@@ -968,6 +968,9 @@ Codex CLI (.codex/config.toml)
 Gemini CLI (.gemini/settings.json)
   <span class="ok">✓</span> in sync
 
+OpenCode (opencode.json)
+  <span class="ok">✓</span> in sync
+
 VS Code (.vscode/mcp.json)
   <span class="ok">✓</span> in sync
 
@@ -1015,6 +1018,9 @@ rendered backend → 4 adapters`},
   (none)
 
 <b>Extensions</b>
+  (none)
+
+<b>Hooks</b>
   (none)`},
  add:{cmd:'agentstack add-skill-to-profile rust-testing rust --write', cwd:'~/Documents/GitHub/agentstack', recon:true,
   out:`Preview (digest sha256:5f0afa8f…c31d) — nothing written yet.
@@ -1045,20 +1051,36 @@ Put it back: agentstack lib trash --restore rust-testing --write`},
   machine policy: unconfigured
   rule source (machine): ~/.agentstack/agentstack.toml
   deny globs (0) [machine manifest; projects may ADD]:
+  allow_roots [machine manifest]:
   destructive-command rules: built-in
   claude-code (+ vscode agent mode) <span class="er">✗</span> detected, hook missing
   codex                            <span class="er">✗</span> detected, hook missing
   gemini                           <span class="er">✗</span> detected, hook missing
+  antigravity                      <span class="dm">· not detected</span>
   cursor                           <span class="dm">· not detected</span>
+  windsurf                         <span class="er">✗</span> detected, hook missing
+  copilot-cli                      <span class="er">✗</span> detected, hook missing
+  opencode                         <span class="er">✗</span> detected, hook missing
+  pi                               <span class="er">✗</span> detected, hook missing
   claude-desktop                   <span class="dm">○ no hook surface (no PreToolUse-style hook exists on this surface)</span>
-  junie                            <span class="dm">○ no hook surface (only a static action allowlist; no per-call hook)</span>`},
+  junie                            <span class="dm">○ no hook surface (only a static action allowlist; no per-call hook)</span>
+  kiro                             <span class="dm">○ no hook surface (hooks nest inside per-agent config files; not wired yet)</span>`},
  guardinstall:{cmd:'agentstack guard install', cwd:'~/Documents/GitHub/agentstack', recon:true,
   out:`Installing guard hook…
-  <span class="ok">✓</span> claude-code (+ vscode agent mode)  wrote ~/.claude/settings.json PreToolUse hook
-  <span class="ok">✓</span> codex                              wrote ~/.codex/config.toml notify hook
-  <span class="ok">✓</span> gemini                             wrote ~/.gemini/settings.json hook
-  <span class="dm">· claude-desktop, junie, kiro         no hook surface — skipped</span>
+  <span class="ok">✓</span> claude-code (+ vscode agent mode) → ~/.claude/settings.json
+  <span class="ok">✓</span> codex → ~/.codex/hooks.json
+  <span class="ok">✓</span> gemini → ~/.gemini/settings.json
+  <span class="dm">· antigravity — not detected, skipped</span>
+  <span class="dm">· cursor — not detected, skipped</span>
+  <span class="ok">✓</span> windsurf → ~/.codeium/windsurf/hooks.json
+  <span class="ok">✓</span> copilot-cli → ~/.copilot/hooks/agentstack-guard.json
+  <span class="ok">✓</span> opencode → ~/.config/opencode/plugins/agentstack-guard.js
+  <span class="ok">✓</span> pi → ~/.pi/agent/extensions/agentstack-guard.ts
+  <span class="dm">○ claude-desktop — no PreToolUse-style hook exists on this surface</span>
+  <span class="dm">○ junie — only a static action allowlist; no per-call hook</span>
+  <span class="dm">○ kiro — hooks nest inside per-agent config files; not wired yet</span>
 
+guard wired into 7 CLI(s).
 Seeded [guard] + [policy.filesystem] deny defaults in ~/.agentstack/agentstack.toml
 
 guard: enabled
