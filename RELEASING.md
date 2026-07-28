@@ -119,7 +119,7 @@ underneath the package manager.
 
 The tag also builds and pushes the **egress-proxy sidecar** image `--lockdown`
 needs, to `ghcr.io/<owner>/agentstack-egress-proxy:{tag,latest}` (the
-`egress-image` job in `release.yml` — GHCR, built-in token, no secrets). The
+`egress_image` job in `release.yml` — GHCR, built-in token, no secrets). The
 job attests the pushed image and appends its immutable
 `ghcr.io/<owner>/agentstack-egress-proxy@sha256:...` reference to the draft
 release notes.

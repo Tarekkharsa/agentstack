@@ -55,9 +55,11 @@ Ordered by what evidence they are waiting on, not by severity:
 
 - [ ] **F01 — publish one release truth.** The `v0.16.0` tag and all release
   checks are green, but GitHub's release action created an `untagged-*` draft
-  and the follow-up tag patch made that draft disappear; `latest` still serves
-  v0.15.0. The workflow now creates, uploads, patches, and verifies drafts by
-  exact release ID and has a manual existing-tag recovery input. Before launch:
+  and a follow-up release-note update replaced the real tag with another
+  placeholder; `latest` still serves
+  v0.15.0. The workflow now builds the image first, creates the complete draft
+  once, uploads by exact release ID, verifies all assets, and has a manual
+  existing-tag recovery input. Before launch:
   push that fix, dispatch `release.yml` with `release_tag=v0.16.0`, verify the
   seven-asset draft, publish it, publish the generated formula to the tap, then
   run the clean install smoke. This is the only code-confirmed launch blocker.

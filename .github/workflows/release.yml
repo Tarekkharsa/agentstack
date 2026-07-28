@@ -103,17 +103,15 @@ jobs:
 
   release:
     name: publish release
-    needs: build
+    # Build and attest the sidecar first so its immutable digest is part of the
+    # draft at creation time. Updating a draft that points at an existing tag
+    # can make GitHub silently replace that tag with an `untagged-*` placeholder.
+    needs: [build, egress_image]
     runs-on: ubuntu-latest
     permissions:
       attestations: write
       contents: write
       id-token: write
-    outputs:
-      # The image job must address the exact draft this job created. Drafts can
-      # temporarily be undiscoverable by tag, and tag-based lookup was the bug
-      # that deleted the first v0.16.0 draft after all assets had uploaded.
-      release_id: ${{ steps.draft.outputs.release_id }}
     steps:
       # Needed for packaging/homebrew/* — this job otherwise only consumes
       # build artifacts and has no working tree.
@@ -153,13 +151,15 @@ jobs:
 
       # Create and address the draft by ID. `softprops/action-gh-release` had a
       # tag-discovery race on v0.16.0: it created an `untagged-*` draft, uploaded
-      # all seven assets, and reported success. Reasserting the real tag in the
-      # image job then made that draft disappear, while the workflow stayed
-      # green. A green release job with no release is worse than a hard failure.
+      # all seven assets, and reported success. A later release-note patch also
+      # replaced the real tag with an `untagged-*` placeholder. The image now
+      # finishes first so the complete draft is created once and never patched.
+      # A green release job with no release is worse than a hard failure.
       - name: Create the draft release
         id: draft
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_DIGEST: ${{ needs.egress_image.outputs.digest }}
         run: |
           set -euo pipefail
           version="$(grep -m1 '^version' crates/cli/Cargo.toml | cut -d'"' -f2)"
@@ -168,6 +168,12 @@ jobs:
             exit 1
           fi
           tag_commit="$(git rev-parse HEAD)"
+          [ -n "$IMAGE_DIGEST" ] || {
+            echo "::error::image job returned no immutable digest" >&2
+            exit 1
+          }
+          owner_lc="${GITHUB_REPOSITORY_OWNER,,}"
+          notes="Egress proxy image: \`ghcr.io/${owner_lc}/agentstack-egress-proxy@${IMAGE_DIGEST}\`"
           rid="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate \
             --jq "[.[] | select(.draft and .tag_name == \"${RELEASE_TAG}\")][0].id")"
           if [ -z "$rid" ] || [ "$rid" = "null" ]; then
@@ -175,6 +181,8 @@ jobs:
               -f tag_name="${RELEASE_TAG}" \
               -f target_commitish="${tag_commit}" \
               -f name="${RELEASE_TAG}" \
+              -f body="${notes}" \
+              -F generate_release_notes=true \
               -F draft=true \
               -F prerelease=false \
               --jq '.id')"
@@ -231,15 +239,17 @@ jobs:
   # after the first push — see RELEASING.md). A companion sandbox RUNNER image
   # is intentionally not published: it must carry the user's chosen harness
   # (see docker/sandbox.Dockerfile).
-  egress-image:
+  egress_image:
     name: publish egress-proxy image (GHCR)
-    needs: release
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       attestations: write
-      contents: write
+      contents: read
       id-token: write
       packages: write   # push the egress-proxy sidecar image to GHCR
+    outputs:
+      digest: ${{ steps.push.outputs.digest }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
@@ -279,28 +289,3 @@ jobs:
           subject-name: ghcr.io/${{ env.OWNER_LC }}/agentstack-egress-proxy
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
-
-      # Patch the exact draft created by the prerequisite job. Never rediscover
-      # it by tag: draft/tag propagation is eventually consistent, while a job
-      # output is not.
-      - name: Add immutable image digest to release notes
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_ID: ${{ needs.release.outputs.release_id }}
-        run: |
-          set -euo pipefail
-          [ -n "$RELEASE_ID" ] || {
-            echo "::error::release job returned no draft id" >&2
-            exit 1
-          }
-          body="$(gh api "repos/${GITHUB_REPOSITORY}/releases/$RELEASE_ID" --jq '.body // ""')"
-          printf '%s\n\nEgress proxy image: `ghcr.io/%s/agentstack-egress-proxy@%s`\n' \
-            "$body" "${OWNER_LC}" "${{ steps.push.outputs.digest }}" > /tmp/release-body.md
-          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/$RELEASE_ID" \
-            -F body=@/tmp/release-body.md --silent
-          gh api "repos/${GITHUB_REPOSITORY}/releases/$RELEASE_ID" \
-            --jq 'select(.draft and .tag_name == "${{ env.RELEASE_TAG }}") | .id' \
-            | grep -qx "$RELEASE_ID" || {
-              echo "::error::draft disappeared or changed identity after image-note patch" >&2
-              exit 1
-            }

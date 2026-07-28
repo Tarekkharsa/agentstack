@@ -8,10 +8,11 @@ binaries, checksums, and provenance attestations for each entry.
 
 ### Fixed
 
-- The release workflow now creates, uploads, patches, and verifies a draft by
-  its exact GitHub release ID. The first v0.16.0 run created an `untagged-*`
-  draft, uploaded all seven assets, then lost the draft when a later job tried
-  to rediscover and retag it; every job stayed green while `latest` remained
+- The release workflow now builds and attests the sidecar first, creates the
+  complete draft once, uploads by the server-provided URL, and verifies the
+  exact GitHub release ID and seven assets. The first v0.16.0 run created an
+  `untagged-*` draft, and a later release-note update silently replaced the real
+  tag with another placeholder; every job stayed green while `latest` remained
   v0.15.0. A manual existing-tag input can rebuild a lost draft without moving
   or recreating the tag, and publication remains an explicit human action.
 - Release references in the automation example, CI recipe, and interactive
