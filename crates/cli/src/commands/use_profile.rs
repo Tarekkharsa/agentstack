@@ -322,6 +322,14 @@ pub fn list_json_value(manifest_dir: Option<&Path>) -> Result<serde_json::Value>
 
     Ok(serde_json::json!({
         "path": base.display().to_string(),
+        // The manifest FILE, not just the project base. A UI that wants to
+        // open the source of truth has to know whether this project uses the
+        // `.agentstack/` layout or a legacy root manifest, and only the code
+        // that resolves that layout can answer without guessing. `ctx.dir` is
+        // already the resolved manifest dir.
+        "manifest_path": ctx.dir.join(agentstack_core::manifest::MANIFEST_FILE)
+            .display()
+            .to_string(),
         "trust": trust_state,
         "profiles": profiles,
         // Null when nothing is active; a UI renders the end/recovery action
