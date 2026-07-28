@@ -2,14 +2,17 @@
 // Browser smoke test for the AgentStack docs site.
 //
 // Serves docs/ over HTTP (or hits BASE_URL) and, with Playwright + Chromium,
-// checks every key page at phone and desktop widths for:
-//   - zero console errors
-//   - no document-level horizontal overflow
+// checks every canonical sitemap page at phone and desktop widths for:
+//   - zero console errors and no document-level horizontal overflow
+//   - one main landmark, a working keyboard skip link, and an H1
+//   - WCAG A/AA violations through axe-core
+//   - a working theme control where the page exposes one
+//   - reduced-motion CSS behavior at the phone viewport
 // plus tutorial-specific structure (lesson heading in view, exactly one
 // lesson pane visible per nav button).
 //
 // Run in CI via:
-//   npm i playwright@1.54.0 --no-save
+//   npm i playwright@1.54.0 @axe-core/playwright@4.10.2 --no-save --no-package-lock
 //   npx playwright@1.54.0 install --with-deps chromium
 //   SMOKE_SELF_TEST=overflow node tools/site-smoke.mjs   # must self-catch
 //   node tools/site-smoke.mjs                            # the real run
@@ -24,16 +27,18 @@ import path from "node:path";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DOCS = path.resolve(__dirname, "..", "docs");
 
-const PAGES = [
-  "index.html",
-  "start.html",
-  "docs.html",
-  "cookbook.html",
-  "examples.html",
-  "reference.html",
-  "enforcement.html",
-  "tutorial/",
-];
+async function canonicalPages() {
+  const xml = await readFile(path.join(DOCS, "sitemap.xml"), "utf8");
+  const pages = [...xml.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => {
+    const pathname = new URL(match[1]).pathname;
+    const prefix = "/agentstack/";
+    if (!pathname.startsWith(prefix)) {
+      throw new Error(`sitemap URL is outside the docs root: ${match[1]}`);
+    }
+    return pathname.slice(prefix.length) || "index.html";
+  });
+  return [...new Set(pages)];
+}
 
 const WIDTHS = [
   { w: 390, h: 844, label: "390x844" },
@@ -105,6 +110,71 @@ async function assertNoOverflow(page) {
   });
 }
 
+async function checkStructure(page, rel, widthLabel, failures) {
+  const structure = await page.evaluate(() => {
+    const skip = document.querySelector("a.skip-link");
+    const target = skip?.hash ? document.querySelector(skip.hash) : null;
+    return {
+      mains: document.querySelectorAll("main, [role='main']").length,
+      h1s: document.querySelectorAll("h1").length,
+      skipCount: document.querySelectorAll("a.skip-link").length,
+      skipTarget: Boolean(target),
+    };
+  });
+  if (structure.mains !== 1) {
+    failures.push(`${rel} @ ${widthLabel} : expected one main landmark, found ${structure.mains}`);
+  }
+  if (structure.h1s < 1) failures.push(`${rel} @ ${widthLabel} : no H1 found`);
+  if (structure.skipCount !== 1 || !structure.skipTarget) {
+    failures.push(
+      `${rel} @ ${widthLabel} : skip link invalid (count=${structure.skipCount}, target=${structure.skipTarget})`,
+    );
+    return;
+  }
+
+  await page.evaluate(() => document.activeElement?.blur());
+  await page.keyboard.press("Tab");
+  const first = await page.evaluate(() =>
+    document.activeElement?.classList.contains("skip-link"),
+  );
+  if (!first) {
+    failures.push(`${rel} @ ${widthLabel} : skip link is not first in keyboard order`);
+  } else {
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(20);
+    const moved = await page.evaluate(
+      () => document.activeElement?.id === "main-content" && location.hash === "#main-content",
+    );
+    if (!moved) failures.push(`${rel} @ ${widthLabel} : skip link did not focus #main-content`);
+  }
+}
+
+async function checkTheme(page, rel, widthLabel, failures) {
+  const selector = "[data-theme-toggle], #themeBtn";
+  if ((await page.locator(selector).count()) === 0) return;
+  const before = await page.evaluate(() => document.documentElement.dataset.theme || "");
+  await page.locator(selector).first().click();
+  const after = await page.evaluate(() => document.documentElement.dataset.theme || "");
+  if (!after || after === before) {
+    failures.push(`${rel} @ ${widthLabel} : theme control did not change data-theme`);
+  }
+}
+
+async function checkReducedMotion(page, rel, widthLabel, failures) {
+  const result = await page.evaluate(() => ({
+    matches: matchMedia("(prefers-reduced-motion: reduce)").matches,
+    longAnimations: document.getAnimations().filter((animation) => {
+      const duration = Number(animation.effect?.getTiming().duration || 0);
+      return Number.isFinite(duration) && duration > 1;
+    }).length,
+  }));
+  if (!result.matches || result.longAnimations > 0) {
+    failures.push(
+      `${rel} @ ${widthLabel} : reduced motion not honored (media=${result.matches}, long animations=${result.longAnimations})`,
+    );
+  }
+}
+
 async function checkTutorial(page, widthLabel, failures) {
   // The initially-visible lesson (user-facing "lesson 1") heading must sit
   // within the viewport horizontally.
@@ -164,12 +234,20 @@ async function main() {
     playwright = await import("playwright");
   } catch (e) {
     console.error(
-      "site-smoke: Playwright is not available. In CI run `npm i playwright@1.54.0 --no-save` and `npx playwright install chromium` first.",
+      "site-smoke: Playwright is not available. In CI install playwright + @axe-core/playwright and run `npx playwright install chromium` first.",
     );
     console.error(String(e && e.message ? e.message : e));
     process.exit(2);
   }
   const { chromium } = playwright;
+  let AxeBuilder;
+  try {
+    ({ default: AxeBuilder } = await import("@axe-core/playwright"));
+  } catch (e) {
+    console.error("site-smoke: @axe-core/playwright is not available.");
+    console.error(String(e && e.message ? e.message : e));
+    process.exit(2);
+  }
 
   let server = null;
   let base = process.env.BASE_URL;
@@ -185,7 +263,7 @@ async function main() {
   // In self-test mode we exercise only the first page: inject a 2000px-wide
   // div, then verify the overflow assertion catches it. The whole point is to
   // prove the checker can fail — so a caught overflow means SUCCESS here.
-  const pages = selfTest ? [PAGES[0]] : PAGES;
+  const pages = selfTest ? ["index.html"] : await canonicalPages();
   const widths = selfTest ? [WIDTHS[0]] : WIDTHS;
   let selfTestCaught = false;
 
@@ -193,6 +271,7 @@ async function main() {
     for (const width of widths) {
       const context = await browser.newContext({
         viewport: { width: width.w, height: width.h },
+        reducedMotion: width.w === 390 ? "reduce" : "no-preference",
       });
       const page = await context.newPage();
       const consoleErrors = [];
@@ -226,8 +305,25 @@ async function main() {
         if (selfTest) selfTestCaught = true;
       }
 
-      if (!selfTest && rel === "tutorial/") {
-        await checkTutorial(page, width.label, failures);
+      if (!selfTest) {
+        await checkStructure(page, rel, width.label, failures);
+        await checkTheme(page, rel, width.label, failures);
+        if (width.w === 390) await checkReducedMotion(page, rel, width.label, failures);
+
+        const axe = await new AxeBuilder({ page })
+          .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
+          .analyze();
+        for (const violation of axe.violations) {
+          const targets = violation.nodes
+            .slice(0, 2)
+            .map((node) => node.target.join(" "))
+            .join(", ");
+          failures.push(
+            `${rel} @ ${width.label} : axe ${violation.id} (${violation.impact || "unknown"}) at ${targets}`,
+          );
+        }
+
+        if (rel === "tutorial/") await checkTutorial(page, width.label, failures);
       }
 
       if (consoleErrors.length) {
@@ -257,7 +353,7 @@ async function main() {
     for (const f of failures) console.error(`  FAIL ${f}`);
     process.exit(1);
   }
-  console.log("site-smoke: OK (all pages clean at both widths; tutorial nav verified)");
+  console.log("site-smoke: OK (all sitemap pages pass browser, keyboard, theme, reduced-motion, and WCAG smoke)");
   process.exit(0);
 }
 

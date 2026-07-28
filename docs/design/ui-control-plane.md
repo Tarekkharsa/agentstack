@@ -10,8 +10,9 @@
 
 ## Decision
 
-t3code is AgentStack's primary graphical experience and launch channel.
-AgentStack will not maintain a separate embedded dashboard.
+t3code is AgentStack's optional graphical companion. The obtainable CLI is the
+primary surface and launch channel; the private t3code fork is not a public
+acquisition path. AgentStack will not maintain a separate embedded dashboard.
 
 The integration is intentionally asymmetric:
 
@@ -342,7 +343,7 @@ it cannot be a generated command string.
 - Establish `agentstack:admin`.
 - Add CLI/UI compatibility failures.
 
-### Slice 1 — launch experience
+### Slice 1 — companion setup experience
 
 - Capability negotiation.
 - Setup plan.
@@ -407,7 +408,7 @@ These require evidence from the first two slices and their own narrow designs.
 
 ## Acceptance criteria
 
-The integration is ready for launch when:
+The integration is ready for public distribution when:
 
 - a new user can reach Ready from t3code in under five minutes;
 - the terminal and t3code produce the same setup plan and resulting files;

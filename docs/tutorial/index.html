@@ -106,7 +106,7 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
   #sidebar{width:auto !important;border-right:none !important;border-bottom:1px solid var(--line)}
   #lessonNav{flex-direction:row !important;overflow-x:auto;padding-bottom:12px !important}
   #lessonNav .navbtn span:last-child{white-space:nowrap}
-  #content{overflow:visible !important}
+  #main-content{overflow:visible !important}
   #contentInner{padding:24px 18px 60px !important}
   .grid2,.grid3,.grid4{grid-template-columns:1fr !important}
   #topnav{flex-wrap:wrap}
@@ -114,6 +114,7 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
 </style>
 </head>
 <body>
+<a class="skip-link" href="#main-content">Skip to content</a>
 <div id="app" style="display:flex;flex-direction:column;height:100vh;overflow:hidden;background:var(--paper);color:var(--ink)">
   <nav id="topnav" style="flex:none;display:flex;align-items:center;gap:20px;padding:12px 24px;background:var(--surface);border-bottom:1px solid var(--line)">
     <a href="../index.html" style="display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--ink)">
@@ -140,7 +141,7 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
     </div>
   </div>
 
-  <div id="content" style="flex:1;overflow-y:auto">
+  <div id="main-content" role="main" tabindex="-1" style="flex:1;overflow-y:auto">
   <div id="contentInner" style="max-width:768px;margin:0 auto;padding:44px 44px 80px">
 
   <section class="lesson-pane" id="lesson-0">
@@ -390,7 +391,7 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
   </section>
 
   <div style="display:flex;justify-content:space-between;margin-top:36px;padding-top:20px;border-top:1px solid var(--line)">
-    <button id="prevBtn" class="mono" style="font-size:13px;padding:10px 18px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--faint)" onclick="go(state.lesson-1)">← Start</button>
+    <button id="prevBtn" class="mono" style="font-size:13px;padding:10px 18px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--muted)" onclick="go(state.lesson-1)">← Start</button>
     <button id="nextBtn" class="mono cta" style="padding:10px 20px" onclick="go(state.lesson+1)">Next: The map →</button>
   </div>
   </div>
@@ -405,7 +406,7 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
 
 var LESSONS=['Welcome — the problem','The map — concepts','Step 1 · Unify','Step 2 · Verify','Step 3 · Guard','Step 4 · Trust','Step 5 · Scale','Step 6 · Confine','Policy & audit','Modes, teams & undo','Recap & cheat sheet'];
 var W='var(--term-text)',G='var(--term-ok)',R='var(--term-bad)',A='var(--term-warn)',D='var(--term-muted)';
-var VERSION='0.15.0'; /* one shared value — keep in sync with the released tag */
+var VERSION='0.16.0'; /* one shared value — keep in sync with the released tag */
 var TERM={
   unify:[
     {cmd:'curl -fsSL …/install.sh | sh',out:[['downloading agentstack v'+VERSION+'…',D],['verifying tarball against checksums.txt… ok',D],['✓ installed to ~/.local/bin/agentstack',G]]},
@@ -478,7 +479,7 @@ function renderNav(){
   var last=LESSONS.length-1;
   var prev=$('prevBtn'),next=$('nextBtn');
   prev.textContent='← '+(state.lesson===0?'Start':shortPrev(state.lesson-1));
-  prev.style.color=state.lesson===0?'var(--faint)':'var(--ink)';
+  prev.style.color=state.lesson===0?'var(--muted)':'var(--ink)';
   next.textContent=(state.lesson===last?'Done — review the ladder':'Next: '+LESSONS[state.lesson+1].split(' — ')[0])+' →';
 }
 function go(n){
@@ -489,7 +490,7 @@ function go(n){
     if(i===n){pane.hidden=false;pane.style.animation='none';void pane.offsetWidth;pane.style.animation='';}
     else pane.hidden=true;
   }
-  $('content').scrollTop=0;
+  $('main-content').scrollTop=0;
   renderNav();
 }
 

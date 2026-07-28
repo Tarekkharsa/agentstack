@@ -38,6 +38,7 @@ SITE = "https://tarekkharsa.github.io/agentstack"
 PAGES = [
     ("concepts.md", "concepts.html", "concepts"),
     ("choose.md", "choose.html", "choose"),
+    ("migrations.md", "migrations.html", "migrations"),
     ("troubleshooting.md", "troubleshooting.html", "troubleshooting"),
     ("faq.md", "faq.html", "faq"),
     ("reference.md", "reference.html", "reference"),
@@ -380,15 +381,16 @@ CSS = """
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.6 var(--sans); }
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
+  a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
+  a:hover { text-decoration-thickness: 2px; }
+  a code { color: var(--ink); }
   code { font-family: var(--mono); font-size: 0.9em; background: var(--code-bg); border-radius: 5px; padding: 0.1em 0.35em; }
   header { position: sticky; top: 0; z-index: 50; background: color-mix(in srgb, var(--surface) 96%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
   .bar { max-width: 74rem; margin: 0 auto; padding: 0.7rem 1.35rem; display: flex; align-items: center; gap: 1.1rem; }
   .wordmark { font-family: var(--font-heading, Caprasimo, serif); font-weight: 400; font-size: 1.15rem; color: var(--ink); display: inline-flex; align-items: center; gap: 0.6rem; }
   .wordmark:hover { text-decoration: none; }
   .wordmark .mark { height: 28px; width: auto; display: block; }
-  .wordmark .wm2 { color: var(--accent); }
+  .wordmark .wm2 { color: var(--ink); }
   nav.top { margin-left: auto; display: flex; align-items: center; gap: 1.05rem; flex-wrap: nowrap; white-space: nowrap; }
   nav.top a { font-weight: 600; font-size: 0.85rem; color: var(--ink); }
   nav.top a:hover { color: var(--accent); text-decoration: none; }
@@ -524,6 +526,7 @@ def build_page(src_rel, out_rel, key):
 <style>{CSS}</style>
 </head>
 <body>
+<a class="skip-link" href="#main-content">Skip to content</a>
 
 <header>
   <div class="bar">
@@ -542,7 +545,7 @@ def build_page(src_rel, out_rel, key):
 
 <div class="docwrap">
 {aside}
-  <main>
+  <main id="main-content" tabindex="-1">
 {VERSION_BANNER}
 {body}
   <p class="srcline">Source of truth: <a href="{gh_src}">docs/{src_rel}</a> — this page is generated from it.</p>

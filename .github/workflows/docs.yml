@@ -36,11 +36,10 @@ jobs:
         with:
           node-version: 22
       - name: Install Playwright (library + Chromium)
-        # `npm i playwright --no-save` makes the package importable from the
-        # smoke script (`import('playwright')`); `playwright install` fetches
-        # the actual browser + OS deps.
+        # Install the browser driver and axe adapter without creating project
+        # package state; `playwright install` fetches Chromium + OS deps.
         run: |
-          npm i playwright@1.54.0 --no-save
+          npm i playwright@1.54.0 @axe-core/playwright@4.10.2 --no-save --no-package-lock
           npx playwright@1.54.0 install --with-deps chromium
       - name: Browser smoke self-test (must catch injected overflow)
         run: SMOKE_SELF_TEST=overflow node tools/site-smoke.mjs

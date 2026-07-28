@@ -40,15 +40,16 @@
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.6 var(--sans); }
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
+  a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
+  a:hover { text-decoration-thickness: 2px; }
+  a code { color: var(--ink); }
   code { font-family: var(--mono); font-size: 0.9em; background: var(--code-bg); border-radius: 5px; padding: 0.1em 0.35em; }
   header { position: sticky; top: 0; z-index: 50; background: color-mix(in srgb, var(--surface) 96%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
   .bar { max-width: 74rem; margin: 0 auto; padding: 0.7rem 1.35rem; display: flex; align-items: center; gap: 1.1rem; }
   .wordmark { font-family: var(--font-heading, Caprasimo, serif); font-weight: 400; font-size: 1.15rem; color: var(--ink); display: inline-flex; align-items: center; gap: 0.6rem; }
   .wordmark:hover { text-decoration: none; }
   .wordmark .mark { height: 28px; width: auto; display: block; }
-  .wordmark .wm2 { color: var(--accent); }
+  .wordmark .wm2 { color: var(--ink); }
   nav.top { margin-left: auto; display: flex; align-items: center; gap: 1.05rem; flex-wrap: nowrap; white-space: nowrap; }
   nav.top a { font-weight: 600; font-size: 0.85rem; color: var(--ink); }
   nav.top a:hover { color: var(--accent); text-decoration: none; }
@@ -99,6 +100,7 @@
 </style>
 </head>
 <body>
+<a class="skip-link" href="#main-content">Skip to content</a>
 
 <header>
   <div class="bar">
@@ -157,6 +159,8 @@
       <li><a class="on-page" href="../howto/add-a-skill.html">Add a skill</a>
       </li>
       <li><a href="../howto/name-a-toolset.html">Name a toolset</a>
+      </li>
+      <li><a href="../migrations.html">Migration recipes</a>
       </li>
       <li><a href="../howto/undo.html">Undo anything</a>
       </li>
@@ -251,8 +255,8 @@
     </ul>
   </details>
 </aside>
-  <main>
-<p class="versionbar">These pages describe <b>v0.16.0</b>, the current release.</p>
+  <main id="main-content" tabindex="-1">
+<p class="versionbar">These pages describe <b>unreleased <code>main</code></b>, which is ahead of the latest release (<b>v0.16.0</b>) — and the release is what <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">the installer gives you</a>. Commands and flags documented here may not exist in your build; <code>agentstack --version</code> says which one you have.</p>
 <h1 id="add-a-skill">Add a skill</h1>
 <p>For anyone giving their agent CLIs a skill — a portable directory with a <code>SKILL.md</code> of instructions. Prerequisite: a project with an <code>.agentstack/agentstack.toml</code> <a href="../concepts.html">manifest</a> (run <code>agentstack init</code> if you don't have one).</p>
 <p>Four verbs, by where the skill lives and how long you want it:</p>

@@ -40,15 +40,16 @@
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.6 var(--sans); }
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
+  a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
+  a:hover { text-decoration-thickness: 2px; }
+  a code { color: var(--ink); }
   code { font-family: var(--mono); font-size: 0.9em; background: var(--code-bg); border-radius: 5px; padding: 0.1em 0.35em; }
   header { position: sticky; top: 0; z-index: 50; background: color-mix(in srgb, var(--surface) 96%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
   .bar { max-width: 74rem; margin: 0 auto; padding: 0.7rem 1.35rem; display: flex; align-items: center; gap: 1.1rem; }
   .wordmark { font-family: var(--font-heading, Caprasimo, serif); font-weight: 400; font-size: 1.15rem; color: var(--ink); display: inline-flex; align-items: center; gap: 0.6rem; }
   .wordmark:hover { text-decoration: none; }
   .wordmark .mark { height: 28px; width: auto; display: block; }
-  .wordmark .wm2 { color: var(--accent); }
+  .wordmark .wm2 { color: var(--ink); }
   nav.top { margin-left: auto; display: flex; align-items: center; gap: 1.05rem; flex-wrap: nowrap; white-space: nowrap; }
   nav.top a { font-weight: 600; font-size: 0.85rem; color: var(--ink); }
   nav.top a:hover { color: var(--accent); text-decoration: none; }
@@ -99,6 +100,7 @@
 </style>
 </head>
 <body>
+<a class="skip-link" href="#main-content">Skip to content</a>
 
 <header>
   <div class="bar">
@@ -157,6 +159,8 @@
       <li><a href="howto/add-a-skill.html">Add a skill</a>
       </li>
       <li><a href="howto/name-a-toolset.html">Name a toolset</a>
+      </li>
+      <li><a href="migrations.html">Migration recipes</a>
       </li>
       <li><a href="howto/undo.html">Undo anything</a>
       </li>
@@ -251,13 +255,13 @@
     </ul>
   </details>
 </aside>
-  <main>
-<p class="versionbar">These pages describe <b>v0.16.0</b>, the current release.</p>
+  <main id="main-content" tabindex="-1">
+<p class="versionbar">These pages describe <b>unreleased <code>main</code></b>, which is ahead of the latest release (<b>v0.16.0</b>) — and the release is what <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">the installer gives you</a>. Commands and flags documented here may not exist in your build; <code>agentstack --version</code> says which one you have.</p>
 <h1 id="integrations">Integrations</h1>
 <p>The AgentStack CLI is the complete, standalone interface: every plan, write, consent check, and enforcement decision lives there. An <strong>integration</strong> is an optional surface that calls those same stable read APIs and fixed actions to make the product easier to discover and use where you already work. An integration presents; it never becomes the enforcement boundary, and it never becomes a second implementation.</p>
 <p>Today there is one.</p>
 <h2 id="t3code">t3code<a class="hlink" href="#t3code" aria-label="Link to this section">#</a></h2>
-<p>t3code is AgentStack's graphical integration and launch channel. The goal is to make AgentStack useful where people already start and supervise Claude Code, Codex, Cursor, and OpenCode—without asking them to learn a second dashboard or the complete AgentStack command surface.</p>
+<p>t3code is AgentStack's optional graphical companion. The obtainable AgentStack CLI is the launch channel; as of v0.16.0 the integrated t3code fork has no public download, so this page documents the compatibility contract for source users rather than presenting an unavailable app as the way to begin. When a packaged t3code build becomes public, it can make AgentStack useful where people already start and supervise coding agents without becoming a second authority system.</p>
 <h3 id="what-works-today">What works today<a class="hlink" href="#what-works-today" aria-label="Link to this section">#</a></h3>
 <p>AgentStack already manages the native configuration read by the coding CLIs t3code launches. Static activation and clean-at-rest sessions therefore apply to those launches without t3code reimplementing configuration logic.</p>
 <p>Run:</p>
@@ -272,7 +276,7 @@
 <li><strong>Setup</strong> — an uninitialized project shows the coding tools and importable capabilities detected by <code>agentstack init --plan</code>, and one action applies that reviewed plan. The apply is bound to the exact plan shown: if a CLI config changes in between, the CLI refuses and asks for a fresh review.</li>
 <li><strong>Status</strong> — one state (Ready, Needs attention, or Needs setup) with the single recommended next action; the full doctor report stays available as the detail layer.</li>
 <li><strong>Undo</strong> — the panel shows this project's most recent AgentStack-managed write and can revert it, by identity, without touching other projects.</li>
-<li><strong>Toolset</strong> — choosing a named toolset and using it temporarily is the next slice; today toolsets remain a CLI flow (<code>agentstack use --list --json</code> is already stable for external pickers).</li>
+<li><strong>Toolset</strong> — browse the library, add a capability to a named toolset, create one, and use it temporarily. The panel negotiates the stable machine contracts for toolsets and sessions and disables edits against an incompatible CLI.</li>
 </ol>
 <p>Reads and actions are version-negotiated: each CLI response names its schema version and usable contracts, and a mismatched pair disables the affected action with upgrade guidance instead of guessing.</p>
 <p>Safety appears progressively:</p>
@@ -295,6 +299,7 @@
 <p>Trust is the clearest example. A preview returns a digest of the immutable content snapshot that produced it. A grant action must return that digest, and the CLI refuses stale or missing consent. The digest proves content consistency, not human attention; t3code's dedicated <code>agentstack:admin</code> authorization — required for every authority-changing action, granted only to administrative sessions, never implied by an open browser tab — is the separate human-authority boundary. Both halves are enforced independently: read-only status and planning need no administrative authority, and a frontend bug can break the panel but cannot mint a grant.</p>
 <h3 id="limits">Limits<a class="hlink" href="#limits" aria-label="Link to this section">#</a></h3>
 <ul>
+<li>There is no public t3code package or supported acquisition path today. The CLI journey is complete without it; do not make a launch or onboarding claim depend on the private fork.</li>
 <li>t3code injects its own browser-preview MCP endpoint directly into sessions, outside native CLI configuration. AgentStack can gate calls on governed paths, but the endpoint is not declared in the project manifest or lockfile. That endpoint is not currently treated as a governed cross-harness workflow launcher. Using t3code MCP for child launch and supervision is a separate research item and must preserve AgentStack's admitted execution plan, authority, cancellation, and evidence path.</li>
 <li>t3code's most permissive provider modes can disable the coding CLI's own approval prompts. AgentStack guard coverage matters more in those sessions; doctor reports missing coverage.</li>
 <li>A source-built t3code may keep state in a different location from the packaged app, so doctor may not observe that development state.</li>

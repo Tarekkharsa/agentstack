@@ -141,6 +141,7 @@ Everything is explained on the website — that is the one place docs live:
 - **[Concepts](https://tarekkharsa.github.io/agentstack/concepts.html)** — every term in two or three plain sentences
 - **[Which mode do I need?](https://tarekkharsa.github.io/agentstack/choose.html)** — protection level and delivery mode, decided in two tables
 - **[How-tos](https://tarekkharsa.github.io/agentstack/docs.html)** — add a server or skill, trust a repo, lock down a run, team setup, CI, undo
+- **[Migration recipes](https://tarekkharsa.github.io/agentstack/migrations.html)** — Claude + Codex, Cursor + Gemini, dotfiles, teams without shared secrets, complete removal
 - **[Troubleshooting](https://tarekkharsa.github.io/agentstack/troubleshooting.html)** — search for the error text you got; every message is quoted from the binary and paired with its fix
 - **[FAQ](https://tarekkharsa.github.io/agentstack/faq.html)** — will it overwrite my configs, is my API key in the manifest, do I need Docker
 - **[Integrations](https://tarekkharsa.github.io/agentstack/integrations.html)** — use AgentStack from t3code and other graphical launchers; the current contract and limits
@@ -160,6 +161,13 @@ cargo fmt --check
 
 Install your build with `agentstack self link`. Ground rules and the security invariants:
 [CONTRIBUTING.md](CONTRIBUTING.md). Release history: [CHANGELOG.md](CHANGELOG.md).
+
+## Community and support
+
+Bug reports and focused contributions are welcome. Read the
+[Code of Conduct](CODE_OF_CONDUCT.md), [governance and succession
+policy](GOVERNANCE.md), and [support scope](SUPPORT.md). Report vulnerabilities
+privately through [SECURITY.md](SECURITY.md), never in a public issue.
 
 ## License
 

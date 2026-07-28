@@ -57,6 +57,7 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
 </style>
 </head>
 <body>
+<a class="skip-link" href="#main-content">Skip to content</a>
 <div style="min-height:100vh;background:var(--color-bg);color:var(--color-text);font-family:var(--font-body)">
   <nav class="nav" style="display:flex;align-items:center;gap:var(--space-4)">
     <a href="index.html" class="nav-brand" style="display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--color-text)">
@@ -90,7 +91,7 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
       <a href="#security" style="text-decoration:none;font-weight:600;color:var(--color-text);font-size:0.95rem">Security model</a>
     </div>
 
-    <div style="flex:1;min-width:0">
+    <div id="main-content" role="main" tabindex="-1" style="flex:1;min-width:0">
       <h1 style="font-family:var(--font-heading);font-weight:400;font-size:2.6rem;margin:0 0 var(--space-3)">Documentation</h1>
       <p style="font-size:1.05rem;line-height:1.65;color:var(--color-neutral-700);margin:0 0 var(--space-6);max-width:620px">Everything here in reading form; the <a href="tutorial/">interactive tutorial</a> teaches the same material with simulated terminals and checkpoints. The complete inventory lives on the <a href="reference.html">reference page</a> — including the twenty-nine power commands --help keeps hidden as progressive disclosure.</p>
 
@@ -149,6 +150,7 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
         <div class="card elev-sm"><div class="card-kicker">skills</div><div class="card-title" style="font-size:1rem;font-family:var(--font-body);font-weight:700">Add a skill</div><div class="card-body" style="font-size:0.95rem;line-height:1.6">add skill owner/repo installs from any repo, pinned in the lockfile. Try one first without writing anything: agentstack try &lt;skill&gt;.</div></div>
         <div class="card elev-sm"><div class="card-kicker">audit</div><div class="card-title" style="font-size:1rem;font-family:var(--font-body);font-weight:700">See what happened</div><div class="card-body" style="font-size:0.95rem;line-height:1.6">report run &lt;id&gt; replays a run's flight recording; report calls shows the global audit log (argument digests only, never values); optimize turns those signals into evidence-backed fixes.</div></div>
         <div class="card elev-sm"><div class="card-kicker">team</div><div class="card-title" style="font-size:1rem;font-family:var(--font-body);font-weight:700">Share one setup with your team</div><div class="card-body" style="font-size:0.95rem;line-height:1.6">Commit .agentstack/ (manifest + lockfile) — intent, never credentials. Each teammate runs secret set for their own values, then apply --write. A maintainer can sign the lockfile (detached ed25519); teammates verify --pubkey before relying on it.</div></div>
+        <div class="card elev-sm"><div class="card-kicker">migrate</div><div class="card-title" style="font-size:1rem;font-family:var(--font-body);font-weight:700"><a href="migrations.html" style="color:inherit">Bring an existing setup</a></div><div class="card-body" style="font-size:0.95rem;line-height:1.6">Step-by-step recipes for Claude + Codex, Cursor + Gemini, dotfiles, a team without shared secrets, and removing AgentStack completely.</div></div>
         <div class="card elev-sm"><div class="card-kicker">lockdown</div><div class="card-title" style="font-size:1rem;font-family:var(--font-body);font-weight:700">Lock down a run</div><div class="card-body" style="font-size:0.95rem;line-height:1.6">Preview with --plan (walks every gate, launches nothing). Then climb: --locked (no Docker, frozen surface) → --sandbox (container + proxied egress, direct route still open) → --sandbox --lockdown (internal-only network, sole peer the egress sidecar).</div></div>
         <div class="card elev-sm"><div class="card-kicker">undo</div><div class="card-title" style="font-size:1rem;font-family:var(--font-body);font-weight:700">Undo anything</div><div class="card-body" style="font-size:0.95rem;line-height:1.6">restore lists every undoable recorded write; --last --write reverts the most recent. Non-write actions have their own verb — see the Undo section below.</div></div>
       </div>

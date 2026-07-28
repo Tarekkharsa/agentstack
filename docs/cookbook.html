@@ -63,6 +63,7 @@
 </style>
 </head>
 <body style="margin:0;background:var(--color-bg);color:var(--color-text);font-family:var(--font-body)">
+<a class="skip-link" href="#main-content">Skip to content</a>
 <div style="min-height:100vh;background:var(--color-bg);color:var(--color-text);font-family:var(--font-body)">
   <nav class="nav" style="display:flex;align-items:center;gap:var(--space-4)">
     <a href="index.html" class="nav-brand" style="display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--color-text)">
@@ -146,7 +147,7 @@
 
     </div>
 
-    <div style="flex:1;min-width:0">
+    <div id="main-content" role="main" tabindex="-1" style="flex:1;min-width:0">
       <h1 style="font-family:var(--font-heading);font-weight:400;font-size:2.6rem;margin:0 0 var(--space-3)">Cookbook — AgentStack, by example</h1>
       <p style="font-size:1.05rem;line-height:1.65;color:var(--color-neutral-700);margin:0 0 var(--space-4);max-width:640px">Twenty-five copy-paste recipes for <strong>using the CLI</strong>, building from a one-line manifest shared by every CLI up to governed automation. The manifest is the source of truth; generated native configuration is compiled output. Watching the security claims <em>proven</em> instead? That's the <a href="examples.html">Demos page</a>.</p>
       <div class="card" style="background:var(--color-accent-100);margin-bottom:var(--space-6)"><div class="card-body" style="font-size:0.92rem;line-height:1.6"><strong>How to read the evidence:</strong> unless a recipe is marked <em>runnable fixture</em>, treat its code as a focused, CLI-validated recipe rather than a self-asserting end-to-end proof.</div></div>

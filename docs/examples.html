@@ -60,6 +60,7 @@
 </style>
 </head>
 <body style="margin:0;background:var(--color-bg);color:var(--color-text);font-family:var(--font-body)">
+<a class="skip-link" href="#main-content">Skip to content</a>
 <div style="min-height:100vh;background:var(--color-bg);color:var(--color-text);font-family:var(--font-body)">
   <nav class="nav" style="display:flex;align-items:center;gap:var(--space-4)">
     <a href="index.html" class="nav-brand" style="display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--color-text)">
@@ -91,7 +92,7 @@
       <a href="#projects" style="text-decoration:none;font-weight:600;color:var(--color-text);font-size:0.92rem">example projects</a>
     </div>
 
-    <div style="flex:1;min-width:0">
+    <div id="main-content" role="main" tabindex="-1" style="flex:1;min-width:0">
       <h1 style="font-family:var(--font-heading);font-weight:400;font-size:2.6rem;margin:0 0 var(--space-3)">Demos — the promises, proven</h1>
       <p style="font-size:1.05rem;line-height:1.65;color:var(--color-neutral-700);margin:0 0 var(--space-8);max-width:640px">Each demo here proves a <strong>promise AgentStack makes</strong> — import once and render everywhere, undo byte-for-byte, and, deeper in, refuse an undeclared tool call and block an unapproved destination. Note the shape of that last one: AgentStack restricts <em>destinations</em> and records decisions. It does not inspect payloads, so an agent can still send data through a host you approved — see <a href="enforcement.html#claim-discipline">the claim discipline</a>. Everything comes from <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">examples/</code> in the repo: self-contained, self-asserting scripts that run in an isolated temp HOME, print PASS/FAIL per claim, and exit nonzero on any mismatch. Looking for <em>how to use the CLI</em> instead? That’s the <a href="cookbook.html">Cookbook</a>.</p>
 

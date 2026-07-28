@@ -15,10 +15,12 @@ Today there is one.
 
 ## t3code
 
-t3code is AgentStack's graphical integration and launch channel. The goal is to
-make AgentStack useful where people already start and supervise Claude Code,
-Codex, Cursor, and OpenCode—without asking them to learn a second dashboard or
-the complete AgentStack command surface.
+t3code is AgentStack's optional graphical companion. The obtainable AgentStack
+CLI is the launch channel; as of v0.16.0 the integrated t3code fork has no public
+download, so this page documents the compatibility contract for source users
+rather than presenting an unavailable app as the way to begin. When a packaged
+t3code build becomes public, it can make AgentStack useful where people already
+start and supervise coding agents without becoming a second authority system.
 
 ### What works today
 
@@ -59,9 +61,10 @@ The native t3code panel implements the first launch slice end to end:
    the detail layer.
 3. **Undo** — the panel shows this project's most recent AgentStack-managed
    write and can revert it, by identity, without touching other projects.
-4. **Toolset** — choosing a named toolset and using it temporarily is the next
-   slice; today toolsets remain a CLI flow (`agentstack use --list --json` is
-   already stable for external pickers).
+4. **Toolset** — browse the library, add a capability to a named toolset, create
+   one, and use it temporarily. The panel negotiates the stable machine
+   contracts for toolsets and sessions and disables edits against an
+   incompatible CLI.
 
 Reads and actions are version-negotiated: each CLI response names its schema
 version and usable contracts, and a mismatched pair disables the affected
@@ -101,6 +104,9 @@ frontend bug can break the panel but cannot mint a grant.
 
 ### Limits
 
+- There is no public t3code package or supported acquisition path today. The
+  CLI journey is complete without it; do not make a launch or onboarding claim
+  depend on the private fork.
 - t3code injects its own browser-preview MCP endpoint directly into sessions,
   outside native CLI configuration. AgentStack can gate calls on governed
   paths, but the endpoint is not declared in the project manifest or lockfile.

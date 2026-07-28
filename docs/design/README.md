@@ -17,7 +17,7 @@ of the boundaries below.
 
 | Document | Answers | Status |
 |---|---|---|
-| [`launch-plan.md`](launch-plan.md) | What has to be true before a public launch, and what ships behind it | Self-contained; read alone for launch work |
+| [`launch-plan.md`](launch-plan.md) | What the completed 2026-07 t3code/workflow prototype built, and why its former launch headline was superseded | Closed implementation record; current launch gate is `TODO.md` |
 | [`ui-control-plane.md`](ui-control-plane.md) | How t3code drives AgentStack — the fixed argv actions, the versioned JSON reads, and why the frontend is never an enforcement boundary | Active |
 | [`workflows-capability.md`](workflows-capability.md) | What a workflow is allowed to be: authoring, authority, and evidence boundaries for the experimental capability kind | Active contract, experimental capability |
 | [`workflow-scaling.md`](workflow-scaling.md) | How governed workflows scale without relaxing the capability contract | Active; Phases 0–1 landed |

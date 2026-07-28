@@ -4,8 +4,19 @@ name: release
 on:
   push:
     tags: ["v*"]
+  # Recovery path for a tag whose build succeeded but whose draft was lost.
+  # It checks out and rebuilds the tag; it never publishes automatically.
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing v* tag to rebuild into a draft release
+        required: true
+        type: string
 
 env:
+  # On a tag push this is github.ref_name; on a recovery dispatch it is the
+  # reviewed existing tag supplied by the maintainer.
+  RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
   # Resilience against flaky crates.io fetches on the runners.
   CARGO_NET_RETRY: "10"
   CARGO_HTTP_MULTIPLEXING: "false"
@@ -33,6 +44,8 @@ jobs:
           - { os: windows-latest, target: x86_64-pc-windows-msvc }
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       # The cross-compiled targets need the standard library for the TARGET
       # installed into the toolchain cargo actually runs, and `rust-toolchain.toml`
       # decides which one that is. Installing the cross std into `stable` while
@@ -96,10 +109,17 @@ jobs:
       attestations: write
       contents: write
       id-token: write
+    outputs:
+      # The image job must address the exact draft this job created. Drafts can
+      # temporarily be undiscoverable by tag, and tag-based lookup was the bug
+      # that deleted the first v0.16.0 draft after all assets had uploaded.
+      release_id: ${{ steps.draft.outputs.release_id }}
     steps:
       # Needed for packaging/homebrew/* — this job otherwise only consumes
       # build artifacts and has no working tree.
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -118,7 +138,7 @@ jobs:
       - name: Render the Homebrew formula
         run: |
           set -e
-          version="${GITHUB_REF_NAME#v}"
+          version="${RELEASE_TAG#v}"
           python3 packaging/homebrew/render-formula.py \
             --version "$version" \
             --checksums assets/checksums.txt \
@@ -131,14 +151,69 @@ jobs:
             assets/agentstack-*.tar.gz
             assets/agentstack-*.zip
 
-      - uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3
-        with:
-          draft: true
-          files: |
-            assets/agentstack-*.tar.gz
-            assets/agentstack-*.zip
-            assets/checksums.txt
-            assets/agentstack.rb
+      # Create and address the draft by ID. `softprops/action-gh-release` had a
+      # tag-discovery race on v0.16.0: it created an `untagged-*` draft, uploaded
+      # all seven assets, and reported success. Reasserting the real tag in the
+      # image job then made that draft disappear, while the workflow stayed
+      # green. A green release job with no release is worse than a hard failure.
+      - name: Create the draft release
+        id: draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          version="$(grep -m1 '^version' crates/cli/Cargo.toml | cut -d'"' -f2)"
+          if [ "$RELEASE_TAG" != "v${version}" ]; then
+            echo "::error::requested tag $RELEASE_TAG != cli crate version v${version}" >&2
+            exit 1
+          fi
+          tag_commit="$(git rev-parse HEAD)"
+          rid="$(gh api "repos/${GITHUB_REPOSITORY}/releases" --paginate \
+            --jq "[.[] | select(.draft and .tag_name == \"${RELEASE_TAG}\")][0].id")"
+          if [ -z "$rid" ] || [ "$rid" = "null" ]; then
+            rid="$(gh api -X POST "repos/${GITHUB_REPOSITORY}/releases" \
+              -f tag_name="${RELEASE_TAG}" \
+              -f target_commitish="${tag_commit}" \
+              -f name="${RELEASE_TAG}" \
+              -F draft=true \
+              -F prerelease=false \
+              --jq '.id')"
+          fi
+          [ -n "$rid" ] && [ "$rid" != "null" ] || {
+            echo "::error::GitHub did not return a draft release id" >&2
+            exit 1
+          }
+          echo "release_id=$rid" >> "$GITHUB_OUTPUT"
+          echo "draft release id: $rid"
+
+      - name: Upload release assets to the exact draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ steps.draft.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          for asset in assets/agentstack-*.tar.gz assets/agentstack-*.zip \
+                       assets/checksums.txt assets/agentstack.rb; do
+            name="${asset##*/}"
+            old="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets" \
+              --jq ".[] | select(.name == \"${name}\") | .id")"
+            if [ -n "$old" ]; then
+              gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${old}"
+            fi
+            gh api -X POST \
+              "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}/assets?name=${name}" \
+              -H "Content-Type: application/octet-stream" \
+              --input "$asset" --silent
+          done
+
+          got="$(gh api "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            --jq '[.tag_name, .draft, (.assets | length)] | @tsv')"
+          expected="${RELEASE_TAG}"$'\t'"true"$'\t'"7"
+          if [ "$got" != "$expected" ]; then
+            echo "::error::draft verification failed: got '$got', expected '$expected'" >&2
+            exit 1
+          fi
+          echo "draft verified by id: ${RELEASE_ID} (${RELEASE_TAG}, 7 assets)"
 
   # The egress-proxy sidecar image `--lockdown` needs. The binary's compiled
   # default is this exact GHCR path pinned to its own crate version
@@ -159,14 +234,16 @@ jobs:
       packages: write   # push the egress-proxy sidecar image to GHCR
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ env.RELEASE_TAG }}
       - name: Tag must match the cli crate version
         # The binary compiled from this tag defaults to
         # ...egress-proxy:v<CARGO_PKG_VERSION>; a mismatched tag would ship
         # binaries pointing at an image this job never publishes.
         run: |
           version="$(grep -m1 '^version' crates/cli/Cargo.toml | cut -d'"' -f2)"
-          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
-            echo "::error::tag ${GITHUB_REF_NAME} != cli crate version v${version}" >&2
+          if [ "${RELEASE_TAG}" != "v${version}" ]; then
+            echo "::error::tag ${RELEASE_TAG} != cli crate version v${version}" >&2
             exit 1
           fi
       - name: Lowercase owner (GHCR requires lowercase paths)
@@ -185,7 +262,7 @@ jobs:
           file: docker/egress-proxy.Dockerfile
           push: true
           tags: |
-            ghcr.io/${{ env.OWNER_LC }}/agentstack-egress-proxy:${{ github.ref_name }}
+            ghcr.io/${{ env.OWNER_LC }}/agentstack-egress-proxy:${{ env.RELEASE_TAG }}
             ghcr.io/${{ env.OWNER_LC }}/agentstack-egress-proxy:latest
 
       - name: Attest egress-proxy image
@@ -195,29 +272,27 @@ jobs:
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
 
-      # Deliberately NOT softprops/action-gh-release here: that action cannot
-      # find an existing DRAFT by tag (drafts own no tag ref), so with
-      # append_body it creates a duplicate draft and then deletes it — the
-      # v0.9.0 dry run proved the appended body is silently lost while the
-      # step stays green. A direct API PATCH against the draft's id is
-      # deterministic and cannot flip the draft to published.
+      # Patch the exact draft created by the prerequisite job. Never rediscover
+      # it by tag: draft/tag propagation is eventually consistent, while a job
+      # output is not.
       - name: Add immutable image digest to release notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_ID: ${{ needs.release.outputs.release_id }}
         run: |
           set -euo pipefail
-          rid="$(gh api "repos/${GITHUB_REPOSITORY}/releases" \
-            --jq "[.[] | select(.draft and .tag_name == \"${GITHUB_REF_NAME}\")][0].id")"
-          if [ -z "$rid" ] || [ "$rid" = "null" ]; then
-            echo "::error::no draft release found for ${GITHUB_REF_NAME}" >&2
+          [ -n "$RELEASE_ID" ] || {
+            echo "::error::release job returned no draft id" >&2
             exit 1
-          fi
-          body="$(gh api "repos/${GITHUB_REPOSITORY}/releases/$rid" --jq '.body // ""')"
+          }
+          body="$(gh api "repos/${GITHUB_REPOSITORY}/releases/$RELEASE_ID" --jq '.body // ""')"
           printf '%s\n\nEgress proxy image: `ghcr.io/%s/agentstack-egress-proxy@%s`\n' \
             "$body" "${OWNER_LC}" "${{ steps.push.outputs.digest }}" > /tmp/release-body.md
-          # tag_name is re-asserted on every PATCH: the v0.9.0 release run
-          # showed a draft's tag_name can end up as a GitHub-internal
-          # "untagged-…" placeholder, and publishing such a draft would mint
-          # a garbage tag. Idempotent when it's already correct.
-          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/$rid" \
-            -F body=@/tmp/release-body.md -f tag_name="${GITHUB_REF_NAME}" --silent
+          gh api -X PATCH "repos/${GITHUB_REPOSITORY}/releases/$RELEASE_ID" \
+            -F body=@/tmp/release-body.md --silent
+          gh api "repos/${GITHUB_REPOSITORY}/releases/$RELEASE_ID" \
+            --jq 'select(.draft and .tag_name == "${{ env.RELEASE_TAG }}") | .id' \
+            | grep -qx "$RELEASE_ID" || {
+              echo "::error::draft disappeared or changed identity after image-note patch" >&2
+              exit 1
+            }

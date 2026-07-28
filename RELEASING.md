@@ -38,7 +38,23 @@ git push --tags
 `.github/workflows/release.yml` builds for macOS (arm64/x64), Linux (arm64/x64),
 and Windows (x64), with the `sandbox` feature enabled on every target. It
 attaches `.tar.gz` / `.zip` assets to a **draft** release and records build
-provenance attestations for them. Review the draft, then publish it.
+provenance attestations for them. The workflow verifies the draft by its exact
+release ID and seven-asset count; a green run therefore means the draft still
+exists. Review the draft, then publish it.
+
+If the tag exists but its draft was lost, rebuild that exact tag through the
+manual recovery input. This still creates a draft and never publishes:
+
+```sh
+gh workflow run release.yml --ref main -f release_tag=v0.16.0
+gh run list --workflow release.yml --limit 1
+gh run watch <run-id> --exit-status
+```
+
+Do not move or recreate the tag. The dispatch checks out the existing tag,
+requires it to match the CLI crate version, rebuilds and re-attests all five
+platform archives, then recreates the formula and draft through the same path
+as an ordinary tag push.
 
 After downloading an asset, verify that its provenance is tied to this
 repository and GitHub Actions workflow:

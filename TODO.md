@@ -53,6 +53,14 @@ down is a finding that gets rediscovered by a stranger.
 
 Ordered by what evidence they are waiting on, not by severity:
 
+- [ ] **F01 — publish one release truth.** The `v0.16.0` tag and all release
+  checks are green, but GitHub's release action created an `untagged-*` draft
+  and the follow-up tag patch made that draft disappear; `latest` still serves
+  v0.15.0. The workflow now creates, uploads, patches, and verifies drafts by
+  exact release ID and has a manual existing-tag recovery input. Before launch:
+  push that fix, dispatch `release.yml` with `release_tag=v0.16.0`, verify the
+  seven-asset draft, publish it, publish the generated formula to the tap, then
+  run the clean install smoke. This is the only code-confirmed launch blocker.
 - [ ] **C2 / F04 — the activation study.** Five developers with 2+ supported
   CLIs, observed without command coaching; pass is 4/5 unaided and a median
   under five minutes. Detail in §1.6 and the Stage 1 gate below. Both reviews
@@ -68,11 +76,15 @@ Ordered by what evidence they are waiting on, not by severity:
 - [ ] **F09 — one versioned docs system.** Pages now carry a banner naming the
   build they describe, which was the load-bearing half. Full per-release
   versioning, global search, and one content source remain.
-- [ ] **F15 — browser and accessibility checks at release grade.** The Playwright
-  smoke runs in the docs workflow; landmarks, keyboard, mobile, theme, and an
-  automated a11y scan do not.
-- [ ] **F18 — migration recipes.** "Claude + Codex", "Cursor + Gemini", "from
-  dotfiles", "team without shared secrets", "remove AgentStack completely".
+- [x] **F15 — browser and accessibility checks at release grade.** Every
+  canonical sitemap page now runs at phone + desktop widths with landmarks,
+  keyboard skip navigation, theme switching, reduced-motion behavior, console/
+  overflow checks, and axe WCAG A/AA scanning; the smoke self-test and full
+  local browser run are green (2026-07-28).
+- [x] **F18 — migration recipes.** One generated, navigable page now covers
+  Claude + Codex, Cursor + Gemini, dotfiles, a team without shared secrets, and
+  complete removal; link/fragment/sitemap and browser/a11y checks are green
+  (2026-07-28).
 - [ ] **F19 — a privacy-respecting learning loop.** Local-only by default, with
   an inspectable export of outcomes — never paths, commands, or content.
   Interviews and diary studies before any telemetry.
@@ -80,12 +92,10 @@ Ordered by what evidence they are waiting on, not by severity:
   `docs/design/README.md` now indexes the design docs. This file still carries
   multi-paragraph implementation stories under checked items, against its own
   rule at the top. Move them; leave one line and a commit ref.
-- [ ] **F13 — governance, deferred on purpose.** Code of Conduct, maintainer
-  succession, funding, support window. The trigger is any one of: a second
-  person gains commit rights, an outside contributor opens a PR, the project is
-  publicly announced, or a security report arrives from outside. Until then it
-  is scaffolding for a building with no occupants. `SECURITY.md`'s private
-  reporting route already exists and is the part that matters first.
+- [x] **F13 — governance trigger met by the planned public launch.** Published
+  Code of Conduct, maintainer/succession and funding posture, support routes and
+  support window; README and contributor orientation link the contracts
+  (2026-07-28).
 
 ## Stage 0 — close confirmed correctness gaps
 

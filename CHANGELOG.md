@@ -4,6 +4,35 @@ User-facing changes per release. The [GitHub Releases
 page](https://github.com/Tarekkharsa/agentstack/releases) carries the built
 binaries, checksums, and provenance attestations for each entry.
 
+## Unreleased
+
+### Fixed
+
+- The release workflow now creates, uploads, patches, and verifies a draft by
+  its exact GitHub release ID. The first v0.16.0 run created an `untagged-*`
+  draft, uploaded all seven assets, then lost the draft when a later job tried
+  to rediscover and retag it; every job stayed green while `latest` remained
+  v0.15.0. A manual existing-tag input can rebuild a lost draft without moving
+  or recreating the tag, and publication remains an explicit human action.
+- Release references in the automation example, CI recipe, and interactive
+  tutorial now agree on v0.16.0.
+
+### Added
+
+- Release-grade docs browser checks now cover every canonical sitemap page at
+  phone and desktop widths: landmarks, keyboard skip navigation, theme
+  switching, reduced motion, overflow/console errors, and axe WCAG A/AA scans.
+- Migration recipes for Claude + Codex, Cursor + Gemini, dotfiles, teams without
+  shared secrets, and complete removal.
+- Code of Conduct, maintainer/succession and funding posture, and explicit
+  support routes/window for the planned public launch.
+
+### Changed
+
+- The CLI portability and recovery loop is the public launch path. t3code is
+  described consistently as an optional private graphical companion, and the
+  old workflow-first t3code launch plan is labelled a closed prototype record.
+
 ## v0.16.0 — 2026-07-28
 
 **The release an end-to-end review asked for.** Two independent product

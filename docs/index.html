@@ -74,6 +74,7 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
 </style>
 </head>
 <body>
+<a class="skip-link" href="#main-content">Skip to content</a>
 <div style="min-height:100vh;background:var(--color-bg);color:var(--color-text);font-family:var(--font-body)">
   <nav class="nav" style="display:flex;align-items:center;gap:var(--space-4)">
     <a href="index.html" class="nav-brand" style="display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--color-text)">
@@ -92,7 +93,7 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
     </div>
   </nav>
 
-  <div style="max-width:1060px;margin:0 auto;padding:calc(var(--space-8) * 1.5) var(--space-6) var(--space-8);position:relative">
+  <div id="main-content" role="main" tabindex="-1" style="max-width:1060px;margin:0 auto;padding:calc(var(--space-8) * 1.5) var(--space-6) var(--space-8);position:relative">
     <div class="hero-split">
       <div style="min-width:0">
         <span class="tag tag-accent-2">open source · Rust · 13 CLI adapters · MIT / Apache-2.0</span>

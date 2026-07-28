@@ -1,20 +1,23 @@
-# Launch plan — the single source for the launch effort
+# t3code launch prototype — closed implementation record
 
-> **Read only this file for the launch work.** It is self-contained: the launch
-> bar, current state, findings, agreed decisions, the reviewable-workflow design,
-> and the ordered to-do list all live here. Do not go hunting through other
-> design docs for this effort — everything needed is below.
+> **Status:** closed 2026-07-28. This records the prototype lanes implemented on
+> 2026-07-23–24; it is **not the current public-launch gate**. The product review
+> found that calling t3code/workflows the launch headline contradicted the
+> portability-first strategy and pointed strangers at a private, unobtainable
+> UI. [`STRATEGY.md`](../../STRATEGY.md) owns product direction and
+> [`TODO.md`](../../TODO.md) is the only current queue.
 >
-> **Status:** design agreed 2026-07-23. Prototype-scoped for v1. When a lane is
-> accepted for build, its tasks move into the checklist at the bottom and, if it
-> touches a security boundary, gets an explicit go before entering `TODO.md`.
+> **Current decision:** the obtainable CLI is the launch channel. Public launch
+> proves `install → init → apply → doctor → restore`; t3code is an optional
+> graphical companion, and workflows remain an advanced experimental lane.
+> Nothing in this historical record promotes either into the beginner promise.
 
 ---
 
-## 1. The launch bar
+## 1. Historical prototype bar (superseded)
 
-Public launch is gated on the **closed loop working end-to-end from t3code's
-UI** — the everyday journey never forces a drop to the CLI:
+The prototype was built against the following graphical bar. It is preserved to
+explain the implementation that follows, not as a current release requirement:
 
 1. **Doctor** — run "check setup", see status + one next action.
 2. **Onboarding/init** — from a fresh machine (no `agentstack` installed):
@@ -105,7 +108,8 @@ No engine change.
 
 ### Lane C2 — reviewable workflows, v1 (medium; **engine untouched**)
 
-The headline. Full design in §5–§6 below.
+The prototype's former headline, now an experimental advanced surface. Full
+design in §5–§6 below.
 
 ---
 
@@ -266,7 +270,7 @@ approve action stays the eventual contract home, deferred as a fast-follow.
 
 ---
 
-## 7. Sequence & the launch-date decision
+## 7. Historical sequence & launch-date decision (superseded)
 
 **Recommended order** (cheapest-first, dependency-safe; one boundary-touching
 item in implementation/review at a time):
@@ -277,12 +281,11 @@ item in implementation/review at a time):
 4. **Lane C2 v1** — reviewable workflows (skill + renderer + handshake); start the
    handshake prototype first to feel the experience.
 
-**Launch-date decision — resolved:** the reviewable-workflow experience ships in
-the launch gate as **C2 v1 (engine untouched)**, so the headline ("design the
-workflow, see its shape, approve it, run it") is real without gating the release
-on native declarative execution. The heavy, security-sensitive engine work is a
-**post-launch fast-follow**, designed properly rather than rushed onto the
-riskiest surface right before going public.
+**Historical decision (superseded 2026-07-28):** this prototype originally put
+C2 v1 in the launch gate. The product review reversed that decision: workflows
+remain experimental until their promotion gates close, and the public launch
+headline is the ordinary portability + recovery loop. The heavy,
+security-sensitive engine work remains evidence-gated rather than launch work.
 
 ### Scope guards (what this is NOT)
 - Not a second UI — extend t3code + the CLI contract only.

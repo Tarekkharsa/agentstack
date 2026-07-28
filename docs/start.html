@@ -135,11 +135,12 @@ pre.cmd .c { color: var(--term-muted); }
   margin: 0; padding: 14px 18px; overflow-x: auto; color: var(--term-text);
   font-family: ui-monospace, Menlo, monospace; font-size: 0.82rem; line-height: 1.7;
 }
-.term .p { color: var(--color-accent); user-select: none; font-weight: 600; }
+.term .p { color: var(--term-warn); user-select: none; font-weight: 600; }
 .term .c { color: var(--term-muted); }
 .term .ok { color: var(--term-ok); }
 .term .no { color: var(--term-bad); }
 .term .am { color: var(--term-warn); }
+.term pre code, pre.cmd code { background: transparent; color: inherit; padding: 0; }
 
 /* ── delivery-mode fork (static: all three panels stacked) ── */
 .modefork {
@@ -186,6 +187,7 @@ pre.cmd .c { color: var(--term-muted); }
 </style>
 </head>
 <body style="margin:0;background:var(--color-bg);color:var(--color-text);font-family:var(--font-body)">
+<a class="skip-link" href="#main-content">Skip to content</a>
 <div style="min-height:100vh;background:var(--color-bg);color:var(--color-text);font-family:var(--font-body)">
   <nav class="nav" style="display:flex;align-items:center;gap:var(--space-4)">
     <a href="index.html" class="nav-brand" style="display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--color-text)">
@@ -221,7 +223,7 @@ pre.cmd .c { color: var(--term-muted); }
       <a href="#s-report"><span class="n">B6</span>Read the flight recorder</a>
     </div>
 
-    <div class="col" style="flex:1;min-width:0">
+    <div id="main-content" role="main" tabindex="-1" class="col" style="flex:1;min-width:0">
 
       <section id="intro">
         <a class="crumb" href="docs.html">← all docs</a>
