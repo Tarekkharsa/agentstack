@@ -49,12 +49,49 @@ code{font-family:var(--mono);font-size:.92em}
 .modes{display:flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
 .modes button{flex:1;padding:5px 4px;font-size:11px;font-weight:600;color:var(--muted);text-align:center}
 .modes button[aria-pressed=true]{background:rgba(233,231,226,.09);color:var(--text)}
+.search{display:flex;align-items:center;gap:8px;padding:6px 9px;border-radius:8px;border:1px solid var(--line);background:rgba(233,231,226,.03)}
+.search.on{border-color:rgba(240,151,90,.4)}
+.search .ic{font-size:11px;color:var(--dimmer);flex:none}
+.search input{flex:1;min-width:0;background:transparent;border:0;outline:none;color:var(--text);font-size:12px}
+.search input::-webkit-search-cancel-button{display:none}
+.search .clr{font-size:13px;line-height:1;color:#8A929B;flex:none;padding:0 2px}
+/* The rail asks the user's question, so a two-line item is normal, not an
+   overflow to be clipped — and the surface badge says where in the product
+   the answer lives before you spend a click finding out. */
+.rail .item{align-items:flex-start}
+.rail .item .dot{margin-top:5px}
+.rail .item .nm{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.4;text-wrap:pretty}
+.rail .item .sf{font-size:9.5px;font-weight:600;letter-spacing:.04em;color:#4E555D;flex:none;margin-top:2px}
+/* Prefixed, because `.pop`/`.dlg` are already the prototype's own popover and
+   dialog frames — a badge sharing those names inherits a 400px width. */
+.rail .item[aria-current=true] .sf.sf-pop{color:var(--green)}
+.rail .item[aria-current=true] .sf.sf-dlg{color:var(--blueSoft)}
+.rail .item[aria-current=true] .sf.sf-chat{color:var(--red)}
+.rail .nores{padding:14px 10px;font-size:12px;line-height:1.5;color:#8A929B}
 
 .main{flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden}
 .hdr{flex:none;padding:17px 24px 0;border-bottom:1px solid var(--line-soft);display:flex;flex-direction:column;gap:13px}
 .hdr .r1{display:flex;align-items:flex-start;gap:16px}
-.hdr .nm{font-size:18.5px;font-weight:600;letter-spacing:-.015em}
+/* The question the reader actually arrived with leads; the internal scenario
+   name is demoted to a kicker. Below it, one plain sentence, then the
+   technical summary — three widths of the same idea, each one optional. */
+.hdr .kicker{font-size:11px;font-weight:600;letter-spacing:.05em;color:var(--orange)}
+.hdr .nm{font-size:21px;font-weight:600;letter-spacing:-.02em;line-height:1.25}
+.hdr .plain{font-size:13.5px;line-height:1.55;color:#B6BDC5;max-width:88ch}
 .hdr .summary{font-size:12.5px;line-height:1.55;color:var(--muted);max-width:104ch}
+.hdr .depthnote{font-size:10.5px;color:var(--dimmer);text-align:right}
+.foot{flex:none;border-top:1px solid var(--line-soft);background:#101317;display:flex;flex-direction:column}
+.foot .segs{display:flex;height:2px;gap:2px;padding:0 2px}
+.foot .segs i{border-radius:2px;background:rgba(233,231,226,.09)}
+.foot .segs i.past{background:rgba(240,151,90,.55)}
+.foot .segs i.now{background:var(--orange)}
+.foot .r{display:flex;align-items:center;gap:14px;padding:9px 20px}
+.foot .pos{font-size:11.5px;color:#8A929B}
+.foot .nav{margin-left:auto;display:flex;align-items:center;gap:10px}
+.foot .nav button{display:inline-flex;align-items:center;gap:9px;height:32px;padding:0 13px;border-radius:8px;border:1px solid var(--line);font-size:12px;font-weight:600;color:var(--text);max-width:460px}
+.foot .nav button:disabled{color:#3E454C;border-color:rgba(233,231,226,.08)}
+.foot .nav button .lbl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.foot .nav button.chapter{background:rgba(240,151,90,.16);border-color:rgba(240,151,90,.4);color:var(--orange)}
 .tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:5px;font-size:10.5px;font-weight:700}
 .tag.g{background:rgba(52,211,153,.14);color:var(--green)}
 .tag.a{background:rgba(240,151,90,.16);color:var(--orange)}
@@ -228,6 +265,9 @@ details[open]>summary::before{content:"▾ "}
 .openbox .ot{font-size:12.5px;line-height:1.6;color:#BEC6D0}
 .openbox .ot b{color:var(--text)}
 .contract{display:flex;align-items:center;gap:10px;border-top:1px solid rgba(233,231,226,.08);padding-top:11px;margin-top:auto}
+/* In the footer the contract sits beside the position line, so it drops the
+   rule and the top margin that separate it from a scrolling column. */
+.contract.inline{border-top:0;padding-top:0;margin-top:0}
 .contract .k{font-size:10.5px;color:var(--dimmer)}
 .contract .v{font-family:var(--mono);font-size:10.5px;color:#8A929B}
 
@@ -267,15 +307,20 @@ details[open]>summary::before{content:"▾ "}
   <aside class="rail">
     <div class="rail-top">
       <div class="brandrow"><span class="mark"></span><span class="title">The AgentStack panel</span></div>
-      <span class="sub">Every scenario, with the panel and the command side by side. The panel is live — do the step and the state really changes. The graphical panel is one host integration today; the CLI is the authority in every one.</span>
+      <span class="sub">Every question a user might arrive with, answered by the panel and the command side by side. The panel is live — do the step and the state really changes. Start anywhere, or press → to walk all 32 frames.</span>
       <div class="modes">
         <button data-mode="guided" aria-pressed="true">Guided</button>
         <button data-mode="sheet" aria-pressed="false">All frames</button>
         <button data-mode="ref" aria-pressed="false">CLI</button>
       </div>
+      <div class="search" id="searchBox">
+        <span class="ic" aria-hidden="true">⌕</span>
+        <input id="railq" type="search" placeholder="Search — or press /" aria-label="Search scenarios">
+        <button class="clr" id="railqx" aria-label="Clear the search" hidden>×</button>
+      </div>
     </div>
     <div class="rail-scroll" id="railScroll"></div>
-    <div class="rail-foot"><span id="railCount"></span><span class="kbd">← → steps</span></div>
+    <div class="rail-foot"><span id="railCount"></span><span class="kbd">← → steps · 1 2 3 depth</span></div>
   </aside>
   <main class="main" id="main"></main>
 </div>
@@ -316,9 +361,42 @@ const base = () => ({
   proposed:false, sel:'backend', menu:null, newRow:null, pending:{add:[],rem:[]},
 });
 let S = base();
-let CUR = {scenario:'ready', step:0, view:'both', mode:'guided', uiPct:46};
+/* `depth` replaces the old pane toggle. Three panes (both/ui/cli) asked the
+   reader to choose a LAYOUT; three depths ask how much they want to be told,
+   which is the question they actually have. Simple is the screens alone;
+   Normal adds the command and how it works; Deep adds the guarantees, the
+   still-open notes and the contract line. */
+let CUR = {scenario:'ready', step:0, depth:'normal', mode:'guided', uiPct:46, q:''};
 let LASTCHANGE = null;   // what the step you just completed actually changed
 const DID = new Set();   // steps whose own action you have actually performed
+const DEPTH = {
+  simple:{ui:true,  cli:false, summary:false, gtee:false, contract:false, note:'just the screens'},
+  normal:{ui:true,  cli:true,  summary:true,  gtee:false, contract:false, note:'screens + commands'},
+  deep:  {ui:true,  cli:true,  summary:true,  gtee:true,  contract:true,  note:'everything, incl. guarantees'},
+};
+const D = () => DEPTH[CUR.depth] || DEPTH.normal;
+
+/* Come back to where you were. Only the view state is stored — never the
+   simulated panel state, which is rebuilt from the step's own setup(). */
+const STORE = 'agentstack-review';
+function persist(){
+  try{ localStorage.setItem(STORE, JSON.stringify({scenario:CUR.scenario, step:CUR.step, depth:CUR.depth, mode:CUR.mode, uiPct:CUR.uiPct})); }
+  catch(e){ /* private mode, file:// with storage off — the review still works */ }
+}
+function restore(){
+  try{
+    const raw = localStorage.getItem(STORE); if(!raw) return;
+    const v = JSON.parse(raw);
+    if(v && SCEN.some(s=>s.id===v.scenario)) CUR.scenario = v.scenario;
+    // Clamp: a scenario can lose steps between one visit and the next, and a
+    // stored index past the end would leave `tourAt` unable to find the frame.
+    const sc = SCEN.find(s=>s.id===CUR.scenario) || SCEN[0];
+    if(Number.isInteger(v.step)) CUR.step = Math.min(Math.max(v.step, 0), sc.steps.length-1);
+    if(DEPTH[v.depth]) CUR.depth = v.depth;
+    if(['guided','sheet','ref'].includes(v.mode)) CUR.mode = v.mode;
+    if(typeof v.uiPct==='number') CUR.uiPct = v.uiPct;
+  }catch(e){ /* ignore a corrupt entry rather than refusing to start */ }
+}
 
 const LIB = {
   skills:[
@@ -1656,6 +1734,84 @@ SCEN.forEach(sc=>{ const g=GUIDE[sc.id]||[];
   sc.steps.forEach((st,i)=>{ const [instr,target,changed]=g[i]||[]; st.instr=instr||null; st.target=target||st.target||null; st.changed=changed||null; }); });
 
 /* flat frame list, for the sheet */
+/* ══ the reader's own words ═════════════════════════════════════════
+   Every scenario above is named for what it IS ("Clone a repo → inert →
+   trusted"). Nobody arrives with that sentence in their head; they arrive
+   with a question ("is it safe to open an agent here?"). `q` is that
+   question — it titles the frame and labels the rail — and the scenario's
+   own name drops to a kicker above it, where it still tells you which part
+   of the product you are in.
+
+   `plains` is one plain sentence per step: no product nouns, no contract
+   names, nothing you have to already know. It sits above the technical
+   summary rather than replacing it, so the same frame reads at whichever
+   depth you asked for. A missing entry falls back to the first, then to the
+   scenario summary — a new step is never blank. */
+const HUMAN = {
+ 'not-installed':{q:"Why is the AgentStack icon greyed out?", plains:[
+   "AgentStack isn't on this machine, so nothing is watching your agents right now. The panel says so instead of quietly disappearing."]},
+ 'first-setup':{q:"How do I get started in this project?", plains:[
+   "Your coding tools each keep their own setup. AgentStack can fold them into one — and shows you the plan before it writes anything.",
+   "One screen, one decision: where your tokens live. Everything else is a list you can open if you want it."]},
+ 'ready':{q:"What is my agent working with right now?", plains:[
+   "The name of the bundle of tools your agent has, and how to change it. That is the whole first page when nothing needs you.",
+   "The same toolset, one tab over — and the rail offers a verb the state cannot honour. That is the bug this frame is here to show."]},
+ 'switch':{q:"How do I change which tools my agent has?", plains:[
+   "Pick a different bundle — for good, or just for this stretch of work.",
+   "The temporary one puts every file back the way it was when you stop."]},
+ 'add-skill':{q:"How do I give my agent a new skill?", plains:[
+   "Find it, pick which bundle it joins, confirm once. You approve a digest, not a description.",
+   "If a token is missing, the manifest still keeps your change — only the render is withheld, and it names the one command that fixes it."]},
+ 'create':{q:"How do I make a new bundle of tools?", plains:[
+   "Name it, then tick what goes in. Nothing is written while you compose.",
+   "The name is checked as you type, because a create that cannot succeed should not offer its button.",
+   "Created — and deliberately not switched to. Naming a thing is not choosing it.",
+   "Its contents are pinned, so the toolset you just described is the one you will get."]},
+ 'remove':{q:"How do I get rid of a tool I installed?", plains:[
+   "This is your machine-wide library, not this project — so the button says so before you press it.",
+   "When a toolset still uses it, the confirm says which one, and what will be left behind."]},
+ 'undo':{q:"How do I undo what AgentStack just did?", plains:[
+   "Everything it writes is recorded first. It offers the most recent change in this project — not a guess, and not somebody else's."]},
+ 'trust':{q:"I cloned a repo — is it safe to open an agent here?", plains:[
+   "A cloned repo can ask for tools of its own. Until you look at them, none of them run, connect, or see your tokens.",
+   "This is the full list of what it wants, before you say yes.",
+   "Approved — for these exact bytes. Change the manifest or the lockfile and you are asked again."]},
+ 'drift':{q:"Something changed a config behind my back. Now what?", plains:[
+   "Two versions disagree. The panel will not pick for you, because the safe answer depends on which one you meant.",
+   "Keep what is on disk, or re-render from the manifest — each button states what it costs."]},
+ 'guard':{q:"How do I stop an agent doing something destructive?", plains:[
+   "A pre-check that every detected CLI consults before it runs a command. It only ever adds protection.",
+   "One write, machine-wide — and the confirm says that out loud, along with how to undo it."]},
+ 'denial':{q:"Why did my agent's command get blocked?", plains:[
+   "It tried something destructive outside this project. You see what, which rule caught it, and what to do instead — with no damage done."]},
+ 'protection':{q:"How do I run something riskier more safely?", plains:[
+   "Four levels, each honest about where it stops. “Not kernel isolation” means exactly that."]},
+ 'workflow':{q:"How do I run and watch a multi-agent job?", plains:[
+   "The model proposes the shape of the run and you approve it in the chat. That click executes nothing.",
+   "Once it starts, one line tells you it is live and offers the way in.",
+   "Then you can watch every agent: the job it has, how confined it is, and where it has got to."]},
+ 'proposed':{q:"Could editing a toolset be simpler than this?", plains:[
+   "A sketch, not shipped code. The tick is the membership, and it reads the same in both directions.",
+   "A new toolset is just a row that is not saved yet — so nothing quietly changes what the controls mean.",
+   "One write at the end, under one digest, instead of one write per click."]},
+ 'activity':{q:"What did my agents actually do?", plains:[
+   "Every call your agents made through AgentStack, and how each one ended. This is the thinnest screen in the panel, and it is not ready."]},
+ 'degraded':{q:"Why are some buttons switched off?", plains:[
+   "The CLI is newer than this build of the panel. Rather than guess, it disables exactly the actions it cannot do correctly.",
+   "A read that landed mid-write. Nothing was lost — the copy says so, which is the difference between a scare and a shrug.",
+   "This one is the host app's own server, not the CLI. Naming them separately is how you know which to look at."]},
+};
+/* Where in the product this happens, so the rail can say it before you click.
+   Derived from the frame itself rather than hand-tagged, so it cannot drift
+   away from what the step actually renders. */
+function surfaceOf(st){
+  if(st.dialog==='denial' || st.dialog==='blueprint') return {n:'IN CHAT', c:'sf-chat'};
+  if(st.manage || st.dialog) return {n:'DIALOG', c:'sf-dlg'};
+  return {n:'POPOVER', c:'sf-pop'};
+}
+const human = sc => HUMAN[sc.id] || {q:sc.name, plains:[]};
+const plainFor = (sc,i) => { const h=human(sc); return h.plains[i] || h.plains[0] || sc.summary; };
+
 const FLAT = SCEN.flatMap(sc => sc.steps.map((st,i)=>({sc,st,i})));
 const TONE_N = {g:'',a:'o',r:'r',b:'b',n:'n'};
 
@@ -1664,18 +1820,37 @@ const scenario = () => SCEN.find(s=>s.id===CUR.scenario) || SCEN[0];
 const step = () => { const sc=scenario(); return sc.steps[Math.min(CUR.step, sc.steps.length-1)]; };
 function stateFor(sc, i){ const s=base(); sc.steps[i].setup(s); return s; }
 
+/* Search over everything a reader might half-remember: the question they came
+   with, the internal name, the group, and the summary. */
+const railHay = s => (human(s).q+' '+s.name+' '+s.group+' '+s.summary).toLowerCase();
+const railMatches = () => { const q=CUR.q.trim().toLowerCase(); return q ? SCEN.filter(s=>railHay(s).includes(q)) : SCEN.slice(); };
+
 function renderRail(){
-  const groups=[...new Set(SCEN.map(s=>s.group))];
-  document.getElementById('railScroll').innerHTML = groups.map(g=>
-    `<h2>${g}</h2>` + SCEN.filter(s=>s.group===g).map(s=>{
-      const on = s.id===CUR.scenario;
-      const col = s.tone==='g'?'var(--green)':s.tone==='a'?'var(--amber)':s.tone==='r'?'var(--red)':s.tone==='b'?'var(--blueSoft)':'var(--dim)';
-      return `<button class="item" data-scen="${s.id}" aria-current="${on}">
-        <span class="dot" style="background:${col}"></span>
-        <span class="nm">${esc(s.name)}</span>
-        <span class="ct">${s.steps.length>1?s.steps.length+' steps':''}</span></button>`;
-    }).join('')).join('');
-  document.getElementById('railCount').textContent = `${SCEN.length} scenarios · ${FLAT.length} frames`;
+  const hits = railMatches();
+  const box = document.getElementById('searchBox');
+  const clr = document.getElementById('railqx');
+  if(box) box.classList.toggle('on', CUR.q.trim().length>0);
+  if(clr) clr.hidden = CUR.q.length===0;
+
+  if(hits.length===0){
+    document.getElementById('railScroll').innerHTML =
+      `<p class="nores">No scenario matches that. Try <b>trust</b>, <b>undo</b>, <b>skill</b>, <b>blocked</b> or <b>workflow</b>.</p>`;
+  }else{
+    const groups=[...new Set(hits.map(s=>s.group))];
+    document.getElementById('railScroll').innerHTML = groups.map(g=>
+      `<h2>${g}</h2>` + hits.filter(s=>s.group===g).map(s=>{
+        const on = s.id===CUR.scenario;
+        const col = s.tone==='g'?'var(--green)':s.tone==='a'?'var(--amber)':s.tone==='r'?'var(--red)':s.tone==='b'?'var(--blueSoft)':'var(--dim)';
+        const sf = surfaceOf(s.steps[0]);
+        return `<button class="item" data-scen="${s.id}" aria-current="${on}" title="${esc(s.name)}">
+          <span class="dot" style="background:${col}"></span>
+          <span class="nm">${esc(human(s).q)}</span>
+          <span class="sf ${sf.c}">${sf.n}</span></button>`;
+      }).join('')).join('');
+  }
+  document.getElementById('railCount').textContent = CUR.q.trim()
+    ? `${hits.length} of ${SCEN.length} scenarios`
+    : `${SCEN.length} scenarios · ${FLAT.length} frames`;
 }
 
 function uiFor(s){
@@ -1729,20 +1904,58 @@ function guideBar(sc,st){
   </div>`;
 }
 
+/* Where this frame sits in the whole review, and what comes next. The tour is
+   the flat frame list, so one button walks the entire product — and it names
+   its destination rather than saying "Next", because "next" is only useful if
+   you already know the running order. */
+function tourAt(){ return FLAT.findIndex(f => f.sc.id===CUR.scenario && f.i===CUR.step); }
+function nextLabel(){
+  const at=tourAt(); const nxt=FLAT[at+1];
+  if(!nxt) return {label:'That’s everything', chapter:false, disabled:true};
+  if(nxt.sc.id!==CUR.scenario) return {label:'Next: '+human(nxt.sc).q, chapter:true, disabled:false};
+  return {label:'Next: '+nxt.st.name, chapter:false, disabled:false};
+}
+function footBar(sc){
+  const at=tourAt(), n=nextLabel();
+  const idx=SCEN.findIndex(s=>s.id===sc.id);
+  const pos = `Frame ${at+1} of ${FLAT.length} · ${idx+1}/${SCEN.length} ${sc.group}`
+    + (sc.steps.length>1 ? ` · part ${CUR.step+1} of ${sc.steps.length}` : '');
+  /* One segment per scenario, weighted by how many frames it holds, so the
+     bar measures reading left rather than scenarios left. */
+  const segs = SCEN.map((s,i)=>`<i class="${i<idx?'past':i===idx?'now':''}" style="flex:${s.steps.length}"></i>`).join('');
+  return `<footer class="foot">
+    <div class="segs">${segs}</div>
+    <div class="r">
+      <span class="pos">${esc(pos)}</span>
+      ${D().contract?`<span class="contract inline"><span class="k">contract</span><span class="v">${esc(step().contract)}</span></span>`:''}
+      <span class="nav">
+        <button data-tour="-1" ${at<=0?'disabled':''}>← Back</button>
+        <button data-tour="1" class="${n.chapter?'chapter':''}" ${n.disabled?'disabled':''}>
+          <span class="lbl">${esc(n.label)}</span><span aria-hidden="true" style="opacity:.6">→</span></button>
+      </span>
+    </div>
+  </footer>`;
+}
+
 function renderGuided(){
-  const sc=scenario(), st=step(), c=CLI[st.cli]||CLI.status;
-  const showUi = CUR.view!=='cli', showCli = CUR.view!=='ui';
-  const uiWidth = CUR.view==='ui' ? '100%' : CUR.uiPct+'%';
+  const sc=scenario(), st=step(), c=CLI[st.cli]||CLI.status, d=D();
+  const showUi = d.ui, showCli = d.cli;
+  const uiWidth = showCli ? CUR.uiPct+'%' : '100%';
   document.getElementById('main').innerHTML = `
   <header class="hdr">
     <div class="r1">
       <div class="col g4" style="min-width:0">
-        <div class="row g10"><span class="nm">${esc(sc.name)}</span><span class="tag ${sc.tone}">${sc.tag}</span></div>
-        <span class="summary">${esc(sc.summary)}</span>
+        <div class="row g10"><span class="kicker">${esc(sc.name)}</span><span class="tag ${sc.tone}">${sc.tag}</span></div>
+        <span class="nm">${esc(human(sc).q)}</span>
+        <span class="plain">${esc(plainFor(sc, CUR.step))}</span>
+        ${d.summary?`<span class="summary">${esc(sc.summary)}</span>`:''}
       </div>
-      <div class="toggle">
-        ${[['both','Both'],['ui','UI only'],['cli','CLI only']].map(([k,l])=>
-          `<button data-view="${k}" aria-pressed="${CUR.view===k}">${l}</button>`).join('')}
+      <div class="col g4" style="margin-left:auto;align-items:flex-end;flex:none">
+        <div class="toggle" role="group" aria-label="How much detail to show">
+          ${[['simple','Simple'],['normal','Normal'],['deep','Deep']].map(([k,l])=>
+            `<button data-depth="${k}" aria-pressed="${CUR.depth===k}">${l}</button>`).join('')}
+        </div>
+        <span class="depthnote">${d.note}</span>
       </div>
     </div>
     <div class="steps">${sc.steps.map((x,i)=>`<button data-step="${i}" aria-current="${i===CUR.step}">
@@ -1771,13 +1984,13 @@ ${c.out}</div>
         <div class="col g10"><span class="sechead">HOW IT WORKS</span>
           ${st.how.map(h=>`<div class="how"><span class="accent" style="background:${h.a}"></span>
             <div class="col g4"><span class="ht">${esc(h.t)}</span><span class="hx">${esc(h.x)}</span></div></div>`).join('')}</div>
-        <div class="col g8"><span class="sechead">GUARANTEES AT THIS STEP</span>
-          ${st.gtee.map(([m,t])=>`<div class="gt ${m==='✓'?'yes':'no'}"><span class="m">${m}</span><span class="x2">${esc(t)}</span></div>`).join('')}</div>
-        ${st.open?`<div class="col g8"><span class="sechead">STILL OPEN</span>
+        ${d.gtee?`<div class="col g8"><span class="sechead">GUARANTEES AT THIS STEP</span>
+          ${st.gtee.map(([m,t])=>`<div class="gt ${m==='✓'?'yes':'no'}"><span class="m">${m}</span><span class="x2">${esc(t)}</span></div>`).join('')}</div>`:''}
+        ${d.gtee&&st.open?`<div class="col g8"><span class="sechead">STILL OPEN</span>
           <div class="openbox"><span class="ot">${st.open}</span></div></div>`:''}
-        <div class="contract"><span class="k">contract</span><span class="v">${esc(st.contract)}</span></div>
       </div></div>`:''}
-  </div>`;
+  </div>
+  ${footBar(sc)}`;
 }
 
 function renderSheet(){
@@ -1955,21 +2168,31 @@ function act(a){
   render();
 }
 
+/* Walk the flat frame list, crossing scenario boundaries — so Back and Next
+   traverse the whole review rather than dead-ending at each scenario's edge. */
+function tour(dir){
+  const at=tourAt(), i=Math.min(Math.max((at===-1?0:at)+dir, 0), FLAT.length-1);
+  gotoStep(FLAT[i].sc.id, FLAT[i].i);
+}
+
 function gotoStep(scenarioId, i){
   CUR.scenario=scenarioId; CUR.step=i; LASTCHANGE=null;
   // Entering a step un-does it and everything after it: the state was just
   // rebuilt from setup(), so anything you performed earlier no longer holds.
   [...DID].forEach(k=>{ const [id,n]=k.split(':'); if(id===scenarioId && +n>=i) DID.delete(k); });
   S = stateFor(scenario(), i);
+  persist();
   render();
 }
 
 /* ── events ──────────────────────────────────────────────────────── */
 document.addEventListener('click', e=>{
-  const m=e.target.closest('[data-mode]');   if(m){ CUR.mode=m.dataset.mode; render(); return; }
+  const m=e.target.closest('[data-mode]');   if(m){ CUR.mode=m.dataset.mode; persist(); render(); return; }
   const sc=e.target.closest('[data-scen]');  if(sc){ gotoStep(sc.dataset.scen,0); return; }
   const stp=e.target.closest('[data-step]'); if(stp){ gotoStep(CUR.scenario, +stp.dataset.step); return; }
-  const v=e.target.closest('[data-view]');   if(v){ CUR.view=v.dataset.view; render(); return; }
+  const dp=e.target.closest('[data-depth]'); if(dp){ CUR.depth=dp.dataset.depth; persist(); render(); return; }
+  const tr=e.target.closest('[data-tour]');  if(tr && !tr.disabled){ tour(+tr.dataset.tour); return; }
+  if(e.target.id==='railqx'){ CUR.q=''; const i=document.getElementById('railq'); if(i) i.value=''; renderRail(); return; }
   if(e.target.closest('[data-replay]')){
     const sc=scenario(), i=CUR.step;
     gotoStep(sc.id, (stepDone(sc,i)&&i+1<sc.steps.length) ? i+1 : i);
@@ -1979,6 +2202,7 @@ document.addEventListener('click', e=>{
   if(a && !a.closest('.frozen') && !a.hasAttribute('disabled')) act(a.dataset.act);
 });
 document.addEventListener('input', e=>{
+  if(e.target.id==='railq'){ CUR.q=e.target.value; renderRail(); return; }
   if(e.target.id==='refq'){ renderRef(); return; }
   const k=e.target.dataset.input;
   if(!k) return;
@@ -2027,13 +2251,29 @@ document.addEventListener('keydown', e=>{
     if(e.key==='Home')       { setUiPct(UI_DEFAULT); e.preventDefault(); }
     return;
   }
-  if(e.target.tagName==='INPUT') return;
-  const sc=scenario();
-  if(e.key==='ArrowRight') gotoStep(sc.id, Math.min(CUR.step+1, sc.steps.length-1));
-  if(e.key==='ArrowLeft')  gotoStep(sc.id, Math.max(CUR.step-1, 0));
+  if(e.target.tagName==='INPUT'){
+    if(e.key==='Escape') e.target.blur();
+    return;
+  }
+  // `/` is the search key everywhere else; make it the search key here too.
+  if(e.key==='/'){
+    e.preventDefault();
+    const i=document.getElementById('railq');
+    if(i){ i.focus(); i.select(); }
+    return;
+  }
+  if(e.key==='1'||e.key==='2'||e.key==='3'){
+    CUR.depth = {1:'simple',2:'normal',3:'deep'}[e.key];
+    persist(); render(); return;
+  }
+  // Arrows walk the whole review, not just this scenario — the same path the
+  // footer's Back/Next take, so the two never disagree about what is next.
+  if(e.key==='ArrowRight'){ tour(1); return; }
+  if(e.key==='ArrowLeft'){ tour(-1); return; }
 });
 
-gotoStep('ready',0);
+restore();
+gotoStep(CUR.scenario, CUR.step);
 </script>
 </body>
 </html>
