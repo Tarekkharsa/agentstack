@@ -71,11 +71,15 @@ pub struct Cli {
 #[derive(Subcommand, Debug)]
 pub enum Command {
     // ── Everyday: the core loop most projects ever need (shown in --help) ─
-    /// Set up everything in one command: detect, import, choose, apply, verify.
+    /// Set up this project: detect the CLIs you have and import them into one
+    /// manifest.
     ///
-    /// Detects CLIs, imports their configs, lets you choose where secrets
-    /// live, previews, confirms, applies, and verifies. Interactive runs are
-    /// guided; scripts get the promptless primitive via flags.
+    /// At a terminal this is the guided first run: it detects your CLIs,
+    /// imports their configs, lifts inline tokens to `${REF}` placeholders,
+    /// asks where those values live, then previews, confirms, applies and
+    /// verifies — setup finished in one command. Scripted runs (`--yes`,
+    /// `--plan`, `--secrets`) are the promptless primitive and stop after the
+    /// manifest, naming `apply --write` as the next step.
     Init(InitArgs),
 
     /// Where this project stands, on one screen: detected CLIs, manifest,
@@ -428,13 +432,56 @@ and renders nothing.
   agentstack toolset create --name backend --server github
       at a terminal: shows what it will create, asks, then writes and re-locks
 
+  agentstack toolset list                see every toolset here
   agentstack use backend                 switch to it
-  agentstack use --list                  see every toolset here
 
 Scripts and graphical clients get the two-step contract instead: --preview
 emits the plan plus a consent digest, and applying needs
 `--yes --consented <digest>`. A bare non-interactive call refuses and says so.")]
     Create(PanelCreateProfileArgs),
+
+    /// List the toolsets declared here, and whether each one is ready to use.
+    #[command(after_help = "\
+The same read as `agentstack use --list`, under the noun. Each toolset's
+resolved skills, servers and harness, plus a readiness flag: is everything it
+references pinned in agentstack.lock and matching?
+
+  agentstack toolset list                see every toolset here
+  agentstack toolset list --json         the same read, machine-readable
+
+Listing never activates anything and writes nothing. To switch:
+`agentstack use <toolset> --write`; to switch only for now:
+`agentstack session start <toolset>`.")]
+    List(ToolsetListArgs),
+}
+
+/// `toolset list` is a fixed-argv alias of `use --list` — one read path, one
+/// implementation. It carries only the flags that read makes sense with, so
+/// the noun is discoverable without growing a second way to activate.
+#[derive(Args, Debug)]
+pub struct ToolsetListArgs {
+    /// Emit machine-readable JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+impl ToolsetListArgs {
+    /// Widen into the `use --list` read this delegates to. Every activation
+    /// field stays at its default, so the alias cannot render or write.
+    /// Borrowed because dispatch matches the parsed `Command` by reference.
+    pub fn to_use_args(&self) -> UseArgs {
+        UseArgs {
+            profile: None,
+            targets: Vec::new(),
+            scope: None,
+            write: false,
+            allow_unresolved: false,
+            prune_foreign: false,
+            no_gitignore: false,
+            list: true,
+            json: self.json,
+        }
+    }
 }
 
 #[derive(Args, Debug)]

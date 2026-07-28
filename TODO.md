@@ -357,6 +357,37 @@ This is the primary graphical path, not an optional dashboard.
   sandbox/lockdown — each with live state where readable, what it covers, and
   what it costs, e.g. "host process — not kernel isolation", "needs Docker ·
   slower start").
+- [x] Teach one ladder, not five (2026-07-28): the README, landing page,
+  getting-started guide and interactive tutorial each described a different
+  progression — the guide taught "Track A / Track B", the tutorial taught
+  "manifest → lockfile → trust → policy → gateway → audit" as *the* map plus a
+  six-step ladder of its own (Unify · Verify · Guard · Trust · Scale ·
+  Confine), and neither put toolsets, undo, or sharing on the beginner path.
+  Both onboarding surfaces now follow the canonical Unify · Switch · Diagnose ·
+  Recover · Share · Govern ladder the README and landing page already agreed
+  on. Concretely: `start.html` gained "check it landed" (`status`), "take it
+  back" (`restore`) and a Switch step (`toolset create` / `use` /
+  `session start|end`) on the main path, marks where first value ends, moved
+  `guard install` into Govern, and collapsed the three-way delivery-mode fork
+  to the static default plus a link to `choose.html`; the tutorial's map lesson
+  now opens on Set up · Toolset · Status · Undo with the governance pipeline
+  demoted to a rung-6 note, its lessons are reordered so Switch precedes
+  Guard/Trust/Confine, and the cheat sheet is grouped by rung.
+- [x] Make the nouns the guide teaches behave like nouns (2026-07-28): with
+  Switch promoted to rung 2, `agentstack toolset` offering only `create` broke
+  the first command after `init` — listing lived at `use --list` and the noun
+  had no read at all. Added `toolset list` as a fixed-argv alias of
+  `use --list` (`ToolsetListArgs::to_use_args`, dispatched to the same
+  `use_profile::run`, every activation field pinned at its default) so the
+  discoverable noun cannot grow a second way to render or write. Also corrected
+  `init`'s one-line description: it advertised "detect, import, choose, apply,
+  verify" for every path, but only the interactive wizard applies and verifies
+  — the scripted (`--yes`/`--plan`/`--secrets`) path stops after the manifest.
+- [x] Confirm the released CLI serves the whole t3code panel (2026-07-28): the
+  panel gates on eight contracts and the published `v0.16.0` advertises all
+  eight plus ten more, so a source-built t3code needs no locally-built
+  AgentStack behind it. Recorded as a table in `docs/integrations.md` with the
+  `doctor --json` check readers can run themselves.
 - [ ] Test the first-run copy with users who have not read the security docs.
 
 ### 1.5 First-value proof
@@ -376,7 +407,7 @@ This is the primary graphical path, not an optional dashboard.
 - [x] Put the same proof sequence in the README, website, and getting-started
   guide (2026-07-23: the five-step import → render → doctor → restore sequence
   with the recording embedded in README "Try it in 60 seconds", the landing
-  quick-start card, and start.html Track A, each linking the runnable script).
+  quick-start card, and start.html rung 1, each linking the runnable script).
 - [x] Make expected output accurate against the current binary (2026-07-23:
   the embedded output IS the recording of the current binary; `run-demo.sh`
   exits nonzero on any output-shape drift, so CI can keep it honest, and

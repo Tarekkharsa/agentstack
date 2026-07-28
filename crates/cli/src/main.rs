@@ -76,6 +76,12 @@ fn run() -> Result<()> {
         Command::Toolset(agentstack::cli::ToolsetCmd::Create(args)) => {
             commands::panel_edit::create_profile(args, dir)
         }
+        // `toolset list` is `use --list` under the noun — same read, same
+        // implementation, no second path that could activate anything.
+        Command::Toolset(agentstack::cli::ToolsetCmd::List(args)) => {
+            let read = args.to_use_args();
+            commands::use_profile::run(&read, dir)
+        }
         Command::Use(args) => commands::use_profile::run(args, dir),
         Command::Session(args) => commands::session::run(args, dir),
         Command::Instructions(args) => commands::instructions::run(args, dir),

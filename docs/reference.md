@@ -1537,7 +1537,7 @@ subcommand carries a trailing `*` (e.g. `guard`'s `check*`). Reach for it when
 you need the exact verb, flag, or subcommand.
 
 <!-- agentstack:generated commands -->
-- **`init`** — Set up everything in one command: detect, import, choose, apply, verify — flags `--global/--force/--dry-run/--plan/--secrets/--no-keychain/--yes/--consented-plan`
+- **`init`** — Set up this project: detect the CLIs you have and import them into one manifest — flags `--global/--force/--dry-run/--plan/--secrets/--no-keychain/--yes/--consented-plan`
 - **`status`** — Where this project stands, on one screen: detected CLIs, manifest, trust, secrets, and the one next step — flags `--json`
 - **`add`** — Add a server or skill to the manifest — subcommands `from/server/skill`
 - **`set`** _(hidden)_ — Create or update a manifest entry in place (idempotent `add`) — subcommands `server`
@@ -1551,7 +1551,7 @@ you need the exact verb, flag, or subcommand.
 - **`try`** _(hidden)_ — Try a skill without installing anything: stage, scan, and emit a wrapper prompt on stdout for piping into any agent CLI — flags `--skill/--rev/--subpath/--allow-flagged`
 - **`lib`** _(hidden)_ — Manage the central capability library — subcommands `new/add/add-server/add-extension/add-hook/list/remove/remove-server/remove-extension/remove-hook/trash/sync/pack-init`
 - **`adopt`** _(hidden)_ — Keep a hand-edit: pull drifted native config back into the manifest — flags `--target/--scope/--write/--no-keychain`
-- **`toolset`** — Work with toolsets: name one that bundles what you already have — subcommands `create`
+- **`toolset`** — Work with toolsets: name one that bundles what you already have — subcommands `create/list`
 - **`use`** — Activate a toolset: render its servers + materialize its skills — flags `--target/--scope/--write/--allow-unresolved/--prune-foreign/--no-gitignore/--list/--json`
 - **`session`** _(hidden)_ — Use a toolset temporarily: load it for now, then put every file back — subcommands `start/end/list/freeze`
 - **`run`** — Launch an agent CLI as a tracked run — flags `--locked/--prompt/--toolset/--scope/--keep/--sandbox/--lockdown/--plan`
