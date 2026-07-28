@@ -79,6 +79,16 @@ code{font-family:var(--mono);font-size:.92em}
 .colhead .v{font-size:11px;color:var(--dimmer)}
 .colhead .c{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--dimmer)}
 .uicol{flex:none;border-right:1px solid var(--line-soft);display:flex;flex-direction:column;min-width:0;overflow:hidden}
+/* drag handle between the two columns */
+.gutter{flex:none;width:9px;margin:0 -4px;cursor:col-resize;position:relative;z-index:3;background:transparent;
+  display:flex;align-items:center;justify-content:center}
+.gutter::before{content:"";width:1px;height:100%;background:transparent;transition:background .12s}
+.gutter::after{content:"";position:absolute;width:3px;height:34px;border-radius:2px;background:rgba(233,231,226,.16);transition:background .12s,height .12s}
+.gutter:hover::after,.gutter:focus-visible::after,.gutter.dragging::after{background:var(--orange);height:56px}
+.gutter:hover::before,.gutter.dragging::before{background:rgba(240,151,90,.35)}
+.gutter:focus-visible{outline:none}
+body.resizing{cursor:col-resize;user-select:none}
+body.resizing iframe{pointer-events:none}
 
 /* ── guide bar: the thing that makes a step a step ────── */
 .guide{flex:none;border-bottom:1px solid rgba(233,231,226,.07);background:rgba(240,151,90,.045)}
@@ -249,7 +259,7 @@ details[open]>summary::before{content:"▾ "}
 .refitem .flag{margin-left:auto}
 .refbody{border-top:1px solid var(--line-soft)}
 
-@media(max-width:1280px){ .body{flex-direction:column} .uicol{border-right:0;border-bottom:1px solid var(--line-soft);width:100%!important} }
+@media(max-width:1280px){ .body{flex-direction:column} .uicol{border-right:0;border-bottom:1px solid var(--line-soft);width:100%!important} .gutter{display:none} }
 </style>
 </head>
 <body>
@@ -306,7 +316,7 @@ const base = () => ({
   proposed:false, sel:'backend', menu:null, newRow:null, pending:{add:[],rem:[]},
 });
 let S = base();
-let CUR = {scenario:'ready', step:0, view:'both', mode:'guided'};
+let CUR = {scenario:'ready', step:0, view:'both', mode:'guided', uiPct:46};
 let LASTCHANGE = null;   // what the step you just completed actually changed
 const DID = new Set();   // steps whose own action you have actually performed
 
@@ -1700,7 +1710,7 @@ function guideBar(sc,st){
 function renderGuided(){
   const sc=scenario(), st=step(), c=CLI[st.cli]||CLI.status;
   const showUi = CUR.view!=='cli', showCli = CUR.view!=='ui';
-  const uiWidth = CUR.view==='ui' ? '100%' : '46%';
+  const uiWidth = CUR.view==='ui' ? '100%' : CUR.uiPct+'%';
   document.getElementById('main').innerHTML = `
   <header class="hdr">
     <div class="r1">
@@ -1717,11 +1727,14 @@ function renderGuided(){
       <span class="num ${i<CUR.step?'done':''}">${i<CUR.step?'✓':i+1}</span><span class="lbl">${esc(x.name)}</span></button>`).join('')}</div>
   </header>
   <div class="body">
-    ${showUi?`<div class="uicol" style="width:${uiWidth}">
+    ${showUi?`<div class="uicol" id="uicol" style="width:${uiWidth}">
       ${guideBar(sc,st)}
       <div class="colhead"><span class="k">WHAT YOU SEE</span><span class="v">${st.ui.startsWith('manage')?'Manage · dialog':st.ui==='popover'?'popover · 400px':'dialog'}</span>
         <span class="c">${esc(liveComponent(S, st))}</span></div>
       <div class="uistage" id="uistage">${uiFor(S)}</div></div>`:''}
+    ${showUi&&showCli?`<div class="gutter" id="gutter" role="separator" aria-orientation="vertical" tabindex="0"
+      aria-label="Resize the panel and terminal columns" aria-valuenow="${Math.round(CUR.uiPct)}" aria-valuemin="24" aria-valuemax="76"
+      title="Drag to resize · double-click to reset · ← → when focused"></div>`:''}
     ${showCli?`<div class="clicol">
       <div class="colhead"><span class="k">THE SAME THING IN THE CLI</span>
         <span class="c">${c.recon?'<span class="badge a" title="A write command — not executed during the review; output read from the source instead.">reconstructed</span>':'<span class="badge g" title="Captured from ./target/release/agentstack 0.16.0">captured</span>'}</span></div>
@@ -1955,7 +1968,43 @@ document.addEventListener('input', e=>{
   const el=document.querySelector(`[data-input="${k}"]`);
   if(el){ el.focus(); el.setSelectionRange(pos,pos); }
 });
+/* ── column resize ──────────────────────────────────────────────────
+   The columns are re-rendered wholesale on every state change, so the drag
+   writes the width straight to the node and only stores the percentage —
+   re-rendering on each pointermove would rebuild both panes 60 times a
+   second and drop the drag. */
+const UI_MIN=24, UI_MAX=76, UI_DEFAULT=46;
+function setUiPct(pct){
+  CUR.uiPct = Math.min(UI_MAX, Math.max(UI_MIN, pct));
+  const col=document.getElementById('uicol'), g=document.getElementById('gutter');
+  if(col) col.style.width = CUR.uiPct+'%';
+  if(g) g.setAttribute('aria-valuenow', Math.round(CUR.uiPct));
+}
+document.addEventListener('pointerdown', e=>{
+  const g=e.target.closest('#gutter'); if(!g) return;
+  const body=g.parentElement.getBoundingClientRect();
+  if(body.width<=0) return;
+  g.classList.add('dragging'); document.body.classList.add('resizing');
+  g.setPointerCapture(e.pointerId);
+  const move = ev => setUiPct(((ev.clientX-body.left)/body.width)*100);
+  const up = () => {
+    g.classList.remove('dragging'); document.body.classList.remove('resizing');
+    g.removeEventListener('pointermove',move); g.removeEventListener('pointerup',up);
+    g.removeEventListener('pointercancel',up);
+  };
+  g.addEventListener('pointermove',move); g.addEventListener('pointerup',up);
+  g.addEventListener('pointercancel',up);
+  e.preventDefault();
+});
+document.addEventListener('dblclick', e=>{ if(e.target.closest('#gutter')) setUiPct(UI_DEFAULT); });
+
 document.addEventListener('keydown', e=>{
+  if(e.target.id==='gutter'){
+    if(e.key==='ArrowLeft')  { setUiPct(CUR.uiPct-2); e.preventDefault(); }
+    if(e.key==='ArrowRight') { setUiPct(CUR.uiPct+2); e.preventDefault(); }
+    if(e.key==='Home')       { setUiPct(UI_DEFAULT); e.preventDefault(); }
+    return;
+  }
   if(e.target.tagName==='INPUT') return;
   const sc=scenario();
   if(e.key==='ArrowRight') gotoStep(sc.id, Math.min(CUR.step+1, sc.steps.length-1));
