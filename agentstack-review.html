@@ -1,0 +1,1589 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentStack in t3code — interactive review</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Newsreader:opsz,wght@6..72,300;6..72,400&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0E1013; --surface:#14171B; --raise:#1B2027;
+  --text:#E9E7E2; --muted:#9AA3AC; --dim:#69727C; --dimmer:#5C646D;
+  --line:rgba(233,231,226,.14); --line-soft:rgba(233,231,226,.09);
+  --blue:#5B7CFA; --blueSoft:#8DA4FF; --green:#34D399; --amber:#FBBF24; --red:#F87171; --orange:#F0975A;
+  --sans:"DM Sans",-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+  --serif:"Newsreader",Georgia,serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg)}
+body{color:var(--text);font-family:var(--sans);line-height:1.45;-webkit-font-smoothing:antialiased;overflow:hidden}
+button{font:inherit;color:inherit;background:transparent;border:0;cursor:pointer;text-align:left}
+input{font:inherit}
+code{font-family:var(--mono);font-size:.92em}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:rgba(233,231,226,.14);border-radius:4px}
+::-webkit-scrollbar-track{background:transparent}
+@keyframes pulse{0%,40%{opacity:1}50%,90%{opacity:.35}100%{opacity:1}}
+.pulse{animation:pulse 2s infinite}
+
+/* ── app shell ──────────────────────────────────────────── */
+.app{display:flex;height:100vh;overflow:hidden}
+.rail{width:280px;flex:none;border-right:1px solid var(--line-soft);background:#101317;display:flex;flex-direction:column}
+.rail-top{padding:15px 15px 13px;border-bottom:1px solid var(--line-soft);display:flex;flex-direction:column;gap:9px}
+.rail-top .brandrow{display:flex;align-items:center;gap:9px}
+.rail-top .title{font-size:14px;font-weight:600;letter-spacing:-.01em}
+.rail-top .sub{font-size:11.5px;line-height:1.5;color:#8A929B}
+.rail-scroll{flex:1;overflow-y:auto;padding:6px 8px 14px}
+.rail h2{font-size:10px;font-weight:700;letter-spacing:.09em;color:var(--dim);padding:11px 8px 4px;margin:0}
+.rail .item{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:7px;width:100%;margin-bottom:1px}
+.rail .item:hover{background:rgba(233,231,226,.05)}
+.rail .item[aria-current=true]{background:rgba(233,231,226,.08)}
+.rail .item .nm{font-size:12.5px;color:var(--muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rail .item[aria-current=true] .nm{color:var(--text);font-weight:600}
+.rail .item .ct{font-family:var(--mono);font-size:10px;color:var(--dimmer);flex:none}
+.rail-foot{padding:9px 12px;border-top:1px solid var(--line-soft);display:flex;align-items:center;gap:8px;font-size:11px;color:var(--dim)}
+.rail-foot .kbd{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--dimmer)}
+.modes{display:flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
+.modes button{flex:1;padding:5px 4px;font-size:11px;font-weight:600;color:var(--muted);text-align:center}
+.modes button[aria-pressed=true]{background:rgba(233,231,226,.09);color:var(--text)}
+
+.main{flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden}
+.hdr{flex:none;padding:17px 24px 0;border-bottom:1px solid var(--line-soft);display:flex;flex-direction:column;gap:13px}
+.hdr .r1{display:flex;align-items:flex-start;gap:16px}
+.hdr .nm{font-size:18.5px;font-weight:600;letter-spacing:-.015em}
+.hdr .summary{font-size:12.5px;line-height:1.55;color:var(--muted);max-width:104ch}
+.tag{display:inline-flex;align-items:center;height:20px;padding:0 8px;border-radius:5px;font-size:10.5px;font-weight:700}
+.tag.g{background:rgba(52,211,153,.14);color:var(--green)}
+.tag.a{background:rgba(240,151,90,.16);color:var(--orange)}
+.tag.r{background:rgba(248,113,113,.16);color:var(--red)}
+.tag.b{background:rgba(91,124,250,.16);color:var(--blueSoft)}
+.tag.n{background:rgba(233,231,226,.08);color:#C9CDD3}
+.toggle{margin-left:auto;display:flex;gap:6px;flex:none}
+.toggle button{display:inline-flex;align-items:center;height:26px;padding:0 10px;border-radius:7px;border:1px solid rgba(233,231,226,.1);font-size:11.5px;font-weight:600;color:var(--muted)}
+.toggle button[aria-pressed=true]{background:rgba(233,231,226,.1);border-color:rgba(233,231,226,.2);color:var(--text)}
+.steps{display:flex;overflow-x:auto}
+.steps button{display:flex;align-items:center;gap:9px;padding:9px 14px 11px;border-bottom:2px solid transparent;flex:none}
+.steps button[aria-current=true]{border-bottom-color:var(--orange)}
+.steps .num{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:99px;background:rgba(233,231,226,.06);color:var(--dim);font-family:var(--mono);font-size:10px;font-weight:700}
+.steps button[aria-current=true] .num{background:rgba(240,151,90,.18);color:var(--orange)}
+.steps .lbl{font-size:12.5px;font-weight:500;color:var(--muted)}
+.steps button[aria-current=true] .lbl{color:var(--text);font-weight:600}
+.steps .done{background:rgba(52,211,153,.16);color:var(--green)}
+
+.body{flex:1;min-height:0;display:flex;overflow:hidden}
+.colhead{flex:none;display:flex;align-items:center;gap:9px;padding:10px 20px;border-bottom:1px solid rgba(233,231,226,.07)}
+.colhead .k{font-size:10.5px;font-weight:700;letter-spacing:.08em;color:var(--dim)}
+.colhead .v{font-size:11px;color:var(--dimmer)}
+.colhead .c{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--dimmer)}
+.uicol{flex:none;border-right:1px solid var(--line-soft);display:flex;flex-direction:column;min-width:0;overflow:hidden}
+.uistage{flex:1;overflow:auto;padding:22px 20px 30px;display:flex;justify-content:center;
+  background:repeating-linear-gradient(45deg,transparent,transparent 9px,rgba(125,135,150,.035) 9px,rgba(125,135,150,.035) 10px)}
+.clicol{flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden}
+.cliscroll{flex:1;overflow-y:auto;padding:18px 20px 26px;display:flex;flex-direction:column;gap:16px}
+
+/* ── panel primitives (transcribed from the shipped components) ───── */
+.mark{width:20px;height:20px;border-radius:6px;background:linear-gradient(135deg,#F6B486,#D96E42);flex:none}
+.mark.sm{width:16px;height:16px;border-radius:5px}
+.pop{width:400px;background:var(--surface);border:1px solid rgba(233,231,226,.16);border-radius:12px;overflow:hidden;
+  box-shadow:0 18px 48px -18px rgba(0,0,0,.75);align-self:flex-start}
+.dlg{width:100%;max-width:768px;background:var(--surface);border:1px solid rgba(233,231,226,.16);border-radius:12px;
+  overflow:hidden;box-shadow:0 18px 48px -18px rgba(0,0,0,.75);align-self:flex-start;display:flex;flex-direction:column}
+.dlg.read{max-width:670px}
+.p-top{display:flex;align-items:center;gap:8px;padding:13px 15px 9px}
+.p-brand{font-size:13.5px;font-weight:600}
+.chip{margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted)}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--green);flex:none;display:inline-block}
+.dot.a{background:var(--amber)}.dot.r{background:var(--red)}.dot.m{background:var(--dim)}.dot.g6{background:rgba(52,211,153,.6)}
+.p-body{padding:0 10px 10px}
+.p-foot{display:flex;align-items:center;gap:8px;border-top:1px solid var(--line-soft);padding:9px 15px}
+.p-foot span{font-size:11.5px;color:var(--muted);flex:1}
+.dlg-top{display:flex;align-items:center;gap:9px;padding:14px 17px 11px}
+.dlg-title{font-size:14.5px;font-weight:600}
+.x{margin-left:auto;color:var(--dim);font-size:16px;line-height:1;padding:2px 6px;border-radius:5px}
+.x:hover{background:rgba(233,231,226,.07);color:var(--text)}
+.box{border:1px solid var(--line);background:rgba(233,231,226,.02);border-radius:9px;padding:10px 12px}
+.box.warn{border-color:rgba(251,191,36,.28);background:rgba(251,191,36,.07)}
+.box.good{border-color:rgba(52,211,153,.35);background:rgba(52,211,153,.06)}
+.box.bad{border-color:rgba(248,113,113,.3);background:rgba(248,113,113,.06)}
+.box.dash{border-style:dashed;background:transparent}
+.cap{font-size:10.5px;font-weight:600;letter-spacing:.07em;color:var(--muted)}
+.t{font-size:13px;font-weight:600;line-height:1.35}
+.d{font-size:12px;line-height:1.5;color:var(--muted)}
+.xs{font-size:11px;line-height:1.5;color:var(--muted)}
+.mono{font-family:var(--mono)}
+.dimt{color:var(--dim)}.warnt{color:var(--amber)}.goodt{color:var(--green)}.badt{color:var(--red)}
+.row{display:flex;align-items:center;gap:8px}
+.col{display:flex;flex-direction:column}
+.g4{gap:4px}.g6{gap:6px}.g8{gap:8px}.g10{gap:10px}
+.mt6{margin-top:6px}.mt8{margin-top:8px}
+.btn{display:inline-flex;align-items:center;height:24px;padding:0 9px;border-radius:6px;border:1px solid var(--line);font-size:11px;font-weight:600;white-space:nowrap}
+.btn:hover{background:rgba(233,231,226,.06)}
+.btn.lg{height:28px;padding:0 12px;font-size:12px}
+.btn.pri{background:var(--blue);border-color:var(--blue);color:#fff}
+.btn.pri:hover{background:#6d8bff}
+.btn.ok{border-color:rgba(52,211,153,.4);background:rgba(52,211,153,.1);color:var(--green)}
+.btn.warn{border-color:rgba(251,191,36,.4);background:rgba(251,191,36,.15);color:var(--amber)}
+.btn.dgr{border-color:rgba(248,113,113,.4);background:rgba(248,113,113,.1);color:var(--red)}
+.btn.ghost{border-color:transparent;color:var(--muted)}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.link{color:var(--muted);font-size:11px;font-weight:600;text-decoration:underline;text-underline-offset:2px}
+.badge{display:inline-flex;align-items:center;height:17px;padding:0 6px;border-radius:4px;font-size:10px;font-weight:600;background:rgba(233,231,226,.07);color:var(--muted)}
+.badge.a{background:rgba(251,191,36,.15);color:var(--amber)}
+.badge.g{background:rgba(52,211,153,.13);color:var(--green)}
+.badge.r{background:rgba(248,113,113,.13);color:var(--red)}
+pre.diff{margin:6px 0 0;max-height:118px;overflow:auto;background:#0D1015;border:1px solid var(--line-soft);border-radius:7px;
+  padding:8px 9px;font-family:var(--mono);font-size:10.5px;line-height:1.5;color:#C6CFD8;white-space:pre}
+pre.diff .add{color:var(--green)}pre.diff .del{color:var(--red)}
+.cmd{display:block;background:#0D1015;border:1px solid var(--line-soft);border-radius:6px;padding:6px 8px;
+  font-family:var(--mono);font-size:10.5px;color:#CBD5DF;margin-top:5px;overflow-x:auto;white-space:pre}
+.tabs{display:flex;align-items:center;gap:2px;padding:0 6px;border-bottom:1px solid var(--line)}
+.tabs button{display:inline-flex;align-items:center;gap:6px;padding:8px 12px;margin-bottom:-1px;border-bottom:2px solid transparent;font-size:12.5px;color:var(--muted)}
+.tabs button[aria-selected=true]{border-bottom-color:var(--text);color:var(--text);font-weight:600}
+.frame{height:520px;overflow:auto}
+.frame.split{display:flex;overflow:hidden}
+.pane-l{width:264px;flex:none;border-right:1px solid var(--line);display:flex;flex-direction:column;overflow:auto}
+.pane-r{flex:1;min-width:0;display:flex;flex-direction:column;overflow:auto}
+.sect{padding:10px 14px 5px;border-top:1px solid var(--line);margin-top:10px}
+.sect.first{border-top:0;margin-top:0}
+.hr{border-top:1px solid var(--line-soft);margin-top:9px;padding-top:9px}
+.inp{width:100%;background:#0D1015;border:1px solid var(--line);border-radius:6px;padding:5px 8px;font-size:11.5px;color:var(--text)}
+.inp::placeholder{color:var(--dim)}
+.itemrow{display:flex;align-items:flex-start;gap:9px;padding:7px 0}
+.itemrow+.itemrow{border-top:1px solid rgba(233,231,226,.05)}
+details>summary{cursor:pointer;font-size:11px;color:var(--dim);list-style:none}
+details>summary::-webkit-details-marker{display:none}
+details>summary::before{content:"▸ "}
+details[open]>summary::before{content:"▾ "}
+.srcline{font-family:var(--mono);font-size:10.5px;color:var(--dim)}
+
+/* ── terminal ───────────────────────────────────────────── */
+.term-wrap{border:1px solid rgba(233,231,226,.12);border-radius:10px;background:#0B0D10;overflow:hidden;flex:none}
+.term-top{display:flex;align-items:center;gap:7px;padding:8px 12px;border-bottom:1px solid rgba(233,231,226,.08);background:rgba(233,231,226,.02)}
+.term-top i{width:8px;height:8px;border-radius:99px;display:block;opacity:.5}
+.term-top .cwd{margin-left:6px;font-family:var(--mono);font-size:10.5px;color:var(--dimmer)}
+.term-top .src{margin-left:auto}
+.term{padding:12px 14px;font-family:var(--mono);font-size:11.5px;line-height:1.62;color:#CFD8E2;white-space:pre-wrap;overflow-x:auto;max-height:340px;overflow-y:auto}
+.term .ps{color:var(--orange)}
+.term b{color:#fff;font-weight:600}
+.term .ok{color:var(--green)}.term .wr{color:var(--amber)}.term .er{color:var(--red)}.term .dm{color:var(--dim)}
+.term .cursor{display:inline-block;width:7px;height:12px;background:var(--orange);vertical-align:-2px;animation:pulse 1.1s steps(1) infinite}
+
+/* ── explainer blocks ───────────────────────────────────── */
+.sechead{font-size:10.5px;font-weight:700;letter-spacing:.08em;color:var(--dim)}
+.how{display:flex;gap:11px}
+.how .accent{width:3px;flex:none;border-radius:2px}
+.how .ht{font-size:12.5px;font-weight:600}
+.how .hx{font-size:12.5px;line-height:1.6;color:var(--muted)}
+.gt{display:flex;align-items:flex-start;gap:9px;border-radius:8px;padding:8px 11px;border:1px solid}
+.gt.yes{border-color:rgba(52,211,153,.25);background:rgba(52,211,153,.05)}
+.gt.no{border-color:rgba(248,113,113,.25);background:rgba(248,113,113,.05)}
+.gt .m{font-family:var(--mono);font-size:11px;font-weight:700;flex:none}
+.gt.yes .m{color:var(--green)}.gt.no .m{color:var(--red)}
+.gt .x2{font-size:12px;line-height:1.55;color:#B6BDC5}
+.openbox{display:flex;gap:11px;border-left:3px solid var(--red);background:rgba(248,113,113,.05);border-radius:0 7px 7px 0;padding:9px 12px}
+.openbox .ot{font-size:12.5px;line-height:1.6;color:#BEC6D0}
+.openbox .ot b{color:var(--text)}
+.contract{display:flex;align-items:center;gap:10px;border-top:1px solid rgba(233,231,226,.08);padding-top:11px;margin-top:auto}
+.contract .k{font-size:10.5px;color:var(--dimmer)}
+.contract .v{font-family:var(--mono);font-size:10.5px;color:#8A929B}
+
+/* ── sheet + reference modes ────────────────────────────── */
+.scroller{flex:1;overflow-y:auto;padding:22px 24px 40px}
+.sheet{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:18px}
+.card{border:1px solid var(--line-soft);border-radius:7px;background:#111419;overflow:hidden;display:flex;flex-direction:column}
+.card-h{display:flex;align-items:center;gap:9px;padding:10px 13px;border-bottom:1px solid var(--line-soft)}
+.card-h .n{font-family:var(--mono);font-size:10px;font-weight:700;color:#0E1013;background:var(--green);padding:2px 6px;border-radius:3px}
+.card-h .n.o{background:var(--orange)}.card-h .n.b{background:var(--blueSoft)}.card-h .n.r{background:var(--red)}.card-h .n.n{background:#C9CDD3}
+.card-h .t2{font-size:12.5px;font-weight:600;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card-h .c2{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--dim);flex:none}
+.card-b{padding:16px;display:flex;justify-content:center;
+  background:repeating-linear-gradient(45deg,transparent,transparent 9px,rgba(125,135,150,.035) 9px,rgba(125,135,150,.035) 10px)}
+.card-b .pop{box-shadow:none}
+.card-b .dlg{max-width:none;box-shadow:none}
+.card-b .frame{height:auto;max-height:430px}
+.card-n{padding:10px 13px;border-top:1px solid var(--line-soft);display:flex;flex-direction:column;gap:6px}
+.sheet-h{font-family:var(--serif);font-weight:300;font-size:25px;margin:24px 0 4px}
+.sheet-h:first-child{margin-top:0}
+.sheet-p{color:var(--muted);font-size:13px;margin:0 0 14px;max-width:84ch}
+.frozen{pointer-events:none}
+.refhead{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:14px}
+.refhead input{background:#0D1015;border:1px solid var(--line);border-radius:7px;padding:7px 11px;font-size:12.5px;color:var(--text);min-width:300px}
+.refitem{border:1px solid var(--line-soft);border-radius:8px;background:#111419;overflow:hidden;margin-bottom:10px}
+.refitem>summary{display:flex;align-items:center;gap:10px;padding:10px 13px;font-size:12.5px}
+.refitem .cmdname{font-family:var(--mono);color:var(--orange)}
+.refitem .purpose{color:var(--muted);font-size:11.5px}
+.refitem .flag{margin-left:auto}
+.refbody{border-top:1px solid var(--line-soft)}
+
+@media(max-width:1280px){ .body{flex-direction:column} .uicol{border-right:0;border-bottom:1px solid var(--line-soft);width:100%!important} }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="rail">
+    <div class="rail-top">
+      <div class="brandrow"><span class="mark"></span><span class="title">AgentStack in t3code</span></div>
+      <span class="sub">Every scenario, with the panel and the command side by side. The panel is live — clicking it changes real state.</span>
+      <div class="modes">
+        <button data-mode="guided" aria-pressed="true">Guided</button>
+        <button data-mode="sheet" aria-pressed="false">All frames</button>
+        <button data-mode="ref" aria-pressed="false">CLI</button>
+      </div>
+    </div>
+    <div class="rail-scroll" id="railScroll"></div>
+    <div class="rail-foot"><span id="railCount"></span><span class="kbd">← → steps</span></div>
+  </aside>
+  <main class="main" id="main"></main>
+</div>
+
+<script>
+"use strict";
+/* ══════════════════════════════════════════════════════════════════════
+   Sources. Panel copy is transcribed from the shipped components —
+     t3code apps/web/src/components/agentstack/{AgentstackControl,
+     AgentstackDenialCard,BlueprintReviewCard}.tsx + agentstack-logic.ts
+   Terminal output is captured from ./target/release/agentstack (0.16.0);
+   write commands that could not be run are labelled "reconstructed".
+   Guarantees quote the product's own claims; each ✕ is a limit the code
+   or docs state explicitly, not an inference.
+   ════════════════════════════════════════════════════════════════════ */
+
+const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+const REF = '$' + '{REF}';
+const ref = n => '$' + '{' + n + '}';
+
+/* ── state ───────────────────────────────────────────────────────── */
+const base = () => ({
+  installed:true, reachable:true, loaded:true, doctorNull:false, incompatible:null,
+  setupState:'ready',
+  trust:'inert', drift:true, guard:false,
+  session:null, activeProfile:null, activeRun:null,
+  canSessions:true, canEditProfiles:true, canRestore:true,
+  toolsets:[
+    {name:'rust',    summary:'3 skills · 0 servers · for claude-code, codex', ready:true,  blocked:null, members:['rust-best-practices','rust-async-patterns','rust-mcp-server-generator']},
+    {name:'backend', summary:'2 servers · 3 skills',                          ready:true,  blocked:null, members:['github','postgres','sql-review']},
+    {name:'review',  summary:'1 server · 2 skills',                           ready:false, blocked:'not pinned — run agentstack lock', members:['github','pr-checklist']},
+  ],
+  manage:null, dialog:null, action:null, flow:null, draft:null, picker:null,
+  query:'', undo:{phase:'idle'}, trustAct:null, driftAct:null, setupAct:null,
+  secretChoice:1, libRemoved:[], created:false, popover:true,
+});
+let S = base();
+let CUR = {scenario:'ready', step:0, view:'both', mode:'guided'};
+
+const LIB = {
+  skills:[
+    {name:'rust-testing',              detail:'Rust testing patterns including unit tests, integration tests and async cases.', origin:'library'},
+    {name:'rust-best-practices',       detail:"Guide for writing idiomatic Rust code based on Apollo GraphQL's best practices handbook.", origin:'library', inManifest:true},
+    {name:'rust-async-patterns',       detail:'Master Rust async programming with Tokio, async traits and error handling.', origin:'library', inManifest:true},
+    {name:'rust-mcp-server-generator', detail:'Generate a complete Rust Model Context Protocol server project.', origin:'library', inManifest:true},
+    {name:'pr-checklist',              detail:'Review checklist applied before a pull request is opened.', origin:'project'},
+  ],
+  servers:[
+    {name:'github',   detail:'runs npx -y @modelcontextprotocol/server-github · needs ' + ref('GITHUB_TOKEN'), origin:'library'},
+    {name:'postgres', detail:'runs uvx mcp-server-postgres · needs ' + ref('DATABASE_URL'), origin:'library'},
+    {name:'figma',    detail:'contacts mcp.figma.com', origin:'library'},
+  ],
+};
+
+/* selectAgentstackPrimaryConcern — one concern, in this order */
+function concern(s){
+  if(s.trust==='inert')    return {type:'trust-inert', title:"This project hasn't been reviewed yet",
+    detail:'Until you review it, its servers and skills stay inert — nothing it declares can start or reach the network.',
+    note:'you approve exact bytes', label:'Review this project', act:'review-trust', others:2};
+  if(s.trust==='drifted')  return {type:'trust-drifted', title:'Reviewed content changed on disk',
+    detail:'Something this project pinned was edited since you approved it, so it is inert again until you review the new bytes.',
+    note:'you approve exact bytes', label:'Review this project', act:'review-trust', others:1};
+  if(s.drift)              return {type:'drift', title:'A CLI config was hand-edited',
+    detail:'Keep the edit or re-render from the manifest — you choose which truth to keep.',
+    note:'reversible · never prunes', label:'Review', act:'review-drift', others:1};
+  if(!s.guard)             return {type:'guard-install', title:'Agent commands run without a pre-check',
+    detail:"Full-access mode turns off the provider's own approval prompts. The guard puts one back, machine-wide.",
+    note:'reversible · only adds protection', label:'Enable guard', act:'action:guard-install', others:0};
+  return null;
+}
+const activeName = s => s.session ? s.session.profile : s.activeProfile;
+function healthyLine(s){
+  const b=[]; if(s.guard) b.push('guard on'); if(!s.drift) b.push('8 CLIs in sync');
+  b.push('secrets resolve','skills installed'); return b.join(' · ');
+}
+const ACTION_META = {
+  'guard-install':{label:'Enable guard', confirm:'Install the pre-tool-use guard into every detected CLI, machine-wide. Only adds protection; reversible with guard uninstall.', done:'guard: enabled — hooks written for 8 CLI(s)'},
+  'adopt-project':{label:'Keep edits',   confirm:"Pull the on-disk hand-edits into this project's manifest. Only writes agentstack.toml — never rewrites or removes anything in a CLI's own config.", done:'adopted 2 change(s) into .agentstack/agentstack.toml'},
+  'apply-project':{label:'Re-render',    confirm:"Re-render this project's CLI config from the manifest. Overwrites hand-edits; keeps servers other setups applied and never prunes. Reversible with agentstack restore.", done:'re-rendered 1 target from the manifest'},
+};
+
+const btn=(l,a,c='',x='')=>`<button class="btn ${c}" data-act="${a}" ${x}>${l}</button>`;
+const dot=k=>`<span class="dot ${k||''}"></span>`;
+
+/* ══ GLANCE ═════════════════════════════════════════════════════════ */
+function viewGlance(s){
+  const c=concern(s);
+  if(!s.reachable) return shell(`<p class="d" style="padding:4px 5px 10px">Couldn't check status — the t3code server didn't answer.</p>`,'',s,{bare:true});
+  if(!s.loaded)    return shell(`<p class="d" style="padding:4px 5px 10px">Checking…</p>`,'',s,{bare:true});
+  if(!s.installed) return shell(`<div class="col g8" style="padding:2px 5px 10px">
+      <p class="t">AgentStack isn't installed</p>
+      <p class="d">The <code>agentstack</code> CLI isn't reachable on the machine running this project, so its sessions run ungoverned. It's a local binary — install it to get trust-gated MCP servers, a pre-tool-use guard, and a per-project audit log.</p>
+      <p class="xs"><b style="color:var(--text)">Install</b> — Build or download it from <code>github.com/Tarekkharsa/agentstack</code>, then put <code>agentstack</code> on your <code>PATH</code>.</p>
+      <p class="xs"><b style="color:var(--text)">Already installed?</b> If <code>agentstack</code> is a shell function or lives off <code>PATH</code> (so a packaged/Finder-launched app can't see it), point the server at the binary:</p>
+      <code class="cmd">T3CODE_AGENTSTACK_BIN=/path/to/agentstack</code>
+      <div class="row g8 mt6">${btn('Check again','recheck')}<span class="xs dimt">Re-checks automatically every few seconds, too.</span></div>
+    </div>`,'',s,{bare:true});
+  if(s.incompatible) return shell(`<div class="col g6" style="padding:2px 5px 10px">
+      <p class="t">Update t3code to continue</p>
+      <p class="d">This project's <code>agentstack</code> CLI (v0.17.0) speaks a newer data format (schema 4) than this t3code build understands (schema 3). Update t3code to read this AgentStack CLI — until then, the panel's actions are disabled to avoid acting on data it can't fully read.</p>
+    </div>`,'',s,{bare:true});
+  if(s.doctorNull) return shell(`<div class="col g8" style="padding:2px 5px 10px">
+      <p class="t">Couldn't read the status</p>
+      <p class="d">agentstack is installed, but <code>doctor</code> returned no readable report for this project. That is usually momentary — a status read that landed while agentstack was writing. Any change you just made has still been applied.</p>
+      <div class="row g8">${btn('Check again','recheck')}<span class="xs dimt">Re-checks automatically every few seconds, too.</span></div>
+      <p class="xs dimt">If it persists, <code>agentstack doctor</code> in a terminal shows the underlying error.</p>
+    </div>`,'',s,{bare:true});
+  if(s.setupState==='needs_setup') return shell(`<div class="col g8" style="padding:2px 5px 10px">
+      <p class="t">This project isn't set up yet</p>
+      <p class="d">AgentStack can import the coding tools already on this machine into one manifest your CLIs render from. You'll see exactly what it would write before anything is written.</p>
+      ${btn('Review setup','open:setup','pri lg')}
+    </div>`,'',s,{bare:true});
+
+  let body;
+  if(c){
+    body = `<div class="box warn col g8">
+      <span class="t">${esc(c.title)}</span>
+      <span class="d">${esc(c.detail)}</span>
+      <div class="row g10">${btn(esc(c.label),'concern','pri')}<span class="xs dimt">${esc(c.note)}</span></div>
+    </div>`;
+  } else {
+    const a=activeName(s);
+    if(a){
+      const row=s.toolsets.find(t=>t.name===a);
+      body = `<div class="box col g8"><span class="cap">WORKING UNDER</span>
+        <div class="row g8"><span style="font-size:14px;font-weight:600;flex:1">${esc(a)}</span>
+          ${s.session&&s.canSessions?btn('Stop using','stop'):''}${btn('Switch','manage:toolsets')}</div>
+        <span class="xs">${esc(row?row.summary:'applied to this project')}${s.session?` · in use ${s.session.ago}`:''}</span></div>`;
+    } else {
+      body = `<div class="box col g8"><span class="d">${s.toolsets.length?'No toolset is active. Pick one to apply it here.':'No toolsets yet — bundle the tools this project needs into one.'}</span>
+        ${btn(s.toolsets.length?'Choose':'Create one','manage:toolsets')}</div>`;
+    }
+  }
+  if(s.action) body += actionConfirm(s.action);
+  const foot = c ? (c.others>0?`${c.others} more finding${c.others>1?'s':''} in Manage`:'Nothing else needs you.')
+                 : (healthyLine(s)||'This project is set up and in sync.');
+  return shell(body,foot,s,{});
+}
+function shell(body,foot,s,o){
+  const c=concern(s);
+  const chip=(o.bare||!s.installed)?'':`<span class="chip">${dot(c?'a':'')}${c?'Needs you':'Ready'}</span>`;
+  const strip=s.activeRun?`<button class="box warn row g8" data-act="open:monitor" style="margin:0 12px 10px;width:calc(100% - 24px)">
+      <span class="dot a pulse"></span>
+      <span class="xs" style="color:var(--text)"><b>${esc(s.activeRun.workflow)}</b> running · ${s.activeRun.running} active</span>
+      <span class="xs warnt" style="margin-left:auto;font-weight:600">View agents →</span></button>`:'';
+  return `<div class="pop">
+    <div class="p-top"><span class="mark"></span><span class="p-brand">AgentStack</span>${chip}</div>
+    ${strip}<div class="p-body">${body}</div>
+    ${foot!==''?`<div class="p-foot"><span>${esc(foot)}</span>${btn('Manage ›','manage:setup','ghost')}</div>`:''}
+  </div>`;
+}
+function actionConfirm(a){
+  const m=ACTION_META[a.kind]||{label:'Run',confirm:''};
+  if(a.phase==='done') return `<div class="box ${a.ok?'good':'bad'} mt8 row g8">
+    <span class="xs"><b class="${a.ok?'goodt':'badt'}">${a.ok?'Done':'Failed'}</b> — <span class="mono">${esc(a.message)}</span></span>
+    <button class="link" data-act="act:dismiss" style="margin-left:auto">dismiss</button></div>`;
+  return `<div class="box warn mt8 col g8"><span class="xs">${esc(m.confirm)}</span>
+    <div class="row g8">${btn(a.phase==='running'?'Running…':'Run '+m.label.toLowerCase(),'act:run','warn',a.phase==='running'?'disabled':'')}${btn('Cancel','act:cancel','ghost')}</div></div>`;
+}
+
+/* ══ MANAGE ═════════════════════════════════════════════════════════ */
+const TABS=[['setup','Setup'],['toolsets','Toolsets'],['protection','Protection'],['activity','Activity']];
+function viewManage(s){
+  const t=s.manage;
+  const body=t==='setup'?tabSetup(s):t==='toolsets'?tabToolsets(s):t==='protection'?tabProtection(s):tabActivity(s);
+  return `<div class="dlg">
+    <div class="dlg-top"><span class="mark sm"></span><span class="dlg-title">Manage AgentStack</span><button class="x" data-act="close">✕</button></div>
+    <div class="tabs">${TABS.map(([id,l])=>`<button data-act="manage:${id}" aria-selected="${t===id}">${l}${id==='activity'&&s.activeRun?' <span class="badge a">run live</span>':''}</button>`).join('')}
+      <span style="margin-left:auto;padding-right:10px" class="srcline">v0.16.0</span></div>
+    <div class="frame ${t==='toolsets'?'split':''}">${body}</div></div>`;
+}
+function tabSetup(s){
+  const c=concern(s);
+  const chipLabel=s.setupState==='needs_setup'?'Needs setup':c?'Needs attention':s.guard?'Protected':'Ready';
+  const rows=[];
+  if(s.trust!=='trusted') rows.push({d:'a',label:'Trust',line:'this project is inert until reviewed',act:'concern',verb:'Review this project'});
+  if(s.drift)  rows.push({d:'a',label:'Claude Code',line:'no longer matches what agentstack last wrote',act:'open:drift',verb:'Review'});
+  if(!s.guard) rows.push({d:'a',label:'Guard',line:'not enabled — Full-access mode disables the providers’ own approval prompts',act:'act:start:guard-install',verb:'Enable guard'});
+  const findings=[
+    ['Claude Desktop config present but binary not on PATH','—'],
+    ['Codex CLI would REMOVE 10 server(s) that came from another setup','agentstack adopt --scope global'],
+    ['guard not enabled — t3code sessions run with no pre-tool-use gate','agentstack guard install'],
+  ];
+  return `<div style="padding:14px 16px 16px" class="col g10">
+    <div class="row g8"><span class="badge ${c?'a':'g'}">${chipLabel}</span><span class="xs dimt">deriveAgentstackStatusChip</span></div>
+    ${rows.map(r=>`<div class="row g8">${dot(r.d)}
+      <div class="col" style="flex:1"><span class="xs dimt">${esc(r.label)}</span><span class="d" style="color:var(--text)">${esc(r.line)}</span></div>
+      ${btn(esc(r.verb),r.act)}</div>`).join('')}
+    <div class="hr col g6"><span class="xs" style="color:var(--text);font-weight:600">What the checkup found <span class="dimt" style="font-weight:400">${findings.length} findings, open by default</span></span>
+      ${findings.map(([m,f])=>`<div style="padding-left:10px;border-left:1px solid var(--line-soft)" class="col">
+        <span class="xs" style="color:var(--text)">${esc(m)}</span><span class="srcline">${esc(f)}</span></div>`).join('')}</div>
+    <div class="row g8"><span class="dot g6"></span><span class="xs">${esc(healthyLine(s))}</span></div>
+    ${s.action?actionConfirm(s.action):''}
+    ${undoView(s)}
+    <div class="hr row g8">${btn('Check again','recheck')}${btn('Open manifest','noop')}
+      <span class="xs dimt">re-runs the same checks as <code>agentstack doctor</code></span></div></div>`;
+}
+function undoView(s){
+  const u=s.undo;
+  if(!s.canRestore) return `<p class="xs dimt">Undo isn't available on this agentstack CLI — update it to revert managed changes.</p>`;
+  if(u.phase==='idle')    return `<div>${btn('Undo last change…','undo:reveal')}</div>`;
+  if(u.phase==='loading') return `<p class="xs dimt">Checking recent changes…</p>`;
+  if(u.phase==='empty')   return `<p class="xs dimt">Nothing to undo — no recorded change touches this project.</p>`;
+  const line=`Undo <b style="color:var(--text)">apply · 8 files · Claude Code, Codex CLI, Gemini CLI</b> · 3h ago`;
+  if(u.phase==='ready')   return `<div class="col g6"><span class="xs">${line}</span><div><button class="link warnt" data-act="undo:ask">Undo this change</button></div></div>`;
+  if(u.phase==='confirm') return `<div class="col g6"><span class="xs">${line}</span>
+      <div class="row g8">${btn('Undo this change','undo:run','warn')}${btn('Cancel','undo:cancel','ghost')}</div></div>`;
+  return `<div class="box good"><span class="xs"><b class="goodt">Undone</b> — <span class="mono">restored 8 file(s) from 18c67c10</span></span></div>`;
+}
+function tabToolsets(s){
+  return `${railView(s)}${s.canEditProfiles?libraryView(s):
+    `<div class="pane-r" style="padding:14px"><p class="d">This agentstack CLI predates the library browser. Update it to add tools to a toolset from here.</p></div>`}`;
+}
+function railView(s){
+  const d=s.draft; let cards='';
+  if(d){
+    const ok=/^[A-Za-z0-9._-]+$/.test(d.name.trim());
+    cards+=`<div class="box good col g6" style="margin-bottom:6px">
+      <input class="inp" placeholder="Name it, e.g. web" value="${esc(d.name)}" data-input="draftname">
+      <span class="xs">${d.picked.length===0?'Now click tools in the library to add them.':`${d.picked.length} tool${d.picked.length>1?'s':''} picked.`}</span>
+      ${d.name.trim()!==''&&!ok?`<span class="xs warnt">Letters, numbers, dot, dash or underscore — no spaces.</span>`:''}
+      <div class="row g8">${btn('Create','draft:create','ok',(!ok||d.picked.length===0)?'disabled':'')}<button class="link" data-act="draft:cancel">Cancel</button></div></div>`;
+  }
+  if(s.toolsets.length===0&&!d) cards+=`<div class="box dash col g6"><span class="t">No toolsets yet</span>
+    <span class="xs">A toolset bundles the servers and skills one kind of work needs. Nothing in the library can be added until there's one to add it to.</span>
+    ${btn('Create the first one','draft:new')}</div>`;
+  cards+=s.toolsets.map(t=>{
+    const inUse=(s.session&&s.session.profile===t.name)||s.activeProfile===t.name;
+    return `<div class="box col g4" style="${inUse?'border-color:rgba(52,211,153,.3);background:rgba(52,211,153,.06)':''}">
+      <div class="row g8">${dot(inUse?'':(t.ready?'g6':'a'))}
+        <span class="xs" style="color:var(--text);font-weight:600;flex:1">${esc(t.name)}</span>
+        ${inUse&&s.canSessions?btn('Stop','stop'):(t.ready&&!s.session&&s.canSessions?btn('Use','use:'+t.name,'','title="Use this toolset temporarily — ends with your files back as they were"'):'')}</div>
+      <span class="srcline">${esc(t.summary)}${inUse&&s.session?' · in use '+s.session.ago:''}</span>
+      ${t.blocked?`<span class="xs warnt">${esc(t.blocked)}</span>`:''}
+      ${t.members?`<span class="srcline">${t.members.map(esc).join(' · ')}</span>`:''}</div>`;
+  }).join('');
+  return `<div class="pane-l">
+    <div class="row g8" style="padding:12px 12px 6px"><span class="cap">TOOLSETS</span>
+      ${s.canEditProfiles&&!d&&s.toolsets.length>0?`<span style="margin-left:auto">${btn('+ New','draft:new')}</span>`:''}</div>
+    <div class="col g6" style="padding:0 8px 12px">${cards}</div></div>`;
+}
+function libraryView(s){
+  const q=s.query.toLowerCase();
+  const match=i=>!q||i.name.toLowerCase().includes(q)||(i.detail||'').toLowerCase().includes(q);
+  const group=(title,items,kind)=>{
+    const list=items.filter(i=>!s.libRemoved.includes(i.name)).filter(match);
+    return `<div class="col g6" style="margin-bottom:10px"><span class="xs" style="color:var(--text);font-weight:600">${title}</span>
+      ${list.length===0?`<span class="xs dimt">${q?`No ${kind}s match.`:`No ${kind}s in the library yet.`}</span>`:list.map(i=>libRow(s,i,kind)).join('')}</div>`;
+  };
+  return `<div class="pane-r">
+    <div class="row g8" style="padding:12px 14px 8px">
+      ${s.draft?`<span class="badge g">Adding to ${esc(s.draft.name.trim()||'new toolset')}</span>`:`<span class="cap">LIBRARY</span>`}
+      <span style="margin-left:auto;width:190px"><input class="inp" placeholder="Filter skills and servers…" value="${esc(s.query)}" data-input="query"></span></div>
+    <div style="padding:0 14px 12px">${group('Skills',LIB.skills,'skill')}${group('Servers',LIB.servers,'server')}</div>
+    ${s.flow?flowCard(s):''}</div>`;
+}
+function libRow(s,i,kind){
+  const picked=s.draft&&s.draft.picked.includes(i.name);
+  let right;
+  if(s.draft) right=btn(picked?'Added':'Add','draft:pick:'+i.name,picked?'ok':'');
+  else if(s.picker===i.name) right=btn('Cancel','picker:close','ghost');
+  else right=btn('Add','picker:'+i.name,'',s.toolsets.length===0?'disabled title="Create a toolset first, then add tools to it"':'title="Add this to a toolset"');
+  const removable=i.origin==='library'&&!s.draft&&!s.flow;
+  return `<div class="itemrow">${dot(picked?'':'m')}
+    <div class="col" style="flex:1;min-width:0">
+      <span class="xs" style="color:var(--text);font-weight:600">${esc(i.name)}${i.inManifest?' <span class="dimt" style="font-weight:400">in project</span>':''}</span>
+      ${i.detail?`<span class="srcline">${esc(i.detail)}</span>`:''}
+      ${s.picker===i.name?`<div class="row g6 mt6"><span class="xs dimt">Add to</span>${s.toolsets.map(t=>btn(esc(t.name),`add:${kind}:${i.name}:${t.name}`)).join('')}</div>`:''}</div>
+    ${removable?`<button class="link badt" data-act="remove:${kind}:${i.name}" title="Remove from your library (all projects) — recoverable">Remove</button>`:''}
+    ${right}</div>`;
+}
+function flowCard(s){
+  const f=s.flow, head=`<span class="t">${esc(f.title)}</span>`; let body='';
+  if(f.phase==='previewing') body=`<span class="xs dimt">Preparing "${esc(f.title)}"…</span>`;
+  else if(f.phase==='unsupported') body=`<span class="xs warnt">This agentstack CLI's preview has no digest to confirm against, so this change can't be applied from here. Update agentstack, or make the change in a terminal.</span>
+    <div><button class="link" data-act="flow:close">← Back to library</button></div>`;
+  else if(f.phase==='confirm'||f.phase==='running'){
+    body = f.kind==='remove'
+      ? `<span class="xs">This removes it from your library on this machine — every project that uses it by name is affected. Nothing in this project's files changes right now.</span>
+         <div class="box warn"><span class="xs">This project uses it — toolset(s) rust. Activating that toolset again will fail until you re-add or restore it.</span></div>
+         <span class="xs">It moves to the library trash, so you can put it back:</span>
+         <code class="cmd">agentstack lib trash --restore ${esc(f.name)} --write</code>
+         <div class="row g8">${btn(f.phase==='running'?'Removing…':'Remove','flow:confirm','dgr')}${btn('Cancel','flow:close','ghost')}</div>`
+      : `<span class="xs">Applying re-locks and re-renders the toolset. An unresolved <code>${esc(REF)}</code> secret blocks the render (set it, then re-apply) — nothing is written until you confirm.</span>
+         <details><summary>Details</summary><span class="srcline">change sha256:5f0afa8f…c31d</span></details>
+         <div class="row g8">${btn(f.phase==='running'?'Applying…':'Confirm','flow:confirm','ok')}${btn('Cancel','flow:close','ghost')}</div>`;
+  }
+  else if(f.phase==='done'&&f.secretBlocked) body=`<span class="xs" style="color:var(--text);font-weight:600">Set a secret to finish</span>
+    <span class="xs">The toolset was written, but a value it needs isn't set yet, so AgentStack kept the <code>${esc(ref('GITHUB_TOKEN'))}</code> placeholder and didn't render the config — nothing leaked.</span>
+    <span class="xs">Set it, then activate the toolset:</span><code class="cmd">agentstack secret set GITHUB_TOKEN</code>
+    <div><button class="link" data-act="flow:close">← Back to library</button></div>`;
+  else body=`<span class="xs"><b class="${f.ok?'goodt':'badt'}">${f.ok?'Done':"Couldn't apply"}</b> — <span class="mono">${esc(f.message)}</span></span>
+    <div><button class="link" data-act="flow:close">← Back to library</button></div>`;
+  return `<div style="border-top:1px solid var(--line);padding:11px 14px;max-height:236px;overflow:auto">
+    <div class="box ${f.phase==='done'&&f.secretBlocked?'warn':''} col g6">${head}${body}</div></div>`;
+}
+function tabProtection(s){
+  const rows=[
+    s.guard?{n:'Guard',st:'on — blocks destructive agent commands before they run',c:'covers agent tool calls on this machine — not a sandbox',d:''}
+           :{n:'Guard',st:'off — agent commands run without a pre-check',c:'free — adds a pre-check hook to every detected CLI',d:'a',act:'guard-install'},
+    {n:'Machine policy',st:'none — each project uses its own limits',c:'add [policy] to ~/.agentstack/agentstack.toml — no repo can loosen it',d:'m'},
+    {n:'Live serving',st:'on — 8 CLIs fetch servers live; unreviewed repos stay inert',c:'',d:''},
+    {n:'Locked run',st:'agentstack run <cli> --locked — pins content and records evidence',c:'host process — not kernel isolation',d:'m'},
+    {n:'Sandbox',st:'agentstack run --sandbox / --lockdown — container isolation; lockdown enforces the network route',c:'needs Docker · slower start',d:'m'},
+  ];
+  return `<div style="padding:0 0 16px">
+    <div class="sect first"><span class="cap">STRONGER MODES</span></div>
+    <div class="col g8" style="padding:4px 14px 10px">
+      <span class="xs">Normal setup already fails closed. These layers add stronger checks — each says what it covers and what it costs.</span>
+      ${rows.map(r=>`<div class="row g8" style="align-items:flex-start">${dot(r.d)}
+        <div class="col" style="flex:1;min-width:0"><span class="xs" style="color:var(--text);font-weight:600">${esc(r.n)}</span>
+          <span class="xs">${esc(r.st)}</span>${r.c?`<span class="srcline">${esc(r.c)}</span>`:''}</div>
+        ${r.act?btn(ACTION_META[r.act].label,'act:start:'+r.act,'warn'):''}</div>`).join('')}
+      ${s.action?actionConfirm(s.action):''}
+      <details class="mt6"><summary>Details — the exact policy lines</summary>
+        <div class="col g4 mt6"><span class="xs dimt">machine policy: unconfigured</span><span class="xs dimt">deny globs (0) [machine manifest; projects may ADD]</span></div></details></div>
+    <div class="sect"><span class="cap">SHARING THIS SETUP</span></div>
+    <div class="col g8" style="padding:4px 14px 0">
+      <span class="xs">The manifest and <code>agentstack.lock</code> are the setup. Commit them and another machine reproduces it — each supplies its own secret values.</span>
+      <div class="box col g4"><span class="xs" style="color:var(--text);font-weight:600">What travels</span>
+        <span class="xs">Server and skill definitions, instructions, settings, and the 2 secret references this project uses — as <code>${esc(REF)}</code> names only.</span>
+        <span class="srcline">Secret values never enter the manifest, the lockfile, or this panel.</span></div>
+      <div class="col g4"><span class="xs" style="color:var(--text);font-weight:600">Pin it first</span>
+        <span class="xs"><code>lock</code> resolves every reference to exact bytes, so a teammate gets what you got — and a later change is visible instead of silent.</span>
+        <code class="cmd">agentstack lock --write</code></div>
+      <div class="col g4"><span class="xs" style="color:var(--text);font-weight:600">Across your own machines</span>
+        <span class="xs">The central library travels as a git repo; server definitions keep their <code>${esc(REF)}</code> placeholders, so no secret leaves this machine.</span>
+        <code class="cmd">agentstack lib sync</code></div>
+      <div class="col g4"><span class="xs" style="color:var(--text);font-weight:600">To a teammate</span>
+        <span class="xs">Commit the manifest and lockfile. To let them verify the lockfile is yours, sign it and publish the printed public key; they verify before trusting.</span>
+        <code class="cmd">agentstack sign</code><code class="cmd">agentstack verify --pubkey &lt;key&gt;</code>
+        <span class="srcline">Moving a whole machine instead? <code>agentstack export</code> writes an encrypted bundle and <code>agentstack import</code> reads it — the one path that can carry secret values, behind a passphrase you type in a terminal.</span></div></div></div>`;
+}
+function tabActivity(s){
+  const calls=[['github__search_issues','2m ago',''],['postgres__query','6m ago',''],['github__create_pr','18m ago','a'],['fs__write_file','1h ago','r']];
+  const runs=[['nightly-review','r-9f2c','12m · 4:07 · 5 steps','',''],
+              ['nightly-review','r-8a11','3h · 1:48 · 5 steps','a','resumable'],
+              ['release-notes','r-77b2','1d · 0:21 · 2 steps','r','failed']];
+  return `<div style="padding:0 0 16px">
+    <div class="sect first"><span class="cap">BROKERED CALLS</span></div>
+    <div class="col g4" style="padding:2px 14px 8px">
+      ${calls.map(([l,a,k])=>`<div class="row g8"><span class="dot ${k==='r'?'r':k==='a'?'a':''}"></span>
+        <span class="xs mono ${k==='a'?'warnt':''}" style="flex:1">${esc(l)}</span><span class="srcline">${a}</span></div>`).join('')}
+      <span class="srcline mt6">Every tool call the gateway brokers lands here with a keyed argument digest — never the values.</span></div>
+    <div class="sect"><span class="cap">WORKFLOW RUNS</span></div>
+    <div class="col g6" style="padding:2px 14px 0">
+      <span class="xs dimt">2 declared · each step a locked run</span>
+      <div class="row g8"><div class="col" style="flex:1"><span class="xs" style="color:var(--text);font-weight:600">nightly-review</span>
+        <span class="srcline">reader · verifier · writer · ≤6 agents</span></div><span class="badge g">trusted</span><span class="badge">locked</span></div>
+      <div class="row g8"><div class="col" style="flex:1"><span class="xs" style="color:var(--text);font-weight:600">repo-audit</span>
+        <span class="srcline">no roles · ≤4 agents</span></div><span class="badge a">inert</span><span class="badge r">drifted</span></div>
+      <div class="hr col g6"><span class="xs" style="color:var(--text);font-weight:600">Recent runs</span>
+      ${runs.map(([n,id,meta,k,b])=>`<button class="row g8" data-act="open:monitor" style="width:100%">
+        <span class="dot ${k==='r'?'r':k==='a'?'a':''}"></span><span class="xs" style="color:var(--text)">${esc(n)}</span>
+        <span class="srcline">${esc(id)}</span>${b?`<span class="badge ${k==='r'?'r':'a'}">${b}</span>`:''}
+        <span class="srcline" style="margin-left:auto">${esc(meta)}</span></button>`).join('')}
+      <span class="srcline">3 older runs · <code>agentstack workflow runs</code></span></div></div></div>`;
+}
+
+/* ══ CONSENT DIALOGS ════════════════════════════════════════════════ */
+function viewTrust(s){
+  const st=s.trust;
+  const line=st==='trusted'?'This repo is trusted at its current bytes. Editing the manifest or lockfile re-gates it.'
+    :st==='drifted'?'This repo was trusted, but its manifest or lockfile changed since — re-review and re-trust.'
+    :'This repo is inert until trusted. Review what auto-mode may run and contact, then consent.';
+  return `<div class="dlg read">
+    <div class="dlg-top"><span class="mark sm"></span><span class="dlg-title">Review this project</span>
+      <span class="badge ${st==='trusted'?'g':'a'}">${st==='trusted'?'Trusted':'Inert — review pending'}</span>
+      <button class="x" data-act="close">✕</button></div>
+    <div style="padding:12px 17px 16px;border-top:1px solid var(--line-soft)" class="col g10">
+      <span class="d">${esc(line)}</span>
+      <div class="col g6"><span class="xs" style="color:var(--text);font-weight:600">Servers (2)</span>
+        <span class="xs mono">github <span class="dimt">runs</span> npx -y @modelcontextprotocol/server-github</span>
+        <span class="xs mono">figma <span class="dimt">contacts</span> mcp.figma.com</span>
+        <span class="xs">Secrets: <span class="mono">${esc(ref('GITHUB_TOKEN'))}, ${esc(ref('FIGMA_PAT'))}</span></span></div>
+      <div class="col g6"><span class="xs" style="color:var(--text);font-weight:600">Skills (3)</span>
+        <div class="row g6" style="flex-wrap:wrap">${['rust-best-practices','rust-async-patterns','rust-mcp-server-generator'].map(n=>`<span class="badge">${n}</span>`).join('')}</div>
+        <span class="xs" style="color:var(--text);font-weight:600">Instructions (1)</span>
+        <div class="row g6"><span class="badge">CLAUDE.md · managed region</span></div></div>
+      <span class="srcline">Full line-by-line review: <code>agentstack trust &lt;path&gt;</code> in a terminal.</span>
+      ${s.trustAct?`<div class="box ${s.trustAct.ok?'good':'bad'}"><span class="xs"><b class="${s.trustAct.ok?'goodt':'badt'}">${s.trustAct.ok?'Done':"Couldn't complete"}</b> — <span class="mono">${esc(s.trustAct.message)}</span></span></div>`:''}
+      <div class="row g8">${st==='trusted'?btn('Revoke trust','trust:revoke','dgr lg'):btn('Trust this repo','trust:grant','ok lg')}${btn('Close','close','ghost lg')}</div>
+    </div></div>`;
+}
+function viewDrift(s){
+  if(!s.drift) return `<div class="dlg read">
+    <div class="dlg-top"><span class="mark sm"></span><span class="dlg-title">Review drift</span><button class="x" data-act="close">✕</button></div>
+    <div style="padding:14px 17px 18px" class="col g10">
+      ${s.driftAct?`<div class="box good"><span class="xs"><b class="goodt">Done</b> — <span class="mono">${esc(s.driftAct.message)}</span></span></div>`:''}
+      <span class="d">Everything is in sync — the manifest matches every rendered config, and no other setup's servers need attention.</span>
+      <span class="srcline">Full line-by-line diff: <code>agentstack diff --scope global</code> in a terminal. Machine-wide global config is best managed from agentstack directly.</span></div></div>`;
+  return `<div class="dlg read">
+    <div class="dlg-top"><span class="mark sm"></span><span class="dlg-title">Review drift</span><button class="x" data-act="close">✕</button></div>
+    <div style="padding:12px 17px 16px;border-top:1px solid var(--line-soft)" class="col g10">
+      <span class="xs" style="color:var(--text);font-weight:600">this repo</span>
+      <div class="box col g4"><span class="xs" style="color:var(--text);font-weight:600">Claude Code</span>
+        <span class="srcline">.mcp.json</span>
+        <pre class="diff"><span class="add">+   "context7": { "command": "npx", "args": ["-y", "context7-mcp"] }</span>
+<span class="del">-   "figma": { "url": "https://mcp.figma.com/sse" }</span></pre></div>
+      <span class="xs">The on-disk config in this repo was hand-edited. Pick which one is the truth.</span>
+      <div class="row g10" style="align-items:baseline">${btn('Keep edits','drift:adopt','ok lg')}
+        <span class="xs">Pull the hand-edit into this project's manifest. Only writes agentstack.toml.</span></div>
+      <div class="row g10" style="align-items:baseline">${btn('Re-render','drift:apply','lg')}
+        <span class="xs">Overwrite the hand-edit from the manifest. Other setups' servers are kept, never pruned; reversible with <code>agentstack restore</code>.</span></div>
+      <div class="hr col g6"><span class="xs" style="color:var(--text);font-weight:600">global configs (~)</span>
+        <span class="xs">10 servers in global configs (~) came from another setup and are kept — this project doesn't manage them and never removes them.</span>
+        <div class="row g6" style="flex-wrap:wrap">${['gha-search','tldraw','miro','chrome-devtools','node_repl','kibana_mcp','figma','context7','gumlet','computer-use'].map(n=>`<span class="badge">${n}</span>`).join('')}</div>
+        <div>${btn('Adopt into this project','drift:adopt')}</div></div>
+    </div></div>`;
+}
+function viewSetup(s){
+  const choices=[['.env file next to the manifest','Plain text, kept out of git; the guard blocks agents from reading it.'],
+    ['OS keychain (service agentstack)','Nothing secret sits in a file. Change them in Keychain Access or with agentstack secret set.'],
+    ['Skip for now','Write only the '+REF+' placeholder; you provide the value later. doctor lists what is missing.']];
+  return `<div class="dlg read">
+    <div class="dlg-top"><span class="mark sm"></span><span class="dlg-title">Set up this project</span><button class="x" data-act="close">✕</button></div>
+    <div style="padding:12px 17px 16px;border-top:1px solid var(--line-soft)" class="col g10">
+      <span class="d">Setup reads the 8 coding tools on this machine and writes one manifest your CLIs render from. Nothing is written until you confirm.</span>
+      <div class="col g6"><span class="xs" style="color:var(--text);font-weight:600">Where token values are stored</span>
+        ${choices.map(([l,d],i)=>`<div class="box ${i===s.secretChoice?'good':''} row g8" data-act="setup:choice:${i}" style="cursor:pointer;align-items:flex-start">
+          ${dot(i===s.secretChoice?'':'m')}<div class="col"><span class="xs" style="color:var(--text);font-weight:600">${esc(l)}</span><span class="xs">${esc(d)}</span></div></div>`).join('')}
+        <span class="xs dimt">Values you'll still provide: <span class="mono">GITHUB_TOKEN, FIGMA_PAT</span></span></div>
+      <details><summary>Coding tools found — 8 tools</summary>
+        <div class="col g4 mt6"><span class="xs">Claude Code <span class="dimt mono">~/.claude.json · .mcp.json</span></span>
+        <span class="xs">Codex CLI <span class="dimt mono">~/.codex/config.toml</span></span>
+        <span class="xs dimt">…and 6 more</span></div></details>
+      <details open><summary>What will be imported — 11 servers, 2 settings</summary>
+        <div class="col g4 mt6"><span class="xs">github <span class="dimt">runs</span> npx -y @modelcontextprotocol/server-github</span>
+        <span class="xs">figma <span class="dimt">contacts</span> mcp.figma.com</span>
+        <span class="xs dimt">Settings from Claude Code, Codex CLI</span></div></details>
+      <details><summary>Files AgentStack will manage — 9 files</summary>
+        <div class="col g4 mt6"><span class="xs mono">.agentstack/agentstack.toml <span class="dimt">— the manifest, written by setup</span></span>
+        <span class="xs mono">.mcp.json <span class="dimt">— Claude Code · writes servers (this project)</span></span>
+        <span class="srcline">Native files are written when you apply the setup to your tools, not by setup itself.</span></div></details>
+      ${s.setupAct?`<div class="box good"><span class="xs"><b class="goodt">Set up</b> — <span class="mono">${esc(s.setupAct.message)}</span></span></div>`:
+      `<div class="col g8"><span class="xs">Writes <span class="mono">.agentstack/agentstack.toml</span> only, storing 2 token values in your system keychain. Your CLIs' own configs aren't touched until you apply the setup to them.</span>
+        <details><summary>Details</summary><span class="srcline">plan sha256:1b90ee2c…7a4f</span></details>
+        <div>${btn('Set up this project','setup:apply','ok lg')}</div></div>`}
+    </div></div>`;
+}
+function viewMonitor(){
+  const steps=[['review:session.ts','reader','completed','1:48','','12 tool calls'],
+               ['review:router.ts','reader','running','1:02','a','7 tool calls'],
+               ['synthesis','writer','spawned','—','m',''],
+               ['verify:claims','verifier','spawned','—','m','']];
+  return `<div class="dlg read">
+    <div class="dlg-top"><span class="dot a pulse"></span><span class="dlg-title">nightly-review</span>
+      <span class="badge g">every step: locked run</span><span class="srcline" style="margin-left:auto">live · 02:41</span>
+      <button class="x" data-act="close">✕</button></div>
+    <div style="padding:10px 17px 6px" class="row g8"><span class="srcline">pinned sha256:9f2c…e1</span>
+      <span class="srcline" style="margin-left:auto">agents 4/6 · 19 tool calls</span></div>
+    <div style="padding:6px 17px 14px" class="col g8">
+      <div class="row g10" style="border-left:2px solid rgba(251,191,36,.25);padding-left:10px">
+        <span class="dot a pulse"></span><span class="xs" style="color:var(--text);font-weight:600;width:150px">orchestrator</span>
+        <span class="srcline" style="flex:1">schedules &amp; gates every spawn · touches no code</span><span class="badge">role: none</span></div>
+      <div class="row g8"><span class="cap">MAP</span><span class="srcline">1/2 done</span></div>
+      ${steps.map(([n,r,st,d,k,tc])=>`<div class="row g10" style="border-left:2px solid rgba(251,191,36,.25);padding-left:10px">
+        <span class="dot ${k||''} ${st==='running'?'pulse':''}"></span>
+        <span class="xs" style="color:var(--text);font-weight:600;width:150px">${esc(n)}</span>
+        <span class="srcline" style="flex:1">${esc(st)}${d!=='—'?' · '+d:''}${tc?' · '+tc:''}</span>
+        <span class="badge">${esc(r)}</span><span class="srcline" style="width:42px;text-align:right">${esc(d)}</span></div>`).join('')}
+      <span class="srcline">Stage grouping follows step labels — a script convention, not enforced structure.</span>
+      <div class="hr row g8"><span class="xs goodt">1 done</span><span class="xs warnt">· 1 running</span>
+        <span class="srcline" style="margin-left:auto">roles can only narrow · ceilings frozen at spawn</span></div></div></div>`;
+}
+function viewDenial(){
+  return `<div class="dlg read" style="max-width:560px">
+    <div class="box warn col g8" style="border:0;border-radius:12px;padding:14px 16px">
+      <div class="row g8"><span class="mark sm"></span><span class="t">Blocked by AgentStack Guard</span><span class="srcline" style="margin-left:auto">14:22:07</span></div>
+      <code class="cmd">rm -rf ~/Documents/GitHub/agentstack/crates</code>
+      <span class="xs">Matched the <b style="color:var(--text)">destructive-rm</b> rule in your machine policy and was denied before it ran. Protecting: the machine <b style="color:var(--text)">filesystem</b> boundary — a ceiling no repo or UI can loosen. Your working tree was not touched.</span>
+      <span class="xs">Safe next step: if you meant this, run the command yourself in a terminal — the guard gates agent commands, not yours.</span>
+      <details><summary>Details — matching rule and enforcement limits</summary>
+        <div class="col g4 mt6"><span class="srcline">Dimension: policy.filesystem</span><span class="srcline">Rule: destructive-rm</span><span class="srcline">Source: machine policy</span>
+        <span class="xs">To change the rule, edit the machine manifest (<code>~/.agentstack/agentstack.toml</code>) — the denial is recorded in the audit log.</span>
+        <span class="srcline">Coverage: a cooperative pre-tool-use hook on this machine. It gates agent tool calls before they run; it is not a sandbox and does not confine other processes.</span></div></details>
+      <div class="row g8">${btn('View in audit log','manage:activity')}
+        ${btn("Can't be overridden here",'noop','','disabled title="A guard denial is your machine policy — the ceiling no repo or UI can loosen."')}</div>
+    </div></div>`;
+}
+function viewBlueprint(){
+  const nodes=[['map','reader','opus','high','×4','Read one changed file and report claims with line anchors.'],
+               ['reduce','writer','opus','high','','Merge the readers’ claims into one review, dropping duplicates.'],
+               ['verify','verifier','sonnet','medium','×2','Refute each surviving claim; majority refutation kills it.']];
+  return `<div class="dlg read" style="max-width:620px">
+    <div class="dlg-top"><span class="mark sm"></span><span class="dlg-title">nightly-review</span><span class="badge">map-reduce</span>
+      <span class="srcline" style="margin-left:auto">workflow blueprint</span></div>
+    <div style="padding:10px 17px 16px" class="col g10">
+      <span class="d">Review every file changed on this branch and produce one verified review.</span>
+      <pre class="diff">flowchart TD
+  map[map · reader ×4] --&gt; reduce[reduce · writer]
+  reduce --&gt; verify[verify · verifier ×2]</pre>
+      ${nodes.map(([p,r,m,e,f,i])=>`<div class="box col g4"><div class="row g6"><span class="badge">${p}</span>
+        <span class="srcline">${r} · ${m} · ${e}</span>${f?`<span class="badge">${f}</span>`:''}</div>
+        <span class="xs">${esc(i)}</span></div>`).join('')}
+      <span class="xs">Approving does not run it. The model writes the workflow and pins this graph together with the script, then <b style="color:var(--text)">you review the real code</b> before anything executes — changing either one asks you again. The graph shows the intended shape; it is not proof the code matches it.</span>
+      <div class="row g8">${btn('Approve','noop','ok lg')}${btn('Reject','noop','lg')}${btn('Edit with the model','noop','ghost lg')}</div>
+    </div></div>`;
+}
+
+/* ══ TERMINAL CONTENT ═══════════════════════════════════════════════ */
+const CLI = {
+ status:{cmd:'agentstack status', cwd:'~/Documents/GitHub/agentstack',
+  out:`<b>agentstack</b> 0.16.0 — one portable manifest, every agent CLI
+
+  <b>CLIs    </b>  8 detected: Claude Code · Claude Desktop · Codex CLI · GitHub Copilot CLI · Gemini CLI · OpenCode · Pi · VS Code
+  <b>Manifest</b>  .agentstack/agentstack.toml — 0 server(s) → 8 detected CLI(s), no [targets] pinned
+  <b>Toolsets</b>  rust
+  <b>Status  </b>  locked · untrusted
+            <span class="dm">its servers are inert — the gateway serves control-plane tools only until you review it</span>
+  <b>Mode    </b>  static <span class="dm">— config files on disk, kept out of git</span>
+
+  <b>Next:</b>  <span class="ok">agentstack trust .</span>   <span class="dm">review it to unlock its servers</span>
+  <span class="dm">All commands: agentstack --help</span>
+  <span class="dm">Deep check (drift, quirks, supply chain): agentstack doctor</span>`},
+ doctor:{cmd:'agentstack doctor', cwd:'~/Documents/GitHub/agentstack',
+  out:`<b>Adapters &amp; CLIs</b>
+  <span class="ok">✓</span> Claude Code    installed · ~/.claude.json parses
+  <span class="wr">⚠</span> Claude Desktop config present but binary not on PATH
+  <span class="ok">✓</span> Codex CLI      installed · ~/.codex/config.toml parses
+  <span class="ok">✓</span> Gemini CLI     installed · ~/.gemini/settings.json parses
+  <span class="wr">⚠</span> VS Code        config present but binary not on PATH
+<b>t3code (supervisor)</b>
+  <span class="ok">✓</span> detected (/Users/tarek.k/.t3) — t3code sessions run CLIs agentstack already governs; nothing extra to render
+  <span class="wr">⚠</span> guard not enabled — t3code's Full-access mode disables the providers' own approval prompts, so those sessions run with no pre-tool-use gate at all ↳ agentstack guard install
+  <span class="dm">· sessions attribute to the global audit only — for per-run evidence: agentstack shim make &lt;cli&gt;</span>
+<b>Zero-files gateway</b>
+  <span class="ok">✓</span> Claude Code    gateway registered (agentstack mcp)
+  <span class="ok">✓</span> not trusted for auto mode — untrusted repos get control-plane tools only ↳ agentstack trust
+<b>Drift</b>
+  <span class="dm">· Claude Code    no longer matches what agentstack last wrote ↳ review: agentstack diff --scope global</span>
+  <span class="dm">· Claude Code    would REMOVE agentstack, gha-search, tldraw, miro, figma, gumlet ↳ keep them: agentstack adopt --scope global</span>
+<b>Skills</b>
+  <span class="ok">✓</span> rust-best-practices  present · SKILL.md ok
+<b>Reproducibility</b>
+  <span class="ok">✓</span> rust-best-practices  library · matches lock
+<span class="dm">· 5 section(s) for features this project doesn't use are hidden — <b>agentstack doctor --all</b> shows everything.</span>
+
+0 error(s), 3 warning(s).
+  start with: <b>agentstack guard install</b>`},
+ trust:{cmd:'agentstack trust .', cwd:'~/GitHub/checkout', recon:true,
+  out:`Reviewing /Users/tarek.k/GitHub/checkout — approving this lets its capabilities activate.
+
+This project declares — review what auto-mode may run/contact:
+  github    npx -y @modelcontextprotocol/server-github
+            → api.github.com   ${'$'}{GITHUB_TOKEN}
+  figma     contacts mcp.figma.com
+
+  skills loadable over MCP:
+  · rust-best-practices          [git, pinned]
+  · rust-async-patterns          [git, pinned]
+
+Grant trust for this project? [y/N]`},
+ trustAfter:{cmd:'agentstack status', cwd:'~/GitHub/checkout',
+  out:`  <b>Status  </b>  locked · <span class="ok">trusted</span>
+            <span class="dm">pinned at sha256:3f9a…c0 — editing the manifest or lockfile re-gates it</span>`},
+ diff:{cmd:'agentstack diff', cwd:'~/Documents/GitHub/agentstack',
+  out:`
+Claude Code (.mcp.json)
+  <span class="ok">✓</span> in sync
+
+Codex CLI (.codex/config.toml)
+  <span class="ok">✓</span> in sync
+
+Gemini CLI (.gemini/settings.json)
+  <span class="ok">✓</span> in sync
+
+VS Code (.vscode/mcp.json)
+  <span class="ok">✓</span> in sync
+
+<span class="ok">✓</span> all targets in sync with the manifest.`},
+ adopt:{cmd:'agentstack adopt --write', cwd:'~/Documents/GitHub/agentstack', recon:true,
+  out:`Adopting drift from Claude Code (global, ~/.claude.json)…
+  + gha-search    (stdio) — pulled into [servers.gha-search]
+  + figma         (http)  — pulled into [servers.figma]
+  + tldraw, miro, chrome-devtools, node_repl — pulled in
+
+Wrote .agentstack/agentstack.toml
+
+Re-lock to pin the adopted entries: agentstack lock
+undo: agentstack restore --last --write`},
+ toolset:{cmd:'agentstack toolset list', cwd:'~/Documents/GitHub/agentstack',
+  out:`Declared toolsets (project trust: untrusted):
+  rust  —  3 skill(s), 0 server(s)  [pinned]`},
+ use:{cmd:'agentstack session start backend', cwd:'~/Documents/GitHub/agentstack', recon:true,
+  out:`session started · backend
+  4 adapter configs snapshotted
+
+<span class="dm"># and when you're done:</span>
+<span class="ps">$</span> <b>agentstack session end</b>
+session ended · configs restored from the snapshot
+
+<span class="dm"># the permanent form instead:</span>
+<span class="ps">$</span> <b>agentstack use backend --write</b>
+rendered backend → 4 adapters`},
+ session:{cmd:'agentstack session list', cwd:'~/Documents/GitHub/agentstack',
+  out:`No active sessions.
+
+<span class="dm"># session --help</span>
+  start   Start a session: load a toolset for now
+  end     End the active session here (or everywhere with --all), reverting it
+  list    List active sessions
+  freeze  Freeze the active session's resolved set into a new toolset, so CI can replay it deterministically`},
+ lib:{cmd:'agentstack lib list', cwd:'~/Documents/GitHub/agentstack',
+  out:`<b>Skills</b>
+  rust-async-patterns  Master Rust async programming with Tokio, async traits, erro… git    rev c4b82b0ad771
+  rust-best-practices  Guide for writing idiomatic Rust code based on Apollo GraphQ… git    rev 3466193ed52d
+  rust-mcp-server-generator Generate a complete Rust MCP server project…            git    rev 329f2dcdaf02
+  rust-testing         Rust testing patterns including unit tests, integration test… git    rev 6a9f075cd97c
+
+<b>Servers</b>
+  (none)
+
+<b>Extensions</b>
+  (none)`},
+ add:{cmd:'agentstack add-skill-to-profile rust-testing rust --write', cwd:'~/Documents/GitHub/agentstack', recon:true,
+  out:`Preview (digest sha256:5f0afa8f…c31d) — nothing written yet.
+
+  + [profiles.rust].skills += "rust-testing"
+
+Re-locks agentstack.lock and re-renders the toolset's configs.
+
+<span class="ok">wrote .agentstack/agentstack.toml</span>
+<span class="ok">wrote agentstack.lock</span>
+undo: agentstack restore --last --write`},
+ secret:{cmd:'agentstack secret list', cwd:'~/Documents/GitHub/agentstack',
+  out:`Manifest references no secrets.
+
+<span class="dm"># in a project that does, an unresolved ref fails closed:</span>
+<span class="wr">manifest updated, nothing rendered</span>
+<span class="wr">  ${'$'}{GITHUB_TOKEN} does not resolve on this machine</span>
+  no adapter config written · no placeholder written
+
+next: agentstack secret set GITHUB_TOKEN`},
+ libremove:{cmd:'agentstack remove-from-library rust-testing --write', cwd:'~/Documents/GitHub/agentstack', recon:true,
+  out:`Removed skill 'rust-testing' from the central library.
+Moved to the library trash.
+
+Put it back: agentstack lib trash --restore rust-testing --write`},
+ guard:{cmd:'agentstack guard status', cwd:'~/Documents/GitHub/agentstack',
+  out:`guard: disabled (run <b>agentstack guard install</b>)
+  machine policy: unconfigured
+  rule source (machine): ~/.agentstack/agentstack.toml
+  deny globs (0) [machine manifest; projects may ADD]:
+  destructive-command rules: built-in
+  claude-code (+ vscode agent mode) <span class="er">✗</span> detected, hook missing
+  codex                            <span class="er">✗</span> detected, hook missing
+  gemini                           <span class="er">✗</span> detected, hook missing
+  cursor                           <span class="dm">· not detected</span>
+  claude-desktop                   <span class="dm">○ no hook surface (no PreToolUse-style hook exists on this surface)</span>
+  junie                            <span class="dm">○ no hook surface (only a static action allowlist; no per-call hook)</span>`},
+ guardinstall:{cmd:'agentstack guard install', cwd:'~/Documents/GitHub/agentstack', recon:true,
+  out:`Installing guard hook…
+  <span class="ok">✓</span> claude-code (+ vscode agent mode)  wrote ~/.claude/settings.json PreToolUse hook
+  <span class="ok">✓</span> codex                              wrote ~/.codex/config.toml notify hook
+  <span class="ok">✓</span> gemini                             wrote ~/.gemini/settings.json hook
+  <span class="dm">· claude-desktop, junie, kiro         no hook surface — skipped</span>
+
+Seeded [guard] + [policy.filesystem] deny defaults in ~/.agentstack/agentstack.toml
+
+guard: enabled
+undo: agentstack guard uninstall`},
+ guardtest:{cmd:'agentstack guard test rm -rf /', cwd:'~/Documents/GitHub/agentstack',
+  out:`<span class="er">DENY</span>  rm -rf /
+  rm of / — refusing to delete a root (built-in rule; deny/allow lists: ~/.agentstack/agentstack.toml)
+  <span class="dm">this was agentstack's guard — how it works: https://tarekkharsa.github.io/agentstack/start.html#s-guard</span>`},
+ restore:{cmd:'agentstack restore', cwd:'~/Documents/GitHub/agentstack',
+  out:`Recorded changes (newest first):
+
+  18c67c14  3h ago   global   apply       1 file · Codex CLI
+  18c67c10  3h ago   project  apply       8 files · Claude Code, Codex CLI, Gemini CLI, OpenCode, VS Code
+  18c677df  4h ago   project  init        3 files · Claude Code, Claude Desktop, Codex CLI, Gemini CLI
+  18c67617  5h ago   workflow-declare workflow declare 'repo-audit' 3 files · repo-audit
+
+Undo one with: agentstack restore &lt;id&gt; --write (or --last for the newest)
+
+Adapter config backups (content before our last write):
+  Claude Code    global ~/.claude.json
+  Codex CLI      global ~/.codex/config.toml`},
+ setup:{cmd:'agentstack init', cwd:'~/Documents/GitHub/t3code', recon:true,
+  out:`Scanning for agent CLIs…
+  Detected CLIs: Claude Code · Codex CLI · Gemini CLI
+
+agentstack.toml (preview — nothing written)
+
+version = 1
+
+[profiles.default]
+servers = ["github"]
+
+Would write .agentstack/agentstack.toml
+Would create .agentstack/instructions/
+
+Found 1 inline token while importing (~/.codex/config.toml): GH_PAT
+
+Where should these token values live?
+
+  1) .env file next to the manifest, in plain text. agentstack keeps this file
+     out of git and its guard blocks agents from reading it.
+  2) OS keychain (service \`agentstack\`). Nothing secret sits in a file.
+  3) skip — write only the ${REF} placeholder; you provide the value later.
+
+Proceed with this plan? [y/N]`},
+ notinstalled:{cmd:'agentstack --version', cwd:'~/Documents/GitHub/t3code',
+  out:`<span class="er">zsh: command not found: agentstack</span>
+
+<span class="ps">$</span> <b>which agentstack</b>
+agentstack not found
+
+<span class="dm"># if it is a shell function or off PATH, point the server at the binary:</span>
+<span class="dm"># T3CODE_AGENTSTACK_BIN=/path/to/agentstack</span>`},
+ runs:{cmd:'agentstack report calls --since 7', cwd:'~/Documents/GitHub/agentstack', recon:true,
+  out:`github__search_issues   ok       412
+github__create_pr       denied     3   policy.network
+fs__write_file          errored    1   ENOENT
+
+<span class="dm"># report --help</span>
+  run    Show a sandboxed run's flight-recorder report (lifecycle, egress decisions, tool calls)
+  runs   List live tracked runs (CLI, pid, toolset, uptime)
+  usage  Show local usage analytics (activation counts + footprint + context cost)
+  calls  Report brokered call activity and library-wide dead weight
+  wire   Rank what's been observed on the wire by the \`proxy\` relay`},
+ workflow:{cmd:'agentstack workflow list', cwd:'~/Documents/GitHub/agentstack', recon:true,
+  out:`nightly-review   trusted   locked     ≤6 agents
+repo-audit       inert     drifted    ≤4 agents
+
+<span class="ps">$</span> <b>agentstack workflow runs</b>
+w-9f2c  nightly-review  running      4/6 agents · 02:41 · pinned sha256:9f2c…e1
+w-8a11  nightly-review  interrupted  5 steps · 1:48   <span class="wr">resumable</span>
+w-77b2  release-notes   failed       2 steps · 0:21
+
+<span class="dm"># workflow --help</span>
+  run · report · list · runs · explain · declare`},
+ protection:{cmd:'agentstack run claude-code --locked', cwd:'~/Documents/GitHub/agentstack', recon:true,
+  out:`posture: LOCKED (host process)
+  content pinned to lockfile digests
+  flight recorder on: lifecycle, egress, tool calls, secret refs
+
+<span class="ps">$</span> <b>agentstack run claude-code --sandbox --lockdown</b>
+posture: SANDBOX+LOCKDOWN
+  <span class="ok">kernel-enforced confinement (container)</span>
+  <span class="ok">only route out is the audited proxy</span>
+
+<span class="ps">$</span> <b>agentstack report run w-9f2c</b>
+full flight recorder + posture label`},
+ share:{cmd:'agentstack lock --write', cwd:'~/Documents/GitHub/agentstack', recon:true,
+  out:`Resolving toolset 'rust'…
+  <span class="ok">✓</span> rust-best-practices          git:apollographql/skills@3466193 → pinned
+  <span class="ok">✓</span> rust-async-patterns          git:wshobson/agents@c4b82b0 → pinned
+
+Wrote agentstack.lock
+
+<span class="ps">$</span> <b>agentstack sign</b>
+signed — publish the printed public key so a teammate can verify
+
+<span class="dm"># on their machine, they review the same bytes themselves:</span>
+<span class="ps">$</span> <b>agentstack trust .</b>`},
+ explain:{cmd:'agentstack explain rust-best-practices', cwd:'~/Documents/GitHub/agentstack',
+  out:`
+rust-best-practices  (skill · git)
+
+  Source        central library (\`agentstack lib\`)
+  Installed     yes — available locally
+  Model         library reference by name — resolved fresh from the central library on every lock
+  Provenance    git:https://github.com/apollographql/skills@3466193ed52d…#skills/rust-best-practices
+  Lock          matches lock
+  Writes to     each tool's skills dir when enabled:
+                Claude Code    ~/.claude/skills/rust-best-practices  (symlink)
+                Codex CLI      ~/.agents/skills/rust-best-practices  (symlink)
+  Enabled for   claude-code (project), codex (project), gemini (project), pi (project)
+  Safety
+                • instructions only — a skill is text, it runs no code and makes no network calls
+                • comes from the central library — inspect it with \`agentstack lib list\``},
+ search:{cmd:'agentstack search rust', cwd:'~/Documents/GitHub/agentstack',
+  out:`3 of 4 result(s) for 'rust', most relevant first:
+
+your library
+  rust-async-patterns Master Rust async programming with Tokio, async traits, error handling… [skill]
+    source: git:https://github.com/wshobson/agents
+    ↳ agentstack add from rust-async-patterns
+
+  rust-best-practices Guide for writing idiomatic Rust code based on Apollo GraphQL's best p… [skill]
+    source: git:https://github.com/apollographql/skills
+    ↳ agentstack add from rust-best-practices
+
+1 more — agentstack search 'rust' --all`},
+ help:{cmd:'agentstack --help', cwd:'~/Documents/GitHub/agentstack',
+  out:`Manage MCP servers + skills across Claude Code, Codex, and more, from a single portable .agentstack/agentstack.toml.
+
+Commands:
+  init     Set up this project: detect the CLIs you have and import them into one manifest
+  status   Where this project stands, on one screen: detected CLIs, manifest, trust, secrets, and the one next step
+  add      Add a server or skill to the manifest
+  search   Search the capability catalog (and mark what's already added)
+  apply    Render the manifest into each target's native config
+  doctor   Verify everything is wired up: adapters, secrets, drift, skills, per-CLI details
+  toolset  Work with toolsets: name one that bundles what you already have
+  use      Activate a toolset: render its servers + materialize its skills
+  run      Launch an agent CLI as a tracked run
+  trust    Review and approve this project's declared capabilities — required before anything activates them
+
+Start here:
+  agentstack                     orientation + the one next step for this directory
+  agentstack init                one command sets up everything: import, choose, apply, verify
+  agentstack status              where this project stands, on one screen
+
+Every command, grouped by task: agentstack --help --all`},
+ helpall:{cmd:'agentstack --help --all', cwd:'~/Documents/GitHub/agentstack',
+  out:`agentstack — every command, including the ones the default --help groups away.
+
+The map, grouped by task:
+
+  Set up      init · status · adapters · settings · self · completions
+  Edit        add · set · search · remove · install · lib · toolset · adopt · export · import
+  Render      apply · use · instructions · lock · session · diff · restore · uninstall
+  Protect     trust · explain · secret · guard · sign · verify
+  Run         run · kill · shim · workflow · gateway · mcp · try
+  Inspect     doctor · report · optimize · proxy
+
+Integration contract (t3code) — fixed actions a graphical panel invokes.
+Not part of the everyday surface; each is digest-bound and previews before it writes.
+
+  add-skill-to-profile   Add a skill to a toolset and activate it (panel action; digest-bound)
+  add-server-to-profile  Add a server to a toolset and activate it (panel action; digest-bound)
+  create-profile         Fixed-argv alias of \`agentstack toolset create\` (panel action)
+  use-profile            Activate an existing toolset (panel action; digest-bound)
+  library-index          The central-library catalog (skills + servers) for the panel browser
+  remove-from-library    Remove a skill or server from the central library (panel action; digest-bound)`},
+ mcp:{cmd:'agentstack mcp --help', cwd:'~/Documents/GitHub/agentstack',
+  out:`Run agentstack as an MCP server over stdio (for an agent to call)
+
+Options:
+      --auto-project        Discover the active project per session instead of pinning to the launch cwd.
+                            Auto-discovered projects are trust-gated: an untrusted manifest exposes
+                            control-plane tools only.
+      --transparent         Advertise the proxied upstream tools in \`tools/list\` (policy-filtered,
+                            namespaced &lt;server&gt;__&lt;tool&gt;). Default is compact mode.`},
+ shim:{cmd:'agentstack shim make codex', cwd:'~/Documents/GitHub/agentstack', recon:true,
+  out:`Wrote ~/.agentstack/shims/codex
+
+Point the supervisor's binary-path setting at:
+  ~/.agentstack/shims/codex
+
+Each session it launches now mints a run id (AGENTSTACK_RUN_ID) and its own
+events.jsonl before exec'ing the real codex binary.`},
+ degraded:{cmd:'agentstack doctor', cwd:'~/Documents/GitHub/agentstack',
+  out:`<span class="dm"># the panel negotiates per-contract, from the status envelope's feature list:</span>
+  sessions        <span class="ok">✓</span>  session start/end offered
+  profiles-edit   <span class="ok">✓</span>  library Add/Remove offered
+  restore         <span class="ok">✓</span>  Undo offered
+  trust-consent   <span class="er">✗</span>  Trust button disabled — "trust from a terminal where the review itself is the consent"
+  observe         <span class="er">✗</span>  "run details below may be limited"
+
+<span class="dm">an unsupported contract disables that action — it is never approximated with an older one</span>`},
+};
+
+/* ══ SCENARIOS ══════════════════════════════════════════════════════ */
+const H=(t,x,a)=>({t,x,a:a||'rgba(240,151,90,.5)'});
+const Y=t=>['✓',t]; const N=t=>['✕',t];
+
+const SCEN = [
+{id:'not-installed', group:'Getting started', name:"AgentStack isn't installed", tag:'DEAD END', tone:'n',
+ summary:"The panel is present but the CLI isn't reachable on the machine running this project. It says so plainly instead of hiding the icon — a hidden icon would read as “no governance available”, which is a different claim.",
+ steps:[{name:'Not reachable', component:'NotInstalled', ui:'popover', cli:'notinstalled',
+   setup:s=>{s.installed=false},
+   how:[H('Why it can still be “installed”',"If agentstack is a shell function or an alias, the t3code server can't see it — it resolves a real binary on PATH. The env var points the server straight at it."),
+        H('Why not hide the panel','Absence of the icon and absence of governance are different facts. The panel stays and names the reason.','rgba(91,124,250,.5)')],
+   gtee:[Y('No config is read or written while the CLI is missing — the panel is inert, not partially applied.'),
+         N('Agent sessions in this project are ungoverned right now: no guard, no gateway, no audit.')],
+   contract:'no contracts negotiated — the status probe never answered',
+   open:'The only way out is a code block. t3code already knows how to update and configure itself; neither path is wired to a button here.'}]},
+
+{id:'first-setup', group:'Getting started', name:'Set up a project, first time', tag:'2 STEPS', tone:'g',
+ summary:'Import the coding tools already on this machine into one manifest every CLI renders from. The plan screen carries the digest, so there is no second confirm restating it.',
+ steps:[
+  {name:'Not set up', component:'NeedsSetup', ui:'popover', cli:'status', setup:s=>{s.setupState='needs_setup'},
+   how:[H('Discovery reads, never writes','Adapters are detected by their own config files. Nothing is imported, moved, or rewritten while the panel is deciding what to offer.','rgba(52,211,153,.5)')],
+   gtee:[Y("Your CLIs' existing configs are untouched at this point — this state is a read.")],
+   contract:'gated on the status envelope only',
+   advance:s=>s.dialog==='setup'},
+  {name:'Review the plan', component:'SetupPanel', ui:'dialog', cli:'setup',
+   setup:s=>{s.setupState='needs_setup';s.dialog='setup'},
+   how:[H('The store choice comes first',"It's the only real decision on this screen, and the refs it governs are listed under it. Everything else is an inventory you can expand."),
+        H('The button states its own scope','“Writes agentstack.toml only… your CLIs’ own configs aren’t touched until you apply” — so a confirm that restated the plan would add a click and no information.','rgba(91,124,250,.5)'),
+        H('The plan digest is the consent','The panel sends back the exact digest it showed you. A plan without one disables setup from here rather than guessing.','rgba(52,211,153,.5)')],
+   gtee:[Y('Secret values never enter the manifest or the lockfile — only ' + REF + ' names do.'),
+         Y('The write is recorded, so it can be undone from the Setup tab.'),
+         N('Setup does not write your CLIs’ native configs — that happens when you apply the setup to them.')],
+   contract:'gated on plan_digest — absent, and setup from the panel is disabled',
+   advance:s=>!!s.setupAct}]},
+
+{id:'ready', group:'Everyday', name:'Ready — the 9-in-10 state', tag:'GLANCE', tone:'g',
+ summary:'One region: the toolset you are working under. The version number, trust pill, healthy-facts line, collapsed checkup, undo row and four nav links all left this surface — every one of them is a Manage click away.',
+ steps:[{name:'Working under', component:'WorkingUnder', ui:'popover', cli:'toolset',
+   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.activeProfile='rust'},
+   how:[H('“Stop using” is conditional','It renders only during a temporary session. Outside one there is nothing to stop, and offering it would imply a state that does not exist.','rgba(52,211,153,.5)'),
+        H('The active name is never guessed','If no toolset owns this directory the panel says so, rather than showing the first declared profile — an unowned name here would be a lie about scope.'),
+        H('Green gets no badge','The pill shows a dot only for “needs you” or a live run. A permanent green dot trains people to ignore the icon.','rgba(91,124,250,.5)')],
+   gtee:[Y('The footer summarises everything not shown, so a quiet panel is a claim, not an omission.'),
+         N('“In sync” describes the configs agentstack renders — it says nothing about servers another setup added.')],
+   contract:'status-v1 · sessions gated on canSessions'}]},
+
+{id:'switch', group:'Everyday', name:'Use a toolset, then stop', tag:'LIVE', tone:'g',
+ summary:'A toolset is a named bundle of servers and skills. Use it temporarily for one stretch of work — the temporary form puts every file back when it ends.',
+ steps:[
+  {name:'Toolsets tab', component:'ToolsetsTab + ToolsetRail', ui:'manage:toolsets', cli:'toolset',
+   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='toolsets'},
+   how:[H('Rail and library on one screen','Adding a skill used to be four layouts: browse, pick a target, confirm, done. Now the toolsets stay left, the library right, and the confirm appears in place.'),
+        H('A blocked row loses its verb','“review” has an unpinned server, so there is no Use button — the reason replaces it instead of a greyed-out button you would have to hover to understand.','rgba(251,191,36,.5)')],
+   gtee:[Y('Ending a session puts your CLIs’ files back as they were — that is what “temporarily” means.'),
+         N('An older CLI without the sessions contract shows “Update agentstack to start a toolset from here” instead of a broken button.')],
+   contract:'gated on canSessions · use-profile is digest-bound',
+   advance:s=>!!s.session},
+  {name:'In use', component:'WorkingUnder · session', ui:'manage:toolsets', cli:'use',
+   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='toolsets';s.session={profile:'backend',ago:'just now'}},
+   how:[H('One session, named in two places','The rail row and the glance both read from the same session record, so they can never disagree about what is active.','rgba(52,211,153,.5)')],
+   gtee:[Y('session end restores each adapter config from the snapshot taken at start.'),
+         N('Killing t3code mid-session does not revert automatically — agentstack session end --all cleans up.')],
+   contract:'sessions-v1'}]},
+
+{id:'add-skill', group:'Everyday', name:'Add a skill', tag:'2 STEPS', tone:'g',
+ summary:'The target toolset is chosen in the row itself, and one digest-bound confirm carries the consent. Adding a server instead lands on the secret-blocked card — the failure that reads as a next step.',
+ steps:[
+  {name:'Pick and confirm', component:'LibraryRow → EditFlowCard', ui:'manage:toolsets', cli:'add',
+   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='toolsets';s.picker='rust-testing'},
+   how:[H('One question, asked once','“Which toolset?” and “Confirm adding to rust” were the same question and its echo. The target is part of the Add control, and the digest binds to that answer.'),
+        H('The digest is the load-bearing step','If the CLI’s preview has no digest, the card says so and disables Confirm rather than applying something it cannot bind to.','rgba(52,211,153,.5)')],
+   gtee:[Y('Nothing is written until you confirm — the preview is computed from a staged copy.'),
+         Y('The lockfile records the exact commit and content checksum, so the same skill resolves identically on a teammate’s machine.')],
+   contract:'add-skill-to-profile · digest-bound · gated on canEditProfiles',
+   // adding a *skill* just succeeds here; adding a *server* is what reaches step 2
+   advance:s=>!!(s.flow&&s.flow.phase==='done'&&s.flow.secretBlocked)},
+  {name:'Secret missing', component:'matchSecretBlock', ui:'manage:toolsets', cli:'secret',
+   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='toolsets';
+             s.flow={kind:'add',title:'Add server "github" to toolset "backend"',phase:'done',ok:false,secretBlocked:true}},
+   how:[H('The template for every failure','What happened, what was protected, and the exact next step — and it refuses to take the secret in the browser. The value belongs to the machine, not the panel.','rgba(52,211,153,.5)'),
+        H('Not styled as an error','It is warning-tinted, not red, because the block is the feature working. The manifest was written; only the render was withheld.','rgba(251,191,36,.5)')],
+   gtee:[Y('A half-rendered config is never left behind: either every ref resolves or nothing is written.'),
+         Y('No secret value is ever typed into, or displayed by, the panel.')],
+   contract:'apply-v1 with an unresolved ' + REF,
+   open:'The panel recognises this state by matching the substring “not written”, so an unrelated permission failure carrying that phrase inherits the reassuring copy. It needs a structured signal from the CLI.'}]},
+
+{id:'create', group:'Everyday', name:'Create a toolset', tag:'2 STEPS', tone:'g',
+ summary:'Composing happens in the rail, beside the library it draws from, instead of listing the whole library a second time in a screen of its own.',
+ steps:[
+  {name:'Compose', component:'ToolsetRail · draft', ui:'manage:toolsets', cli:'toolset',
+   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='toolsets';s.draft={name:'',picked:[]}},
+   how:[H('Create is disabled until it can succeed','A name that matches the allowed pattern and at least one member. The rule is stated as text, not discovered by clicking.'),
+        H('Empty rail explains itself','With no toolsets, every library Add is disabled and the empty card says why — rather than leaving you to infer it from greyed-out buttons.','rgba(91,124,250,.5)')],
+   gtee:[Y('Composing writes nothing: the draft lives in the panel until you press Create.')],
+   contract:'create-profile — a fixed-argv alias of agentstack toolset create',
+   advance:s=>s.created},
+  {name:'Created', component:'ToolsetRail', ui:'manage:toolsets', cli:'toolset',
+   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='toolsets';
+             s.toolsets=s.toolsets.concat([{name:'web',summary:'2 tool(s)',ready:true,blocked:null,members:['rust-testing','figma']}]);s.created=true},
+   how:[H('Creating does not activate','A new toolset appears with a Use button, not in use. Naming and activating stay separate verbs.','rgba(52,211,153,.5)')],
+   gtee:[Y('Creating a toolset writes the manifest only — no CLI config is rendered until you use it.')],
+   contract:'create-profile',
+   open:'Rename and delete do not exist. For a switcher that is now the first page’s whole job, those are the two missing verbs — and both are profile edits, so they fit the existing contract shape.'}]},
+
+{id:'remove', group:'Everyday', name:'Remove from the library', tag:'MACHINE-WIDE', tone:'a',
+ summary:'The one panel action whose blast radius is bigger than the project you are in — so the copy says “from your library”, names the projects affected, and shows the restore command before you press it.',
+ steps:[{name:'Confirm removal', component:'RemovalConfirmBody', ui:'manage:toolsets', cli:'libremove',
+   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='toolsets';
+             s.flow={kind:'remove',name:'rust-testing',title:'Remove skill "rust-testing" from your library',phase:'confirm'}},
+   how:[H('Recessive by design','Remove is hidden until you hover the row, while Add is always visible. Same row, deliberately different weight, because the blast radius differs.'),
+        H('It names the projects it breaks','“This project uses it — toolset(s) rust” with the consequence spelled out: activating that toolset again will fail until you re-add or restore it.','rgba(251,191,36,.5)')],
+   gtee:[Y('It moves to the library trash — the restore command is shown before you confirm, not after.'),
+         N("Nothing in this project's files changes at removal time; the breakage appears the next time that toolset is activated.")],
+   contract:'remove-from-library · gated on library-remove-v1'}]},
+
+{id:'undo', group:'Everyday', name:'Undo something', tag:'LEDGER', tone:'b',
+ summary:'Every write is recorded before it lands. The panel offers the newest entry that touches this project — never a blind --last, which could revert a write from another repo.',
+ steps:[{name:'Undo last change', component:'UndoAffordance', ui:'manage:setup', cli:'restore',
+   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='setup';s.undo={phase:'ready'}},
+   how:[H('Scoped to this project','The ledger is machine-global, so the panel filters it. Offering --last from a project-scoped UI could revert something from a different repo entirely.'),
+        H('Two clicks, never one','Reveal names the change; a second click arms it; a third runs it. The change is described before it is offered.','rgba(91,124,250,.5)')],
+   gtee:[Y('Each verb reverses exactly one agentstack change — nothing here deletes your data.'),
+         N('Side effects are not undone: a file a server deleted is not brought back.')],
+   contract:'gated on canRestore — otherwise “Undo isn’t available on this agentstack CLI”'}]},
+
+{id:'trust', group:'Trust & safety', name:'Clone a repo → inert → trusted', tag:'CONSENT', tone:'a',
+ summary:'A freshly cloned repo can declare its own servers and skills. Until you review it, none of them run, resolve a secret, or reach your agents. This is the one screen I would never shorten.',
+ steps:[
+  {name:'Inert', component:'ConcernCard · trust', ui:'popover', cli:'status', setup:s=>{},
+   how:[H('Inert is the default, not a setting','The gateway is registered once per machine. After that, every repo serves its own servers with no files copied in — and a repo you just cloned is inert until you trust it.','rgba(52,211,153,.5)'),
+        H("The agent isn't blind, just limited",'Inside an inert repo an agent sees AgentStack’s control-plane tools only. It can ask what is declared; it cannot run any of it.','rgba(91,124,250,.5)')],
+   gtee:[Y('No server process is spawned, no host is contacted, and no ' + REF + ' resolves before you approve.')],
+   contract:'trust state from the status envelope',
+   advance:s=>s.dialog==='trust'},
+  {name:'Review', component:'TrustReviewPanel', ui:'dialog', cli:'trust', setup:s=>{s.dialog='trust'},
+   how:[H('Trust is consent to bytes','Approving pins a digest of this exact content. Any later edit — a git pull, an agentstack lock — drops it back to inert.'),
+        H('Not a sandbox','Trust gates activation; it does not confine a server once it is running. That is what locked runs, sandbox and lockdown are for.','rgba(248,113,113,.5)')],
+   gtee:[Y('A change to any pinned file re-gates the repo automatically.'),
+         N('Trusting does not review the scripts a server points at — read those the way you would read a .envrc.')],
+   contract:'gated on surface_digest + the trust-consent contract; missing either disables granting from here',
+   advance:s=>s.trust==='trusted',
+   open:'Consent is all-or-nothing and the list is unbounded — twenty servers is a wall with the grant button past the fold. Group by risk, pin the verdict bar, and consider per-item opt-out.'},
+  {name:'Trusted', component:'TrustReviewPanel · granted', ui:'dialog', cli:'trustAfter',
+   setup:s=>{s.trust='trusted';s.dialog='trust';s.trustAct={ok:true,message:'trusted /Users/tarek.k/GitHub/checkout at sha256:3f9a…c0'}},
+   how:[H('The result stays on screen','A persistent Done banner, not a toast that clears itself before you have read it — and the consequence line above it rewrites to the trusted wording.','rgba(52,211,153,.5)')],
+   gtee:[Y('Revoke is offered in the same place, styled destructively, so granting is reversible from the panel.')],
+   contract:'trust-consent · revoke uses the same path'}]},
+
+{id:'drift', group:'Trust & safety', name:'Someone hand-edited a config', tag:'2 STEPS', tone:'g',
+ summary:"A CLI's config no longer matches the manifest. Pick which one is the truth. The generic confirm that restated the verb you had just chosen is gone — the diff plus the stated outcome is the consent.",
+ steps:[
+  {name:'The concern', component:'ConcernCard · drift', ui:'popover', cli:'doctor',
+   setup:s=>{s.trust='trusted'},
+   how:[H('“Review”, not “Fix”','The panel does not know which side is the truth, and says so. A Fix button here would be picking a winner on your behalf.')],
+   gtee:[Y('Drift is reported, never resolved silently — nothing is rewritten until you choose.')],
+   contract:'agentstack.diff RPC · scope-explicit',
+   advance:s=>s.dialog==='drift'},
+  {name:'Review drift', component:'DriftScopeSection', ui:'dialog', cli:'diff', setup:s=>{s.trust='trusted';s.dialog='drift'},
+   how:[H('Weighted, not symmetrical','“Keep edits” is emphasised because it is the non-destructive answer. Two equal-weight buttons made you guess which one loses work.','rgba(52,211,153,.5)'),
+        H('Each verb states its own consequence','On its own line, next to the button, instead of inside a modal you dismiss before it takes effect.')],
+   gtee:[Y("Re-rendering never prunes servers belonging to another setup — only the managed region is rewritten."),
+         Y('Both directions are recorded in the restore ledger.')],
+   contract:'adopt-project / apply-project · scope explicit in the action name',
+   advance:s=>!s.drift,
+   open:'The diff renders verbatim, capped at 6,000 characters but not redacted. A hand-edited config can contain an inline token, so value positions should be masked before display.'}]},
+
+{id:'guard', group:'Trust & safety', name:'Turn the guard on', tag:'THE ONE WRITE', tone:'a',
+ summary:'The only write the glance popover itself can start. t3code’s Full-access mode disables the provider’s own approval prompts; the guard puts one back, machine-wide.',
+ steps:[
+  {name:'The concern', component:'ConcernCard · guard-install', ui:'popover', cli:'guard',
+   setup:s=>{s.trust='trusted';s.drift=false},
+   how:[H('It only ever adds','Every other concern routes to a dialog. This one confirms inline because the action is additive and reversible — there is nothing to review first.','rgba(52,211,153,.5)')],
+   gtee:[Y('The confirm names its own undo: reversible with guard uninstall.')],
+   contract:'guard-install · one of three ACTION_META kinds the panel may run',
+   advance:s=>!!s.action},
+  {name:'Confirm and run', component:'ActionConfirm', ui:'popover', cli:'guardinstall',
+   setup:s=>{s.trust='trusted';s.drift=false;s.action={kind:'guard-install',phase:'confirm'}},
+   how:[H('Machine-wide, said out loud','The hook is written for every detected CLI, not just this project — so the confirm says “machine-wide” rather than letting the project-scoped dialog imply otherwise.','rgba(251,191,36,.5)')],
+   gtee:[Y('Only adds protection — no existing hook or config is replaced.'),
+         N('It is a cooperative pre-tool-use hook. It gates agent tool calls; it is not a sandbox and does not confine other processes.')],
+   contract:'guard-install',
+   advance:s=>s.guard,
+   open:'Enabling from a project-scoped dialog writes hooks for the whole machine. The copy is honest about it, but the control still sits inside a per-project surface.'}]},
+
+{id:'denial', group:'Trust & safety', name:'The guard blocks a command', tag:'IN CHAT', tone:'r',
+ summary:'The one AgentStack surface most users will ever notice: it appears in the thread, unprompted, and reads as protection rather than failure.',
+ steps:[{name:'Denial card', component:'AgentstackDenialCard', ui:'dialog', cli:'guardtest', setup:s=>{s.dialog='denial'},
+   how:[H('Five parts, always','What was blocked, the rule, what it protects, the safe next step, the details. That is why the timeline renders a card instead of an error.','rgba(52,211,153,.5)'),
+        H('No “Allow once”','The second button exists only to say the denial is not the panel’s to override — and to name the file that is.','rgba(248,113,113,.5)'),
+        H('The ceiling cannot be raised by a repo','Machine policy is a ceiling: a project manifest may narrow it, never loosen it.','rgba(91,124,250,.5)')],
+   gtee:[Y('The command was denied before it ran — your working tree was not touched.'),
+         Y('The denial is recorded with argument digests only, never values.'),
+         N('Coverage is a cooperative hook on this machine. It does not confine processes started outside an agent CLI.')],
+   contract:'denial contract · View in audit log opens the Activity tab'}]},
+
+{id:'protection', group:'Trust & safety', name:'Stronger modes, and sharing', tag:'READ-ONLY', tone:'n',
+ summary:'Each layer says what it covers and what it costs — including where it stops. Sharing shares the tab and stays read-only on purpose.',
+ steps:[{name:'Protection tab', component:'ProtectionPanel + SharePanel', ui:'manage:protection', cli:'protection',
+   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='protection'},
+   how:[H('The labels are the integrity','“not kernel isolation”, “needs Docker”, “covers agent tool calls — not a sandbox”. This is the product refusing to oversell itself.','rgba(52,211,153,.5)'),
+        H('Sharing has no buttons','Sign, verify, lib sync and export need a key or a passphrase that must never enter a browser payload, so the panel shows the commands and stops there.','rgba(91,124,250,.5)')],
+   gtee:[Y('Under --sandbox --lockdown, network egress can only leave through the audited proxy.'),
+         Y('Only ' + REF + ' names travel when you share — values stay on each machine.'),
+         N('A locked run does not confine a server that is already running: it pins content and records evidence.')],
+   contract:'read-only · every verb here belongs to the CLI'}]},
+
+{id:'workflow', group:'Workflows', name:'Approve a blueprint, then watch it run', tag:'3 STEPS', tone:'g',
+ summary:'The model proposes a shape, you approve it in the thread, the pinned bytes still get the normal trust review, and the live run is one click from the panel. The old Workflows nav row is gone — a live strip and a tab badge replaced it.',
+ steps:[
+  {name:'Approve the shape', component:'BlueprintReviewCard', ui:'dialog', cli:'workflow',
+   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.dialog='blueprint'},
+   how:[H("Approving a shape isn't running it",'Each button sends an exact plain-text reply into the thread. The graph is pinned next to the script, so editing either one asks you again.','rgba(52,211,153,.5)'),
+        H('The card admits its own limit','“The graph shows the intended shape; it is not proof the code matches it.” You still review the real bytes at the trust step.')],
+   gtee:[Y('Approval writes nothing executable.'),
+         N('The graph is a claim about intent, not a verified property of the script.')],
+   contract:'blueprint parse + send-message — disabled without a live chat thread'},
+  {name:'Live strip', component:'AgentstackControl · live run', ui:'popover', cli:'workflow',
+   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.activeProfile='rust';s.activeRun={workflow:'nightly-review',running:2}},
+   how:[H('One click, not a nav row','A live run puts a strip above the body and a badge on the Activity tab. The Workflows row — empty for almost everyone — is gone.'),
+        H('The only animated element','The pill dot deliberately does not pulse while the strip does, so two pulses never read as two separate events.','rgba(91,124,250,.5)')],
+   gtee:[Y('The strip appears alongside whatever body state is showing — it is not gated by the concern.')],
+   contract:'gated on observe — otherwise “run details below may be limited”',
+   advance:s=>s.dialog==='monitor'},
+  {name:'Watch the agents', component:'WorkflowMonitorDialog', ui:'dialog', cli:'workflow',
+   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.activeRun={workflow:'nightly-review',running:2};s.dialog='monitor'},
+   how:[H('Posture is per step','Each row carries its own posture label, so a HOST step among LOCKED readers is visible rather than averaged away.','rgba(52,211,153,.5)'),
+        H('Observe-only, and it says so','The dialog reads the run; it does not start or stop it. Start and kill stay in the terminal, where the run’s lifetime actually lives.','rgba(91,124,250,.5)')],
+   gtee:[Y("Every step's evidence is recorded independently — the run can be audited step by step."),
+         Y('Roles can only narrow, and ceilings are frozen at spawn.'),
+         N('The panel cannot stop a run; agentstack kill does, and reverts any toolset it owned.')],
+   contract:'workflow observe · read-only'}]},
+
+{id:'activity', group:'Evidence', name:'See what your agents did', tag:'WEAKEST TAB', tone:'r',
+ summary:'The CLI has a flight recorder, per-capability context costs and evidence-backed fixes. The panel shows server__tool, a dot and an age — the widest gap between the two surfaces.',
+ steps:[{name:'Activity tab', component:'ActivityPanel + WorkflowPanel', ui:'manage:activity', cli:'runs',
+   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='activity';s.activeRun={workflow:'nightly-review',running:2}},
+   how:[H('Digests, not values','The audit log records argument digests across every run. That is what makes it safe to show in a shared UI at all.','rgba(52,211,153,.5)'),
+        H('Two nav rows became one tab','Brokered calls and workflow runs were separate destinations, one of them almost always empty. Calls come first as the common case.','rgba(91,124,250,.5)')],
+   gtee:[Y('No argument value is ever stored or displayed — only digests.'),
+         N('A plain host run that talks to servers directly leaves nothing to report; only brokered activity is recorded.')],
+   contract:'report calls · report runs',
+   open:'“Why did GitHub fail in Codex?” needs the failure reason and the run the call belonged to. Both exist in report calls; neither is surfaced. This is the one tab I would hold back from general release.'}]},
+
+{id:'degraded', group:'Degraded', name:'Version mismatch, and an unreadable read', tag:'FAILS CLOSED', tone:'g',
+ summary:'When the CLI speaks a newer schema, or a status read lands mid-write, the panel disables actions rather than guessing — and names exactly what it cannot do.',
+ steps:[
+  {name:'Update needed', component:'UpdateNeeded', ui:'popover', cli:'degraded', setup:s=>{s.incompatible=true},
+   how:[H('Negotiated, not assumed','The panel asks which contracts the CLI supports and disables only the affected actions. A newer CLI never causes a wrong write.','rgba(52,211,153,.5)')],
+   gtee:[Y('An unsupported contract disables the action — it is never approximated with an older one.')],
+   contract:'schema compare · reads still work, actions do not',
+   open:'It correctly refuses to act but offers no way out. t3code already knows how to update itself via the sidebar update pill — that path should be wired in.'},
+  {name:'Unreadable status', component:'DoctorUnreadable', ui:'popover', cli:'doctor', setup:s=>{s.doctorNull=true},
+   how:[H('The reassurance sentence matters','“Any change you just made has still been applied” is the difference between a scary error and a momentary read failure.','rgba(91,124,250,.5)')],
+   gtee:[Y('A failed read never rolls anything back — the last write stands.')],
+   contract:'status read returned no parseable doctor report'},
+  {name:'Server silent', component:'unreachable', ui:'popover', cli:'notinstalled', setup:s=>{s.reachable=false},
+   how:[H('A different failure, a different sentence','This is the t3code server not answering, not the CLI failing. Naming them separately is why you can tell which one to look at.')],
+   gtee:[Y('Distinct from a CLI failure, so the two are never confused for each other.'),
+         N('Unlike the other two failures, this one renders no Check again — recovery waits on the background poll.')],
+   contract:'the status RPC itself failed'}]},
+];
+
+/* flat frame list, for the sheet */
+const FLAT = SCEN.flatMap(sc => sc.steps.map((st,i)=>({sc,st,i})));
+const TONE_N = {g:'',a:'o',r:'r',b:'b',n:'n'};
+
+/* ══ render ═════════════════════════════════════════════════════════ */
+const scenario = () => SCEN.find(s=>s.id===CUR.scenario) || SCEN[0];
+const step = () => { const sc=scenario(); return sc.steps[Math.min(CUR.step, sc.steps.length-1)]; };
+function stateFor(sc, i){ const s=base(); sc.steps[i].setup(s); return s; }
+
+function renderRail(){
+  const groups=[...new Set(SCEN.map(s=>s.group))];
+  document.getElementById('railScroll').innerHTML = groups.map(g=>
+    `<h2>${g}</h2>` + SCEN.filter(s=>s.group===g).map(s=>{
+      const on = s.id===CUR.scenario;
+      const col = s.tone==='g'?'var(--green)':s.tone==='a'?'var(--amber)':s.tone==='r'?'var(--red)':s.tone==='b'?'var(--blueSoft)':'var(--dim)';
+      return `<button class="item" data-scen="${s.id}" aria-current="${on}">
+        <span class="dot" style="background:${col}"></span>
+        <span class="nm">${esc(s.name)}</span>
+        <span class="ct">${s.steps.length>1?s.steps.length+' steps':''}</span></button>`;
+    }).join('')).join('');
+  document.getElementById('railCount').textContent = `${SCEN.length} scenarios · ${FLAT.length} frames`;
+}
+
+function uiFor(s){
+  if(s.dialog==='trust')     return viewTrust(s);
+  if(s.dialog==='drift')     return viewDrift(s);
+  if(s.dialog==='setup')     return viewSetup(s);
+  if(s.dialog==='monitor')   return viewMonitor();
+  if(s.dialog==='denial')    return viewDenial();
+  if(s.dialog==='blueprint') return viewBlueprint();
+  if(s.manage)               return viewManage(s);
+  return viewGlance(s);
+}
+
+function renderGuided(){
+  const sc=scenario(), st=step(), c=CLI[st.cli]||CLI.status;
+  const showUi = CUR.view!=='cli', showCli = CUR.view!=='ui';
+  const uiWidth = CUR.view==='ui' ? '100%' : '46%';
+  document.getElementById('main').innerHTML = `
+  <header class="hdr">
+    <div class="r1">
+      <div class="col g4" style="min-width:0">
+        <div class="row g10"><span class="nm">${esc(sc.name)}</span><span class="tag ${sc.tone}">${sc.tag}</span></div>
+        <span class="summary">${esc(sc.summary)}</span>
+      </div>
+      <div class="toggle">
+        ${[['both','Both'],['ui','UI only'],['cli','CLI only']].map(([k,l])=>
+          `<button data-view="${k}" aria-pressed="${CUR.view===k}">${l}</button>`).join('')}
+      </div>
+    </div>
+    <div class="steps">${sc.steps.map((x,i)=>`<button data-step="${i}" aria-current="${i===CUR.step}">
+      <span class="num ${i<CUR.step?'done':''}">${i<CUR.step?'✓':i+1}</span><span class="lbl">${esc(x.name)}</span></button>`).join('')}</div>
+  </header>
+  <div class="body">
+    ${showUi?`<div class="uicol" style="width:${uiWidth}">
+      <div class="colhead"><span class="k">WHAT YOU SEE</span><span class="v">${st.ui.startsWith('manage')?'Manage · dialog':st.ui==='popover'?'popover · 400px':'dialog'}</span>
+        <span class="c">${esc(st.component)}</span></div>
+      <div class="uistage" id="uistage">${uiFor(S)}</div></div>`:''}
+    ${showCli?`<div class="clicol">
+      <div class="colhead"><span class="k">THE SAME THING IN THE CLI</span>
+        <span class="c">${c.recon?'<span class="badge a" title="A write command — not executed during the review; output read from the source instead.">reconstructed</span>':'<span class="badge g" title="Captured from ./target/release/agentstack 0.16.0">captured</span>'}</span></div>
+      <div class="cliscroll">
+        <div class="term-wrap">
+          <div class="term-top"><i style="background:#F87171"></i><i style="background:#FBBF24"></i><i style="background:#34D399"></i>
+            <span class="cwd">${esc(c.cwd||'~')}</span></div>
+          <div class="term"><span class="ps">$</span> <b>${esc(c.cmd)}</b><span class="cursor"></span>
+
+${c.out}</div>
+        </div>
+        <div class="col g10"><span class="sechead">HOW IT WORKS</span>
+          ${st.how.map(h=>`<div class="how"><span class="accent" style="background:${h.a}"></span>
+            <div class="col g4"><span class="ht">${esc(h.t)}</span><span class="hx">${esc(h.x)}</span></div></div>`).join('')}</div>
+        <div class="col g8"><span class="sechead">GUARANTEES AT THIS STEP</span>
+          ${st.gtee.map(([m,t])=>`<div class="gt ${m==='✓'?'yes':'no'}"><span class="m">${m}</span><span class="x2">${esc(t)}</span></div>`).join('')}</div>
+        ${st.open?`<div class="col g8"><span class="sechead">STILL OPEN</span>
+          <div class="openbox"><span class="ot">${st.open}</span></div></div>`:''}
+        <div class="contract"><span class="k">contract</span><span class="v">${esc(st.contract)}</span></div>
+      </div></div>`:''}
+  </div>`;
+}
+
+function renderSheet(){
+  const groups=[...new Set(SCEN.map(s=>s.group))];
+  let n=0;
+  document.getElementById('main').innerHTML = `<div class="scroller">${groups.map(g=>{
+    const items=FLAT.filter(f=>f.sc.group===g);
+    return `<h2 class="sheet-h">${g}</h2>
+      <p class="sheet-p">${items.length} frame${items.length>1?'s':''} · ${[...new Set(items.map(f=>f.sc.name))].length} scenario(s)</p>
+      <div class="sheet">${items.map(f=>{
+        const s=stateFor(f.sc,f.i); n++;
+        return `<div class="card">
+          <div class="card-h"><span class="n ${TONE_N[f.sc.tone]}">${String(n).padStart(2,'0')}</span>
+            <span class="t2">${esc(f.sc.name)}${f.sc.steps.length>1?' · '+esc(f.st.name):''}</span>
+            <span class="c2">${esc(f.st.component)}</span></div>
+          <div class="card-b frozen">${uiFor(s)}</div>
+          <div class="card-n">${f.st.gtee.map(([m,t])=>`<div class="gt ${m==='✓'?'yes':'no'}"><span class="m">${m}</span><span class="x2">${esc(t)}</span></div>`).join('')}
+            ${f.st.open?`<div class="openbox"><span class="ot">${f.st.open}</span></div>`:''}</div>
+        </div>`;
+      }).join('')}</div>`;
+  }).join('')}</div>`;
+}
+
+function renderRef(){
+  const el=document.getElementById('refq'), q=el?el.value:'';
+  const keys=Object.keys(CLI).filter(k=>!q||CLI[k].cmd.toLowerCase().includes(q.toLowerCase()));
+  document.getElementById('main').innerHTML = `<div class="scroller">
+    <div class="refhead"><input id="refq" placeholder="Filter commands…" value="${esc(q)}">
+      <span class="xs dimt">${keys.length} of ${Object.keys(CLI).length} · <span class="badge g">captured</span> ran against the real binary · <span class="badge a">reconstructed</span> writes, read from the source instead</span></div>
+    ${keys.map(k=>{const c=CLI[k];return `<details class="refitem" ${keys.length<4?'open':''}>
+      <summary><span class="cmdname">${esc(c.cmd)}</span><span class="purpose">${esc(c.cwd||'')}</span>
+        <span class="flag badge ${c.recon?'a':'g'}">${c.recon?'reconstructed':'captured'}</span></summary>
+      <div class="refbody"><div class="term" style="max-height:none">${c.out}</div></div></details>`;}).join('')}</div>`;
+  if(q){const i=document.getElementById('refq'); i.focus(); i.setSelectionRange(q.length,q.length);}
+}
+
+function render(){
+  renderRail();
+  if(CUR.mode==='guided') renderGuided();
+  else if(CUR.mode==='sheet') renderSheet();
+  else renderRef();
+  document.querySelectorAll('[data-mode]').forEach(b=>b.setAttribute('aria-pressed', b.dataset.mode===CUR.mode));
+}
+
+/* ══ actions — the live state machine ═══════════════════════════════ */
+function act(a){
+  const [head,...rest]=a.split(':');
+  switch(head){
+    case 'close': S.dialog=null; S.manage=null; S.picker=null; S.popover=true; break;
+    case 'noop': break;
+    case 'recheck': S.loaded=true; S.doctorNull=false; S.reachable=true; break;
+    case 'manage': S.dialog=null; S.manage=rest[0]; break;
+    case 'open':   S.dialog=rest[0]; break;
+    case 'concern':{
+      const c=concern(S); if(!c) break;
+      if(c.act==='review-trust') S.dialog='trust';
+      else if(c.act==='review-drift') S.dialog='drift';
+      else S.action={kind:c.act.split(':')[1],phase:'confirm'};
+      break;}
+    case 'act':
+      if(rest[0]==='start') S.action={kind:rest[1],phase:'confirm'};
+      if(rest[0]==='cancel'||rest[0]==='dismiss') S.action=null;
+      if(rest[0]==='run'){
+        const k=S.action.kind;
+        S.action={kind:k,phase:'done',ok:true,message:ACTION_META[k].done};
+        if(k==='guard-install') S.guard=true;
+        if(k==='adopt-project'||k==='apply-project') S.drift=false;
+      }
+      break;
+    case 'trust':
+      if(rest[0]==='grant'){S.trust='trusted';S.trustAct={ok:true,message:'trusted /Users/tarek.k/GitHub/checkout at sha256:3f9a…c0'};}
+      if(rest[0]==='revoke'){S.trust='inert';S.trustAct={ok:true,message:'revoked — this project is inert again'};}
+      break;
+    case 'drift':
+      S.drift=false;
+      S.driftAct={ok:true,message: rest[0]==='adopt'?'adopted 2 changes into .agentstack/agentstack.toml':'re-rendered 1 target from the manifest'};
+      break;
+    case 'setup':
+      if(rest[0]==='choice') S.secretChoice=+rest[1];
+      if(rest[0]==='apply'){S.setupAct={ok:true,message:'wrote .agentstack/agentstack.toml · 11 server(s) imported'};S.setupState='ready';}
+      break;
+    case 'use':  S.session={profile:rest[0],ago:'just now'}; break;
+    case 'stop': S.session=null; break;
+    case 'draft':
+      if(rest[0]==='new') S.draft={name:'',picked:[]};
+      if(rest[0]==='cancel') S.draft=null;
+      if(rest[0]==='pick'){const n=rest[1],p=S.draft.picked; S.draft.picked=p.includes(n)?p.filter(x=>x!==n):p.concat(n);}
+      if(rest[0]==='create'){
+        S.toolsets=S.toolsets.concat([{name:S.draft.name.trim(),summary:`${S.draft.picked.length} tool(s)`,ready:true,blocked:null,members:S.draft.picked.slice()}]);
+        S.draft=null; S.created=true;
+      }
+      break;
+    case 'picker': S.picker = rest[0]==='close'?null:rest[0]; break;
+    case 'add':{ const [kind,name,target]=rest; S.picker=null;
+      S.flow={kind:'add',title:`Add ${kind} "${name}" to toolset "${target}"`,phase:'confirm',secret:kind==='server'}; break;}
+    case 'remove': S.flow={kind:'remove',name:rest[1],title:`Remove ${rest[0]} "${rest[1]}" from your library`,phase:'confirm'}; break;
+    case 'flow':
+      if(rest[0]==='close') S.flow=null;
+      if(rest[0]==='confirm'){
+        const f=S.flow;
+        if(f.kind==='remove'){ S.libRemoved.push(f.name); S.flow={...f,phase:'done',ok:true,message:`moved "${f.name}" to the library trash`}; }
+        else if(f.secret) S.flow={...f,phase:'done',ok:false,secretBlocked:true};
+        else S.flow={...f,phase:'done',ok:true,message:'re-locked agentstack.lock and re-rendered 4 target(s)'};
+      }
+      break;
+    case 'undo':
+      if(rest[0]==='reveal') S.undo={phase:'ready'};
+      if(rest[0]==='ask')    S.undo={phase:'confirm'};
+      if(rest[0]==='cancel') S.undo={phase:'ready'};
+      if(rest[0]==='run')    S.undo={phase:'done'};
+      break;
+  }
+  // a step advances by having actually been performed, not by switching a slide
+  const sc=scenario(), i=CUR.step, st=sc.steps[i];
+  if(st && st.advance && st.advance(S) && i+1<sc.steps.length) CUR.step=i+1;
+  render();
+}
+
+function gotoStep(scenarioId, i){
+  CUR.scenario=scenarioId; CUR.step=i;
+  S = stateFor(scenario(), i);
+  render();
+}
+
+/* ── events ──────────────────────────────────────────────────────── */
+document.addEventListener('click', e=>{
+  const m=e.target.closest('[data-mode]');   if(m){ CUR.mode=m.dataset.mode; render(); return; }
+  const sc=e.target.closest('[data-scen]');  if(sc){ gotoStep(sc.dataset.scen,0); return; }
+  const stp=e.target.closest('[data-step]'); if(stp){ gotoStep(CUR.scenario, +stp.dataset.step); return; }
+  const v=e.target.closest('[data-view]');   if(v){ CUR.view=v.dataset.view; render(); return; }
+  const a=e.target.closest('[data-act]');
+  if(a && !a.closest('.frozen') && !a.hasAttribute('disabled')) act(a.dataset.act);
+});
+document.addEventListener('input', e=>{
+  if(e.target.id==='refq'){ renderRef(); return; }
+  const k=e.target.dataset.input;
+  if(!k) return;
+  const pos=e.target.selectionStart;
+  if(k==='draftname'&&S.draft) S.draft.name=e.target.value;
+  if(k==='query') S.query=e.target.value;
+  render();
+  const el=document.querySelector(`[data-input="${k}"]`);
+  if(el){ el.focus(); el.setSelectionRange(pos,pos); }
+});
+document.addEventListener('keydown', e=>{
+  if(e.target.tagName==='INPUT') return;
+  const sc=scenario();
+  if(e.key==='ArrowRight') gotoStep(sc.id, Math.min(CUR.step+1, sc.steps.length-1));
+  if(e.key==='ArrowLeft')  gotoStep(sc.id, Math.max(CUR.step-1, 0));
+});
+
+gotoStep('ready',0);
+</script>
+</body>
+</html>
