@@ -292,9 +292,9 @@ const base = () => ({
   session:null, activeProfile:null, activeRun:null,
   canSessions:true, canEditProfiles:true, canRestore:true,
   toolsets:[
-    {name:'rust',    summary:'3 skills · 0 servers · for claude-code, codex', ready:true,  blocked:null, members:['rust-best-practices','rust-async-patterns','rust-mcp-server-generator']},
-    {name:'backend', summary:'2 servers · 3 skills',                          ready:true,  blocked:null, members:['github','postgres','sql-review']},
-    {name:'review',  summary:'1 server · 2 skills',                           ready:false, blocked:'not pinned — run agentstack lock', members:['github','pr-checklist']},
+    {name:'rust',    ready:true,  blocked:null, targets:'claude-code, codex', members:['rust-best-practices','rust-async-patterns','rust-mcp-server-generator']},
+    {name:'backend', ready:true,  blocked:null, targets:'claude-code',        members:['github','postgres','sql-review']},
+    {name:'review',  ready:false, blocked:'not pinned — run agentstack lock', targets:'claude-code', members:['github','pr-checklist']},
   ],
   manage:null, dialog:null, action:null, flow:null, draft:null, picker:null,
   query:'', undo:{phase:'idle'}, trustAct:null, driftAct:null, setupAct:null,
@@ -350,6 +350,45 @@ const ACTION_META = {
   'apply-project':{label:'Re-render',    confirm:"Re-render this project's CLI config from the manifest. Overwrites hand-edits; keeps servers other setups applied and never prunes. Reversible with agentstack restore.", done:'re-rendered 1 target from the manifest'},
 };
 
+/* ── one toolset, described one way ─────────────────────────────────
+   Every surface that shows a toolset uses these two. The summary is derived
+   from the members, so a row can never claim a count its own member list
+   contradicts — which is exactly what three hand-written literals did. */
+const isServer = n => LIB.servers.some(x=>x.name===n);
+function summarizeToolset(t){
+  const sv=t.members.filter(isServer).length, sk=t.members.length-sv;
+  const bits=[];
+  if(sv) bits.push(sv+' server'+(sv>1?'s':''));
+  if(sk) bits.push(sk+' skill'+(sk>1?'s':''));
+  if(!bits.length) bits.push('nothing in it yet');
+  if(t.targets) bits.push('for '+t.targets);
+  return bits.join(' · ');
+}
+/* opts.faithful reproduces the shipped rail's two bugs (see the Use-a-toolset
+   finding); the proposal passes it off, which is the fix. */
+function toolsetRow(s,t,o){
+  o=o||{};
+  const held = !!(s.session && s.session.profile===t.name);
+  const active = s.activeProfile===t.name;
+  const inUse = o.faithful ? (active||held) : held;
+  const sel = o.selectable && !s.newRow && s.sel===t.name;
+  const age = (o.faithful ? (inUse&&s.session) : held) ? ' · in use '+s.session.ago : '';
+  const tag = o.selectable
+    ? `${held?'<span class="badge g">in use</span>':''}${sel?'<span class="badge" style="background:rgba(91,124,250,.18);color:var(--blueSoft)">editing</span>':''}`
+    : (inUse&&s.canSessions ? btn('Stop','stop')
+       : (t.ready&&!s.session&&s.canSessions ? btn('Use','use:'+t.name,'','title="Use this toolset temporarily — ends with your files back as they were"') : ''));
+  const body = `<div class="row g8">${dot(inUse?'':(t.ready?'g6':'a'))}
+      <span class="xs" style="color:var(--text);font-weight:600;flex:1">${esc(t.name)}</span>${tag}</div>
+    <span class="srcline">${esc(summarizeToolset(t))}${age}</span>
+    ${t.blocked?`<span class="xs warnt">${esc(t.blocked)}</span>`:''}
+    ${t.members.length?`<span class="srcline">${t.members.map(esc).join(' · ')}</span>`:''}`;
+  const style = sel ? 'border-color:rgba(91,124,250,.45);background:rgba(91,124,250,.08)'
+              : inUse ? 'border-color:rgba(52,211,153,.3);background:rgba(52,211,153,.06)' : '';
+  return o.selectable
+    ? `<button class="box col g4" data-act="sel:${t.name}" style="width:100%;text-align:left;${style}">${body}</button>`
+    : `<div class="box col g4" style="${style}">${body}</div>`;
+}
+
 const btn=(l,a,c='',x='')=>`<button class="btn ${c}" data-act="${a}" ${x}>${l}</button>`;
 const dot=k=>`<span class="dot ${k||''}"></span>`;
 
@@ -396,7 +435,7 @@ function viewGlance(s){
       body = `<div class="box col g8"><span class="cap">WORKING UNDER</span>
         <div class="row g8"><span style="font-size:14px;font-weight:600;flex:1">${esc(a)}</span>
           ${s.session&&s.canSessions?btn('Stop using','stop'):''}${btn('Switch','manage:toolsets')}</div>
-        <span class="xs">${esc(row?row.summary:'applied to this project')}${s.session?` · in use ${s.session.ago}`:''}</span></div>`;
+        <span class="xs">${esc(row?summarizeToolset(row):'applied to this project')}${s.session?` · in use ${s.session.ago}`:''}</span></div>`;
     } else {
       body = `<div class="box col g8"><span class="d">${s.toolsets.length?'No toolset is active. Pick one to apply it here.':'No toolsets yet — bundle the tools this project needs into one.'}</span>
         ${btn(s.toolsets.length?'Choose':'Create one','manage:toolsets')}</div>`;
@@ -495,16 +534,9 @@ function railView(s){
   if(s.toolsets.length===0&&!d) cards+=`<div class="box dash col g6"><span class="t">No toolsets yet</span>
     <span class="xs">A toolset bundles the servers and skills one kind of work needs. Nothing in the library can be added until there's one to add it to.</span>
     ${btn('Create the first one','draft:new')}</div>`;
-  cards+=s.toolsets.map(t=>{
-    const inUse=(s.session&&s.session.profile===t.name)||s.activeProfile===t.name;
-    return `<div class="box col g4" style="${inUse?'border-color:rgba(52,211,153,.3);background:rgba(52,211,153,.06)':''}">
-      <div class="row g8">${dot(inUse?'':(t.ready?'g6':'a'))}
-        <span class="xs" style="color:var(--text);font-weight:600;flex:1">${esc(t.name)}</span>
-        ${inUse&&s.canSessions?btn('Stop','stop'):(t.ready&&!s.session&&s.canSessions?btn('Use','use:'+t.name,'','title="Use this toolset temporarily — ends with your files back as they were"'):'')}</div>
-      <span class="srcline">${esc(t.summary)}${inUse&&s.session?' · in use '+s.session.ago:''}</span>
-      ${t.blocked?`<span class="xs warnt">${esc(t.blocked)}</span>`:''}
-      ${t.members?`<span class="srcline">${t.members.map(esc).join(' · ')}</span>`:''}</div>`;
-  }).join('');
+  // faithful: keeps the shipped rail's Stop-without-a-session and leaking
+  // "in use" age, because both are findings on this scenario.
+  cards+=s.toolsets.map(t=>toolsetRow(s,t,{faithful:true})).join('');
   return `<div class="pane-l">
     <div class="row g8" style="padding:12px 12px 6px"><span class="cap">TOOLSETS</span>
       ${s.canEditProfiles&&!d&&s.toolsets.length>0?`<span style="margin-left:auto">${btn('+ New','draft:new')}</span>`:''}</div>
@@ -587,18 +619,6 @@ function tabToolsetsProposed(s){
   const inSet  = n => (base.includes(n) && !pend.rem.includes(n)) || pend.add.includes(n);
   const count  = pend.add.length + pend.rem.length;
 
-  const railRow = t => {
-    const on = !s.newRow && s.sel===t.name;
-    const held = s.session && s.session.profile===t.name;
-    return `<button class="box col g4" data-act="sel:${t.name}" style="width:100%;text-align:left;${on?'border-color:rgba(91,124,250,.45);background:rgba(91,124,250,.08)':''}">
-      <div class="row g8">${dot(held?'':(t.ready?'g6':'a'))}
-        <span class="xs" style="color:var(--text);font-weight:600;flex:1">${esc(t.name)}</span>
-        ${held?`<span class="badge g">in use</span>`:''}
-        ${on?`<span class="badge" style="background:rgba(91,124,250,.18);color:var(--blueSoft)">editing</span>`:''}</div>
-      <span class="srcline">${esc(t.summary)}</span>
-      ${t.blocked?`<span class="xs warnt">${esc(t.blocked)}</span>`:''}</button>`;
-  };
-
   const newRow = s.newRow ? `<div class="box col g6" style="border-color:rgba(91,124,250,.45);background:rgba(91,124,250,.08)">
       <span class="cap">NEW TOOLSET</span>
       <input class="inp" placeholder="Name it, e.g. web" value="${esc(s.newRow.name)}" data-input="newname">
@@ -645,7 +665,7 @@ function tabToolsetsProposed(s){
   return `<div class="pane-l">
       <div class="row g8" style="padding:12px 12px 6px"><span class="cap">TOOLSETS</span>
         ${!s.newRow?`<span style="margin-left:auto">${btn('+ New','p:new')}</span>`:''}</div>
-      <div class="col g6" style="padding:0 8px 12px">${newRow}${s.toolsets.map(railRow).join('')}</div>
+      <div class="col g6" style="padding:0 8px 12px">${newRow}${s.toolsets.map(t=>toolsetRow(s,t,{selectable:true})).join('')}</div>
       <div style="padding:0 12px 12px"><span class="srcline">Pick one — the list on the right is its contents.</span></div>
     </div>
     <div class="pane-r">
@@ -1321,7 +1341,7 @@ const SCEN = [
    advance:s=>s.created},
   {name:'Created', component:'ToolsetRail', ui:'manage:toolsets', cli:'toolset',
    setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='toolsets';
-             s.toolsets=s.toolsets.concat([{name:'web',summary:'2 tool(s)',ready:true,blocked:null,members:['rust-testing','figma']}]);s.created=true},
+             s.toolsets=s.toolsets.concat([{name:'web',ready:true,blocked:null,targets:'claude-code',members:['rust-testing','figma']}]);s.created=true},
    how:[H('Creating does not activate','A new toolset appears with a Use button, not in use. Naming and activating stay separate verbs.','rgba(52,211,153,.5)')],
    gtee:[Y('Creating a toolset writes the manifest only — no CLI config is rendered until you use it.')],
    contract:'create-profile',
@@ -1474,7 +1494,7 @@ const SCEN = [
    advance:s=>!!(s.flow&&s.flow.phase==='done')},
   {name:'Create one, identically', component:'proposed · unsaved rail row', ui:'manage:toolsets', cli:'toolset',
    setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='toolsets';s.proposed=true;
-             s.newRow={name:'web',members:[],summary:'new toolset',ready:true,blocked:null}},
+             s.newRow={name:'web',members:[],ready:true,blocked:null,targets:'claude-code'}},
    how:[H('Creating stops being a mode','A new toolset is a rail row that is not saved yet, selected like any other. The list to its right behaves exactly as it just did — so nothing silently rewrites what the controls mean, and there is no state you have to notice you are in.'),
         H('Which is why the ticks made sense here first','Your instinct was right: ticking obviously means “put this in the thing I am building”. The proposal is to make the saved case work the same way, rather than have one gesture for new toolsets and another for existing ones.','rgba(52,211,153,.5)'),
         H('Create is the same button as Apply','One bar, one write, in the same place. For a new toolset it is also the only moment the name is validated.','rgba(91,124,250,.5)')],
@@ -1783,7 +1803,7 @@ function act(a){
       if(rest[0]==='cancel') S.draft=null;
       if(rest[0]==='pick'){const n=rest[1],p=S.draft.picked; S.draft.picked=p.includes(n)?p.filter(x=>x!==n):p.concat(n);}
       if(rest[0]==='create'){
-        S.toolsets=S.toolsets.concat([{name:S.draft.name.trim(),summary:`${S.draft.picked.length} tool(s)`,ready:true,blocked:null,members:S.draft.picked.slice()}]);
+        S.toolsets=S.toolsets.concat([{name:S.draft.name.trim(),ready:true,blocked:null,targets:'claude-code',members:S.draft.picked.slice()}]);
         S.draft=null; S.created=true;
       }
       break;
@@ -1791,7 +1811,7 @@ function act(a){
     case 'p':{
       const [op,...r]=rest;
       const reset=()=>{S.pending={add:[],rem:[]}};
-      if(op==='new'){ S.newRow={name:'',members:[],summary:'new toolset',ready:true,blocked:null}; S.menu=null; reset(); }
+      if(op==='new'){ S.newRow={name:'',members:[],ready:true,blocked:null,targets:'claude-code'}; S.menu=null; reset(); }
       if(op==='cancel'){ S.newRow=null; reset(); }
       if(op==='menu')  S.menu = r[0]||null;
       if(op==='reset') reset();
@@ -1810,7 +1830,7 @@ function act(a){
       }
       if(op==='create'){
         const m=S.pending.add.slice();
-        S.toolsets=S.toolsets.concat([{...S.newRow,members:m,summary:`${m.length} tool(s)`}]);
+        S.toolsets=S.toolsets.concat([{...S.newRow,members:m}]);
         S.sel=S.newRow.name; S.newRow=null; S.created=true; reset();
       }
       break;}
@@ -1826,7 +1846,6 @@ function act(a){
           if(f.secret) S.flow={...f,phase:'done',ok:false,secretBlocked:true};
           else {
             t.members = t.members.filter(x=>!f.rem.includes(x)).concat(f.add);
-            t.summary = `${t.members.length} tool(s)`;
             S.pending={add:[],rem:[]};
             S.flow={...f,phase:'done',ok:true,message:`re-locked once and re-rendered ${t.name} across 4 target(s)`};
           }
