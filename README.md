@@ -54,9 +54,9 @@ agentstack doctor    # verify it landed — every warning names its exact fix
 — no prompts, no token values — then `agentstack apply --write`. Inline tokens are lifted into
 `${REF}` placeholders, resolved per machine and never stored in the manifest.
 
-Here is the whole loop, recorded from a real run of the current binary:
+Here is the whole loop, condensed from a real run of the current binary:
 
-![Two CLIs with different half-setups: agentstack imports both into one manifest, renders each native format, passes doctor with 0 errors, and restores the machine byte-for-byte](docs/demos/first-value.gif)
+![Two CLIs with different half-setups: agentstack imports both into one manifest, renders each native format, passes doctor with 0 errors, and restores the machine byte-for-byte](docs/demos/first-value.svg)
 
 1. **Start** — two real native configs: Claude Code knows a `github` server
    (inline token), Codex knows `tldraw`. Neither knows the other's.

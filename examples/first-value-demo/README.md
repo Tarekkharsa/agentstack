@@ -27,11 +27,10 @@ that the journey's expected output stays accurate against the current binary.
 
 ## Record it
 
-vhs stalls on this machine; use asciinema + agg:
+vhs stalls on this machine; use asciinema:
 
 ```sh
 DEMO_PAUSE=2.5 asciinema rec first-value.cast --window-size 108x30 -c ./run-demo.sh
-agg --font-size 16 first-value.cast first-value.gif
 ```
 
 `DEMO_PAUSE` paces the narration lines for a watchable recording; the default
@@ -39,7 +38,14 @@ agg --font-size 16 first-value.cast first-value.gif
 108×30 window keeps the longest output lines unwrapped (the sandbox already
 pins its temp dir to a short `/tmp` path for the same reason).
 
-The published recording lives at `docs/demos/first-value.gif` (with its
-`.cast` source) and is embedded in the README, the website landing page, and
-the getting-started guide — re-record and replace it after any change to this
-script's output.
+The full recording is kept at `docs/demos/first-value.cast`. What the README,
+the website landing page, the getting-started guide and the demos page embed
+is `docs/demos/first-value.svg` — an animated terminal SVG condensed from that
+cast, and the `FIRST_VALUE` scene in `tools/make-term-svgs.py` is its source.
+It replaced a 664 KB GIF: 11 KB, crisp at any DPI, and it animates inside
+GitHub's image proxy (which blocks JS but not CSS). After any change to this
+script's output, re-record the cast, update the scene, and re-run:
+
+```sh
+python3 tools/make-term-svgs.py
+```

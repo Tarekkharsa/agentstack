@@ -168,10 +168,12 @@ def render(title, rows, out_path):
                 start_at = on
                 if cls == "c" and r.kind == "cmd" and any(c == "t" for c, _ in r.spans):
                     start_at = None  # patched below via extra class
+                # \0 stands in for the attribute quote so it survives esc();
+                # swapped back for a real '"' when the row is assembled below.
                 tspans.append(
                     f'<text x="{x:.1f}" y="{y}" fill="{fill}"{weight} '
                     f'textLength="{w:.1f}" lengthAdjust="spacingAndGlyphs" xml:space="preserve" '
-                    f'{"" if start_at is not None else f"class=~cc{i}~ "}>{esc(txt)}</text>'
+                    f'{"" if start_at is not None else f"class=\0cc{i}\0 "}>{esc(txt)}</text>'
                 )
             x += w
         if r.kind == "cmd":
@@ -180,20 +182,24 @@ def render(title, rows, out_path):
                 f".cc{i}{{opacity:0;animation:cc{i} {total}s linear infinite}}"
                 f"@keyframes cc{i}{{0%,{s1}%{{opacity:0}}{min(s1 + 0.01, 99.98)}%,99.5%{{opacity:1}}100%{{opacity:0}}}}"
             )
-        body.append(f'<g class="q{i}">{"".join(tspans).replace("~", chr(34))}</g>')
+        body.append(f'<g class="q{i}">{"".join(tspans).replace(chr(0), chr(34))}</g>')
 
     # blinking cursor parked after the last row's text, alive once it lands
     last = len(rows) - 1
     last_y = HEAD_H + int(PAD * 0.6) + (last + 1) * LH - 6
     cur_x = PAD + rows[last].text_len * CW + 4
     on_last = pct(starts[last])
+    # Two animations on one element would both target `opacity` and the later
+    # one (blink) would simply win, leaving the cursor visible from frame 0.
+    # A wrapper <g> keeps them on separate elements, so they multiply.
     css.append(
-        f".cur{{opacity:0;animation:curon {total}s linear infinite, blink 1.1s steps(2,start) infinite}}"
+        f".cur{{opacity:0;animation:curon {total}s linear infinite}}"
         f"@keyframes curon{{0%,{on_last}%{{opacity:0}}{min(on_last + 0.01, 99.98)}%,99.5%{{opacity:1}}100%{{opacity:0}}}}"
+        ".cur>rect{animation:blink 1.1s steps(2,start) infinite}"
     )
     body.append(
-        f'<rect class="cur" x="{cur_x:.1f}" y="{last_y - FS + 1}" width="7" height="{FS + 2}" '
-        f'fill="{COLORS["ok"]}"/>'
+        f'<g class="cur"><rect x="{cur_x:.1f}" y="{last_y - FS + 1}" width="7" height="{FS + 2}" '
+        f'fill="{COLORS["ok"]}"/></g>'
     )
 
     svg = (
@@ -228,6 +234,38 @@ FIRSTRUN = (
         gap(),
         cmd("agentstack apply"),
         out(("ok", "  ✓"), ("c", " nothing to write — every target in sync")),
+    ],
+)
+
+# The headline demo (README, landing hero, start, examples). Condensed from
+# docs/demos/first-value.cast — the asciinema recording of
+# examples/first-value-demo/run-demo.sh, which asserts all eight claims shown
+# here. Paths are shortened to their tails (the real run uses an isolated temp
+# HOME) and the long JSON/TOML dumps are collapsed to one line each; every
+# other line is the run's own output.
+FIRST_VALUE = (
+    "two half-set-up CLIs → one manifest → both in sync → undone",
+    [
+        cmd("cat ~/.claude.json ~/.codex/config.toml", "   # two CLIs, two formats"),
+        out(("c", '  "github": { … "GITHUB_TOKEN": "ghp-…" }   '), ("i", "Claude Code · JSON")),
+        out(("c", "  [mcp_servers.tldraw]                      "), ("i", "Codex CLI · TOML")),
+        out(("c", "  neither knows the other's server — and a live token sits in plain JSON"), d=0.8),
+        gap(),
+        cmd("agentstack init --yes --secrets env"),
+        out(("c", "  📥  Imported 2 MCP server(s) from those configs: github · tldraw")),
+        out(("c", "  🔐  1 plaintext token lifted to "), ("ok", "${GITHUB_TOKEN}"), ("c", " → gitignored .env")),
+        out(("ok", "  ✅  Wrote .agentstack/agentstack.toml"), ("c", "   the manifest holds the ${REF}"), d=0.8),
+        gap(),
+        cmd("agentstack apply --scope global --write"),
+        out(("ok", "  ✓"), ("c", " wrote 2 server(s) — 2 target(s) in sync")),
+        out(("c", "  Claude Code gained 'tldraw' · Codex gained 'github' — each in its own syntax"), d=0.8),
+        gap(),
+        cmd("agentstack doctor"),
+        out(("ok", "  ✓"), ("c", " 0 error(s), 0 warning(s)"), d=0.8),
+        gap(),
+        cmd("agentstack restore --last --write", "   # twice: undo the render, then the import"),
+        out(("ok", "  ✓"), ("c", " both native configs byte-identical to where they started")),
+        out(("ok", "  ✓"), ("c", " manifest and .env gone — the machine is exactly as it was")),
     ],
 )
 
@@ -297,8 +335,6 @@ GUARD = (
         gap(),
         out(("c", "  agent → "), ("i", "rm -rf /opt/acme/data")),
         out(("no", "    ✗ blocked"), ("c", "   destructive, outside the workspace"), d=0.8),
-        # NOTE: '~' is reserved by render() as a quote placeholder — avoid it
-        # in row text (the real demo uses HEAD~3; condensed here without it).
         out(("c", "  agent → "), ("i", "git reset --hard")),
         out(("no", "    ✗ blocked"), ("c", "   discards uncommitted work"), d=0.8),
         out(("c", "  agent → "), ("i", "cat .env")),
@@ -368,12 +404,13 @@ WIZARD_REPLAY = (
 
 if __name__ == "__main__":
     docs = Path(__file__).resolve().parent.parent / "docs"
-    # Only the SVGs still embedded somewhere are rendered: firstrun.svg
-    # (design docs, examples/sandbox) and trust-gate.svg (README). The other
-    # scene specs above are kept as source material but not written out —
-    # the old landing/docs pages that embedded them were replaced by the
-    # design-system site (docs/theme/).
+    # Only the SVGs still embedded somewhere are rendered: demos/first-value.svg
+    # (README, landing hero, start, examples), firstrun.svg (design docs,
+    # examples/sandbox) and trust-gate.svg. The other scene specs above are kept
+    # as source material but not written out — the old landing/docs pages that
+    # embedded them were replaced by the design-system site (docs/theme/).
     for name, (title, rows) in {
+        "demos/first-value": FIRST_VALUE,
         "firstrun": FIRSTRUN,
         "trust-gate": TRUST_GATE,
     }.items():

@@ -371,9 +371,11 @@ This is the primary graphical path, not an optional dashboard.
   `examples/first-value-demo/run-demo.sh` — self-asserting, sandboxed,
   asciinema-recordable via `DEMO_PAUSE`).
 - [x] Record a short demo focused on portability, not threat prevention
-  (2026-07-23: `docs/demos/first-value.gif` + `.cast`, asciinema+agg at
-  108×30, DEMO_PAUSE=2.5, recorded against the current binary with all eight
-  assertions green in the recorded run).
+  (2026-07-23: `docs/demos/first-value.cast`, asciinema at 108×30,
+  DEMO_PAUSE=2.5, recorded against the current binary with all eight
+  assertions green in the recorded run; 2026-07-28: the embedded artifact is
+  now `docs/demos/first-value.svg`, an animated terminal SVG condensed from
+  that cast by `tools/make-term-svgs.py`, replacing the 664 KB GIF).
 - [x] Put the same proof sequence in the README, website, and getting-started
   guide (2026-07-23: the five-step import → render → doctor → restore sequence
   with the recording embedded in README "Try it in 60 seconds", the landing
