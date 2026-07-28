@@ -262,6 +262,23 @@
 <p>Today there is one.</p>
 <h2 id="t3code">t3code<a class="hlink" href="#t3code" aria-label="Link to this section">#</a></h2>
 <p>t3code is AgentStack's optional graphical companion. The obtainable AgentStack CLI is the launch channel; as of v0.16.0 the integrated t3code fork has no public download, so this page documents the compatibility contract for source users rather than presenting an unavailable app as the way to begin. When a packaged t3code build becomes public, it can make AgentStack useful where people already start and supervise coding agents without becoming a second authority system.</p>
+<h3 id="the-released-cli-serves-the-whole-panel">The released CLI serves the whole panel<a class="hlink" href="#the-released-cli-serves-the-whole-panel" aria-label="Link to this section">#</a></h3>
+<p>The half that is public — the CLI — is already complete for this integration. The panel gates each of its features on a contract the CLI advertises, and the <strong>published <code>v0.16.0</code> release serves every one of them</strong>, so a source-built t3code needs no locally-built AgentStack behind it:</p>
+<div class="tblwrap"><table>
+<thead><tr><th>Panel capability</th><th>Contract</th><th>In released v0.16.0</th></tr></thead><tbody>
+<tr><td>Setup — render the plan, apply it</td><td><code>init-plan</code>, <code>apply-setup</code></td><td>yes</td></tr>
+<tr><td>Status — one state, one next action</td><td><code>status-v1</code>, <code>doctor-advisories-v1</code></td><td>yes</td></tr>
+<tr><td>Undo — revert this project's last write</td><td><code>restore-last</code></td><td>yes</td></tr>
+<tr><td>Toolsets — browse, create, add, activate</td><td><code>profiles-v1</code>, <code>profiles-edit-v1</code>, <code>toolset-create-v2</code></td><td>yes</td></tr>
+<tr><td>Use temporarily</td><td><code>sessions-v1</code></td><td>yes</td></tr>
+<tr><td>Review this project</td><td><code>trust-preview</code>, <code>trust-consent</code></td><td>yes</td></tr>
+<tr><td>Drift review</td><td><code>diff-v1</code>, <code>diff-ownership-v1</code></td><td>yes</td></tr>
+<tr><td>Library remove</td><td><code>library-remove-v1</code></td><td>yes</td></tr>
+<tr><td>Workflow monitor (read-only)</td><td><code>workflow-observe-v1</code></td><td>yes</td></tr>
+</tbody></table></div>
+<p>Check any build yourself — the envelope is part of the read:</p>
+<pre class="block"><code>agentstack doctor --json | jq '{schema_version, features}'</code></pre>
+<p>A panel feature whose contract is absent disables that action with upgrade guidance; it never guesses or degrades silently.</p>
 <h3 id="what-works-today">What works today<a class="hlink" href="#what-works-today" aria-label="Link to this section">#</a></h3>
 <p>AgentStack already manages the native configuration read by the coding CLIs t3code launches. Static activation and clean-at-rest sessions therefore apply to those launches without t3code reimplementing configuration logic.</p>
 <p>Run:</p>

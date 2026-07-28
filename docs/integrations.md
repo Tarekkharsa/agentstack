@@ -22,6 +22,34 @@ rather than presenting an unavailable app as the way to begin. When a packaged
 t3code build becomes public, it can make AgentStack useful where people already
 start and supervise coding agents without becoming a second authority system.
 
+### The released CLI serves the whole panel
+
+The half that is public — the CLI — is already complete for this integration.
+The panel gates each of its features on a contract the CLI advertises, and the
+**published `v0.16.0` release serves every one of them**, so a source-built
+t3code needs no locally-built AgentStack behind it:
+
+| Panel capability | Contract | In released v0.16.0 |
+| --- | --- | --- |
+| Setup — render the plan, apply it | `init-plan`, `apply-setup` | yes |
+| Status — one state, one next action | `status-v1`, `doctor-advisories-v1` | yes |
+| Undo — revert this project's last write | `restore-last` | yes |
+| Toolsets — browse, create, add, activate | `profiles-v1`, `profiles-edit-v1`, `toolset-create-v2` | yes |
+| Use temporarily | `sessions-v1` | yes |
+| Review this project | `trust-preview`, `trust-consent` | yes |
+| Drift review | `diff-v1`, `diff-ownership-v1` | yes |
+| Library remove | `library-remove-v1` | yes |
+| Workflow monitor (read-only) | `workflow-observe-v1` | yes |
+
+Check any build yourself — the envelope is part of the read:
+
+```bash
+agentstack doctor --json | jq '{schema_version, features}'
+```
+
+A panel feature whose contract is absent disables that action with upgrade
+guidance; it never guesses or degrades silently.
+
 ### What works today
 
 AgentStack already manages the native configuration read by the coding CLIs

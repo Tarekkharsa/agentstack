@@ -173,24 +173,32 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
 
   <section class="lesson-pane" id="lesson-1" hidden>
     <div class="kicker">LESSON 2 · THE MAP</div>
-    <h1 class="lesson">Six words explain the whole system</h1>
-    <p class="lede" style="margin-bottom:20px">Read the pipeline left to right: you write a <strong>manifest</strong>, the <strong>lockfile</strong> pins it, you <strong>trust</strong> the result, <strong>policy</strong> narrows what may run, and the <strong>gateway</strong> carries it to your tools — every call landing in the <strong>audit</strong> log.</p>
+    <h1 class="lesson">Four ideas, then a ladder</h1>
+    <p class="lede" style="margin-bottom:20px">Everyday agentstack is four ideas. <strong>Set up</strong> imports the tools you already have. A <strong>toolset</strong> is what this project or task needs. <strong>Status</strong> says whether you're ready and what to do next. <strong>Undo</strong> takes any change back. That is the whole beginner surface — the next lesson does all four.</p>
     <div style="background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md,16px);padding:20px 22px;margin-bottom:20px;overflow-x:auto">
       <div class="mono" style="display:flex;gap:6px;align-items:center;font-size:12px;white-space:nowrap">
-        <span style="background:var(--code-bg);border:1px solid var(--line);padding:8px 12px;border-radius:8px;font-weight:700">manifest</span><span style="color:var(--accent);font-weight:700">→</span>
-        <span style="background:var(--code-bg);border:1px solid var(--line);padding:8px 12px;border-radius:8px;font-weight:700">lockfile</span><span style="color:var(--accent);font-weight:700">→</span>
-        <span style="background:var(--code-bg);border:1px solid var(--line);padding:8px 12px;border-radius:8px;font-weight:700">trust</span><span style="color:var(--accent);font-weight:700">→</span>
-        <span style="background:var(--code-bg);border:1px solid var(--line);padding:8px 12px;border-radius:8px;font-weight:700">policy</span><span style="color:var(--accent);font-weight:700">→</span>
-        <span style="background:var(--code-bg);border:1px solid var(--line);padding:8px 12px;border-radius:8px;font-weight:700">gateway</span><span style="color:var(--accent);font-weight:700">→</span>
-        <span style="background:var(--strong-bg);color:var(--strong-fg);padding:8px 12px;border-radius:8px;font-weight:700">audit log</span>
+        <span style="background:var(--code-bg);border:1px solid var(--line);padding:8px 12px;border-radius:8px;font-weight:700">set up</span><span style="color:var(--accent);font-weight:700">→</span>
+        <span style="background:var(--code-bg);border:1px solid var(--line);padding:8px 12px;border-radius:8px;font-weight:700">toolset</span><span style="color:var(--accent);font-weight:700">→</span>
+        <span style="background:var(--code-bg);border:1px solid var(--line);padding:8px 12px;border-radius:8px;font-weight:700">status</span><span style="color:var(--accent);font-weight:700">→</span>
+        <span style="background:var(--strong-bg);color:var(--strong-fg);padding:8px 12px;border-radius:8px;font-weight:700">undo</span>
       </div>
     </div>
-    <div class="hint">Tap each term to open its plain-English definition — these eight cover 90% of what you'll read anywhere else.</div>
+    <p class="lede" style="margin-bottom:14px">Everything beyond those four arrives as a <strong>ladder</strong>, one rung at a time. Each rung pays off on its own, and nothing later is needed to keep the earlier wins. The rest of this tutorial is one lesson per rung, in this order:</p>
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:20px">
+      <div style="background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px"><div style="font-size:12.5px;font-weight:700;margin-bottom:3px">1 · Unify</div><div style="font-size:12.5px;color:var(--muted)">import once, render everywhere</div></div>
+      <div style="background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px"><div style="font-size:12.5px;font-weight:700;margin-bottom:3px">2 · Switch</div><div style="font-size:12.5px;color:var(--muted)">toolsets and temporary sessions</div></div>
+      <div style="background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px"><div style="font-size:12.5px;font-weight:700;margin-bottom:3px">3 · Diagnose</div><div style="font-size:12.5px;color:var(--muted)">doctor and diff explain drift</div></div>
+      <div style="background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px"><div style="font-size:12.5px;font-weight:700;margin-bottom:3px">4 · Recover</div><div style="font-size:12.5px;color:var(--muted)">keep an edit, or undo the write</div></div>
+      <div style="background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px"><div style="font-size:12.5px;font-weight:700;margin-bottom:3px">5 · Share</div><div style="font-size:12.5px;color:var(--muted)">locked, secret-free setups</div></div>
+      <div style="background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px"><div style="font-size:12.5px;font-weight:700;margin-bottom:3px">6 · Govern</div><div style="font-size:12.5px;color:var(--muted)">trust, policy, confined runs</div></div>
+    </div>
+    <div class="callout"><strong>Rung 6 has its own vocabulary</strong> — <span class="mono">manifest → lockfile → trust → policy → gateway → audit log</span> is the pipeline that governs work you didn't write. You meet each word at the lesson that needs it; nothing on rungs 1–5 requires any of them.</div>
+    <div class="hint">Tap each term below to open its plain-English definition — these eight cover 90% of what you'll read anywhere else.</div>
     <div id="termCards" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px"></div>
   </section>
 
   <section class="lesson-pane" id="lesson-2" hidden>
-    <div class="kicker">LESSON 3 · STEP 1 — UNIFY</div>
+    <div class="kicker">LESSON 3 · RUNG 1 — UNIFY</div>
     <h1 class="lesson">One manifest for every CLI</h1>
     <p class="lede"><code>agentstack init</code> scans your machine, imports the MCP servers your CLIs already have, and writes <strong>one reviewed manifest</strong>: <code>.agentstack/agentstack.toml</code>. Then <code>apply --write</code> renders it back into every CLI's native config. Edit once, applied everywhere.</p>
     <div class="callout" style="margin-bottom:18px"><strong>Secrets get lifted, not stored.</strong> Any inline token found in an imported config becomes a <code class="sm">${REF}</code> placeholder. The real value goes to a gitignored <code class="sm">.env</code> or the OS keychain — the manifest itself never holds a secret value.</div>
@@ -233,8 +241,8 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
     </div>
   </section>
 
-  <section class="lesson-pane" id="lesson-3" hidden>
-    <div class="kicker">LESSON 4 · STEP 2 — VERIFY</div>
+  <section class="lesson-pane" id="lesson-4" hidden>
+    <div class="kicker">LESSON 5 · RUNGS 3–4 — DIAGNOSE &amp; RECOVER</div>
     <h1 class="lesson">Doctor catches drift; you pick the truth</h1>
     <p class="lede"><strong>Drift</strong> = a mismatch between the manifest and what's on disk — someone hand-edited a config, or the manifest stopped declaring something. <code>doctor</code> flags it, and every warning names its exact fix. The decision is always the same question: <em>which side holds the truth?</em></p>
     <div class="grid2" style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px">
@@ -260,8 +268,8 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
     <div style="margin-top:16px;font-size:13px;color:var(--muted);line-height:1.6"><strong>One undo verb:</strong> every rendered-config write (<code class="sm">apply</code>, <code class="sm">use</code>, sessions) is recorded — <code class="sm">agentstack restore --last --write</code> reverts the most recent one. The manifest itself is yours: an <code class="sm">adopt</code> you regret is undone in your editor or git.</div>
   </section>
 
-  <section class="lesson-pane" id="lesson-4" hidden>
-    <div class="kicker">LESSON 5 · STEP 3 — GUARD</div>
+  <section class="lesson-pane" id="lesson-6" hidden>
+    <div class="kicker">LESSON 7 · RUNG 6 — GUARD</div>
     <h1 class="lesson">Block the accidents before they land</h1>
     <p class="lede"><code>agentstack guard install</code> wires a check into each CLI's own pre-tool-use hook. When the agent is about to run something obviously destructive, the hook refuses <em>before</em> the command executes.</p>
     <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:18px">
@@ -270,11 +278,11 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
       <div style="flex:1;min-width:180px;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px"><div class="mono" style="font-size:12.5px;font-weight:700;color:var(--bad);margin-bottom:4px">⛔ .env reads</div><div style="font-size:12.5px;color:var(--muted)">reads of secret and key files</div></div>
     </div>
     <div class="term" data-term="guard" data-title="what the agent sees" data-minh="130"></div>
-    <div class="callout"><strong>Honest limit:</strong> guard is <em>cooperative</em>, not enforcement. It catches an agent's accidents, not a determined attacker — a CLI that ignores its own hooks bypasses it entirely. Kernel-level confinement comes in Step 6.</div>
+    <div class="callout"><strong>Honest limit:</strong> guard is <em>cooperative</em>, not enforcement. It catches an agent's accidents, not a determined attacker — a CLI that ignores its own hooks bypasses it entirely. Kernel-level confinement comes two lessons on, in Confine.</div>
   </section>
 
-  <section class="lesson-pane" id="lesson-5" hidden>
-    <div class="kicker">LESSON 6 · STEP 4 — TRUST</div>
+  <section class="lesson-pane" id="lesson-7" hidden>
+    <div class="kicker">LESSON 8 · RUNG 6 — TRUST</div>
     <h1 class="lesson">Cloned repos stay inert until you approve them</h1>
     <p class="lede">Register the gateway once (<code>gateway connect --all --write</code>) and every repo serves its capabilities through it — but a fresh clone is <strong>inert</strong>: no server spawns, no skill enters context, no secret resolves, until you run <code>agentstack trust .</code></p>
     <div style="background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md,16px);padding:20px 22px;margin-bottom:18px">
@@ -296,10 +304,13 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
     <div class="callout"><strong>What trust means — exactly.</strong> Trust pins a SHA-256 <em>consent digest</em> of the manifest, overlay, and lockfile, and gates whether declared servers may <em>load</em>. It does not vouch that the code is safe, and it does not confine a server once it runs. Vet one capability in depth first with <code class="sm">agentstack explain &lt;name&gt;</code>.</div>
   </section>
 
-  <section class="lesson-pane" id="lesson-6" hidden>
-    <div class="kicker">LESSON 7 · STEP 5 — SCALE</div>
-    <h1 class="lesson">One governed stack across projects and machines</h1>
-    <p class="lede">Three tools carry your setup beyond a single project:</p>
+  <section class="lesson-pane" id="lesson-3" hidden>
+    <div class="kicker">LESSON 4 · RUNG 2 — SWITCH</div>
+    <h1 class="lesson">Switch by task, not by editing five config files</h1>
+    <p class="lede">One setup is a start. What makes agentstack a daily tool is that the setup <strong>changes with the work</strong> — and changing it is one command, not five files.</p>
+    <div class="term" style="margin-bottom:8px" data-term="switch" data-title="your-project — zsh"></div>
+    <div class="callout" style="margin-bottom:18px"><strong>Need it only for now?</strong> <code class="sm">agentstack session start backend</code> loads a toolset for this piece of work and <code class="sm">agentstack session end</code> puts every file back. That is also exactly what <em>clean-at-rest</em> mode automates — nothing generated exists between the two commands, so the repo stays pristine for git.</div>
+    <p class="lede">Three tools carry the same idea beyond a single project:</p>
     <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px">
       <div class="rowcard" style="align-items:baseline"><span class="mono" style="font-size:13px;font-weight:700;color:var(--accent);flex:none;width:110px">toolsets</span><span style="font-size:13.5px;color:var(--body);line-height:1.55">Named subsets of the manifest ("backend", "design"). <code class="sm">use &lt;toolset&gt; --write</code> materializes only that toolset's skills and prunes the rest it owns.</span></div>
       <div class="rowcard" style="align-items:baseline"><span class="mono" style="font-size:13px;font-weight:700;color:var(--accent);flex:none;width:110px">library</span><span style="font-size:13.5px;color:var(--body);line-height:1.55">Your central home at <code class="sm">~/.agentstack/lib/</code> — skills and server definitions projects reference <em>by name</em> instead of copying. <code class="sm">lib sync</code> carries it across machines.</span></div>
@@ -309,8 +320,8 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
     <div style="font-size:13px;color:var(--muted);line-height:1.6;margin-top:10px">Try before installing: <code class="sm">agentstack try owner/repo --skill &lt;name&gt;</code> stages and scans a skill and emits a wrapper prompt for piping into any CLI — no manifest, lock, or config is touched.</div>
   </section>
 
-  <section class="lesson-pane" id="lesson-7" hidden>
-    <div class="kicker">LESSON 8 · STEP 6 — CONFINE</div>
+  <section class="lesson-pane" id="lesson-8" hidden>
+    <div class="kicker">LESSON 9 · RUNG 6 — CONFINE</div>
     <h1 class="lesson">Four postures, from advisory to kernel-enforced</h1>
     <p class="lede">Every tracked run prints a <strong>posture</strong> label — how strongly the effective policy is <em>actually</em> enforced. Climb the ladder as trust in the workload drops:</p>
     <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:18px">
@@ -334,8 +345,8 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
     <div class="callout"><strong>Honest limit:</strong> even lockdown never makes exfiltration <em>impossible</em> — traffic to a host you did approve (including the model API) is still allowed. Egress rules bound where data can go; they can't read intent.</div>
   </section>
 
-  <section class="lesson-pane" id="lesson-8" hidden>
-    <div class="kicker">LESSON 9 · POLICY &amp; AUDIT</div>
+  <section class="lesson-pane" id="lesson-9" hidden>
+    <div class="kicker">LESSON 10 · RUNG 6 — POLICY &amp; AUDIT</div>
     <h1 class="lesson">Machine ∩ project — and everything on the record</h1>
     <p class="lede">Your <strong>machine policy</strong> (in <code>~/.agentstack/agentstack.toml</code>) sets standing limits checked <em>before</em> any project's on every brokered call. The effective policy is the <strong>intersection</strong> — a repo can only narrow a machine rule, never loosen it.</p>
     <div style="background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md,16px);padding:20px 22px;margin-bottom:18px">
@@ -365,8 +376,8 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
     <div class="term" style="margin-bottom:8px" data-term="report" data-title="your-project — zsh"></div>
   </section>
 
-  <section class="lesson-pane" id="lesson-9" hidden>
-    <div class="kicker">LESSON 10 · MODES, TEAMS &amp; UNDO</div>
+  <section class="lesson-pane" id="lesson-5" hidden>
+    <div class="kicker">LESSON 6 · RUNG 5 — SHARE, MODES &amp; UNDO</div>
     <h1 class="lesson">Where files live, how teams share, how anything reverts</h1>
     <p class="lede">You always commit the <strong>intent</strong> — manifest + lockfile. Where the rendered artifacts live is a per-project <strong>delivery mode</strong>, chosen during init and switchable any time (switching never changes what you trust or what policy allows):</p>
     <div class="grid3" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px">
@@ -384,10 +395,10 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
     <h1 class="lesson">Prove it stuck, then keep the cheat sheet</h1>
     <div id="recapQuiz" style="display:flex;flex-direction:column;gap:14px;margin-bottom:24px"></div>
     <div style="background:var(--term-bg);border:1px solid var(--strong-bd);border-radius:var(--radius-md,16px);padding:20px 24px">
-      <div class="mono" style="font-size:11px;font-weight:600;letter-spacing:0.12em;color:var(--term-muted);margin-bottom:14px">CHEAT SHEET — THE NINE EVERYDAY COMMANDS + THE LADDER</div>
+      <div class="mono" style="font-size:11px;font-weight:600;letter-spacing:0.12em;color:var(--term-muted);margin-bottom:14px">CHEAT SHEET — THE EVERYDAY COMMANDS, BY RUNG</div>
       <div id="cheats" class="mono" style="display:grid;grid-template-columns:auto 1fr;gap:6px 18px;font-size:12px;line-height:1.7"></div>
     </div>
-    <div style="margin-top:18px;font-size:13.5px;color:var(--muted);line-height:1.65">Real setup takes ~10 minutes: install, <code class="sm">agentstack init</code>, <code class="sm">doctor</code> — then climb only as far as you need. The <a href="../start.html">docs site's "Get started" guide</a> shows expected output at every step.</div>
+    <div style="margin-top:18px;font-size:13.5px;color:var(--muted);line-height:1.65">Real setup takes ~5 minutes: install, <code class="sm">agentstack init</code>, <code class="sm">apply --write</code>, <code class="sm">status</code> — then climb only as far as you need. The <a href="../start.html">docs site's "Get started" guide</a> shows expected output at every step.</div>
   </section>
 
   <div style="display:flex;justify-content:space-between;margin-top:36px;padding-top:20px;border-top:1px solid var(--line)">
@@ -404,7 +415,7 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
    behavior, no template runtime. All terminals are simulations. */
 'use strict';
 
-var LESSONS=['Welcome — the problem','The map — concepts','Step 1 · Unify','Step 2 · Verify','Step 3 · Guard','Step 4 · Trust','Step 5 · Scale','Step 6 · Confine','Policy & audit','Modes, teams & undo','Recap & cheat sheet'];
+var LESSONS=['Welcome — the problem','The map — four ideas, six rungs','Rung 1 · Unify','Rung 2 · Switch','Rungs 3–4 · Diagnose & Recover','Rung 5 · Share','Rung 6 · Guard','Rung 6 · Trust','Rung 6 · Confine','Rung 6 · Policy & audit','Recap & cheat sheet'];
 var W='var(--term-text)',G='var(--term-ok)',R='var(--term-bad)',A='var(--term-warn)',D='var(--term-muted)';
 var VERSION='0.16.0'; /* one shared value — keep in sync with the released tag */
 var TERM={
@@ -430,10 +441,15 @@ var TERM={
     {cmd:'agentstack trust --list',out:[['~/work/api-service     ✓ matches pinned digest',G],['~/tmp/cloned-repo      ✗ CHANGED since trust (git pull) — inert again',R]]},
     {cmd:'agentstack trust --revoke',out:[['✓ trust withdrawn — this repo is inert again',G]]}
   ],
+  switch:[
+    {cmd:'agentstack toolset create --name backend --server github --server postgres',out:[['✓ named toolset "backend" — 2 server(s), 3 skill(s)',G],['✓ re-locked agentstack.lock',G],['naming does not activate: nothing was rendered',D]]},
+    {cmd:'agentstack use backend --write',out:[['✓ materialized 3 skill(s) for toolset "backend"',G],['✓ pruned 2 skill(s) owned by other toolsets  (hand-made dirs untouched)',D],['✓ 4 target(s) in sync — every CLI now sees only "backend"',G]]},
+    {cmd:'agentstack use --list',out:[['backend   2 server(s) · 3 skill(s)   ✓ ready   ← active',G],['design    1 server(s) · 4 skill(s)   ✓ ready',W],['incident  3 server(s) · 1 skill(s)   ⚠ 1 ${REF} unresolved',A]]}
+  ],
   scale:[
     {cmd:'agentstack search postgres',out:[['[library]   pg-tools        your central library  (~/.agentstack/lib/)',W],['[registry]  postgres-mcp    registry.modelcontextprotocol.io',W],['[catalog]   sql-skill       bundled catalog',W]]},
     {cmd:'agentstack add from postgres-mcp --write',out:[['✓ resolved from the official MCP Registry',G],['🔑 secret lifted → ${DATABASE_URL}',A],['✓ added to .agentstack/agentstack.toml',G],['next: agentstack apply --write renders it to all 4 CLIs at once',D]]},
-    {cmd:'agentstack use backend --write',out:[['✓ materialized 3 skill(s) for toolset "backend"',G],['✓ pruned 2 skill(s) owned by other toolsets  (hand-made dirs untouched)',D]]}
+    {cmd:'agentstack lib sync',out:[['✓ committed 2 local change(s) to the library repo',G],['✓ pulled 1 skill added on another machine',G],['server defs travel as ${REF}s — no secret value ever leaves this machine',D]]}
   ],
   run:[
     {cmd:'agentstack run claude-code --locked',out:[['┌ run r-6c19 · claude-code',W],['│ posture  HOST / PROTECTED',A],['│ gates    trust ✓ · lock ✓ · policy admission ✓ · tool surface frozen',D],['└ launching on host…',W]]},
@@ -533,12 +549,12 @@ function runCmd(lines,id,i){
 /* ---------- lesson 2: term cards ---------- */
 var TERMS=[
   ['manifest','the one file you review','One file — .agentstack/agentstack.toml — listing everything your tools may run: MCP servers, skills, instructions, settings, hooks. You edit it; AgentStack renders it into each CLI’s own config. It only ever holds ${REF} secret placeholders, never real values.'],
-  ['lockfile','pins exact bytes','agentstack.lock pins the manifest’s resolved contents — server definitions, skill bytes, instruction bytes — to SHA-256 digests. Same inputs reproduce; any change is visible. It is part of what you consent to when you trust a project.'],
   ['adapter','per-CLI compiler','AgentStack’s per-CLI compiler: turns one manifest into that CLI’s own config format (.mcp.json for Claude Code, config.toml for Codex, …). There are 13 today; "target" is just an adapter id you name in [targets].'],
+  ['toolset','a named subset','A named subset of the manifest ("backend", "design") you activate together with use <toolset>. A manifest with no toolsets activates its whole inline set — you only name one when you have several.'],
+  ['lockfile','pins exact bytes','agentstack.lock pins the manifest’s resolved contents — server definitions, skill bytes, instruction bytes — to SHA-256 digests. Same inputs reproduce; any change is visible. It is part of what you consent to when you trust a project.'],
   ['gateway','the broker in the middle','AgentStack’s in-process broker. Instead of each CLI talking to MCP servers directly, calls route through the gateway, where policy is checked and every call is logged. Only gateway-routed ("brokered") calls are policy-checked and audited.'],
   ['trust','your local approval','Your approval that a project may auto-load on this machine, pinned to a SHA-256 consent digest of manifest + overlay + lockfile. Until you trust, a clone is inert. Change any pinned byte — a git pull, a re-lock — and it drops back to untrusted.'],
   ['policy','machine ∩ project','Rules fencing tools, egress, secrets, and filesystem paths. Your machine policy is checked before any project’s on every brokered call; the effective policy is the intersection, so a repo can only narrow your rules, never loosen them.'],
-  ['toolset','a named subset','A named subset of the manifest ("backend", "design") you activate together with use <toolset>. A manifest with no toolsets activates its whole inline set — you only name one when you have several.'],
   ['posture','how strongly it’s enforced','The per-run label printed on the run banner: HOST/ADVISORY, HOST/PROTECTED, SANDBOX/PROXIED, or LOCKDOWN/ENFORCED — what the effective policy is actually enforced by, not just what it says.']
 ];
 function renderTermCards(){
@@ -754,18 +770,22 @@ var RECAP=[
    options:['The repo’s — it’s more specific','Your machine policy — the effective policy is the intersection','Whichever was written last'],correct:1,
    explain:'Machine ∩ project: a repo can only narrow a machine rule, never loosen it. A machine-layer refusal names its layer in the error and the audit log.'}];
 var CHEATS=[
-  ['init','scan CLIs → write one reviewed manifest; lift inline tokens to ${REF}s'],
-  ['apply --write','render the manifest into every CLI’s native config'],
-  ['status / doctor','health + drift; every warning names its exact fix'],
-  ['diff → adopt | apply','review drift, then keep the edit or keep the manifest'],
-  ['guard install','block rm -rf, git reset --hard, .env reads before they run'],
-  ['gateway connect','register the gateway once per CLI (zero-files mode)'],
-  ['trust . / --list / --revoke','review a repo, pin its digest; any edit re-gates it'],
-  ['search / add from <id> --write','find in library + catalog + MCP Registry; apply --write renders it everywhere'],
-  ['use <toolset> --write','materialize one named subset of the manifest'],
-  ['run --locked | --sandbox | --lockdown','climb the posture ladder to kernel-enforced'],
-  ['report runs | calls · optimize · explain','flight recorder, audit log, evidence-backed fixes, vet-first'],
-  ['restore --last --write','the one undo verb for every recorded write']];
+  ['init','rung 1 — scan CLIs → write one reviewed manifest; lift inline tokens to ${REF}s'],
+  ['apply --write','rung 1 — render the manifest into every CLI’s native config'],
+  ['status','rung 1 — one screen: what is here, whether it is ready, the one next step'],
+  ['use <toolset> --write','rung 2 — switch to one named subset of the manifest'],
+  ['session start / end','rung 2 — use a toolset for now, then put every file back'],
+  ['doctor','rung 3 — the deep check: adapters, secrets, drift, skills, supply chain'],
+  ['diff','rung 3 — show the consequence of drift before anything changes'],
+  ['adopt | apply --write','rung 4 — keep the hand edit, or re-assert the manifest'],
+  ['restore --last --write','rung 4 — the one undo verb for every recorded write'],
+  ['search / add from <id> --write','rung 5 — find in library + catalog + MCP Registry; apply renders it everywhere'],
+  ['lib sync','rung 5 — carry the central library across machines; secrets stay put'],
+  ['guard install','rung 6 — block rm -rf, git reset --hard, .env reads before they run'],
+  ['gateway connect','rung 6 — register the gateway once per CLI (zero-files mode)'],
+  ['trust . / --list / --revoke','rung 6 — review a repo, pin its digest; any edit re-gates it'],
+  ['run --locked | --sandbox | --lockdown','rung 6 — climb the posture ladder to kernel-enforced'],
+  ['report runs | calls · optimize · explain','rung 6 — flight recorder, audit log, evidence-backed fixes']];
 function buildRecap(){
   var wrap=$('recapQuiz');
   RECAP.forEach(function(q){

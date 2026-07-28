@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Get started — build or govern your agent stack</title>
-<meta name="description" content="Start in ten minutes: consolidate the agent setup already on your machine, or take an unfamiliar repo from untrusted to a confined run with a readable report.">
+<title>Get started — six rungs, and rung one is five minutes</title>
+<meta name="description" content="Six rungs, climbed in order. Rung one takes five minutes and no Docker: import the agent setup already on your machine, render it into every CLI, check it landed, undo it.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta property="og:title" content="Get started — agentstack">
-<meta property="og:description" content="Consolidate your current agent setup, or take an unfamiliar repo from untrusted to a confined, auditable run.">
+<meta property="og:description" content="Six rungs, climbed in order. Rung one is five minutes: import your agent setup, render it into every CLI, check it landed, undo it.">
 <meta property="og:type" content="article">
 <meta property="og:url" content="https://tarekkharsa.github.io/agentstack/start.html">
 <meta property="og:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
@@ -18,7 +18,7 @@
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="Get started — agentstack">
-<meta name="twitter:description" content="The ten-minute path: untrusted repo → reviewed → confined run → readable report. Exact commands and expected output.">
+<meta name="twitter:description" content="Unify → Switch → Diagnose → Recover → Share → Govern. Exact commands and expected output for each rung.">
 <meta name="twitter:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
 <link rel="canonical" href="https://tarekkharsa.github.io/agentstack/start.html">
 <script src="theme/theme.js"></script>
@@ -80,6 +80,27 @@ html { scroll-behavior: smooth; }
 .callout p { margin: 0.3rem 0 0; color: var(--color-neutral-700); }
 .callout p:first-of-type { margin-top: 0; }
 
+/* ── the six-rung ladder, restated as jump links ── */
+.ladder { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-2); margin: var(--space-4) 0 0; }
+.ladder a {
+  display: block; text-decoration: none; padding: 10px 12px;
+  border: 1px solid var(--color-divider); border-radius: var(--radius-md, 16px);
+  background: var(--color-surface); color: var(--color-neutral-700);
+  font-size: 0.84rem; line-height: 1.45;
+}
+.ladder a:hover { border-color: var(--color-accent); }
+.ladder a b { display: block; color: var(--color-text); font-size: 0.9rem; margin-bottom: 2px; }
+@media (max-width: 760px) { .ladder { grid-template-columns: 1fr; } }
+
+/* ── first-value marker ── */
+.milestone {
+  margin: var(--space-6) 0 0; padding: 14px 18px;
+  border: 1px solid var(--color-accent-2); border-radius: var(--radius-md, 16px);
+  background: var(--color-accent-2-100); font-size: 0.95rem; line-height: 1.55;
+}
+.milestone b { display: block; font-weight: 700; font-size: 0.85rem; margin-bottom: 5px; }
+.milestone p { margin: 0.3rem 0 0; color: var(--color-neutral-700); }
+
 /* ── track headers ── */
 .track { margin: var(--space-8) 0 0; padding-top: var(--space-6); border-top: 1px solid var(--color-divider); }
 .track h2 { font-family: var(--font-heading); font-weight: 400; font-size: 1.6rem; margin: 0 0 0.3rem; letter-spacing: -0.01em; }
@@ -100,8 +121,9 @@ ol.walk > li::before {
   color: var(--color-accent); font: 700 0.95rem var(--font-body);
   display: flex; align-items: center; justify-content: center; box-shadow: var(--shadow-sm);
 }
-ol.walk.ta > li::before { content: "A" counter(step); font-size: 0.82rem; }
-ol.walk.tb > li::before { content: "B" counter(step); font-size: 0.82rem; }
+ol.walk.ta { counter-reset: step 1; }
+ol.walk.tswitch { counter-reset: step 5; }
+ol.walk.tb { counter-reset: step 6; }
 ol.walk > li > h2 { font-family: var(--font-heading); font-weight: 400; font-size: 1.3rem; margin: -0.1rem 0 var(--space-2); }
 .expect {
   font-family: var(--font-body); font-size: 0.72rem; font-weight: 700;
@@ -141,19 +163,6 @@ pre.cmd .c { color: var(--term-muted); }
 .term .no { color: var(--term-bad); }
 .term .am { color: var(--term-warn); }
 .term pre code, pre.cmd code { background: transparent; color: inherit; padding: 0; }
-
-/* ── delivery-mode fork (static: all three panels stacked) ── */
-.modefork {
-  margin: var(--space-4) 0 0; border: 1px solid var(--color-divider);
-  border-radius: var(--radius-md, 16px); background: var(--color-surface);
-  padding: var(--space-4); box-shadow: var(--shadow-sm);
-}
-.modefork > .forklede { margin: 0 0 0.2rem; font-size: 0.95rem; line-height: 1.55; color: var(--color-neutral-700); }
-.modefork > .forklede strong { color: var(--color-text); font-weight: 700; }
-.modepanel + .modepanel { margin-top: var(--space-4); padding-top: var(--space-4); border-top: 1px solid var(--color-divider); }
-.modepanel h3 { font-family: var(--font-heading); font-weight: 400; font-size: 1.1rem; margin: 0.2rem 0 var(--space-2); }
-.rhythm { margin: var(--space-3) 0 0; font-size: 0.92rem; }
-.rhythm > .expect { margin: 0 0 0.15rem; }
 
 /* ── next cards ── */
 #next { margin-top: var(--space-8); }
@@ -209,47 +218,54 @@ pre.cmd .c { color: var(--term-muted); }
     <div class="toc" style="width:210px;flex:none;position:sticky;top:24px;align-self:flex-start;display:flex;flex-direction:column;gap:var(--space-2)">
       <div class="toc-h">On this page</div>
       <a href="#s-install"><span class="n">1</span>Install the binary</a>
-      <div class="toc-sub">Track A — unify your setup</div>
-      <a href="#s-import"><span class="n">A1</span>Import what's there</a>
-      <a href="#s-render"><span class="n">A2</span>Render into every CLI</a>
-      <a href="#s-guard"><span class="n">A3</span>Wire the guardrails</a>
-      <a href="#s-verify"><span class="n">A4</span>Verify the loop</a>
-      <div class="toc-sub">Track B — govern a repo</div>
-      <a href="#s-connect"><span class="n">B1</span>Register the gateway</a>
-      <a href="#s-clone"><span class="n">B2</span>Clone — it stays inert</a>
-      <a href="#s-trust"><span class="n">B3</span>Review, then trust</a>
-      <a href="#s-secret"><span class="n">B4</span>Secrets in the keychain</a>
-      <a href="#s-run"><span class="n">B5</span>Run it confined</a>
-      <a href="#s-report"><span class="n">B6</span>Read the flight recorder</a>
+      <div class="toc-sub">Rung 1 — Unify</div>
+      <a href="#s-import"><span class="n">2</span>Import what's there</a>
+      <a href="#s-render"><span class="n">3</span>Render into every CLI</a>
+      <a href="#s-verify"><span class="n">4</span>Check it landed</a>
+      <a href="#s-undo"><span class="n">5</span>Take it back</a>
+      <div class="toc-sub">Rung 2 — Switch</div>
+      <a href="#s-switch"><span class="n">6</span>Switch by task</a>
+      <div class="toc-sub">Rungs 3–5</div>
+      <a href="#s-deeper">Diagnose · Recover · Share</a>
+      <div class="toc-sub">Rung 6 — Govern</div>
+      <a href="#s-guard"><span class="n">7</span>Wire the guardrails</a>
+      <a href="#s-connect"><span class="n">8</span>Register the gateway</a>
+      <a href="#s-clone"><span class="n">9</span>Clone — it stays inert</a>
+      <a href="#s-trust"><span class="n">10</span>Review, then trust</a>
+      <a href="#s-secret"><span class="n">11</span>Secrets in the keychain</a>
+      <a href="#s-run"><span class="n">12</span>Run it confined</a>
+      <a href="#s-report"><span class="n">13</span>Read the flight recorder</a>
     </div>
 
     <div id="main-content" role="main" tabindex="-1" class="col" style="flex:1;min-width:0">
 
       <section id="intro">
         <a class="crumb" href="docs.html">← all docs</a>
-        <p class="eyebrow">Get started · install, then two tracks</p>
+        <p class="eyebrow">Get started · install, then climb one rung at a time</p>
         <h1 style="font-family:var(--font-heading);font-weight:400;font-size:2.6rem;margin:0 0 var(--space-3)">Start with one command. Climb as far as you need.</h1>
         <p class="lede">
-          agentstack is adopted in steps. Install once, then take either track.
-          <strong>Track&nbsp;A (A1–A4)</strong> unifies the CLIs already on your
-          machine into one guarded manifest; <strong>Track&nbsp;B (B1–B6)</strong>
-          governs repos you didn't write — inert until review, run
-          <strong>confined</strong>, with readable evidence. Each track pays off on
-          its own.
+          agentstack is adopted in <strong>six rungs</strong>, the same six the
+          <a href="index.html#climb">home page</a> lists. Each pays off on its own,
+          and nothing later is required to keep the earlier wins. This page walks
+          them in order — <strong>rung 1 is the whole first session</strong>, and you
+          can stop there.
         </p>
         <div class="callout">
-          <b>Where to start</b>
-          <p>Track&nbsp;A — one source of truth for every CLI plus guardrails, ~5
-            minutes, no Docker. Come back for Track&nbsp;B the first time an
-            unfamiliar repo declares MCP servers you've never read.</p>
+          <b>Rung 1 is ~5 minutes and needs no Docker</b>
+          <p>Import your CLIs into one manifest, render it back to all of them, check
+            it landed, and undo it. That is first value; steps 2–5 below are the
+            whole of it.</p>
+          <p>Rungs 2–5 (switch by task, diagnose, recover, share) are the everyday
+            tool. Rung 6 — trust, policy, confined runs — is for repos you didn't
+            write, and only its last two steps want Docker.</p>
         </div>
-        <div class="callout">
-          <b>Only one step needs Docker</b>
-          <p>The trust gate, tool firewall, secret resolution, and call audit all run
-            natively. Only the <code>--sandbox</code> / <code>--lockdown</code>
-            confined run (B5) spawns a container — stop before B5 and you still get a
-            trust-gated, firewalled, audited setup; only the host agent process is
-            left unconfined.</p>
+        <div class="ladder" aria-label="The six rungs">
+          <a href="#s-import"><b>1 · Unify</b> import once, render everywhere</a>
+          <a href="#s-switch"><b>2 · Switch</b> toolsets and temporary sessions</a>
+          <a href="#s-deeper"><b>3 · Diagnose</b> doctor and diff explain drift</a>
+          <a href="#s-deeper"><b>4 · Recover</b> keep an edit, or undo the write</a>
+          <a href="#s-deeper"><b>5 · Share</b> locked, secret-free setups</a>
+          <a href="#track-b"><b>6 · Govern</b> trust, policy, confined runs</a>
         </div>
       </section>
 
@@ -267,7 +283,7 @@ pre.cmd .c { color: var(--term-muted); }
             Prefer to build it yourself? From a checkout: <code>cargo build
             --release</code>, then <code>./target/release/agentstack self link</code>
             to put it on your <code>PATH</code>. Release binaries compile in sandbox
-            support (B5's <code>run --sandbox</code>); a bare <code>cargo build</code>
+            support (step&nbsp;12's <code>run --sandbox</code>); a bare <code>cargo build</code>
             needs <code>--features sandbox</code>.
           </p>
           <p class="expect">You should see</p>
@@ -280,9 +296,9 @@ pre.cmd .c { color: var(--term-muted); }
       </ol>
 
       <div class="track" id="track-a">
-        <p class="eyebrow">Track A · A1–A4 · import, deliver, guard, verify</p>
+        <p class="eyebrow">Rung 1 · Unify · steps 2–5</p>
         <h2>Unify the stack you already have</h2>
-        <p class="muted">~5 minutes · no Docker · ends with every CLI in sync, and guarded.</p>
+        <p class="muted">~5 minutes · no Docker · ends with every CLI in sync — and reversible.</p>
         <img src="demos/first-value.svg" alt="Recorded proof of the loop this track teaches: import two CLIs' configs once, render both native formats, doctor clean, restore byte-for-byte" loading="lazy" style="width:100%;border-radius:12px;margin-top:1rem;border:1px solid var(--color-divider,#ddd)">
         <p class="small muted" style="margin-top:0.5rem">The whole track, condensed from a real run: import once → both CLIs in sync → clean doctor → fully reversible. Reproduce it fenced: <a href="https://github.com/Tarekkharsa/agentstack/blob/main/examples/first-value-demo/run-demo.sh"><code>examples/first-value-demo/run-demo.sh</code></a>.</p>
       </div>
@@ -296,13 +312,10 @@ pre.cmd .c { color: var(--term-muted); }
             plan (nothing is written until you confirm), detects your installed CLIs,
             imports their MCP config into one portable
             <a href="concepts.html">manifest</a>, lifts inline tokens to
-            <code>${REF}</code> references, asks where those values should live
-            (default: a gitignored <code>.env</code>), then has you pick a
-            <a href="concepts.html"><strong>delivery mode</strong></a>. The remaining
-            steps differ per mode, so the walkthrough forks below — this page follows
-            <strong>static</strong>, the default. By hand, that flow is
-            <code>init</code> → <code>apply --write</code> →
-            <code>use &lt;toolset&gt; --write</code>.
+            <code>${REF}</code> references, and asks where those values should live
+            (default: a gitignored <code>.env</code>). Press Enter at every prompt
+            and you get the defaults this page follows. By hand, that flow is
+            <code>init</code> → <code>apply --write</code>.
           </p>
           <pre class="cmd">agentstack init</pre>
           <p class="expect">You should see</p>
@@ -353,138 +366,27 @@ pre.cmd .c { color: var(--term-muted); }
           </div>
 
           <p class="muted">
-            Press Enter for <strong>static</strong> (the default) and keep going —
-            you can switch later.
+            Press Enter for <strong>static</strong> — config files on disk, kept out
+            of git. It is the right default for a first project and the one this page
+            follows.
           </p>
-
-          <div class="modefork" id="mode-fork">
-            <p class="forklede">
-              <strong>The wizard forks here — and so does this page.</strong> Each
-              mode does something different next and settles into its own rhythm.
-              Static is the default; A2–A4 below walk it in full. Choosing
-              deliberately? <a href="choose.html">Which mode do I need?</a>
-            </p>
-
-            <!-- STATIC -->
-            <div class="modepanel" id="mpanel-static">
-              <h3>Static — rendered configs, kept out of git</h3>
-              <p class="muted">
-                The wizard previews every write, asks once, installs skill sources,
-                then renders your manifest into each CLI's native format — the path
-                A2–A4 below walk in full.
-              </p>
-              <p class="expect">The wizard finishes with</p>
-              <div class="term">
-                <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>static fork · render + apply</b></div>
-                <pre><code><span class="p">? Pick a delivery mode ›</span> <span class="ok">static</span>
-<span class="c">  → preview every write · Apply this setup? · install · apply --write · skills · doctor</span>
-
-<span class="ok">✓ Setup complete.</span>
-
-<span class="c">What changed on this machine</span>
-<span class="c">  Files written (4):</span>
-<span class="c">    .mcp.json              (Claude Code · servers)</span>
-<span class="c">    .codex/config.toml     (Codex CLI · servers)</span>
-<span class="c">    .gemini/settings.json  (Gemini CLI · servers)</span>
-<span class="c">    …</span>
-<span class="c">  Secrets:</span>
-<span class="c">    GITHUB_TOKEN  resolved from .env</span>
-<span class="c">  Undo recorded file writes from this setup:  agentstack restore --last --write</span>
-<span class="c">  Inspect any time:  agentstack doctor  ·  agentstack</span>
-<span class="c">  Learn the rest: https://tarekkharsa.github.io/agentstack/start.html — or run `agentstack` anytime for your next step.</span></code></pre>
-              </div>
-              <div class="rhythm">
-                <p class="expect">Your daily rhythm afterwards</p>
-                <p class="muted">
-                  Edit the manifest, then <code>agentstack apply --write</code> —
-                  every CLI follows. <code>agentstack doctor</code> names any fix.
-                </p>
-              </div>
-            </div>
-
-            <!-- CLEAN-AT-REST -->
-            <div class="modepanel" id="mpanel-clean">
-              <h3>Clean-at-rest — active only while you work, then restored</h3>
-              <p class="muted">
-                <em>Nothing is rendered.</em> The wizard pins your lockfile and
-                teaches the two-command session rhythm; capabilities exist only
-                between <code>session start</code> and <code>session end</code>, so
-                the repo stays pristine for git.
-              </p>
-              <p class="expect">The wizard finishes with</p>
-              <div class="term">
-                <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>clean-at-rest fork · lock + session</b></div>
-                <pre><code><span class="p">? Pick a delivery mode ›</span> <span class="ok">clean-at-rest</span>
-<span class="c">  → lock · session-rhythm · doctor</span>
-
-<span class="c">Lock</span>
-<span class="ok">✓</span><span class="c"> pinned 1 skill(s) + 1 server(s) from the implicit default + 0 instruction(s) + 0 executable pin(s) in agentstack.lock</span>
-<span class="c">  no configs rendered, no skills materialized — that stays `agentstack use --write`.</span>
-
-<span class="c">  · capabilities exist only during a session — the repo stays clean for git:</span>
-<span class="c">    </span>agentstack session start &lt;toolset&gt;
-<span class="c">    </span>agentstack session end
-
-<span class="c">Doctor</span>
-<span class="c">  # drift suppressed — nothing was rendered, so there's no "apply pending" to flag</span>
-
-<span class="ok">✓ Setup complete.</span>
-<span class="c">  No files were written to any CLI config.</span>
-<span class="c">  Undo recorded file writes from this setup:  agentstack restore --last --write</span>
-<span class="c">  Learn the rest: https://tarekkharsa.github.io/agentstack/start.html — or run `agentstack` anytime for your next step.</span></code></pre>
-              </div>
-              <div class="rhythm">
-                <p class="expect">Your daily rhythm afterwards</p>
-                <p class="muted">
-                  <code>agentstack session start &lt;toolset&gt;</code> when you sit
-                  down; <code>agentstack session end</code> when you're done. Nothing
-                  generated is left on disk in between.
-                </p>
-              </div>
-            </div>
-
-            <!-- ZERO-FILES -->
-            <div class="modepanel" id="mpanel-zero">
-              <h3>Zero-files — nothing on disk, served live after review</h3>
-              <p class="muted">
-                <em>Nothing is ever written.</em> The wizard offers to register the
-                gateway in your harnesses, then points you at
-                <code>agentstack trust .</code> — which it never runs for you,
-                because trust is your consent to grant. Best across many repos.
-              </p>
-              <p class="expect">The wizard finishes with</p>
-              <div class="term">
-                <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>zero-files fork · gateway + trust</b></div>
-                <pre><code><span class="p">? Pick a delivery mode ›</span> <span class="ok">zero-files</span>
-<span class="c">  → gateway-offer · trust-pointer</span>
-
-<span class="p">?</span> <span class="c">Register the agentstack</span><span class="c"> gateway in your installed harnesses now?</span> <span class="ok">› yes</span>
-<span class="c">  Claude Code (~/.claude.json)</span>
-<span class="ok">    ✓</span><span class="c"> gateway registered (agentstack mcp --auto-project)</span>
-<span class="c">  Codex CLI (~/.codex/config.toml)     …</span>
-<span class="c">  Updated 6 harness config(s).</span>
-
-<span class="c">  · then trust this repo so the gateway will serve its capabilities:</span>
-<span class="c">    </span>agentstack trust .</code></pre>
-              </div>
-              <div class="rhythm">
-                <p class="expect">Your daily rhythm afterwards</p>
-                <p class="muted">
-                  Register once with
-                  <code>agentstack gateway connect --all --write</code>, then
-                  <code>agentstack trust .</code> in each new repo. Nothing lands on
-                  disk; the gateway serves trusted repos live.
-                </p>
-              </div>
-            </div>
+          <div class="callout">
+            <b>The other two modes exist; you do not need them yet</b>
+            <p><strong>Clean-at-rest</strong> renders nothing and activates a toolset
+              only between <code>session start</code> and <code>session end</code>
+              (step&nbsp;6 teaches that rhythm). <strong>Zero-files</strong> writes
+              nothing ever and serves trusted repos live through the gateway
+              (step&nbsp;8). Switch whenever you have a reason —
+              <a href="choose.html">which mode do I need?</a> decides it in two
+              tables.</p>
           </div>
         </li>
 
         <li id="s-render">
           <h2>Render it into every CLI</h2>
           <p class="small muted" style="margin-bottom:0.8rem">
-            The static path (default). On clean-at-rest and zero-files the wizard
-            renders nothing here — the fork above covered those; skip to A3.
+            The static default. On clean-at-rest and zero-files nothing is rendered
+            here — step&nbsp;6 and step&nbsp;8 cover those rhythms instead.
           </p>
           <p class="muted">
             <code>apply</code> previews each CLI's changes in its native format and
@@ -507,6 +409,149 @@ pre.cmd .c { color: var(--term-muted); }
           </div>
         </li>
 
+        <li id="s-verify">
+          <h2>Check it landed</h2>
+          <p class="muted">
+            <code>agentstack status</code> is the one screen: which CLIs were found,
+            what the manifest holds, whether secrets resolve, and the single next
+            step. Run it from any directory — with no manifest it tells you to run
+            <code>init</code>; with one, it tells you whether you are done.
+          </p>
+          <pre class="cmd">agentstack status</pre>
+          <p class="expect">You should see</p>
+          <div class="term">
+            <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>one screen, one next step</b></div>
+            <pre><code><span class="p">$</span> agentstack status
+<span class="c">agentstack 0.16.0 — one portable manifest, every agent CLI</span>
+
+<span class="c">  CLIs      6 detected: Claude Code · Codex CLI · Copilot CLI · Gemini CLI · …</span>
+<span class="c">  Manifest  .agentstack/agentstack.toml — 2 server(s) → 2 target(s)</span>
+<span class="c">  Status    locked · trusted</span>
+<span class="c">  Mode      static — config files on disk, kept out of git</span>
+<span class="c">  Secrets   1 referenced, all resolve</span>
+
+<span class="ok">  Next:  everything is in sync — nothing to do</span></code></pre>
+          </div>
+          <p class="small muted">
+            Want the deep version — drift per CLI, launcher quirks, supply-chain
+            scan? That is <code>agentstack doctor</code>, and status links you to it.
+            Rung&nbsp;3 below is where it earns its keep.
+          </p>
+        </li>
+
+        <li id="s-undo">
+          <h2>Take it back, any time</h2>
+          <p class="muted">
+            Every write agentstack makes is recorded as one revertible entry, so the
+            question "what did this just do to my machine?" always has an answer and
+            an undo. Without <code>--write</code> it is a dry run that names each
+            file it would revert.
+          </p>
+          <pre class="cmd">agentstack restore --last            <span class="c"># dry run: what undoing would touch</span>
+agentstack restore --last --write    <span class="c"># actually undo it</span></pre>
+          <p class="expect">You should see</p>
+          <div class="term">
+            <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>one write, one undo</b></div>
+            <pre><code><span class="p">$</span> agentstack restore --last
+<span class="c">  ↩ 18c66ebc (project, 6m ago) apply: 3 files · Claude Code, Codex CLI</span>
+<span class="no">  ✗</span><span class="c"> Claude Code · servers          delete  .mcp.json</span>
+<span class="no">  ✗</span><span class="c"> Codex CLI · servers            delete  .codex/config.toml</span>
+<span class="c">  ↩ .gitignore · managed artifacts revert  .gitignore</span>
+
+<span class="c">Dry run. Re-run with --write to undo.</span></code></pre>
+          </div>
+          <p class="small muted">
+            Taking all of it off is <code>agentstack uninstall</code>, which previews
+            the same way. Full walkthrough: <a href="howto/undo.html">undo anything</a>.
+          </p>
+        </li>
+      </ol>
+
+      <div class="milestone">
+        <b>That is first value — rung 1, done.</b>
+        <p>Your CLIs share one setup, you can tell whether it is healthy, and you can
+          put the machine back. Everything below is optional and each rung stands on
+          its own; come back for the next one when you feel the need it answers.</p>
+      </div>
+
+      <div class="track" id="track-switch">
+        <p class="eyebrow">Rung 2 · Switch · step 6</p>
+        <h2>Switch by task, not by editing five config files</h2>
+        <p class="muted">~2 minutes · the reason this becomes a daily tool rather than a one-time import.</p>
+      </div>
+
+      <ol class="walk tswitch">
+        <li id="s-switch">
+          <h2>Name a toolset, then switch to it</h2>
+          <p class="muted">
+            A <a href="concepts.html">toolset</a> is a named subset of what you just
+            imported — <code>backend</code>, <code>incident</code>,
+            <code>design</code>. Naming one changes nothing on disk;
+            <code>use</code> activates it, rendering that subset's servers and
+            materializing its skills while pruning the ones it owns.
+          </p>
+          <pre class="cmd">agentstack toolset create --name backend --server github   <span class="c"># name it (writes the manifest, renders nothing)</span>
+agentstack use backend --write                             <span class="c"># switch to it</span>
+agentstack use --list                                      <span class="c"># every toolset here, and whether each is ready</span></pre>
+          <p class="muted">
+            For a toolset you want <em>only for now</em>, start a session instead:
+            the previous native files come back when you end it, so nothing
+            permanent is left behind.
+          </p>
+          <pre class="cmd">agentstack session start backend   <span class="c"># load it for this piece of work</span>
+agentstack session end             <span class="c"># put every file back</span></pre>
+          <div class="callout">
+            <b>This is what clean-at-rest mode automates</b>
+            <p>Pick clean-at-rest at <code>init</code> and this session rhythm becomes
+              the default: nothing generated exists between
+              <code>session start</code> and <code>session end</code>, so the repo
+              stays pristine for git. Same commands, no rendered files at rest.</p>
+          </div>
+          <p class="small muted">
+            Full walkthrough, including which capabilities a toolset may hold:
+            <a href="howto/name-a-toolset.html">name a toolset</a>.
+          </p>
+        </li>
+      </ol>
+
+      <section id="s-deeper" class="track">
+        <p class="eyebrow">Rungs 3–5 · when the setup starts moving</p>
+        <h2>Diagnose · Recover · Share</h2>
+        <p class="muted">Three rungs you climb the first time something drifts, someone hand-edits a rendered file, or a teammate needs the same setup. Each is a short how-to rather than a step here.</p>
+        <div class="cards">
+          <div class="fcard">
+            <h3><a href="troubleshooting.html">3 · Diagnose — <code>doctor</code> and <code>diff</code></a></h3>
+            <p><code>agentstack doctor</code> checks adapters, secrets, drift, skills
+               and supply chain, and names the exact fix for each warning;
+               <code>agentstack diff</code> shows the consequence before anything
+               changes. Nothing is written by either.</p>
+          </div>
+          <div class="fcard">
+            <h3><a href="howto/undo.html">4 · Recover — <code>adopt</code>, <code>apply</code>, <code>restore</code></a></h3>
+            <p>Someone hand-edited a rendered config. <code>adopt</code> pulls that
+               edit back into the manifest if it was intentional;
+               <code>apply --write</code> re-asserts the manifest if it wasn't;
+               <code>restore</code> reverts one recorded write.</p>
+          </div>
+          <div class="fcard">
+            <h3><a href="howto/team-setup.html">5 · Share — lock, library, export</a></h3>
+            <p>Commit the manifest and <code>agentstack.lock</code> — both hold
+               <code>${REF}</code> placeholders, never secret values, so each machine
+               supplies its own. The <a href="reference.html#the-central-library">central
+               library</a> reuses one skill across projects by name.</p>
+          </div>
+        </div>
+      </section>
+
+      <div class="track" id="track-b">
+        <p class="eyebrow">Rung 6 · Govern · steps 7–13</p>
+        <h2>Govern work you didn't write</h2>
+        <p class="muted">~10 minutes · Docker only for the confined run near the end.</p>
+        <p class="muted">Rungs 1–5 leave every CLI unified, switchable, diagnosable and shareable. This rung is what you add when an agent can do damage by accident, or when a repo you cloned declares MCP servers you have never read. Step&nbsp;7 alone is worth doing on any machine.</p>
+      </div>
+
+      <ol class="walk tb">
+
         <li id="s-guard">
           <h2>Wire the guardrails</h2>
           <p class="muted">
@@ -516,10 +561,10 @@ pre.cmd .c { color: var(--term-muted); }
             <code>[policy.filesystem]</code> deny-globs like <code>.env</code> are
             blocked before they land, each denial recorded. It catches an agent's
             <em>accidents</em>, not a determined attacker — kernel-enforced
-            confinement is B5. <a href="enforcement.html">What each layer enforces</a>.
+            confinement is step&nbsp;12. <a href="enforcement.html">What each layer enforces</a>.
           </p>
           <p class="small muted" style="margin-top:-0.4rem">
-            Machine-level, so it applies whichever delivery mode you picked above.
+            Machine-level, so it applies to every project and whichever delivery mode you picked.
           </p>
           <pre class="cmd">agentstack guard install</pre>
           <p class="expect">You should see</p>
@@ -540,31 +585,6 @@ pre.cmd .c { color: var(--term-muted); }
             which CLIs are wired.
           </p>
         </li>
-
-        <li id="s-verify">
-          <h2>Verify the loop</h2>
-          <p class="muted">
-            <code>agentstack doctor</code> checks everything is wired up and names the
-            exact fix for anything that isn't; from any directory, bare
-            <code>agentstack</code> tells you the one next step. Your daily rhythm is
-            the one in your mode's panel above.
-          </p>
-          <pre class="cmd">agentstack doctor</pre>
-          <p class="small muted">
-            That's Track&nbsp;A. The first time you clone a repo you didn't write and
-            it declares its own MCP servers, continue to Track&nbsp;B below.
-          </p>
-        </li>
-      </ol>
-
-      <div class="track" id="track-b">
-        <p class="eyebrow">Track B · B1–B6 · power users · you clone repos you didn't write</p>
-        <h2>Govern an unfamiliar repo <span class="small muted" style="font-weight:400">(power users)</span></h2>
-        <p class="muted">~10 minutes · Docker only for the confined run at the end.</p>
-        <p class="muted">The everyday path never needs this — Track&nbsp;A alone leaves every CLI unified, guarded, and audited, so come here only when you run repos you didn't write.</p>
-      </div>
-
-      <ol class="walk tb">
 
         <li id="s-connect">
           <h2>Register the gateway, once</h2>
@@ -735,7 +755,7 @@ agentstack report run &lt;run-id&gt; --json <span class="c"># machine-readable, 
 
       <section id="next">
         <p class="eyebrow">Where to go next</p>
-        <h2 style="font-family:var(--font-heading);font-weight:400;font-size:1.6rem;margin:0 0 var(--space-2)">You've done the loop. Here's the rest.</h2>
+        <h2 style="font-family:var(--font-heading);font-weight:400;font-size:1.6rem;margin:0 0 var(--space-2)">You've climbed the ladder. Here's the rest.</h2>
         <div class="cards">
           <div class="fcard">
             <h3><a href="reference.html#the-protected-tier-in-detail-run---locked">The Protected tier — <code>run --locked</code></a></h3>
