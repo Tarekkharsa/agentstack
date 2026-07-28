@@ -294,6 +294,9 @@ const base = () => ({
   manage:null, dialog:null, action:null, flow:null, draft:null, picker:null,
   query:'', undo:{phase:'idle'}, trustAct:null, driftAct:null, setupAct:null,
   secretChoice:1, libRemoved:[], created:false, popover:true,
+  // proposal only: the rail carries a selection, so the library always has a
+  // destination and never needs a mode
+  proposed:false, sel:'backend', menu:null, newRow:null,
 });
 let S = base();
 let CUR = {scenario:'ready', step:0, view:'both', mode:'guided'};
@@ -425,7 +428,7 @@ function actionConfirm(a){
 const TABS=[['setup','Setup'],['toolsets','Toolsets'],['protection','Protection'],['activity','Activity']];
 function viewManage(s){
   const t=s.manage;
-  const body=t==='setup'?tabSetup(s):t==='toolsets'?tabToolsets(s):t==='protection'?tabProtection(s):tabActivity(s);
+  const body=t==='setup'?tabSetup(s):t==='toolsets'?(s.proposed?tabToolsetsProposed(s):tabToolsets(s)):t==='protection'?tabProtection(s):tabActivity(s);
   return `<div class="dlg">
     <div class="dlg-top"><span class="mark sm"></span><span class="dlg-title">Manage AgentStack</span><button class="x" data-act="close">✕</button></div>
     <div class="tabs">${TABS.map(([id,l])=>`<button data-act="manage:${id}" aria-selected="${t===id}">${l}${id==='activity'&&s.activeRun?' <span class="badge a">run live</span>':''}</button>`).join('')}
@@ -538,7 +541,11 @@ function flowCard(s){
   else if(f.phase==='unsupported') body=`<span class="xs warnt">This agentstack CLI's preview has no digest to confirm against, so this change can't be applied from here. Update agentstack, or make the change in a terminal.</span>
     <div><button class="link" data-act="flow:close">← Back to library</button></div>`;
   else if(f.phase==='confirm'||f.phase==='running'){
-    body = f.kind==='remove'
+    body = f.kind==='unadd'
+      ? `<span class="xs">Takes it out of this toolset, in this project. It stays in your library and in every other toolset that uses it.</span>
+         <details><summary>Details</summary><span class="srcline">change sha256:c41b09aa…7e12</span></details>
+         <div class="row g8">${btn('Remove','flow:confirm','ok')}${btn('Cancel','flow:close','ghost')}</div>`
+      : f.kind==='remove'
       ? `<span class="xs">This removes it from your library on this machine — every project that uses it by name is affected. Nothing in this project's files changes right now.</span>
          <div class="box warn"><span class="xs">This project uses it — toolset(s) rust. Activating that toolset again will fail until you re-add or restore it.</span></div>
          <span class="xs">It moves to the library trash, so you can put it back:</span>
@@ -557,6 +564,76 @@ function flowCard(s){
   return `<div style="border-top:1px solid var(--line);padding:11px 14px;max-height:236px;overflow:auto">
     <div class="box ${f.phase==='done'&&f.secretBlocked?'warn':''} col g6">${head}${body}</div></div>`;
 }
+/* ══ PROPOSAL ═══════════════════════════════════════════════════════
+   One change carries the rest: the rail row is a selection, so the library
+   always has a destination. That kills the mode ("composing"), the deferred
+   picker ("Add to …"), and the asymmetry (add here, but un-add elsewhere).
+   Membership becomes state on the row, so one verb per row is enough, and
+   the machine-wide delete moves out of the row into an overflow. */
+function tabToolsetsProposed(s){
+  const selName = s.newRow ? s.newRow.name : s.sel;
+  const sel = s.newRow || s.toolsets.find(t=>t.name===s.sel);
+  const members = sel ? sel.members : [];
+
+  const railRow = t => {
+    const on = !s.newRow && s.sel===t.name;
+    const inSession = s.session && s.session.profile===t.name;
+    return `<button class="box col g4" data-act="sel:${t.name}" style="width:100%;text-align:left;${on?'border-color:rgba(91,124,250,.45);background:rgba(91,124,250,.08)':''}">
+      <div class="row g8">${dot(inSession?'':(t.ready?'g6':'a'))}
+        <span class="xs" style="color:var(--text);font-weight:600;flex:1">${esc(t.name)}</span>
+        ${inSession?`<span class="badge g">in use</span>`:''}
+        ${on?`<span class="badge" style="background:rgba(91,124,250,.18);color:var(--blueSoft)">editing</span>`:''}</div>
+      <span class="srcline">${esc(t.summary)}</span>
+      ${t.blocked?`<span class="xs warnt">${esc(t.blocked)}</span>`:''}</button>`;
+  };
+
+  const newRow = s.newRow ? `<div class="box col g6" style="border-color:rgba(91,124,250,.45);background:rgba(91,124,250,.08)">
+      <input class="inp" placeholder="Name it, e.g. web" value="${esc(s.newRow.name)}" data-input="newname">
+      <span class="xs">${s.newRow.members.length===0?'Add tools from the library — it is already pointed here.':`${s.newRow.members.length} tool(s) added.`}</span>
+      <div class="row g8">${btn('Create','p:create','ok',(!/^[A-Za-z0-9._-]+$/.test(s.newRow.name.trim())||s.newRow.members.length===0)?'disabled':'')}
+        <button class="link" data-act="p:cancel">Cancel</button></div></div>` : '';
+
+  const libItem = (i,kind) => {
+    const has = members.includes(i.name);
+    const open = s.menu===i.name;
+    return `<div class="itemrow">${dot(has?'':'m')}
+      <div class="col" style="flex:1;min-width:0">
+        <span class="xs" style="color:var(--text);font-weight:600">${esc(i.name)}
+          ${has?'<span class="badge g" style="margin-left:6px">in '+esc(selName||'')+'</span>':''}</span>
+        ${i.detail?`<span class="srcline">${esc(i.detail)}</span>`:''}
+        ${open?`<div class="box bad col g4 mt6"><span class="xs">Delete <b>${esc(i.name)}</b> from your library — every project that uses it by name is affected. It moves to the library trash.</span>
+          <div class="row g8">${btn('Delete from library…','remove:'+kind+':'+i.name,'dgr')}${btn('Cancel','p:menu:','ghost')}</div></div>`:''}
+      </div>
+      ${has?btn('Remove','p:rem:'+kind+':'+i.name,'', 'title="Remove from this toolset — this project only"')
+           :btn('Add','p:add:'+kind+':'+i.name,'', selName?'title="Add to '+esc(selName)+'"':'disabled title="Pick a toolset on the left first"')}
+      ${i.origin==='library'?`<button class="link dimt" data-act="p:menu:${i.name}" title="More — machine-wide actions" style="text-decoration:none">⋯</button>`:''}</div>`;
+  };
+
+  const q=s.query.toLowerCase();
+  const match=i=>!q||i.name.toLowerCase().includes(q)||(i.detail||'').toLowerCase().includes(q);
+  const group=(title,items,kind)=>{
+    const list=items.filter(i=>!s.libRemoved.includes(i.name)).filter(match);
+    return `<div class="col g6" style="margin-bottom:10px"><span class="xs" style="color:var(--text);font-weight:600">${title}</span>
+      ${list.length===0?`<span class="xs dimt">No ${kind}s match.</span>`:list.map(i=>libItem(i,kind)).join('')}</div>`;
+  };
+
+  return `<div class="pane-l">
+      <div class="row g8" style="padding:12px 12px 6px"><span class="cap">TOOLSETS</span>
+        ${!s.newRow?`<span style="margin-left:auto">${btn('+ New','p:new')}</span>`:''}</div>
+      <div class="col g6" style="padding:0 8px 12px">${newRow}${s.toolsets.map(railRow).join('')}</div>
+      <div style="padding:0 12px 12px"><span class="srcline">Pick one — the library adds to whichever is selected.</span></div>
+    </div>
+    <div class="pane-r">
+      <div class="row g8" style="padding:12px 14px 8px">
+        <span class="cap">LIBRARY</span>
+        ${selName?`<span class="badge" style="background:rgba(91,124,250,.18);color:var(--blueSoft)">→ ${esc(selName)}</span>`
+                 :`<span class="badge a">no toolset selected</span>`}
+        <span style="margin-left:auto;width:180px"><input class="inp" placeholder="Filter…" value="${esc(s.query)}" data-input="query"></span></div>
+      <div style="padding:0 14px 12px">${group('Skills',LIB.skills,'skill')}${group('Servers',LIB.servers,'server')}</div>
+      ${s.flow?flowCard(s):''}
+    </div>`;
+}
+
 function tabProtection(s){
   const rows=[
     s.guard?{n:'Guard',st:'on — blocks destructive agent commands before they run',c:'covers agent tool calls on this machine — not a sandbox',d:''}
@@ -1173,6 +1250,7 @@ const SCEN = [
    gtee:[Y('Ending a session puts your CLIs’ files back as they were — that is what “temporarily” means.'),
          N('An older CLI without the sessions contract shows “Update agentstack to start a toolset from here” instead of a broken button.')],
    contract:'gated on canSessions · use-profile is digest-bound',
+   open:'Two bugs in the rail. <b>Stop appears without a session</b>: <code>inUse = row.active || session?.profile === row.name</code> (2266) feeds <code>inUse &amp;&amp; canSessions</code> (2285), so a permanently-active toolset offers Stop — which ends a session that does not exist. The glance requires <code>session &amp;&amp; canSessions</code> (1003), so the two surfaces disagree about the same toolset. And <b>“in use” leaks across rows</b>: <code>inUse &amp;&amp; session</code> (2310) appends <em>this</em> session’s age to <em>any</em> in-use row, so an active toolset and a session-held toolset both claim it.',
    advance:s=>!!s.session},
   {name:'In use', component:'WorkingUnder · session', ui:'manage:toolsets', cli:'use',
    setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='toolsets';s.session={profile:'backend',ago:'just now'}},
@@ -1190,6 +1268,7 @@ const SCEN = [
         H('The digest is the load-bearing step','If the CLI’s preview has no digest, the card says so and disables Confirm rather than applying something it cannot bind to.','rgba(52,211,153,.5)')],
    gtee:[Y('Nothing is written until you confirm — the preview is computed from a staged copy.'),
          Y('The lockfile records the exact commit and content checksum, so the same skill resolves identically on a teammate’s machine.')],
+   open:'<b>“Add” means three different things in the same place.</b> With no toolsets it is disabled; with toolsets it opens an inline “Add to …” picker and relabels itself Cancel; while composing a draft it toggles membership immediately. The only clue to which mode you are in is a pill in the pane header. The destination is also chosen <em>after</em> the verb, and a row never says whether it is already in the toolset — so the first honest feedback is the confirm. See the Proposed scenario.',
    contract:'add-skill-to-profile · digest-bound · gated on canEditProfiles',
    // adding a *skill* just succeeds here; adding a *server* is what reaches step 2
    advance:s=>!!(s.flow&&s.flow.phase==='done'&&s.flow.secretBlocked)},
@@ -1212,6 +1291,7 @@ const SCEN = [
         H('Empty rail explains itself','With no toolsets, every library Add is disabled and the empty card says why — rather than leaving you to infer it from greyed-out buttons.','rgba(91,124,250,.5)')],
    gtee:[Y('Composing writes nothing: the draft lives in the panel until you press Create.')],
    contract:'create-profile — a fixed-argv alias of agentstack toolset create',
+   open:'Composing is an <b>invisible mode</b> that changes what every library row’s button does, and it hides the library’s Remove entirely (<code>!composing</code>). A mode that rewrites the meaning of the controls around it should be a place you can see you are in, not a state you infer from a pill.',
    advance:s=>s.created},
   {name:'Created', component:'ToolsetRail', ui:'manage:toolsets', cli:'toolset',
    setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='toolsets';
@@ -1230,7 +1310,8 @@ const SCEN = [
         H('It names the projects it breaks','“This project uses it — toolset(s) rust” with the consequence spelled out: activating that toolset again will fail until you re-add or restore it.','rgba(251,191,36,.5)')],
    gtee:[Y('It moves to the library trash — the restore command is shown before you confirm, not after.'),
          N("Nothing in this project's files changes at removal time; the breakage appears the next time that toolset is activated.")],
-   contract:'remove-from-library · gated on library-remove-v1'}]},
+   contract:'remove-from-library · gated on library-remove-v1',
+   open:'The reasoning is right — different blast radii should not look alike — but the execution has two costs. The verb is <code>opacity-0</code> until hover, so on a trackpad-free pass, a touch screen, or a screen reader driven by landmarks it is <b>undiscoverable</b>; and it is the <em>only</em> remove in the library, so you can add a skill to a toolset from this row but not take it out again. The word is also overloaded: this “Remove” is machine-wide, while the one users will look for is project-scope.'}]},
 
 {id:'undo', group:'Everyday', name:'Undo something', tag:'LEDGER', tone:'b',
  summary:'Every write is recorded before it lands. The panel offers the newest entry that touches this project — never a blind --last, which could revert a write from another repo.',
@@ -1349,6 +1430,28 @@ const SCEN = [
          N('The panel cannot stop a run; agentstack kill does, and reverts any toolset it owned.')],
    contract:'workflow observe · read-only'}]},
 
+{id:'proposed', group:'Proposed', name:'One destination, one verb', tag:'PROPOSAL', tone:'b',
+ summary:'The same three jobs — add, remove, create — with the rail carrying a selection. Because the library always has a destination, the mode disappears, the deferred picker disappears, and one verb per row is enough. This is a proposal, not shipped code.',
+ steps:[
+  {name:'Add to the selected toolset', component:'proposed · ToolsetsTab', ui:'manage:toolsets', cli:'add',
+   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='toolsets';s.proposed=true;s.sel='backend'},
+   how:[H('The destination is picked first, and stays visible','Selecting a toolset in the rail is what the rail was always for. The library header reads “→ backend” the whole time, so no row has to ask you where afterwards.'),
+        H('One verb, and it is the membership','A row is either in the selected toolset or not: <b>Add</b> or <b>Remove</b>, never both, never a third meaning. That also gives back the missing verb — you can now take a skill out of a toolset from the place you put it in.','rgba(52,211,153,.5)'),
+        H('The machine-wide delete leaves the row','It moves into the row’s ⋯ overflow and is called <b>Delete from library</b> — a different place and a different word from the project-scope Remove beside it, instead of the same word hidden on hover.','rgba(248,113,113,.5)')],
+   gtee:[Y('Every state a row can be in is legible without hovering it.'),
+         Y('The project-scope verb and the machine-scope verb never occupy the same position.'),
+         N('This is a sketch of a proposal — no contract exists for it, and removing from a toolset would need one.')],
+   contract:'would reuse add-skill-to-profile · needs a matching remove-from-profile',
+   advance:s=>!!(s.flow&&s.flow.phase==='done')},
+  {name:'Create one the same way', component:'proposed · unsaved rail row', ui:'manage:toolsets', cli:'toolset',
+   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='toolsets';s.proposed=true;
+             s.newRow={name:'web',members:[],summary:'new toolset',ready:true,blocked:null}},
+   how:[H('Creating is not a mode','A new toolset is a rail row that is not saved yet. It is selected like any other, so the library behaves identically — no “composing” state that silently rewrites what every button does.'),
+        H('Adding to an unsaved toolset writes nothing','So it needs no digest and no confirm. The single write happens at <b>Create</b>, which is also the only place the name is validated.','rgba(52,211,153,.5)')],
+   gtee:[Y('Nothing is written until Create — the row is panel state, exactly as the draft was.'),
+         N('It does not solve rename or delete for a toolset; those verbs still do not exist anywhere.')],
+   contract:'would reuse create-profile'}]},
+
 {id:'activity', group:'Evidence', name:'See what your agents did', tag:'WEAKEST TAB', tone:'r',
  summary:'The CLI has a flight recorder, per-capability context costs and evidence-backed fixes. The panel shows server__tool, a dot and an age — the widest gap between the two surfaces.',
  steps:[{name:'Activity tab', component:'ActivityPanel + WorkflowPanel', ui:'manage:activity', cli:'runs',
@@ -1417,6 +1520,9 @@ const GUIDE = {
    ["Click **View agents →** on the live strip.", 'open:monitor', "The monitor opened — one click, no Workflows nav row."],
    ["Read-only. Starting and killing a run stay in the terminal.", null, null]],
  'activity':[["Every row is a digest, never a value — and never a reason.", null, null]],
+ 'proposed':[
+   ["`rust-testing` is not in **backend** — click **Add**. Then try **Remove** on one that is, and ⋯ for the machine-wide delete.", 'p:add:skill:rust-testing', "Added, with the same digest confirm as today — but you never had to say where."],
+   ["The unsaved row is selected, so the library points at it. Add a tool, then **Create**.", 'p:add:skill:rust-testing', "Added to the unsaved toolset — no digest, because nothing was written."]],
  'degraded':[
    ["No verb at all — and the copy names the host app rather than asking it for its name. Both are the gap.", null, null],
    ["**Check again** re-polls; the copy already told you nothing was lost.", 'recheck', "Read succeeded. The write you made before it was never at risk."],
@@ -1457,6 +1563,16 @@ function uiFor(s){
   if(s.dialog==='blueprint') return viewBlueprint();
   if(s.manage)               return viewManage(s);
   return viewGlance(s);
+}
+
+/* The step names a component, but you can navigate away from it inside the
+   panel — so the header reports what is actually rendered right now. */
+function liveComponent(st_, step_){
+  if(st_.dialog) return {trust:'TrustReviewPanel',drift:'DriftReviewPanel',setup:'SetupPanel',
+    monitor:'WorkflowMonitorDialog',denial:'AgentstackDenialCard',blueprint:'BlueprintReviewCard'}[st_.dialog];
+  if(st_.manage) return st_.proposed ? 'proposed · ToolsetsTab' : {setup:'SetupTab',toolsets:'ToolsetsTab + ToolsetRail',
+    protection:'ProtectionPanel + SharePanel',activity:'ActivityPanel + WorkflowPanel'}[st_.manage];
+  return step_.component;
 }
 
 /* Markdown-lite for instruction text: **bold** and `code`. */
@@ -1512,7 +1628,7 @@ function renderGuided(){
     ${showUi?`<div class="uicol" style="width:${uiWidth}">
       ${guideBar(sc,st)}
       <div class="colhead"><span class="k">WHAT YOU SEE</span><span class="v">${st.ui.startsWith('manage')?'Manage · dialog':st.ui==='popover'?'popover · 400px':'dialog'}</span>
-        <span class="c">${esc(st.component)}</span></div>
+        <span class="c">${esc(liveComponent(S, st))}</span></div>
       <div class="uistage" id="uistage">${uiFor(S)}</div></div>`:''}
     ${showCli?`<div class="clicol">
       <div class="colhead"><span class="k">THE SAME THING IN THE CLI</span>
@@ -1637,6 +1753,27 @@ function act(a){
         S.draft=null; S.created=true;
       }
       break;
+    case 'sel': S.sel=rest[0]; S.newRow=null; S.menu=null; break;
+    case 'p':{
+      const [op,...r]=rest;
+      if(op==='new'){ S.newRow={name:'',members:[],summary:'new toolset',ready:true,blocked:null}; S.menu=null; }
+      if(op==='cancel') S.newRow=null;
+      if(op==='menu') S.menu = r[0]||null;
+      if(op==='create'){ S.toolsets=S.toolsets.concat([{...S.newRow,summary:`${S.newRow.members.length} tool(s)`}]);
+        S.sel=S.newRow.name; S.newRow=null; S.created=true; }
+      if(op==='add'){
+        const [kind,name]=r; S.menu=null;
+        const target = S.newRow || S.toolsets.find(t=>t.name===S.sel);
+        if(S.newRow){ S.newRow.members=S.newRow.members.concat(name); }         // unsaved: no write, no confirm
+        else S.flow={kind:'add',title:`Add ${kind} "${name}" to toolset "${target.name}"`,phase:'confirm',secret:kind==='server',member:name};
+      }
+      if(op==='rem'){
+        const [kind,name]=r; S.menu=null;
+        if(S.newRow) S.newRow.members=S.newRow.members.filter(x=>x!==name);
+        else { const t=S.toolsets.find(x=>x.name===S.sel);
+          S.flow={kind:'unadd',title:`Remove ${kind} "${name}" from toolset "${t.name}"`,phase:'confirm',member:name}; }
+      }
+      break;}
     case 'picker': S.picker = rest[0]==='close'?null:rest[0]; break;
     case 'add':{ const [kind,name,target]=rest; S.picker=null;
       S.flow={kind:'add',title:`Add ${kind} "${name}" to toolset "${target}"`,phase:'confirm',secret:kind==='server'}; break;}
@@ -1644,10 +1781,13 @@ function act(a){
     case 'flow':
       if(rest[0]==='close') S.flow=null;
       if(rest[0]==='confirm'){
-        const f=S.flow;
+        const f=S.flow, t=S.toolsets.find(x=>x.name===S.sel);
         if(f.kind==='remove'){ S.libRemoved.push(f.name); S.flow={...f,phase:'done',ok:true,message:`moved "${f.name}" to the library trash`}; }
+        else if(f.kind==='unadd'){ t.members=t.members.filter(x=>x!==f.member);
+          S.flow={...f,phase:'done',ok:true,message:`re-locked and re-rendered ${t.name}`}; }
         else if(f.secret) S.flow={...f,phase:'done',ok:false,secretBlocked:true};
-        else S.flow={...f,phase:'done',ok:true,message:'re-locked agentstack.lock and re-rendered 4 target(s)'};
+        else { if(f.member&&t&&!t.members.includes(f.member)) t.members=t.members.concat(f.member);
+          S.flow={...f,phase:'done',ok:true,message:'re-locked agentstack.lock and re-rendered 4 target(s)'}; }
       }
       break;
     case 'undo':
@@ -1693,6 +1833,7 @@ document.addEventListener('input', e=>{
   if(!k) return;
   const pos=e.target.selectionStart;
   if(k==='draftname'&&S.draft) S.draft.name=e.target.value;
+  if(k==='newname'&&S.newRow) S.newRow.name=e.target.value;
   if(k==='query') S.query=e.target.value;
   render();
   const el=document.querySelector(`[data-input="${k}"]`);
