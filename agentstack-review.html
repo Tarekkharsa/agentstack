@@ -177,6 +177,8 @@ pre.diff .add{color:var(--green)}pre.diff .del{color:var(--red)}
 .inp::placeholder{color:var(--dim)}
 .itemrow{display:flex;align-items:flex-start;gap:9px;padding:7px 0}
 .itemrow+.itemrow{border-top:1px solid rgba(233,231,226,.05)}
+.libremove{opacity:0;transition:opacity .12s}
+.itemrow:hover .libremove,.libremove:focus-visible{opacity:1}
 .tick{width:15px;height:15px;flex:none;margin-top:2px;border:1.5px solid rgba(233,231,226,.3);border-radius:4px;
   display:inline-flex;align-items:center;justify-content:center;font-size:10px;line-height:1;color:transparent}
 .tick:hover{border-color:rgba(233,231,226,.6)}
@@ -569,7 +571,9 @@ function libRow(s,i,kind){
       <span class="xs" style="color:var(--text);font-weight:600">${esc(i.name)}${i.inManifest?' <span class="dimt" style="font-weight:400">in project</span>':''}</span>
       ${i.detail?`<span class="srcline">${esc(i.detail)}</span>`:''}
       ${s.picker===i.name?`<div class="row g6 mt6"><span class="xs dimt">Add to</span>${s.toolsets.map(t=>btn(esc(t.name),`add:${kind}:${i.name}:${t.name}`)).join('')}</div>`:''}</div>
-    ${removable?`<button class="link badt" data-act="remove:${kind}:${i.name}" title="Remove from your library (all projects) — recoverable">Remove</button>`:''}
+    ${removable?`<button class="link badt libremove" data-act="remove:${kind}:${i.name}"
+       title="Remove from your library (all projects) — recoverable"
+       aria-label="Remove ${esc(i.name)} from your library">Remove</button>`:''}
     ${right}</div>`;
 }
 function flowCard(s){
@@ -587,11 +591,14 @@ function flowCard(s){
          <details><summary>Details</summary><span class="srcline">change sha256:c41b09aa…7e12</span></details>
          <div class="row g8">${btn('Remove','flow:confirm','ok')}${btn('Cancel','flow:close','ghost')}</div>`
       : f.kind==='remove'
-      ? `<span class="xs">This removes it from your library on this machine — every project that uses it by name is affected. Nothing in this project's files changes right now.</span>
-         <div class="box warn"><span class="xs">This project uses it — toolset(s) rust. Activating that toolset again will fail until you re-add or restore it.</span></div>
+      ? (()=>{ // RemovalConfirmBody: the warning box appears only when this
+                // project actually references it (removal.used_by_this_project)
+          const used = s.toolsets.filter(t=>t.members.includes(f.name)).map(t=>t.name);
+          return `<span class="xs">This removes it from your library on this machine — every project that uses it by name is affected. Nothing in this project's files changes right now.</span>
+         ${used.length?`<div class="box warn"><span class="xs"><b class="warnt">This project uses it</b> — toolset${used.length>1?'s':''} ${used.map(esc).join(', ')}. Activating that toolset again will fail until you re-add or restore it.</span></div>`:''}
          <span class="xs">It moves to the library trash, so you can put it back:</span>
          <code class="cmd">agentstack lib trash --restore ${esc(f.name)} --write</code>
-         <div class="row g8">${btn(f.phase==='running'?'Removing…':'Remove','flow:confirm','dgr')}${btn('Cancel','flow:close','ghost')}</div>`
+         <div class="row g8">${btn(f.phase==='running'?'Removing…':'Remove','flow:confirm','dgr')}${btn('Cancel','flow:close','ghost')}</div>`;})()
       : `<span class="xs">Applying re-locks and re-renders the toolset. An unresolved <code>${esc(REF)}</code> secret blocks the render (set it, then re-apply) — nothing is written until you confirm.</span>
          <details><summary>Details</summary><span class="srcline">change sha256:5f0afa8f…c31d</span></details>
          <div class="row g8">${btn(f.phase==='running'?'Applying…':'Confirm','flow:confirm','ok')}${btn('Cancel','flow:close','ghost')}</div>`;
@@ -1362,16 +1369,31 @@ const SCEN = [
    open:'Rename and delete do not exist. For a switcher that is now the first page’s whole job, those are the two missing verbs — and both are profile edits, so they fit the existing contract shape.'}]},
 
 {id:'remove', group:'Everyday', name:'Remove from the library', tag:'MACHINE-WIDE', tone:'a',
- summary:'The one panel action whose blast radius is bigger than the project you are in — so the copy says “from your library”, names the projects affected, and shows the restore command before you press it.',
- steps:[{name:'Confirm removal', component:'RemovalConfirmBody', ui:'manage:toolsets', cli:'libremove',
+ summary:'What does this Remove actually remove? Not the toolset — your machine-wide library, for every project on this machine. The button never says so; only the confirm does, and it says two different things depending on whether anything here uses the item.',
+ steps:[
+  {name:'Nothing uses it', component:'RemovalConfirmBody', ui:'manage:toolsets', cli:'libremove',
    setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='toolsets';
              s.flow={kind:'remove',name:'rust-testing',title:'Remove skill "rust-testing" from your library',phase:'confirm'}},
-   how:[H('Recessive by design','Remove is hidden until you hover the row, while Add is always visible. Same row, deliberately different weight, because the blast radius differs.'),
-        H('It names the projects it breaks','“This project uses it — toolset(s) rust” with the consequence spelled out: activating that toolset again will fail until you re-add or restore it.','rgba(251,191,36,.5)')],
+   how:[H('The button cannot answer the question','Sitting beside <b>Add</b>, “Remove” reads as Add’s inverse — take it out of the toolset. It is not: it deletes from the machine-wide library, for every project. You only learn that after pressing it.','rgba(248,113,113,.5)'),
+        H('The confirm is where the scope finally appears','“…from your library on this machine — every project that uses it by name is affected.” That sentence is right, and it is the first time the word <em>library</em> appears anywhere near the control.'),
+        H('No toolset here uses rust-testing','So the preview comes back without <code>used_by_this_project</code> and the warning box stays away. Step 2 is the same button on an item this project does use.','rgba(52,211,153,.5)')],
    gtee:[Y('It moves to the library trash — the restore command is shown before you confirm, not after.'),
+         Y('The warning box appears only when this project actually references the item.'),
          N("Nothing in this project's files changes at removal time; the breakage appears the next time that toolset is activated.")],
    contract:'remove-from-library · gated on library-remove-v1',
-   open:'The reasoning is right — different blast radii should not look alike — but the execution has two costs. The verb is <code>opacity-0</code> until hover, so on a trackpad-free pass, a touch screen, or a screen reader driven by landmarks it is <b>undiscoverable</b>; and it is the <em>only</em> remove in the library, so you can add a skill to a toolset from this row but not take it out again. The word is also overloaded: this “Remove” is machine-wide, while the one users will look for is project-scope.'}]},
+   open:'The reasoning is right — different blast radii should not look alike — but it costs three things. <b>The label is wrong for its position</b>: beside Add, “Remove” reads as Add’s inverse, and the scope appears only in the confirm. <b>It is hover-revealed</b> (<code>opacity-0 … group-hover:opacity-100</code>), so without a pointer it cannot be found at all. And it is the <em>only</em> remove in the library, so you can put a skill into a toolset from this row but never take it out — the project-scope verb people actually reach for does not exist.',
+   advance:s=>!!(s.flow&&s.flow.phase==='done')},
+  {name:'This project uses it', component:'RemovalConfirmBody · used_by_this_project', ui:'manage:toolsets', cli:'libremove', fresh:true,
+   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='toolsets';
+             s.flow={kind:'remove',name:'rust-best-practices',title:'Remove skill "rust-best-practices" from your library',phase:'confirm'}},
+   how:[H('Same button, a second sentence','<code>rust-best-practices</code> is in the <code>rust</code> toolset, so the preview returns <code>used_by_this_project</code> and the confirm grows a warning naming the toolset and the consequence.','rgba(251,191,36,.5)'),
+        H('It states what survives and what does not','“Activating that toolset again will fail until you re-add or restore it” — or, when the project defines its own copy, “This project defines its own copy, so it keeps working.” Two outcomes, and it says which one you are in.'),
+        H('Which is why the button needed to say it','The confirm does the entire job of explaining the scope. Everything it explains lands as a surprise, because the control that opened it implied the opposite.','rgba(248,113,113,.5)')],
+   gtee:[Y('The warning names the toolsets by name, not a count.'),
+         Y('Removal is recoverable from the library trash in both cases.'),
+         N('The row itself gives no hint that this item is used here — that fact exists only inside the confirm.')],
+   contract:'remove-from-library · the preview carries the removal payload',
+   open:'The confirm renders in a <b>drawer pinned to the bottom of the tab</b>, not beside the row. The code comment calls it “anchored under the thing it is about”, which is true of the tab and not of the row: in a 600px frame with the library scrolled, the row you clicked can be off-screen while you read a destructive confirm about it.'}]},
 
 {id:'undo', group:'Everyday', name:'Undo something', tag:'LEDGER', tone:'b',
  summary:'Every write is recorded before it lands. The panel offers the newest entry that touches this project — never a blind --last, which could revert a write from another repo.',
@@ -1569,7 +1591,9 @@ const GUIDE = {
  'create':[
    ["A name and one tool are already picked — click **Create**. (Clear the name to see the rule it enforces.)", 'draft:create', "Created — and not activated. Naming a toolset and using it are separate verbs."],
    ["The new toolset appears with a **Use** button, not in use.", null, null]],
- 'remove':[["Read the blast radius, then **Remove** — or **Cancel**.", 'flow:confirm', "Moved to the library trash. The row is gone from every project that referenced it by name."]],
+ 'remove':[
+   ["Nothing here uses `rust-testing`, so the confirm is two plain sentences. Press **Remove** — or **Cancel**.", 'flow:confirm', "Moved to the library trash. Now the same button on an item this project does use."],
+   ["`rust-best-practices` is in the `rust` toolset — read the warning the preview added.", 'flow:confirm', "Removed. The `rust` toolset still names it, and will fail to activate until it is re-added or restored."]],
  'undo':[["**Undo this change** arms it; a second click runs it.", 'undo:ask', "Armed. Nothing is reverted until you confirm — that is the second click."]],
  'trust':[
    ["Click **Review this project** — the repo is inert until you do.", 'concern', "The review opened. Nothing has been granted yet."],
@@ -1885,7 +1909,14 @@ function act(a){
   const sc=scenario(), i=CUR.step, st=sc.steps[i];
   const tgt = st && (typeof st.target==='function' ? st.target(S) : st.target);
   if(tgt===a) DID.add(sc.id+':'+i);
-  if(st && st.advance && st.advance(S) && i+1<sc.steps.length){ LASTCHANGE=st.changed; CUR.step=i+1; }
+  if(st && st.advance && st.advance(S) && i+1<sc.steps.length){
+    LASTCHANGE=st.changed; CUR.step=i+1;
+    // Most steps continue from the state you just produced. A step marked
+    // `fresh` starts from a different one — it is a second case, not a
+    // continuation — so rebuild it rather than leaving the last result up.
+    const next=sc.steps[i+1];
+    if(next.fresh){ DID.delete(sc.id+':'+(i+1)); S=stateFor(sc,i+1); }
+  }
   render();
 }
 
