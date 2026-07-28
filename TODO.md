@@ -53,16 +53,13 @@ down is a finding that gets rediscovered by a stranger.
 
 Ordered by what evidence they are waiting on, not by severity:
 
-- [ ] **F01 — publish one release truth.** The `v0.16.0` tag and all release
-  checks are green, but GitHub's release action created an `untagged-*` draft
-  and a follow-up release-note update replaced the real tag with another
-  placeholder; `latest` still serves
-  v0.15.0. The workflow now builds the image first, creates the complete draft
-  once, uploads by exact release ID, verifies all assets, and has a manual
-  existing-tag recovery input. Before launch:
-  push that fix, dispatch `release.yml` with `release_tag=v0.16.0`, verify the
-  seven-asset draft, publish it, publish the generated formula to the tap, then
-  run the clean install smoke. This is the only code-confirmed launch blocker.
+- [x] **F01 — one release truth is public.** v0.16.0 is GitHub's latest
+  release with five provenance-verified archives, checksums, the corrected
+  formula, and an immutable public GHCR digest. The official Homebrew tap is
+  public; both the checksum-verifying installer and a clean `brew install` plus
+  formula test passed on 2026-07-28. Release recovery now uploads by exact ID,
+  creates complete notes once instead of patching a draft, and no-ops only
+  after verifying an already-published tag and all seven assets.
 - [ ] **C2 / F04 — the activation study.** Five developers with 2+ supported
   CLIs, observed without command coaching; pass is 4/5 unaided and a median
   under five minutes. Detail in §1.6 and the Stage 1 gate below. Both reviews

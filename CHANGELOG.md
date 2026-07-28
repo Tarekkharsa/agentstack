@@ -15,6 +15,9 @@ binaries, checksums, and provenance attestations for each entry.
   tag with another placeholder; every job stayed green while `latest` remained
   v0.15.0. A manual existing-tag input can rebuild a lost draft without moving
   or recreating the tag, and publication remains an explicit human action.
+- The generated Homebrew formula now installs from Homebrew's stripped archive
+  root instead of looking for a top-level directory that no longer exists at
+  staging time. The official tap passes a clean install and formula test.
 - Release references in the automation example, CI recipe, and interactive
   tutorial now agree on v0.16.0.
 
