@@ -1541,7 +1541,7 @@ you need the exact verb, flag, or subcommand.
 - **`status`** — Where this project stands, on one screen: detected CLIs, manifest, trust, secrets, and the one next step — flags `--json`
 - **`add`** — Add a server or skill to the manifest — subcommands `from/server/skill`
 - **`set`** _(hidden)_ — Create or update a manifest entry in place (idempotent `add`) — subcommands `server`
-- **`search`** — Search the capability catalog (and mark what's already added) — flags `--json`
+- **`search`** — Search the capability catalog (and mark what's already added) — flags `--all/--json`
 - **`apply`** — Render the manifest into each target's native config — flags `--target/--toolset/--dry-run/--write/--scope/--allow-unresolved/--prune-foreign/--no-gitignore/--verbose`
 - **`instructions`** _(hidden)_ — Compile [instructions.*] into each CLI's CLAUDE.md / AGENTS.md — flags `--target/--scope/--write`
 - **`doctor`** — Verify everything is wired up: adapters, secrets, drift, skills, per-CLI details — flags `--ci/--live/--probe/--fix/--deep/--all/--json`

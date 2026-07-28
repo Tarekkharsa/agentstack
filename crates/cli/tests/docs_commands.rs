@@ -1047,3 +1047,173 @@ fn authored_html_pages_say_toolset() {
         violations.join("\n")
     );
 }
+
+/// Claim phrasings that overstate what any mode enforces. Each is banned
+/// because `docs/ENFORCEMENT.md` explicitly says the opposite, and marketing
+/// copy is exactly where the caveat gets dropped for rhythm.
+///
+/// The rule these encode is the one in ENFORCEMENT.md's own claim discipline:
+/// AgentStack **restricts destinations and records decisions**. It does not
+/// inspect payloads, so nothing it does can be described as stopping
+/// exfiltration, and no mode is "secure by default" — the enforcement matrix
+/// has four postures precisely because they differ.
+///
+/// The fix is never to soften the product. It is to name the mode and the
+/// mechanism: "blocks connections to hosts you did not approve, on the
+/// enforced paths" says more than "prevents exfiltration" and is true.
+const OVERSTATED_CLAIMS: &[(&str, &str)] = &[
+    (
+        "block exfiltration",
+        "destinations are restricted; payloads are never inspected",
+    ),
+    (
+        "blocks exfiltration",
+        "destinations are restricted; payloads are never inspected",
+    ),
+    (
+        "prevents exfiltration",
+        "destinations are restricted; payloads are never inspected",
+    ),
+    (
+        "prevent exfiltration",
+        "destinations are restricted; payloads are never inspected",
+    ),
+    (
+        "stops exfiltration",
+        "destinations are restricted; payloads are never inspected",
+    ),
+    (
+        "exfiltration is impossible",
+        "ENFORCEMENT.md names this exact sentence as the claim never to make",
+    ),
+    (
+        "secure by default",
+        "name the posture — host, gateway, sandbox, or lockdown — and what it enforces",
+    ),
+    (
+        "fully secure",
+        "no mode claims this; cite the enforcement cell instead",
+    ),
+    ("bank-grade", "not a claim this project can substantiate"),
+    (
+        "military-grade",
+        "not a claim this project can substantiate",
+    ),
+];
+
+/// F06: every public safety claim must survive a reading of
+/// `docs/ENFORCEMENT.md`.
+///
+/// The technical caveats in this repository are unusually careful; the risk was
+/// always that the marketing copy would not inherit them. It already had not:
+/// the examples index promised to "block exfiltration" three clicks from a
+/// page stating that an allowed destination can still receive anything.
+///
+/// This is a lint over phrasings rather than a judgement of meaning, so it
+/// cannot catch every overstatement. It catches the ones that are cheap to
+/// write by accident, which is the failure mode that actually occurred.
+///
+/// Two exemptions, both for the same reason: the careful docs say these
+/// sentences in order to *deny* them. `ENFORCEMENT.md` and its rendered page
+/// are skipped wholesale, because stating the ceiling is their entire job. And
+/// anywhere else, a match preceded by a negation is the good case — "never
+/// means exfiltration is impossible" is the sentence we want, and a lint that
+/// failed it would teach the next person to delete the caveat.
+#[test]
+fn public_docs_make_no_claim_enforcement_md_denies() {
+    let root = repo_root();
+    let mut files = vocab_doc_files(&root);
+    files.extend(authored_html_pages(&root));
+
+    assert!(
+        files.len() >= 10,
+        "the claim scan found only {} file(s) — the discovery broke, not the docs",
+        files.len()
+    );
+
+    let mut violations: Vec<String> = Vec::new();
+    for path in files {
+        let display = path
+            .strip_prefix(&root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .into_owned();
+        // The two pages whose job is to state the ceiling quote the banned
+        // phrases to rule them out.
+        if display.ends_with("ENFORCEMENT.md") || display.ends_with("enforcement.html") {
+            continue;
+        }
+        let content = std::fs::read_to_string(&path).expect("readable docs page");
+        let lower = content.to_ascii_lowercase();
+        for (claim, why) in OVERSTATED_CLAIMS {
+            for (pos, _) in lower.match_indices(claim) {
+                if negated_before(&lower, pos) {
+                    continue;
+                }
+                violations.push(format!(
+                    "{display}:{} — \"{claim}\": {why}\n      {}",
+                    line_number(&content, pos),
+                    snippet_for_line(&content, pos)
+                ));
+            }
+        }
+    }
+
+    assert!(
+        violations.is_empty(),
+        "public copy makes a claim docs/ENFORCEMENT.md denies. Name the mode and \
+         the mechanism instead of the outcome:\n{}",
+        violations.join("\n")
+    );
+}
+
+/// Is this claim being denied rather than made?
+///
+/// Looks back over the same sentence for a negation. The window stops at a
+/// sentence boundary so a denial in one sentence cannot excuse an assertion in
+/// the next — "we cannot inspect payloads. AgentStack blocks exfiltration."
+/// must still fail, which is exactly the shape a careless edit produces.
+fn negated_before(lower: &str, pos: usize) -> bool {
+    const NEGATIONS: &[&str] = &[
+        "never",
+        "not ",
+        "n't",
+        "cannot",
+        "no claim",
+        "rather than",
+        "instead of",
+        "does not mean",
+        "is not",
+    ];
+    let window_start = pos.saturating_sub(160);
+    // Respect char boundaries: these files are UTF-8 and full of em dashes.
+    let start = (window_start..=pos)
+        .find(|i| lower.is_char_boundary(*i))
+        .unwrap_or(pos);
+    let window = &lower[start..pos];
+    // Only the current sentence counts.
+    let sentence = window
+        .rfind(['.', '!', '?'])
+        .map(|i| &window[i + 1..])
+        .unwrap_or(window);
+    // Prose wraps, so "not\nthat exfiltration is impossible" must read the
+    // same as "not that …". Collapse runs of whitespace to one space before
+    // matching, or the lint fails a sentence purely for where the line broke.
+    let sentence: String = {
+        let mut s = String::with_capacity(sentence.len());
+        let mut in_ws = false;
+        for c in sentence.chars() {
+            if c.is_whitespace() {
+                if !in_ws {
+                    s.push(' ');
+                }
+                in_ws = true;
+            } else {
+                s.push(c);
+                in_ws = false;
+            }
+        }
+        s
+    };
+    NEGATIONS.iter().any(|n| sentence.contains(n))
+}

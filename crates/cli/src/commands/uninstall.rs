@@ -47,7 +47,16 @@ struct Removal {
 }
 
 pub fn run(args: &UninstallArgs, manifest_dir: Option<&Path>) -> Result<()> {
-    let ctx = crate::commands::load(manifest_dir)?;
+    // No manifest here is not necessarily a mistake. "Reset everything
+    // AgentStack put on this machine" is a real thing to want — after deleting
+    // a project, or from any directory at all — and until this branch existed
+    // the only command that could do it refused to start without the one file
+    // it does not remove. Answering "there is no manifest" to someone asking
+    // to be rid of the tool is the worst moment to be pedantic (review F07).
+    let ctx = match crate::commands::load(manifest_dir) {
+        Ok(ctx) => ctx,
+        Err(no_manifest) => return machine_state_only(args, no_manifest),
+    };
     let state = State::load()?;
     // An empty manifest is the whole trick: every planner reads it as "declare
     // nothing" and removes precisely what it previously managed. Parsed rather
@@ -285,6 +294,90 @@ fn kept_notes(manifest_dir: &Path) -> Vec<String> {
         ));
     }
     out
+}
+
+/// The "reset all AgentStack data on this machine" half of the exit, reached
+/// when there is no manifest to revert rendered output against.
+///
+/// It removes `~/.agentstack` and nothing else — deliberately narrow. Rendered
+/// native config is removed by planning an empty manifest against the state
+/// ledger, and without a manifest there is no such plan; guessing at other
+/// projects' files from the ledger alone would be a second removal path with
+/// none of the diff/undo properties the module header insists on.
+///
+/// `--keep-home` here would ask to remove nothing at all, so it is refused with
+/// the reason rather than silently succeeding at doing nothing.
+fn machine_state_only(args: &UninstallArgs, no_manifest: anyhow::Error) -> Result<()> {
+    let home = crate::util::paths::agentstack_home();
+    if !home.exists() {
+        // Nothing on either side: the original "no manifest" error is still
+        // the most useful thing to say.
+        return Err(no_manifest);
+    }
+    if args.keep_home {
+        println!(
+            "Nothing to do: there is no manifest here to revert rendered output against, \
+             and --keep-home asks to leave {} alone.",
+            home.display()
+        );
+        return Ok(());
+    }
+
+    println!(
+        "{}\n",
+        if args.write {
+            "Removing AgentStack's machine-local state:".bold()
+        } else {
+            "No manifest here, so there is no rendered output to revert. \
+             This is what AgentStack still holds on this machine:"
+                .bold()
+        }
+    );
+    println!(
+        "  {}  {}",
+        "AgentStack's own state".bold(),
+        format!(
+            "{} — undo ledger, trust store, central library, sessions",
+            home.display()
+        )
+        .dimmed()
+    );
+
+    if !args.write {
+        println!("\n{}", "Re-run with --write to remove it.".dimmed());
+        println!(
+            "{}",
+            "This is machine-wide: the undo ledger goes with it, so writes AgentStack \
+             made in ANY project stop being undoable."
+                .dimmed()
+        );
+        println!(
+            "{}",
+            "Rendered native config in a project is removed by running `agentstack uninstall` \
+             in that project, which needs its manifest."
+                .dimmed()
+        );
+        return Ok(());
+    }
+
+    std::fs::remove_dir_all(&home)
+        .with_context_path(&home)
+        .map(|_| println!("  {} removed {}", "✓".green(), home.display()))?;
+
+    println!("\n{}", "AgentStack's machine state is gone.".bold());
+    println!(
+        "  {}",
+        "Any rendered config still in a project is untouched — run `agentstack uninstall` \
+         there, with its manifest, to take that back too."
+            .dimmed()
+    );
+    println!(
+        "  {}",
+        "The binary itself is still on PATH — remove it the way you installed it \
+         (`rm $(command -v agentstack)` for the installer or `self link`)."
+            .dimmed()
+    );
+    Ok(())
 }
 
 fn print_plan(args: &UninstallArgs, root: &Path, removals: &[Removal], home: Option<&Path>) {

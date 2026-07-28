@@ -33,9 +33,25 @@ jobs:
           - { os: windows-latest, target: x86_64-pc-windows-msvc }
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-      # Intentionally floating: `stable` is a branch ref with no resolvable tag.
-      - uses: dtolnay/rust-toolchain@stable
+      # The cross-compiled targets need the standard library for the TARGET
+      # installed into the toolchain cargo actually runs, and `rust-toolchain.toml`
+      # decides which one that is. Installing the cross std into `stable` while
+      # the file redirects cargo to the pinned channel fails as
+      # `E0463: can't find crate for core` — and only on the cross targets, so
+      # three of five artifacts still build and the release looks half-fine.
+      # Read the pin from the file rather than restating it: a second copy of
+      # the version is a second thing to forget on a toolchain bump.
+      - name: Read the pinned toolchain
+        id: pin
+        shell: bash
+        run: |
+          channel=$(grep -m1 '^channel' rust-toolchain.toml | cut -d'"' -f2)
+          [ -n "$channel" ] || { echo "no channel in rust-toolchain.toml"; exit 1; }
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "building with $channel for ${{ matrix.target }}"
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: ${{ steps.pin.outputs.channel }}
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
 

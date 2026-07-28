@@ -69,7 +69,7 @@ across fresh sandboxes.
 
 ## What it does not claim
 
-This example is about **skill delivery equivalence and the profile fence**, not
+This example is about **skill delivery equivalence and the toolset fence**, not
 runtime firewalling. The lease brokers only skill content here (the `docs`
 profile declares no servers); for the MCP tool firewall and trust gate see
 `examples/malicious-repo-demo/`, and for kernel-enforced egress/filesystem

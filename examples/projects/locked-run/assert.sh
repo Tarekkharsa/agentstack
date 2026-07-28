@@ -243,10 +243,12 @@ fi
 # ── 7) --profile is a FENCE: the grant freezes only the subset ────────────────
 say "7) run claude-code --locked --profile ci — the grant carries ONLY the fenced subset"
 OUT="$("$AS" run claude-code --locked --profile ci 2>&1)" || bad "fenced run failed: $OUT"
-if grep -q "profile fence: 'ci'" <<< "$OUT"; then
-  ok "fence: the run states the profile fence up front"
+# The run banner says "toolset fence" — `--profile` stays the frozen flag
+# name, but every line a person reads says toolset (finding H2).
+if grep -q "toolset fence: 'ci'" <<< "$OUT"; then
+  ok "fence: the run states the toolset fence up front"
 else
-  bad "fence: expected the profile-fence line; got: $OUT"
+  bad "fence: expected the toolset-fence line; got: $OUT"
 fi
 RUN_FENCED="$(newest_run)"
 GRANT_FENCED="$(find "$RUNS/$RUN_FENCED" -name 'grant.json' | head -1)"

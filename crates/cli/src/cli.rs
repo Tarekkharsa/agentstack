@@ -2236,6 +2236,13 @@ pub struct SearchArgs {
     /// Free-text query over name, description, and tags (lists all if omitted).
     pub query: Option<String>,
 
+    /// Show every match instead of the most relevant few. The default page is
+    /// short on purpose: a first screen of substring matches teaches you to
+    /// search somewhere else. `--json` is unaffected and always carries the
+    /// complete ranked list.
+    #[arg(long)]
+    pub all: bool,
+
     /// Emit the same results as JSON (contract `json-reads-v1`).
     #[arg(long)]
     pub json: bool,

@@ -28,7 +28,9 @@ the [README](../README.md) and the [getting-started walkthrough](start.html).
 AgentStack packages, runs, and governs AI agents — skills, tools, MCP servers,
 and ephemeral generated capabilities — as trusted, portable bundles.
 
-The strategic frame: the **agent bundle** is the standard unit (the way the image was Docker's unit). Everything else in the system gates it, constrains it, records it, or distributes it. Config unification across agent CLIs is the adoption wedge; the trust gate, firewall, and audit trail are the durable value. The registry/marketplace is the endgame, only viable because trust and signing exist first.
+The strategic frame: the **manifest** is the unit. Everything else in the system renders it, gates it, constrains it, or records it. Portability across agent CLIs — import once, render everywhere, switch by task, recover safely — is the product; the trust gate, the policy ceiling, and the call record are what make that portability safe to rely on rather than a second thing to worry about.
+
+> An earlier version of this paragraph called a public registry/marketplace "the endgame". [`STRATEGY.md`](../STRATEGY.md) has since cut that lane: a catalog is not built until local reuse succeeds repeatedly, and it is not a goal the architecture is steering toward. The sentence is corrected rather than deleted so the change of direction is legible to anyone who read the old one.
 
 **A note on vocabulary.** User-facing docs — the README, the getting-started
 walkthrough, and the how-to guides — call the reviewed config file the
