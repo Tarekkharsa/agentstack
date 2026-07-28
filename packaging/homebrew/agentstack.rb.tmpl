@@ -38,7 +38,8 @@ class Agentstack < Formula
   end
 
   def install
-    bin.install Dir["agentstack-*/agentstack"].first => "agentstack"
+    # Homebrew strips an archive's single top-level directory while staging.
+    bin.install "agentstack"
   end
 
   test do
