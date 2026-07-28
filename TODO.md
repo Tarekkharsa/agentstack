@@ -44,6 +44,49 @@ sharing evidence
 advanced expansion only if earned
 ```
 
+## Open review findings — what two product reviews left standing
+
+Both 2026-07-27 reviews are closed except the items below. Everything else they
+raised is fixed and shipped in v0.16.0; `CHANGELOG.md` is the record of which.
+These are kept here, short, because a finding that is neither fixed nor written
+down is a finding that gets rediscovered by a stranger.
+
+Ordered by what evidence they are waiting on, not by severity:
+
+- [ ] **C2 / F04 — the activation study.** Five developers with 2+ supported
+  CLIs, observed without command coaching; pass is 4/5 unaided and a median
+  under five minutes. Detail in §1.6 and the Stage 1 gate below. Both reviews
+  concluded this is now cheaper *after* a public release than before it — the
+  gate had been blocking indefinitely, and real installs are where the five
+  come from. It is also the only planned activity that could falsify the
+  product thesis rather than confirm it.
+- [ ] **M1 / F08 — extract the authority data path.** 82% of the workspace's
+  Rust lives in `crates/cli`, so `grant.rs` (authority construction) sits in
+  the same crate as `lib.rs` (library management) with no compiler-enforced
+  boundary. Multi-week, and the contract comes first — the existing item under
+  "Engineering foundation track" below is the live one.
+- [ ] **F09 — one versioned docs system.** Pages now carry a banner naming the
+  build they describe, which was the load-bearing half. Full per-release
+  versioning, global search, and one content source remain.
+- [ ] **F15 — browser and accessibility checks at release grade.** The Playwright
+  smoke runs in the docs workflow; landmarks, keyboard, mobile, theme, and an
+  automated a11y scan do not.
+- [ ] **F18 — migration recipes.** "Claude + Codex", "Cursor + Gemini", "from
+  dotfiles", "team without shared secrets", "remove AgentStack completely".
+- [ ] **F19 — a privacy-respecting learning loop.** Local-only by default, with
+  an inspectable export of outcomes — never paths, commands, or content.
+  Interviews and diary studies before any telemetry.
+- [ ] **M12 (remainder) — closed-item narratives belong in `CHANGELOG.md`.**
+  `docs/design/README.md` now indexes the design docs. This file still carries
+  multi-paragraph implementation stories under checked items, against its own
+  rule at the top. Move them; leave one line and a commit ref.
+- [ ] **F13 — governance, deferred on purpose.** Code of Conduct, maintainer
+  succession, funding, support window. The trigger is any one of: a second
+  person gains commit rights, an outside contributor opens a PR, the project is
+  publicly announced, or a security report arrives from outside. Until then it
+  is scaffolding for a building with no occupants. `SECURITY.md`'s private
+  reporting route already exists and is the part that matters first.
+
 ## Stage 0 — close confirmed correctness gaps
 
 These items block broader product work because they violate or weaken an
