@@ -95,11 +95,23 @@ fn load_manifest(dir: Option<&Path>) -> Result<Manifest> {
 fn build_preview(action: &str, digest: &str, mut body: Map<String, Value>) -> Value {
     body.insert("action".into(), action.into());
     body.insert("consent_digest".into(), digest.to_string().into());
-    // `create-profile` is the one action here that no longer renders (it names a
-    // toolset; activating it is a separate verb), so it cannot carry the shared
-    // note's render/`${REF}` clauses — they would be false. Every other action
-    // still re-locks and re-renders.
-    let note = if action == "create-profile" {
+    // Three actions here touch the manifest without rendering: naming a toolset,
+    // renaming one, and deleting one. None of them can carry the shared note's
+    // render/`${REF}` clauses, because for them those clauses are simply false.
+    // Every other action still re-locks and re-renders.
+    let note = if action == "rename-profile" {
+        format!(
+            "Review, then apply with --yes --consented {digest}. Applying renames the \
+             manifest entry — its servers and skills come with it, nothing is rendered, \
+             and no ${{REF}} secret is resolved."
+        )
+    } else if action == "delete-profile" {
+        format!(
+            "Review, then apply with --yes --consented {digest}. Applying removes the \
+             toolset entry — the servers and skills it named stay declared here and stay \
+             in the library. Nothing is rendered."
+        )
+    } else if action == "create-profile" {
         format!(
             "Review, then apply with --yes --consented {digest}. Applying writes the \
              manifest entry and re-locks — nothing is rendered, so no ${{REF}} secret is \
