@@ -1100,6 +1100,24 @@ rendered backend → 4 adapters`},
 
 <b>Hooks</b>
   (none)`},
+ edit:{cmd:'agentstack edit-profile --profile backend --add-skill rust-testing --remove-server github --preview', cwd:'~/Documents/GitHub/agentstack',
+  out:`{
+  "profile": "backend",
+  "add_skills": ["rust-testing"],
+  "add_servers": [],
+  "remove_skills": [],
+  "remove_servers": ["github"],
+  "skills": ["rust-testing"],
+  "servers": [],
+  "empties_toolset": false,
+  "action": "edit-profile",
+  "consent_digest": "sha256:1b8a6d67…a08e4"
+}
+
+<span class="dm">Every add and every removal in one write, under one digest, then one re-lock
+and one re-render. \`skills\`/\`servers\` are the RESULT — the panel's ticks draw an
+end state, so the digest binds the picture you were looking at, not the list of
+operations that implies it.</span>`},
  add:{cmd:'agentstack add-skill-to-profile rust-testing rust --write', cwd:'~/Documents/GitHub/agentstack', recon:true,
   out:`Preview (digest sha256:5f0afa8f…c31d) — nothing written yet.
 
@@ -1437,15 +1455,15 @@ const SCEN = [
    open:'<b>“In use” leaks across rows.</b> <code>AgentstackControl.tsx:2310</code> appends the age with <code>inUse &amp;&amp; session</code> — <em>this</em> session’s age, on <em>any</em> in-use row. <code>rust</code> is active, <code>backend</code> holds the session, and both now claim “in use just now”. The suffix belongs only to the row whose name matches <code>session.profile</code>.'}]},
 
 {id:'add-skill', group:'Everyday', name:'Add a skill', tag:'2 STEPS', tone:'g',
- summary:'The target toolset is chosen in the row itself, and one digest-bound confirm carries the consent. Adding a server instead lands on the secret-blocked card — the failure that reads as a next step.',
+ summary:'How this looked before the tick, and the failure that still reads the same either way: an unresolved secret blocks the render, keeps the manifest, and names the one command that fixes it.',
  steps:[
-  {name:'Pick and confirm', component:'LibraryRow → EditFlowCard', ui:'manage:toolsets', cli:'add',
+  {name:'Pick and confirm (legacy)', component:'LibraryRow → EditFlowCard', ui:'manage:toolsets', cli:'add',
    setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='toolsets';s.picker='rust-testing'},
    how:[H('One question, asked once','“Which toolset?” and “Confirm adding to rust” were the same question and its echo. The target is part of the Add control, and the digest binds to that answer.'),
         H('The digest is the load-bearing step','If the CLI’s preview has no digest, the card says so and disables Confirm rather than applying something it cannot bind to.','rgba(52,211,153,.5)')],
    gtee:[Y('Nothing is written until you confirm — the preview is computed from a staged copy.'),
          Y('The lockfile records the exact commit and content checksum, so the same skill resolves identically on a teammate’s machine.')],
-   open:'<b>“Add” means three different things in the same place.</b> With no toolsets it is disabled; with toolsets it opens an inline “Add to …” picker and relabels itself Cancel; while composing a draft it toggles membership immediately. The only clue to which mode you are in is a pill in the pane header. Underneath the mode problem is a labelling one: <b>a button reading “Add” cannot say what it adds to</b>, and the destination is chosen <em>after</em> the verb — so the word is asked to carry a meaning it does not have. The row never says whether it is already in the toolset either, so the first honest feedback is the confirm. Next to it, <b>“Remove” cannot say which of the two scopes it means</b>: this one is machine-wide, and the project-scope one people expect does not exist. See the Proposed scenario.',
+   open:'<b>Closed — this is the legacy path.</b> “Add” used to mean three things in one place: disabled with no toolsets, an inline “Add to …” picker with them, and an immediate toggle while composing — with a pill in the header as the only clue which. Underneath was a labelling problem: a button reading “Add” cannot say what it adds to, and the destination was chosen <em>after</em> the verb. A CLI carrying <code>profiles-edit-batch-v1</code> now shows a tick instead, and the destination is named once by the pane (see <b>One destination, one verb</b>). This frame is what an older binary still shows, which is why it is still here.',
    contract:'add-skill-to-profile · digest-bound · gated on canEditProfiles',
    // adding a *skill* just succeeds here; adding a *server* is what reaches step 2
    advance:s=>!!(s.flow&&s.flow.phase==='done'&&s.flow.secretBlocked)},
@@ -1457,7 +1475,7 @@ const SCEN = [
    gtee:[Y('A half-rendered config is never left behind: either every ref resolves or nothing is written.'),
          Y('No secret value is ever typed into, or displayed by, the panel.')],
    contract:'apply-v1 with an unresolved ' + REF,
-   open:'The panel recognises this state by matching the substring “not written”, so an unrelated permission failure carrying that phrase inherits the reassuring copy. It needs a structured signal from the CLI.'}]},
+   open:'<b>Narrowed.</b> The panel used to recognise this state by matching the substring “not written”, so an unrelated permission failure carrying that phrase inherited the reassuring copy — and was treated as success. It now matches only the CLI’s own signals (“unresolved secret”, “agentstack secret set NAME”). A structured field on the wire would still be better than reading prose.'}]},
 
 {id:'create', group:'Everyday', name:'Create a toolset', tag:'2 STEPS', tone:'g',
  summary:'Composing happens in the rail, beside the library it draws from, instead of listing the whole library a second time in a screen of its own.',
@@ -1622,31 +1640,32 @@ const SCEN = [
          N('The panel cannot stop a run; agentstack kill does, and reverts any toolset it owned.')],
    contract:'workflow observe · read-only'}]},
 
-{id:'proposed', group:'Proposed', name:'One destination, one verb', tag:'PROPOSAL', tone:'b',
- summary:'The same three jobs — add, remove, create — with the rail carrying a selection. Because the library always has a destination, the mode disappears, the deferred picker disappears, and one verb per row is enough. This is a proposal, not shipped code.',
+{id:'proposed', group:'Everyday', name:'One destination, one verb', tag:'LIVE', tone:'g',
+ summary:'The same three jobs — add, remove, create — with the rail carrying a selection. Because the library always has a destination, the mode disappears, the deferred picker disappears, and one verb per row is enough. Shipped: the tick is the membership, and un-ticking is the inverse that never existed before.',
  steps:[
-  {name:'Edit what is in a toolset', component:'proposed · ToolsetsTab', ui:'manage:toolsets', cli:'add',
+  {name:'Edit what is in a toolset', component:'ToolsetsTab · tick', ui:'manage:toolsets', cli:'edit',
    setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='toolsets';s.proposed=true;s.sel='backend'},
    how:[H('No verb has to carry the destination','“Add” cannot say where it adds, so it was asked to mean something it could not. The pane is titled <b>WHAT’S IN BACKEND</b> and each row is ticked or not — the tick <em>is</em> the membership, and it reads the same in both directions.'),
-        H('Un-ticking is the missing verb','Today you can put a skill into a toolset from this list but never take it out again. Un-ticking does it, and it is obviously the inverse of what you just did — no second word to learn, and no second word to confuse with the library one.','rgba(52,211,153,.5)'),
-        H('One apply, one lock, one render','Today every add is its own write, re-lock and re-render. Ticking is free; the bar collects the change and applies it once, under one digest. Fewer writes, one consent, and Reset costs nothing because nothing has happened yet.','rgba(91,124,250,.5)'),
+        H('Un-ticking was the missing verb','You could put a skill into a toolset from this list and never take it out again — the add verbs had no inverse, and the only Remove nearby was the machine-wide library one. Un-ticking is now that inverse: no second word to learn, and no second word to confuse with the library’s.','rgba(52,211,153,.5)'),
+        H('One apply, one lock, one render','Every add used to be its own write, re-lock and re-render. Ticking is free; the bar collects the change and applies it once, under one digest. Reset costs nothing because nothing has happened yet — and a tick that undoes an untick leaves the batch entirely rather than sending an add and a remove that cancel.','rgba(91,124,250,.5)'),
         H('The machine-wide delete is not a peer of the tick','It leaves the row entirely — into ⋯, under <b>Delete from library</b>, and it names the scope in the confirm: “This is your machine-wide library, not this toolset.” The two scopes no longer share a word, a place, or a shape.','rgba(248,113,113,.5)')],
    gtee:[Y('Every row states which set it belongs to and where it came from, without hovering.'),
          Y('The project-scope edit and the machine-wide delete share no word, no position and no control shape.'),
          Y('Ticking writes nothing — the digest is taken once, over the whole batch.'),
-         N('This is a proposal. Batch edit and remove-from-toolset have no CLI contract today; both would need one.')],
-   contract:'would need profiles-edit to accept a batch (adds + removes) under one digest',
+         Y('The preview returns the RESULTING membership, so consent binds the end state the ticks drew.'),
+         N('Removing a member ends a membership only. The capability stays declared here and stays in your library — deleting it is the machine-wide verb, and says so.')],
+   contract:'edit-profile · profiles-edit-batch-v1',
    target:s=>((s.pending.add.length||s.pending.rem.length)?'p:apply':'p:tog:skill:rust-testing'),
    advance:s=>!!(s.flow&&s.flow.phase==='done')},
   {name:'Create one, identically', component:'proposed · unsaved rail row', ui:'manage:toolsets', cli:'toolset',
    setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='toolsets';s.proposed=true;
              s.newRow={name:'web',members:[],ready:true,blocked:null,targets:'claude-code'}},
    how:[H('Creating stops being a mode','A new toolset is a rail row that is not saved yet, selected like any other. The list to its right behaves exactly as it just did — so nothing silently rewrites what the controls mean, and there is no state you have to notice you are in.'),
-        H('Which is why the ticks made sense here first','Your instinct was right: ticking obviously means “put this in the thing I am building”. The proposal is to make the saved case work the same way, rather than have one gesture for new toolsets and another for existing ones.','rgba(52,211,153,.5)'),
+        H('Which is why the ticks made sense here first','Ticking obviously means “put this in the thing I am building”. The saved case now works the same way, rather than one gesture for new toolsets and another for existing ones.','rgba(52,211,153,.5)'),
         H('Create is the same button as Apply','One bar, one write, in the same place. For a new toolset it is also the only moment the name is validated.','rgba(91,124,250,.5)')],
    gtee:[Y('Nothing is written until Create — the row and its ticks are panel state.'),
-         N('Rename and delete for a toolset still do not exist anywhere, in either design.')],
-   contract:'would reuse create-profile, with the ticked set as its members',
+         Y('Rename and delete now exist too, on the rail row — each refusing where the name is load-bearing elsewhere.')],
+   contract:'create-profile, with the ticked set as its members',
    target:s=>(s.pending.add.length?'p:create':'p:tog:skill:rust-testing'),
    advance:s=>s.created}]},
 
@@ -1790,10 +1809,10 @@ const HUMAN = {
    "The model proposes the shape of the run and you approve it in the chat. That click executes nothing.",
    "Once it starts, one line tells you it is live and offers the way in.",
    "Then you can watch every agent: the job it has, how confined it is, and where it has got to."]},
- 'proposed':{q:"Could editing a toolset be simpler than this?", plains:[
-   "A sketch, not shipped code. The tick is the membership, and it reads the same in both directions.",
-   "A new toolset is just a row that is not saved yet — so nothing quietly changes what the controls mean.",
-   "One write at the end, under one digest, instead of one write per click."]},
+ 'proposed':{q:"How do I change what's in a toolset?", plains:[
+   "Pick the toolset on the left; the list on the right is what's in it. Tick to add, un-tick to take out — the tick is the membership, and it reads the same both ways.",
+   "A new toolset is just a row that is not saved yet, filled by the same ticks — so nothing quietly changes what the controls mean.",
+   "Nothing is written while you tick. One write at the end, under one digest, instead of one write per click."]},
  'activity':{q:"What did my agents actually do?", plains:[
    "Every call your agents made through AgentStack, and how each one ended. This is the thinnest screen in the panel, and it is not ready."]},
  'degraded':{q:"Why are some buttons switched off?", plains:[
