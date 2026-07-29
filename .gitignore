@@ -35,3 +35,8 @@ examples/workflow-scale/results.jsonl
 /.gemini/skills/
 /.pi/skills/
 # <<< agentstack >>>
+
+# local playwright install for tools/site-smoke.mjs
+/node_modules/
+/package.json
+/package-lock.json
