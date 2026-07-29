@@ -47,10 +47,11 @@ advanced expansion only if earned
 ### Launch status (2026-07-29)
 
 The public-launch path — `install → init → apply → doctor → restore` — is
-shipped and public in v0.16.0. **v0.17.0 — the binary the study installs,
-with the dry-run fixes — is tagged and drafted (all seven assets, provenance,
-formula) awaiting the maintainer's publish (2026-07-29).** What separates
-here from a validated launch:
+shipped and public. **v0.17.0 is the published release (2026-07-29): the
+binary the study installs, carrying the dry-run fixes, the gateway
+fail-closed fence, and `edit-profile`. Verified post-publish from the public
+tap on a clean setup — the full journey runs green and doctor no longer
+contradicts a toolset switch.** What separates here from a validated launch:
 
 - **The §1.6 activation study** (the Stage 1 gate), then fixing the three most
   common blockers it finds. It is the one planned activity that can falsify
@@ -76,7 +77,11 @@ Ordered by what evidence they are waiting on, not by severity:
   concluded this is now cheaper *after* a public release than before it — the
   gate had been blocking indefinitely, and real installs are where the five
   come from. It is also the only planned activity that could falsify the
-  product thesis rather than confirm it.
+  product thesis rather than confirm it. Study-watch (found verifying the
+  published binary, 2026-07-29): `init` imports only global-scope configs —
+  a participant whose servers live in a project `.mcp.json` sees "no config
+  files found" and imports nothing. If a participant hits it, that is likely
+  blocker #1; fix after the study confirms, not before.
 - [ ] **M1 / F08 — extract the authority data path.** 82% of the workspace's
   Rust lives in `crates/cli`, so `grant.rs` (authority construction) sits in
   the same crate as `lib.rs` (library management) with no compiler-enforced
