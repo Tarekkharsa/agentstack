@@ -199,6 +199,14 @@ write, and status paths.
 
 ### 1.6 Activation study
 
+Study kit (recruiting, protocol, metrics, gate mapping):
+[`docs/design/activation-study.md`](docs/design/activation-study.md). A
+maintainer dry-run of the full journey (2026-07-29, sandboxed HOME, release
+build) found and fixed four pre-study blockers — active-toolset drift
+awareness in doctor/diff, positional `toolset create <name>`, the
+no-such-toolset error and lock-summary jargon, and a stale undo hint — and
+recorded 2.1s total tool time for the whole journey.
+
 - [ ] Recruit five developers who use at least two supported agent CLIs and did
   not build AgentStack.
 - [ ] Observe them without guiding individual commands.

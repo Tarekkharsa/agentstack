@@ -25,6 +25,7 @@ of the boundaries below.
 | [`adr-tools-execute-runtime.md`](adr-tools-execute-runtime.md) | Why `tools_execute` runs where it does, and who owns it | Accepted decision record |
 | [`t3code-mcp-bridge-research.md`](t3code-mcp-bridge-research.md) | Why the MCP harness bridge was **not** built | Closed research — kept so the question is not re-opened from scratch |
 | [`reference-field-notes.md`](reference-field-notes.md) | Operational corner cases too deep for [the reference](../reference.md) | Maintainer-facing addenda |
+| [`activation-study.md`](activation-study.md) | How to run the §1.6 activation study: recruiting, protocol, metrics, and the Stage 1 gate mapping | Ready to run; results tick the gate in `TODO.md` |
 
 ## Writing one
 
