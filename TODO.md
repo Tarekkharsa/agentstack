@@ -4,7 +4,7 @@
 >
 > **Strategy:** [`STRATEGY.md`](STRATEGY.md)
 >
-> **Updated:** 2026-07-23
+> **Updated:** 2026-07-29
 >
 > **Rule:** finish the current stage gate before starting a later product stage
 
@@ -44,6 +44,17 @@ sharing evidence
 advanced expansion only if earned
 ```
 
+### Launch status (2026-07-29)
+
+The public-launch path — `install → init → apply → doctor → restore` — is
+shipped and public in v0.16.0. What separates here from a validated launch:
+
+- **The §1.6 activation study** (the Stage 1 gate), then fixing the three most
+  common blockers it finds. It is the one planned activity that can falsify
+  the product thesis rather than confirm it.
+- Workflows ship visible and honestly labeled experimental; their promotion
+  gate (under "Experimental workflows") is separate and does not block launch.
+
 ## Open review findings — what two product reviews left standing
 
 Both 2026-07-27 reviews are closed except the items below. Everything else they
@@ -54,12 +65,8 @@ down is a finding that gets rediscovered by a stranger.
 Ordered by what evidence they are waiting on, not by severity:
 
 - [x] **F01 — one release truth is public.** v0.16.0 is GitHub's latest
-  release with five provenance-verified archives, checksums, the corrected
-  formula, and an immutable public GHCR digest. The official Homebrew tap is
-  public; both the checksum-verifying installer and a clean `brew install` plus
-  formula test passed on 2026-07-28. Release recovery now uploads by exact ID,
-  creates complete notes once instead of patching a draft, and no-ops only
-  after verifying an already-published tag and all seven assets.
+  release with provenance-verified archives, checksums, the corrected formula,
+  and the public Homebrew tap; installer and `brew install` verified 2026-07-28.
 - [ ] **C2 / F04 — the activation study.** Five developers with 2+ supported
   CLIs, observed without command coaching; pass is 4/5 unaided and a median
   under five minutes. Detail in §1.6 and the Stage 1 gate below. Both reviews
@@ -70,148 +77,71 @@ Ordered by what evidence they are waiting on, not by severity:
 - [ ] **M1 / F08 — extract the authority data path.** 82% of the workspace's
   Rust lives in `crates/cli`, so `grant.rs` (authority construction) sits in
   the same crate as `lib.rs` (library management) with no compiler-enforced
-  boundary. Multi-week, and the contract comes first — the existing item under
-  "Engineering foundation track" below is the live one.
+  boundary. The contract comes first — the existing item under "Engineering
+  foundation track" below is the live one. (Sizing note, 2026-07-29:
+  `grant.rs` is ~83% tests; the production authority code is roughly 500
+  lines, so the move is smaller than the raw line count suggests.)
 - [ ] **F09 — one versioned docs system.** Pages now carry a banner naming the
   build they describe, which was the load-bearing half. Full per-release
   versioning, global search, and one content source remain.
-- [x] **F15 — browser and accessibility checks at release grade.** Every
-  canonical sitemap page now runs at phone + desktop widths with landmarks,
-  keyboard skip navigation, theme switching, reduced-motion behavior, console/
-  overflow checks, and axe WCAG A/AA scanning; the smoke self-test and full
-  local browser run are green (2026-07-28).
-- [x] **F18 — migration recipes.** One generated, navigable page now covers
-  Claude + Codex, Cursor + Gemini, dotfiles, a team without shared secrets, and
-  complete removal; link/fragment/sitemap and browser/a11y checks are green
-  (2026-07-28).
+- [x] **F15 — browser and accessibility checks at release grade** (2026-07-28:
+  phone + desktop widths, landmarks, keyboard skip, themes, reduced motion,
+  axe WCAG A/AA; smoke self-test and full local run green).
+- [x] **F18 — migration recipes** (2026-07-28: one generated page covering
+  Claude + Codex, Cursor + Gemini, dotfiles, teams without shared secrets, and
+  complete removal; link/sitemap/a11y checks green).
 - [ ] **F19 — a privacy-respecting learning loop.** Local-only by default, with
   an inspectable export of outcomes — never paths, commands, or content.
   Interviews and diary studies before any telemetry.
-- [ ] **M12 (remainder) — closed-item narratives belong in `CHANGELOG.md`.**
-  `docs/design/README.md` now indexes the design docs. This file still carries
-  multi-paragraph implementation stories under checked items, against its own
-  rule at the top. Move them; leave one line and a commit ref.
-- [x] **F13 — governance trigger met by the planned public launch.** Published
-  Code of Conduct, maintainer/succession and funding posture, support routes and
-  support window; README and contributor orientation link the contracts
-  (2026-07-28).
+- [x] **M12 — closed-item narratives belong in `CHANGELOG.md`** (2026-07-29:
+  executed — every checked item in this file is now one line plus a date or
+  commit ref; the narratives live in `CHANGELOG.md` and commit history. Stale
+  "uncommitted" annotations were corrected against git: the scaling lane,
+  Lanes C1/C2, and the F13/F14 fixes all shipped in v0.16.0.)
+- [x] **F13 — governance trigger met by the planned public launch** (2026-07-28:
+  Code of Conduct, succession/funding posture, support routes published and
+  linked).
 
 ## Stage 0 — close confirmed correctness gaps
 
-These items block broader product work because they violate or weaken an
-existing boundary. Finish and review them before enabling new UI writes.
+Closed 2026-07-23. Detail in `CHANGELOG.md` (v0.16.0) and the commits below.
 
 ### Workflow module boundary
 
-- [x] Review and land the explicit Boa `IdleModuleLoader` (landed `b05fd26`;
-  required witness `dynamic_import_of_real_on_disk_module_is_refused` green;
-  independent review 2026-07-23 confirmed the loader refuses every import
-  and Boa 0.21.1's default globals expose no filesystem, network,
-  environment, or process API).
-- [x] Run the focused workflow tests and independently review all context
-  construction defaults for other ambient host capabilities (2026-07-23,
-  fable + gpt-5.6 Sol independently). Two findings, both fixed with
-  witnesses: Boa's default host hook leaked the OS timezone through
-  explicit-argument `Date` methods (now pinned to UTC in `Hooks`), and
-  `WeakRef` exposed GC-schedule nondeterminism (now poisoned in the prelude
-  alongside `FinalizationRegistry`). Dynamic-compilation denial and runtime
+- [x] Boa `IdleModuleLoader` landed and independently reviewed; refuses every
+  import (`b05fd26`, witness `dynamic_import_of_real_on_disk_module_is_refused`).
+- [x] Ambient-capability review of context construction, two independent
+  reviewers (2026-07-23): timezone pinned to UTC, `WeakRef`/
+  `FinalizationRegistry` poisoned; dynamic-compilation denial and runtime
   limits verified sound.
-- [x] Script-boundary review recorded complete (§9.3 discharged 2026-07-23):
-  a fresh reviewer re-derived the boundary's witness set from the code and
-  threat model, confirmed the shipped suite proves the load-bearing ones,
-  and mutation-tested the two most load-bearing guards — zero blocking
-  findings. The `(preview)` command label is dropped: `workflow` is now a
-  visible CLI command (a deliberate +1 to the curated visible set) and the
-  docs drop the interpreter-review caveat. The cross-model codex pass was
-  skipped on a quota error (recommended follow-up on refill); three
-  non-blocking coverage refinements recorded in the design doc's §9 gate 3.
+- [x] §9.3 script-boundary review discharged with zero blocking findings
+  (2026-07-23); the `(preview)` label dropped — `workflow` is a visible
+  command. Its open follow-ups live under "Experimental workflows" below.
 
 ### Consent snapshot and UI authorization
 
-- [x] Land the immutable `ConsentSnapshot` implementation (`e1c8000`).
-  - Manifest, local overlay, and lockfile must be read once.
-  - The displayed preview and `surface_digest` must derive from those same
-    captured bytes.
-  - A grant must record only the digest it verified.
-  - An edit before grant must refuse or leave the project in `Changed`, never
-    silently bless different bytes.
-- [x] Add focused trust and CLI witnesses for absent, wrong, stale, and matching
-  consent digests (`e1c8000`).
-- [x] Complete the independent line-by-line review of the consent snapshot and
-  grant path (2026-07-23, fable + gpt-5.6 Sol independently; nine findings,
-  all closed in the same-day hardening commit): interactive grants now record
-  the reviewed snapshot's digest instead of a disk re-read; the preview
-  refuses to display a library definition that does not match the snapshot's
-  lock pin; `apply`'s owned-refresh re-pin digests the bytes it wrote and can
-  no longer create or blank a trust entry; the consent digest distinguishes
-  absent from empty pinned files (v3 — existing entries re-gate); the
-  whole-store load-modify-save is serialized so a grant cannot resurrect a
-  concurrent revoke; init's plan digest covers the full import (v2) and the
-  consented write consumes the exact verified detection; review/blocker/
-  policy lines sanitize hostile text; and the `isatty` consent probe's limits
-  are documented honestly in `docs/ENFORCEMENT.md` (a same-user PTY equals
-  the same-user store-file boundary, no stronger claim made).
-- [x] Complete the t3code half of the contract (t3code `f0196e536`,
-  `d98b5080d`): `surface_digest` decoded, carried in the grant request,
-  mapped to fixed `--yes --consented-digest` argv, and a grant with an
-  absent/malformed digest is refused before anything spawns (stale refusal
-  is CLI-enforced).
-- [x] Introduce the dedicated `agentstack:admin` authorization boundary
-  (t3code `f0196e536`): required for every `agentstackAction` write, granted
-  only to administrative sessions, checked server-side against the
-  authenticated session's scopes; RPC-level fail-closed witness added in
-  `d98b5080d`. Reads stay on `orchestration:read`.
-- [x] Verify that older CLI/newer UI and newer CLI/older UI combinations fail
-  closed with a useful message (`717f29d` envelope + t3code `d98b5080d`
-  negotiation: newer CLI schema → one "update needed" state, actions
-  disabled; older CLI without a feature → that action disabled with upgrade
-  guidance).
+- [x] Immutable `ConsentSnapshot` with focused trust/CLI witnesses (`e1c8000`).
+- [x] Independent line-by-line review of the consent/grant path; nine findings
+  closed same day; consent digest v3 re-gates every existing entry
+  (2026-07-23).
+- [x] t3code half of the contract: digest-bound grants, the `agentstack:admin`
+  authorization boundary, and version-mismatch fail-closed behavior
+  (CLI envelope `717f29d`; t3code `f0196e536`, `d98b5080d`).
 
 ### Stage 0 gate
 
-- [x] Security-sensitive diffs receive line-by-line review (consent path and
-  interpreter ambient defaults reviewed independently 2026-07-23; findings
-  fixed same day, each with a witness).
-- [x] Focused tests pass (trust, workflow, command-module, and integration
-  suites green; `cargo fmt --check` and clippy clean).
-- [x] The t3code trust flow works end-to-end with a matching digest
-  (t3code `d04757e38`: the panel's service drives the real binary through
-  preview → grant → drift → stale-digest refusal → re-grant → revoke).
-- [x] No frontend condition is the only enforcement of a write guarantee
-  (the CLI independently verifies consent digests, plan digests, and
-  non-interactive gates; t3code refusals are pre-spawn hygiene on top,
-  witnessed by the e2e test refusing at the CLI layer).
-
-Stage 0 is closed: the §9.3 interpreter-boundary review discharged the last
-workflow preview-label item (2026-07-23). Workflows remain in the
-experimental lane pending the repeated-use promotion gate below, but the
-command is no longer preview-hidden.
+- [x] Closed 2026-07-23: security diffs reviewed line-by-line, focused suites
+  green, the t3code trust flow proven end-to-end against the real binary, and
+  no write guarantee enforced only by the frontend.
 
 ## Stage 1 — first value in under five minutes
 
 ### 1.1 Positioning reset
 
-- [x] Replace the security-first strategy with the cross-CLI environment
-  manager strategy.
-- [x] Make the README lead with “one agent setup across every coding CLI.”
-- [x] Align the website hero and contributor orientation with the new product
-  definition.
-- [x] Review the remaining public documentation for security-first opening copy
-  and move deep security material to the point where it becomes relevant
-  (2026-07-23, full public-page sweep): the tutorial's first lesson now opens
-  with the portability promise (the threat framing moved after it and into the
-  Guard/Trust lessons where it belongs); the demos page leads with "the
-  promises, proven" and the first-value demo ahead of the malicious-repo one;
-  workflows.md defines what a workflow does before its preview/governance
-  status; choose.md asks "where do files live" before "how much protection";
-  the docs-hub and cookbook openings lead with the outcome instead of
-  checksum/sandbox clauses. Task-titled security how-tos (trust-a-repo,
-  lock-down-a-run) keep their topic-appropriate openings.
-- [x] Keep the enforcement matrix, architecture, and security documentation
-  intact as the authoritative deeper layer (verified in the same sweep:
-  ENFORCEMENT.md and ARCHITECTURE.md are untouched, the retired-page redirect
-  stubs route to them, and every simplified opening links there for the
-  precise version).
+- [x] Complete (2026-07-23): strategy, README, website, and the public docs
+  lead with cross-CLI portability; deep security material moved to where it
+  becomes relevant; `ENFORCEMENT.md`/`ARCHITECTURE.md` remain the untouched
+  authoritative layer.
 
 ### 1.2 One recommended onboarding journey
 
@@ -225,193 +155,47 @@ t3code presents this as a guided graphical flow; the terminal presents the
 same sequence directly. Both must call the same CLI-owned planning, validation,
 write, and status paths.
 
-- [x] Audit `agentstack init` from a clean machine/user perspective
-  (2026-07-23, sandboxed HOME): flagless non-TTY refuses with named escapes;
-  no-CLI machines get the starter manifest; detection distinguishes
-  binaries-on-PATH from configs-found; the summary's "From:" names only CLIs
-  that actually contributed content.
-- [x] Land `init --plan` as the stable, read-only JSON contract for
-  detecting CLIs, importable capabilities, secret reference names, origins, and
-  proposed destinations without writing or prompting (`e1c8000`).
-- [x] Add its witness that no manifest, secret store, native config, or restore
-  entry changes during planning (`e1c8000`).
-- [x] Ensure the first screen says which CLIs and native configurations were
-  found (2026-07-23, both surfaces): scripted init and the wizard open with
-  each detected CLI and the exact native config files detection read (or the
-  honest "binary on PATH — no config files found"); `init --plan` carries the
-  same evidence (`detected[].bin_on_path`, `detected[].configs`) and the
-  t3code setup card renders it under "Coding tools found".
-- [x] Show imported servers, skills, instructions, and secret reference names
-  before writing (2026-07-23): servers are listed by name with what each runs
-  or contacts, settings imports name their source CLIs, and lifted secret
-  references print with their origins — all before any write; the wizard's
-  import confirm moved AFTER that review (`run_for_setup` gates the write).
-  Skills and instructions are not part of the init import (nothing to show);
-  the plan and terminal state exactly what is imported.
-- [x] Explain unsupported or lossy imports in plain language (2026-07-23):
-  entries the import cannot map are named with a reason and the assurance
-  nothing was deleted, both in `init` output and `init --plan` (`unsupported`);
-  the settings import states that unrecognized settings stay in each CLI's own
-  file.
-- [x] Make the destination scopes and files visible without requiring knowledge
-  of adapter internals (2026-07-23, both surfaces): "Files agentstack will
-  manage" names the manifest (written by the import) and each CLI's native
-  destination with its scope in plain words ("this project" / "machine-wide"),
-  labeled as written by the next `apply --write`, not now; `init --plan`'s
-  additive `destinations[]` feeds the identical rows in the t3code setup card.
-  Witnessed by `init_review.rs` against the real binary.
-- [x] End the flow with one concise success summary (2026-07-23): scripted
-  `init` closes with manifest path / source CLIs / imported counts / secrets
-  still needing values / next commands (`render_import_summary`); the wizard
-  close leads with manifest path, CLIs updated, capabilities, and
-  still-needed secrets (`render_setup_facts`).
-- [x] Ensure a failed target does not hide successful targets or leave ownership
-  state ambiguous (2026-07-23): a hard per-target error no longer aborts the
-  apply pass — remaining targets render, completed writes stay recorded in
-  history and ownership state, the summary names the failures, and the exit
-  is nonzero (`apply_partial_failure` witness).
-- [x] Confirm `agentstack restore` can undo the onboarding write set
-  (2026-07-23): `init_restore_onboarding` witnesses one `restore --last`
-  returning manifest, secrets `.env`, and `.gitignore` byte-for-byte.
+- [x] Complete (2026-07-23, `e1c8000` + same-day batch): init audited from a
+  clean machine; `init --plan` is the stable read-only JSON contract with a
+  no-write witness; detection evidence, the pre-write import review, lossy
+  imports in plain language, visible destinations, and one success summary all
+  ship on both surfaces; a failed target no longer hides successful ones; one
+  `restore --last` returns the onboarding write set byte-for-byte.
 
 ### 1.3 t3code launch experience
 
-This is the primary graphical path, not an optional dashboard.
-
-- [x] Replace the current t3code integration copy with the product contract
-  (`docs/howto/use-with-t3code.md`, `docs/design/ui-control-plane.md`
-  updated to the shipped action enum and journey).
-- [x] Add capability negotiation (`717f29d` CLI envelope; t3code
-  `d98b5080d`): every UI-facing read carries `schema_version` + `features`,
-  the panel disables with an upgrade message on mismatch.
-- [x] Add a setup RPC backed by `init --plan` (t3code `agentstackSetupPlan`
-  → fixed `init --plan` argv; no import logic in TypeScript).
-- [x] Present the plan in four user-facing groups (setup card: coding tools
-  found / what will be imported / files AgentStack will manage / values
-  still needed).
-- [x] Add only fixed, closed actions for the first slice: `setup-apply`
-  (consent-bound to `plan_digest`), status via `doctor --json`, and
-  `restore-write` (id-addressed undo; the ledger is machine-global, so the
-  panel undoes the newest entry touching its own project, never `--last`).
-- [x] Resolve workspace identity on the t3code server (server-side
-  `resolveAgentstackWorkspaceRoot`; the browser sends only project/thread
-  ids, never a path or argv).
-- [x] Show one recommended next action (`doctor --json` `state` +
-  `next_action`; the panel leads with them).
-- [x] Keep trust, policy, guard, gateway, and workflow controls out of the
-  initial setup screen (the setup card uses plain language only; digests
-  live behind a Details disclosure).
-- [x] Add parity tests proving the t3code flow and direct CLI flow produce
-  the same plan and resulting files
-  (`crates/cli/tests/t3code_parity.rs`, `717f29d`: the panel's fixed argv
-  and the direct scripted journey yield byte-identical files, the same
-  doctor state, and project-isolated undo).
-- [x] Remove or rewrite old t3code copy that claimed completeness before the
-  consent/admin contract worked (`docs/howto/use-with-t3code.md` now
-  describes the enforced contract).
-- [x] Lane C1 — workflow observe contract (2026-07-24, uncommitted, reviewed
-  zero-blocking): `workflow list`/`runs --json` carry the `ui_contract`
-  envelope via `list_value`/`runs_value` in
-  `crates/cli/src/commands/workflow.rs`; `workflow-observe-v1` appended last in
-  `ui_contract::FEATURES`; parity witness
-  `panel_workflow_observe_reads_carry_envelope` pins both fixed argv; t3code
-  monitor negotiates the feature and consumes the enveloped read. See
-  `docs/design/launch-plan.md` Lane C1.
+- [x] Complete (2026-07-23/24): integration copy replaced with the shipped
+  contract; capability negotiation (`717f29d` + t3code `d98b5080d`); setup RPC
+  backed by `init --plan` with the four-group setup card; fixed closed actions
+  only (consent-bound `setup-apply`, `doctor --json` status, id-addressed
+  `restore-write`); server-side workspace identity; one recommended next
+  action; no advanced nouns in setup; parity tests prove panel and CLI produce
+  byte-identical files (`crates/cli/tests/t3code_parity.rs`); Lane C1
+  workflow-observe contract shipped in v0.16.0 (`7b9e101`).
 
 ### 1.4 Progressive-disclosure acceptance
 
-- [x] Use only Setup, Toolset, Status, and Undo as beginner navigation concepts
-  (2026-07-23, t3code panel restructure): the tab bar is gone — the Overview is
-  the single beginner surface (status chip, manifest/checkup/secrets/library
-  outcomes, Toolsets card, Undo), and Workflow/Activity/Policy became
-  back-navigable advanced views one tap deeper.
-- [x] Replace unexplained internal nouns in first-run UI with outcome language
-  (2026-07-23): the wizard's delivery-mode picker and orientation drop
-  "gateway"/"trust-gated" for outcome phrasing ("nothing on disk — served live
-  to your CLIs after review"); the panel's "Doctor" row reads "Checkup", the
-  "Gateway" row became "Live serving" inside More protection, and guard/
-  sandbox/workflow facts left the first-run overview.
-- [x] Verify ordinary local import/apply does not require Docker, policy,
-  gateway, confinement, or workflow decisions (2026-07-23:
-  `ordinary_journey_vocab` witnesses the scripted init → apply --write →
-  doctor journey completing prompt-free with zero advanced vocabulary; the
-  unconfigured machine-policy doctor line joined the hidden-by-default
-  sections to make that true).
-- [x] When unfamiliar repository content triggers review, show the exact
-  content surface and why review is required (already shipped in the t3code
-  trust review: named servers with their run/contact targets, secret names,
-  named skills/workflows/extensions/instructions, and the state sentence
-  explaining inertness; `agentstack trust` prints the same surface in the
-  terminal).
-- [x] For every surfaced denial, render what was blocked, the boundary, what is
-  protected, one exact safe next action, and a details link (2026-07-23:
-  AgentstackDenialCard now renders all five — blocked command, matching
-  rule/source sentence, a derived "protecting" line, the safe next step, and a
-  Details disclosure with the rule, dimension, source, and honest coverage
-  limits). CLI-side refusals continue to carry what/why/next in their message
-  text; a structured JSON denial envelope for UI rendering remains the Slice 3
-  design in `docs/design/ui-control-plane.md`.
-- [x] Put stronger execution modes behind “More protection” after normal setup,
-  with honest cost/coverage labels (2026-07-23: the panel's More protection
-  view lists guard, machine policy, live serving, locked runs, and
-  sandbox/lockdown — each with live state where readable, what it covers, and
-  what it costs, e.g. "host process — not kernel isolation", "needs Docker ·
-  slower start").
-- [x] Teach one ladder, not five (2026-07-28): the README, landing page,
-  getting-started guide and interactive tutorial each described a different
-  progression — the guide taught "Track A / Track B", the tutorial taught
-  "manifest → lockfile → trust → policy → gateway → audit" as *the* map plus a
-  six-step ladder of its own (Unify · Verify · Guard · Trust · Scale ·
-  Confine), and neither put toolsets, undo, or sharing on the beginner path.
-  Both onboarding surfaces now follow the canonical Unify · Switch · Diagnose ·
-  Recover · Share · Govern ladder the README and landing page already agreed
-  on. Concretely: `start.html` gained "check it landed" (`status`), "take it
-  back" (`restore`) and a Switch step (`toolset create` / `use` /
-  `session start|end`) on the main path, marks where first value ends, moved
-  `guard install` into Govern, and collapsed the three-way delivery-mode fork
-  to the static default plus a link to `choose.html`; the tutorial's map lesson
-  now opens on Set up · Toolset · Status · Undo with the governance pipeline
-  demoted to a rung-6 note, its lessons are reordered so Switch precedes
-  Guard/Trust/Confine, and the cheat sheet is grouped by rung.
-- [x] Make the nouns the guide teaches behave like nouns (2026-07-28): with
-  Switch promoted to rung 2, `agentstack toolset` offering only `create` broke
-  the first command after `init` — listing lived at `use --list` and the noun
-  had no read at all. Added `toolset list` as a fixed-argv alias of
-  `use --list` (`ToolsetListArgs::to_use_args`, dispatched to the same
-  `use_profile::run`, every activation field pinned at its default) so the
-  discoverable noun cannot grow a second way to render or write. Also corrected
-  `init`'s one-line description: it advertised "detect, import, choose, apply,
-  verify" for every path, but only the interactive wizard applies and verifies
-  — the scripted (`--yes`/`--plan`/`--secrets`) path stops after the manifest.
-- [x] Confirm the released CLI serves the whole t3code panel (2026-07-28): the
-  panel gates on eight contracts and the published `v0.16.0` advertises all
-  eight plus ten more, so a source-built t3code needs no locally-built
-  AgentStack behind it. Recorded as a table in `docs/integrations.md` with the
-  `doctor --json` check readers can run themselves.
+- [x] Complete except the user test (2026-07-23 → 2026-07-28): Setup/Toolset/
+  Status/Undo are the only beginner concepts; first-run UI speaks outcome
+  language; the ordinary import/apply journey is witnessed vocabulary-free
+  (`ordinary_journey_vocab`); trust review shows the exact content surface;
+  every surfaced denial renders what/boundary/protected/next/details; stronger
+  modes sit behind "More protection" with honest cost/coverage labels; one
+  canonical ladder (Unify · Switch · Diagnose · Recover · Share · Govern)
+  across README, landing, guide, and tutorial; `toolset list` gives the taught
+  noun a read; the released v0.16.0 serves the whole t3code panel.
+- [x] The recovery pair `restore`/`adopt` joined the default `--help` — Undo
+  is a beginner concept, so the way back is findable without `--help --all`
+  (`8f96af3`, 2026-07-29).
 - [ ] Test the first-run copy with users who have not read the security docs.
 
 ### 1.5 First-value proof
 
-- [x] Build one fenced, reproducible demonstration that starts with two real
-  native CLI configurations, imports an MCP server, writes one manifest,
-  renders two target formats, ends with a clean doctor result, and restores
-  the original state byte-for-byte (2026-07-23:
-  `examples/first-value-demo/run-demo.sh` — self-asserting, sandboxed,
-  asciinema-recordable via `DEMO_PAUSE`).
-- [x] Record a short demo focused on portability, not threat prevention
-  (2026-07-23: `docs/demos/first-value.cast`, asciinema at 108×30,
-  DEMO_PAUSE=2.5, recorded against the current binary with all eight
-  assertions green in the recorded run; 2026-07-28: the embedded artifact is
-  now `docs/demos/first-value.svg`, an animated terminal SVG condensed from
-  that cast by `tools/make-term-svgs.py`, replacing the 664 KB GIF).
-- [x] Put the same proof sequence in the README, website, and getting-started
-  guide (2026-07-23: the five-step import → render → doctor → restore sequence
-  with the recording embedded in README "Try it in 60 seconds", the landing
-  quick-start card, and start.html rung 1, each linking the runnable script).
-- [x] Make expected output accurate against the current binary (2026-07-23:
-  the embedded output IS the recording of the current binary; `run-demo.sh`
-  exits nonzero on any output-shape drift, so CI can keep it honest, and
-  start.html's wizard transcript was updated to the Stage 1.4 wording).
+- [x] Complete (2026-07-23/28): self-asserting sandboxed demo
+  (`examples/first-value-demo/run-demo.sh`); the recording embedded in README,
+  landing, and start guide is the current binary's own output as an animated
+  SVG; any output-shape drift fails the demo script nonzero, so CI keeps it
+  honest.
 
 ### 1.6 Activation study
 
@@ -441,109 +225,35 @@ This is the primary graphical path, not an optional dashboard.
 
 ### 2.1 Stabilize the profile contract
 
-- [x] Land `use --list --json` as the machine-readable profile inventory
-  (`e1c8000`).
-- [x] Report the initial machine-readable profile surface (`e1c8000`):
-  - name;
-  - harness;
-  - selected servers and skills;
-  - pin/readiness state;
-  - project trust state;
-  - active state when applicable.
-- [x] Give incomplete profiles one actionable explanation rather than several
-  low-level lock errors (2026-07-23): the session-start gate — the one place
-  that piled a repeated per-item lock line under a "changed since lock was
-  written" lead-in false for never-pinned content — now names the unpinned
-  items on one line with one fix (lock → review → re-trust → retry); genuine
-  drift keeps the accurate story. Gate unchanged, message-shape witness added.
-  (`use --list --json` already carries one actionable reason per blocked row.)
-- [x] Document one simple way to create a second profile from an existing setup
-  (2026-07-23, `docs/howto/name-a-toolset.md`): the capabilities are already in
-  the manifest, so a second toolset just names a subset — add one
-  `[profiles.<name>]` block listing the servers/skills that task needs, then
-  activate it (`session start` or `use --write`); `session freeze --name` is
-  offered as the capture-what-I-used alternative.
+- [x] Complete (2026-07-23, `e1c8000` + follow-ups): `use --list --json` is the
+  machine-readable inventory (name, harness, selection, readiness, trust,
+  active state) with one actionable reason per blocked row; the second-toolset
+  journey is documented (`docs/howto/name-a-toolset.md`).
 
 ### 2.2 Make temporary switching dependable
 
-- [x] Land the fail-closed session-start readiness gate (`e1c8000`).
-- [x] Make `session start` state which profile and native files it activates
-  (2026-07-23): the start report names the profile, every native config file
-  the session now manages (the exact set `end` restores), the skills it
-  materialized where, and the one command that reverts it.
-- [x] Make current session/profile visible in the default status surface
-  (2026-07-23): bare `agentstack` shows an active session as its own line —
-  profile, humanized age, and the end command (the toolsets/doctor JSON
-  already carried it via `sessions-v1`).
-- [x] Ensure `session end` reports exactly what it restored (2026-07-23):
-  the end report lists the files put back to their pre-session bytes (from
-  the session's own history entry) and the skills removed; an end with
-  nothing to revert says so instead of implying a restore.
-- [x] Detect abandoned sessions and offer the safe recovery command
-  (2026-07-23): AgentStack does not supervise the agent process, so the honest
-  liveness signal at this layer is age — `session::is_abandoned` treats a
-  session that has outlived a working day (12h) as abandoned, defined once and
-  read by every surface. The bare-`agentstack` Session line flags an abandoned
-  session and leads with the `session end` recovery; `session list` names each
-  session with its age, flags the abandoned ones, and offers the exact safe
-  recovery for those only; `use --list --json`'s `session` object carries an
-  `abandoned` boolean so the panel highlights an interrupted session without
-  re-deriving the threshold. Witnesses: `is_abandoned` boundary,
-  `session_status_line`, and `render_session_list` unit tests.
-- [x] Test overlapping projects and interrupted processes without silently
-  clobbering user files (2026-07-23, `session_overlap.rs`): two projects each
-  run their own session, keyed separately — one project's start/end never
-  touches the other's native config, and each `end` restores only its own
-  project's pre-session bytes; an interrupted (store-only) session stays
-  visible, reads as abandoned once aged, refuses a second `start` that would
-  overwrite the live config, and `end` still restores the original bytes
-  exactly.
+- [x] Complete (2026-07-23): fail-closed session-start gate (`e1c8000`);
+  start/end reports name exactly what they activate and restore; the active
+  session is visible in bare `agentstack`; abandoned sessions (12h) are
+  defined once and flagged by every surface with the safe recovery command;
+  overlapping projects and interrupted processes witnessed
+  (`session_overlap.rs`).
 
 ### 2.3 Present profiles through user tasks
 
-- [x] Add two concrete examples (2026-07-23, `docs/howto/name-a-toolset.md`):
-  backend development versus incident response (everyday DB/code + review
-  skills vs. read-only observability + runbook, activated for the page then
-  reverted); and a minimal committed project toolset versus a broad personal
-  machine-manifest toolset.
-- [x] Explain profiles as “named toolsets,” not as policy or workflow roles
-  (2026-07-23): the howto opens by defining a toolset as a named subset of the
-  setup you already have — "not a policy, a permission level, or a workflow
-  role" — and reiterates that a toolset only selects from capabilities that
-  already passed review, granting no extra authority.
-- [x] Recommend temporary sessions in the beginner path and keep static apply as
-  the stable/offline path (2026-07-23): the "Which activation" section names
-  `session start`/`end` the recommended beginner way to switch and `use
-  --write` the stable/offline path (CI, offline, long-lived checkout), both
-  reversible.
+- [x] Complete (2026-07-23, `docs/howto/name-a-toolset.md`): two worked
+  examples; a toolset is "a named subset of the setup you already have — not a
+  policy, a permission level, or a workflow role"; sessions are the
+  recommended way to switch, static apply the stable/offline path.
 
 ### 2.4 t3code toolset picker
 
-Start only after the CLI JSON contract is reviewed and stable.
-
-- [x] Add read-only profiles RPC using server-resolved workspace identity
-  (2026-07-23: `agentstack.toolsets` → fixed `use --list --json` argv;
-  `sessions-v1` feature gates the session verbs; body carries per-profile
-  `active` and the top-level `session` object).
-- [x] Add fixed actions for session start and end (2026-07-23:
-  `session-start` name-bound to the toolsets read with a pre-spawn shape
-  refusal, `session-end` fixed argv, never `--all`; the CLI's fail-closed
-  gate stays the enforcement — witnessed against the real binary in
-  `AgentstackCli.e2e.test.ts`, refused until trusted and pinned).
-- [x] Label profiles as toolsets in the UI; keep the profile identifier in
-  details and machine-readable contracts (panel card says "Toolsets" / "Use
-  temporarily" / "Stop using"; the wire contract keeps `profiles`).
-- [x] Show readiness and the effective selected surface (per-row server/skill
-  counts + harness; a blocked row shows one actionable reason — trust review
-  first, else the first blocker's own fix).
-- [x] Keep editing/creating profiles out of this slice (read + the two
-  session verbs only; no create/edit surface anywhere).
-- [x] Demonstrate recovery when the panel closes during an active session
-  (2026-07-23: session state is read from the CLI's store on every load —
-  `toolset_sessions.rs` witnesses the listing reporting a session whose
-  supervisor died, and the panel's "Stop using" maps to the same
-  `session end` the e2e proves reverts it). Browser-level walkthrough of the
-  reopened panel remains part of the Stage 2 gate's user scenario.
+- [x] Complete (2026-07-23): read-only toolsets RPC plus the two session verbs,
+  name-bound with pre-spawn shape refusals and the CLI's fail-closed gate as
+  the enforcement; "Toolsets" / "Use temporarily" language; readiness with one
+  reason per blocked row; no create/edit surface in this slice; panel-close
+  recovery witnessed. The browser-level walkthrough of a reopened panel
+  remains part of the Stage 2 gate's user scenario.
 
 ### Stage 2 gate
 
@@ -556,24 +266,11 @@ Start only after the CLI JSON contract is reviewed and stable.
 
 ### 3.1 Connect diagnosis to action
 
-- [x] Inventory every actionable `doctor` finding. (~110 templates across 15
-  sections; sources: doctor.rs + manifest/validate.rs + scan.rs.)
-- [x] Map each finding to one recommended next action:
-  - inspect with `diff`;
-  - keep with `adopt --write`;
-  - reconcile with `apply --write`;
-  - recover with `restore`;
-  - re-lock or re-trust when content changed.
-  - (2026-07-23: closed the biggest remaining gap — every manifest-validation
-    error kind now carries a concrete `.with_fix()` naming a real `agentstack`
-    command or a precise manifest edit, feeding doctor's `↳` line and its single
-    `start with:` triage. Drift/secrets/trust findings already carried fixes.)
-- [x] Remove findings that only restate internal state without helping the user.
-  (2026-07-23: dropped four Ok/informational restatements — extension
-  matches-pin, named-policy rule-count, machine-dimension rule-count, healthy
-  machine-policy digest line; kept every error/warn sibling.)
-- [x] Keep informational findings visually separate from blockers. (Dimmed `·`
-  vs ✓/⚠/✗ convention preserved; empty sections now print no bare header.)
+- [x] Complete (2026-07-23): ~110 actionable doctor findings inventoried;
+  every finding carries one concrete recommended action (diff / adopt / apply /
+  restore / re-lock / re-trust) via `.with_fix()`, feeding doctor's `↳` line
+  and its single `start with:` triage; informational restatements dropped;
+  blockers stay visually separate from information.
 
 ### 3.2 Make writes predictable
 
@@ -700,32 +397,36 @@ work.
 Workflows remain available for supervised testing but are not part of the
 beginner promise.
 
-**Reviewable workflows (Lane C2 v1)** — landed 2026-07-24 (uncommitted,
-adversarially reviewed to zero blocking findings). The launch headline: a model
-proposes a workflow as an `agentstack-blueprint` JSON blueprint (pattern +
-nodes with role/model/effort/instruction + symbolic fanout + edges), t3code's
-chat renderer intercepts the fence and draws the shape as a Mermaid graph, and
-the user approves / rejects / edits-with-the-model before it runs. Engine
-untouched: the `propose-workflow` skill acts as compiler on approve and runs via
-the existing `agentstack workflow run`. Handshake is in-band (no new websocket
-method); blueprint `model`/`effort` are advisory and there is no digest binding
-between the drawn blueprint and the executed script — both are named v1 caveats.
-Deferred fast-follows: native declarative per-node execution (plan IR, authority
-+ Boa boundary, digest-bound approve), direct-manipulation editing, and the
-`workflow propose --json` contract migration. See `docs/design/launch-plan.md`
-Lane C2 v1.
+**Reviewable workflows (Lane C2 v1)** — shipped in v0.16.0 (`7b9e101`,
+adversarially reviewed to zero blocking findings): a model proposes a workflow
+as an `agentstack-blueprint` JSON blueprint, t3code's chat renderer draws the
+shape as a graph, and the user approves / rejects / edits-with-the-model
+before it runs. The engine is untouched: the `propose-workflow` skill compiles
+on approve and runs through the existing `agentstack workflow run`. Both v1
+caveats named at landing are now closed — the approved blueprint is
+digest-bound to the executed script (F13, `405ef30`) and declaring is one
+recorded, undoable transaction (F14, `dd3e595`). Deferred fast-follows:
+native declarative per-node execution, direct-manipulation editing, and the
+`workflow propose --json` contract migration. History:
+`docs/design/launch-plan.md` (closed record).
 
-Before promoting them:
+Before promoting them out of experimental:
 
 - [x] Complete the module-loader fix and independent script-boundary review
-  (module loader landed earlier; §9.3 boundary review discharged 2026-07-23,
-  zero blocking findings — recommended follow-ups: a cross-model codex pass
-  on quota refill and coverage findings A/B/C in the design doc's §9 gate 3).
-- [ ] Review heap-growth and hostile string/regex behavior.
+  (§9.3 discharged 2026-07-23, zero blocking findings — recommended
+  follow-ups: a cross-model codex pass on quota refill and coverage findings
+  A/B/C in the design doc's §9 gate 3).
+- [x] Review F13 — the approved blueprint is bound to the executed bytes
+  (`405ef30`, v0.16.0).
+- [x] Review F14 — compile-on-approve is one recorded, undoable transaction
+  through the restore ledger (`dd3e595`, v0.16.0).
+- [ ] Review heap-growth and hostile string/regex behavior. (Phase 2b below is
+  the piece that actually caps the JS heap the posture label admits is
+  uncapped.)
 - [ ] Preserve the out-of-thread watchdog and honest posture label.
 - [ ] Run at least three recurring tasks on separate occasions.
   (1 of 3 done — 2026-07-23: workflow-acceptance map→reduce→verify, real
-  `claude` x5, PASS, 22.0s, evidence green; see design doc §9 gate 4.
+  `claude` ×5, PASS, 22.0s, evidence green; see design doc §9 gate 4.
   Occasions 2 and 3 must be separate sittings.)
 - [ ] Confirm each task is easier to repeat than the equivalent native/manual
   orchestration.
@@ -737,83 +438,59 @@ Before promoting them:
 ### Workflow scaling lane
 
 Design: [`docs/design/workflow-scaling.md`](docs/design/workflow-scaling.md).
-MapReduce-informed, but only where the analogy holds. The spine is that every
-framework freedom Hadoop enjoys (retry, reorder, relocate, race) is paid for by
-task purity — so the lane buys purity back where a profile can *prove* it,
-rather than where an author claims it. Post-launch: the 2026-07-25 product
-review puts the everyday loop ahead of this, and that stands.
+MapReduce-informed, but only where the analogy holds: every framework freedom
+Hadoop enjoys (retry, reorder, relocate, race) is paid for by task purity, so
+the lane buys purity back where a profile can *prove* it, not where an author
+claims it. Post-launch: the 2026-07-25 product review puts the everyday loop
+ahead of this, and that stands. Phases 0–3 and 5 shipped in v0.16.0
+(`ac76fc0`, `49c8f9c`).
 
-- [x] Phase 0 — measurement rig (2026-07-26, uncommitted).
-  `examples/workflow-scale/`: latency-configurable mock harness (latency is
-  checksum-derived from the prompt, so runs replay identically), width and
-  concurrency knobs, `analyze.py`. Uses only the shipped report shape.
-  Baseline finding that set the phase order: the batch barrier and the
-  concurrency cap are *coupled* — at conc 4 efficiency was 0.885 (pool
-  saturated, barrier nearly free), at conc 16 it fell to 0.547. Neither fix
-  was worth shipping alone.
-- [x] Phase 1 — continuous dispatch (2026-07-26, uncommitted). Persistent
-  worker pool replacing whole-batch joining; children stay in flight across
-  `step()`. New `StepOutcome::Awaiting` in the engine distinguishes "still
-  owed results" from the pre-existing stall failure. Width 100 / conc 16:
-  15.36s → 12.00s (efficiency 0.547 → 0.675); **0.902 at a flat latency
-  distribution**, so the residual loss under heavy tails is the tail itself.
-  Preserved: spawn-evidence-before-launch, lockstep resume replay, park/swap
-  exclusivity, and the wall check's batch-boundary semantics. Witness:
-  `a_later_stage_child_overlaps_an_earlier_stage_child` (rendezvous-based,
-  mutation-verified against a forced-lockstep regression).
-- [x] Phase 1b — surface the serial cliff in `workflow list` (`*` in the
-  table, `serial_roles` in JSON): a wide `parallel()` over a non-injectable
-  role runs sequentially whatever the cap says, and that was previously only
-  visible per-child in the run log.
-- [x] Phase 2a — schema-validated results (2026-07-26, uncommitted).
-  `agent(prompt, {schema})` resolves the promise with a parsed value;
-  `crates/cli/src/commands/workflow_schema.rs` holds the prompt contract, a
-  tolerant extractor (fences/prose, string- and escape-aware balanced scan),
-  and a bounded JSON Schema subset — no new dependency, unsupported keywords
-  documented as ignored. **No automatic re-ask**: a CLI retry would spend an
-  agent slot the engine's ceiling never granted. The same transform runs on
-  the replay path, or a resumed run would feed a string where the original fed
-  an object (witnessed). Taint sources serialize non-string results so
-  structured output stays on the influence evidence.
+- [x] Phase 0 — measurement rig (`examples/workflow-scale/`): deterministic
+  replayable mock harness + `analyze.py`. Key finding that set the phase
+  order: the batch barrier and the concurrency cap are coupled (efficiency
+  0.885 at conc 4 → 0.547 at conc 16).
+- [x] Phase 1 — continuous dispatch: persistent worker pool,
+  `StepOutcome::Awaiting`; width 100 / conc 16: 15.36s → 12.00s, 0.902 at a
+  flat latency distribution — the residual loss is the straggler tail.
+  Spawn-evidence-before-launch, lockstep resume replay, park/swap exclusivity,
+  and wall-check semantics preserved, with a mutation-verified overlap witness.
+- [x] Phase 1b — the serial cliff is visible in `workflow list` (`*` marker +
+  `serial_roles` in JSON; contract advertised in `49c8f9c`).
+- [x] Phase 2a — schema-validated results: `agent(prompt, {schema})` with a
+  bounded JSON-Schema subset and no new dependency. No automatic re-ask — a
+  CLI retry would spend an agent slot the engine's ceiling never granted. The
+  replay path runs the same transform (witnessed).
 - [ ] Phase 2b — content-addressed artifact store
   (`~/.agentstack/artifacts/<sha256>`) plus a resident-result byte cap, past
   which `agent()` returns a frozen opaque `{digest, bytes, preview}` handle.
   This is what actually bounds the JS heap the posture label admits is
   uncapped.
 - [x] Phase 3 — `shard()` / `partition()` in the prelude and
-  `agentstack workflow explain <name>` (2026-07-26, uncommitted). `partition`
-  returns exactly `r` buckets including empty ones, so reducer count (and
-  ceiling arithmetic) is not data-dependent; placement is a fixed FNV-1a over
-  the key string, so a replay reproduces the split. `explain` runs the same
-  admission choke point as `run` (rule 3: an untrusted bundle's script must not
-  be parsed) and reports call SITES, not calls, saying so explicitly.
+  `agentstack workflow explain <name>`: `partition` returns exactly `r`
+  buckets with FNV-1a placement so replays reproduce the split; `explain`
+  runs the same admission choke point as `run` and reports call *sites*,
+  saying so explicitly.
 - [~] Phase 4 — purity surface landed and **failing closed**; execution half
   BLOCKED. `[workflows.<n>.scheduling.<role>]` parses `effect_free` / `retry` /
   `speculative`, and validation refuses all three with the prerequisite named.
-  **The plan's premise was wrong**: a `Profile` fences servers/skills/harness
-  only; `[policy.filesystem]` is bundle-global, its `write` scope is enforced
-  only in sandbox mode, and workflow children run at host tier — so nothing
-  today can verify effect-freedom. Deriving it would violate rule 8; accepting
-  the author's claim would defeat the thesis. Unblocked by either per-profile
+  The plan's premise was wrong: a `Profile` fences servers/skills/harness
+  only, `[policy.filesystem]` is bundle-global and enforced only in sandbox
+  mode, and workflow children run at host tier — so nothing today can verify
+  effect-freedom. Deriving it would violate rule 8; accepting the author's
+  claim would defeat the thesis. Unblocked by either per-profile
   filesystem/egress dimensions, or deriving purity from a sandbox/lockdown
   posture for the role's children.
-- [x] Phase 5 — the `Dispatcher` seam with a local-only implementation
-  (2026-07-26, uncommitted). `TaskDescriptor` carries digests and names, never
-  argv/policy/secrets/paths — the absence is the contract and has its own
-  witness. Acceptance held: the existing suite passes unchanged and the bench
-  is unmoved (11.87s vs 12.00s at width 100/conc 16).
+- [x] Phase 5 — the `Dispatcher` seam with a local-only implementation:
+  `TaskDescriptor` carries digests and names, never argv/policy/secrets/paths
+  — the absence is the contract and has its own witness; the suite passes
+  unchanged and the bench is unmoved.
   - [ ] Still open from Phase 5: cancellation propagation (the watchdog
     orphans in-flight children) and splitting report/list/runs out of
     `workflow.rs` (review F16).
-- [ ] Phase 6 — distributed workers. **Trigger NOT met as of 2026-07-26, so
-  nothing was built.** The binding constraint at width 100 is the straggler
-  tail (0.673 heavy-tail vs 0.902 flat), whose fix is Phase 4's backup tasks —
-  blocked on the purity prerequisite, not on a shortage of machines.
-- [ ] Review F13 — bind the approved blueprint to the executed bytes
-  (`plan_digest`), so the two consent gates do not read as independent
-  ceremony.
-- [ ] Review F14 — make compile-on-approve one recorded, undoable transaction
-  through the restore ledger.
+- [ ] Phase 6 — distributed workers. Trigger NOT met as of 2026-07-26, so
+  nothing was built: the binding constraint at width 100 is the straggler
+  tail, whose fix is Phase 4's backup tasks — blocked on the purity
+  prerequisite, not on a shortage of machines.
 
 ### t3code MCP harness bridge — research only
 
@@ -825,13 +502,9 @@ spawn path.
 
 - [x] Inventory the actual t3code MCP tools, authentication, lifecycle,
   cancellation, result, and compatibility behavior
-  (`docs/design/t3code-mcp-bridge-research.md`, 2026-07-23): the MCP
-  endpoint is browser-preview only (13 `preview_*` tools, per-thread bearer,
-  inward-facing); the `/ws` session protocol launches only pre-configured
-  provider instances with no per-call argv, process identity, process-level
-  result, or version handshake. Decision: the bridge is NOT buildable on
-  today's surface; the remaining items below stay open pending the upstream
-  changes named in that document.
+  (`docs/design/t3code-mcp-bridge-research.md`, 2026-07-23). Decision: the
+  bridge is NOT buildable on today's surface; the items below stay open
+  pending the upstream changes named in that document.
 - [ ] Map every proposed MCP operation to the existing workflow child-run
   contract: strict lock, trust, machine policy, frozen `ExecutionPlan`,
   `AuthorityGrant`, scoped MCP configuration, and recorded outcome.

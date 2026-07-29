@@ -36,6 +36,13 @@ binaries, checksums, and provenance attestations for each entry.
 - The CLI portability and recovery loop is the public launch path. t3code is
   described consistently as an optional private graphical companion, and the
   old workflow-first t3code launch plan is labelled a closed prototype record.
+- `restore` and `adopt` are visible in the default `--help`. Undo is one of
+  the four beginner concepts, so the way back is findable without
+  `--help --all`.
+- `TODO.md` follows its own rule again: every closed item is one line plus a
+  date or commit ref (review finding M12), stale "uncommitted" annotations
+  were corrected against git, and the F13/F14 workflow review items are
+  recorded as shipped in v0.16.0.
 
 ## v0.16.0 — 2026-07-28
 
