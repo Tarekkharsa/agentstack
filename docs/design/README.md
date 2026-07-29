@@ -26,6 +26,7 @@ of the boundaries below.
 | [`t3code-mcp-bridge-research.md`](t3code-mcp-bridge-research.md) | Why the MCP harness bridge was **not** built | Closed research — kept so the question is not re-opened from scratch |
 | [`reference-field-notes.md`](reference-field-notes.md) | Operational corner cases too deep for [the reference](../reference.md) | Maintainer-facing addenda |
 | [`activation-study.md`](activation-study.md) | How to run the §1.6 activation study: recruiting, protocol, metrics, and the Stage 1 gate mapping | Ready to run; results tick the gate in `TODO.md` |
+| [`codex-workflow-review-2026-07-29.md`](codex-workflow-review-2026-07-29.md) | What an independent cross-model review found in the workflow interpreter, and the evidence each isolation invariant holds | Closed review record; open findings live in `TODO.md`'s promotion checklist |
 
 ## Writing one
 

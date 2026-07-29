@@ -427,6 +427,22 @@ Before promoting them out of experimental:
   (§9.3 discharged 2026-07-23, zero blocking findings — recommended
   follow-ups: a cross-model codex pass on quota refill and coverage findings
   A/B/C in the design doc's §9 gate 3).
+- [x] Cross-model codex review pass (2026-07-29, gpt-5.6 Sol, static, at
+  `6beac55`): isolation, bridge topology, and shell/path hygiene confirmed;
+  verdict "reasonable to keep shipping as labeled experimental". Six
+  promotion-blocking findings recorded — two sharpen limitations the code
+  already documents (watchdog does stderr/fs I/O before its hard exit and can
+  block there; no JS heap cap), and it found three new ones, folded into the
+  open items below.
+- [ ] Close the codex findings before promotion: (a) result serialization
+  re-enters the bridge after the final pending-request drain — a getter on the
+  root result can enqueue an agent request that is returned as `Done` with no
+  `StepSpawned` evidence; (b) `Atomics.isLockFree`/`waitAsync` remain
+  reachable and are host-dependent, breaking cross-host resume determinism;
+  (c) the 1 MiB script cap lives only in the CLI caller — enforce it at the
+  crate boundary; (d) give the watchdog a no-I/O hard-exit path; (e) no total
+  instruction budget for native built-ins (regex/string work runs until the
+  process watchdog). Full report retained by the maintainer.
 - [x] Review F13 — the approved blueprint is bound to the executed bytes
   (`405ef30`, v0.16.0).
 - [x] Review F14 — compile-on-approve is one recorded, undoable transaction
