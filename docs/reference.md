@@ -1436,7 +1436,7 @@ release over somebody's build output would be a surprise, not an upgrade.
 
 ```text
 Updates
-  · AgentStack 0.16.0 is available (you are on 0.15.0) ↳ agentstack self update
+  · AgentStack 0.17.0 is available (you are on 0.16.0) ↳ agentstack self update
 ```
 
 It is a **note**, not a warning: it counts in `doctor --json`'s `advisories`,
@@ -1464,9 +1464,9 @@ you have:
 
 ```console
 $ agentstack --version
-agentstack 0.16.0 (sandbox: yes)     # a release binary — run --sandbox works
+agentstack 0.17.0 (sandbox: yes)     # a release binary — run --sandbox works
 $ agentstack --version
-agentstack 0.16.0 (sandbox: no)      # a plain source build — it does not
+agentstack 0.17.0 (sandbox: no)      # a plain source build — it does not
 ```
 
 `agentstack doctor` repeats the fact in its **Adapters & CLIs** section, and

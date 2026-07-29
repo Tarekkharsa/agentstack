@@ -16,7 +16,7 @@ Today there is one.
 ## t3code
 
 t3code is AgentStack's optional graphical companion. The obtainable AgentStack
-CLI is the launch channel; as of v0.16.0 the integrated t3code fork has no public
+CLI is the launch channel; as of v0.17.0 the integrated t3code fork has no public
 download, so this page documents the compatibility contract for source users
 rather than presenting an unavailable app as the way to begin. When a packaged
 t3code build becomes public, it can make AgentStack useful where people already
@@ -26,10 +26,10 @@ start and supervise coding agents without becoming a second authority system.
 
 The half that is public — the CLI — is already complete for this integration.
 The panel gates each of its features on a contract the CLI advertises, and the
-**published `v0.16.0` release serves every one of them**, so a source-built
+**published `v0.17.0` release serves every one of them**, so a source-built
 t3code needs no locally-built AgentStack behind it:
 
-| Panel capability | Contract | In released v0.16.0 |
+| Panel capability | Contract | In released v0.17.0 |
 | --- | --- | --- |
 | Setup — render the plan, apply it | `init-plan`, `apply-setup` | yes |
 | Status — one state, one next action | `status-v1`, `doctor-advisories-v1` | yes |

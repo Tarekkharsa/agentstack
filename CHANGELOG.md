@@ -4,7 +4,19 @@ User-facing changes per release. The [GitHub Releases
 page](https://github.com/Tarekkharsa/agentstack/releases) carries the built
 binaries, checksums, and provenance attestations for each entry.
 
-## Unreleased
+## v0.17.0 — 2026-07-29
+
+**The release the activation study installs.** Before putting the launch
+journey in front of five strangers, the maintainer ran it cold — sandboxed
+HOME, release binary, two CLIs — and fixed everything that run surfaced:
+doctor no longer contradicts a fresh toolset switch, `toolset create backend`
+works the way every first attempt typed it, and the errors and success lines
+along the way stopped speaking in internals. The recovery pair (`restore`,
+`adopt`) is in the default `--help`, toolsets can be renamed and deleted, and
+the release workflow itself — whose first v0.16.0 run quietly lost its draft —
+now verifies what it built. The §1.6 study kit ships in
+`docs/design/activation-study.md`; the study is what stands between this
+release and a validated launch.
 
 ### Fixed
 

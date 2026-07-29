@@ -256,7 +256,7 @@
   </details>
 </aside>
   <main id="main-content" tabindex="-1">
-<p class="versionbar">These pages describe <b>unreleased <code>main</code></b>, which is ahead of the latest release (<b>v0.16.0</b>) — and the release is what <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">the installer gives you</a>. Commands and flags documented here may not exist in your build; <code>agentstack --version</code> says which one you have.</p>
+<p class="versionbar">These pages describe <b>v0.17.0</b>, the current release.</p>
 <h1 id="feature-reference">Feature reference</h1>
 <p>The complete, implemented-and-tested feature inventory. The <a href="https://github.com/Tarekkharsa/agentstack/blob/main/README.md">README</a> is the tour; this is the map. Terms (CLI, adapter, target, gateway, posture, trust, …) are defined once in <a href="concepts.html">concepts.md</a> — this page assumes them and stays operational.</p>
 <p>Deeper rationale and field notes — edge cases, crate-level caveats, and implementation internals — live in <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/design/reference-field-notes.md">reference field notes</a>.</p>
@@ -717,7 +717,7 @@ agentstack self update --write      # download, verify the sha256, install it</c
 <h3 id="the-version-note-in-doctor">The version note in <code>doctor</code><a class="hlink" href="#the-version-note-in-doctor" aria-label="Link to this section">#</a></h3>
 <p><code>agentstack doctor</code> carries one line when a newer release exists:</p>
 <pre class="block"><code>Updates
-  · AgentStack 0.16.0 is available (you are on 0.15.0) ↳ agentstack self update</code></pre>
+  · AgentStack 0.17.0 is available (you are on 0.16.0) ↳ agentstack self update</code></pre>
 <p>It is a <strong>note</strong>, not a warning: it counts in <code>doctor --json</code>'s <code>advisories</code>, never in <code>errors</code> or <code>warnings</code>, so it cannot move <code>state</code> off <code>ready</code> or become the "start with" next action. A current binary prints no section at all.</p>
 <p>The check is deliberately cheap: at most one short, bounded request per 24 hours, cached in <code>~/.agentstack/update-check.json</code>. It never blocks, and it is silent when you are offline — a failed check backs off for the full day rather than re-dialling on every command. Nothing is checked at all when the running binary is a build-tree binary, which cannot take a downloaded release anyway.</p>
 <p>Opt out of every release-channel request — this command and the note — with:</p>
@@ -725,9 +725,9 @@ agentstack self update --write      # download, verify the sha256, install it</c
 <h2 id="which-build-am-i-running---version">Which build am I running? (<code>--version</code>)<a class="hlink" href="#which-build-am-i-running---version" aria-label="Link to this section">#</a></h2>
 <p>The Docker sandbox is a compile-time option. Published release binaries are built with it; a plain <code>cargo build --release</code> is not, and the two otherwise carry the same version number and the same <code>--help</code>. <code>--version</code> says which one you have:</p>
 <pre class="block"><code>$ agentstack --version
-agentstack 0.16.0 (sandbox: yes)     # a release binary — run --sandbox works
+agentstack 0.17.0 (sandbox: yes)     # a release binary — run --sandbox works
 $ agentstack --version
-agentstack 0.16.0 (sandbox: no)      # a plain source build — it does not</code></pre>
+agentstack 0.17.0 (sandbox: no)      # a plain source build — it does not</code></pre>
 <p><code>agentstack doctor</code> repeats the fact in its <strong>Adapters &amp; CLIs</strong> section, and <code>agentstack run &lt;cli&gt; --sandbox</code> on a build without it refuses by naming the real cause rather than blaming Docker:</p>
 <pre class="block"><code>$ agentstack run claude-code --sandbox
 error: this build has no sandbox support — nothing was launched

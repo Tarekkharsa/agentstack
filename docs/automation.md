@@ -115,7 +115,7 @@ manifest is absent or unreadable, and `manifest.error` says which.
 
 ```json
 {
-  "version": "0.16.0",
+  "version": "0.17.0",
   "clis_detected": ["Claude Code", "Codex CLI", "Gemini CLI"],
   "manifest": {
     "path": "/repo/.agentstack/agentstack.toml",

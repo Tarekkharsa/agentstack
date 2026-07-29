@@ -256,16 +256,16 @@
   </details>
 </aside>
   <main id="main-content" tabindex="-1">
-<p class="versionbar">These pages describe <b>unreleased <code>main</code></b>, which is ahead of the latest release (<b>v0.16.0</b>) — and the release is what <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">the installer gives you</a>. Commands and flags documented here may not exist in your build; <code>agentstack --version</code> says which one you have.</p>
+<p class="versionbar">These pages describe <b>v0.17.0</b>, the current release.</p>
 <h1 id="integrations">Integrations</h1>
 <p>The AgentStack CLI is the complete, standalone interface: every plan, write, consent check, and enforcement decision lives there. An <strong>integration</strong> is an optional surface that calls those same stable read APIs and fixed actions to make the product easier to discover and use where you already work. An integration presents; it never becomes the enforcement boundary, and it never becomes a second implementation.</p>
 <p>Today there is one.</p>
 <h2 id="t3code">t3code<a class="hlink" href="#t3code" aria-label="Link to this section">#</a></h2>
-<p>t3code is AgentStack's optional graphical companion. The obtainable AgentStack CLI is the launch channel; as of v0.16.0 the integrated t3code fork has no public download, so this page documents the compatibility contract for source users rather than presenting an unavailable app as the way to begin. When a packaged t3code build becomes public, it can make AgentStack useful where people already start and supervise coding agents without becoming a second authority system.</p>
+<p>t3code is AgentStack's optional graphical companion. The obtainable AgentStack CLI is the launch channel; as of v0.17.0 the integrated t3code fork has no public download, so this page documents the compatibility contract for source users rather than presenting an unavailable app as the way to begin. When a packaged t3code build becomes public, it can make AgentStack useful where people already start and supervise coding agents without becoming a second authority system.</p>
 <h3 id="the-released-cli-serves-the-whole-panel">The released CLI serves the whole panel<a class="hlink" href="#the-released-cli-serves-the-whole-panel" aria-label="Link to this section">#</a></h3>
-<p>The half that is public — the CLI — is already complete for this integration. The panel gates each of its features on a contract the CLI advertises, and the <strong>published <code>v0.16.0</code> release serves every one of them</strong>, so a source-built t3code needs no locally-built AgentStack behind it:</p>
+<p>The half that is public — the CLI — is already complete for this integration. The panel gates each of its features on a contract the CLI advertises, and the <strong>published <code>v0.17.0</code> release serves every one of them</strong>, so a source-built t3code needs no locally-built AgentStack behind it:</p>
 <div class="tblwrap"><table>
-<thead><tr><th>Panel capability</th><th>Contract</th><th>In released v0.16.0</th></tr></thead><tbody>
+<thead><tr><th>Panel capability</th><th>Contract</th><th>In released v0.17.0</th></tr></thead><tbody>
 <tr><td>Setup — render the plan, apply it</td><td><code>init-plan</code>, <code>apply-setup</code></td><td>yes</td></tr>
 <tr><td>Status — one state, one next action</td><td><code>status-v1</code>, <code>doctor-advisories-v1</code></td><td>yes</td></tr>
 <tr><td>Undo — revert this project's last write</td><td><code>restore-last</code></td><td>yes</td></tr>
