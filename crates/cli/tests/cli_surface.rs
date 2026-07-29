@@ -32,11 +32,16 @@ fn status_parses_and_help_maps_every_command() {
         .collect();
     assert_eq!(
         visible,
-        ["init", "status", "add", "search", "apply", "doctor", "toolset", "use", "run", "trust"],
+        [
+            "init", "status", "add", "search", "apply", "doctor", "toolset", "use", "run", "trust",
+            "restore", "adopt"
+        ],
         "the visible list is the beginner loop, in task order — `workflow` stays \
          reachable but out of it until the repeated-use gate closes. `toolset` is \
          visible because naming one is a step a person takes by hand (H2); the \
-         `create-profile` argv behind it stays hidden for t3code."
+         `create-profile` argv behind it stays hidden for t3code. `restore` and \
+         `adopt` close the loop: Undo is one of the four beginner concepts, so \
+         the recovery pair must be findable from plain `--help`."
     );
 
     // Review finding H5: the default help used to print all ~40 command names two
@@ -104,7 +109,7 @@ fn full_inventory_differs_from_short_help_and_covers_hidden_commands() {
         .to_string();
     assert_ne!(inventory, short_after_help);
     // Hidden top-level commands appear with their summaries…
-    for hidden in ["optimize", "gateway", "restore", "settings"] {
+    for hidden in ["optimize", "gateway", "diff", "settings"] {
         assert!(inventory.contains(hidden), "inventory lists '{hidden}'");
     }
     // …and so do nested subcommands the short help never shows.
@@ -178,11 +183,11 @@ fn runtime_defaults_scope_from_the_manifest_and_hidden_help_points_to_inventory(
     assert_eq!(scope, None, "session resolves the manifest-home default");
 
     let runtime = agentstack::cli::runtime_command();
-    let adopt = runtime
+    let diff = runtime
         .get_subcommands()
-        .find(|c| c.get_name() == "adopt")
-        .expect("adopt command");
-    assert!(adopt
+        .find(|c| c.get_name() == "diff")
+        .expect("diff command");
+    assert!(diff
         .get_after_help()
         .expect("hidden footer")
         .to_string()

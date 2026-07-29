@@ -1,6 +1,8 @@
 //! Command-line surface (clap derive). The visible set is the beginner loop —
-//! init/status/add/search/apply/use/doctor/run/trust (`setup` survives only as
-//! a hidden alias of init) — and EVERY command, visible or hidden, appears in
+//! init/status/add/search/apply/doctor/toolset/use/run/trust — plus the
+//! recovery pair restore/adopt: Undo is one of the four beginner concepts, so
+//! the way back must be findable from plain `--help` (`setup` survives only as
+//! a hidden alias of init). EVERY command, visible or hidden, appears in
 //! the task-grouped map in `after_help` below, so `--help` is one complete
 //! screen: a short list to start from, a full map to grow into. Hidden
 //! commands still run and still have their own `--help`.
@@ -154,13 +156,6 @@ pub enum Command {
     #[command(hide = true)]
     Lib(LibArgs),
 
-    /// Keep a hand-edit: pull drifted native config back into the manifest.
-    ///
-    /// Imports hand-added servers and hand-edited fields from target configs
-    /// so the manifest stays the source of truth.
-    #[command(hide = true)]
-    Adopt(AdoptArgs),
-
     // ── Activate & run ───────────────────────────────────────────────────
     /// Work with toolsets: name one that bundles what you already have.
     ///
@@ -257,6 +252,26 @@ pub enum Command {
     /// `agentstack lock`) requires re-trusting.
     Trust(TrustArgs),
 
+    // ── Recover ──────────────────────────────────────────────────────────
+    // Undo is one of the four beginner concepts (Setup, Toolset, Status,
+    // Undo), so both recovery verbs stay in the default `--help`: a user who
+    // broke something must find the way back without reading the README.
+    /// Undo a recorded write: revert what apply/use/session changed.
+    ///
+    /// Reverts a history entry (servers, settings, hooks, instructions), or
+    /// restores one adapter's config from its single-slot backup.
+    #[command(after_help = "\
+Examples:
+  agentstack restore --last --write
+  agentstack restore claude-code --write")]
+    Restore(RestoreArgs),
+
+    /// Keep a hand-edit: pull drifted native config back into the manifest.
+    ///
+    /// Imports hand-added servers and hand-edited fields from target configs
+    /// so the manifest stays the source of truth.
+    Adopt(AdoptArgs),
+
     /// Run agentstack as an MCP server over stdio (for an agent to call).
     #[command(hide = true)]
     Mcp(McpArgs),
@@ -297,18 +312,6 @@ Examples:
     /// observed with `agentstack report wire`.
     #[command(hide = true)]
     Proxy(ProxyStartArgs),
-
-    /// Undo a recorded write: revert an apply/use/session history entry
-    /// (servers, settings, hooks, instructions), or restore one adapter's
-    /// config from its single-slot backup.
-    #[command(
-        hide = true,
-        after_help = "\
-Examples:
-  agentstack restore --last --write
-  agentstack restore claude-code --write"
-    )]
-    Restore(RestoreArgs),
 
     /// Manage secrets in the OS keychain.
     #[command(hide = true)]
@@ -2397,7 +2400,7 @@ pub fn full_command_inventory() -> String {
 
     let cmd = Cli::command();
     // The task-grouped name map lives here rather than in the default `--help`.
-    // Printing all ~40 names two lines under a curated list of 11 undid the
+    // Printing all ~40 names two lines under the short curated list undid the
     // curation on the same screen; a reader who asked for `--all` has opted in.
     let mut out = String::from(
         "agentstack — every command, including the ones the default --help groups away.\n\

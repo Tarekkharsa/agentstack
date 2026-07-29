@@ -770,7 +770,6 @@ agentstack completions fish &gt; ~/.config/fish/completions/agentstack.fish</cod
 <li><strong><code>lock</code></strong> _(hidden)_ — Resolve each toolset's skill + server refs and pin <code>agentstack.lock</code> — flags <code>--profile/--update/--upgrade/--all/--with-instructions/--yes/--write</code></li>
 <li><strong><code>try</code></strong> _(hidden)_ — Try a skill without installing anything: stage, scan, and emit a wrapper prompt on stdout for piping into any agent CLI — flags <code>--skill/--rev/--subpath/--allow-flagged</code></li>
 <li><strong><code>lib</code></strong> _(hidden)_ — Manage the central capability library — subcommands <code>new/add/add-server/add-extension/add-hook/list/remove/remove-server/remove-extension/remove-hook/trash/sync/pack-init</code></li>
-<li><strong><code>adopt</code></strong> _(hidden)_ — Keep a hand-edit: pull drifted native config back into the manifest — flags <code>--target/--scope/--write/--no-keychain</code></li>
 <li><strong><code>toolset</code></strong> — Work with toolsets: name one that bundles what you already have — subcommands <code>create/list</code></li>
 <li><strong><code>use</code></strong> — Activate a toolset: render its servers + materialize its skills — flags <code>--target/--scope/--write/--allow-unresolved/--prune-foreign/--no-gitignore/--list/--json</code></li>
 <li><strong><code>session</code></strong> _(hidden)_ — Use a toolset temporarily: load it for now, then put every file back — subcommands <code>start/end/list/freeze</code></li>
@@ -784,12 +783,13 @@ agentstack completions fish &gt; ~/.config/fish/completions/agentstack.fish</cod
 <li><strong><code>guard</code></strong> _(hidden)_ — Machine-level destructive-command guard — subcommands <code>check*/test/install/uninstall/status</code></li>
 <li><strong><code>gateway</code></strong> _(hidden)_ — The zero-files gateway: register it once per CLI (<code>connect</code>) and every trusted repo brings its own servers through <code>agentstack mcp --auto-project</code> with no per-project files — subcommands <code>connect/disconnect</code></li>
 <li><strong><code>trust</code></strong> — Review and approve this project's declared capabilities — required before anything activates them — flags <code>--list/--revoke/--yes/--consented-digest/--preview</code></li>
+<li><strong><code>restore</code></strong> — Undo a recorded write: revert what apply/use/session changed — flags <code>--last/--list/--scope/--write/--json</code></li>
+<li><strong><code>adopt</code></strong> — Keep a hand-edit: pull drifted native config back into the manifest — flags <code>--target/--scope/--write/--no-keychain</code></li>
 <li><strong><code>mcp</code></strong> _(hidden)_ — Run agentstack as an MCP server over stdio (for an agent to call) — flags <code>--auto-project/--transparent</code></li>
 <li><strong><code>diff</code></strong> _(hidden)_ — Show drift between the manifest and the on-disk configs — flags <code>--target/--profile/--scope/--json</code></li>
 <li><strong><code>explain</code></strong> _(hidden)_ — Explain a server, skill, or instruction before you rely on it — flags <code>--json</code></li>
 <li><strong><code>optimize</code></strong> _(hidden)_ — Turn agentstack's collected signals into concrete recommendations — flags <code>--json/--write/--since</code></li>
 <li><strong><code>proxy</code></strong> _(hidden)_ — Start the wire relay: a localhost proxy in front of the Anthropic API — flags <code>--port/--upstream</code></li>
-<li><strong><code>restore</code></strong> _(hidden)_ — Undo a recorded write: revert an apply/use/session history entry (servers, settings, hooks, instructions), or restore one adapter's config from its single-slot backup — flags <code>--last/--list/--scope/--write/--json</code></li>
 <li><strong><code>secret</code></strong> _(hidden)_ — Manage secrets in the OS keychain — subcommands <code>set/get/rm/list</code></li>
 <li><strong><code>settings</code></strong> _(hidden)_ — Edit a target's native <code>[settings.&lt;target&gt;]</code> entries — subcommands <code>set/unset</code></li>
 <li><strong><code>export</code></strong> _(hidden)_ — Export the manifest (+ lock, + optionally secrets) as an encrypted bundle — flags <code>--output/--secrets/--passphrase</code></li>
