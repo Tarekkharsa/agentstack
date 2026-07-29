@@ -20,6 +20,22 @@ what that agent could reach instead of narrowing it, which is fixed here. The §
 `docs/design/activation-study.md`; the study is what stands between this
 release and a validated launch.
 
+### Security
+
+- **A toolset that disappears out from under a live session now fences to
+  nothing, not to everything.** The gateway resolves a session's fence by name
+  on every call. When that name stopped resolving — the toolset renamed,
+  deleted, or hand-edited away mid-session — the fence resolved to "no profile",
+  and "no profile" does not mean "no servers": it means every server in the
+  manifest plus every profile's. So the agent's reachable surface silently
+  *widened* at exactly the moment the configuration was in an unexpected state,
+  with nothing in the way (the host gateway is built without the trust gate).
+  The lease fence already failed closed here; the ambient-session fence now
+  does too (and the pinned fence, which today only the frozen-run path
+  constructs, so the one user-visible change is the session case). A fence that
+  names no toolset at all is unchanged — that legitimately means "nothing is
+  fenced" and still serves the declared surface.
+
 ### Fixed
 
 - **`doctor` and `diff` no longer contradict a fresh toolset switch.** Both
@@ -57,6 +73,14 @@ release and a validated launch.
 
 ### Added
 
+- **`edit-profile` edits a toolset's membership as one batch, with an
+  inverse.** Repeatable `--add-skill/--add-server/--remove-skill/
+  --remove-server` apply the whole intent as one manifest write under one
+  consent digest, then re-lock and re-render once — previously composing a
+  toolset cost a full pipeline per capability, and there was no way to take
+  a member back out at all. Removal ends the membership only: the capability
+  stays declared in the manifest and stays in the library. An empty batch,
+  or a name on both sides of the same change, is refused before any write.
 - A study kit for the §1.6 activation study
   (`docs/design/activation-study.md`): recruiting message, participant
   criteria, observation protocol, metrics sheet, and a results template that
@@ -122,20 +146,6 @@ means every trusted project reads as `Changed` once after upgrading —
 re-review with `agentstack trust`.**
 
 ### Security
-
-- **A toolset that disappears out from under a live session now fences to
-  nothing, not to everything.** The gateway resolves a session's fence by name
-  on every call. When that name stopped resolving — the toolset renamed,
-  deleted, or hand-edited away mid-session — the fence resolved to "no profile",
-  and "no profile" does not mean "no servers": it means every server in the
-  manifest plus every profile's. So the agent's reachable surface silently
-  *widened* at exactly the moment the configuration was in an unexpected state,
-  with nothing in the way (the host gateway is built without the trust gate).
-  The lease fence already failed closed here; the ambient-session fence now
-  does too (and the pinned fence, which today only the frozen-run path
-  constructs, so the one user-visible change is the session case). A fence that
-  names no toolset at all is unchanged — that legitimately means "nothing is
-  fenced" and still serves the declared surface.
 
 - **`doctor --live` no longer contacts a repository's servers before you have
   trusted it.** The flag performs live MCP handshakes against every HTTP server
