@@ -6,6 +6,11 @@ binaries, checksums, and provenance attestations for each entry.
 
 ## Unreleased
 
+### Fixed
+
+- The interactive tutorial's install transcript and the cookbook's CI recipe
+  now pin v0.17.0; both had stayed one release behind.
+
 ### Added
 
 - **The panel preview is a public docs page** (`/panel/`, in the site nav

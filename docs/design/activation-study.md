@@ -59,6 +59,18 @@ docs — participants must arrive cold; the task script hands them the URL.
 - Start a timer at the moment they run the install command; note wall-clock
   timestamps at each milestone below.
 
+Consent and data handling (say this before starting, get a verbal yes):
+
+- What is collected: hand-written notes, milestone timestamps, and verbatim
+  confusion quotes. No screen or audio recording unless they explicitly agree;
+  if they do, the recording stays on the observer's machine.
+- Notes carry a participant number, not a name; nothing else identifying.
+- Notes are kept only until the top-three blockers are fixed and the Stage 1
+  gate is recorded in `TODO.md`, then deleted. Aggregated results (times,
+  counts, anonymized quotes) are what persists.
+- They can stop at any point, and can ask for their notes to be deleted
+  afterward — both without explanation.
+
 ## 4. Task script (read aloud, then stop talking)
 
 > "Install AgentStack from <https://github.com/Tarekkharsa/agentstack>, then

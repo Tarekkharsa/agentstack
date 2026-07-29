@@ -110,6 +110,25 @@ Ordered by what evidence they are waiting on, not by severity:
   Code of Conduct, succession/funding posture, support routes published and
   linked).
 
+Post-v0.17.0 re-review findings (2026-07-29, line-by-line review of the launch
+sprint). None blocks the study; queue them as the first post-study items:
+
+- [ ] **R1 — `edit-profile` skips the live-session blocker.** Rename/delete
+  refuse when a session fences the toolset (`profile_blockers`); the batch
+  edit (`a04a0bf`) does not — it changes a fenced running agent's reachable
+  surface mid-flight, unflagged. Add the blocker or surface it in the preview.
+- [ ] **R2 — doctor and diff read different server maps.** `diff` resolves the
+  central library; `doctor`'s narrowed expected render is inline-only — so a
+  names-only library-backed manifest (the recommended pattern) gets perpetual
+  "changes pending" with a fix cue that cannot fix it. Make doctor
+  library-aware like diff.
+- [ ] **R3 — one notion of "active", cleared when it should be.**
+  `restore` and `delete-profile` leave `state.json`'s `active_profile` behind
+  (a deleted name silently resurrects on re-create), and `toolset list`
+  derives "active" from the session instead — three notions of active. Clear
+  on restore/delete, unify the readers, and add witnesses; `882f6e1`'s
+  behavior currently has none.
+
 ## Stage 0 — close confirmed correctness gaps
 
 Closed 2026-07-23. Detail in `CHANGELOG.md` (v0.16.0) and the commits below.
