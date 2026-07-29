@@ -307,7 +307,7 @@ details[open]>summary::before{content:"▾ "}
   <aside class="rail">
     <div class="rail-top">
       <div class="brandrow"><span class="mark"></span><span class="title">The AgentStack panel</span></div>
-      <span class="sub">Every question a user might arrive with, answered by the panel and the command side by side. The panel is live — do the step and the state really changes. Start anywhere, or press → to walk all 32 frames.</span>
+      <span class="sub">Every question a user might arrive with, answered by the panel and the command side by side. The panel is live — do the step and the state really changes. Start anywhere, or press → to walk every frame.</span>
       <div class="modes">
         <button data-mode="guided" aria-pressed="true">Guided</button>
         <button data-mode="sheet" aria-pressed="false">All frames</button>
@@ -1454,29 +1454,6 @@ const SCEN = [
    contract:'sessions-v1',
    open:'<b>“In use” leaks across rows.</b> <code>AgentstackControl.tsx:2310</code> appends the age with <code>inUse &amp;&amp; session</code> — <em>this</em> session’s age, on <em>any</em> in-use row. <code>rust</code> is active, <code>backend</code> holds the session, and both now claim “in use just now”. The suffix belongs only to the row whose name matches <code>session.profile</code>.'}]},
 
-{id:'add-skill', group:'Everyday', name:'Add a skill', tag:'2 STEPS', tone:'g',
- summary:'How this looked before the tick, and the failure that still reads the same either way: an unresolved secret blocks the render, keeps the manifest, and names the one command that fixes it.',
- steps:[
-  {name:'Pick and confirm (legacy)', component:'LibraryRow → EditFlowCard', ui:'manage:toolsets', cli:'add',
-   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='toolsets';s.picker='rust-testing'},
-   how:[H('One question, asked once','“Which toolset?” and “Confirm adding to rust” were the same question and its echo. The target is part of the Add control, and the digest binds to that answer.'),
-        H('The digest is the load-bearing step','If the CLI’s preview has no digest, the card says so and disables Confirm rather than applying something it cannot bind to.','rgba(52,211,153,.5)')],
-   gtee:[Y('Nothing is written until you confirm — the preview is computed from a staged copy.'),
-         Y('The lockfile records the exact commit and content checksum, so the same skill resolves identically on a teammate’s machine.')],
-   open:'<b>Closed — this is the legacy path.</b> “Add” used to mean three things in one place: disabled with no toolsets, an inline “Add to …” picker with them, and an immediate toggle while composing — with a pill in the header as the only clue which. Underneath was a labelling problem: a button reading “Add” cannot say what it adds to, and the destination was chosen <em>after</em> the verb. A CLI carrying <code>profiles-edit-batch-v1</code> now shows a tick instead, and the destination is named once by the pane (see <b>One destination, one verb</b>). This frame is what an older binary still shows, which is why it is still here.',
-   contract:'add-skill-to-profile · digest-bound · gated on canEditProfiles',
-   // adding a *skill* just succeeds here; adding a *server* is what reaches step 2
-   advance:s=>!!(s.flow&&s.flow.phase==='done'&&s.flow.secretBlocked)},
-  {name:'Secret missing', component:'matchSecretBlock', ui:'manage:toolsets', cli:'secret',
-   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='toolsets';
-             s.flow={kind:'add',title:'Add server "github" to toolset "backend"',phase:'done',ok:false,secretBlocked:true}},
-   how:[H('The template for every failure','What happened, what was protected, and the exact next step — and it refuses to take the secret in the browser. The value belongs to the machine, not the panel.','rgba(52,211,153,.5)'),
-        H('Not styled as an error','It is warning-tinted, not red, because the block is the feature working. The manifest was written; only the render was withheld.','rgba(251,191,36,.5)')],
-   gtee:[Y('A half-rendered config is never left behind: either every ref resolves or nothing is written.'),
-         Y('No secret value is ever typed into, or displayed by, the panel.')],
-   contract:'apply-v1 with an unresolved ' + REF,
-   open:'<b>Narrowed.</b> The panel used to recognise this state by matching the substring “not written”, so an unrelated permission failure carrying that phrase inherited the reassuring copy — and was treated as success. It now matches only the CLI’s own signals (“unresolved secret”, “agentstack secret set NAME”). A structured field on the wire would still be better than reading prose.'}]},
-
 {id:'create', group:'Everyday', name:'Create a toolset', tag:'2 STEPS', tone:'g',
  summary:'Composing happens in the rail, beside the library it draws from, instead of listing the whole library a second time in a screen of its own.',
  steps:[
@@ -1657,6 +1634,15 @@ const SCEN = [
    contract:'edit-profile · profiles-edit-batch-v1',
    target:s=>((s.pending.add.length||s.pending.rem.length)?'p:apply':'p:tog:skill:rust-testing'),
    advance:s=>!!(s.flow&&s.flow.phase==='done')},
+  {name:'When a secret is missing', component:'matchSecretBlock', ui:'manage:toolsets', cli:'secret',
+   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='toolsets';
+             s.flow={kind:'add',title:'Update toolset "backend" — add 1',phase:'done',ok:false,secretBlocked:true}},
+   how:[H('The template for every failure','What happened, what was protected, and the exact next step — and it refuses to take the secret in the browser. The value belongs to the machine, not the panel.','rgba(52,211,153,.5)'),
+        H('Not styled as an error','It is warning-tinted, not red, because the block is the feature working. The manifest was written; only the render was withheld.','rgba(251,191,36,.5)')],
+   gtee:[Y('A half-rendered config is never left behind: either every ref resolves or nothing is written.'),
+         Y('No secret value is ever typed into, or displayed by, the panel.')],
+   contract:'apply-v1 with an unresolved ' + REF,
+   open:'<b>Narrowed.</b> The panel used to recognise this state by matching the substring “not written”, so an unrelated permission failure carrying that phrase inherited the reassuring copy — and was treated as success. It now matches only the CLI’s own signals (“unresolved secret”, “agentstack secret set NAME”). A structured field on the wire would still be better than reading prose.'},
   {name:'Create one, identically', component:'proposed · unsaved rail row', ui:'manage:toolsets', cli:'toolset',
    setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='toolsets';s.proposed=true;
              s.newRow={name:'web',members:[],ready:true,blocked:null,targets:'claude-code'}},
@@ -1714,9 +1700,6 @@ const GUIDE = {
  'switch':[
    ["`rust` is already active. Click **Use** on `backend` to start a temporary session as well.", 'use:backend', "Two rows now claim “in use just now” — only `backend` holds the session."],
    ["**Stop** ends it and puts every file back.", 'stop', "Session ended — the configs were restored from the start snapshot."]],
- 'add-skill':[
-   ["Pick a toolset for `rust-testing`, then **Confirm** the digest.", 'add:skill:rust-testing:rust', "Applied: re-locked and re-rendered. Now try adding the **github** server instead."],
-   ["This is where an unresolved secret lands. **Back to library** to leave it.", 'flow:close', "Closed. The manifest keeps the change; only the render was withheld."]],
  'create':[
    ["A name and one tool are already picked — click **Create**. (Clear the name to see the rule it enforces.)", 'draft:create', "Created — and not activated. Naming a toolset and using it are separate verbs."],
    ["The new toolset appears with a **Use** button, not in use.", null, null]],
@@ -1743,6 +1726,7 @@ const GUIDE = {
  'activity':[["Every row is a digest, never a value — and never a reason.", null, null]],
  'proposed':[
    ["Tick **rust-testing** to put it in `backend` — then un-tick something that is already in, and press **Apply**. (⋯ holds the machine-wide delete.)", null, "Applied as one change: one re-lock, one render, one digest — and nothing asked you where."],
+   ["This is where an apply lands when a token is missing. **Back to library** to leave it.", 'flow:close', "Closed. The manifest keeps the change; only the render was withheld."],
    ["The unsaved row is selected, so the list is its contents. Tick a tool, then **Create**.", null, "Created from the ticked set. Identical gesture to the saved case — that is the whole point."]],
  'degraded':[
    ["No verb at all — and the copy names the host app rather than asking it for its name. Both are the gap.", null, null],
@@ -1778,9 +1762,6 @@ const HUMAN = {
  'switch':{q:"How do I change which tools my agent has?", plains:[
    "Pick a different bundle — for good, or just for this stretch of work.",
    "The temporary one puts every file back the way it was when you stop."]},
- 'add-skill':{q:"How do I give my agent a new skill?", plains:[
-   "Find it, pick which bundle it joins, confirm once. You approve a digest, not a description.",
-   "If a token is missing, the manifest still keeps your change — only the render is withheld, and it names the one command that fixes it."]},
  'create':{q:"How do I make a new bundle of tools?", plains:[
    "Name it, then tick what goes in. Nothing is written while you compose.",
    "The name is checked as you type, because a create that cannot succeed should not offer its button.",
@@ -1810,9 +1791,9 @@ const HUMAN = {
    "Once it starts, one line tells you it is live and offers the way in.",
    "Then you can watch every agent: the job it has, how confined it is, and where it has got to."]},
  'proposed':{q:"How do I change what's in a toolset?", plains:[
-   "Pick the toolset on the left; the list on the right is what's in it. Tick to add, un-tick to take out — the tick is the membership, and it reads the same both ways.",
-   "A new toolset is just a row that is not saved yet, filled by the same ticks — so nothing quietly changes what the controls mean.",
-   "Nothing is written while you tick. One write at the end, under one digest, instead of one write per click."]},
+   "Pick the toolset on the left; the list on the right is what's in it. Tick to add, un-tick to take out — the tick is the membership, and it reads the same both ways. Nothing is written while you tick.",
+   "If a token is missing, the manifest still keeps your change — only the render is withheld, and it names the one command that fixes it.",
+   "A new toolset is just a row that is not saved yet, filled by the same ticks — so nothing quietly changes what the controls mean."]},
  'activity':{q:"What did my agents actually do?", plains:[
    "Every call your agents made through AgentStack, and how each one ended. This is the thinnest screen in the panel, and it is not ready."]},
  'degraded':{q:"Why are some buttons switched off?", plains:[
@@ -1867,6 +1848,8 @@ function renderRail(){
           <span class="sf ${sf.c}">${sf.n}</span></button>`;
       }).join('')).join('');
   }
+  // Derived, never written down: a hand-counted total is a fact that goes
+  // stale the first time a scenario gains or loses a step.
   document.getElementById('railCount').textContent = CUR.q.trim()
     ? `${hits.length} of ${SCEN.length} scenarios`
     : `${SCEN.length} scenarios · ${FLAT.length} frames`;
