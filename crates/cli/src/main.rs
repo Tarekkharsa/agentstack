@@ -76,6 +76,14 @@ fn run() -> Result<()> {
         Command::Toolset(agentstack::cli::ToolsetCmd::Create(args)) => {
             commands::panel_edit::create_profile(args, dir)
         }
+        // Same authority path as the hidden fixed-argv aliases the panel emits:
+        // one implementation, one consent digest, two spellings.
+        Command::Toolset(agentstack::cli::ToolsetCmd::Rename(args)) => {
+            commands::panel_edit::rename_profile(args, dir)
+        }
+        Command::Toolset(agentstack::cli::ToolsetCmd::Delete(args)) => {
+            commands::panel_edit::delete_profile(args, dir)
+        }
         // `toolset list` is `use --list` under the noun — same read, same
         // implementation, no second path that could activate anything.
         Command::Toolset(agentstack::cli::ToolsetCmd::List(args)) => {
@@ -139,6 +147,8 @@ fn run() -> Result<()> {
         Command::AddSkillToProfile(args) => commands::panel_edit::add_skill(args, dir),
         Command::AddServerToProfile(args) => commands::panel_edit::add_server(args, dir),
         Command::CreateProfile(args) => commands::panel_edit::create_profile(args, dir),
+        Command::RenameProfile(args) => commands::panel_edit::rename_profile(args, dir),
+        Command::DeleteProfile(args) => commands::panel_edit::delete_profile(args, dir),
         Command::UseProfile(args) => commands::panel_edit::use_profile(args, dir),
         Command::LibraryIndex => commands::panel_edit::library_index(dir),
         Command::RemoveFromLibrary(args) => commands::panel_edit::remove_from_library(args, dir),

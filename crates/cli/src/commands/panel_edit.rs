@@ -38,8 +38,8 @@ use anyhow::{Context, Result};
 use serde_json::{json, Map, Value};
 
 use crate::cli::{
-    PanelAddServerArgs, PanelAddSkillArgs, PanelCreateProfileArgs, PanelLibraryKind,
-    PanelRemoveFromLibraryArgs, PanelUseProfileArgs,
+    PanelAddServerArgs, PanelAddSkillArgs, PanelCreateProfileArgs, PanelDeleteProfileArgs,
+    PanelLibraryKind, PanelRemoveFromLibraryArgs, PanelRenameProfileArgs, PanelUseProfileArgs,
 };
 use crate::manifest::Manifest;
 
@@ -902,6 +902,278 @@ fn build_remove_preview(action: &str, digest: &str, mut body: Map<String, Value>
     crate::ui_contract::envelope(Value::Object(body))
 }
 
+// ── rename-profile / delete-profile ─────────────────────────────────────────
+
+/// The reasons a toolset's name is load-bearing somewhere else, checked before
+/// either verb writes.
+///
+/// Both verbs REFUSE on every one of these rather than cascading the edit.
+/// A role name in `[workflows.*].roles` is that workflow's reviewed authority
+/// request: it is pinned in `agentstack.lock` and length-framed into the
+/// workflow grant digest, so rewriting it here would edit a consented surface
+/// without consent and permanently strand any parked run that presented the old
+/// digest. Refusing costs the user one extra step and keeps that surface
+/// something only an explicit workflow edit can move.
+fn profile_blockers(manifest: &Manifest, name: &str, dir: Option<&Path>) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+
+    // A live session fences the gateway to this toolset's servers, and that
+    // fence is resolved by NAME on every call. Renaming or deleting underneath
+    // it does not tighten the fence — it removes it — so the session is ended
+    // explicitly first rather than warned about.
+    if let Ok(ctx) = crate::commands::load(dir) {
+        if crate::session::active(&ctx.dir).is_some_and(|s| s.profile == name) {
+            out.push((
+                "a session is using it".to_string(),
+                "agentstack session end".to_string(),
+            ));
+        }
+    }
+
+    for (wf_name, wf) in &manifest.workflows {
+        if wf.roles.iter().any(|r| r == name) {
+            out.push((
+                format!("workflow '{wf_name}' declares it as a role"),
+                format!("edit [workflows.{wf_name}] roles, then re-run `agentstack lock`"),
+            ));
+        }
+    }
+    out
+}
+
+/// Render the blockers as one refusal that names every cause and its fix.
+fn refuse_if_blocked(blockers: &[(String, String)], verb: &str, name: &str) -> Result<()> {
+    if blockers.is_empty() {
+        return Ok(());
+    }
+    let lines: Vec<String> = blockers
+        .iter()
+        .map(|(why, fix)| format!("  · {why} ↳ {fix}"))
+        .collect();
+    anyhow::bail!(
+        "won't {verb} toolset '{name}' — its name is in use elsewhere:\n{}",
+        lines.join("\n")
+    )
+}
+
+/// A rename target has to be a bare TOML key: the name becomes the
+/// `[profiles.<name>]` header, so a dot would silently nest the table under
+/// another and a space would not parse at all.
+fn validate_profile_name(name: &str) -> Result<()> {
+    let starts_ok = matches!(name.as_bytes().first(), Some(b'a'..=b'z' | b'0'..=b'9'));
+    let chars_ok = name
+        .bytes()
+        .all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'_' | b'-'));
+    anyhow::ensure!(
+        starts_ok && chars_ok && name.len() <= 64,
+        "invalid toolset name '{}' — use lowercase letters, digits, '_' or '-'; \
+         start with a letter or digit; max 64 chars",
+        name.escape_debug()
+    );
+    Ok(())
+}
+
+pub fn rename_profile(args: &PanelRenameProfileArgs, dir: Option<&Path>) -> Result<()> {
+    rename_profile_gated(args, dir, std::io::stdin().is_terminal())
+}
+
+fn rename_profile_gated(
+    args: &PanelRenameProfileArgs,
+    dir: Option<&Path>,
+    interactive: bool,
+) -> Result<()> {
+    use owo_colors::OwoColorize;
+    let preview = rename_profile_preview(args, dir)?;
+    if !args.consent.yes {
+        if args.consent.preview {
+            return emit(&preview);
+        }
+        if !interactive {
+            anyhow::bail!(
+                "nothing was renamed — this is not a terminal, so there is no one to ask.\n\
+                 Run it at a terminal, or pass --preview to get the plan and its consent \
+                 digest, then re-run with --yes --consented <digest>."
+            );
+        }
+        println!(
+            "\nRename toolset {} to {}\n",
+            args.name.bold(),
+            args.to.bold()
+        );
+        println!("  Its servers and skills come with it. Nothing is rendered.");
+        println!(
+            "  {}",
+            format!("consent {}", preview_digest(&preview)?).dimmed()
+        );
+        if !confirm("Rename it?")? {
+            println!("cancelled — nothing was written.");
+            return Ok(());
+        }
+        let fresh = rename_profile_preview(args, dir)?;
+        verify_consent(Some(preview_digest(&preview)?), preview_digest(&fresh)?)
+            .context("the manifest changed while you were reviewing")?;
+    } else {
+        verify_consent(args.consent.consented.as_deref(), preview_digest(&preview)?)?;
+    }
+
+    let base = crate::commands::project_base(dir)?;
+    let path =
+        crate::manifest::resolve_manifest_dir(&base).join(crate::manifest::load::MANIFEST_FILE);
+    let text =
+        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    let out = crate::commands::remove::rename_profile_entry(&text, &args.name, &args.to)?;
+    toml::from_str::<Manifest>(&out).context("resulting manifest would be invalid")?;
+    crate::util::atomic::write(&path, &out)
+        .with_context(|| format!("writing {}", path.display()))?;
+
+    println!(
+        "\n{} toolset {} is now {}.",
+        "✓".green(),
+        args.name.bold(),
+        args.to.bold()
+    );
+    println!(
+        "  {}",
+        "Nothing was rendered — your CLIs are unchanged.".dimmed()
+    );
+    println!("  Activate it:  agentstack session start {}", args.to);
+    Ok(())
+}
+
+pub fn rename_profile_preview(args: &PanelRenameProfileArgs, dir: Option<&Path>) -> Result<Value> {
+    let manifest = load_manifest(dir)?;
+    ensure_profile_exists(&manifest, &args.name)?;
+    anyhow::ensure!(
+        args.name != args.to,
+        "toolset '{}' already has that name",
+        args.name
+    );
+    anyhow::ensure!(
+        !manifest.profiles.contains_key(&args.to),
+        "toolset '{}' already exists",
+        args.to
+    );
+    validate_profile_name(&args.to)?;
+    refuse_if_blocked(
+        &profile_blockers(&manifest, &args.name, dir),
+        "rename",
+        &args.name,
+    )?;
+
+    let params = json!({ "name": args.name, "to": args.to });
+    let digest = action_digest("rename-profile", &params, &manifest_bytes(dir)?);
+    let members = manifest.profiles.get(&args.name);
+
+    let mut body = Map::new();
+    body.insert("profile".into(), args.name.clone().into());
+    body.insert("to".into(), args.to.clone().into());
+    body.insert(
+        "servers".into(),
+        json!(members.map(|p| p.servers.clone()).unwrap_or_default()),
+    );
+    body.insert(
+        "skills".into(),
+        json!(members.map(|p| p.skills.clone()).unwrap_or_default()),
+    );
+    Ok(build_preview("rename-profile", &digest, body))
+}
+
+pub fn delete_profile(args: &PanelDeleteProfileArgs, dir: Option<&Path>) -> Result<()> {
+    delete_profile_gated(args, dir, std::io::stdin().is_terminal())
+}
+
+fn delete_profile_gated(
+    args: &PanelDeleteProfileArgs,
+    dir: Option<&Path>,
+    interactive: bool,
+) -> Result<()> {
+    use owo_colors::OwoColorize;
+    let preview = delete_profile_preview(args, dir)?;
+    if !args.consent.yes {
+        if args.consent.preview {
+            return emit(&preview);
+        }
+        if !interactive {
+            anyhow::bail!(
+                "nothing was deleted — this is not a terminal, so there is no one to ask.\n\
+                 Run it at a terminal, or pass --preview to get the plan and its consent \
+                 digest, then re-run with --yes --consented <digest>."
+            );
+        }
+        println!("\nDelete toolset {}\n", args.name.bold());
+        println!(
+            "  {}",
+            "Its servers and skills stay declared here and stay in your library.".dimmed()
+        );
+        println!(
+            "  {}",
+            format!("consent {}", preview_digest(&preview)?).dimmed()
+        );
+        if !confirm("Delete it?")? {
+            println!("cancelled — nothing was written.");
+            return Ok(());
+        }
+        let fresh = delete_profile_preview(args, dir)?;
+        verify_consent(Some(preview_digest(&preview)?), preview_digest(&fresh)?)
+            .context("the manifest changed while you were reviewing")?;
+    } else {
+        verify_consent(args.consent.consented.as_deref(), preview_digest(&preview)?)?;
+    }
+
+    let base = crate::commands::project_base(dir)?;
+    let path =
+        crate::manifest::resolve_manifest_dir(&base).join(crate::manifest::load::MANIFEST_FILE);
+    let text =
+        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    let out = crate::commands::remove::remove_profile_entry(&text, &args.name)?;
+    toml::from_str::<Manifest>(&out).context("resulting manifest would be invalid")?;
+    crate::util::atomic::write(&path, &out)
+        .with_context(|| format!("writing {}", path.display()))?;
+
+    println!("\n{} toolset {} deleted.", "✓".green(), args.name.bold());
+    println!(
+        "  {}",
+        "Its servers and skills are still declared — only the grouping is gone.".dimmed()
+    );
+    Ok(())
+}
+
+pub fn delete_profile_preview(args: &PanelDeleteProfileArgs, dir: Option<&Path>) -> Result<Value> {
+    let manifest = load_manifest(dir)?;
+    ensure_profile_exists(&manifest, &args.name)?;
+    // The last toolset is a widening, not a tidy-up: with `[profiles]` empty,
+    // the render and the proxied server surface both fall back to every server
+    // in the manifest. Refuse rather than silently unfencing.
+    anyhow::ensure!(
+        manifest.profiles.len() > 1,
+        "won't delete '{}' — it is the only toolset here, and with none declared \
+         every server in the manifest becomes reachable instead of just this set. \
+         Create another toolset first, or edit the manifest by hand if that is what you want.",
+        args.name
+    );
+    refuse_if_blocked(
+        &profile_blockers(&manifest, &args.name, dir),
+        "delete",
+        &args.name,
+    )?;
+
+    let params = json!({ "name": args.name });
+    let digest = action_digest("delete-profile", &params, &manifest_bytes(dir)?);
+    let members = manifest.profiles.get(&args.name);
+
+    let mut body = Map::new();
+    body.insert("profile".into(), args.name.clone().into());
+    body.insert(
+        "servers".into(),
+        json!(members.map(|p| p.servers.clone()).unwrap_or_default()),
+    );
+    body.insert(
+        "skills".into(),
+        json!(members.map(|p| p.skills.clone()).unwrap_or_default()),
+    );
+    Ok(build_preview("delete-profile", &digest, body))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1168,5 +1440,183 @@ mod tests {
         assert!(profiles.iter().any(|p| p == "web"), "toolsets listed");
 
         std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    /// The refusal rules are the entire safety argument for these two verbs, so
+    /// each one gets a witness. They refuse rather than cascade because a
+    /// toolset name is also a workflow's role name — a reviewed authority
+    /// surface pinned in the lockfile and hashed into that workflow's grant
+    /// digest.
+    #[test]
+    fn rename_and_delete_refuse_when_the_name_is_load_bearing() {
+        let _g = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", tmp.path().join("home"));
+
+        // Two toolsets, one of which a workflow declares as a role.
+        std::fs::write(
+            tmp.path().join("agentstack.toml"),
+            "version = 1\n\n\
+             [servers.github]\ntype = \"stdio\"\ncommand = \"npx\"\n\n\
+             [profiles.backend]\nservers = [\"github\"]\n\n\
+             [profiles.spare]\nservers = [\"github\"]\n\n\
+             [workflows.nightly]\npath = \"wf.js\"\nroles = [\"backend\"]\n",
+        )
+        .unwrap();
+
+        let ren = |name: &str, to: &str| PanelRenameProfileArgs {
+            name: name.into(),
+            to: to.into(),
+            consent: crate::cli::PanelConsent {
+                preview: true,
+                yes: false,
+                consented: None,
+                allow_unresolved: false,
+            },
+        };
+        let del = |name: &str| PanelDeleteProfileArgs {
+            name: name.into(),
+            consent: crate::cli::PanelConsent {
+                preview: true,
+                yes: false,
+                consented: None,
+                allow_unresolved: false,
+            },
+        };
+
+        // A workflow role: refused, and the refusal names the workflow and the
+        // fix rather than just saying no.
+        let err = rename_profile_preview(&ren("backend", "api"), Some(tmp.path()))
+            .expect_err("a workflow role must not be renamed out from under it");
+        assert!(
+            err.to_string().contains("nightly"),
+            "names the workflow: {err}"
+        );
+        assert!(err.to_string().contains("roles"), "names the fix: {err}");
+        let err = delete_profile_preview(&del("backend"), Some(tmp.path()))
+            .expect_err("a workflow role must not be deleted out from under it");
+        assert!(
+            err.to_string().contains("nightly"),
+            "names the workflow: {err}"
+        );
+
+        // The unreferenced one previews fine, and its members ride along.
+        let ok = rename_profile_preview(&ren("spare", "extra"), Some(tmp.path())).unwrap();
+        assert_eq!(ok["profile"], "spare");
+        assert_eq!(ok["to"], "extra");
+        assert_eq!(ok["servers"][0], "github");
+        assert!(ok["consent_digest"]
+            .as_str()
+            .unwrap()
+            .starts_with("sha256:"));
+
+        // A rename target has to be a bare TOML key: a dot would silently nest
+        // [profiles.a.b] under another table.
+        assert!(rename_profile_preview(&ren("spare", "a.b"), Some(tmp.path())).is_err());
+        assert!(rename_profile_preview(&ren("spare", "Extra"), Some(tmp.path())).is_err());
+        // And it must not collide or no-op.
+        assert!(rename_profile_preview(&ren("spare", "backend"), Some(tmp.path())).is_err());
+        assert!(rename_profile_preview(&ren("spare", "spare"), Some(tmp.path())).is_err());
+    }
+
+    /// Deleting the last toolset is a widening, not a tidy-up: with `[profiles]`
+    /// empty, the render and the proxied server surface both fall back to every
+    /// server in the manifest.
+    #[test]
+    fn delete_refuses_the_last_toolset_because_none_means_everything() {
+        let _g = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", tmp.path().join("home"));
+        std::fs::write(
+            tmp.path().join("agentstack.toml"),
+            "version = 1\n\n[servers.github]\ntype = \"stdio\"\ncommand = \"npx\"\n\n\
+             [profiles.only]\nservers = [\"github\"]\n",
+        )
+        .unwrap();
+
+        let args = PanelDeleteProfileArgs {
+            name: "only".into(),
+            consent: crate::cli::PanelConsent {
+                preview: true,
+                yes: false,
+                consented: None,
+                allow_unresolved: false,
+            },
+        };
+        let err = delete_profile_preview(&args, Some(tmp.path()))
+            .expect_err("deleting the last toolset unfences rather than tidies");
+        assert!(
+            err.to_string().contains("only toolset"),
+            "the refusal explains the widening: {err}"
+        );
+    }
+
+    /// Both verbs keep the headless two-step contract: a bare non-interactive
+    /// call refuses in prose, and an apply needs the digest its preview showed.
+    #[test]
+    fn rename_and_delete_keep_the_headless_consent_contract() {
+        let _g = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", tmp.path().join("home"));
+        std::fs::write(
+            tmp.path().join("agentstack.toml"),
+            "version = 1\n\n[servers.github]\ntype = \"stdio\"\ncommand = \"npx\"\n\n\
+             [profiles.backend]\nservers = [\"github\"]\n\n\
+             [profiles.spare]\nservers = [\"github\"]\n",
+        )
+        .unwrap();
+        let renamed = || {
+            std::fs::read_to_string(tmp.path().join("agentstack.toml"))
+                .unwrap()
+                .contains("[profiles.api]")
+        };
+
+        let mk = |preview: bool, yes: bool, consented: Option<&str>| PanelRenameProfileArgs {
+            name: "backend".into(),
+            to: "api".into(),
+            consent: crate::cli::PanelConsent {
+                preview,
+                yes,
+                consented: consented.map(str::to_string),
+                allow_unresolved: false,
+            },
+        };
+
+        let err = rename_profile_gated(&mk(false, false, None), Some(tmp.path()), false)
+            .expect_err("a bare headless call must refuse");
+        assert!(
+            err.to_string().contains("--preview"),
+            "names the flag: {err}"
+        );
+        assert!(!renamed(), "a refused call must not write");
+
+        let err = rename_profile_gated(
+            &mk(false, true, Some("sha256:nope")),
+            Some(tmp.path()),
+            false,
+        )
+        .expect_err("a wrong digest must refuse");
+        assert!(
+            err.to_string().contains("mismatch"),
+            "names the cause: {err}"
+        );
+        assert!(!renamed(), "a mismatched digest must not write");
+
+        // The real digest applies, and the rename lands.
+        let preview = rename_profile_preview(&mk(true, false, None), Some(tmp.path())).unwrap();
+        let digest = preview["consent_digest"].as_str().unwrap().to_string();
+        rename_profile_gated(&mk(false, true, Some(&digest)), Some(tmp.path()), false).unwrap();
+        assert!(renamed(), "the consented rename must write");
+
+        // Applying the same digest twice fails: the manifest bytes moved.
+        let err = rename_profile_gated(&mk(false, true, Some(&digest)), Some(tmp.path()), false)
+            .expect_err("a replayed digest must refuse");
+        assert!(!err.to_string().is_empty());
     }
 }

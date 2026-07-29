@@ -1550,7 +1550,7 @@ you need the exact verb, flag, or subcommand.
 - **`lock`** _(hidden)_ — Resolve each toolset's skill + server refs and pin `agentstack.lock` — flags `--profile/--update/--upgrade/--all/--with-instructions/--yes/--write`
 - **`try`** _(hidden)_ — Try a skill without installing anything: stage, scan, and emit a wrapper prompt on stdout for piping into any agent CLI — flags `--skill/--rev/--subpath/--allow-flagged`
 - **`lib`** _(hidden)_ — Manage the central capability library — subcommands `new/add/add-server/add-extension/add-hook/list/remove/remove-server/remove-extension/remove-hook/trash/sync/pack-init`
-- **`toolset`** — Work with toolsets: name one that bundles what you already have — subcommands `create/list`
+- **`toolset`** — Work with toolsets: name one that bundles what you already have — subcommands `create/rename/delete/list`
 - **`use`** — Activate a toolset: render its servers + materialize its skills — flags `--target/--scope/--write/--allow-unresolved/--prune-foreign/--no-gitignore/--list/--json`
 - **`session`** _(hidden)_ — Use a toolset temporarily: load it for now, then put every file back — subcommands `start/end/list/freeze`
 - **`run`** — Launch an agent CLI as a tracked run — flags `--locked/--prompt/--toolset/--scope/--keep/--sandbox/--lockdown/--plan`
@@ -1581,6 +1581,8 @@ you need the exact verb, flag, or subcommand.
 - **`add-server-to-profile`** _(hidden)_ — Add a server to a toolset and activate it (panel action; digest-bound) — flags `--profile/--name/--type/--url/--header/--command/--arg/--cwd/--env/--preview/--yes/--consented/--allow-unresolved`
 - **`uninstall`** _(hidden)_ — Remove everything AgentStack manages, previewing first — flags `--scope/--write/--verbose/--keep-home`
 - **`create-profile`** _(hidden)_ — Fixed-argv alias of `agentstack toolset create` (panel action) — flags `--name/--skill/--server/--preview/--yes/--consented/--allow-unresolved`
+- **`rename-profile`** _(hidden)_ — Fixed-argv alias of `agentstack toolset rename` (panel action) — flags `--name/--to/--preview/--yes/--consented/--allow-unresolved`
+- **`delete-profile`** _(hidden)_ — Fixed-argv alias of `agentstack toolset delete` (panel action) — flags `--name/--preview/--yes/--consented/--allow-unresolved`
 - **`use-profile`** _(hidden)_ — Activate an existing toolset (panel action; digest-bound) — flags `--profile/--preview/--yes/--consented/--allow-unresolved`
 - **`library-index`** _(hidden)_ — The central-library catalog (skills + servers) for the panel browser
 - **`remove-from-library`** _(hidden)_ — Remove a skill or server from the central library (panel action; digest-bound). Moves it to the library trash — recoverable with `agentstack lib trash --restore <id> --write` — flags `--kind/--name/--preview/--yes/--consented/--allow-unresolved`

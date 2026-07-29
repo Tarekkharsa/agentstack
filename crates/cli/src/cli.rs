@@ -401,6 +401,14 @@ argv. Both run one authority path and produce the same consent digest."
     )]
     CreateProfile(PanelCreateProfileArgs),
 
+    /// Fixed-argv alias of `agentstack toolset rename` (panel action).
+    #[command(name = "rename-profile", hide = true)]
+    RenameProfile(PanelRenameProfileArgs),
+
+    /// Fixed-argv alias of `agentstack toolset delete` (panel action).
+    #[command(name = "delete-profile", hide = true)]
+    DeleteProfile(PanelDeleteProfileArgs),
+
     /// Activate an existing toolset (panel action; digest-bound).
     #[command(name = "use-profile", hide = true)]
     UseProfile(PanelUseProfileArgs),
@@ -442,6 +450,37 @@ Scripts and graphical clients get the two-step contract instead: --preview
 emits the plan plus a consent digest, and applying needs
 `--yes --consented <digest>`. A bare non-interactive call refuses and says so.")]
     Create(PanelCreateProfileArgs),
+
+    /// Rename a toolset, keeping everything in it.
+    #[command(after_help = "\
+Renames the toolset's own entry in the manifest and nothing else — its servers
+and skills come with it, and nothing is rendered.
+
+It refuses rather than guessing when the name is load-bearing elsewhere:
+
+  · a live session is using it        end the session first
+  · a workflow declares it as a role  a role name is that workflow's reviewed
+                                      authority request — pinned in the lockfile
+                                      and hashed into its grant digest — so
+                                      renaming it here would rewrite a consented
+                                      surface and strand any parked run
+
+  agentstack toolset rename --name backend --to api")]
+    Rename(PanelRenameProfileArgs),
+
+    /// Delete a toolset. The servers and skills in it stay declared.
+    #[command(after_help = "\
+Removes the toolset's entry from the manifest. A toolset is a selection over
+your servers and skills, not their owner, so everything it named stays declared
+here and stays in your library.
+
+It refuses when a live session is using it, when a workflow declares it as a
+role, and when it is the last toolset you have — with none declared, the render
+and the proxied server surface fall back to every server in the manifest, so
+that last delete widens rather than tidies.
+
+  agentstack toolset delete --name backend")]
+    Delete(PanelDeleteProfileArgs),
 
     /// List the toolsets declared here, and whether each one is ready to use.
     #[command(after_help = "\
@@ -1680,6 +1719,46 @@ pub struct PanelCreateProfileArgs {
     pub consent: PanelConsent,
 }
 
+/// `rename-profile` — re-key one `[profiles.<name>]` table.
+///
+/// Deliberately narrow: it refuses rather than cascading. A toolset name is
+/// also a workflow's role name (`[workflows.*].roles`), which is pinned in
+/// `agentstack.lock` and length-framed into that workflow's grant digest — so
+/// renaming one out from under a workflow would rewrite a reviewed authority
+/// surface without consent and permanently strand any parked run holding the
+/// old digest. Those cases refuse, naming the command that clears them.
+#[derive(Args, Debug)]
+pub struct PanelRenameProfileArgs {
+    /// The toolset to rename.
+    #[arg(long)]
+    pub name: String,
+
+    /// Its new name.
+    #[arg(long = "to", value_name = "NAME")]
+    pub to: String,
+
+    #[command(flatten)]
+    pub consent: PanelConsent,
+}
+
+/// `delete-profile` — drop one `[profiles.<name>]` table.
+///
+/// Removes the grouping only: the servers and skills it named stay declared and
+/// stay in the library, because a toolset is a selection over them rather than
+/// their owner. Refuses the same cases `rename-profile` does, plus deleting the
+/// last toolset — with `[profiles]` empty the render and the proxied server
+/// surface both fall back to *everything* in the manifest, so that delete
+/// widens rather than tidies.
+#[derive(Args, Debug)]
+pub struct PanelDeleteProfileArgs {
+    /// The toolset to delete.
+    #[arg(long)]
+    pub name: String,
+
+    #[command(flatten)]
+    pub consent: PanelConsent,
+}
+
 /// `use-profile` — activate an existing toolset (re-lock + re-render only).
 #[derive(Args, Debug)]
 pub struct PanelUseProfileArgs {
@@ -2376,6 +2455,8 @@ pub fn full_command_inventory() -> String {
         "add-skill-to-profile",
         "add-server-to-profile",
         "create-profile",
+        "rename-profile",
+        "delete-profile",
         "use-profile",
         "library-index",
         "remove-from-library",

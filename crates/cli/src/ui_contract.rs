@@ -141,6 +141,8 @@ pub const FEATURES: &[&str] = &[
     "profiles-edit-v1",
     "diff-ownership-v1",
     "toolset-create-v2",
+    "toolset-rename-v1",
+    "toolset-delete-v1",
     "library-remove-v1",
     "workflow-observe-v1",
     "workflow-serial-roles-v1",

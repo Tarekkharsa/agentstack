@@ -357,3 +357,131 @@ mod tests {
         assert_eq!(names, vec!["b"]);
     }
 }
+
+/// Delete a whole `[profiles.<name>]` table.
+///
+/// Text-level like every other manifest mutation in this crate: the manifest is
+/// a file a human writes, so comments, key order and formatting outside the
+/// edited region must survive. Round-tripping through the parsed model would
+/// reformat the file.
+pub(crate) fn remove_profile_entry(text: &str, name: &str) -> Result<String> {
+    let mut doc: DocumentMut = text.parse().context("parsing manifest as TOML")?;
+    let profiles = doc
+        .get_mut("profiles")
+        .and_then(|i| i.as_table_mut())
+        .with_context(|| format!("no toolset '{name}' — this manifest declares none"))?;
+    if profiles.remove(name).is_none() {
+        anyhow::bail!("no toolset '{name}' in the manifest");
+    }
+    Ok(doc.to_string())
+}
+
+/// Re-key `[profiles.<from>]` to `[profiles.<to>]`, keeping its position.
+///
+/// `remove` + `insert` would move the table to the end of `[profiles]`, so the
+/// whole table is rebuilt in order with just the one key swapped — a rename
+/// should read as a rename in the diff, not as a delete plus an append.
+pub(crate) fn rename_profile_entry(text: &str, from: &str, to: &str) -> Result<String> {
+    let mut doc: DocumentMut = text.parse().context("parsing manifest as TOML")?;
+    let profiles = doc
+        .get_mut("profiles")
+        .and_then(|i| i.as_table_mut())
+        .with_context(|| format!("no toolset '{from}' — this manifest declares none"))?;
+    if profiles.get(from).is_none() {
+        anyhow::bail!("no toolset '{from}' in the manifest");
+    }
+    if profiles.get(to).is_some() {
+        anyhow::bail!("toolset '{to}' already exists");
+    }
+    let entries: Vec<(String, toml_edit::Item)> = profiles
+        .iter()
+        .map(|(k, v)| {
+            let key = if k == from {
+                to.to_string()
+            } else {
+                k.to_string()
+            };
+            (key, v.clone())
+        })
+        .collect();
+    profiles.clear();
+    for (k, v) in entries {
+        profiles.insert(&k, v);
+    }
+    Ok(doc.to_string())
+}
+
+#[cfg(test)]
+mod profile_entry_tests {
+    use super::*;
+
+    const SAMPLE: &str = r#"# my setup
+version = 1
+
+[servers.github]
+type = "stdio"
+command = "gh-mcp"
+
+[profiles.backend]  # the one I use most
+servers = ["github"]
+skills = ["rust-testing"]
+
+[profiles.design]
+servers = []
+"#;
+
+    #[test]
+    fn rename_keeps_position_comments_and_every_other_table() {
+        let out = rename_profile_entry(SAMPLE, "backend", "api").unwrap();
+        // Re-keyed, and still the FIRST profile — a rename must read as a
+        // rename in the diff, not as a delete plus an append at the end.
+        let backend_at = out.find("[profiles.api]").unwrap();
+        let design_at = out.find("[profiles.design]").unwrap();
+        assert!(backend_at < design_at, "renamed table moved: {out}");
+        assert!(
+            !out.contains("[profiles.backend]"),
+            "old key survived: {out}"
+        );
+        // Everything a human wrote around it survives.
+        assert!(out.contains("# my setup"), "leading comment lost: {out}");
+        assert!(
+            out.contains("# the one I use most"),
+            "inline comment lost: {out}"
+        );
+        assert!(
+            out.contains("[servers.github]"),
+            "unrelated table lost: {out}"
+        );
+        // The members came with it.
+        let parsed: crate::manifest::Manifest = toml::from_str(&out).unwrap();
+        let p = parsed.profiles.get("api").expect("renamed profile parses");
+        assert_eq!(p.servers, vec!["github".to_string()]);
+        assert_eq!(p.skills, vec!["rust-testing".to_string()]);
+    }
+
+    #[test]
+    fn rename_refuses_an_unknown_or_colliding_name() {
+        assert!(rename_profile_entry(SAMPLE, "nope", "api").is_err());
+        assert!(rename_profile_entry(SAMPLE, "backend", "design").is_err());
+    }
+
+    #[test]
+    fn delete_removes_only_its_own_table() {
+        let out = remove_profile_entry(SAMPLE, "backend").unwrap();
+        assert!(!out.contains("[profiles.backend]"), "not removed: {out}");
+        assert!(out.contains("[profiles.design]"), "sibling removed: {out}");
+        assert!(
+            out.contains("[servers.github]"),
+            "server table removed: {out}"
+        );
+        assert!(out.contains("# my setup"), "comment lost: {out}");
+        let parsed: crate::manifest::Manifest = toml::from_str(&out).unwrap();
+        assert!(!parsed.profiles.contains_key("backend"));
+        assert!(parsed.profiles.contains_key("design"));
+    }
+
+    #[test]
+    fn delete_refuses_an_unknown_name() {
+        assert!(remove_profile_entry(SAMPLE, "nope").is_err());
+    }
+}
