@@ -652,6 +652,147 @@ fn every_dynamic_command_parses() {
     );
 }
 
+// ── Cookbook manifest-snippet gate ─────────────────────────────────────────
+//
+// The dynamic-command gate above proves the cookbook's `$ agentstack …` lines
+// parse on the real clap tree. This is the same promise for the OTHER thing
+// the page tells a reader to copy: its TOML manifest snippets. Each one is
+// deserialized with the workspace's real manifest type — the same
+// `toml::from_str::<Manifest>` call `manifest::load` runs — so a schema
+// rename/removal (or a typo in a `deny_unknown_fields` table such as
+// `[experimental]` or `[policy.filesystem]`) fails CI instead of rotting the
+// docs silently. Lenient tables (`Manifest` itself, `Policy`) ignore unknown
+// keys by design, so this witnesses exactly what the loader would: no more,
+// no less.
+
+/// One rendered code block from the cookbook's terminal-styled markup, with
+/// the source line its first rendered line sits on.
+struct CookbookBlock {
+    line: usize,
+    text: String,
+}
+
+/// Drop every `<…>` tag, keeping only rendered text.
+fn strip_tags(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut in_tag = false;
+    for c in s.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            c if !in_tag => out.push(c),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Extract every code block from the cookbook page. The page has no
+/// `<pre>`/`<code>` blocks: each rendered code line is its own source line,
+/// a `<div style="white-space:pre">…</div>` (or a `--term-muted` comment div
+/// heading the block, e.g. `# .agentstack/agentstack.toml`), so a block is a
+/// maximal run of consecutive such source lines.
+fn cookbook_code_blocks(content: &str) -> Vec<CookbookBlock> {
+    let mut blocks: Vec<CookbookBlock> = Vec::new();
+    let mut current: Option<CookbookBlock> = None;
+    for (idx, line) in content.lines().enumerate() {
+        let trimmed = line.trim_start();
+        let is_code_line = trimmed.starts_with(r#"<div style="white-space:pre">"#)
+            || trimmed.starts_with(r#"<div style="color:var(--term-muted)"#);
+        if is_code_line {
+            let text = html_unescape(&strip_tags(trimmed));
+            let block = current.get_or_insert(CookbookBlock {
+                line: idx + 1,
+                text: String::new(),
+            });
+            if !block.text.is_empty() {
+                block.text.push('\n');
+            }
+            block.text.push_str(&text);
+        } else if let Some(block) = current.take() {
+            blocks.push(block);
+        }
+    }
+    blocks.extend(current);
+    blocks
+}
+
+#[test]
+fn cookbook_toml_snippets_deserialize_as_manifest() {
+    let root = repo_root();
+    let content =
+        std::fs::read_to_string(root.join("docs/cookbook.html")).expect("readable cookbook page");
+    let blocks = cookbook_code_blocks(&content);
+
+    let mut checked = 0usize;
+    let mut failures: Vec<String> = Vec::new();
+    for block in &blocks {
+        let first = block
+            .text
+            .lines()
+            .find(|l| !l.trim().is_empty())
+            .unwrap_or("");
+        if first.trim_start().starts_with('$') {
+            continue; // command transcript — `every_dynamic_command_parses` turf
+        }
+        // Structural classifier, not an allowlist: a block is a manifest
+        // snippet iff some line is a TOML table header or `key = value`
+        // assignment. This keeps the one non-TOML, non-command block (r18's
+        // GitHub Actions YAML, `steps:` / `- uses:`) out without naming it —
+        // and any new TOML-shaped block is enrolled the moment it lands.
+        let toml_shaped = block
+            .text
+            .lines()
+            .map(str::trim_start)
+            .any(|l| l.starts_with('[') || l.contains(" = "));
+        if !toml_shaped {
+            continue;
+        }
+        // Most snippets are deliberate fragments illustrating one table
+        // (`[targets]`, `[policy.tools]`, …); only `version` is required at
+        // the top level, so wrapping is one prepended line. A snippet that
+        // already declares `version` (r1's full manifest) is parsed verbatim.
+        let has_version = block
+            .text
+            .lines()
+            .take_while(|l| !l.trim_start().starts_with('['))
+            .any(|l| l.trim_start().starts_with("version"));
+        let candidate = if has_version {
+            block.text.clone()
+        } else {
+            format!("version = 1\n{}", block.text)
+        };
+        checked += 1;
+        if let Err(err) = toml::from_str::<agentstack_core::manifest::Manifest>(&candidate) {
+            failures.push(format!(
+                "  docs/cookbook.html:{}: {}",
+                block.line,
+                err.message()
+            ));
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "cookbook TOML snippet(s) the real manifest deserializer rejects:\n{}",
+        failures.join("\n")
+    );
+    // Extraction floors: the page carries ~34 code blocks, ~16 of them TOML.
+    // If a markup refactor stops matching, fail loudly instead of passing on
+    // an empty scan.
+    assert!(
+        blocks.len() >= 25,
+        "cookbook block extraction found only {} blocks — the line markers no \
+         longer match the page markup",
+        blocks.len()
+    );
+    assert!(
+        checked >= 15,
+        "cookbook TOML classification found only {checked} snippets — the \
+         extraction or classifier no longer matches the page"
+    );
+}
+
 // ── Vocabulary gate: one concept, one word ─────────────────────────────────
 //
 // The product name for "a named subset of your setup" is **toolset**. It used
