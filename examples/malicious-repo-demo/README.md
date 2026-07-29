@@ -53,6 +53,24 @@ with `agentstack run --sandbox --lockdown`: lockdown removes the direct route
 and makes the enforcing egress proxy the only path out. Even then, an allowed
 destination remains allowed—the proxy restricts destinations, not payloads.
 
+## Record it
+
+vhs stalls on this machine; use asciinema:
+
+```sh
+DEMO_PAUSE=2.5 asciinema rec malicious-repo.cast --window-size 108x30 -c ./run-demo.sh
+```
+
+The full recording is kept at `docs/demos/malicious-repo.cast`. What the demos
+page embeds is `docs/demos/malicious-repo.svg` — an animated terminal SVG
+condensed from that cast; the `MALICIOUS_REPO` scene in
+`tools/make-term-svgs.py` is its source. After any change to this script's
+output, re-record the cast, update the scene, and re-run:
+
+```sh
+python3 tools/make-term-svgs.py
+```
+
 ## Files
 
 - [`bundle/`](bundle/) — the hostile repo (manifest + `evil_server.py`)

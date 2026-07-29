@@ -1,0 +1,13 @@
+{"version":3,"term":{"cols":108,"rows":30},"timestamp":1785344726,"command":"./run-demo.sh","env":{"SHELL":"/bin/zsh"}}
+[0.609, "o", "\r\n\u001b[1mAgentStack — malicious-repo demo (asserting)\u001b[0m\r\n"]
+[2.521, "o", "\r\n\u001b[1m1) Unprotected: a bare harness runs the cloned server\u001b[0m\r\n"]
+[2.976, "o", "  \u001b[32mPASS\u001b[0m the sink received exfiltrated data — the threat is real\r\n"]
+[0.000, "o", "\r\n\u001b[1m2) AgentStack, not yet trusted: the server is inert\u001b[0m\r\n"]
+[2.590, "o", "  \u001b[32mPASS\u001b[0m the exfiltrate tool is not exposed while untrusted\r\n"]
+[0.313, "o", "  \u001b[32mPASS\u001b[0m the sink stayed empty — the server was never spawned\r\n"]
+[0.000, "o", "\r\n"]
+[0.000, "o", "\u001b[1m3) Trusted, but the machine firewall denies the exfil tool\u001b[0m\r\n"]
+[2.963, "o", "  \u001b[32mPASS\u001b[0m the call was firewalled and written to the audit log as denied\r\n"]
+[0.000, "o", "  \u001b[32mPASS\u001b[0m the sink stayed empty — the exfil call never reached the server\r\n"]
+[2.516, "o", "\r\n\u001b[1mSummary:\u001b[0m 5 passed, 0 failed\r\n"]
+[0.028, "x", "0"]

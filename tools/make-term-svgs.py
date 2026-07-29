@@ -269,6 +269,32 @@ FIRST_VALUE = (
     ],
 )
 
+# The demos-page proof of the gateway boundary. Condensed from
+# docs/demos/malicious-repo.cast — the asciinema recording of
+# examples/malicious-repo-demo/run-demo.sh, which asserts all five claims shown
+# here. Every line below is the run's own output; only the color mapping is
+# ours (PASS keeps its green, section headers stay ink).
+MALICIOUS_REPO = (
+    "one hostile repo, three postures: exfiltrated · inert · denied",
+    [
+        cmd("examples/malicious-repo-demo/run-demo.sh", "   # the same hostile bundle, three ways"),
+        out(("i", "AgentStack — malicious-repo demo (asserting)"), d=0.8),
+        gap(),
+        out(("i", "1) Unprotected: a bare harness runs the cloned server")),
+        out(("ok", "  PASS"), ("c", " the sink received exfiltrated data — the threat is real"), d=0.9),
+        gap(),
+        out(("i", "2) AgentStack, not yet trusted: the server is inert")),
+        out(("ok", "  PASS"), ("c", " the exfiltrate tool is not exposed while untrusted")),
+        out(("ok", "  PASS"), ("c", " the sink stayed empty — the server was never spawned"), d=0.9),
+        gap(),
+        out(("i", "3) Trusted, but the machine firewall denies the exfil tool")),
+        out(("ok", "  PASS"), ("c", " the call was firewalled and written to the audit log as denied")),
+        out(("ok", "  PASS"), ("c", " the sink stayed empty — the exfil call never reached the server"), d=0.9),
+        gap(),
+        out(("i", "Summary: "), ("ok", "5 passed"), ("i", ", 0 failed")),
+    ],
+)
+
 TRUST_GATE = (
     "clone → inert → trust → firewalled → audited",
     [
@@ -405,12 +431,14 @@ WIZARD_REPLAY = (
 if __name__ == "__main__":
     docs = Path(__file__).resolve().parent.parent / "docs"
     # Only the SVGs still embedded somewhere are rendered: demos/first-value.svg
-    # (README, landing hero, start, examples), firstrun.svg (design docs,
-    # examples/sandbox) and trust-gate.svg. The other scene specs above are kept
-    # as source material but not written out — the old landing/docs pages that
-    # embedded them were replaced by the design-system site (docs/theme/).
+    # (README, landing hero, start, examples), demos/malicious-repo.svg (the
+    # demos page), firstrun.svg (design docs, examples/sandbox) and
+    # trust-gate.svg. The other scene specs above are kept as source material
+    # but not written out — the old landing/docs pages that embedded them were
+    # replaced by the design-system site (docs/theme/).
     for name, (title, rows) in {
         "demos/first-value": FIRST_VALUE,
+        "demos/malicious-repo": MALICIOUS_REPO,
         "firstrun": FIRSTRUN,
         "trust-gate": TRUST_GATE,
     }.items():
