@@ -316,6 +316,11 @@ recorded 2.1s total tool time for the whole journey.
 - [ ] Show the undo path before a material write.
 - [ ] Preserve foreign entries unless the user explicitly selects a reviewed
   pruning operation.
+- [ ] Diagnose foreign writes into managed instruction files. TanStack Intent's
+  `intent install` writes skill guidance into `CLAUDE.md` / `AGENTS.md` /
+  `.cursorrules` — the same files whose managed regions we own. A user running
+  both tools produces drift that doctor should name as foreign content with the
+  adopt-or-reapply choice, not silently reconcile.
 
 ### 3.3 Adapter reliability
 
@@ -368,7 +373,36 @@ recorded 2.1s total tool time for the whole journey.
 - [ ] Simplify library terminology or commands based on that exercise.
 - [ ] Do not build a public catalog until local reuse succeeds repeatedly.
 
-### 4.3 Team discovery
+### 4.3 External skill sources — TanStack Intent importer
+
+TanStack Intent (announced 2026-03) is a CLI for library maintainers to ship
+Agent Skills inside npm packages; consumers run `intent install`, which
+discovers intent-enabled packages in `node_modules` and writes their skills
+into agent config files. It is supply-side to our demand-side: it produces
+versioned skills, we decide what a project is allowed to have. That makes it a
+capability *source* for the library, not a competitor — but only if the skills
+arrive through the manifest, pinned, rather than as text splatted into files we
+manage (see the drift item in §3.2, which is the part worth doing regardless).
+
+Evidence gate before building: the maintainer, or a study participant, must
+actually depend on an intent-enabled package and want its skills. Do not build
+this on the strength of the ecosystem existing.
+
+- [ ] Confirm the trigger: at least one real project whose dependencies ship
+  intent skills the user wants in a toolset.
+- [ ] Import intent-enabled package skills into the central library as ordinary
+  pinned entries — content digest, source recorded, re-gated on byte change.
+  Reuse the existing import/adopt seam; do not add a second capability path.
+- [ ] Treat package-shipped skill content as hostile input (rule 7): bound it,
+  parse defensively, and require the trust gate before it can enter agent
+  context.
+- [ ] Decide how a package upgrade surfaces — a changed skill is a pin change,
+  so it must re-gate rather than update silently.
+- [ ] Do not adopt their authoring loop (`scaffold` / `validate` / `stale`).
+  That is a maintainer-side workflow for people publishing libraries, which is
+  not our user.
+
+### 4.4 Team discovery
 
 - [ ] Complete three independent project handoffs.
 - [ ] Interview participants about repeated coordination pain.
