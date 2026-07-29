@@ -408,11 +408,11 @@ if __name__ == "__main__":
     # (README, landing hero, start, examples) and trust-gate.svg. The other
     # scene specs above are kept as source material but not written out — the
     # old landing/docs pages that embedded them were replaced by the
-    # design-system site (docs/theme/). FIRSTRUN is likewise source-only:
-    # nothing embeds docs/firstrun.svg anymore, and the committed file was
-    # hand-patched after generation (65c6138 swapped in the wizard's captured
-    # output and clamped its textLength values by hand), so rendering it here
-    # would silently revert those edits.
+    # design-system site (docs/theme/). FIRSTRUN is likewise source-only: its
+    # docs/firstrun.svg output ended up embedded nowhere (docs/examples.html
+    # replays the sandbox first run with its own simulated terminal) and had
+    # been hand-patched after generation (65c6138), so the file was deleted
+    # rather than left to drift.
     for name, (title, rows) in {
         "demos/first-value": FIRST_VALUE,
         "trust-gate": TRUST_GATE,
