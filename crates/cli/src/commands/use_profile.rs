@@ -118,7 +118,7 @@ pub(crate) fn selected_profile(
                 .profiles
                 .get(p)
                 .with_context(|| {
-                    format!("no toolset '{p}' in manifest — check the `[profiles.*]` tables there for the exact name")
+                    format!("no toolset '{p}' in this project — `agentstack toolset list` shows the ones declared here")
                 })?;
             Ok(Some(p.to_string()))
         }
@@ -365,7 +365,7 @@ fn print_profile_listing(out: &serde_json::Value) {
         println!(
             "No toolsets yet — the implicit default (every inline skill and server) is what activates."
         );
-        println!("  Name one:  agentstack toolset create --name <name> --server <server>");
+        println!("  Name one:  agentstack toolset create <name> --server <server>");
         return;
     }
     println!("Declared toolsets (project trust: {trust_state}):");
@@ -747,6 +747,7 @@ pub fn activate(
                         history_targets.push(desc.display.clone());
                         plan.write()?;
                         state.record(&key, plan.managed.clone(), &plan.proposed, &identity);
+                        state.record_active_profile(&key, prepared.profile.clone());
                         // Track what this guarded write kept on disk (empty
                         // after a --prune-foreign actually pruned them).
                         state.record_kept_foreign(&key, foreign.clone());
@@ -771,6 +772,7 @@ pub fn activate(
                     // .gitignore block depend on it.
                     if args.write && !blocked {
                         state.record(&key, plan.managed.clone(), &plan.proposed, &identity);
+                        state.record_active_profile(&key, prepared.profile.clone());
                         state.record_kept_foreign(&key, foreign.clone());
                         covered_targets.insert(desc.display.clone());
                     }

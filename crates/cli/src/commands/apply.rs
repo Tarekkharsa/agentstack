@@ -268,6 +268,10 @@ fn render(
     // Distinct from `blocked_targets` (fail-closed gates): a failure here is
     // unexpected, but it must not hide the targets that DID succeed.
     let mut failed_targets: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    // Toolset selections this write replaced with a wider render — named in
+    // the summary so a `use backend --write` is never undone silently.
+    let mut replaced_profiles: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
 
     for id in &target_ids {
         let Some(desc) = ctx.registry.get(id) else {
@@ -435,6 +439,16 @@ fn render(
                     backups.push(capture);
                     touched_targets.insert(desc.display.clone());
                     state.record(&key, plan.managed.clone(), &plan.proposed, &identity);
+                    // A full-manifest apply replaces any narrower `use`
+                    // selection; name the toolset it just widened away so the
+                    // switch isn't undone silently (a bare re-activate gets it
+                    // back). A `--toolset` apply records that selection.
+                    if let Some(prev) = state.active_profile(&key) {
+                        if args.profile.as_deref() != Some(prev.as_str()) {
+                            replaced_profiles.insert(prev);
+                        }
+                    }
+                    state.record_active_profile(&key, args.profile.clone());
                     // Track what this guarded write kept on disk (empty after a
                     // --prune-foreign actually pruned them) — see
                     // TargetState::kept_foreign.
@@ -456,6 +470,7 @@ fn render(
                 // Even with no file change, keep state in sync with reality.
                 if will_write {
                     state.record(&key, plan.managed.clone(), &plan.proposed, &identity);
+                    state.record_active_profile(&key, args.profile.clone());
                     state.record_kept_foreign(&key, foreign.clone());
                 }
                 crate::outln!("  {} up to date", "✓".green());
@@ -874,6 +889,17 @@ fn render(
                 "\n{} {n} skill(s) in the manifest are not rendered by `apply` — activate them: `agentstack use --write` (no toolsets declared, so everything inline is the default)",
                 "ℹ".cyan()
             ),
+        }
+    }
+
+    // An apply that widened the render past an active toolset replaced that
+    // selection — say so, with the way back, instead of undoing it silently.
+    if will_write && !replaced_profiles.is_empty() && !quiet {
+        for p in &replaced_profiles {
+            crate::outln!(
+                "\n{} this rendered the full manifest, replacing the active toolset '{p}' — switch back: agentstack use {p} --write",
+                "ℹ".cyan()
+            );
         }
     }
 

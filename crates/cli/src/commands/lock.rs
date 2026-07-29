@@ -154,7 +154,7 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
                 .profiles
                 .get(p)
                 .with_context(|| {
-                    format!("no profile '{p}' in manifest — check the `[profiles.*]` tables there for the exact name")
+                    format!("no toolset '{p}' in this project — `agentstack toolset list` shows the ones declared here")
                 })?;
             Some(vec![p.clone()])
         }
@@ -183,15 +183,29 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
         Some(p) => format!("{} toolset(s)", p.len()),
         None => "the implicit default (no toolsets declared)".to_string(),
     };
+    // Count only what actually pinned — six "+ 0 <jargon>(s)" segments turned
+    // the beginner journey's first success line into a wall of internals.
+    let mut pinned_parts: Vec<String> = Vec::new();
+    for (n, what) in [
+        (skills.len(), "skill(s)"),
+        (servers.len(), "server(s)"),
+        (instructions, "instruction(s)"),
+        (executables, "executable pin(s)"),
+        (extensions, "extension(s)"),
+        (workflows, "workflow(s)"),
+    ] {
+        if n > 0 {
+            pinned_parts.push(format!("{n} {what}"));
+        }
+    }
+    let pinned_summary = if pinned_parts.is_empty() {
+        "nothing new".to_string()
+    } else {
+        pinned_parts.join(" + ")
+    };
     println!(
-        "{} pinned {} skill(s) + {} server(s) from {from} + {} instruction(s) + {} executable pin(s) + {} extension(s) + {} workflow(s) in {}",
+        "{} pinned {pinned_summary} from {from} in {}",
         "✓".green(),
-        skills.len(),
-        servers.len(),
-        instructions,
-        executables,
-        extensions,
-        workflows,
         Lock::path(&ctx.dir).display()
     );
     println!(

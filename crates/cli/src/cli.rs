@@ -440,16 +440,16 @@ editing five config files.
 Naming one does not switch to it: this writes the manifest entry and re-locks,
 and renders nothing.
 
-  agentstack toolset create --name backend --server github
+  agentstack toolset create backend --server github
       at a terminal: shows what it will create, asks, then writes and re-locks
 
   agentstack toolset list                see every toolset here
-  agentstack use backend                 switch to it
+  agentstack use backend --write         switch to it
 
 Scripts and graphical clients get the two-step contract instead: --preview
 emits the plan plus a consent digest, and applying needs
 `--yes --consented <digest>`. A bare non-interactive call refuses and says so.")]
-    Create(PanelCreateProfileArgs),
+    Create(ToolsetCreateArgs),
 
     /// Rename a toolset, keeping everything in it.
     #[command(after_help = "\
@@ -465,8 +465,8 @@ It refuses rather than guessing when the name is load-bearing elsewhere:
                                       renaming it here would rewrite a consented
                                       surface and strand any parked run
 
-  agentstack toolset rename --name backend --to api")]
-    Rename(PanelRenameProfileArgs),
+  agentstack toolset rename backend --to api")]
+    Rename(ToolsetRenameArgs),
 
     /// Delete a toolset. The servers and skills in it stay declared.
     #[command(after_help = "\
@@ -479,8 +479,8 @@ role, and when it is the last toolset you have — with none declared, the rende
 and the proxied server surface fall back to every server in the manifest, so
 that last delete widens rather than tidies.
 
-  agentstack toolset delete --name backend")]
-    Delete(PanelDeleteProfileArgs),
+  agentstack toolset delete backend")]
+    Delete(ToolsetDeleteArgs),
 
     /// List the toolsets declared here, and whether each one is ready to use.
     #[command(after_help = "\
@@ -505,6 +505,116 @@ pub struct ToolsetListArgs {
     /// Emit machine-readable JSON.
     #[arg(long)]
     pub json: bool,
+}
+
+/// The human spelling of `create-profile`'s args: the name is positional
+/// (`toolset create backend`, like `git branch <name>`) with `--name` kept as
+/// an equivalent flag. Converts into [`PanelCreateProfileArgs`] before
+/// dispatch, so both spellings run the one authority path and produce the
+/// same consent digest — the digest binds resolved params, never raw argv.
+#[derive(Args, Debug)]
+pub struct ToolsetCreateArgs {
+    /// New toolset name (must not already exist).
+    #[arg(value_name = "NAME", required_unless_present = "name_flag")]
+    pub name: Option<String>,
+
+    /// Flag spelling of NAME (same as the positional; kept for scripts).
+    #[arg(long = "name", value_name = "NAME", conflicts_with = "name")]
+    pub name_flag: Option<String>,
+
+    /// Skill to include (repeatable). `*` means every inline skill.
+    #[arg(long = "skill", value_name = "NAME")]
+    pub skills: Vec<String>,
+
+    /// Server to include (repeatable).
+    #[arg(long = "server", value_name = "NAME")]
+    pub servers: Vec<String>,
+
+    #[command(flatten)]
+    pub consent: PanelConsent,
+}
+
+impl ToolsetCreateArgs {
+    /// Borrowed (dispatch matches the parsed `Command` by reference).
+    pub fn to_panel_args(&self) -> PanelCreateProfileArgs {
+        PanelCreateProfileArgs {
+            // clap guarantees exactly one spelling is present
+            // (required_unless_present + conflicts_with).
+            name: self
+                .name
+                .clone()
+                .or_else(|| self.name_flag.clone())
+                .unwrap_or_default(),
+            skills: self.skills.clone(),
+            servers: self.servers.clone(),
+            consent: self.consent.clone(),
+        }
+    }
+}
+
+/// The human spelling of `rename-profile`'s args (positional name, `--name`
+/// kept as an equivalent flag) — see [`ToolsetCreateArgs`].
+#[derive(Args, Debug)]
+pub struct ToolsetRenameArgs {
+    /// The toolset to rename.
+    #[arg(value_name = "NAME", required_unless_present = "name_flag")]
+    pub name: Option<String>,
+
+    /// Flag spelling of NAME (same as the positional; kept for scripts).
+    #[arg(long = "name", value_name = "NAME", conflicts_with = "name")]
+    pub name_flag: Option<String>,
+
+    /// Its new name.
+    #[arg(long = "to", value_name = "NAME")]
+    pub to: String,
+
+    #[command(flatten)]
+    pub consent: PanelConsent,
+}
+
+impl ToolsetRenameArgs {
+    /// Borrowed (dispatch matches the parsed `Command` by reference).
+    pub fn to_panel_args(&self) -> PanelRenameProfileArgs {
+        PanelRenameProfileArgs {
+            name: self
+                .name
+                .clone()
+                .or_else(|| self.name_flag.clone())
+                .unwrap_or_default(),
+            to: self.to.clone(),
+            consent: self.consent.clone(),
+        }
+    }
+}
+
+/// The human spelling of `delete-profile`'s args (positional name, `--name`
+/// kept as an equivalent flag) — see [`ToolsetCreateArgs`].
+#[derive(Args, Debug)]
+pub struct ToolsetDeleteArgs {
+    /// The toolset to delete.
+    #[arg(value_name = "NAME", required_unless_present = "name_flag")]
+    pub name: Option<String>,
+
+    /// Flag spelling of NAME (same as the positional; kept for scripts).
+    #[arg(long = "name", value_name = "NAME", conflicts_with = "name")]
+    pub name_flag: Option<String>,
+
+    #[command(flatten)]
+    pub consent: PanelConsent,
+}
+
+impl ToolsetDeleteArgs {
+    /// Borrowed (dispatch matches the parsed `Command` by reference).
+    pub fn to_panel_args(&self) -> PanelDeleteProfileArgs {
+        PanelDeleteProfileArgs {
+            name: self
+                .name
+                .clone()
+                .or_else(|| self.name_flag.clone())
+                .unwrap_or_default(),
+            consent: self.consent.clone(),
+        }
+    }
 }
 
 impl ToolsetListArgs {

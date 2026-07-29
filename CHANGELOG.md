@@ -8,6 +8,26 @@ binaries, checksums, and provenance attestations for each entry.
 
 ### Fixed
 
+- **`doctor` and `diff` no longer contradict a fresh toolset switch.** Both
+  now remember which toolset a `use --write` activated and compare each CLI's
+  on-disk config against that selection — previously a successful switch was
+  immediately reported as "changes pending ↳ apply --write", and following
+  doctor's own cue silently widened the render back to the full manifest,
+  undoing the switch. Their fix cues now name the command that preserves the
+  selection (`agentstack use <toolset> --write`); a full `apply --write`
+  still renders everything, and now says which active toolset selection it
+  replaced and how to switch back. `session end` and `toolset rename` keep
+  the recorded selection consistent (restored and followed, respectively).
+  Found by the pre-study dry run of the §1.6 activation journey.
+- The no-such-toolset error now points at `agentstack toolset list` instead
+  of telling a first-time user to go read `[profiles.*]` tables in the
+  manifest, and `toolset create`'s undo hint names
+  `agentstack toolset delete` instead of hand-editing TOML — that command
+  exists now.
+- The lock summary counts only what actually pinned. The beginner journey's
+  first success line printed six "+ 0 …" segments of internal category names;
+  a two-server pin now reads "pinned 2 server(s) from 1 toolset(s)".
+
 - The release workflow now builds and attests the sidecar first, creates the
   complete draft once, uploads by the server-provided URL, and verifies the
   exact GitHub release ID and seven assets. The first v0.16.0 run created an
@@ -23,6 +43,10 @@ binaries, checksums, and provenance attestations for each entry.
 
 ### Added
 
+- A study kit for the §1.6 activation study
+  (`docs/design/activation-study.md`): recruiting message, participant
+  criteria, observation protocol, metrics sheet, and a results template that
+  maps 1:1 onto the Stage 1 gate.
 - Release-grade docs browser checks now cover every canonical sitemap page at
   phone and desktop widths: landmarks, keyboard skip navigation, theme
   switching, reduced motion, overflow/console errors, and axe WCAG A/AA scans.
@@ -33,6 +57,15 @@ binaries, checksums, and provenance attestations for each entry.
 
 ### Changed
 
+- `toolset create|rename|delete` accept the name positionally
+  (`agentstack toolset create backend`), the spelling every comparable CLI
+  taught first-time users to try; `--name` remains as an equivalent flag for
+  scripts. Both spellings run the one authority path and produce the same
+  consent digest, and the frozen `*-profile` panel argv is untouched.
+- `toolset create` and `toolset rename` close by pointing at
+  `agentstack use <name> --write` — the persistent switch the beginner
+  journey teaches — with `session start` as the temporary alternative,
+  instead of steering everyone to sessions.
 - The CLI portability and recovery loop is the public launch path. t3code is
   described consistently as an optional private graphical companion, and the
   old workflow-first t3code launch plan is labelled a closed prototype record.

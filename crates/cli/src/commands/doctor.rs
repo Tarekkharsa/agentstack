@@ -795,6 +795,35 @@ fn run_checks(
                     format!(" --scope {scope}")
                 };
                 let key = target_key(id, scope, &ctx.dir);
+                // Active-toolset awareness: a `use <p> --write` narrowed this
+                // key's render to p's selection, so drift compares against that
+                // selection — without it a fresh activation reads as "changes
+                // pending" and the cue (`apply --write`) would widen the render
+                // back, silently undoing the switch (2026-07-29 dry-run
+                // finding). Name-filtering `server_map` keeps this section's
+                // inline semantics; a recorded toolset that has since left the
+                // manifest falls back to the full render.
+                let active_profile = state
+                    .active_profile(&key)
+                    .filter(|p| manifest.profiles.contains_key(p));
+                let profile_map: indexmap::IndexMap<String, crate::manifest::Server>;
+                let render_map = match &active_profile {
+                    Some(p) => {
+                        profile_map = server_map
+                            .iter()
+                            .filter(|(n, _)| manifest.profiles[p.as_str()].servers.contains(n))
+                            .map(|(n, s)| (n.clone(), s.clone()))
+                            .collect();
+                        &profile_map
+                    }
+                    None => &server_map,
+                };
+                // The command that brings disk back in line with the expected
+                // render above — re-activate the selection when one is active.
+                let fix_cmd = match &active_profile {
+                    Some(p) => format!("agentstack use {p} --write"),
+                    None => "agentstack apply --write".to_string(),
+                };
                 // Was this key's managed set recorded by a different manifest? Its
                 // leftover entries are then not ours to prune (see
                 // State::foreign_prunes): `--fix` keeps them, and the report points at
@@ -831,7 +860,7 @@ fn run_checks(
                     desc,
                     &ctx.resolver,
                     ruleset,
-                    &server_map,
+                    render_map,
                     &previously,
                     scope,
                     &ctx.dir,
@@ -968,10 +997,10 @@ fn run_checks(
                         report.line(
                             Level::Warn,
                             format!(
-                            "{:<14} {} change(s) pending ↳ agentstack apply --write{scope_flag}",
-                            desc.display,
-                            plan.managed.len()
-                        ),
+                                "{:<14} {} change(s) pending ↳ {fix_cmd}{scope_flag}",
+                                desc.display,
+                                plan.managed.len()
+                            ),
                         );
                     } else {
                         // A pending prune deletes real entries from a live config —
@@ -982,9 +1011,9 @@ fn run_checks(
                         let prune_cmd = if foreign_key {
                             // apply's guard keeps foreign entries — pruning them
                             // takes the explicit flag.
-                            "agentstack apply --prune-foreign"
+                            "agentstack apply --prune-foreign".to_string()
                         } else {
-                            "agentstack apply --write"
+                            fix_cmd.clone()
                         };
                         // Foreign entries are safe by default (apply keeps them),
                         // so that case is Info; a removal of entries THIS manifest

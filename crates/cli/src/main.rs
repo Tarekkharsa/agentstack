@@ -74,15 +74,15 @@ fn run() -> Result<()> {
         // `toolset create` and the frozen `create-profile` argv are the same
         // action under two names — one authority path, one consent digest.
         Command::Toolset(agentstack::cli::ToolsetCmd::Create(args)) => {
-            commands::panel_edit::create_profile(args, dir)
+            commands::panel_edit::create_profile(&args.to_panel_args(), dir)
         }
         // Same authority path as the hidden fixed-argv aliases the panel emits:
         // one implementation, one consent digest, two spellings.
         Command::Toolset(agentstack::cli::ToolsetCmd::Rename(args)) => {
-            commands::panel_edit::rename_profile(args, dir)
+            commands::panel_edit::rename_profile(&args.to_panel_args(), dir)
         }
         Command::Toolset(agentstack::cli::ToolsetCmd::Delete(args)) => {
-            commands::panel_edit::delete_profile(args, dir)
+            commands::panel_edit::delete_profile(&args.to_panel_args(), dir)
         }
         // `toolset list` is `use --list` under the noun — same read, same
         // implementation, no second path that could activate anything.

@@ -59,6 +59,14 @@ pub struct TargetState {
     /// choice. Empty (default) in pre-schema state files.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub kept_foreign: Vec<String>,
+    /// The toolset a `use --write` (or `apply --toolset --write`) last
+    /// activated for this key; `None` after a full-manifest `apply --write`.
+    /// `doctor`/`diff` compare disk against this selection — without it, a
+    /// fresh `use backend --write` reads as "changes pending ↳ apply --write",
+    /// and following that cue silently widens the render back to everything.
+    /// Absent in pre-schema state files (loads as `None`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_profile: Option<String>,
 }
 
 /// Identity of the manifest at `dir` for the cross-manifest prune guard: the
@@ -136,6 +144,19 @@ impl State {
         entry.managed_servers = managed_servers;
         entry.last_hash = hash(content);
         entry.source_manifest = Some(source.to_string());
+    }
+
+    /// The toolset last activated for `key` (None: full manifest, or never
+    /// activated / pre-schema state).
+    pub fn active_profile(&self, key: &str) -> Option<String> {
+        self.targets.get(key).and_then(|t| t.active_profile.clone())
+    }
+
+    /// Record which toolset a write rendered for `key` — the profile name for
+    /// a `use`/`--toolset` write, `None` for a full-manifest `apply`.
+    pub fn record_active_profile(&mut self, key: &str, profile: Option<String>) {
+        let entry = self.targets.entry(key.to_string()).or_default();
+        entry.active_profile = profile;
     }
 
     /// Foreign-manifest server names a guarded write left on disk under

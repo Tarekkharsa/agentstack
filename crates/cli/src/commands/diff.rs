@@ -120,6 +120,9 @@ fn collect(args: &DiffArgs, manifest_dir: Option<&Path>, print_text: bool) -> Re
     let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets)?;
     let state = State::load()?;
     let mut drift = 0;
+    // The reconcile command for the closing hint — `use <p> --write` when an
+    // active toolset drives the expected render, else the full apply.
+    let mut reconcile_cmd = "agentstack apply --write".to_string();
     let mut kept_all: Vec<(String, Vec<String>)> = Vec::new();
     let mut target_outcomes = Vec::new();
     let mut warnings = Vec::new();
@@ -151,11 +154,37 @@ fn collect(args: &DiffArgs, manifest_dir: Option<&Path>, print_text: bool) -> Re
                 kept.push(n);
             }
         }
+        // Active-toolset awareness (mirrors doctor's drift section): when no
+        // explicit --toolset was passed, compare against the selection a
+        // `use <p> --write` last rendered for this key — so diff and doctor
+        // keep telling the same story after a switch. Ownership checks above
+        // stay on the full map (a manifest server outside the selection is
+        // still ours, not foreign); only the expected render narrows. A
+        // recorded toolset gone from the manifest falls back to the full map.
+        let active_profile = match &args.profile {
+            Some(_) => None,
+            None => state
+                .active_profile(&key)
+                .filter(|p| manifest.profiles.contains_key(p)),
+        };
+        let profile_map: indexmap::IndexMap<String, crate::manifest::Server>;
+        let render_map = match &active_profile {
+            Some(p) => {
+                reconcile_cmd = format!("agentstack use {p} --write");
+                profile_map = server_map
+                    .iter()
+                    .filter(|(n, _)| manifest.profiles[p.as_str()].servers.contains(n))
+                    .map(|(n, s)| (n.clone(), s.clone()))
+                    .collect();
+                &profile_map
+            }
+            None => &server_map,
+        };
         let Some(plan) = plan_target_with_servers(
             desc,
             &ctx.resolver,
             &ruleset,
-            &server_map,
+            render_map,
             &previously,
             scope,
             &ctx.dir,
@@ -307,7 +336,7 @@ fn collect(args: &DiffArgs, manifest_dir: Option<&Path>, print_text: bool) -> Re
         } else {
             println!(
                 "{drift} target(s) drifted. Run {} to reconcile.",
-                "agentstack apply --write".bold()
+                reconcile_cmd.bold()
             );
         }
     }

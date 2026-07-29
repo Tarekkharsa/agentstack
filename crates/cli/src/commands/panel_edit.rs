@@ -536,10 +536,14 @@ fn print_created(name: &str) {
         "  {}",
         "Nothing was rendered — your CLIs are unchanged.".dimmed()
     );
-    println!("  Activate it:  agentstack session start {name}");
+    println!("  Switch to it:  agentstack use {name} --write");
     println!(
         "  {}",
-        format!("Undo: delete the [profiles.{name}] block from agentstack.toml").dimmed()
+        format!("(or only for now: agentstack session start {name})").dimmed()
+    );
+    println!(
+        "  {}",
+        format!("Undo: agentstack toolset delete --name {name}").dimmed()
     );
 }
 
@@ -563,7 +567,7 @@ fn print_create_review(args: &PanelCreateProfileArgs, digest: &str) {
     println!(
         "  {}",
         format!(
-            "activate it afterwards with `agentstack session start {}`.",
+            "switch to it afterwards with `agentstack use {} --write`.",
             args.name
         )
         .dimmed()
@@ -1038,6 +1042,23 @@ fn rename_profile_gated(
     crate::util::atomic::write(&path, &out)
         .with_context(|| format!("writing {}", path.display()))?;
 
+    // Keep the drift baseline pointed at the same toolset under its new name:
+    // any key whose recorded active toolset was the old name follows the
+    // rename, or doctor/diff would silently fall back to the full-manifest
+    // comparison.
+    if let Ok(mut state) = crate::state::State::load() {
+        let mut changed = false;
+        for ts in state.targets.values_mut() {
+            if ts.active_profile.as_deref() == Some(args.name.as_str()) {
+                ts.active_profile = Some(args.to.clone());
+                changed = true;
+            }
+        }
+        if changed {
+            let _ = state.save();
+        }
+    }
+
     println!(
         "\n{} toolset {} is now {}.",
         "✓".green(),
@@ -1048,7 +1069,7 @@ fn rename_profile_gated(
         "  {}",
         "Nothing was rendered — your CLIs are unchanged.".dimmed()
     );
-    println!("  Activate it:  agentstack session start {}", args.to);
+    println!("  Switch to it:  agentstack use {} --write", args.to);
     Ok(())
 }
 

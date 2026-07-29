@@ -89,7 +89,7 @@ pub fn run(manifest_dir: Option<&Path>, args: &WorkflowDeclareArgs) -> Result<()
         bail!(
             "refusing to declare: no [profiles.*] table for role(s) {} — a workflow requests \
              authority, it never creates it. Define the toolset(s) first, e.g. \
-             `agentstack toolset create --name {} --server <name>`",
+             `agentstack toolset create {} --server <name>`",
             unknown
                 .iter()
                 .map(|r| format!("'{r}'"))

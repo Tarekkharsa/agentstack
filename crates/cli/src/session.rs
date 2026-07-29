@@ -58,6 +58,13 @@ pub struct Session {
     /// disclosure). Sticky within the session, gone at exit.
     #[serde(default)]
     pub loads: Vec<LoadEntry>,
+    /// Each touched state key's `active_profile` as it was before this
+    /// session activated its own — `end` puts these back alongside the file
+    /// bytes, so a session never permanently repoints what doctor/diff
+    /// compare against. Empty for records from older versions (end then
+    /// leaves state untouched, exactly as it did before the field existed).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub prev_profiles: BTreeMap<String, Option<String>>,
 }
 
 fn now_secs() -> u64 {
@@ -322,11 +329,17 @@ pub fn start(manifest_dir: Option<&Path>, profile: &str, scope: Scope) -> Result
     let mut touched: BTreeSet<String> = BTreeSet::new();
     let mut server_files: Vec<(String, PathBuf)> = Vec::new();
     let mut skill_before: Vec<(PathBuf, bool, BTreeSet<String>)> = Vec::new();
+    // Snapshot each key's pre-session active toolset — activation below
+    // records the session's own, and `end` restores these (see
+    // `Session::prev_profiles`).
+    let mut prev_profiles: BTreeMap<String, Option<String>> = BTreeMap::new();
     for id in &target_ids {
         let Some(desc) = ctx.registry.get(id) else {
             continue;
         };
-        let prev = state.managed_servers(&target_key(id, scope, &ctx.dir));
+        let key = target_key(id, scope, &ctx.dir);
+        prev_profiles.insert(key.clone(), state.active_profile(&key));
+        let prev = state.managed_servers(&key);
         if let Some(plan) = plan_target_with_servers(
             desc,
             &ctx.resolver,
@@ -384,6 +397,7 @@ pub fn start(manifest_dir: Option<&Path>, profile: &str, scope: Scope) -> Result
             history_id,
             skill_adds: skill_adds.clone(),
             loads: Vec::new(),
+            prev_profiles,
         },
     );
     save_all(&map)?;
@@ -436,6 +450,19 @@ pub fn end(manifest_dir: Option<&Path>) -> Result<EndReport> {
         }
         if !sa.dir_preexisted {
             let _ = fs::remove_dir(Path::new(&sa.dir));
+        }
+    }
+    // 3. Put back each key's pre-session active toolset (recorded at start),
+    //    so doctor/diff compare against what was active before the session —
+    //    not against the toolset the session just reverted. Best-effort like
+    //    the file restore above: a failed state save must not strand the
+    //    session record.
+    if !sess.prev_profiles.is_empty() {
+        if let Ok(mut state) = State::load() {
+            for (k, prev) in &sess.prev_profiles {
+                state.record_active_profile(k, prev.clone());
+            }
+            let _ = state.save();
         }
     }
     map.remove(&key);
