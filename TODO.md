@@ -47,7 +47,10 @@ advanced expansion only if earned
 ### Launch status (2026-07-29)
 
 The public-launch path — `install → init → apply → doctor → restore` — is
-shipped and public in v0.16.0. What separates here from a validated launch:
+shipped and public in v0.16.0. **v0.17.0 — the binary the study installs,
+with the dry-run fixes — is tagged and drafted (all seven assets, provenance,
+formula) awaiting the maintainer's publish (2026-07-29).** What separates
+here from a validated launch:
 
 - **The §1.6 activation study** (the Stage 1 gate), then fixing the three most
   common blockers it finds. It is the one planned activity that can falsify
