@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>The AgentStack panel — interactive review</title>
+<title>The AgentStack panel — interactive preview</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=Newsreader:opsz,wght@6..72,300;6..72,400&display=swap" rel="stylesheet">
 <style>
 :root{
   --bg:#0E1013; --surface:#14171B; --raise:#1B2027;
-  --text:#E9E7E2; --muted:#9AA3AC; --dim:#69727C; --dimmer:#5C646D;
+  --text:#E9E7E2; --muted:#9AA3AC; --dim:#848D97; --dimmer:#7E8791;
   --line:rgba(233,231,226,.14); --line-soft:rgba(233,231,226,.09);
   --blue:#5B7CFA; --blueSoft:#8DA4FF; --green:#34D399; --amber:#FBBF24; --red:#F87171; --orange:#F0975A;
   --sans:"DM Sans",-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
@@ -34,18 +34,21 @@ code{font-family:var(--mono);font-size:.92em}
 .rail{width:280px;flex:none;border-right:1px solid var(--line-soft);background:#101317;display:flex;flex-direction:column}
 .rail-top{padding:15px 15px 13px;border-bottom:1px solid var(--line-soft);display:flex;flex-direction:column;gap:9px}
 .rail-top .brandrow{display:flex;align-items:center;gap:9px}
-.rail-top .title{font-size:14px;font-weight:600;letter-spacing:-.01em}
+.rail-top .title{font-size:14px;font-weight:600;letter-spacing:-.01em;margin:0}
+.skip-link{position:absolute;left:-999px;top:8px;z-index:99;background:var(--raise);color:var(--text);padding:8px 14px;border-radius:8px;border:1px solid var(--line);font-size:13px}
+.skip-link:focus{left:8px}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 .rail-top .sub{font-size:11.5px;line-height:1.5;color:#8A929B}
 .rail-scroll{flex:1;overflow-y:auto;padding:6px 8px 14px}
-.rail h2{font-size:10px;font-weight:700;letter-spacing:.09em;color:var(--dim);padding:11px 8px 4px;margin:0}
+.rail h2{font-size:10px;font-weight:700;letter-spacing:.09em;color:#848D97;padding:11px 8px 4px;margin:0}
 .rail .item{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:7px;width:100%;margin-bottom:1px}
 .rail .item:hover{background:rgba(233,231,226,.05)}
 .rail .item[aria-current=true]{background:rgba(233,231,226,.08)}
 .rail .item .nm{font-size:12.5px;color:var(--muted);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rail .item[aria-current=true] .nm{color:var(--text);font-weight:600}
 .rail .item .ct{font-family:var(--mono);font-size:10px;color:var(--dimmer);flex:none}
-.rail-foot{padding:9px 12px;border-top:1px solid var(--line-soft);display:flex;align-items:center;gap:8px;font-size:11px;color:var(--dim)}
-.rail-foot .kbd{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--dimmer)}
+.rail-foot{padding:9px 12px;border-top:1px solid var(--line-soft);display:flex;align-items:center;gap:8px;font-size:11px;color:#848D97}
+.rail-foot .kbd{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:#848D97}
 .modes{display:flex;border:1px solid var(--line);border-radius:7px;overflow:hidden}
 .modes button{flex:1;padding:5px 4px;font-size:11px;font-weight:600;color:var(--muted);text-align:center}
 .modes button[aria-pressed=true]{background:rgba(233,231,226,.09);color:var(--text)}
@@ -61,7 +64,7 @@ code{font-family:var(--mono);font-size:.92em}
 .rail .item{align-items:flex-start}
 .rail .item .dot{margin-top:5px}
 .rail .item .nm{white-space:normal;overflow:visible;text-overflow:clip;line-height:1.4;text-wrap:pretty}
-.rail .item .sf{font-size:9.5px;font-weight:600;letter-spacing:.04em;color:#4E555D;flex:none;margin-top:2px}
+.rail .item .sf{font-size:9.5px;font-weight:600;letter-spacing:.04em;color:#848D97;flex:none;margin-top:2px}
 /* Prefixed, because `.pop`/`.dlg` are already the prototype's own popover and
    dialog frames — a badge sharing those names inherits a 400px width. */
 .rail .item[aria-current=true] .sf.sf-pop{color:var(--green)}
@@ -79,7 +82,7 @@ code{font-family:var(--mono);font-size:.92em}
 .hdr .nm{font-size:21px;font-weight:600;letter-spacing:-.02em;line-height:1.25}
 .hdr .plain{font-size:13.5px;line-height:1.55;color:#B6BDC5;max-width:88ch}
 .hdr .summary{font-size:12.5px;line-height:1.55;color:var(--muted);max-width:104ch}
-.hdr .depthnote{font-size:10.5px;color:var(--dimmer);text-align:right}
+.hdr .depthnote{font-size:10.5px;color:#848D97;text-align:right}
 .foot{flex:none;border-top:1px solid var(--line-soft);background:#101317;display:flex;flex-direction:column}
 .foot .segs{display:flex;height:2px;gap:2px;padding:0 2px}
 .foot .segs i{border-radius:2px;background:rgba(233,231,226,.09)}
@@ -140,7 +143,7 @@ body.resizing iframe{pointer-events:none}
 .guide .txt{font-size:12.5px;line-height:1.45;color:#D6DAE0;flex:1;min-width:0}
 .guide .txt b{color:var(--text);font-weight:600}
 .guide .txt code{background:rgba(233,231,226,.07);border-radius:4px;padding:1px 4px}
-.guide .of{font-family:var(--mono);font-size:10.5px;color:var(--dim);flex:none}
+.guide .of{font-family:var(--mono);font-size:10.5px;color:#848D97;flex:none}
 .guide .replay{font-size:11px;font-weight:600;color:var(--dim);border:1px solid var(--line);border-radius:6px;padding:3px 8px;flex:none}
 .guide .replay:hover{color:var(--text);background:rgba(233,231,226,.06)}
 .guide .changed{display:flex;align-items:flex-start;gap:8px;padding:0 20px 9px;font-size:12px;line-height:1.5;color:var(--green)}
@@ -303,11 +306,12 @@ details[open]>summary::before{content:"▾ "}
 </style>
 </head>
 <body>
+<a class="skip-link" href="#main-content">Skip to content</a>
 <div class="app">
   <aside class="rail">
     <div class="rail-top">
-      <div class="brandrow"><span class="mark"></span><span class="title">The AgentStack panel</span></div>
-      <span class="sub">Every question a user might arrive with, answered by the panel and the command side by side. The panel is live — do the step and the state really changes. Start anywhere, or press → to walk every frame.</span>
+      <div class="brandrow"><span class="mark"></span><h1 class="title">The AgentStack panel</h1></div>
+      <span class="sub">Every question a user might arrive with, answered by the panel and the command side by side. The panel is live — do the step and the state really changes. Start anywhere, or press → to walk every frame. The graphical panel is an optional companion app that isn't publicly downloadable yet — every action it shows maps to a CLI command that ships today.</span>
       <div class="modes">
         <button data-mode="guided" aria-pressed="true">Guided</button>
         <button data-mode="sheet" aria-pressed="false">All frames</button>
@@ -322,16 +326,14 @@ details[open]>summary::before{content:"▾ "}
     <div class="rail-scroll" id="railScroll"></div>
     <div class="rail-foot"><span id="railCount"></span><span class="kbd">← → steps · 1 2 3 depth</span></div>
   </aside>
-  <main class="main" id="main"></main>
+  <main class="main" id="main-content" tabindex="-1"></main>
 </div>
 
 <script>
 "use strict";
 /* ══════════════════════════════════════════════════════════════════════
-   Sources. Panel copy is transcribed from the shipped components —
-     t3code apps/web/src/components/agentstack/{AgentstackControl,
-     AgentstackDenialCard,BlueprintReviewCard}.tsx + agentstack-logic.ts
-   Terminal output is captured from ./target/release/agentstack (0.16.0);
+   Sources. Panel copy is transcribed from the shipped panel components;
+   terminal output is captured from ./target/release/agentstack (0.16.0);
    write commands that could not be run are labelled "reconstructed".
    Guarantees quote the product's own claims; each ✕ is a limit the code
    or docs state explicitly, not an inference.
@@ -485,19 +487,18 @@ const dot=k=>`<span class="dot ${k||''}"></span>`;
 /* ══ GLANCE ═════════════════════════════════════════════════════════ */
 function viewGlance(s){
   const c=concern(s);
-  if(!s.reachable) return shell(`<p class="d" style="padding:4px 5px 10px">Couldn't check status — the t3code server didn't answer.</p>`,'',s,{bare:true});
+  if(!s.reachable) return shell(`<p class="d" style="padding:4px 5px 10px">Couldn't check status — the panel's host app didn't answer.</p>`,'',s,{bare:true});
   if(!s.loaded)    return shell(`<p class="d" style="padding:4px 5px 10px">Checking…</p>`,'',s,{bare:true});
   if(!s.installed) return shell(`<div class="col g8" style="padding:2px 5px 10px">
       <p class="t">AgentStack isn't installed</p>
       <p class="d">The <code>agentstack</code> CLI isn't reachable on the machine running this project, so its sessions run ungoverned. It's a local binary — install it to get trust-gated MCP servers, a pre-tool-use guard, and a per-project audit log.</p>
       <p class="xs"><b style="color:var(--text)">Install</b> — Build or download it from <code>github.com/Tarekkharsa/agentstack</code>, then put <code>agentstack</code> on your <code>PATH</code>.</p>
-      <p class="xs"><b style="color:var(--text)">Already installed?</b> If <code>agentstack</code> is a shell function or lives off <code>PATH</code> (so a packaged/Finder-launched app can't see it), point the server at the binary:</p>
-      <code class="cmd">T3CODE_AGENTSTACK_BIN=/path/to/agentstack</code>
+      <p class="xs"><b style="color:var(--text)">Already installed?</b> If <code>agentstack</code> is a shell function or lives off <code>PATH</code> (so a packaged/Finder-launched app can't see it), point the panel at the binary in its settings.</p>
       <div class="row g8 mt6">${btn('Check again','recheck')}<span class="xs dimt">Re-checks automatically every few seconds, too.</span></div>
     </div>`,'',s,{bare:true});
   if(s.incompatible) return shell(`<div class="col g6" style="padding:2px 5px 10px">
-      <p class="t">Update t3code to continue</p>
-      <p class="d">This project's <code>agentstack</code> CLI (v0.17.0) speaks a newer data format (schema 4) than this t3code build understands (schema 3). Update t3code to read this AgentStack CLI — until then, the panel's actions are disabled to avoid acting on data it can't fully read.</p>
+      <p class="t">Update the panel to continue</p>
+      <p class="d">This project's <code>agentstack</code> CLI (v0.17.0) speaks a newer data format (schema 4) than this panel build understands (schema 3). Update the panel app to read this AgentStack CLI — until then, the panel's actions are disabled to avoid acting on data it can't fully read.</p>
     </div>`,'',s,{bare:true});
   if(s.doctorNull) return shell(`<div class="col g8" style="padding:2px 5px 10px">
       <p class="t">Couldn't read the status</p>
@@ -1001,10 +1002,6 @@ const CLI = {
   <span class="ok">✓</span> Codex CLI      installed · ~/.codex/config.toml parses
   <span class="ok">✓</span> Gemini CLI     installed · ~/.gemini/settings.json parses
   <span class="wr">⚠</span> VS Code        config present but binary not on PATH
-<b>t3code (supervisor)</b>
-  <span class="ok">✓</span> detected (/Users/tarek.k/.t3) — t3code sessions run CLIs agentstack already governs; nothing extra to render
-  <span class="wr">⚠</span> guard not enabled — t3code's Full-access mode disables the providers' own approval prompts, so those sessions run with no pre-tool-use gate at all ↳ agentstack guard install
-  <span class="dm">· sessions attribute to the global audit only — for per-run evidence: agentstack shim make &lt;cli&gt;</span>
 <b>Zero-files gateway</b>
   <span class="ok">✓</span> Claude Code    gateway registered (agentstack mcp)
   <span class="ok">✓</span> not trusted for auto mode — untrusted repos get control-plane tools only ↳ agentstack trust
@@ -1228,8 +1225,7 @@ Proceed with this plan? [y/N]`},
 <span class="ps">$</span> <b>which agentstack</b>
 agentstack not found
 
-<span class="dm"># if it is a shell function or off PATH, point the server at the binary:</span>
-<span class="dm"># T3CODE_AGENTSTACK_BIN=/path/to/agentstack</span>`},
+<span class="dm"># if it is a shell function or off PATH, point the panel at the binary in its settings</span>`},
  runs:{cmd:'agentstack report calls --since 7', cwd:'~/Documents/GitHub/agentstack', recon:true,
   out:`github__search_issues   ok       412
 github__create_pr       denied     3   policy.network
@@ -1338,7 +1334,7 @@ The map, grouped by task:
   Run         run · kill · shim · workflow · gateway · mcp · try
   Inspect     doctor · report · optimize · proxy
 
-Integration contract (t3code) — fixed actions a graphical panel invokes.
+Integration contract — the fixed actions the graphical panel invokes.
 Not part of the everyday surface; each is digest-bound and previews before it writes.
 
   add-skill-to-profile   Add a skill to a toolset and activate it (panel action; digest-bound)
@@ -1943,7 +1939,7 @@ function renderGuided(){
   const sc=scenario(), st=step(), c=CLI[st.cli]||CLI.status, d=D();
   const showUi = d.ui, showCli = d.cli;
   const uiWidth = showCli ? CUR.uiPct+'%' : '100%';
-  document.getElementById('main').innerHTML = `
+  document.getElementById('main-content').innerHTML = `
   <header class="hdr">
     <div class="r1">
       <div class="col g4" style="min-width:0">
@@ -1975,11 +1971,11 @@ function renderGuided(){
     ${showCli?`<div class="clicol">
       <div class="colhead"><span class="k">THE SAME THING IN THE CLI</span>
         <span class="c">${c.recon?'<span class="badge a" title="A write command — not executed during the review; output read from the source instead.">reconstructed</span>':'<span class="badge g" title="Captured from ./target/release/agentstack 0.16.0">captured</span>'}</span></div>
-      <div class="cliscroll">
+      <div class="cliscroll" tabindex="0" role="region" aria-label="Command transcript">
         <div class="term-wrap">
           <div class="term-top"><i style="background:#F87171"></i><i style="background:#FBBF24"></i><i style="background:#34D399"></i>
             <span class="cwd">${esc(c.cwd||'~')}</span></div>
-          <div class="term"><span class="ps">$</span> <b>${esc(c.cmd)}</b><span class="cursor"></span>
+          <div class="term" tabindex="0" role="region" aria-label="Terminal output"><span class="ps">$</span> <b>${esc(c.cmd)}</b><span class="cursor"></span>
 
 ${c.out}</div>
         </div>
@@ -1998,7 +1994,7 @@ ${c.out}</div>
 function renderSheet(){
   const groups=[...new Set(SCEN.map(s=>s.group))];
   let n=0;
-  document.getElementById('main').innerHTML = `<div class="scroller">${groups.map(g=>{
+  document.getElementById('main-content').innerHTML = `<div class="scroller">${groups.map(g=>{
     const items=FLAT.filter(f=>f.sc.group===g);
     return `<h2 class="sheet-h">${g}</h2>
       <p class="sheet-p">${items.length} frame${items.length>1?'s':''} · ${[...new Set(items.map(f=>f.sc.name))].length} scenario(s)</p>
@@ -2019,13 +2015,13 @@ function renderSheet(){
 function renderRef(){
   const el=document.getElementById('refq'), q=el?el.value:'';
   const keys=Object.keys(CLI).filter(k=>!q||CLI[k].cmd.toLowerCase().includes(q.toLowerCase()));
-  document.getElementById('main').innerHTML = `<div class="scroller">
+  document.getElementById('main-content').innerHTML = `<div class="scroller">
     <div class="refhead"><input id="refq" placeholder="Filter commands…" value="${esc(q)}">
       <span class="xs dimt">${keys.length} of ${Object.keys(CLI).length} · <span class="badge g">captured</span> ran against the real binary · <span class="badge a">reconstructed</span> writes, read from the source instead</span></div>
     ${keys.map(k=>{const c=CLI[k];return `<details class="refitem" ${keys.length<4?'open':''}>
       <summary><span class="cmdname">${esc(c.cmd)}</span><span class="purpose">${esc(c.cwd||'')}</span>
         <span class="flag badge ${c.recon?'a':'g'}">${c.recon?'reconstructed':'captured'}</span></summary>
-      <div class="refbody"><div class="term" style="max-height:none">${c.out}</div></div></details>`;}).join('')}</div>`;
+      <div class="refbody"><div class="term" style="max-height:none" tabindex="0" role="region" aria-label="Terminal output">${c.out}</div></div></details>`;}).join('')}</div>`;
   if(q){const i=document.getElementById('refq'); i.focus(); i.setSelectionRange(q.length,q.length);}
 }
 

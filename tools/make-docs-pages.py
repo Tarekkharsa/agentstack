@@ -536,6 +536,7 @@ def build_page(src_rel, out_rel, key):
       <a href="{base}cookbook.html">Cookbook</a>
       <a href="{base}examples.html">Demos</a>
       <a href="{base}tutorial/">Tutorial</a>
+      <a href="{base}panel/">Panel</a>
       <a href="https://github.com/Tarekkharsa/agentstack">GitHub</a>
       <button class="themebtn" data-theme-toggle onclick="toggleTheme()">Light mode</button>
       <a class="ghost" href="{base}start.html">Get&nbsp;started</a>
