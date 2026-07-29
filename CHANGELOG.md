@@ -14,7 +14,9 @@ works the way every first attempt typed it, and the errors and success lines
 along the way stopped speaking in internals. The recovery pair (`restore`,
 `adopt`) is in the default `--help`, toolsets can be renamed and deleted, and
 the release workflow itself — whose first v0.16.0 run quietly lost its draft —
-now verifies what it built. The §1.6 study kit ships in
+now verifies what it built. Adding those two toolset verbs turned up a fence
+that failed open: a toolset disappearing out from under a live session widened
+what that agent could reach instead of narrowing it, which is fixed here. The §1.6 study kit ships in
 `docs/design/activation-study.md`; the study is what stands between this
 release and a validated launch.
 
@@ -120,6 +122,20 @@ means every trusted project reads as `Changed` once after upgrading —
 re-review with `agentstack trust`.**
 
 ### Security
+
+- **A toolset that disappears out from under a live session now fences to
+  nothing, not to everything.** The gateway resolves a session's fence by name
+  on every call. When that name stopped resolving — the toolset renamed,
+  deleted, or hand-edited away mid-session — the fence resolved to "no profile",
+  and "no profile" does not mean "no servers": it means every server in the
+  manifest plus every profile's. So the agent's reachable surface silently
+  *widened* at exactly the moment the configuration was in an unexpected state,
+  with nothing in the way (the host gateway is built without the trust gate).
+  The lease fence already failed closed here; the ambient-session fence now
+  does too (and the pinned fence, which today only the frozen-run path
+  constructs, so the one user-visible change is the session case). A fence that
+  names no toolset at all is unchanged — that legitimately means "nothing is
+  fenced" and still serves the declared surface.
 
 - **`doctor --live` no longer contacts a repository's servers before you have
   trusted it.** The flag performs live MCP handshakes against every HTTP server

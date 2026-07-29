@@ -152,6 +152,31 @@ fn save_all(map: &BTreeMap<String, Session>) -> Result<()> {
     fs::write(&path, text).with_context(|| format!("writing {}", path.display()))
 }
 
+/// Record a bare active session for `dir` without running the whole `start`
+/// pipeline (which renders configs and writes history).
+///
+/// Test-only, and deliberately routed through the real `dir_key`/`save_all`:
+/// a test that hand-rolled the store key would stop exercising the lookup it
+/// is meant to be testing.
+#[cfg(test)]
+pub(crate) fn record_for_test(dir: &Path, profile: &str) {
+    let mut all = load_all();
+    all.insert(
+        dir_key(dir),
+        Session {
+            dir: dir.display().to_string(),
+            profile: profile.to_string(),
+            scope: "project".to_string(),
+            started_unix: now_secs(),
+            history_id: None,
+            skill_adds: Vec::new(),
+            loads: Vec::new(),
+            prev_profiles: BTreeMap::new(),
+        },
+    );
+    let _ = save_all(&all);
+}
+
 /// The active session for `dir`, if any.
 pub fn active(dir: &Path) -> Option<Session> {
     load_all().get(&dir_key(dir)).cloned()

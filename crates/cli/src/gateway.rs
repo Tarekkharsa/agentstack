@@ -618,31 +618,48 @@ impl Gateway {
                     f
                 }
                 None => {
-                    // When a session is active, fence the proxied surface to that
-                    // session's profile servers — the same fence a profile puts
-                    // on skills, extended to runtime tools. A vanished session
-                    // profile means no fence rather than fencing to nothing;
-                    // sandboxed runs pin their fence in the frozen set above, so
-                    // ambient host session state never decides what a run reaches.
-                    let invalid_lease = matches!(
-                        &fence,
-                        Fence::Lease(p) if !ctx.loaded.manifest.profiles.contains_key(p.as_str())
-                    );
-                    let profile_owned: Option<String> = match &fence {
-                        Fence::AmbientSession => crate::session::active(&ctx.dir)
-                            .map(|s| s.profile)
-                            .filter(|p| ctx.loaded.manifest.profiles.contains_key(p.as_str())),
-                        Fence::Pinned(p) => p
-                            .clone()
-                            .filter(|p| ctx.loaded.manifest.profiles.contains_key(p.as_str())),
-                        Fence::Lease(p) => (!invalid_lease).then(|| p.clone()),
+                    // When a session (or lease, or pin) is active, fence the
+                    // proxied surface to that toolset's servers — the same fence
+                    // a profile puts on skills, extended to runtime tools.
+                    //
+                    // What the fence ASKS for is kept separate from whether that
+                    // toolset still exists, because the two states that look
+                    // alike here are not alike at all: "nothing is fenced" and
+                    // "a fence names a toolset that is gone". Resolving the
+                    // second to `None` used to hand the caller the FULL declared
+                    // surface — `effective_runtime_servers(.., None)` means every
+                    // server in the manifest plus every profile's — so a toolset
+                    // renamed or deleted out from under a live session silently
+                    // widened what that agent could reach, at exactly the moment
+                    // the configuration was in an unexpected state. A fence that
+                    // cannot be honoured now fences to nothing, which is what the
+                    // lease case already did and what the other two now do too.
+                    //
+                    // Sandboxed runs never reach here at all: they pin their
+                    // fence in the frozen set above, so ambient host session
+                    // state never decides what a run reaches.
+                    let requested: Option<String> = match &fence {
+                        Fence::AmbientSession => {
+                            crate::session::active(&ctx.dir).map(|s| s.profile)
+                        }
+                        Fence::Pinned(p) => p.clone(),
+                        Fence::Lease(p) => Some(p.clone()),
                     };
-                    let profile = profile_owned.as_deref();
+                    let gone: Option<&str> = requested
+                        .as_deref()
+                        .filter(|p| !ctx.loaded.manifest.profiles.contains_key(*p));
+                    let profile: Option<&str> = if gone.is_some() {
+                        None
+                    } else {
+                        requested.as_deref()
+                    };
                     // Name refs resolve inline-first, then central library.
                     let library = crate::library::Library::load_default_or_warn();
-                    let raw = if invalid_lease {
+                    let raw = if let Some(name) = gone {
                         eprintln!(
-                            "gateway: the leased toolset does not exist — serving no upstream servers"
+                            "gateway: the fenced toolset {:?} is no longer declared — serving no \
+                             upstream servers (end the session or re-declare it)",
+                            crate::text::sanitize_line(name)
                         );
                         Vec::new()
                     } else {
@@ -653,14 +670,14 @@ impl Gateway {
                             profile,
                         )
                     };
-                    if matches!(fence, Fence::Lease(_)) {
+                    if profile.is_some() {
                         eprintln!(
-                            "gateway: MCP toolset lease active — proxying only this toolset's {} server(s)",
-                            raw.len()
-                        );
-                    } else if profile.is_some() {
-                        eprintln!(
-                            "gateway: session active — proxying only this toolset's {} server(s)",
+                            "gateway: {} — proxying only this toolset's {} server(s)",
+                            if matches!(fence, Fence::Lease(_)) {
+                                "MCP toolset lease active"
+                            } else {
+                                "session active"
+                            },
                             raw.len()
                         );
                     }
@@ -1761,6 +1778,124 @@ mod tests {
         std::env::remove_var("AGENTSTACK_HOME");
         let names: Vec<&str> = gw.upstreams.iter().map(|u| u.name.as_str()).collect();
         assert_eq!(names, ["alpha", "kibana"]);
+    }
+
+    /// The ambient-session fence must fail CLOSED when its toolset is gone.
+    ///
+    /// This is the asymmetry that used to exist: a vanished lease profile
+    /// served nothing, but a vanished *session* profile resolved to `None` —
+    /// and `None` does not mean "no servers", it means every server in the
+    /// manifest plus every profile's. So renaming or deleting a toolset out
+    /// from under a live session widened the agent's reachable surface instead
+    /// of narrowing it, with no gate in the way: the host gateway is built with
+    /// `require_trust: false`.
+    #[test]
+    fn a_session_whose_toolset_vanished_fences_to_nothing_not_everything() {
+        use assert_fs::prelude::*;
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+        let project = assert_fs::TempDir::new().unwrap();
+        project
+            .child("agentstack.toml")
+            .write_str(
+                "version = 1\n\
+                 [servers.alpha]\ntype = \"http\"\nurl = \"https://alpha/mcp\"\n\
+                 [servers.beta]\ntype = \"http\"\nurl = \"https://beta/mcp\"\n\
+                 [profiles.backend]\nservers = [\"beta\"]\n",
+            )
+            .unwrap();
+
+        // No session: the host gateway legitimately serves the whole declared
+        // surface. This case must NOT change — "nothing is fenced" and "a fence
+        // names something gone" are different states.
+        let unfenced = Gateway::from_manifest(Some(project.path()));
+        let mut names: Vec<&str> = unfenced.upstreams.iter().map(|u| u.name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(names, ["alpha", "beta"], "no session means no fence");
+
+        // A session naming a declared toolset fences to it.
+        crate::session::record_for_test(project.path(), "backend");
+        let fenced = Gateway::from_manifest(Some(project.path()));
+        assert_eq!(
+            fenced
+                .upstreams
+                .iter()
+                .map(|u| u.name.as_str())
+                .collect::<Vec<_>>(),
+            ["beta"],
+            "a live session fences to its toolset"
+        );
+
+        // The toolset is renamed away underneath the live session.
+        project
+            .child("agentstack.toml")
+            .write_str(
+                "version = 1\n\
+                 [servers.alpha]\ntype = \"http\"\nurl = \"https://alpha/mcp\"\n\
+                 [servers.beta]\ntype = \"http\"\nurl = \"https://beta/mcp\"\n\
+                 [profiles.renamed]\nservers = [\"beta\"]\n",
+            )
+            .unwrap();
+        let stranded = Gateway::from_manifest(Some(project.path()));
+        assert!(
+            stranded.upstreams.is_empty(),
+            "a session whose toolset vanished must fence to nothing — it served {:?}",
+            stranded
+                .upstreams
+                .iter()
+                .map(|u| u.name.as_str())
+                .collect::<Vec<_>>()
+        );
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    /// The same rule for an explicitly pinned fence: `Pinned(None)` is "no
+    /// fence asked for" and still serves the declared surface, but
+    /// `Pinned(Some(gone))` must serve nothing.
+    #[test]
+    fn a_pinned_fence_naming_a_gone_toolset_serves_nothing() {
+        use assert_fs::prelude::*;
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+        let project = assert_fs::TempDir::new().unwrap();
+        project
+            .child("agentstack.toml")
+            .write_str(
+                "version = 1\n\
+                 [servers.alpha]\ntype = \"http\"\nurl = \"https://alpha/mcp\"\n\
+                 [profiles.backend]\nservers = [\"alpha\"]\n",
+            )
+            .unwrap();
+
+        let none = Gateway::build(
+            Some(project.path()),
+            Fence::Pinned(None),
+            None,
+            None,
+            false,
+            None,
+        );
+        assert_eq!(none.upstreams.len(), 1, "no pin asked for means no fence");
+
+        let gone = Gateway::build(
+            Some(project.path()),
+            Fence::Pinned(Some("missing".into())),
+            None,
+            None,
+            false,
+            None,
+        );
+        assert!(
+            gone.upstreams.is_empty(),
+            "a pinned fence naming a gone toolset must serve nothing"
+        );
+        std::env::remove_var("AGENTSTACK_HOME");
     }
 
     #[test]

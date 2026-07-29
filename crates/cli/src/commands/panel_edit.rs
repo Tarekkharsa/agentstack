@@ -935,8 +935,12 @@ fn profile_blockers(manifest: &Manifest, name: &str, dir: Option<&Path>) -> Vec<
 
     // A live session fences the gateway to this toolset's servers, and that
     // fence is resolved by NAME on every call. Renaming or deleting underneath
-    // it does not tighten the fence — it removes it — so the session is ended
-    // explicitly first rather than warned about.
+    // it strands the session: the fence can no longer be honoured, so the
+    // gateway serves nothing until the session ends. That is the safe
+    // direction — it used to serve EVERYTHING, which is why the gateway now
+    // fails closed here — but silently cutting a running agent off from its
+    // tools is still a worse answer than asking for the session to be ended
+    // first, which is why this stays a refusal rather than a warning.
     if let Ok(ctx) = crate::commands::load(dir) {
         if crate::session::active(&ctx.dir).is_some_and(|s| s.profile == name) {
             out.push((
