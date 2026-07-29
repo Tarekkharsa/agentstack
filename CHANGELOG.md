@@ -4,6 +4,20 @@ User-facing changes per release. The [GitHub Releases
 page](https://github.com/Tarekkharsa/agentstack/releases) carries the built
 binaries, checksums, and provenance attestations for each entry.
 
+## Unreleased
+
+### Added
+
+- **The panel preview is a public docs page** (`/panel/`, in the site nav
+  beside the tutorial): the interactive walkthrough of the graphical
+  companion — every question a user arrives with, answered by the panel and
+  the CLI side by side, including the trust gate, drift, and denial states.
+  The page says plainly that the panel isn't publicly downloadable yet and
+  that every action shown maps to a CLI command that ships today. It passes
+  the same release-grade site checks as every other page (H1/skip-link
+  keyboard path, reduced motion honored, WCAG AA contrast, focusable
+  terminal regions) and the toolset-vocabulary gate.
+
 ## v0.17.0 — 2026-07-29
 
 **The release the activation study installs.** Before putting the launch
