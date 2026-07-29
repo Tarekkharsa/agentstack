@@ -22,12 +22,33 @@ you demo it.
 
 ## 2. Recruiting message (copy-paste)
 
-> I'm running a 30-minute study of a CLI tool that manages MCP servers and
-> skills across coding agents (Claude Code, Codex, Gemini, …). You qualify if
-> you use two or more of those CLIs. You'll install a tool and set it up on
-> your own machine while sharing your screen; I'll watch and take notes but
-> won't help unless you're fully stuck. Nothing leaves your machine, no prep
-> needed. Interested?
+Send the DM variant to people you know; the broadcast variant fits a Slack
+channel or public post. Neither names a command, links the repo, or links
+docs — participants must arrive cold; the task script hands them the URL.
+
+**DM:**
+
+> Hey — I built a CLI tool that manages MCP servers and skills across coding
+> agents (Claude Code, Codex, Gemini, Cursor…), and I'm doing a round of
+> usability sessions before launch. You use at least two of those, right?
+>
+> The ask: 30 minutes on a call, screen shared. You install the tool and set
+> it up on your own machine with your real configs — I watch and take notes,
+> but I don't help; watching where it's confusing *is* the study. Nothing
+> leaves your machine, nothing to prepare, and you can rip it out at the end
+> (uninstalling cleanly is part of what I'm testing).
+>
+> Any slot this week or next work for you? I'll owe you a coffee and
+> first-name credit in the release notes — or anonymity, your pick.
+
+**Broadcast:**
+
+> Looking for 5 developers who use **2+ AI coding CLIs** (Claude Code, Codex,
+> Gemini, Cursor, OpenCode…) for a 30-minute usability session of a tool that
+> unifies MCP/skill setup across them. You install it on your machine while
+> sharing your screen; I watch and take notes but don't coach — the stumbles
+> are the data. No prep, nothing leaves your machine, easy to uninstall
+> after. DM me if you're in.
 
 ## 3. Setup (before each session)
 
