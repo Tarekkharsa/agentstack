@@ -147,6 +147,7 @@ fn run() -> Result<()> {
         Command::AddSkillToProfile(args) => commands::panel_edit::add_skill(args, dir),
         Command::AddServerToProfile(args) => commands::panel_edit::add_server(args, dir),
         Command::CreateProfile(args) => commands::panel_edit::create_profile(args, dir),
+        Command::EditProfile(args) => commands::panel_edit::edit_profile(args, dir),
         Command::RenameProfile(args) => commands::panel_edit::rename_profile(args, dir),
         Command::DeleteProfile(args) => commands::panel_edit::delete_profile(args, dir),
         Command::UseProfile(args) => commands::panel_edit::use_profile(args, dir),

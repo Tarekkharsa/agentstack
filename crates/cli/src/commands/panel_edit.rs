@@ -39,7 +39,8 @@ use serde_json::{json, Map, Value};
 
 use crate::cli::{
     PanelAddServerArgs, PanelAddSkillArgs, PanelCreateProfileArgs, PanelDeleteProfileArgs,
-    PanelLibraryKind, PanelRemoveFromLibraryArgs, PanelRenameProfileArgs, PanelUseProfileArgs,
+    PanelEditProfileArgs, PanelLibraryKind, PanelRemoveFromLibraryArgs, PanelRenameProfileArgs,
+    PanelUseProfileArgs,
 };
 use crate::manifest::Manifest;
 
@@ -918,6 +919,154 @@ fn build_remove_preview(action: &str, digest: &str, mut body: Map<String, Value>
     crate::ui_contract::envelope(Value::Object(body))
 }
 
+// ── edit-profile ────────────────────────────────────────────────────────────
+
+/// `edit-profile` — every add and every removal for one toolset, applied as a
+/// single change under one consent digest.
+///
+/// The per-capability verbs each ran the full pipeline, so building a toolset
+/// of six things cost six writes, six locks and six renders — and there was no
+/// verb at all for taking something back out. This collects the whole intent,
+/// writes the manifest once, then re-locks and re-renders once.
+///
+/// Removal ends a MEMBERSHIP and nothing more: the capability stays declared in
+/// the manifest and stays in the central library. That distinction is the
+/// reason this verb exists rather than being folded into `remove-from-library`,
+/// which is machine-wide.
+pub fn edit_profile(args: &PanelEditProfileArgs, dir: Option<&Path>) -> Result<()> {
+    let preview = edit_profile_preview(args, dir)?;
+    if !args.consent.yes {
+        return emit(&preview);
+    }
+    verify_consent(args.consent.consented.as_deref(), preview_digest(&preview)?)?;
+
+    // One read, every mutation, one write. Doing it member-by-member through
+    // `enroll` would re-read and re-write the manifest per capability, so a
+    // failure halfway would leave a partially-applied batch the digest never
+    // described.
+    let base = crate::commands::project_base(dir)?;
+    let path =
+        crate::manifest::resolve_manifest_dir(&base).join(crate::manifest::load::MANIFEST_FILE);
+    let mut text =
+        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    for name in &args.add_skills {
+        text = crate::commands::add::add_to_profile(&text, &args.profile, "skills", name)?;
+    }
+    for name in &args.add_servers {
+        text = crate::commands::add::add_to_profile(&text, &args.profile, "servers", name)?;
+    }
+    for name in &args.remove_skills {
+        text = crate::commands::remove::remove_from_profile(&text, &args.profile, "skills", name)?;
+    }
+    for name in &args.remove_servers {
+        text = crate::commands::remove::remove_from_profile(&text, &args.profile, "servers", name)?;
+    }
+    toml::from_str::<Manifest>(&text).context("resulting manifest would be invalid")?;
+    crate::util::atomic::write(&path, &text)
+        .with_context(|| format!("writing {}", path.display()))?;
+
+    // One re-lock and one re-render for the whole batch — the activation path
+    // every other mutating panel verb uses.
+    activate(&args.profile, args.consent.allow_unresolved, dir)
+}
+
+/// Validate the batch and build its enveloped preview. Public so the panel (and
+/// the parity witness) can read the digest without parsing stdout.
+pub fn edit_profile_preview(args: &PanelEditProfileArgs, dir: Option<&Path>) -> Result<Value> {
+    let manifest = load_manifest(dir)?;
+    ensure_profile_exists(&manifest, &args.profile)?;
+
+    let changes = args.add_skills.len()
+        + args.add_servers.len()
+        + args.remove_skills.len()
+        + args.remove_servers.len();
+    anyhow::ensure!(changes > 0, "no changes requested");
+
+    // A name on both sides is an intent nobody can act on — and silently
+    // picking one would apply something the preview did not describe.
+    for n in &args.add_skills {
+        anyhow::ensure!(
+            !args.remove_skills.contains(n),
+            "skill '{n}' is being both added and removed",
+        );
+    }
+    for n in &args.add_servers {
+        anyhow::ensure!(
+            !args.remove_servers.contains(n),
+            "server '{n}' is being both added and removed",
+        );
+    }
+
+    // Additions must resolve before the write, so activation never trips on a
+    // dangling reference. `"*"` is the legal inline-all-skills wildcard.
+    let libctx = crate::commands::load(dir)?.library_ctx();
+    for s in &args.add_skills {
+        anyhow::ensure!(
+            s == "*" || manifest.skills.contains_key(s) || libctx.library.get(s).is_some(),
+            "no skill '{s}' in the manifest or central library",
+        );
+    }
+    for s in &args.add_servers {
+        anyhow::ensure!(
+            manifest.servers.contains_key(s) || libctx.library.get_server(s).is_some(),
+            "no server '{s}' in the manifest or central library",
+        );
+    }
+
+    // What the batch would leave behind, computed here so the preview can show
+    // the RESULT rather than only the deltas — the panel's ticks are a picture
+    // of the end state, and a consent that describes a different thing from the
+    // one on screen is not consent to what was seen.
+    let current = manifest.profiles.get(&args.profile);
+    let after = |existing: &[String], add: &[String], remove: &[String]| -> Vec<String> {
+        let mut out: Vec<String> = existing
+            .iter()
+            .filter(|n| !remove.contains(n))
+            .cloned()
+            .collect();
+        for n in add {
+            if !out.contains(n) {
+                out.push(n.clone());
+            }
+        }
+        out
+    };
+    let skills_after = after(
+        current.map(|p| p.skills.as_slice()).unwrap_or_default(),
+        &args.add_skills,
+        &args.remove_skills,
+    );
+    let servers_after = after(
+        current.map(|p| p.servers.as_slice()).unwrap_or_default(),
+        &args.add_servers,
+        &args.remove_servers,
+    );
+    // Emptying a toolset is allowed but is not a no-op: an empty toolset
+    // resolves to nothing, so activating it serves nothing. Say so rather than
+    // letting the panel present it as an ordinary edit.
+    let empties = skills_after.is_empty() && servers_after.is_empty();
+
+    let params = json!({
+        "profile": args.profile,
+        "add_skills": args.add_skills,
+        "add_servers": args.add_servers,
+        "remove_skills": args.remove_skills,
+        "remove_servers": args.remove_servers,
+    });
+    let digest = action_digest("edit-profile", &params, &manifest_bytes(dir)?);
+
+    let mut body = Map::new();
+    body.insert("profile".into(), args.profile.clone().into());
+    body.insert("add_skills".into(), json!(args.add_skills));
+    body.insert("add_servers".into(), json!(args.add_servers));
+    body.insert("remove_skills".into(), json!(args.remove_skills));
+    body.insert("remove_servers".into(), json!(args.remove_servers));
+    body.insert("skills".into(), json!(skills_after));
+    body.insert("servers".into(), json!(servers_after));
+    body.insert("empties_toolset".into(), empties.into());
+    Ok(build_preview("edit-profile", &digest, body))
+}
+
 // ── rename-profile / delete-profile ─────────────────────────────────────────
 
 /// The reasons a toolset's name is load-bearing somewhere else, checked before
@@ -1655,5 +1804,111 @@ mod tests {
         let err = rename_profile_gated(&mk(false, true, Some(&digest)), Some(tmp.path()), false)
             .expect_err("a replayed digest must refuse");
         assert!(!err.to_string().is_empty());
+    }
+
+    /// The batch is one write and one activation, and its preview describes the
+    /// END STATE as well as the deltas — a panel drawing ticks consents to the
+    /// picture it drew, not to a list of operations that imply it.
+    #[test]
+    fn edit_profile_previews_the_resulting_membership_not_just_the_deltas() {
+        let _g = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", tmp.path().join("home"));
+        std::fs::write(
+            tmp.path().join("agentstack.toml"),
+            "version = 1\n\n\
+             [servers.github]\ntype = \"stdio\"\ncommand = \"npx\"\n\n\
+             [servers.figma]\ntype = \"http\"\nurl = \"https://figma\"\n\n\
+             [profiles.backend]\nservers = [\"github\"]\nskills = []\n",
+        )
+        .unwrap();
+
+        let args = |adds: Vec<&str>, removes: Vec<&str>| PanelEditProfileArgs {
+            profile: "backend".into(),
+            add_skills: vec![],
+            remove_skills: vec![],
+            add_servers: adds.into_iter().map(String::from).collect(),
+            remove_servers: removes.into_iter().map(String::from).collect(),
+            consent: crate::cli::PanelConsent {
+                preview: true,
+                yes: false,
+                consented: None,
+                allow_unresolved: false,
+            },
+        };
+
+        let p =
+            edit_profile_preview(&args(vec!["figma"], vec!["github"]), Some(tmp.path())).unwrap();
+        assert_eq!(
+            p["servers"],
+            json!(["figma"]),
+            "the end state, not the delta"
+        );
+        assert_eq!(p["add_servers"], json!(["figma"]));
+        assert_eq!(p["remove_servers"], json!(["github"]));
+        assert_eq!(p["empties_toolset"], json!(false));
+
+        // Removing everything is allowed, but an empty toolset resolves to
+        // nothing — so it is flagged rather than presented as an ordinary edit.
+        let empty = edit_profile_preview(&args(vec![], vec!["github"]), Some(tmp.path())).unwrap();
+        assert_eq!(empty["servers"], json!([]));
+        assert_eq!(empty["empties_toolset"], json!(true));
+
+        // A name on both sides is an intent nobody can act on.
+        assert!(
+            edit_profile_preview(&args(vec!["figma"], vec!["figma"]), Some(tmp.path())).is_err()
+        );
+        // An empty batch is refused rather than becoming a pointless re-render.
+        assert!(edit_profile_preview(&args(vec![], vec![]), Some(tmp.path())).is_err());
+        // Additions must resolve before anything is written.
+        assert!(edit_profile_preview(&args(vec!["nope"], vec![]), Some(tmp.path())).is_err());
+    }
+
+    /// Removing a member ends a MEMBERSHIP: the capability stays declared. That
+    /// is the whole difference between this verb and `remove-from-library`.
+    #[test]
+    fn edit_profile_removal_keeps_the_capability_declared() {
+        let _g = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", tmp.path().join("home"));
+        std::fs::write(
+            tmp.path().join("agentstack.toml"),
+            "version = 1\n\n\
+             [servers.github]\ntype = \"stdio\"\ncommand = \"npx\"\n\n\
+             [profiles.backend]\nservers = [\"github\"]\n\n\
+             [profiles.other]\nservers = [\"github\"]\n",
+        )
+        .unwrap();
+
+        let text = std::fs::read_to_string(tmp.path().join("agentstack.toml")).unwrap();
+        let out =
+            crate::commands::remove::remove_from_profile(&text, "backend", "servers", "github")
+                .unwrap();
+        let parsed: Manifest = toml::from_str(&out).unwrap();
+        assert!(
+            parsed.servers.contains_key("github"),
+            "the capability must stay declared: {out}"
+        );
+        assert!(
+            parsed.profiles["backend"].servers.is_empty(),
+            "it must leave THIS toolset: {out}"
+        );
+        assert_eq!(
+            parsed.profiles["other"].servers,
+            vec!["github".to_string()],
+            "and must not touch another toolset's membership: {out}"
+        );
+
+        // Removing something that was never a member is not an error — the
+        // caller's intent is already satisfied, and a re-applied batch should
+        // be idempotent rather than brittle.
+        assert!(
+            crate::commands::remove::remove_from_profile(&text, "backend", "skills", "absent")
+                .is_ok()
+        );
     }
 }

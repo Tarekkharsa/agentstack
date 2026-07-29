@@ -401,6 +401,10 @@ argv. Both run one authority path and produce the same consent digest."
     )]
     CreateProfile(PanelCreateProfileArgs),
 
+    /// Change one toolset's membership as a batch (panel action; digest-bound).
+    #[command(name = "edit-profile", hide = true)]
+    EditProfile(PanelEditProfileArgs),
+
     /// Fixed-argv alias of `agentstack toolset rename` (panel action).
     #[command(name = "rename-profile", hide = true)]
     RenameProfile(PanelRenameProfileArgs),
@@ -1829,6 +1833,43 @@ pub struct PanelCreateProfileArgs {
     pub consent: PanelConsent,
 }
 
+/// `edit-profile` — one toolset's membership, changed as a single batch.
+///
+/// The existing `add-*-to-profile` verbs each mutate, re-lock and re-render on
+/// their own, so composing a toolset by hand costs one write, one lock and one
+/// render per capability — and there was no way to take something out again at
+/// all. This applies every add and every removal in one write, under ONE
+/// consent digest, followed by one re-lock and one re-render.
+///
+/// Removal here ends a MEMBERSHIP: the capability stays declared in the
+/// manifest and stays in the central library. Removing the capability itself is
+/// `remove-from-library`, which is machine-wide and says so.
+#[derive(Args, Debug)]
+pub struct PanelEditProfileArgs {
+    /// The toolset whose membership is changing.
+    #[arg(long)]
+    pub profile: String,
+
+    /// Skill to add (repeatable).
+    #[arg(long = "add-skill", value_name = "NAME")]
+    pub add_skills: Vec<String>,
+
+    /// Skill to take out of this toolset (repeatable). It stays declared.
+    #[arg(long = "remove-skill", value_name = "NAME")]
+    pub remove_skills: Vec<String>,
+
+    /// Server to add (repeatable).
+    #[arg(long = "add-server", value_name = "NAME")]
+    pub add_servers: Vec<String>,
+
+    /// Server to take out of this toolset (repeatable). It stays declared.
+    #[arg(long = "remove-server", value_name = "NAME")]
+    pub remove_servers: Vec<String>,
+
+    #[command(flatten)]
+    pub consent: PanelConsent,
+}
+
 /// `rename-profile` — re-key one `[profiles.<name>]` table.
 ///
 /// Deliberately narrow: it refuses rather than cascading. A toolset name is
@@ -2565,6 +2606,7 @@ pub fn full_command_inventory() -> String {
         "add-skill-to-profile",
         "add-server-to-profile",
         "create-profile",
+        "edit-profile",
         "rename-profile",
         "delete-profile",
         "use-profile",

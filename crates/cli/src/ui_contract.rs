@@ -63,6 +63,19 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   is for `remove-from-library`. The other three `profiles-edit-v1` verbs
 ///   (`add-skill-to-profile`, `add-server-to-profile`, `use-profile`) still
 ///   re-lock AND re-render, and are unchanged.
+/// - `profiles-edit-batch-v1`: `edit-profile --profile <p>` takes repeatable
+///   `--add-skill` / `--add-server` / `--remove-skill` / `--remove-server` and
+///   applies them as ONE manifest write under ONE `consent_digest`, followed by
+///   a single re-lock and re-render. Two things it gives a panel that no other
+///   verb does: a way to take a capability OUT of a toolset (the `add-*` verbs
+///   have no inverse — `remove-from-library` is machine-wide and deletes the
+///   capability itself, which is a different act), and a membership edit whose
+///   cost does not scale with the number of things changed. The preview carries
+///   the resulting `skills`/`servers` as well as the deltas, so a UI showing the
+///   end state consents to the same picture it drew, plus `empties_toolset` for
+///   the case where the batch would leave nothing behind. A separate name from
+///   `profiles-edit-v1` because a binary advertising that one legitimately has
+///   no removal path at all.
 /// - `library-remove-v1`: `remove-from-library --kind skill|server --name <n>`
 ///   drops a capability from the MACHINE-WIDE central library, bound to a
 ///   `consent_digest` a prior `--preview` returned — here over the library index
@@ -141,6 +154,7 @@ pub const FEATURES: &[&str] = &[
     "profiles-edit-v1",
     "diff-ownership-v1",
     "toolset-create-v2",
+    "profiles-edit-batch-v1",
     "toolset-rename-v1",
     "toolset-delete-v1",
     "library-remove-v1",

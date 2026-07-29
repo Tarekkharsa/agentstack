@@ -485,3 +485,45 @@ servers = []
         assert!(remove_profile_entry(SAMPLE, "nope").is_err());
     }
 }
+
+/// Drop one member name from a single toolset's `servers`/`skills` array.
+///
+/// Distinct from [`remove_entry`], which removes a capability from the whole
+/// manifest and prunes it from EVERY toolset: this leaves the capability
+/// declared and only ends its membership of one toolset. That difference is the
+/// difference between "I don't want this here" and "I don't want this at all",
+/// and the panel needs the first without the second.
+///
+/// Absent membership is not an error — the caller's intent ("this toolset must
+/// not contain `name`") is already satisfied, and a batch that re-applies is
+/// better idempotent than brittle.
+pub(crate) fn remove_from_profile(
+    text: &str,
+    profile: &str,
+    field: &str,
+    name: &str,
+) -> Result<String> {
+    let mut doc: DocumentMut = text.parse().context("parsing manifest as TOML")?;
+    let Some(ptable) = doc
+        .get_mut("profiles")
+        .and_then(|i| i.as_table_mut())
+        .and_then(|t| t.get_mut(profile))
+        .and_then(|i| i.as_table_mut())
+    else {
+        anyhow::bail!("no toolset '{profile}' in the manifest");
+    };
+    if let Some(arr) = ptable.get_mut(field).and_then(|i| i.as_array_mut()) {
+        let before = arr.len();
+        arr.retain(|v| v.as_str() != Some(name));
+        // `retain` drops the value but leaves the whitespace that surrounded
+        // it, so removing the first of two members yields `[ "b"]`. Normalize
+        // the array we just edited — a manifest is a file a human reads, and a
+        // stray gap is the sort of thing that makes a tool look careless.
+        // Scoped to arrays that actually changed, so untouched formatting
+        // elsewhere in the file survives.
+        if arr.len() != before {
+            arr.fmt();
+        }
+    }
+    Ok(doc.to_string())
+}
