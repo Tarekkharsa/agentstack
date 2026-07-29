@@ -551,6 +551,8 @@ agentstack session end             <span class="c"># put every file back</span><
         <p class="muted">Rungs 1–5 leave every CLI unified, switchable, diagnosable and shareable. This rung is what you add when an agent can do damage by accident, or when a repo you cloned declares MCP servers you have never read. Step&nbsp;7 alone is worth doing on any machine.</p>
       </div>
 
+      <details id="govern-steps" style="margin:var(--space-2) 0 0">
+        <summary style="cursor:pointer;font-weight:600;font-size:1.02rem;color:var(--color-text);padding:var(--space-2) 0">Walk the seven steps — guard &middot; gateway &middot; inert clone &middot; trust &middot; secrets &middot; confined run &middot; evidence</summary>
       <ol class="walk tb">
 
         <li id="s-guard">
@@ -753,6 +755,7 @@ agentstack report run &lt;run-id&gt; --json <span class="c"># machine-readable, 
         </li>
 
       </ol>
+      </details>
 
       <section id="next">
         <p class="eyebrow">Where to go next</p>
@@ -818,5 +821,19 @@ agentstack report run &lt;run-id&gt; --json <span class="c"># machine-readable, 
     </div>
   </div>
 </div>
+<script>
+(function(){
+  var d=document.getElementById('govern-steps');
+  if(!d) return;
+  function openForHash(){
+    var h=location.hash&&location.hash.slice(1);
+    if(!h) return;
+    var t=document.getElementById(h);
+    if(t&&d.contains(t)){d.open=true;t.scrollIntoView();}
+  }
+  openForHash();
+  addEventListener('hashchange',openForHash);
+})();
+</script>
 </body>
 </html>
