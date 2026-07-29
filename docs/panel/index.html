@@ -348,8 +348,8 @@ const base = () => ({
   installed:true, reachable:true, loaded:true, doctorNull:false, incompatible:null,
   setupState:'ready',
   trust:'inert', drift:true, guard:false,
-  session:null, activeProfile:null, activeRun:null,
-  canSessions:true, canEditProfiles:true, canRestore:true,
+  session:null, activeToolset:null, activeRun:null,
+  canSessions:true, canEditToolsets:true, canRestore:true,
   toolsets:[
     {name:'rust',    ready:true,  blocked:null, targets:'claude-code, codex', members:['rust-best-practices','rust-async-patterns','rust-mcp-server-generator']},
     {name:'backend', ready:true,  blocked:null, targets:'claude-code',        members:['github','postgres','sql-review']},
@@ -431,7 +431,7 @@ function concern(s){
     note:'reversible · only adds protection', label:'Enable guard', act:'action:guard-install', others:0};
   return null;
 }
-const activeName = s => s.session ? s.session.profile : s.activeProfile;
+const activeName = s => s.session ? s.session.toolset : s.activeToolset;
 function healthyLine(s){
   const b=[]; if(s.guard) b.push('guard on'); if(!s.drift) b.push('8 CLIs in sync');
   b.push('secrets resolve','skills installed'); return b.join(' · ');
@@ -460,8 +460,8 @@ function summarizeToolset(t){
    finding); the proposal passes it off, which is the fix. */
 function toolsetRow(s,t,o){
   o=o||{};
-  const held = !!(s.session && s.session.profile===t.name);
-  const active = s.activeProfile===t.name;
+  const held = !!(s.session && s.session.toolset===t.name);
+  const active = s.activeToolset===t.name;
   const inUse = o.faithful ? (active||held) : held;
   const sel = o.selectable && !s.newRow && s.sel===t.name;
   const age = (o.faithful ? (inUse&&s.session) : held) ? ' · in use '+s.session.ago : '';
@@ -609,7 +609,7 @@ function undoView(s){
   return `<div class="box good"><span class="xs"><b class="goodt">Undone</b> — <span class="mono">restored 8 file(s) from 18c67c10</span></span></div>`;
 }
 function tabToolsets(s){
-  return `${railView(s)}${s.canEditProfiles?libraryView(s):
+  return `${railView(s)}${s.canEditToolsets?libraryView(s):
     `<div class="pane-r" style="padding:14px"><p class="d">This agentstack CLI predates the library browser. Update it to add tools to a toolset from here.</p></div>`}`;
 }
 function railView(s){
@@ -630,7 +630,7 @@ function railView(s){
   cards+=s.toolsets.map(t=>toolsetRow(s,t,{faithful:true})).join('');
   return `<div class="pane-l">
     <div class="row g8" style="padding:12px 12px 6px"><span class="cap">TOOLSETS</span>
-      ${s.canEditProfiles&&!d&&s.toolsets.length>0?`<span style="margin-left:auto">${btn('+ New','draft:new')}</span>`:''}</div>
+      ${s.canEditToolsets&&!d&&s.toolsets.length>0?`<span style="margin-left:auto">${btn('+ New','draft:new')}</span>`:''}</div>
     <div class="col g6" style="padding:0 8px 12px">${cards}</div></div>`;
 }
 function libraryView(s){
@@ -1410,9 +1410,9 @@ const SCEN = [
  summary:'One region: the toolset you are working under. The version number, trust pill, healthy-facts line, collapsed checkup, undo row and four nav links all left this surface — every one of them is a Manage click away.',
  steps:[
   {name:'Working under', component:'WorkingUnder', ui:'popover', cli:'toolset',
-   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.activeProfile='rust'},
+   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.activeToolset='rust'},
    how:[H('“Stop using” is conditional','It renders only during a temporary session. Outside one there is nothing to stop, and offering it would imply a state that does not exist. Hold that thought for step 2.','rgba(52,211,153,.5)'),
-        H('The active name is never guessed','If no toolset owns this directory the panel says so, rather than showing the first declared profile — an unowned name here would be a lie about scope.'),
+        H('The active name is never guessed','If no toolset owns this directory the panel says so, rather than showing the first declared toolset — an unowned name here would be a lie about scope.'),
         H('Green gets no badge','The pill shows a dot only for “needs you” or a live run. A permanent green dot trains people to ignore the icon.','rgba(91,124,250,.5)')],
    gtee:[Y('The footer summarises everything not shown, so a quiet panel is a claim, not an omission.'),
          Y('One toolset is described one way here and everywhere else — the counts are derived from its members.'),
@@ -1420,9 +1420,9 @@ const SCEN = [
    contract:'status-v1 · sessions gated on canSessions',
    advance:s=>s.manage==='toolsets'},
   {name:'The same toolset, one tab over', component:'ToolsetRail', ui:'manage:toolsets', cli:'toolset',
-   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.activeProfile='rust';s.manage='toolsets'},
+   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.activeToolset='rust';s.manage='toolsets'},
    how:[H('Same toolset, two answers','<code>rust</code> is active without a session. The glance offered no way to stop it — correctly, since there is no session to end. The rail offers <b>Stop</b> for the same toolset at the same instant.'),
-        H('Where the difference comes from','The glance asks <code>session &amp;&amp; canSessions</code>; the rail asks <code>inUse &amp;&amp; canSessions</code>, where <code>inUse</code> is <code>row.active || session?.profile === row.name</code>. Two conditions for one question.','rgba(248,113,113,.5)'),
+        H('Where the difference comes from','The glance asks <code>session &amp;&amp; canSessions</code>; the rail asks <code>inUse &amp;&amp; canSessions</code>, where <code>inUse</code> is <code>row.active || session?.toolset === row.name</code>. Two conditions for one question.','rgba(248,113,113,.5)'),
         H('Press it and see','Nothing happens. The verb is offered for a state it is not defined for — which is worse than not offering it, because the panel has now made a claim it cannot honour.','rgba(251,191,36,.5)')],
    gtee:[Y('The row itself is honest: the name, the derived counts and the members all agree.'),
          N('Its Stop button is not: pressing it ends a session that does not exist.')],
@@ -1433,7 +1433,7 @@ const SCEN = [
  summary:'A toolset is a named bundle of servers and skills. Use it temporarily for one stretch of work — the temporary form puts every file back when it ends.',
  steps:[
   {name:'Toolsets tab', component:'ToolsetsTab + ToolsetRail', ui:'manage:toolsets', cli:'toolset',
-   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='toolsets';s.activeProfile='rust'},
+   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='toolsets';s.activeToolset='rust'},
    how:[H('Rail and library on one screen','Adding a skill used to be four layouts: browse, pick a target, confirm, done. Now the toolsets stay left, the library right, and the confirm appears in place.'),
         H('A blocked row loses its verb','“review” has an unpinned server, so there is no Use button — the reason replaces it instead of a greyed-out button you would have to hover to understand.','rgba(251,191,36,.5)')],
    gtee:[Y('Ending a session puts your CLIs’ files back as they were — that is what “temporarily” means.'),
@@ -1442,13 +1442,13 @@ const SCEN = [
    open:'<code>rust</code> is active and <code>backend</code> is about to hold the session — which is the state that exposes the second rail bug. Start the session and watch both rows.',
    advance:s=>!!s.session},
   {name:'In use', component:'WorkingUnder · session', ui:'manage:toolsets', cli:'use',
-   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='toolsets';s.activeProfile='rust';s.session={profile:'backend',ago:'just now'}},
+   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='toolsets';s.activeToolset='rust';s.session={toolset:'backend',ago:'just now'}},
    how:[H('One session, named in two places','The rail row and the glance both read from the same session record, so they can never disagree about what is active.','rgba(52,211,153,.5)')],
    gtee:[Y('session end restores each adapter config from the snapshot taken at start.'),
          N('Killing the host app mid-session does not revert automatically — agentstack session end --all cleans up.'),
          N('Only one row actually holds the session, but two of them say so.')],
    contract:'sessions-v1',
-   open:'<b>“In use” leaks across rows.</b> <code>AgentstackControl.tsx:2310</code> appends the age with <code>inUse &amp;&amp; session</code> — <em>this</em> session’s age, on <em>any</em> in-use row. <code>rust</code> is active, <code>backend</code> holds the session, and both now claim “in use just now”. The suffix belongs only to the row whose name matches <code>session.profile</code>.'}]},
+   open:'<b>“In use” leaks across rows.</b> <code>AgentstackControl.tsx:2310</code> appends the age with <code>inUse &amp;&amp; session</code> — <em>this</em> session’s age, on <em>any</em> in-use row. <code>rust</code> is active, <code>backend</code> holds the session, and both now claim “in use just now”. The suffix belongs only to the row whose name matches <code>session.toolset</code>.'}]},
 
 {id:'create', group:'Everyday', name:'Create a toolset', tag:'2 STEPS', tone:'g',
  summary:'Composing happens in the rail, beside the library it draws from, instead of listing the whole library a second time in a screen of its own.',
@@ -1467,7 +1467,7 @@ const SCEN = [
    how:[H('Creating does not activate','A new toolset appears with a Use button, not in use. Naming and activating stay separate verbs.','rgba(52,211,153,.5)')],
    gtee:[Y('Creating a toolset writes the manifest only — no CLI config is rendered until you use it.')],
    contract:'create-profile',
-   open:'Rename and delete do not exist. For a switcher that is now the first page’s whole job, those are the two missing verbs — and both are profile edits, so they fit the existing contract shape.'}]},
+   open:'Rename and delete do not exist. For a switcher that is now the first page’s whole job, those are the two missing verbs — and both are toolset edits, so they fit the existing contract shape.'}]},
 
 {id:'remove', group:'Everyday', name:'Remove from the library', tag:'MACHINE-WIDE', tone:'a',
  summary:'What does this Remove actually remove? Not the toolset — your machine-wide library, for every project on this machine. The button never says so; only the confirm does, and it says two different things depending on whether anything here uses the item.',
@@ -1598,7 +1598,7 @@ const SCEN = [
          N('The graph is a claim about intent, not a verified property of the script.')],
    contract:'blueprint parse + send-message — disabled without a live chat thread'},
   {name:'Live strip', component:'AgentstackControl · live run', ui:'popover', cli:'workflow',
-   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.activeProfile='rust';s.activeRun={workflow:'nightly-review',running:2}},
+   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.activeToolset='rust';s.activeRun={workflow:'nightly-review',running:2}},
    how:[H('One click, not a nav row','A live run puts a strip above the body and a badge on the Activity tab. The Workflows row — empty for almost everyone — is gone.'),
         H('The only animated element','The pill dot deliberately does not pulse while the strip does, so two pulses never read as two separate events.','rgba(91,124,250,.5)')],
    gtee:[Y('The strip appears alongside whatever body state is showing — it is not gated by the concern.')],
@@ -2082,7 +2082,7 @@ function act(a){
       if(rest[0]==='choice') S.secretChoice=+rest[1];
       if(rest[0]==='apply'){S.setupAct={ok:true,message:'wrote .agentstack/agentstack.toml · 11 server(s) imported'};S.setupState='ready';}
       break;
-    case 'use':  S.session={profile:rest[0],ago:'just now'}; break;
+    case 'use':  S.session={toolset:rest[0],ago:'just now'}; break;
     case 'stop': S.session=null; break;
     case 'draft':
       if(rest[0]==='new') S.draft={name:'',picked:[]};

@@ -980,7 +980,12 @@ const PROFILE_IDENTIFIERS: &[&str] = &[
     // Panel/MCP verb names in the fixed-argv contract t3code drives.
     "create-profile",
     "use-profile",
+    "edit-profile",
+    "add-skill-to-profile",
+    "add-server-to-profile",
     "_create_profile",
+    // The panel capability ids (`profiles-edit`, `profiles-edit-batch-v1`).
+    "profiles-edit",
     // The flag as the fixed-argv panel verbs still spell it. On VISIBLE
     // commands the long form is now `--toolset`, with `--profile` kept as a
     // working alias — so prose showing a visible command should say
