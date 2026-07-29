@@ -88,6 +88,7 @@ jobs:
           AGENTSTACK_BIN: ${{ github.workspace }}/target/release/agentstack
         run: |
           for script in \
+            examples/first-value-demo/run-demo.sh \
             examples/guard-demo/run-demo.sh \
             examples/one-manifest-demo/run-demo.sh \
             examples/mcp-profile-lease/run-demo.sh \
