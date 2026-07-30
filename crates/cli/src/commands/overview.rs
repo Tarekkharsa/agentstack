@@ -660,14 +660,17 @@ fn print_orientation(o: &Orientation, status: bool) {
             format!("failed to load: {err}").red()
         ),
         ManifestState::Loaded(f) => {
-            let mut parts = vec![format!("{} server(s)", f.servers)];
+            let mut parts = vec![super::count(f.servers, "server")];
             if f.skills > 0 {
-                parts.push(format!("{} skill(s)", f.skills));
+                parts.push(super::count(f.skills, "skill"));
             }
             let targets_note = if f.pinned_targets.is_empty() {
-                format!("{} detected CLI(s), no [targets] pinned", f.fanout_targets)
+                format!(
+                    "{}, no [targets] pinned",
+                    super::count(f.fanout_targets, "detected CLI")
+                )
             } else {
-                format!("{} target(s)", f.pinned_targets.len())
+                super::count(f.pinned_targets.len(), "target")
             };
             println!(
                 "  {}  {} — {} → {}",

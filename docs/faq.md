@@ -73,8 +73,8 @@ manages.
 genuinely differ, it keeps the first one imported and says so out loud:
 
 ```text
-⚠ server 'github' is defined differently by 1 other CLI(s) — kept the first
-  definition imported (the others stay in their CLI's own config)
+⚠ server 'github' is defined differently by 1 other CLI — kept the first
+  definition imported (the other stays in its CLI's own config)
 ```
 
 Nothing is lost — the other definition stays in its own CLI's config until you

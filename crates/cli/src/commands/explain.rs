@@ -395,7 +395,8 @@ fn explain_server(name: &str, ctx: &crate::commands::Context) -> String {
     }
     if outside_targets > 0 {
         o.push_str(&format!(
-            "                + {outside_targets} more CLI(s) outside this project's [targets]\n"
+            "                + {} outside this project's [targets]\n",
+            super::count(outside_targets, "more CLI")
         ));
     }
     if enabled_summary.is_empty() {
@@ -752,7 +753,8 @@ fn explain_skill(name: &str, ctx: &crate::commands::Context) -> String {
     }
     if outside_targets > 0 {
         o.push_str(&format!(
-            "                + {outside_targets} more CLI(s) outside this project's [targets]\n"
+            "                + {} outside this project's [targets]\n",
+            super::count(outside_targets, "more CLI")
         ));
     }
     if !enabled_summary.is_empty() {

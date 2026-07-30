@@ -785,10 +785,12 @@ fn run_global(args: &InitArgs) -> Result<()> {
         );
     } else {
         println!("  Detected CLIs: {}", detected.join(" · "));
-        if crate::util::confirm::confirm(&format!(
-            "Install the guard into these {} CLI(s)?",
-            detected.len()
-        ))? {
+        let prompt = if detected.len() == 1 {
+            "Install the guard into this CLI?".to_string()
+        } else {
+            format!("Install the guard into these {} CLIs?", detected.len())
+        };
+        if crate::util::confirm::confirm(&prompt)? {
             super::guard::install()?;
         } else {
             println!(
@@ -1073,11 +1075,16 @@ fn run_impl(
         .map(|c| c.display.clone())
         .collect();
     for (name, extra) in &conflict_counts {
+        let clis = super::count(*extra, "other CLI");
+        let others = if *extra == 1 {
+            "the other stays in its"
+        } else {
+            "the others stay in their"
+        };
         println!(
-            "{} server '{name}' is defined differently by {} other CLI(s) — kept the first \
-             definition imported (the others stay in their CLI's own config)",
-            "⚠".yellow(),
-            extra
+            "{} server '{name}' is defined differently by {clis} — kept the first \
+             definition imported ({others} CLI's own config)",
+            "⚠".yellow()
         );
     }
 
@@ -1555,9 +1562,12 @@ fn render_import_summary(
         "  Manifest:  {manifest_path}   (the source of truth your CLIs render from)\n"
     ));
     out.push_str(&format!("  From:      {}\n", sources.join(" · ")));
-    let mut imported = format!("{server_count} MCP server(s)");
+    let mut imported = super::count(server_count, "MCP server");
     if settings_count > 0 {
-        imported.push_str(&format!(" · settings from {settings_count} CLI(s)"));
+        imported.push_str(&format!(
+            " · settings from {}",
+            super::count(settings_count, "CLI")
+        ));
     }
     out.push_str(&format!("  Imported:  {imported}\n"));
     // M4: the CLIs deliberately left out of `[targets] default`. Naming them —
@@ -1887,7 +1897,7 @@ mod tests {
         );
         assert!(out.contains("Manifest:  /tmp/proj/.agentstack/agentstack.toml"));
         assert!(out.contains("From:      Claude Code · Codex CLI"));
-        assert!(out.contains("8 MCP server(s) · settings from 2 CLI(s)"));
+        assert!(out.contains("8 MCP servers · settings from 2 CLIs"));
         assert!(out.contains("1 still need a value"));
         assert!(out.contains("agentstack secret set GITHUB_TOKEN"));
         assert!(out.contains("agentstack restore --last --write"));

@@ -158,7 +158,11 @@ pub(crate) fn profile_disambiguation(manifest: &Manifest) -> String {
             } else {
                 profile.skills.len()
             };
-            let counts = format!("{} · {}", count(servers, "server"), count(skills, "skill"));
+            let counts = format!(
+                "{} · {}",
+                super::count(servers, "server"),
+                super::count(skills, "skill")
+            );
             (name, counts)
         })
         .collect();
@@ -176,11 +180,6 @@ pub(crate) fn profile_disambiguation(manifest: &Manifest) -> String {
         ));
     }
     out
-}
-
-/// "1 server" / "2 servers" — a count with its correctly pluralized noun.
-fn count(n: usize, noun: &str) -> String {
-    format!("{n} {noun}{}", if n == 1 { "" } else { "s" })
 }
 
 pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {

@@ -277,8 +277,8 @@
 <p>Thirteen adapters ship today: Antigravity, Claude Code, Claude Desktop, Codex CLI, GitHub Copilot CLI, Cursor, Gemini CLI, Junie, Kiro, OpenCode, Pi, VS Code, and Windsurf. <code>agentstack adapters list</code> shows which are installed here. They are not equally verified — five get a nightly check against the real CLI and the rest are best-effort. The <a href="adapters.html">adapter support matrix</a> says which is which, and what each one manages.</p>
 <h2 id="what-if-two-of-my-clis-already-define-the-same-server">What if two of my CLIs already define the same server?<a class="hlink" href="#what-if-two-of-my-clis-already-define-the-same-server" aria-label="Link to this section">#</a></h2>
 <p><code>agentstack init</code> imports both into one manifest entry. If the two definitions genuinely differ, it keeps the first one imported and says so out loud:</p>
-<pre class="block"><code>⚠ server 'github' is defined differently by 1 other CLI(s) — kept the first
-  definition imported (the others stay in their CLI's own config)</code></pre>
+<pre class="block"><code>⚠ server 'github' is defined differently by 1 other CLI — kept the first
+  definition imported (the other stays in its CLI's own config)</code></pre>
 <p>Nothing is lost — the other definition stays in its own CLI's config until you apply. Review the merged entry, edit it if the wrong one won, then <code>agentstack apply --write</code> makes both CLIs agree. That is how they stop drifting apart.</p>
 <h2 id="do-i-need-docker">Do I need Docker?<a class="hlink" href="#do-i-need-docker" aria-label="Link to this section">#</a></h2>
 <p>No. Docker is only needed for <code>agentstack run --sandbox</code> and <code>--lockdown</code>, the top of the protection ladder. Importing, unifying, applying, naming toolsets, diagnosing, and undoing all work with no container runtime at all. See <a href="choose.html">which mode do I need?</a>.</p>

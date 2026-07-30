@@ -694,8 +694,9 @@ pub(crate) fn install() -> Result<()> {
     for (id, why) in NO_HOOK_SURFACE {
         println!("  {} {id} — {why}", "○".dimmed());
     }
+    let clis = super::count(wrote, "CLI");
     println!(
-        "\n{} guard wired into {wrote} CLI(s). Blocks: destructive commands, reads/writes of \
+        "\n{} guard wired into {clis}. Blocks: destructive commands, reads/writes of \
          [policy.filesystem] deny paths, writes outside the workspace/[guard] allow_roots.\n\
          This is cooperative (accident) protection — for hostile code use `agentstack run --sandbox`.",
         "✓".green().bold()
