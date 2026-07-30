@@ -58,26 +58,20 @@ struct Report {
     /// ran with no project. Exposed in the JSON so consumers don't have to
     /// parse the gateway section's prose.
     trust: Option<&'static str>,
+    /// The project's delivery mode (`static` / `clean-at-rest` / `zero-files`),
+    /// derived by the SAME `mode_from_signals` reading `agentstack status`
+    /// prints — set when a project context is checked, `None` when doctor ran
+    /// with no project. In the JSON so consumers stop inferring the mode from
+    /// section prose (`doctor-mode-v1`).
+    mode: Option<&'static str>,
+    /// Whether this project was ever activated (`locked`, a lockfile exists)
+    /// or not (`never_activated`) — the same fact `status` words as
+    /// "not locked (never activated)". `None` when doctor ran with no project.
+    activation: Option<&'static str>,
     /// Structured `--probe` results. `None` on every other invocation, so the
     /// JSON omits the key entirely: a consumer can tell "not probed" from
     /// "probed, and there was nothing to probe" (`ran: true`, empty list).
     probe: Option<ProbeResults>,
-    /// This project's delivery mode (`static` / `clean-at-rest` /
-    /// `zero-files`) and whether it has ever been activated — the same two
-    /// facts `agentstack status` prints, from the same derivation.
-    ///
-    /// A UI that shows an on-disk path is making a claim only `static` makes
-    /// true: clean-at-rest removes those files between sessions and zero-files
-    /// never writes them, so without this a panel tells the user to go look
-    /// for something that is not there. `None` when doctor ran with no
-    /// project, where there is no mode to report and guessing one would
-    /// mislabel whether the user's files should exist.
-    mode: Option<&'static str>,
-    /// `locked` / `never_activated`. Kept apart from `mode`: "never activated"
-    /// explains an absent lockfile and absent configs whichever mode the
-    /// manifest asks for, and folding the two would report a mode's normal
-    /// state as a fault.
-    activation: Option<&'static str>,
 }
 
 /// The `--probe` outcome as a whole, so the JSON can distinguish a probe that
@@ -107,10 +101,10 @@ impl Report {
             errors: 0,
             warnings: 0,
             advisories: 0,
-            mode: None,
-            activation: None,
             sections: Vec::new(),
             trust: None,
+            mode: None,
+            activation: None,
             probe: None,
         }
     }
@@ -309,7 +303,9 @@ impl Report {
             // status chip (see `state`).
             "advisories": self.advisories,
             "trust": self.trust,
-            // `doctor-mode-v1`. Absent (null) with no project — see the field.
+            // Delivery mode + activation, the same readings `status` prints
+            // (`doctor-mode-v1`) — so a UI never has to reverse them out of
+            // section prose like "Mode zero-files" or "never activated".
             "mode": self.mode,
             "activation": self.activation,
             // Per-server startup results (see `doctor-probe-v1`); null unless
@@ -676,30 +672,14 @@ fn run_checks(
         crate::trust::TrustState::Changed => "drifted",
         crate::trust::TrustState::Untrusted => "untrusted",
     });
-    // `doctor-mode-v1`: the same two facts `agentstack status` prints, from the
-    // same derivation — every signal it needs is already in hand here (the
-    // gateway count just above, the trust state just read, the lockfile, and
-    // the write ledger). Computed rather than re-checked so the two surfaces
-    // cannot drift into disagreeing about what mode a project is in.
-    let locked = crate::lock::Lock::path(&ctx.dir).exists();
-    report.mode = Some(
-        crate::commands::overview::mode_from_signals(
-            crate::commands::overview::has_rendered_artifacts(&ctx, &target_ids),
-            connected > 0,
-            matches!(trust_state, crate::trust::TrustState::Trusted),
-            locked,
-        )
-        .label(),
-    );
-    report.activation = Some(if locked { "locked" } else { "never_activated" });
-
     match trust_state {
         crate::trust::TrustState::Trusted => {
             report.line(Level::Ok, "this project is trusted for auto mode")
         }
         crate::trust::TrustState::Changed => report.line(
             Level::Warn,
-            "trusted, but the manifest or lockfile changed since ↳ review + agentstack trust",
+            "trusted, but the manifest or lockfile changed since it was last reviewed \
+             ↳ agentstack trust",
         ),
         // Untrusted is a choice, not a fault (Ok) — unless a harness actually
         // uses the bridge AND the project declares a runtime surface (inline
@@ -746,6 +726,19 @@ fn run_checks(
         report.mark_irrelevant();
     }
 
+    // Delivery mode + activation, via the SAME derivations `status` uses
+    // (overview::detect_mode / the lockfile's existence) — computed once here
+    // so the Drift section below and the JSON body can't disagree with the
+    // orientation screen about which mode this project is in. Like `status`,
+    // the mode reads over ALL registry ids, not the resolved `[targets]`
+    // subset: a bridge registered in a harness this project doesn't pin still
+    // makes the machine's delivery story zero-files.
+    let all_ids: Vec<String> = ctx.registry.ids().map(str::to_string).collect();
+    let mode = super::overview::detect_mode(&ctx, &all_ids);
+    let locked = crate::lock::Lock::path(&ctx.dir).exists();
+    report.mode = Some(mode.label());
+    report.activation = Some(if locked { "locked" } else { "never_activated" });
+
     report.section("Secrets");
     let refs = manifest.referenced_secrets();
     if refs.is_empty() {
@@ -787,14 +780,25 @@ fn run_checks(
     }
 
     report.section("Drift");
-    if args.skip_drift {
-        // Clean-at-rest deliberately keeps rendered configs off disk, so the
-        // usual "declared servers not on disk → apply --write" comparison would
-        // be a false alarm pointing the user straight back at the render they
-        // opted out of. Suppress the section (hidden unless --all).
+    if args.skip_drift || mode == super::overview::Mode::ZeroFiles {
+        // Both delivery modes that keep rendered configs off disk ON PURPOSE:
+        // the usual "declared servers not on disk → apply --write" comparison
+        // would be a false alarm pointing the user straight back at the render
+        // they opted out of. Zero-files is detected here (the mode is derived,
+        // never flagged), and it also spares the project the machine-wide
+        // global-scope keys other manifests recorded — the old behavior
+        // recommended `apply --write --scope global` to a project whose
+        // truthful story was "served live, nothing to render" (2026-07-30
+        // panel audit). Note ZeroFiles implies nothing rendered: any recorded
+        // render flips the derivation to Static, which still gets the full
+        // comparison. Suppress the section (hidden unless --all).
         report.line(
             Level::Ok,
-            "not rendering configs — clean-at-rest keeps them off disk",
+            if args.skip_drift {
+                "not rendering configs — clean-at-rest keeps them off disk"
+            } else {
+                "not rendering configs — zero-files serves this project live through the gateway"
+            },
         );
         report.mark_irrelevant();
     } else {
@@ -1115,7 +1119,7 @@ fn run_checks(
         if manifest.servers.is_empty() && !any_drift {
             report.mark_irrelevant();
         }
-    } // end else (skip_drift == false)
+    } // end else (drift comparison ran: not skip_drift, not zero-files)
 
     // Instruction fragments: the managed region of each CLAUDE.md / AGENTS.md
     // must match what the manifest would compile at SOME scope the project
@@ -3975,6 +3979,25 @@ mod tests {
         );
         assert_eq!(report.state(), "needs_attention");
         assert_eq!(report.first_fix(), Some("open Codex once"));
+    }
+
+    /// `doctor-mode-v1`: the JSON body carries `mode` and `activation` as
+    /// typed fields — null before a project context is checked, verbatim
+    /// labels once set. The panel used to reverse these out of section prose
+    /// ("Mode zero-files", "not locked (never activated)"), which any
+    /// rewording silently broke.
+    #[test]
+    fn to_json_carries_mode_and_activation() {
+        let mut report = Report::new();
+        let body = report.to_json();
+        assert_eq!(body["mode"], serde_json::Value::Null);
+        assert_eq!(body["activation"], serde_json::Value::Null);
+
+        report.mode = Some("zero-files");
+        report.activation = Some("never_activated");
+        let body = report.to_json();
+        assert_eq!(body["mode"], "zero-files");
+        assert_eq!(body["activation"], "never_activated");
     }
 
     /// N1: Codex is detected by binary-on-PATH and lands in `targets.default`,

@@ -110,14 +110,6 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   name would make it over-promise, and a UI reading `serial_roles` on the
 ///   strength of `workflow-observe-v1` would be sniffing a field — the exact
 ///   thing these names exist to replace.
-/// - `doctor-mode-v1`: `doctor --json` carries top-level `mode` (`static` /
-///   `clean-at-rest` / `zero-files`) and `activation` (`locked` /
-///   `never_activated`) — the two facts `agentstack status` prints, from the
-///   same derivation. Both are null when doctor ran with no project. A UI
-///   needs the name because the absence of the keys is indistinguishable from
-///   "no project" on an older binary, and guessing a mode mislabels whether
-///   the user's files should be on disk at all: every panel surface that names
-///   a rendered path is making a claim only `static` makes true.
 /// - `doctor-advisories-v1`: `doctor --json` carries a top-level `advisories`
 ///   count, and section lines can carry `level: "advisory"` — findings that are
 ///   true and worth stating but are NOT something this project must repair, so
@@ -140,6 +132,22 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   answer, not an error: the CLI refuses to spawn anything for a project that
 ///   is not trusted at its current bytes, and a UI that treats that as a
 ///   failure would push the user to retry instead of to the trust review.
+/// - `doctor-mode-v1`: `doctor --json` carries `mode` (`static` /
+///   `clean-at-rest` / `zero-files`) and `activation` (`locked` /
+///   `never_activated`) — the same derived readings `agentstack status`
+///   prints, as typed fields. Before this a panel needing the delivery mode
+///   had to substring-match section prose ("Mode zero-files", "not locked
+///   (never activated)"), which rewording silently breaks. Both are `null`
+///   when doctor ran with no project (`needs_setup`). A separate name rather
+///   than a wider reading of `status-v1`, because a binary predating the
+///   fields legitimately advertises that contract without them.
+/// - `diff-existence-v1`: each `diff --json` target carries `existed_before` —
+///   whether the config file was on disk when the diff was computed. With
+///   `changed` it splits the two stories a pending render tells: absent file
+///   ("never rendered here") vs a rendered file the manifest moved ahead of.
+///   The UI's stopgap was parsing the unified-diff hunk header (`@@ -0,0`),
+///   which an empty-but-present file already misclassifies. Its own name for
+///   the usual reason: reading the field on an older binary would be sniffing.
 /// - `json-reads-v1`: the four orientation reads that had no machine form now
 ///   accept `--json` and emit an enveloped body — `status`, `search`,
 ///   `adapters list`, and `session list`. Each is the SAME reading the human
@@ -181,6 +189,7 @@ pub const FEATURES: &[&str] = &[
     "doctor-advisories-v1",
     "doctor-mode-v1",
     "doctor-probe-v1",
+    "diff-existence-v1",
     "json-reads-v1",
 ];
 
@@ -244,6 +253,7 @@ mod tests {
             "workflow-serial-roles-v1",
             "doctor-advisories-v1",
             "doctor-mode-v1",
+            "diff-existence-v1",
         ] {
             assert!(
                 features.contains(&shipped),

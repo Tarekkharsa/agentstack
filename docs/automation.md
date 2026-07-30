@@ -76,11 +76,13 @@ named exception noted in its row.
 | `agentstack session list --json` | `json-reads-v1` | `sessions[]` |
 | `agentstack doctor --json` | `status-v1` | `state`, `next_action`, `sections`, `errors`, `warnings`, `trust`, `protection` |
 | `agentstack doctor --json` | `doctor-advisories-v1` | top-level `advisories` count; section lines may carry `level: "advisory"` |
+| `agentstack doctor --json` | `doctor-mode-v1` | top-level `mode` (`static` / `clean-at-rest` / `zero-files`) and `activation` (`locked` / `never_activated`) — the same derived readings `status` prints, so no prose-matching |
 | `agentstack doctor --probe --json` | `doctor-probe-v1` | top-level `probe` object. **This one spawns**: it starts each stdio server, speaks the MCP `initialize` handshake, and stops it again |
 | `agentstack use --list --json` | `profiles-v1` | `path`, `trust`, `profiles[]` with readiness |
 | `agentstack use --list --json` | `sessions-v1` | per-entry `active`, plus the top-level `session` object |
 | `agentstack diff --json` | `diff-v1` | `targets[]`, `drifted`, `kept`, `owner_refreshes`, `scope`, `warnings` |
 | `agentstack diff --json` | `diff-ownership-v1` | per-target `managed`, `hand_edited`, `foreign_untracked` |
+| `agentstack diff --json` | `diff-existence-v1` | per-target `existed_before` — splits "never rendered here / file absent" from "the manifest moved ahead of a rendered file" |
 | `agentstack restore --json` | `restore-last` | `entries` (newest first) and `adapter_backups` |
 | `agentstack workflow list --json` | `workflow-observe-v1` | `workflows[]` with per-entry trust and lock state |
 | `agentstack workflow list --json` | `workflow-serial-roles-v1` | per-entry `serial_roles` |

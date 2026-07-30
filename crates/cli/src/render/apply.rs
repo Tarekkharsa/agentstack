@@ -29,6 +29,12 @@ pub struct TargetPlan {
     pub scope: Scope,
     pub config_path: PathBuf,
     pub existing: String,
+    /// Whether the config file was readable on disk when this plan was
+    /// computed. `existing == ""` alone cannot answer that — an absent file
+    /// and an empty file both read as "": the first means "never rendered
+    /// here", the second "a rendered file the manifest moved ahead of", and
+    /// external UIs need the distinction without parsing diff hunk headers.
+    pub existed_before: bool,
     pub proposed: String,
     /// Names of the servers we rendered into this target.
     pub managed: Vec<String>,
@@ -383,7 +389,12 @@ pub fn plan_target_with_servers(
         .cloned()
         .collect();
 
-    let existing = fs::read_to_string(&config_path).unwrap_or_default();
+    // A failed read (almost always "no such file") and an empty file must stay
+    // distinguishable — `existed_before` carries that bit to diff/doctor.
+    let (existing, existed_before) = match fs::read_to_string(&config_path) {
+        Ok(content) => (content, true),
+        Err(_) => (String::new(), false),
+    };
 
     let mut proposed = match format {
         Format::Json => {
@@ -415,6 +426,7 @@ pub fn plan_target_with_servers(
         scope,
         config_path,
         existing,
+        existed_before,
         proposed,
         managed,
         removed,
