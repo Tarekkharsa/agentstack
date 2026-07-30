@@ -350,9 +350,9 @@ trust it with `agentstack trust` (or the UI trust review), then retry</code></pr
 project was trusted — review with `agentstack trust` (or the UI trust review),
 then retry</code></pre>
 <p>Trust is bound to content. A <code>git pull</code>, or your own edit to the manifest or lockfile, invalidates the old approval — that re-gate is the feature. Review what changed, then re-trust.</p>
-<p><strong><code>trusted, but the manifest or lockfile changed since ↳ review + agentstack trust</code></strong></p>
+<p><strong><code>trusted, but the manifest or lockfile changed since it was last reviewed ↳ agentstack trust</code></strong></p>
 <p>The <code>doctor</code> form of the same state. <code>agentstack status</code> calls it <code>trust stale (content changed)</code>.</p>
-<p><strong><code>not trusted — 1 CLI(s) use the gateway, but this project's 1 server(s) are not proxied ↳ agentstack trust &lt;path&gt;</code></strong></p>
+<p><strong><code>not trusted — 1 CLI uses the gateway, but this project's 1 server is not proxied ↳ agentstack trust &lt;path&gt;</code></strong></p>
 <p>A harness is wired to the gateway, this project declares servers, and none of them reach the agent — every session here silently gets control-plane tools only.</p>
 <p><strong><code>not trusted for auto mode — untrusted repos get control-plane tools only ↳ agentstack trust</code></strong></p>
 <p>The same fact when nothing is wired up yet. Stated as <code>ok</code>, because staying untrusted is a legitimate choice.</p>
