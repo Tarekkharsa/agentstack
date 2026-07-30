@@ -548,8 +548,24 @@ fn run_checks(
                         ),
                     }
                 } else if desc.config_present() {
+                    // Advisory, not Warn, for the same reason the branch below
+                    // is Info: not having a CLI installed is a fact, not a
+                    // fault. A config file outliving its editor does not change
+                    // that — an uninstall leaves the directory behind, so this
+                    // fires on a machine where nothing is wrong and nothing can
+                    // be repaired. As a warning it never cleared, which put a
+                    // healthy project permanently at "needs attention" over
+                    // somebody else's leftovers, and made the one state the
+                    // user is meant to act on mean less every time they saw it.
+                    //
+                    // It stays louder than Info because there IS something
+                    // here: we would render for a tool that cannot launch, and
+                    // the remedy (install it, or drop it from
+                    // `[targets].default`) is worth stating. That is precisely
+                    // what Advisory is for — counted in its own total, never
+                    // the "start with" next action, and `state()` stays ready.
                     report.line(
-                        Level::Warn,
+                        Level::Advisory,
                         format!("{:<14} config present but binary not on PATH", desc.display),
                     );
                 } else {
