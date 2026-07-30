@@ -708,11 +708,20 @@ fn run_checks(
         crate::trust::TrustState::Untrusted => {
             let runtime = crate::resolve::runtime_server_names(manifest, None);
             if connected > 0 && !runtime.is_empty() {
+                let clis = if connected == 1 {
+                    "1 CLI uses".to_string()
+                } else {
+                    format!("{connected} CLIs use")
+                };
+                let servers = if runtime.len() == 1 {
+                    "1 server is".to_string()
+                } else {
+                    format!("{} servers are", runtime.len())
+                };
                 report.line(
                     Level::Warn,
                     format!(
-                        "not trusted — {connected} CLI(s) use the gateway, but this project's {} server(s) are not proxied ↳ agentstack trust {}",
-                        runtime.len(),
+                        "not trusted — {clis} the gateway, but this project's {servers} not proxied ↳ agentstack trust {}",
                         base.display()
                     ),
                 );

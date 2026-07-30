@@ -280,7 +280,7 @@ what changed, then re-trust.
 The `doctor` form of the same state. `agentstack status` calls it
 `trust stale (content changed)`.
 
-**`not trusted — 1 CLI(s) use the gateway, but this project's 1 server(s) are not proxied ↳ agentstack trust <path>`**
+**`not trusted — 1 CLI uses the gateway, but this project's 1 server is not proxied ↳ agentstack trust <path>`**
 
 A harness is wired to the gateway, this project declares servers, and none of
 them reach the agent — every session here silently gets control-plane tools
