@@ -84,10 +84,13 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
 /// telling the user so at the moment of mutation is the cheapest trust there is.
 fn restart_hint(outcome: &Outcome) {
     if outcome.written_count > 0 {
-        crate::outln!(
-            "{} Restart or reopen your agent CLI(s) so they pick up the new config.",
-            "→".cyan()
-        );
+        // written_count counts touched targets, i.e. CLIs whose config changed.
+        let advice = if outcome.written_count == 1 {
+            "Restart or reopen your agent CLI so it picks up the new config."
+        } else {
+            "Restart or reopen your agent CLIs so they pick up the new config."
+        };
+        crate::outln!("{} {advice}", "→".cyan());
         // Name the exact command, not the bare verb: `agentstack restore` alone
         // lists the ledger, so a user following this line got a list to read
         // rather than the undo they were promised.
@@ -228,8 +231,8 @@ fn render(
     // it resolved to and how to pin it — the fan-out should never be a surprise.
     if !quiet && args.targets.is_empty() && manifest.targets.default.is_empty() {
         crate::outln!(
-            "Targets: {} detected CLI(s) — no [targets] in the manifest; pin the list with `agentstack init` or a [targets] block",
-            target_ids.len()
+            "Targets: {} — no [targets] in the manifest; pin the list with `agentstack init` or a [targets] block",
+            super::count(target_ids.len(), "detected CLI")
         );
     }
     // The effective (machine ∩ project) policy artifact, compiled once for
@@ -461,10 +464,18 @@ fn render(
                             plan.config_path.display()
                         );
                     } else {
-                        crate::outln!("  {} wrote {} server(s)", "✓".green(), plan.managed.len());
+                        crate::outln!(
+                            "  {} wrote {}",
+                            "✓".green(),
+                            super::count(plan.managed.len(), "server")
+                        );
                     }
                 } else {
-                    crate::outln!("  {} {} server(s) to apply", "→".cyan(), plan.managed.len());
+                    crate::outln!(
+                        "  {} {} to apply",
+                        "→".cyan(),
+                        super::count(plan.managed.len(), "server")
+                    );
                 }
             } else {
                 // Even with no file change, keep state in sync with reality.
@@ -913,12 +924,13 @@ fn render(
             // the changed count, so a clean re-apply said "Applied to 0
             // target(s)" directly under four "✓ up to date" lines.
             let covered = in_scope_targets.len().max(written_count);
+            let targets = super::count(covered, "target");
             if written_count == 0 {
-                crate::outln!("{covered} target(s) already in sync — nothing to change.");
+                crate::outln!("{targets} already in sync — nothing to change.");
             } else {
                 // The undo pointer belongs to `restart_hint`, which already
                 // prints it on the standalone path — don't print a second one.
-                crate::outln!("{covered} target(s) in sync — wrote {written_count}.");
+                crate::outln!("{targets} in sync — wrote {written_count}.");
             }
         } else {
             // Every not-fully-written target is blocked, failed, or both;

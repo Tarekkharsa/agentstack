@@ -26,7 +26,7 @@ The most common cause is not an error at all: **a harness reads its config at
 startup**. After any write, `apply` says so itself.
 
 ```text
-→ Restart or reopen your agent CLI(s) so they pick up the new config.
+→ Restart or reopen your agent CLIs so they pick up the new config.
   undo: agentstack restore --last --write
 ```
 
@@ -63,7 +63,7 @@ ones it did not find so a machine with 5 of 13 installed is not greeted by 8
 warnings. If you *do* use that CLI, it is installed somewhere agentstack does
 not look — check that its config lives at the standard path.
 
-**`1 target(s) in sync — wrote 1.` but the CLI still shows nothing**
+**`1 target in sync — wrote 1.` but the CLI still shows nothing**
 
 Check the scope. Project scope writes a repo-local file (`.mcp.json`); global
 scope writes the CLI's user-level config. A server rendered into the repo is
@@ -515,7 +515,7 @@ the exact name
 The toolset name does not exist. `agentstack use --list` prints the declared
 ones with a readiness flag for each.
 
-**`⚠ server 'github' is defined differently by 1 other CLI(s) — kept the first definition imported (the others stay in their CLI's own config)`**
+**`⚠ server 'github' is defined differently by 1 other CLI — kept the first definition imported (the other stays in its CLI's own config)`**
 
 From `agentstack init`. Two CLIs disagreed about the same server name, so the
 import kept the first one it read. Nothing is lost — the other definition is

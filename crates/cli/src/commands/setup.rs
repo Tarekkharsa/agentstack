@@ -1146,7 +1146,7 @@ fn render_change_summary(
     // Harnesses read config at startup, so an open session won't see the writes
     // — but only say so when a CLI config actually changed this run (P30).
     if cli_config_changed {
-        out.push_str("\n  Restart your agent CLI(s) so they pick up the new config.\n");
+        out.push_str("\n  Restart your agent CLIs so they pick up the new config.\n");
     }
     // P29.1: the closing doorway is the summary's FINAL line — it hands the user
     // to the walkthrough exactly when curiosity peaks, or back to bare
@@ -1492,7 +1492,7 @@ mod tests {
         assert!(out.contains("agentstack doctor"));
         assert!(out.contains("agentstack secret rm API_TOKEN"));
         // A CLI config changed → the restart advice is present.
-        assert!(out.contains("Restart your agent CLI(s)"));
+        assert!(out.contains("Restart your agent CLIs"));
         // guard_wired → the guard carries its own undo line (its writes are
         // outside the apply history `restore` reverses).
         assert!(out.contains("agentstack guard uninstall"));
@@ -1519,12 +1519,12 @@ mod tests {
         let out = render_change_summary(&files, &[], &[], false, &[], false);
         assert!(out.contains("manifest · import"));
         assert!(
-            !out.contains("Restart your agent CLI(s)"),
+            !out.contains("Restart your agent CLIs"),
             "an import-only run must not advise a restart:\n{out}"
         );
         // But it is still present when a CLI config did change.
         let out_changed = render_change_summary(&files, &[], &[], true, &[], false);
-        assert!(out_changed.contains("Restart your agent CLI(s)"));
+        assert!(out_changed.contains("Restart your agent CLIs"));
     }
 
     // P30: the classifier separates agentstack's own bookkeeping (manifest,
