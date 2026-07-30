@@ -1587,6 +1587,7 @@ you need the exact verb, flag, or subcommand.
 - **`use-profile`** _(hidden)_ — Activate an existing toolset (panel action; digest-bound) — flags `--profile/--preview/--yes/--consented/--allow-unresolved`
 - **`library-index`** _(hidden)_ — The central-library catalog (skills + servers) for the panel browser
 - **`remove-from-library`** _(hidden)_ — Remove a skill or server from the central library (panel action; digest-bound). Moves it to the library trash — recoverable with `agentstack lib trash --restore <id> --write` — flags `--kind/--name/--preview/--yes/--consented/--allow-unresolved`
+- **`remove-capability`** _(hidden)_ — Remove a skill or server from this project's manifest (panel action; digest-bound), then re-lock and re-render — flags `--kind/--name/--preview/--yes/--consented/--allow-unresolved`
 <!-- agentstack:end -->
 
 ## Everything shipped so far

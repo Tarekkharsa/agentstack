@@ -87,6 +87,7 @@ named exception noted in its row.
 | `agentstack workflow runs --json` | `workflow-observe-v1` | `runs[]` from the machine-global runs directory |
 | `agentstack init --plan` | `init-plan` | the detection plan, with `plan_digest` |
 | `agentstack trust --preview` | `trust-preview` | the full reviewed surface, with `surface_digest` |
+| `agentstack trust --preview` | `trust-server-blockers-v1` | known server/executable blockers, each with a `fix` of `agentstack lock` or `edit-manifest` |
 | `agentstack library-index` | `profiles-edit-v1` | the central-library catalog (skills + servers) |
 
 ## Consent-bound actions
@@ -104,6 +105,7 @@ the digest back to apply.
 | `agentstack use-profile` | `profiles-edit-v1` | re-locks and re-renders |
 | `agentstack create-profile` | `toolset-create-v2` | writes the manifest entry and re-locks, and renders **nothing** — naming a toolset is not activating it |
 | `agentstack remove-from-library` | `library-remove-v1` | machine-wide, not project; recoverable from `lib/.trash` |
+| `agentstack remove-capability` | `manifest-remove-v1` | removes a project definition and memberships, then re-locks and re-renders; library untouched |
 | `agentstack restore --last --write` | `restore-last` | undoes the newest recorded write |
 
 ## Payload shapes

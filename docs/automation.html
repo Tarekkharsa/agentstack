@@ -306,6 +306,7 @@ $ echo $?
 <tr><td><code>agentstack workflow runs --json</code></td><td><code>workflow-observe-v1</code></td><td><code>runs[]</code> from the machine-global runs directory</td></tr>
 <tr><td><code>agentstack init --plan</code></td><td><code>init-plan</code></td><td>the detection plan, with <code>plan_digest</code></td></tr>
 <tr><td><code>agentstack trust --preview</code></td><td><code>trust-preview</code></td><td>the full reviewed surface, with <code>surface_digest</code></td></tr>
+<tr><td><code>agentstack trust --preview</code></td><td><code>trust-server-blockers-v1</code></td><td>known server/executable blockers, each with a <code>fix</code> of <code>agentstack lock</code> or <code>edit-manifest</code></td></tr>
 <tr><td><code>agentstack library-index</code></td><td><code>profiles-edit-v1</code></td><td>the central-library catalog (skills + servers)</td></tr>
 </tbody></table></div>
 <h2 id="consent-bound-actions">Consent-bound actions<a class="hlink" href="#consent-bound-actions" aria-label="Link to this section">#</a></h2>
@@ -319,6 +320,7 @@ $ echo $?
 <tr><td><code>agentstack use-profile</code></td><td><code>profiles-edit-v1</code></td><td>re-locks and re-renders</td></tr>
 <tr><td><code>agentstack create-profile</code></td><td><code>toolset-create-v2</code></td><td>writes the manifest entry and re-locks, and renders <strong>nothing</strong> — naming a toolset is not activating it</td></tr>
 <tr><td><code>agentstack remove-from-library</code></td><td><code>library-remove-v1</code></td><td>machine-wide, not project; recoverable from <code>lib/.trash</code></td></tr>
+<tr><td><code>agentstack remove-capability</code></td><td><code>manifest-remove-v1</code></td><td>removes a project definition and memberships, then re-locks and re-renders; library untouched</td></tr>
 <tr><td><code>agentstack restore --last --write</code></td><td><code>restore-last</code></td><td>undoes the newest recorded write</td></tr>
 </tbody></table></div>
 <h2 id="payload-shapes">Payload shapes<a class="hlink" href="#payload-shapes" aria-label="Link to this section">#</a></h2>

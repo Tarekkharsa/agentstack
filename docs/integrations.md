@@ -37,9 +37,10 @@ t3code needs no locally-built AgentStack behind it:
 | Toolsets — browse, create, add, activate | `profiles-v1`, `profiles-edit-v1`, `toolset-create-v2` | yes |
 | Toolsets — edit membership, rename, delete | `profiles-edit-batch-v1`, `toolset-rename-v1`, `toolset-delete-v1` | yes |
 | Use temporarily | `sessions-v1` | yes |
-| Review this project | `trust-preview`, `trust-consent` | yes |
+| Review this project | `trust-preview`, `trust-server-blockers-v1`, `trust-consent` | yes |
 | Drift review | `diff-v1`, `diff-ownership-v1` | yes |
 | Library remove | `library-remove-v1` | yes |
+| Project server/skill remove | `manifest-remove-v1` | yes |
 | Workflow monitor (read-only) | `workflow-observe-v1` | yes |
 | Serial-role scheduling warning | `workflow-serial-roles-v1` | yes |
 | Startup test — actually start the servers | `doctor-probe-v1` | yes |
