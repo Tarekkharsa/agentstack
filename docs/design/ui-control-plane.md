@@ -154,8 +154,11 @@ Every UI-facing read response carries (implemented — `crates/cli/src/ui_contra
   "schema_version": 1,
   "features": ["init-plan", "apply-setup", "trust-preview", "trust-consent",
                "status-v1", "profiles-v1", "diff-v1", "restore-last",
-               "sessions-v1", "profiles-edit-v1", "workflow-observe-v1",
-               "workflow-serial-roles-v1"]
+               "sessions-v1", "profiles-edit-v1", "diff-ownership-v1",
+               "toolset-create-v2", "profiles-edit-batch-v1",
+               "toolset-rename-v1", "toolset-delete-v1", "library-remove-v1",
+               "workflow-observe-v1", "workflow-serial-roles-v1",
+               "doctor-advisories-v1", "doctor-probe-v1", "json-reads-v1"]
 }
 ```
 
@@ -398,13 +401,26 @@ so the bridge is **not** being built against the current surface.
 
 ### Deferred
 
-- Profile authoring.
-- Workflow authoring and supervision.
+- Workflow authoring and supervision. Read-only observation ships
+  (`workflow-observe-v1`, plus the `workflow-serial-roles-v1` scheduling
+  warning); authoring a `[workflows.*]` entry and running or resuming one from
+  the panel does not.
 - Generic policy editing.
 - Secret-value entry in the browser.
 - Organization administration.
 
 These require evidence from the first two slices and their own narrow designs.
+
+Profile authoring is no longer deferred — it shipped as a set of separately
+negotiated, digest-bound edits rather than a general manifest editor: create
+(`toolset-create-v2`), batched membership changes including removal
+(`profiles-edit-batch-v1`), rename (`toolset-rename-v1`), and delete
+(`toolset-delete-v1`). Each previews, carries a `consent_digest` the apply must
+echo, and re-locks; the CLI re-validates and can still refuse — deleting the
+last toolset is refused because it would widen the reachable server set — and
+the panel shows that refusal rather than paraphrasing it. What stays deferred
+is authoring the underlying capability definitions: a panel can select and
+group servers and skills, not define a new one.
 
 ## Acceptance criteria
 

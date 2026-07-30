@@ -271,12 +271,16 @@
 <tr><td>Status — one state, one next action</td><td><code>status-v1</code>, <code>doctor-advisories-v1</code></td><td>yes</td></tr>
 <tr><td>Undo — revert this project's last write</td><td><code>restore-last</code></td><td>yes</td></tr>
 <tr><td>Toolsets — browse, create, add, activate</td><td><code>profiles-v1</code>, <code>profiles-edit-v1</code>, <code>toolset-create-v2</code></td><td>yes</td></tr>
+<tr><td>Toolsets — edit membership, rename, delete</td><td><code>profiles-edit-batch-v1</code>, <code>toolset-rename-v1</code>, <code>toolset-delete-v1</code></td><td>yes</td></tr>
 <tr><td>Use temporarily</td><td><code>sessions-v1</code></td><td>yes</td></tr>
 <tr><td>Review this project</td><td><code>trust-preview</code>, <code>trust-consent</code></td><td>yes</td></tr>
 <tr><td>Drift review</td><td><code>diff-v1</code>, <code>diff-ownership-v1</code></td><td>yes</td></tr>
 <tr><td>Library remove</td><td><code>library-remove-v1</code></td><td>yes</td></tr>
 <tr><td>Workflow monitor (read-only)</td><td><code>workflow-observe-v1</code></td><td>yes</td></tr>
+<tr><td>Serial-role scheduling warning</td><td><code>workflow-serial-roles-v1</code></td><td>yes</td></tr>
+<tr><td>Startup test — actually start the servers</td><td><code>doctor-probe-v1</code></td><td>yes</td></tr>
 </tbody></table></div>
+<p>Two names in <code>FEATURES</code> are deliberately absent from this table. <code>json-reads-v1</code> names the <code>--json</code> form of <code>status</code>, <code>search</code>, <code>adapters list</code> and <code>session list</code> — an integrator contract for callers that scrape those screens, which the panel does not use because it reads the richer payloads directly. <code>profiles-edit-v1</code> covers the digest-bound add verbs, listed above with the toolset rows.</p>
 <p>Check any build yourself — the envelope is part of the read:</p>
 <pre class="block"><code>agentstack doctor --json | jq '{schema_version, features}'</code></pre>
 <p>A panel feature whose contract is absent disables that action with upgrade guidance; it never guesses or degrades silently.</p>

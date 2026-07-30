@@ -36,6 +36,25 @@ All three checks must pass before a PR is ready. The Docker sidecar tests
 (`crates/egress/tests/sidecar_image.rs`) are `#[ignore]`d locally; CI's
 sandbox job runs them with `--include-ignored`.
 
+### T3 Code integration smoke
+
+Changes to the T3 control-plane contracts can exercise the real bridge and all
+four browser regressions (setup posture, CLI edit refusals, server startup
+probe, and serial workflow roles) against a sibling T3 checkout:
+
+```bash
+cargo build --release
+npm i playwright@1.54.0 --no-save --no-package-lock
+npx playwright@1.54.0 install chromium
+T3CODE_REPO=/path/to/t3code node tools/t3-integration-smoke.mjs
+```
+
+The runner uses the release AgentStack binary for T3's bridge E2E suite, then
+starts T3 with isolated `HOME`, `AGENTSTACK_HOME`, and T3 data. Its deterministic
+CLI fixture advertises and withholds individual feature contracts so the real
+browser verifies both the intended UI and fail-closed behavior. It stops only
+the exact process group it started and removes its temporary state.
+
 ## Ground rules (not preferences)
 
 These are security requirements. PRs that relax them will be declined even

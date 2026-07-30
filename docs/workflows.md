@@ -17,10 +17,12 @@ workflow, run it end to end with `agentstack workflow run`, render its
 evidence tree with `agentstack workflow report`, and resume an interrupted
 run with `--resume` (replay from the recorded journal — byte-identical
 script and args, or it refuses). Every agent step runs as a governed
-[locked run](reference.html). The interpreter boundary passed its
-independent security review on 2026-07-23; what that settled is the
-*posture*, not the enforcement — a host-tier step is still cooperative-guard
-only, exactly as *Honest limits* below describes.
+[locked run](reference.html). The interpreter boundary was independently
+security-reviewed on 2026-07-23 and judged acceptable for this experimental
+stage; findings that must close before workflows leave experimental are
+retained in `TODO.md`. What that review settled is the *posture*, not the
+enforcement — a host-tier step is still cooperative-guard only, exactly as
+*Honest limits* below describes.
 
 ## Why a workflow needs governing
 
@@ -167,10 +169,14 @@ The full technical contract and security rationale live in the
 [workflows capability design doc](design/workflows-capability.md). The
 manifest kind, pinning, trust review, the engine, `workflow run` /
 `workflow report`, negotiated ceilings, and journal-replay resume all ship,
-and the interpreter boundary has passed its independent security review.
-What remains before workflows leave experimental is repeated-use evidence —
-running real workflows on separate occasions and confirming each is easier
-to repeat than hand-rolled orchestration (`TODO.md`).
+and the interpreter boundary has been independently security-reviewed and
+judged acceptable while experimental. What remains before workflows leave
+experimental is twofold: the review findings still open in `TODO.md` (the
+watchdog's no-I/O exit path, interpreter memory bounds, re-entrancy, a total
+instruction budget for native built-ins, cross-host resume determinism, and
+the crate boundary), and repeated-use evidence — running real workflows on
+separate occasions and confirming each is easier to repeat than hand-rolled
+orchestration.
 
 Scaling work — how the drive loop behaves at width, and what it costs — is
 tracked separately in the

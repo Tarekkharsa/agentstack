@@ -35,11 +35,21 @@ t3code needs no locally-built AgentStack behind it:
 | Status — one state, one next action | `status-v1`, `doctor-advisories-v1` | yes |
 | Undo — revert this project's last write | `restore-last` | yes |
 | Toolsets — browse, create, add, activate | `profiles-v1`, `profiles-edit-v1`, `toolset-create-v2` | yes |
+| Toolsets — edit membership, rename, delete | `profiles-edit-batch-v1`, `toolset-rename-v1`, `toolset-delete-v1` | yes |
 | Use temporarily | `sessions-v1` | yes |
 | Review this project | `trust-preview`, `trust-consent` | yes |
 | Drift review | `diff-v1`, `diff-ownership-v1` | yes |
 | Library remove | `library-remove-v1` | yes |
 | Workflow monitor (read-only) | `workflow-observe-v1` | yes |
+| Serial-role scheduling warning | `workflow-serial-roles-v1` | yes |
+| Startup test — actually start the servers | `doctor-probe-v1` | yes |
+
+Two names in `FEATURES` are deliberately absent from this table.
+`json-reads-v1` names the `--json` form of `status`, `search`, `adapters list`
+and `session list` — an integrator contract for callers that scrape those
+screens, which the panel does not use because it reads the richer payloads
+directly. `profiles-edit-v1` covers the digest-bound add verbs, listed above
+with the toolset rows.
 
 Check any build yourself — the envelope is part of the read:
 
