@@ -280,7 +280,7 @@
 <tr><td>Serial-role scheduling warning</td><td><code>workflow-serial-roles-v1</code></td><td>yes</td></tr>
 <tr><td>Startup test — actually start the servers</td><td><code>doctor-probe-v1</code></td><td>yes</td></tr>
 </tbody></table></div>
-<p>Two names in <code>FEATURES</code> are deliberately absent from this table. <code>json-reads-v1</code> names the <code>--json</code> form of <code>status</code>, <code>search</code>, <code>adapters list</code> and <code>session list</code> — an integrator contract for callers that scrape those screens, which the panel does not use because it reads the richer payloads directly. <code>profiles-edit-v1</code> covers the digest-bound add verbs, listed above with the toolset rows.</p>
+<p>One name in <code>FEATURES</code> is deliberately absent from this table. <code>json-reads-v1</code> names the <code>--json</code> form of <code>status</code>, <code>search</code>, <code>adapters list</code> and <code>session list</code> — an integrator contract for callers that scrape those screens, which the panel does not use because it reads the richer payloads directly. Every other name appears above; <code>profiles-edit-v1</code> covers the digest-bound add verbs and is listed with the toolset rows.</p>
 <p>Check any build yourself — the envelope is part of the read:</p>
 <pre class="block"><code>agentstack doctor --json | jq '{schema_version, features}'</code></pre>
 <p>A panel feature whose contract is absent disables that action with upgrade guidance; it never guesses or degrades silently.</p>

@@ -44,12 +44,12 @@ t3code needs no locally-built AgentStack behind it:
 | Serial-role scheduling warning | `workflow-serial-roles-v1` | yes |
 | Startup test — actually start the servers | `doctor-probe-v1` | yes |
 
-Two names in `FEATURES` are deliberately absent from this table.
+One name in `FEATURES` is deliberately absent from this table.
 `json-reads-v1` names the `--json` form of `status`, `search`, `adapters list`
 and `session list` — an integrator contract for callers that scrape those
 screens, which the panel does not use because it reads the richer payloads
-directly. `profiles-edit-v1` covers the digest-bound add verbs, listed above
-with the toolset rows.
+directly. Every other name appears above; `profiles-edit-v1` covers the
+digest-bound add verbs and is listed with the toolset rows.
 
 Check any build yourself — the envelope is part of the read:
 
