@@ -405,13 +405,16 @@ WIZARD_REPLAY = (
 if __name__ == "__main__":
     docs = Path(__file__).resolve().parent.parent / "docs"
     # Only the SVGs still embedded somewhere are rendered: demos/first-value.svg
-    # (README, landing hero, start, examples), firstrun.svg (design docs,
-    # examples/sandbox) and trust-gate.svg. The other scene specs above are kept
-    # as source material but not written out — the old landing/docs pages that
-    # embedded them were replaced by the design-system site (docs/theme/).
+    # (README, landing hero, start, examples) and trust-gate.svg. The other
+    # scene specs above are kept as source material but not written out — the
+    # old landing/docs pages that embedded them were replaced by the
+    # design-system site (docs/theme/). FIRSTRUN is likewise source-only: its
+    # docs/firstrun.svg output ended up embedded nowhere (docs/examples.html
+    # replays the sandbox first run with its own simulated terminal) and had
+    # been hand-patched after generation (65c6138), so the file was deleted
+    # rather than left to drift.
     for name, (title, rows) in {
         "demos/first-value": FIRST_VALUE,
-        "firstrun": FIRSTRUN,
         "trust-gate": TRUST_GATE,
     }.items():
         render(title, rows, docs / f"{name}.svg")

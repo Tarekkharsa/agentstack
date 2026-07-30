@@ -60,9 +60,10 @@ vhs demo-firstrun.tape
 ```
 
 The GIF lands at `../../docs/firstrun.gif` — nothing embeds it, so review its
-size before committing one. The replay actually shown on the site
-(`docs/firstrun.svg`) is a condensed transcript maintained in
-`tools/make-term-svgs.py`; regenerate it with `python3 tools/make-term-svgs.py`.
+size before committing one. The replay actually shown on the site is the
+simulated terminal in `docs/examples.html` ("sandbox · first run"); the old
+condensed SVG replay was deleted, though its scene spec survives as source
+material in `tools/make-term-svgs.py` (FIRSTRUN).
 For an asciinema workflow, use the commands in the script header.
 
 ## Central library demo
