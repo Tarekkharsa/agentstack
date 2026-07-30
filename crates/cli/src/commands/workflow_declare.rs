@@ -86,9 +86,15 @@ pub fn run(manifest_dir: Option<&Path>, args: &WorkflowDeclareArgs) -> Result<()
         .filter(|r| !manifest.profiles.contains_key(*r))
         .collect();
     if !unknown.is_empty() {
+        let role_noun = if unknown.len() == 1 { "role" } else { "roles" };
+        let toolset_noun = if unknown.len() == 1 {
+            "toolset"
+        } else {
+            "toolsets"
+        };
         bail!(
-            "refusing to declare: no [profiles.*] table for role(s) {} — a workflow requests \
-             authority, it never creates it. Define the toolset(s) first, e.g. \
+            "refusing to declare: no [profiles.*] table for {role_noun} {} — a workflow requests \
+             authority, it never creates it. Define the {toolset_noun} first, e.g. \
              `agentstack toolset create {} --server <name>`",
             unknown
                 .iter()
@@ -165,8 +171,8 @@ pub fn run(manifest_dir: Option<&Path>, args: &WorkflowDeclareArgs) -> Result<()
             .collect::<Vec<_>>()
             .join("\n  ");
         bail!(
-            "refusing to declare: {} validation error(s):\n  {detail}",
-            errors.len()
+            "refusing to declare: {}:\n  {detail}",
+            super::count(errors.len(), "validation error")
         );
     }
 
@@ -301,7 +307,11 @@ pub fn run(manifest_dir: Option<&Path>, args: &WorkflowDeclareArgs) -> Result<()
 
     match outcome {
         Ok(n) => {
-            println!("\n  {} declared and pinned ({n} file(s))", "✓".green());
+            println!(
+                "\n  {} declared and pinned ({})",
+                "✓".green(),
+                super::count(n, "file")
+            );
             println!(
                 "\n{}\n  {}\n  {}",
                 "Next — review it, then run it:".bold(),
@@ -326,16 +336,17 @@ pub fn run(manifest_dir: Option<&Path>, args: &WorkflowDeclareArgs) -> Result<()
                 crate::history::discard(&recorded);
                 bail!(
                     "declaring workflow '{name}' failed, and every change was rolled back \
-                     ({reverted} file(s) restored) — the project is as it was.\n\nWhat failed: {e:#}"
+                     ({} restored) — the project is as it was.\n\nWhat failed: {e:#}",
+                    super::count(reverted, "file")
                 );
             }
             // A partial rollback is the case the durable entry exists for: say
             // so, and point at the ledger rather than claiming it is undone.
             bail!(
                 "declaring workflow '{name}' failed, and rolling it back was INCOMPLETE \
-                 ({reverted} of {} file(s) restored) — the project is NOT as it was.\n\n\
+                 ({reverted} of {} restored) — the project is NOT as it was.\n\n\
                  Finish the undo with:  agentstack restore --last --write\n\nWhat failed: {e:#}",
-                undo.len()
+                super::count(undo.len(), "file")
             );
         }
     }

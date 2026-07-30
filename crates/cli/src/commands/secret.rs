@@ -132,7 +132,10 @@ fn list(manifest_dir: Option<&Path>) -> Result<()> {
     }
     println!();
     if missing > 0 {
-        println!("{missing} secret(s) unresolved on this machine.");
+        println!(
+            "{} unresolved on this machine.",
+            super::count(missing, "secret")
+        );
     } else {
         println!("{} all secrets resolve.", "✓".green());
     }

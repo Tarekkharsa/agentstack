@@ -114,8 +114,8 @@ pub fn normalized_workflows(
         .collect();
     if !workflow_issues.is_empty() {
         anyhow::bail!(
-            "refusing to normalize workflows: {} validation error(s):\n  {}",
-            workflow_issues.len(),
+            "refusing to normalize workflows: {}:\n  {}",
+            crate::commands::count(workflow_issues.len(), "validation error"),
             workflow_issues.join("\n  ")
         );
     }

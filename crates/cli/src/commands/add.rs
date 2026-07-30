@@ -1198,8 +1198,8 @@ pub(crate) fn select_skills(
     }
     if !crate::util::confirm::is_interactive() {
         anyhow::bail!(
-            "{} skill(s) in this source — pass --skill <name> to choose: {}",
-            discovered.len(),
+            "{} in this source — pass --skill <name> to choose: {}",
+            super::count(discovered.len(), "skill"),
             names_list()
         );
     }
@@ -1320,7 +1320,7 @@ fn print_selection(
     for (s, p) in selected.iter().zip(planned) {
         let status = match p.scan_warnings.len() {
             0 => "scan: clean".to_string(),
-            n => format!("scan: {n} warning(s)"),
+            n => format!("scan: {}", super::count(n, "warning")),
         };
         println!(
             "  {} {:<20} {:<24} {:<18} {}",
@@ -1458,9 +1458,9 @@ fn preview_and_commit(
         )?;
         for (id, dir) in &outcome.written {
             println!(
-                "  {} {id}: {} skill(s) → {}",
+                "  {} {id}: {} → {}",
                 "✓".green(),
-                new_skills.len(),
+                super::count(new_skills.len(), "skill"),
                 dir.display()
             );
         }
@@ -1488,9 +1488,9 @@ fn preview_and_commit(
         }
         if !outcome.failed.is_empty() {
             anyhow::bail!(
-                "{} target(s) failed to materialize (the manifest and lock writes stand — \
+                "{} failed to materialize (the manifest and lock writes stand — \
                  retry with `agentstack use{} --write`)",
-                outcome.failed.len(),
+                super::count(outcome.failed.len(), "target"),
                 profile.map(|p| format!(" {p}")).unwrap_or_default()
             );
         }
@@ -1507,9 +1507,9 @@ fn print_activation_footer(act: &ActivationCtx, profile: Option<&str>) {
     let profile_word = profile.map(|p| format!(" {p}")).unwrap_or_default();
     match act.mode {
         Mode::Static if !act.ambiguous => println!(
-            "{} will materialize into {} target(s)",
+            "{} will materialize into {}",
             "→".cyan(),
-            act.target_ids.len()
+            super::count(act.target_ids.len(), "target")
         ),
         Mode::Static => println!(
             "{} several toolsets declared — activate with `agentstack use{profile_word} --write`",

@@ -162,9 +162,9 @@ pub fn run(args: &AdoptArgs, manifest_dir: Option<&Path>) -> Result<()> {
         .context("cannot update the manifest — fix its TOML syntax with `agentstack doctor`, then rerun `agentstack adopt`")?;
 
     println!(
-        "\n{} {} server(s) to adopt into {}",
+        "\n{} {} to adopt into {}",
         "→".cyan(),
-        collected.len(),
+        super::count(collected.len(), "server"),
         ctx.loaded.manifest_path.display()
     );
     print!(
@@ -176,7 +176,12 @@ pub fn run(args: &AdoptArgs, manifest_dir: Option<&Path>) -> Result<()> {
     );
     if !lifted.is_empty() {
         let names: Vec<&str> = lifted.iter().map(|l| l.reference.as_str()).collect();
-        println!("  {} lifted secret(s): {}", "🔐".dimmed(), names.join(", "));
+        println!(
+            "  {} {}: {}",
+            "🔐".dimmed(),
+            super::count(names.len(), "lifted secret"),
+            names.join(", ")
+        );
     }
 
     if args.write {
@@ -188,7 +193,11 @@ pub fn run(args: &AdoptArgs, manifest_dir: Option<&Path>) -> Result<()> {
         }
         crate::util::atomic::write(&ctx.loaded.manifest_path, &new_text)
             .with_context(|| format!("writing {}", ctx.loaded.manifest_path.display()))?;
-        println!("\n{} adopted {} server(s).", "✓".green(), collected.len());
+        println!(
+            "\n{} adopted {}.",
+            "✓".green(),
+            super::count(collected.len(), "server")
+        );
     } else {
         println!(
             "\nDry run. Re-run with {} to update the manifest.",

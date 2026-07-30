@@ -159,9 +159,9 @@ pub fn gate(name: &str, dir: &Path, allow_flagged: bool, warnings: &mut Vec<Stri
             .collect::<Vec<_>>()
             .join("\n");
         anyhow::bail!(
-            "'{name}': {} high-severity content finding(s) — add blocked \
+            "'{name}': {} — add blocked \
              (pass --allow-flagged to add anyway):\n{list}",
-            high.len()
+            crate::commands::count(high.len(), "high-severity content finding")
         );
     }
     for f in &findings {

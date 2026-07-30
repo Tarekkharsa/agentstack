@@ -694,9 +694,9 @@ mod hosted {
         Err(runtime_unavailable(
             "lockdown executor refusing to run",
             format!(
-                "{} selected server(s) could not be served and would escape the \
+                "{} could not be served and would escape the \
                  gateway-only fence: {}",
-                skipped.len(),
+                crate::commands::count(skipped.len(), "selected server"),
                 skipped.join(", ")
             ),
         ))

@@ -70,11 +70,12 @@ pub fn run(args: &SearchArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let hidden = total - shown.len();
 
     if hidden == 0 {
-        println!("{total} result(s) for '{query}':\n");
+        println!("{} for '{query}':\n", super::count(total, "result"));
     } else {
         println!(
-            "{} of {total} result(s) for '{query}', most relevant first:\n",
-            shown.len()
+            "{} of {} for '{query}', most relevant first:\n",
+            shown.len(),
+            super::count(total, "result")
         );
     }
 

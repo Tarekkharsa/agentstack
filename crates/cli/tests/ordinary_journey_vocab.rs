@@ -108,5 +108,5 @@ fn scripted_init_apply_doctor_needs_no_advanced_vocabulary() {
     // doctor closed clean — so the vocabulary claim covers a working flow, not
     // an early exit.
     assert!(proj.join(".agentstack/agentstack.toml").exists());
-    assert!(transcript.contains("0 error(s), 0 warning(s)"));
+    assert!(transcript.contains("0 errors, 0 warnings"));
 }

@@ -209,9 +209,12 @@ pub fn run(args: &OptimizeArgs, manifest_dir: Option<&Path>) -> Result<()> {
         apply_safe(&ctx, &recs)?;
     } else if recs.iter().any(|r| r.safe_auto) {
         println!(
-            "\nRe-run with {} to apply the {} recommendation(s) marked safe.",
+            "\nRe-run with {} to apply the {} marked safe.",
             "--write".bold(),
-            recs.iter().filter(|r| r.safe_auto).count()
+            super::count(
+                recs.iter().filter(|r| r.safe_auto).count(),
+                "recommendation"
+            )
         );
     }
     Ok(())
@@ -269,8 +272,8 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
         "audit log is empty".to_string()
     } else {
         format!(
-            "{} gateway call(s) over {span}d in the audit log",
-            inp.calls.len()
+            "{} over {span}d in the audit log",
+            super::count(inp.calls.len(), "gateway call")
         )
     };
 
@@ -282,15 +285,26 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
         let profiles = in_profiles.get(name.as_str()).cloned().unwrap_or_default();
         let fp = inp.footprints.get(name);
 
+        let activation_gloss = if activations == 1 {
+            "the time"
+        } else {
+            "times"
+        };
         let mut evidence = vec![
-            format!("{calls_n} gateway call(s) for this server ({window_note})"),
-            format!("{activations} activation(s) — times agentstack rendered it into a config (usage.json)"),
+            format!(
+                "{} for this server ({window_note})",
+                super::count(calls_n as usize, "gateway call")
+            ),
+            format!(
+                "{} — {activation_gloss} agentstack rendered it into a config (usage.json)",
+                super::count(activations as usize, "activation")
+            ),
         ];
         if let Some(f) = fp {
             evidence.push(format!(
-                "context cost ~{} per session across {} tool(s) ({}) (footprint.json)",
+                "context cost ~{} per session across {} ({}) (footprint.json)",
                 fmt_tokens(f.est_tokens),
-                f.tools,
+                super::count(f.tools, "tool"),
                 fmt_age(f.measured_at)
             ));
         }
@@ -300,7 +314,15 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
             );
         }
         if !profiles.is_empty() {
-            evidence.push(format!("referenced by toolset(s): {}", profiles.join(", ")));
+            evidence.push(format!(
+                "referenced by {}: {}",
+                if profiles.len() == 1 {
+                    "toolset"
+                } else {
+                    "toolsets"
+                },
+                profiles.join(", ")
+            ));
         }
 
         // Unused server: no gateway calls AND never rendered by agentstack.
@@ -336,8 +358,13 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
                 } else if managed {
                     "manual: it is live in a native config, where the harness calls it directly — the audit log can't see those calls".into()
                 } else {
+                    let (noun, verb, demonstrative) = if profiles.len() == 1 {
+                        ("toolset", "references", "that toolset loads")
+                    } else {
+                        ("toolsets", "reference", "those toolsets load")
+                    };
                     format!(
-                        "manual: toolset(s) {} reference it — removing it changes what those toolsets load",
+                        "manual: {noun} {} {verb} it — removing it changes what {demonstrative}",
                         profiles.join(", ")
                     )
                 },
@@ -382,13 +409,14 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
                 let used: Vec<String> = s.ok_tools.keys().cloned().collect();
                 let mut ev = vec![
                     format!(
-                        "exposes {} tool(s) costing ~{} per session (footprint.json, {})",
-                        f.tools,
+                        "exposes {} costing ~{} per session (footprint.json, {})",
+                        super::count(f.tools, "tool"),
                         fmt_tokens(f.est_tokens),
                         fmt_age(f.measured_at)
                     ),
                     format!(
-                        "only {distinct} distinct tool(s) called successfully over {span}d: {}",
+                        "only {} called successfully over {span}d: {}",
+                        super::count(distinct, "distinct tool"),
                         s.ok_tools
                             .iter()
                             .map(|(t, n)| format!("{t} ×{n}"))
@@ -438,10 +466,16 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
             kind: "denied-calls",
             target: server.clone(),
             impact: "medium",
-            title: format!("'{server}': {} call(s) denied by the tool firewall", s.denied),
+            title: format!(
+                "'{server}': {} denied by the tool firewall",
+                super::count(s.denied as usize, "call")
+            ),
             evidence: vec![
                 format!("denied over {span}d: {}", tools.join("; ")),
-                format!("({} total call(s) to this server in the window)", s.total),
+                format!(
+                    "({} to this server in the window)",
+                    super::count(s.total as usize, "total call")
+                ),
             ],
             action: format!(
                 "review `[policy.tools]` for '{server}' (agentstack report calls for the full log) — loosen the rule if these were legitimate, keep it if not"
@@ -454,17 +488,19 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
     // Error-noisy servers: mostly failing at runtime.
     for (server, s) in &stats {
         if s.total >= 5 && s.errors * 2 >= s.total {
+            let call_noun = if s.total == 1 { "call" } else { "calls" };
             recs.push(Recommendation {
                 kind: "error-noisy",
                 target: server.clone(),
                 impact: "medium",
                 title: format!(
-                    "'{server}': {}/{} call(s) errored — likely misconfigured",
-                    s.errors, s.total
+                    "'{server}': {}/{} {call_noun} errored — likely misconfigured",
+                    s.errors, s.total,
                 ),
                 evidence: vec![format!(
-                    "{} error(s) out of {} call(s) over {span}d (audit log)",
-                    s.errors, s.total
+                    "{} out of {} over {span}d (audit log)",
+                    super::count(s.errors as usize, "error"),
+                    super::count(s.total as usize, "call")
                 )],
                 action: format!(
                     "agentstack explain {server}   # check its secrets, then: agentstack doctor --live"
@@ -520,7 +556,7 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
                 impact: "low",
                 title: format!("skill '{name}' was never materialized and no toolset loads it"),
                 evidence: vec![
-                    format!("0 activation(s) since tracking began (usage.json, {span}d of runtime history)"),
+                    format!("0 activations since tracking began (usage.json, {span}d of runtime history)"),
                     "in no toolset's skill list".into(),
                 ],
                 action: format!("agentstack remove {name} --write   # or keep it in the central library only"),
@@ -538,13 +574,15 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
         .filter(|n| inp.footprints.get(n).is_none())
         .count();
     if unmeasured > 0 && unmeasured * 2 > inp.manifest.servers.len() {
+        let server_total = inp.manifest.servers.len();
+        let verb = if server_total == 1 { "has" } else { "have" };
         recs.push(Recommendation {
             kind: "measure",
             target: "footprints".into(),
             impact: "low",
             title: format!(
-                "{unmeasured}/{} server(s) have no measured context cost",
-                inp.manifest.servers.len()
+                "{unmeasured}/{} {verb} no measured context cost",
+                super::count(server_total, "server")
             ),
             evidence: vec!["cost-based recommendations above are incomplete without it (footprint.json)".into()],
             action: "agentstack report usage --live".into(),
@@ -570,8 +608,8 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
 fn print_report(ctx: &super::Context, recs: &[Recommendation], calls: &[CallRecord], span: u64) {
     println!("{} — {}", "Optimize".bold(), ctx.dir.display());
     println!(
-        "Data: {} gateway call(s) over {span}d · activations since first apply · context costs from `stats --live`\n",
-        calls.len()
+        "Data: {} over {span}d · activations since first apply · context costs from `stats --live`\n",
+        super::count(calls.len(), "gateway call")
     );
     if calls.is_empty() {
         println!(
@@ -610,10 +648,11 @@ fn print_report(ctx: &super::Context, recs: &[Recommendation], calls: &[CallReco
         println!("      {mark} — {}\n", r.safety);
     }
     let safe = recs.iter().filter(|r| r.safe_auto).count();
+    let review = recs.len() - safe;
+    let review_verb = if review == 1 { "needs" } else { "need" };
     println!(
-        "{} recommendation(s): {safe} safe to auto-apply, {} need review.",
-        recs.len(),
-        recs.len() - safe
+        "{}: {safe} safe to auto-apply, {review} {review_verb} review.",
+        super::count(recs.len(), "recommendation")
     );
 }
 
@@ -649,9 +688,9 @@ fn apply_safe(ctx: &super::Context, recs: &[Recommendation]) -> Result<()> {
         crate::util::atomic::write(&ctx.loaded.manifest_path, &text)
             .with_context(|| format!("writing {}", ctx.loaded.manifest_path.display()))?;
         println!(
-            "{} removed {} inert server(s): {}",
+            "{} removed {}: {}",
             "✓".green(),
-            removals.len(),
+            super::count(removals.len(), "inert server"),
             removals.join(", ")
         );
     }

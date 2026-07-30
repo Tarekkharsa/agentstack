@@ -359,9 +359,12 @@ fn finish(
     }
     println!();
     if write {
-        println!("Updated {changed} harness config(s).");
+        println!("Updated {}.", super::count(changed, "harness config"));
     } else if changed > 0 {
-        println!("{changed} harness config(s) would change. Re-run with --write to apply.");
+        println!(
+            "{} would change. Re-run with --write to apply.",
+            super::count(changed, "harness config")
+        );
     } else {
         println!("Nothing to change.");
     }

@@ -425,9 +425,9 @@ fn explain_server(name: &str, ctx: &crate::commands::Context) -> String {
             &mut o,
             "Context cost",
             &format!(
-                "~{} per session across {} tool(s) ({})",
+                "~{} per session across {} ({})",
                 crate::footprint::fmt_tokens(f.est_tokens),
-                f.tools,
+                super::count(f.tools, "tool"),
                 crate::footprint::fmt_age(f.measured_at)
             ),
         ),
@@ -600,7 +600,9 @@ fn explain_server(name: &str, ctx: &crate::commands::Context) -> String {
             .iter()
             .filter(|r| sources.source_of(r).is_some())
             .count();
-        bullet(&mut o, &format!("needs {} secret(s) ({resolved} resolve here) — ${{REF}} in the manifest and lockfile; a static render resolves values into native configs that require them", refs.len()));
+        let verb = if resolved == 1 { "resolves" } else { "resolve" };
+        let pronoun = if refs.len() == 1 { "it" } else { "them" };
+        bullet(&mut o, &format!("needs {} ({resolved} {verb} here) — ${{REF}} in the manifest and lockfile; a static render resolves values into native configs that require {pronoun}", super::count(refs.len(), "secret")));
     }
     if crate::provider::resolve(name)
         .map(|c| c.trust().namespaced)

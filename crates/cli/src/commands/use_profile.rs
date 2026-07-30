@@ -373,10 +373,7 @@ fn print_profile_listing(out: &serde_json::Value) {
         let ready = if p["pinned"].as_bool().unwrap_or(false) {
             "pinned".to_string()
         } else {
-            format!(
-                "{} blocker(s)",
-                p["blockers"].as_array().map_or(0, Vec::len)
-            )
+            super::count(p["blockers"].as_array().map_or(0, Vec::len), "blocker")
         };
         let in_use = if p["active"].as_bool().unwrap_or(false) {
             "  · in use (agentstack session end reverts it)"
@@ -384,9 +381,9 @@ fn print_profile_listing(out: &serde_json::Value) {
             ""
         };
         println!(
-            "  {name}  —  {} skill(s), {} server(s)  [{ready}]{in_use}",
-            p["skills"].as_array().map_or(0, Vec::len),
-            p["servers"].as_array().map_or(0, Vec::len),
+            "  {name}  —  {}, {}  [{ready}]{in_use}",
+            super::count(p["skills"].as_array().map_or(0, Vec::len), "skill"),
+            super::count(p["servers"].as_array().map_or(0, Vec::len), "server"),
         );
     }
 }
@@ -589,10 +586,10 @@ pub fn activate(
     let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets)?;
     let ruleset = crate::render::ruleset_for(manifest)?;
     println!(
-        "Activating toolset '{}' (scope: {scope}) — {} server(s), {} skill(s)",
+        "Activating toolset '{}' (scope: {scope}) — {}, {}",
         label.bold(),
-        server_map.len(),
-        active_skills.len()
+        super::count(server_map.len(), "server"),
+        super::count(active_skills.len(), "skill")
     );
 
     // P19: shadowing an inline skill over a same-named central-library skill is
@@ -730,9 +727,9 @@ pub fn activate(
                     if args.write && blocked {
                         blocked_targets.push(desc.display.clone());
                         let reason = if plan.unresolved.is_empty() {
-                            "secret read failure(s); set them"
+                            "secret read failures; set them"
                         } else {
-                            "unresolved secret(s); set them"
+                            "unresolved secrets; set them"
                         };
                         println!(
                             "  {} not written — {reason} or pass --allow-unresolved",
@@ -763,7 +760,11 @@ pub fn activate(
                             println!("  {} servers → {}", "✓".green(), plan.config_path.display());
                         }
                     } else {
-                        println!("  {} {} server(s) to write", "→".cyan(), plan.managed.len());
+                        println!(
+                            "  {} {} to write",
+                            "→".cyan(),
+                            super::count(plan.managed.len(), "server")
+                        );
                     }
                 } else {
                     // Even with no file change, keep state in sync with
@@ -808,16 +809,16 @@ pub fn activate(
                     crate::usage::bump(&plan.managed_names());
                     wrote_skill_dirs += 1;
                     println!(
-                        "  {} {} skill(s) → {}",
+                        "  {} {} → {}",
                         "✓".green(),
-                        plan.managed_names().len(),
+                        super::count(plan.managed_names().len(), "skill"),
                         skills_dir.display()
                     );
                 } else {
                     println!(
-                        "  {} {} skill(s) to {} into {}",
+                        "  {} {} to {} into {}",
                         "→".cyan(),
-                        plan.active.len(),
+                        super::count(plan.active.len(), "skill"),
                         strategy_word(strategy),
                         skills_dir.display()
                     );
@@ -837,9 +838,9 @@ pub fn activate(
                 "no skills dir at this scope for this CLI"
             };
             println!(
-                "  {} ({reason} — {} skill(s) not materialized)",
+                "  {} ({reason} — {} not materialized)",
                 "·".dimmed(),
-                active_skills.len()
+                super::count(active_skills.len(), "skill")
             );
         }
 
@@ -927,9 +928,10 @@ pub fn activate(
         if blocked_targets.is_empty() {
             if wrote == 0 && wrote_skill_dirs > 0 {
                 println!(
-                    "\n{} activated '{}' — wrote skills to {wrote_skill_dirs} location(s); no server configs changed.",
+                    "\n{} activated '{}' — wrote skills to {}; no server configs changed.",
                     "✓".green(),
-                    label
+                    label,
+                    super::count(wrote_skill_dirs, "location")
                 );
             } else {
                 // Coverage first, changes second — see `covered_targets`. A
@@ -938,15 +940,17 @@ pub fn activate(
                 let covered = covered_targets.len().max(wrote);
                 if wrote == 0 {
                     println!(
-                        "\n{} '{}' already active on {covered} target(s) — nothing to change.",
+                        "\n{} '{}' already active on {} — nothing to change.",
                         "✓".green(),
-                        label
+                        label,
+                        super::count(covered, "target")
                     );
                 } else {
                     println!(
-                        "\n{} activated '{}' on {covered} target(s) — wrote {wrote}.",
+                        "\n{} activated '{}' on {} — wrote {wrote}.",
                         "✓".green(),
-                        label
+                        label,
+                        super::count(covered, "target")
                     );
                 }
             }
@@ -961,11 +965,11 @@ pub fn activate(
             // A blocked target is a failure, not a footnote: report it in the
             // summary and exit nonzero so scripts can't mistake this for done.
             println!(
-                "\n{} activated '{}' on {} target(s) (wrote {wrote}); {} target(s) BLOCKED: {}",
+                "\n{} activated '{}' on {} (wrote {wrote}); {} BLOCKED: {}",
                 "⚠".yellow(),
                 label,
-                covered_targets.len().max(wrote),
-                blocked_targets.len(),
+                super::count(covered_targets.len().max(wrote), "target"),
+                super::count(blocked_targets.len(), "target"),
                 blocked_targets.join(", ")
             );
             let fix = if missing_secrets.is_empty() {
@@ -978,8 +982,8 @@ pub fn activate(
                 format!("fix: {} (or pass --allow-unresolved)", cmds.join(" · "))
             };
             anyhow::bail!(
-                "unresolved secret(s) blocked {} target(s) — {fix}",
-                blocked_targets.len()
+                "unresolved secrets blocked {} — {fix}",
+                super::count(blocked_targets.len(), "target")
             );
         }
     } else {

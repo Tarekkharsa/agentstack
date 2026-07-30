@@ -124,7 +124,7 @@ pub fn run(args: &InstructionsArgs, manifest_dir: Option<&Path>) -> Result<()> {
                     println!("  {} wrote managed region", "✓".green());
                 } else {
                     blocked += 1;
-                    println!("  {} not written — missing fragment source(s)", "✗".red());
+                    println!("  {} not written — missing fragment sources", "✗".red());
                 }
             } else {
                 println!("  {} would update managed region", "→".cyan());
@@ -168,15 +168,19 @@ pub fn run(args: &InstructionsArgs, manifest_dir: Option<&Path>) -> Result<()> {
         if manifest.instructions.values().any(|i| !i.from_user_layer) {
             super::lock::record_instruction_pins(&ctx.dir, manifest, false)?;
         }
-        println!("Updated {changed} instruction file(s).");
+        println!("Updated {}.", super::count(changed, "instruction file"));
     } else {
         println!(
-            "{changed} instruction file(s) would change. Re-run with {} to write.",
+            "{} would change. Re-run with {} to write.",
+            super::count(changed, "instruction file"),
             "--write".bold()
         );
     }
     if blocked > 0 {
-        anyhow::bail!("{blocked} instruction file(s) not written — missing fragment source(s)");
+        anyhow::bail!(
+            "{} not written — missing fragment sources",
+            super::count(blocked, "instruction file")
+        );
     }
     Ok(())
 }

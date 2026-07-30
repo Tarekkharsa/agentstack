@@ -164,7 +164,11 @@ pub fn run(args: &SessionArgs, dir: Option<&Path>) -> Result<()> {
         SessionCmd::End { all } => {
             if *all {
                 let n = crate::session::end_all()?;
-                println!("{} ended {n} session(s) — reverted", "✓".green());
+                println!(
+                    "{} ended {} — reverted",
+                    "✓".green(),
+                    super::count(n, "session")
+                );
             } else {
                 let report = crate::session::end(dir)?;
                 let root = crate::commands::project_base(dir)?;

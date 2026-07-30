@@ -969,13 +969,14 @@ fn grant_gated(base: &Path, yes: bool, consented: Option<&str>, interactive: boo
         {
             "Run `agentstack lock`, review the result, then `agentstack trust` again."
         } else {
-            "Fix or remove the blocked declaration(s) above. Then run `agentstack lock` for \
+            "Fix or remove the blocked declarations above. Then run `agentstack lock` for \
              anything marked unpinned and review again."
         };
         anyhow::bail!(
-            "cannot trust {}: its loadable surface isn't fully pinned — {} item(s) need locking or review:\n{}\n{}",
+            "cannot trust {}: its loadable surface isn't fully pinned — {} {} locking or review:\n{}\n{}",
             base.display(),
-            blockers.len(),
+            super::count(blockers.len(), "item"),
+            if blockers.len() == 1 { "needs" } else { "need" },
             lines.join("\n"),
             next
         );
@@ -1135,7 +1136,10 @@ fn blueprint_review_lines(
                     ));
                 }
                 if nodes.len() > 16 {
-                    out.push(format!("    · … {} more node(s)", nodes.len() - 16));
+                    out.push(format!(
+                        "    · … {}",
+                        super::count(nodes.len() - 16, "more node")
+                    ));
                 }
             }
         }

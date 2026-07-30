@@ -528,12 +528,12 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
     // The run id prints UNSTYLED: it is the `workflow report` entry point and
     // must be copyable/parseable from stderr without escape sequences.
     eprintln!(
-        "{} workflow '{}' admitted: run {}, {} role(s), effective ceilings max_agents={} \
+        "{} workflow '{}' admitted: run {}, {}, effective ceilings max_agents={} \
          max_wall_seconds={}{}, concurrency cap {}",
         "▶".green(),
         wf.name.bold(),
         run_id,
-        wf.roles.len(),
+        super::count(wf.roles.len(), "role"),
         effective_agents,
         effective_wall,
         if narrowed {
@@ -548,10 +548,10 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
     );
     if let Some(journal) = &replay {
         eprintln!(
-            "{} resuming: {} journaled step(s) will replay from verified artifacts — no \
+            "{} resuming: {} will replay from verified artifacts — no \
              journaled step re-executes; the wall clock restarts at the full effective ceiling",
             "↻".cyan(),
-            journal.remaining(),
+            super::count(journal.remaining(), "journaled step"),
         );
     }
 
@@ -2078,12 +2078,13 @@ fn render_workflow_report(run_id: &str) -> Result<String> {
     writeln!(out)?;
 
     if !ev.resumes.is_empty() {
-        writeln!(out, "Resumed {} time(s):", ev.resumes.len())?;
+        writeln!(out, "Resumed {}:", super::count(ev.resumes.len(), "time"))?;
         for (ts, replayed) in &ev.resumes {
             writeln!(
                 out,
-                "  at ts={ts}: {replayed} step(s) replayed from the journal (no journaled \
-                 step re-executed)"
+                "  at ts={ts}: {} replayed from the journal (no journaled \
+                 step re-executed)",
+                super::count(*replayed as usize, "step")
             )?;
         }
         writeln!(out)?;
@@ -2456,8 +2457,11 @@ fn print_explain(v: &serde_json::Value) {
     }
     println!();
     println!(
-        "{} agent() call site(s) in the pinned source.",
-        v["agent_call_sites"]
+        "{} in the pinned source.",
+        super::count(
+            v["agent_call_sites"].as_u64().unwrap_or(0) as usize,
+            "agent() call site"
+        )
     );
     println!(
         "Sites, not calls: one site inside a loop or .map() runs once per item, so the actual\n\
@@ -4171,7 +4175,7 @@ mod tests {
             assert_eq!(outcomes, ["done"], "one terminal, the resumed session's");
 
             let report = render_workflow_report(&id).unwrap();
-            assert!(report.contains("Resumed 1 time(s)"), "{report}");
+            assert!(report.contains("Resumed 1 time:"), "{report}");
             assert!(report.contains("[replayed on resume]"), "{report}");
             assert!(report.contains("[live, resumed session]"), "{report}");
         });

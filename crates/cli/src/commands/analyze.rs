@@ -70,7 +70,10 @@ fn print_recent_calls(calls: &[CallRecord], n: usize) {
     if recent.is_empty() {
         return;
     }
-    println!("\n{}", format!("Last {} call(s)", recent.len()).bold());
+    println!(
+        "\n{}",
+        format!("Last {}", super::count(recent.len(), "call")).bold()
+    );
     for e in recent {
         let age_s = calllog::now_epoch().saturating_sub(e.ts);
         let age = match age_s {

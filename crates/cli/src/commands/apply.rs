@@ -425,9 +425,9 @@ fn render(
                 if will_write && blocked {
                     blocked_targets.insert(desc.display.clone());
                     let reason = if plan.unresolved.is_empty() {
-                        "secret read failure(s); set them"
+                        "secret read failures; set them"
                     } else {
-                        "unresolved secret(s); set them"
+                        "unresolved secrets; set them"
                     };
                     crate::outln!(
                         "  {} not written — {reason} or pass --allow-unresolved",
@@ -530,10 +530,7 @@ fn render(
                     }
                     if will_write && sblocked {
                         blocked_targets.insert(desc.display.clone());
-                        crate::outln!(
-                            "  {} settings not written — unresolved secret(s)",
-                            "✗".red()
-                        );
+                        crate::outln!("  {} settings not written — unresolved secrets", "✗".red());
                     } else if will_write {
                         let capture = crate::history::capture(
                             &sp.settings_path,
@@ -543,9 +540,17 @@ fn render(
                         backups.push(capture);
                         touched_targets.insert(desc.display.clone());
                         state.record_settings(&key, sp.managed.clone());
-                        crate::outln!("  {} wrote {} setting(s)", "✓".green(), sp.managed.len());
+                        crate::outln!(
+                            "  {} wrote {}",
+                            "✓".green(),
+                            super::count(sp.managed.len(), "setting")
+                        );
                     } else {
-                        crate::outln!("  {} {} setting(s) to apply", "→".cyan(), sp.managed.len());
+                        crate::outln!(
+                            "  {} {} to apply",
+                            "→".cyan(),
+                            super::count(sp.managed.len(), "setting")
+                        );
                     }
                 } else if will_write && !sblocked {
                     state.record_settings(&key, sp.managed.clone());
@@ -592,7 +597,7 @@ fn render(
                     }
                     if will_write && hblocked {
                         blocked_targets.insert(desc.display.clone());
-                        crate::outln!("  {} hooks not written — unresolved secret(s)", "✗".red());
+                        crate::outln!("  {} hooks not written — unresolved secrets", "✗".red());
                     } else if will_write {
                         let capture =
                             crate::history::capture(&hp.path, format!("{} · hooks", desc.display));
@@ -600,9 +605,17 @@ fn render(
                         backups.push(capture);
                         touched_targets.insert(desc.display.clone());
                         state.record_hooks(&key, hp.managed.clone());
-                        crate::outln!("  {} wrote {} hook(s)", "✓".green(), hp.managed.len());
+                        crate::outln!(
+                            "  {} wrote {}",
+                            "✓".green(),
+                            super::count(hp.managed.len(), "hook")
+                        );
                     } else {
-                        crate::outln!("  {} {} hook(s) to apply", "→".cyan(), hp.managed.len());
+                        crate::outln!(
+                            "  {} {} to apply",
+                            "→".cyan(),
+                            super::count(hp.managed.len(), "hook")
+                        );
                     }
                 } else if will_write && !hblocked {
                     state.record_hooks(&key, hp.managed.clone());
@@ -643,7 +656,7 @@ fn render(
                         if will_write && iblocked {
                             blocked_targets.insert(desc.display.clone());
                             crate::outln!(
-                                "  {} instructions not written — missing fragment source(s)",
+                                "  {} instructions not written — missing fragment sources",
                                 "✗".red()
                             );
                         } else if will_write {
@@ -656,15 +669,15 @@ fn render(
                             touched_targets.insert(desc.display.clone());
                             wrote_instructions = true;
                             crate::outln!(
-                                "  {} wrote {} instruction fragment(s)",
+                                "  {} wrote {}",
                                 "✓".green(),
-                                ip.fragments.len()
+                                super::count(ip.fragments.len(), "instruction fragment")
                             );
                         } else {
                             crate::outln!(
-                                "  {} {} instruction fragment(s) to apply",
+                                "  {} {} to apply",
                                 "→".cyan(),
-                                ip.fragments.len()
+                                super::count(ip.fragments.len(), "instruction fragment")
                             );
                         }
                     }
@@ -679,9 +692,10 @@ fn render(
                         .count();
                     if n > 0 {
                         crate::outln!(
-                        "  {} (instructions not supported by this CLI — {n} fragment(s) not compiled)",
-                        "·".dimmed()
-                    );
+                            "  {} (instructions not supported by this CLI — {} not compiled)",
+                            "·".dimmed(),
+                            super::count(n, "fragment")
+                        );
                     }
                 }
             }
@@ -753,8 +767,13 @@ fn render(
         changed_count += 1;
         if !will_write {
             crate::outln!(
-                "\n{} manifest refresh pending for owned server(s) {} → {}",
+                "\n{} manifest refresh pending for {} {} → {}",
                 "→".cyan(),
+                if names.len() == 1 {
+                    "owned server"
+                } else {
+                    "owned servers"
+                },
                 names.join(", "),
                 path.display()
             );
@@ -798,8 +817,13 @@ fn render(
         crate::util::atomic::write(path, &new_text)
             .with_context(|| format!("writing {}", path.display()))?;
         crate::outln!(
-            "\n{} refreshed owned server(s) {} in {}",
+            "\n{} refreshed {} {} in {}",
             "✓".green(),
+            if names.len() == 1 {
+                "owned server"
+            } else {
+                "owned servers"
+            },
             names.join(", "),
             path.display()
         );
@@ -891,14 +915,18 @@ fn render(
     // without one, "use <profile>" would send the user to a dead end.
     if !manifest.skills.is_empty() && !quiet {
         let n = manifest.skills.len();
+        let verb = if n == 1 { "is" } else { "are" };
+        let pronoun = if n == 1 { "it" } else { "them" };
         match manifest.profiles.keys().next() {
             Some(first) => crate::outln!(
-                "\n{} {n} skill(s) in the manifest are not rendered by `apply` — activate them through a toolset: `agentstack use {first} --write` (or `agentstack init`, which does this for you)",
-                "ℹ".cyan()
+                "\n{} {} in the manifest {verb} not rendered by `apply` — activate {pronoun} through a toolset: `agentstack use {first} --write` (or `agentstack init`, which does this for you)",
+                "ℹ".cyan(),
+                super::count(n, "skill")
             ),
             None => crate::outln!(
-                "\n{} {n} skill(s) in the manifest are not rendered by `apply` — activate them: `agentstack use --write` (no toolsets declared, so everything inline is the default)",
-                "ℹ".cyan()
+                "\n{} {} in the manifest {verb} not rendered by `apply` — activate {pronoun}: `agentstack use --write` (no toolsets declared, so everything inline is the default)",
+                "ℹ".cyan(),
+                super::count(n, "skill")
             ),
         }
     }
@@ -945,7 +973,7 @@ fn render(
             let mut what = Vec::new();
             if !blocked_targets.is_empty() {
                 what.push(format!(
-                    "{} blocked by unresolved secret(s) or missing fragment source(s)",
+                    "{} blocked by unresolved secrets or missing fragment sources",
                     blocked_targets.len()
                 ));
             }
@@ -961,8 +989,8 @@ fn render(
                 ));
             }
             crate::outln!(
-                "Wrote {fully_written} of {} target(s); {}{partial_note}; see {} above.",
-                changed_targets.len(),
+                "Wrote {fully_written} of {}; {}{partial_note}; see {} above.",
+                super::count(changed_targets.len(), "target"),
                 what.join("; "),
                 "✗".red()
             );
@@ -973,13 +1001,15 @@ fn render(
             // would refuse — the next command is fixing the manifest, not
             // re-running the one that just failed.
             crate::outln!(
-                "{changed_count} target(s) would change{} — fix the {} validation error(s) above before writing.",
+                "{} would change{} — fix the {} validation errors above before writing.",
+                super::count(changed_count, "target"),
                 removal_note(removed_count),
                 "✗".red()
             );
         } else {
             crate::outln!(
-                "{changed_count} target(s) would change{}. Re-run with {} to write.",
+                "{} would change{}. Re-run with {} to write.",
+                super::count(changed_count, "target"),
                 removal_note(removed_count),
                 "--write".bold()
             );
@@ -987,7 +1017,8 @@ fn render(
     } else {
         // A confirm prompt is about to follow — don't tell the user to re-run.
         crate::outln!(
-            "{changed_count} target(s) would change{}.",
+            "{} would change{}.",
+            super::count(changed_count, "target"),
             removal_note(removed_count)
         );
     }
@@ -995,7 +1026,10 @@ fn render(
     // the whole story — a third "N issue(s)" line in between was pure repetition.
     let blocked_write = will_write && !blocked_targets.is_empty();
     if error_count > 0 && !quiet && !blocked_write {
-        crate::outln!("{error_count} issue(s) — resolve before writing.");
+        crate::outln!(
+            "{} — resolve before writing.",
+            super::count(error_count, "issue")
+        );
     }
 
     // A hard per-target failure exits nonzero AFTER state and history are
@@ -1003,9 +1037,9 @@ fn render(
     // and the error names exactly which targets did not land.
     if will_write && !failed_targets.is_empty() {
         anyhow::bail!(
-            "write failed on {} target(s): {} — each ✗ above has the error; targets written \
+            "write failed on {}: {} — each ✗ above has the error; targets written \
              before or after stay recorded (undo: agentstack restore)",
-            failed_targets.len(),
+            super::count(failed_targets.len(), "target"),
             failed_targets
                 .iter()
                 .map(String::as_str)
@@ -1031,8 +1065,9 @@ fn render(
             format!("fix: {} (or pass --allow-unresolved)", cmds.join(" · "))
         };
         anyhow::bail!(
-            "blocked write(s) on {} target(s) — {fix}",
-            blocked_targets.len()
+            "{} on {} — {fix}",
+            super::count(blocked_targets.len(), "blocked write"),
+            super::count(blocked_targets.len(), "target")
         );
     }
 

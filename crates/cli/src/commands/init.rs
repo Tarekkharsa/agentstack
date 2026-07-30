@@ -204,8 +204,8 @@ fn report_unstored_keychain(unstored: &[String]) {
         "{}  {}",
         "⚠".yellow(),
         format!(
-            "The OS credential store is unreachable — {} value(s) not stored:",
-            unstored.len()
+            "The OS credential store is unreachable — {} not stored:",
+            super::count(unstored.len(), "value")
         )
         .yellow()
         .bold()
@@ -225,12 +225,13 @@ fn report_unstored_keychain(unstored: &[String]) {
 /// Report the values init deliberately did NOT store (skip path), each with the
 /// one-liner to store it. This replaces `--no-keychain`'s old silent value-drop.
 fn report_skipped(lifted: &[Lifted]) {
+    let pronoun = if lifted.len() == 1 { "it" } else { "each" };
     println!(
         "{}  {}",
         "·".dimmed(),
         format!(
-            "{} token(s) not stored — provide each before running:",
-            lifted.len()
+            "{} not stored — provide {pronoun} before running:",
+            super::count(lifted.len(), "token")
         )
         .bold()
     );
@@ -1202,8 +1203,8 @@ version = 1
             "{}  {} — replaced with secure references here:",
             "🔐".dimmed(),
             format!(
-                "Found {} plaintext token(s) in your live CLI configs",
-                lifted.len()
+                "Found {} in your live CLI configs",
+                super::count(lifted.len(), "plaintext token")
             )
             .yellow()
             .bold()
@@ -1270,16 +1271,26 @@ version = 1
             // A preview never prompts, so resolve the store non-interactively.
             match preresolved_store.map_or_else(|| resolve_secret_store(args, false), Ok)? {
                 SecretStore::Env => println!(
-                    "Would store {} secret(s) in .env (gitignored).",
-                    lifted.len()
+                    "Would store {} in .env (gitignored).",
+                    super::count(lifted.len(), "secret")
                 ),
                 SecretStore::Keychain => {
-                    println!("Would store {} secret(s) in the OS keychain.", lifted.len())
+                    println!(
+                        "Would store {} in the OS keychain.",
+                        super::count(lifted.len(), "secret")
+                    )
                 }
-                SecretStore::Skip => println!(
-                    "Would write {} ${{REF}} placeholder(s); values not stored (--secrets skip).",
-                    lifted.len()
-                ),
+                SecretStore::Skip => {
+                    let values = if lifted.len() == 1 {
+                        "value not stored"
+                    } else {
+                        "values not stored"
+                    };
+                    println!(
+                        "Would write {}; {values} (--secrets skip).",
+                        super::count(lifted.len(), "${REF} placeholder")
+                    )
+                }
             }
         }
         return Ok(true);
@@ -1325,8 +1336,9 @@ version = 1
                     keychain_changes = changes;
                     if stored > 0 {
                         secret_notice = Some(format!(
-                            "{}  Stored {stored} token(s) in the OS keychain (service `agentstack`)",
-                            "🔑".dimmed()
+                            "{}  Stored {} in the OS keychain (service `agentstack`)",
+                            "🔑".dimmed(),
+                            super::count(stored, "token")
                         ));
                     }
                     if !unstored.is_empty() {
@@ -1358,9 +1370,9 @@ version = 1
                         }
                     }
                     secret_notice = Some(format!(
-                        "{}  Stored {} token(s) in .env{}",
+                        "{}  Stored {} in .env{}",
                         "🔑".dimmed(),
-                        entries.len(),
+                        super::count(entries.len(), "token"),
                         if is_git { " (gitignored)" } else { "" }
                     ));
                 }
@@ -1584,8 +1596,13 @@ fn render_import_summary(
         ));
     }
     if !needing_values.is_empty() {
+        let verb = if needing_values.len() == 1 {
+            "needs"
+        } else {
+            "need"
+        };
         out.push_str(&format!(
-            "  Secrets:   {} still need a value before this setup can run:\n",
+            "  Secrets:   {} still {verb} a value before this setup can run:\n",
             needing_values.len()
         ));
         for name in needing_values {
@@ -1639,9 +1656,10 @@ pub(crate) fn display_path(path: &Path, project_root: &Path) -> String {
 /// (no color), so the shape is unit-testable.
 fn render_found_clis(detected: &[DetectedCli], project_root: &Path) -> String {
     let mut out = String::new();
+    let pronoun = if detected.len() == 1 { "its" } else { "their" };
     out.push_str(&format!(
-        "🔍  Found {} coding tool(s) and their native configs:\n",
-        detected.len()
+        "🔍  Found {} and {pronoun} native configs:\n",
+        super::count(detected.len(), "coding tool")
     ));
     let width = detected.iter().map(|c| c.display.len()).max().unwrap_or(0);
     for c in detected {
@@ -1669,8 +1687,8 @@ fn render_found_clis(detected: &[DetectedCli], project_root: &Path) -> String {
 fn render_import_servers(servers: &IndexMap<String, Server>) -> String {
     let mut out = String::new();
     out.push_str(&format!(
-        "📥  Importing {} MCP server(s) from those configs:\n",
-        servers.len()
+        "📥  Importing {} from those configs:\n",
+        super::count(servers.len(), "MCP server")
     ));
     let width = servers
         .keys()
@@ -1812,7 +1830,7 @@ mod tests {
             },
         ];
         let out = render_found_clis(&detected, root);
-        assert!(out.contains("Found 2 coding tool(s)"));
+        assert!(out.contains("Found 2 coding tools"));
         assert!(out.contains("Claude Code"));
         assert!(out.contains("/somewhere/.claude.json · /somewhere/.claude/settings.json"));
         assert!(
@@ -1838,7 +1856,7 @@ mod tests {
         servers.insert("github".into(), stdio);
         servers.insert("ctx".into(), http);
         let out = render_import_servers(&servers);
-        assert!(out.contains("Importing 2 MCP server(s)"));
+        assert!(out.contains("Importing 2 MCP servers"));
         assert!(out.contains("github"));
         assert!(out.contains("runs npx -y github-mcp"));
         assert!(out.contains("contacts https://mcp.example.com/sse"));
@@ -1898,7 +1916,7 @@ mod tests {
         assert!(out.contains("Manifest:  /tmp/proj/.agentstack/agentstack.toml"));
         assert!(out.contains("From:      Claude Code · Codex CLI"));
         assert!(out.contains("8 MCP servers · settings from 2 CLIs"));
-        assert!(out.contains("1 still need a value"));
+        assert!(out.contains("1 still needs a value"));
         assert!(out.contains("agentstack secret set GITHUB_TOKEN"));
         assert!(out.contains("agentstack restore --last --write"));
         assert!(out.contains("agentstack apply --write"));

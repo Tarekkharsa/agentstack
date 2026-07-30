@@ -155,7 +155,7 @@ fn blocked_write_summary_counts_written_targets() {
         "a fully blocked apply must not claim success:\n{stdout}"
     );
     assert!(
-        stdout.contains("Wrote 0 of 2 target(s); 2 blocked"),
+        stdout.contains("Wrote 0 of 2 targets; 2 blocked"),
         "summary should count only targets actually written:\n{stdout}"
     );
     assert!(!ok, "a blocked apply --write must exit nonzero");
@@ -167,7 +167,7 @@ fn blocked_write_summary_counts_written_targets() {
     // Nothing was written, so a follow-up dry-run still shows both pending.
     let (dry_ok, dry) = run(&["apply", "--dry-run"]);
     assert!(
-        dry.contains("2 target(s) would change"),
+        dry.contains("2 targets would change"),
         "blocked targets must still show as pending:\n{dry}"
     );
     assert!(
@@ -221,7 +221,7 @@ fn partially_blocked_apply_counts_once_and_exits_nonzero() {
     );
     // One target, counted once: blocked (with a partial note), not "written".
     assert!(
-        stdout.contains("Wrote 0 of 1 target(s); 1 blocked"),
+        stdout.contains("Wrote 0 of 1 target; 1 blocked"),
         "a blocked target must not also count as written:\n{stdout}"
     );
     assert!(

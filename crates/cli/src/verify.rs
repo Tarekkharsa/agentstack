@@ -194,14 +194,19 @@ pub fn ensure_session_startable(
     // lead-in for content that was never pinned in the first place. The gate
     // itself is unchanged: unpinned still refuses (never first-pin here).
     let mut lines = format!(
-        "refusing to start a session with {what} — it isn't ready yet:\n  {} item(s) unpinned (not in agentstack.lock): {}\n",
-        unpinned.len(),
+        "refusing to start a session with {what} — it isn't ready yet:\n  {} unpinned (not in agentstack.lock): {}\n",
+        crate::commands::count(unpinned.len(), "item"),
         unpinned.join(", ")
     );
     if !blocked.is_empty() {
+        let (pronoun, verb) = if blocked.len() == 1 {
+            ("it", "was")
+        } else {
+            ("they", "were")
+        };
         lines.push_str(&format!(
-            "  {} item(s) changed since they were pinned:\n{}",
-            blocked.len(),
+            "  {} changed since {pronoun} {verb} pinned:\n{}",
+            crate::commands::count(blocked.len(), "item"),
             offender_lines(&blocked)
         ));
     }
@@ -316,8 +321,8 @@ fn bail_blocked(action: &str, blocked: Vec<(String, String)>) -> anyhow::Result<
         return Ok(());
     }
     anyhow::bail!(
-        "refusing to {action}: {} pinned item(s) changed since agentstack.lock was written —\n{}\nReview the changes, then run `agentstack lock` to accept them (re-locking re-gates the project for auto mode).",
-        blocked.len(),
+        "refusing to {action}: {} changed since agentstack.lock was written —\n{}\nReview the changes, then run `agentstack lock` to accept them (re-locking re-gates the project for auto mode).",
+        crate::commands::count(blocked.len(), "pinned item"),
         offender_lines(&blocked)
     )
 }
@@ -330,9 +335,10 @@ fn bail_locked(action: &str, blocked: Vec<(String, String)>) -> anyhow::Result<(
     if blocked.is_empty() {
         return Ok(());
     }
+    let pronoun = if blocked.len() == 1 { "it" } else { "them" };
     anyhow::bail!(
-        "refusing to {action}: {} input(s) failed locked integrity verification —\n{}\nLock-pinnable inputs must be pinned and matching, and every frozen server must resolve and pass its required integrity check; review them, then run `agentstack lock`.",
-        blocked.len(),
+        "refusing to {action}: {} failed locked integrity verification —\n{}\nLock-pinnable inputs must be pinned and matching, and every frozen server must resolve and pass its required integrity check; review {pronoun}, then run `agentstack lock`.",
+        crate::commands::count(blocked.len(), "input"),
         offender_lines(&blocked)
     )
 }
@@ -374,7 +380,7 @@ mod tests {
         .unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("isn't ready yet"), "{msg}");
-        assert!(msg.contains("2 item(s) unpinned"), "{msg}");
+        assert!(msg.contains("2 items unpinned"), "{msg}");
         assert!(msg.contains("a, b"), "{msg}");
         assert!(msg.contains("agentstack lock"), "{msg}");
         assert!(
@@ -554,7 +560,7 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("refusing to activate 'backend'"), "{err}");
-        assert!(err.contains("2 pinned item(s)"), "{err}");
+        assert!(err.contains("2 pinned items"), "{err}");
         assert!(err.contains("code-review"), "{err}");
         assert!(err.contains("kibana"), "{err}");
         assert!(!err.contains("good"), "unchanged items stay out: {err}");
@@ -575,7 +581,7 @@ mod tests {
         let err = ensure_locked_inputs("claude-code", &skills, &instructions, &servers, &[], &[])
             .unwrap_err()
             .to_string();
-        assert!(err.contains("3 input(s)"), "{err}");
+        assert!(err.contains("3 inputs"), "{err}");
         assert!(err.contains("skill 's'"), "{err}");
         assert!(err.contains("instruction 'i'"), "{err}");
         assert!(err.contains("server 'srv'"), "{err}");
@@ -606,7 +612,7 @@ mod tests {
         let err = ensure_locked_inputs("claude-code", &[], &[], &[], &executables, &[])
             .unwrap_err()
             .to_string();
-        assert!(err.contains("2 input(s)"), "{err}");
+        assert!(err.contains("2 inputs"), "{err}");
         assert!(
             err.contains("executable 'scripts/run.sh' (server 'agent')"),
             "{err}"
@@ -687,7 +693,7 @@ mod tests {
         let err = ensure_locked_inputs("x", &[], &[], &servers, &[], &[])
             .unwrap_err()
             .to_string();
-        assert!(err.contains("2 input(s)"), "{err}");
+        assert!(err.contains("2 inputs"), "{err}");
         assert!(err.contains("server 'a'"), "{err}");
         assert!(err.contains("server 'b'"), "{err}");
     }

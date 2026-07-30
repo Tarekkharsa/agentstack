@@ -58,7 +58,7 @@ pub fn run_export(args: &ExportArgs, manifest_dir: Option<&Path>) -> Result<()> 
         .with_context(|| format!("writing {}", args.output.display()))?;
 
     let secret_note = if args.secrets {
-        format!(" + {} secret(s)", bundle.secrets.len())
+        format!(" + {}", super::count(bundle.secrets.len(), "secret"))
     } else {
         String::new()
     };
@@ -114,7 +114,10 @@ pub fn run_import(args: &ImportArgs, manifest_dir: Option<&Path>) -> Result<()> 
         } else {
             "→ keychain"
         };
-        println!("  {} secret(s) {action}", bundle.secrets.len());
+        println!(
+            "  {} {action}",
+            super::count(bundle.secrets.len(), "secret")
+        );
     }
     println!("\nNext: `agentstack install` then `agentstack doctor`.");
     Ok(())

@@ -422,7 +422,7 @@ owner = "codex"   # codex's own config is the source of truth</code></pre>
 <h2 id="agent-operable-agentstack-mcp">Agent-operable (<code>agentstack mcp</code>)<a class="hlink" href="#agent-operable-agentstack-mcp" aria-label="Link to this section">#</a></h2>
 <p>agentstack runs as an MCP server over stdio, so the agent itself can discover and propose capabilities. The control-plane tools it advertises are below; the <strong>propose</strong> group writes the <strong>manifest only</strong> (commit-safe <code>${REF}</code>s, nothing executed — the agent proposes, a human runs <code>apply</code>):</p>
 <div class="tblwrap"><table>
-<thead><tr><th>Tool(s)</th><th>What it does</th><th>More</th></tr></thead><tbody>
+<thead><tr><th>Tools</th><th>What it does</th><th>More</th></tr></thead><tbody>
 <tr><td><code>agentstack_search</code></td><td>search catalog + your library for capabilities to install</td><td><a href="#search-across-providers">search</a></td></tr>
 <tr><td><code>agentstack_list</code></td><td>list the manifest's capabilities</td><td>—</td></tr>
 <tr><td><code>agentstack_doctor</code></td><td>run the doctor checks (adds a <code>Trust (auto mode):</code> line)</td><td><a href="#doctor-shows-what-you-use">doctor</a></td></tr>

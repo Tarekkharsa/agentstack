@@ -94,7 +94,7 @@ fn scripted_init_states_clis_configs_servers_and_destinations_before_writing() {
     // (1) First screen: the CLIs found, each with the exact config files that
     // back the detection — displayed ~-compacted since they live under HOME.
     assert!(
-        text.contains("Found 2 coding tool(s) and their native configs"),
+        text.contains("Found 2 coding tools and their native configs"),
         "{text}"
     );
     assert!(text.contains("Claude Code"), "{text}");
@@ -103,7 +103,7 @@ fn scripted_init_states_clis_configs_servers_and_destinations_before_writing() {
     assert!(text.contains("~/.codex/config.toml"), "{text}");
 
     // (2) Servers by name, with what each runs.
-    assert!(text.contains("Importing 2 MCP server(s)"), "{text}");
+    assert!(text.contains("Importing 2 MCP servers"), "{text}");
     assert!(text.contains("github"), "{text}");
     assert!(text.contains("tldraw"), "{text}");
     assert!(

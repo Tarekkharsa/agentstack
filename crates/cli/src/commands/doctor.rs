@@ -205,9 +205,11 @@ impl Report {
             }
         }
         if hidden > 0 {
+            let verb = if hidden == 1 { "is" } else { "are" };
             println!(
-                "{} {hidden} section(s) for features this project doesn't use are hidden — {} shows everything.",
+                "{} {} for features this project doesn't use {verb} hidden — {} shows everything.",
                 "·".dimmed(),
+                super::count(hidden, "section"),
                 "agentstack doctor --all".bold()
             );
         }
@@ -374,18 +376,23 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
 
         println!();
         if fixed > 0 {
-            println!("{} re-applied {fixed} drifted target(s).", "✓".green());
+            println!(
+                "{} re-applied {}.",
+                "✓".green(),
+                super::count(fixed, "drifted target")
+            );
         }
         // Notes are reported separately from warnings so the headline count
         // answers "what must I fix?" and nothing else.
         let notes = if report.advisories > 0 {
-            format!(", {} note(s)", report.advisories)
+            format!(", {}", super::count(report.advisories, "note"))
         } else {
             String::new()
         };
         println!(
-            "{} error(s), {} warning(s){notes}.",
-            report.errors, report.warnings
+            "{}, {}{notes}.",
+            super::count(report.errors, "error"),
+            super::count(report.warnings, "warning")
         );
         // Triage, not just totals: name the one fix to start with.
         if report.errors + report.warnings > 0 {
@@ -399,7 +406,10 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
     // exiting inline so `main` owns the single exit point and this path stays
     // testable. Gating is independent of the output format above.
     if args.ci && report.errors > 0 {
-        anyhow::bail!("doctor found {} error(s) — see report above", report.errors);
+        anyhow::bail!(
+            "doctor found {} — see report above",
+            super::count(report.errors, "error")
+        );
     }
     Ok(())
 }
@@ -1033,8 +1043,13 @@ fn run_checks(
                             report.line(
                                 Level::Error,
                                 format!(
-                                    "{:<14} not fixed — unresolved secret(s): {}",
+                                    "{:<14} not fixed — {}: {}",
                                     desc.display,
+                                    if plan.unresolved.len() == 1 {
+                                        "unresolved secret"
+                                    } else {
+                                        "unresolved secrets"
+                                    },
                                     plan.unresolved.join(", ")
                                 ),
                             );
@@ -1043,8 +1058,13 @@ fn run_checks(
                             report.line(
                                 Level::Error,
                                 format!(
-                                    "{:<14} not fixed — secret read failure(s): {}",
+                                    "{:<14} not fixed — {}: {}",
                                     desc.display,
+                                    if plan.failed.len() == 1 {
+                                        "secret read failure"
+                                    } else {
+                                        "secret read failures"
+                                    },
                                     plan.failed.join(", ")
                                 ),
                             );
@@ -1059,9 +1079,9 @@ fn run_checks(
                         report.line(
                             Level::Ok,
                             format!(
-                                "{:<14} re-applied {} change(s)",
+                                "{:<14} re-applied {}",
                                 desc.display,
-                                plan.managed.len()
+                                super::count(plan.managed.len(), "change")
                             ),
                         );
                     } else if plan.removed.is_empty() {
@@ -1069,9 +1089,9 @@ fn run_checks(
                         report.line(
                             Level::Warn,
                             format!(
-                                "{:<14} {} change(s) pending ↳ {fix_cmd}{scope_flag}",
+                                "{:<14} {} pending ↳ {fix_cmd}{scope_flag}",
                                 desc.display,
-                                plan.managed.len()
+                                super::count(plan.managed.len(), "change")
                             ),
                         );
                     } else {
@@ -1143,7 +1163,8 @@ fn run_checks(
             report.line(
                 Level::Ok,
                 format!(
-                    "{inherited} fragment(s) inherited from the machine manifest ({})",
+                    "{} inherited from the machine manifest ({})",
+                    super::count(inherited, "fragment"),
                     up.display()
                 ),
             );
@@ -1364,16 +1385,17 @@ fn run_checks(
             report.line(
                 Level::Warn,
                 format!(
-                    "{} hook(s) defined but no selected target supports hooks",
-                    manifest.hooks.len()
+                    "{} defined but no selected target supports hooks",
+                    super::count(manifest.hooks.len(), "hook")
                 ),
             );
         } else if hook_issues == 0 {
             report.line(
                 Level::Ok,
                 format!(
-                    "{} hook(s) in sync across {hook_capable} hook-capable target(s)",
-                    manifest.hooks.len()
+                    "{} in sync across {}",
+                    super::count(manifest.hooks.len(), "hook"),
+                    super::count(hook_capable, "hook-capable target")
                 ),
             );
         }
@@ -1499,7 +1521,8 @@ fn run_checks(
             report.line(
                 Level::Warn,
                 format!(
-                    "{stale} leftover dir(s) under {} — {what}; remove with `rm -rf {}`",
+                    "{} under {} — {what}; remove with `rm -rf {}`",
+                    super::count(stale, "leftover dir"),
                     tidy_path(&root),
                     root.display()
                 ),
@@ -1913,7 +1936,15 @@ fn probe_stdio_servers(
             results.push(serde_json::json!({
                 "server": name,
                 "status": "not_probeable",
-                "detail": format!("unresolved secret(s): {}", missing.join(", ")),
+                "detail": format!(
+                    "{}: {}",
+                    if missing.len() == 1 {
+                        "unresolved secret"
+                    } else {
+                        "unresolved secrets"
+                    },
+                    missing.join(", ")
+                ),
             }));
             continue;
         }
@@ -2518,8 +2549,8 @@ fn check_policy(manifest: &Manifest, report: &mut Report) {
         report.line(
             Level::Ok,
             format!(
-                "[policy.filesystem] read — {} scope(s) — informational (the sandbox mounts one whole workspace)",
-                manifest.policy.filesystem.read.len()
+                "[policy.filesystem] read — {} — informational (the sandbox mounts one whole workspace)",
+                super::count(manifest.policy.filesystem.read.len(), "scope")
             ),
         );
     }
@@ -2527,8 +2558,8 @@ fn check_policy(manifest: &Manifest, report: &mut Report) {
         report.line(
             Level::Ok,
             format!(
-                "[policy.filesystem] write — {} scope(s) — enforced in sandbox mode (workspace mounts read-only unless covered); advisory in host mode",
-                manifest.policy.filesystem.write.len()
+                "[policy.filesystem] write — {} — enforced in sandbox mode (workspace mounts read-only unless covered); advisory in host mode",
+                super::count(manifest.policy.filesystem.write.len(), "scope")
             ),
         );
     }
@@ -3228,11 +3259,14 @@ fn bare_launcher_advisory(hits: &[(&str, &str)]) -> String {
         .collect::<Vec<_>>()
         .join(", ");
     let n = hits.len();
+    let verb = if n == 1 { "uses" } else { "use" };
+    let pronoun = if n == 1 { "it" } else { "them" };
     format!(
-        "{n} server(s) use a bare launcher that resolves via PATH: {servers}. A GUI-launched \
+        "{} {verb} a bare launcher that resolves via PATH: {servers}. A GUI-launched \
          harness (Claude Code.app, Claude Desktop, VS Code) may inherit a minimal PATH and fail \
-         to spawn them. Terminal-launched CLIs are unaffected. To pin them, use an absolute path \
-         or a login-shell wrapper: command = \"zsh\", args = [\"-lc\", \"exec <launcher> …\"]"
+         to spawn {pronoun}. Terminal-launched CLIs are unaffected. To pin {pronoun}, use an absolute path \
+         or a login-shell wrapper: command = \"zsh\", args = [\"-lc\", \"exec <launcher> …\"]",
+        super::count(n, "server")
     )
 }
 
@@ -3943,7 +3977,7 @@ mod tests {
         assert_eq!(bare.len(), 1, "one line for all of them, got {quirks:?}");
         let q = bare[0];
         assert!(q.advisory, "an ecosystem caveat is not a defect to repair");
-        assert!(q.msg.starts_with("3 server(s)"), "{}", q.msg);
+        assert!(q.msg.starts_with("3 servers"), "{}", q.msg);
         for name in ["a", "b", "c"] {
             assert!(q.msg.contains(name), "must name {name}: {}", q.msg);
         }
@@ -3956,10 +3990,7 @@ mod tests {
     fn advisories_leave_the_project_ready() {
         let mut report = Report::new();
         report.section("Quirks");
-        report.line(
-            Level::Advisory,
-            "2 server(s) use a bare launcher ↳ pin them",
-        );
+        report.line(Level::Advisory, "2 servers use a bare launcher ↳ pin them");
         report.line(Level::Ok, "no unsupported syntax for any target");
 
         assert_eq!(report.advisories, 1);
@@ -4070,10 +4101,7 @@ mod tests {
         report.section("Instructions");
         report.line(Level::Warn, "Codex will IGNORE this ↳ open Codex once");
         report.section("Drift");
-        report.line(
-            Level::Warn,
-            "2 change(s) pending ↳ agentstack apply --write",
-        );
+        report.line(Level::Warn, "2 changes pending ↳ agentstack apply --write");
         assert_eq!(report.first_fix(), Some("agentstack apply --write"));
 
         // Errors still outrank warnings, and the same preference applies
