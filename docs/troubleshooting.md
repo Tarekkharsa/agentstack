@@ -275,7 +275,7 @@ Trust is bound to content. A `git pull`, or your own edit to the manifest or
 lockfile, invalidates the old approval — that re-gate is the feature. Review
 what changed, then re-trust.
 
-**`trusted, but the manifest or lockfile changed since ↳ review + agentstack trust`**
+**`trusted, but the manifest or lockfile changed since it was last reviewed ↳ agentstack trust`**
 
 The `doctor` form of the same state. `agentstack status` calls it
 `trust stale (content changed)`.

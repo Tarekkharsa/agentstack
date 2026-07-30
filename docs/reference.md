@@ -442,8 +442,9 @@ error.
 `apply` prunes entries we own that left the manifest and `doctor`/`diff`
 detect hand-edits — see [drift: adopt or apply?](#drift-adopt-or-apply) for
 which fix to run. `diff --json` emits the selected scope, toolset, per-CLI
-change/diff records, kept foreign entries, owner refreshes, and warnings for CI
-or agent consumers.
+change/diff records (each with `existed_before`, so an absent config reads as
+a first render rather than an edit), kept foreign entries, owner refreshes,
+and warnings for CI or agent consumers.
 
 ### Scopes
 

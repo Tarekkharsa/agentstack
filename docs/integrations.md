@@ -26,8 +26,10 @@ start and supervise coding agents without becoming a second authority system.
 
 The half that is public — the CLI — is already complete for this integration.
 The panel gates each of its features on a contract the CLI advertises, and the
-**published `v0.17.0` release serves every one of them**, so a source-built
-t3code needs no locally-built AgentStack behind it:
+**published `v0.17.0` release serves every affordance the panel gates a button
+on**, so a source-built t3code needs no locally-built AgentStack behind it.
+The two `no` rows sharpen wording only (typed fields replacing prose
+inference), and the panel degrades to its older wording where they are absent:
 
 | Panel capability | Contract | In released v0.17.0 |
 | --- | --- | --- |
@@ -44,6 +46,8 @@ t3code needs no locally-built AgentStack behind it:
 | Workflow monitor (read-only) | `workflow-observe-v1` | yes |
 | Serial-role scheduling warning | `workflow-serial-roles-v1` | yes |
 | Startup test — actually start the servers | `doctor-probe-v1` | yes |
+| Status — typed delivery mode + activation | `doctor-mode-v1` | no — next release |
+| Drift review — first render vs moved-ahead | `diff-existence-v1` | no — next release |
 
 One name in `FEATURES` is deliberately absent from this table.
 `json-reads-v1` names the `--json` form of `status`, `search`, `adapters list`

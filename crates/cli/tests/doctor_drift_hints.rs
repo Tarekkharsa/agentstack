@@ -403,3 +403,61 @@ fn unmanaged_churn_is_not_edited_on_disk() {
         "a change to the managed region must warn, got: {drift}"
     );
 }
+
+/// 2026-07-30 panel-audit finding: a zero-files project (gateway registered,
+/// trusted, nothing rendered, never activated) was told to `agentstack apply
+/// --write --scope global` — a render its whole mode opts out of, aimed at the
+/// GLOBAL config no less. The drift comparison must be suppressed for a
+/// derived zero-files mode exactly like the flagged clean-at-rest path, and
+/// the JSON must carry the mode + activation as typed fields
+/// (`doctor-mode-v1`) instead of leaving the panel to substring-match prose.
+#[test]
+fn zero_files_project_is_served_live_not_told_to_apply() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    setup(&home);
+
+    // The agentstack gateway is registered in Claude Code's global config —
+    // the zero-files delivery signal. Nothing else is rendered anywhere.
+    fs::write(
+        home.join(".claude.json"),
+        "{\n  \"mcpServers\": {\n    \"agentstack\": { \"type\": \"stdio\", \"command\": \"agentstack\", \"args\": [\"mcp\", \"--auto-project\"] }\n  }\n}\n",
+    )
+    .unwrap();
+
+    // A trusted project that declares a server but never activated (no lock,
+    // no recorded render) — the audit demo's exact shape.
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [servers.docs]\ntype = \"http\"\nurl = \"https://docs/mcp\"\n",
+    )
+    .unwrap();
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
+
+    let report = doctor::collect(Some(&proj)).unwrap();
+
+    // The typed fields the panel consumes instead of prose.
+    assert_eq!(report["mode"], "zero-files", "in: {report}");
+    assert_eq!(report["activation"], "never_activated", "in: {report}");
+
+    // The drift comparison is suppressed with the honest story, so the one
+    // recommended action can never be the render this mode opts out of.
+    let drift = section_msgs(&report, "Drift").join("\n");
+    assert!(
+        drift.contains("zero-files serves this project live"),
+        "drift section must state the serving-live story, got: {drift}"
+    );
+    assert!(
+        !drift.contains("apply --write"),
+        "a zero-files project must not be pointed at a render, got: {drift}"
+    );
+    let next = report["next_action"].as_str().unwrap_or_default();
+    assert!(
+        !next.contains("apply --write"),
+        "next_action must not recommend rendering a zero-files project, got: {next}"
+    );
+}

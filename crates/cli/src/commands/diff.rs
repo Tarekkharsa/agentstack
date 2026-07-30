@@ -60,6 +60,13 @@ pub struct TargetOutcome {
     /// since our last recorded write — the same signal `doctor` calls
     /// "edited on disk since last apply".
     pub hand_edited: bool,
+    /// Whether the config file was on disk when this diff was computed. With
+    /// `changed`, this splits the two stories a pending render can tell:
+    /// `false` means "never rendered here / file absent", `true` means "the
+    /// manifest moved ahead of a rendered file". External UIs used to infer
+    /// this from the `@@ -0,0` hunk header, which an empty-but-present file
+    /// breaks. Read this only when `diff-existence-v1` is advertised.
+    pub existed_before: bool,
 }
 
 #[derive(serde::Serialize)]
@@ -318,6 +325,7 @@ fn collect(args: &DiffArgs, manifest_dir: Option<&Path>, print_text: bool) -> Re
             foreign_untracked: untracked,
             managed: plan.managed.clone(),
             hand_edited,
+            existed_before: plan.existed_before,
         });
     }
 

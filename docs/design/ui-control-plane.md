@@ -159,7 +159,8 @@ Every UI-facing read response carries (implemented — `crates/cli/src/ui_contra
                "toolset-rename-v1", "toolset-delete-v1", "library-remove-v1",
                "manifest-remove-v1", "trust-server-blockers-v1",
                "workflow-observe-v1", "workflow-serial-roles-v1",
-               "doctor-advisories-v1", "doctor-probe-v1", "json-reads-v1"]
+               "doctor-advisories-v1", "doctor-probe-v1", "doctor-mode-v1",
+               "diff-existence-v1", "json-reads-v1"]
 }
 ```
 
