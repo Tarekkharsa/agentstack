@@ -386,8 +386,9 @@ fn admission_error(refusals: &[(String, String)]) -> anyhow::Error {
         .map(|(who, why)| format!("  {who}  {why}"))
         .collect();
     anyhow::anyhow!(
-        "refusing to launch: {} declared request(s) fall outside the machine policy ceiling —\n{}",
-        refusals.len(),
+        "refusing to launch: {} {} outside the machine policy ceiling —\n{}",
+        super::count(refusals.len(), "declared request"),
+        if refusals.len() == 1 { "falls" } else { "fall" },
         lines.join("\n")
     )
 }
@@ -1361,14 +1362,16 @@ fn live(
         return Err(ev.refuse("locked-verify", e));
     }
     ev.passed("locked-verify", None)?;
-    banner!(quiet, headless,
-        "  {} locked inputs: {} skill(s), {} instruction(s), {} server(s), {} executable pin(s), {} extension(s) verified",
+    banner!(
+        quiet,
+        headless,
+        "  {} locked inputs: {}, {}, {}, {}, {} verified",
         "✓".green(),
-        inputs.skill_statuses.len(),
-        inputs.instruction_statuses.len(),
-        inputs.frozen.len(),
-        inputs.executable_statuses.len(),
-        inputs.extension_statuses.len(),
+        super::count(inputs.skill_statuses.len(), "skill"),
+        super::count(inputs.instruction_statuses.len(), "instruction"),
+        super::count(inputs.frozen.len(), "server"),
+        super::count(inputs.executable_statuses.len(), "executable pin"),
+        super::count(inputs.extension_statuses.len(), "extension"),
     );
 
     // §3 step 4b: rendered-copy verification (E2b). locked-verify proved the
@@ -1880,13 +1883,13 @@ fn plan(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
                 &inputs.extension_statuses,
             ) {
                 Ok(()) => println!(
-                    "  {} locked inputs: {} skill(s), {} instruction(s), {} server(s), {} executable pin(s), {} extension(s) verified",
+                    "  {} locked inputs: {}, {}, {}, {}, {} verified",
                     "✓".green(),
-                    inputs.skill_statuses.len(),
-                    inputs.instruction_statuses.len(),
-                    inputs.frozen.len(),
-                    inputs.executable_statuses.len(),
-                    inputs.extension_statuses.len(),
+                    super::count(inputs.skill_statuses.len(), "skill"),
+                    super::count(inputs.instruction_statuses.len(), "instruction"),
+                    super::count(inputs.frozen.len(), "server"),
+                    super::count(inputs.executable_statuses.len(), "executable pin"),
+                    super::count(inputs.extension_statuses.len(), "extension"),
                 ),
                 Err(e) => {
                     println!("  {} locked inputs: verification failed", "✗".red());
@@ -1951,9 +1954,14 @@ fn plan(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
                     );
                 } else {
                     println!(
-                        "  {} policy: {} declared request(s) exceed the machine ceiling",
+                        "  {} policy: {} {} the machine ceiling",
                         "✗".red(),
-                        refusals.len()
+                        super::count(refusals.len(), "declared request"),
+                        if refusals.len() == 1 {
+                            "exceeds"
+                        } else {
+                            "exceed"
+                        }
                     );
                     for (who, why) in refusals {
                         blockers.push((format!("policy-admission {who}"), why));
@@ -1999,9 +2007,12 @@ fn plan(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
     println!("  proposed grant:");
     println!("    project: {}", base.display());
     println!(
-        "    harness: {} ({} redacted argument(s))",
+        "    harness: {} ({})",
         args.harness,
-        argv.as_ref().map_or(args.args.len(), Vec::len)
+        super::count(
+            argv.as_ref().map_or(args.args.len(), Vec::len),
+            "redacted argument"
+        )
     );
     if let Some(inputs) = &inputs {
         let servers: Vec<&str> = inputs.frozen.iter().map(|(n, _)| n.as_str()).collect();
@@ -2014,11 +2025,11 @@ fn plan(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
             }
         );
         println!(
-            "    inputs: {} skill(s), {} instruction(s), {} executable pin(s), {} extension(s)",
-            inputs.skill_statuses.len(),
-            inputs.instruction_statuses.len(),
-            inputs.executable_statuses.len(),
-            inputs.extension_statuses.len()
+            "    inputs: {}, {}, {}, {}",
+            super::count(inputs.skill_statuses.len(), "skill"),
+            super::count(inputs.instruction_statuses.len(), "instruction"),
+            super::count(inputs.executable_statuses.len(), "executable pin"),
+            super::count(inputs.extension_statuses.len(), "extension")
         );
         if let Some(rendered) = &rendered {
             println!(
@@ -2071,9 +2082,9 @@ fn plan(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
         .map(|(gate, why)| format!("  [{gate}] {why}"))
         .collect();
     anyhow::bail!(
-        "a live `run {} --locked` would be REFUSED — {} blocker(s):\n{}",
+        "a live `run {} --locked` would be REFUSED — {}:\n{}",
         args.harness,
-        blockers.len(),
+        super::count(blockers.len(), "blocker"),
         lines.join("\n")
     )
 }

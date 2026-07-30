@@ -335,7 +335,8 @@ fn collect(args: &DiffArgs, manifest_dir: Option<&Path>, print_text: bool) -> Re
             println!("{} all targets in sync with the manifest.", "✓".green());
         } else {
             println!(
-                "{drift} target(s) drifted. Run {} to reconcile.",
+                "{} drifted. Run {} to reconcile.",
+                super::count(drift, "target"),
                 reconcile_cmd.bold()
             );
         }

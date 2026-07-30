@@ -342,9 +342,9 @@ pub fn report_text(run_id: &str) -> String {
                         String::new()
                     };
                     o.push_str(&format!(
-                        "    {} headless output: {} byte(s) · sha256:{}{}\n",
+                        "    {} headless output: {} · sha256:{}{}\n",
                         "✓".green(),
-                        bytes,
+                        super::count(*bytes as usize, "byte"),
                         sha256,
                         trunc
                     ));

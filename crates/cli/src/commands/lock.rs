@@ -99,10 +99,11 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
             })
             .collect::<Vec<_>>()
             .join("\n  ");
+        let pronoun = if errors.len() == 1 { "it" } else { "them" };
         anyhow::bail!(
-            "refusing to lock: {} validation error(s) — pinning them would put content in the \
+            "refusing to lock: {} — pinning {pronoun} would put content in the \
              consent surface that can never be admitted:\n  {detail}",
-            errors.len()
+            super::count(errors.len(), "validation error")
         );
     }
 
@@ -180,22 +181,22 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
     }
 
     let from = match &profiles {
-        Some(p) => format!("{} toolset(s)", p.len()),
+        Some(p) => super::count(p.len(), "toolset"),
         None => "the implicit default (no toolsets declared)".to_string(),
     };
     // Count only what actually pinned — six "+ 0 <jargon>(s)" segments turned
     // the beginner journey's first success line into a wall of internals.
     let mut pinned_parts: Vec<String> = Vec::new();
     for (n, what) in [
-        (skills.len(), "skill(s)"),
-        (servers.len(), "server(s)"),
-        (instructions, "instruction(s)"),
-        (executables, "executable pin(s)"),
-        (extensions, "extension(s)"),
-        (workflows, "workflow(s)"),
+        (skills.len(), "skill"),
+        (servers.len(), "server"),
+        (instructions, "instruction"),
+        (executables, "executable pin"),
+        (extensions, "extension"),
+        (workflows, "workflow"),
     ] {
         if n > 0 {
-            pinned_parts.push(format!("{n} {what}"));
+            pinned_parts.push(super::count(n, what));
         }
     }
     let pinned_summary = if pinned_parts.is_empty() {

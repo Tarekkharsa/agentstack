@@ -166,7 +166,7 @@ fn configure(
     // import above may already have landed, so close with the truthful summary.
     if pf.validation_errors {
         println!(
-            "\n{} Fix the manifest validation error(s) above, then re-run {}.",
+            "\n{} Fix the manifest validation errors above, then re-run {}.",
             "→".cyan(),
             "agentstack init".bold()
         );
@@ -250,7 +250,7 @@ fn run_static(args: &SetupArgs, scope: Scope, manifest_dir: Option<&Path>) -> Re
     let preview = super::apply::preview(&apply_args(args, scope, false), manifest_dir)?;
     if preview.validation_errors || preview.write_blockers > 0 {
         println!(
-            "\n{} Resolve the issue(s) above, then re-run {}.",
+            "\n{} Resolve the issues above, then re-run {}.",
             "→".cyan(),
             "agentstack init".bold()
         );
@@ -955,8 +955,8 @@ fn print_stop_summary(history_before: &std::collections::HashSet<String>) {
 fn render_stop_summary(files: &[(String, String)]) -> String {
     let mut out = String::new();
     out.push_str(&format!(
-        "\n  The import already wrote {} file(s) this run:\n",
-        files.len()
+        "\n  The import already wrote {} this run:\n",
+        super::count(files.len(), "file")
     ));
     for (path, label) in files {
         out.push_str(&format!("    {path}  ({label})\n"));
@@ -1068,15 +1068,15 @@ fn render_setup_facts(
     } else {
         out.push_str(&format!("  CLIs updated:  {}\n", clis.join(" · ")));
     }
-    let mut caps = format!("{server_count} MCP server(s)");
+    let mut caps = super::count(server_count, "MCP server");
     if skill_count > 0 {
-        caps.push_str(&format!(" · {skill_count} skill(s)"));
+        caps.push_str(&format!(" · {}", super::count(skill_count, "skill")));
     }
     out.push_str(&format!("  Capabilities:  {caps}\n"));
     if !still_needed.is_empty() {
         out.push_str(&format!(
-            "  Still needed:  {} secret value(s) before this setup can run:\n",
-            still_needed.len()
+            "  Still needed:  {} before this setup can run:\n",
+            super::count(still_needed.len(), "secret value")
         ));
         for name in still_needed {
             out.push_str(&format!(
@@ -1450,7 +1450,7 @@ mod tests {
         );
         assert!(out.contains("Manifest:      /p/.agentstack/agentstack.toml"));
         assert!(out.contains("CLIs updated:  Claude Code · Codex CLI"));
-        assert!(out.contains("8 MCP server(s) · 2 skill(s)"));
+        assert!(out.contains("8 MCP servers · 2 skills"));
         assert!(out.contains("agentstack secret set GITHUB_TOKEN"));
 
         // Import-only run: nothing native touched → says so plainly; no
@@ -1458,7 +1458,7 @@ mod tests {
         let quiet = render_setup_facts("/p/agentstack.toml", &clis_updated(&files[..1]), 1, 0, &[]);
         assert!(quiet.contains("CLIs updated:  none"));
         assert!(!quiet.contains("Still needed"));
-        assert!(!quiet.contains("skill(s)"));
+        assert!(!quiet.contains("skill"));
     }
 
     // P7: the transparency close lists every written file, names each secret's
@@ -1573,7 +1573,7 @@ mod tests {
             (".env".to_string(), ".env · lifted secrets".to_string()),
         ];
         let out = render_stop_summary(&files);
-        assert!(out.contains("The import already wrote 2 file(s)"));
+        assert!(out.contains("The import already wrote 2 files"));
         assert!(out.contains(".agentstack/agentstack.toml  (manifest · import)"));
         assert!(out.contains(".env  (.env · lifted secrets)"));
         assert!(out.contains("agentstack restore --last --write"));

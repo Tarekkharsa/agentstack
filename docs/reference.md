@@ -533,7 +533,7 @@ propose capabilities. The control-plane tools it advertises are below; the
 **propose** group writes the **manifest only** (commit-safe `${REF}`s, nothing
 executed — the agent proposes, a human runs `apply`):
 
-| Tool(s) | What it does | More |
+| Tools | What it does | More |
 |---|---|---|
 | `agentstack_search` | search catalog + your library for capabilities to install | [search](#search-across-providers) |
 | `agentstack_list` | list the manifest's capabilities | — |

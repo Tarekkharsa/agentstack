@@ -348,8 +348,14 @@ impl Upstream {
 
     fn call_tool(&self, tool: &str, args: Value) -> Result<Value> {
         if !self.unresolved.is_empty() {
+            let secrets = crate::commands::count(self.unresolved.len(), "secret");
+            let pronoun = if self.unresolved.len() == 1 {
+                "it"
+            } else {
+                "them"
+            };
             anyhow::bail!(
-                "{}: cannot call '{tool}' — secret(s) did not resolve on this machine: {}. Set them with `agentstack secret set`.",
+                "{}: cannot call '{tool}' — {secrets} did not resolve on this machine: {}. Set {pronoun} with `agentstack secret set`.",
                 self.name,
                 self.unresolved.join(", ")
             );
@@ -611,8 +617,8 @@ impl Gateway {
                 Some(f) => {
                     if !f.is_empty() {
                         eprintln!(
-                            "gateway: proxying {} frozen server(s) from the run plan",
-                            f.len()
+                            "gateway: proxying {} from the run plan",
+                            crate::commands::count(f.len(), "frozen server")
                         );
                     }
                     f
@@ -672,13 +678,13 @@ impl Gateway {
                     };
                     if profile.is_some() {
                         eprintln!(
-                            "gateway: {} — proxying only this toolset's {} server(s)",
+                            "gateway: {} — proxying only this toolset's {}",
                             if matches!(fence, Fence::Lease(_)) {
                                 "MCP toolset lease active"
                             } else {
                                 "session active"
                             },
-                            raw.len()
+                            crate::commands::count(raw.len(), "server")
                         );
                     }
                     // Library definitions are outside the trust digest, so they
@@ -1434,7 +1440,7 @@ mod tests {
         let cases = [
             // gateway.rs call_tool: unresolved-${REF} fail-fast (unwrapped).
             (
-                anyhow::anyhow!("fix: cannot call 'echo' — secret(s) did not resolve on this machine: GITHUB_TOKEN. Set them with `agentstack secret set`."),
+                anyhow::anyhow!("fix: cannot call 'echo' — 1 secret did not resolve on this machine: GITHUB_TOKEN. Set it with `agentstack secret set`."),
                 "unresolved-secret",
             ),
             // stdio request timeout, under the send() context wrapper.

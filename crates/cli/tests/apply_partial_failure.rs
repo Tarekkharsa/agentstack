@@ -83,7 +83,7 @@ default = ["claude-code", "codex"]
     .expect_err("a failed target write must exit nonzero");
     let msg = format!("{err:#}");
     assert!(
-        msg.contains("write failed on 1 target(s)") && msg.contains("Codex"),
+        msg.contains("write failed on 1 target") && msg.contains("Codex"),
         "the error names the failed target: {msg}"
     );
 

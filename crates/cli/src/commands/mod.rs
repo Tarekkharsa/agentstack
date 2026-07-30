@@ -141,3 +141,10 @@ pub fn load(manifest_dir: Option<&Path>) -> Result<Context> {
         resolver,
     })
 }
+
+/// "1 server" / "2 servers" — a count with its correctly pluralized noun.
+/// Only for nouns that pluralize by appending `s` (CLI → CLIs); anything
+/// irregular branches at the call site.
+pub(crate) fn count(n: usize, noun: &str) -> String {
+    format!("{n} {noun}{}", if n == 1 { "" } else { "s" })
+}

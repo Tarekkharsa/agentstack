@@ -295,11 +295,12 @@ impl ReplayJournal {
         let mut ids: Vec<u64> = self.steps.keys().copied().collect();
         ids.sort_unstable();
         let ids: Vec<String> = ids.iter().map(|i| format!("#{i}")).collect();
+        let steps = super::count(self.steps.len(), "journaled step");
+        let verb = if self.steps.len() == 1 { "was" } else { "were" };
         anyhow::anyhow!(
-            "refusing resume: {} journaled step(s) ({}) were never re-issued by the engine {at} \
+            "refusing resume: {steps} ({}) {verb} never re-issued by the engine {at} \
              — the journal does not match this script's deterministic replay (a torn or \
              doctored journal, or an engine-nondeterminism bug)",
-            self.steps.len(),
             ids.join(", ")
         )
     }

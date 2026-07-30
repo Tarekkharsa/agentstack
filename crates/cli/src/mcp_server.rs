@@ -1540,8 +1540,8 @@ fn format_hits(
         );
     }
     let mut out = format!(
-        "{} proxied tool(s){}:\n",
-        hits.len(),
+        "{}{}:\n",
+        crate::commands::count(hits.len(), "proxied tool"),
         if query.trim().is_empty() {
             String::new()
         } else {
@@ -1760,8 +1760,8 @@ fn diff_summary(args: &Value, dir: Option<&Path>) -> Result<String> {
         ));
     }
     let mut out = format!(
-        "{} tool(s) would change on apply ({scope} scope):\n",
-        changed.len()
+        "{} would change on apply ({scope} scope):\n",
+        crate::commands::count(changed.len(), "tool")
     );
     for t in changed {
         let display = t.get("display").and_then(Value::as_str).unwrap_or("?");

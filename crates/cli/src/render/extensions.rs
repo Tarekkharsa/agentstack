@@ -240,9 +240,10 @@ pub fn render(
             .map(|(name, why)| format!("  extension '{name}'  {why}"))
             .collect::<Vec<_>>()
             .join("\n");
+        let extensions = crate::commands::count(broken.len(), "extension");
+        let pronoun = if broken.len() == 1 { "its" } else { "their" };
         anyhow::bail!(
-            "refusing to render native extensions: {} extension(s) cannot be resolved to their pinned content —\n{lines}",
-            broken.len(),
+            "refusing to render native extensions: {extensions} cannot be resolved to {pronoun} pinned content —\n{lines}"
         );
     }
 
@@ -311,9 +312,10 @@ pub fn render(
                 .map(|(name, why)| format!("  {name:width$}  {why}"))
                 .collect::<Vec<_>>()
                 .join("\n");
+            let pronoun = if blocked.len() == 1 { "it" } else { "them" };
             anyhow::bail!(
-                "refusing to render native extensions: {} extension(s) failed lock verification —\n{}\nReview the changes, then run `agentstack lock` to accept them.",
-                blocked.len(),
+                "refusing to render native extensions: {} failed lock verification —\n{}\nReview the changes, then run `agentstack lock` to accept {pronoun}.",
+                crate::commands::count(blocked.len(), "extension"),
                 lines
             );
         }

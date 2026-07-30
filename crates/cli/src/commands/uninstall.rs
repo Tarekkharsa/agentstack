@@ -288,9 +288,10 @@ fn kept_notes(manifest_dir: &Path) -> Vec<String> {
         .unwrap_or(0);
     if secrets > 0 {
         out.push(format!(
-            "Kept: {} — holds {secrets} secret value(s) in plaintext. Delete it yourself \
+            "Kept: {} — holds {} in plaintext. Delete it yourself \
              to fully reset.",
-            crate::commands::init::display_path(&env, manifest_dir)
+            crate::commands::init::display_path(&env, manifest_dir),
+            super::count(secrets, "secret value")
         ));
     }
     out
@@ -454,7 +455,7 @@ fn apply_removals(root: &Path, removals: Vec<Removal>) -> Result<()> {
     }
     let n = backups.len();
     crate::history::record("uninstall", "uninstall", labels, backups)?;
-    println!("\n{n} file(s) reverted.");
+    println!("\n{} reverted.", super::count(n, "file"));
     Ok(())
 }
 

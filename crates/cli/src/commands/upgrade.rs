@@ -69,7 +69,7 @@ pub fn run(args: &UpgradeArgs, manifest_dir: Option<&Path>) -> Result<()> {
         }
     }
     if failures > 0 {
-        anyhow::bail!("{failures} pack(s) failed to upgrade");
+        anyhow::bail!("{} failed to upgrade", super::count(failures, "pack"));
     }
     Ok(())
 }

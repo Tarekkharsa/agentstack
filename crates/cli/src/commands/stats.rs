@@ -167,7 +167,7 @@ fn print_human(report: &Value) {
             name,
             count,
             cost,
-            format!("{live} slot(s)").dimmed(),
+            super::count(live as usize, "slot").dimmed(),
             bar.cyan()
         );
     }

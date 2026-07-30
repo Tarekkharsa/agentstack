@@ -53,10 +53,20 @@ fn sync(
         return Ok(());
     }
     if manifest.skills.is_empty() {
+        let pronoun = if profile_names.len() == 1 {
+            "it"
+        } else {
+            "them"
+        };
         println!(
-            "Manifest defines no inline skills; {} toolset-referenced skill(s) resolve \
-             from the central library — pin them with `agentstack lock`.",
-            profile_names.len()
+            "Manifest defines no inline skills; {} {} \
+             from the central library — pin {pronoun} with `agentstack lock`.",
+            super::count(profile_names.len(), "toolset-referenced skill"),
+            if profile_names.len() == 1 {
+                "resolves"
+            } else {
+                "resolve"
+            }
         );
     }
 
@@ -116,9 +126,10 @@ fn sync(
             }
             if high > 0 && !allow_flagged {
                 println!(
-                    "  {} {name}: {high} high-severity finding(s) — install blocked \
+                    "  {} {name}: {} — install blocked \
                      (pass --allow-flagged to install anyway)",
-                    "✗".red()
+                    "✗".red(),
+                    super::count(high, "high-severity finding")
                 );
                 errors += 1;
                 continue;
@@ -195,7 +206,7 @@ fn sync(
         println!("\n{} lockfile up to date.", "✓".green());
     }
     if errors > 0 {
-        anyhow::bail!("{errors} skill(s) failed to resolve");
+        anyhow::bail!("{} failed to resolve", super::count(errors, "skill"));
     }
     Ok(())
 }

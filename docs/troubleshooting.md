@@ -32,7 +32,7 @@ startup**. After any write, `apply` says so itself.
 
 Restart the CLI first, then work down this list.
 
-**`Claude Code    1 change(s) pending ↳ agentstack apply --write`**
+**`Claude Code    1 change pending ↳ agentstack apply --write`**
 
 The manifest declares something the native config does not have yet. Nothing is
 written until you ask.
@@ -122,14 +122,14 @@ agentstack secret set LINEAR_TOKEN
 agentstack apply --write
 ```
 
-**`✗ not written — unresolved secret(s); set them or pass --allow-unresolved`**
+**`✗ not written — unresolved secrets; set them or pass --allow-unresolved`**
 
 The per-target consequence of the line above: that config file was left
 untouched. `--allow-unresolved` writes the literal `${REF}` through to the
 native config, which is occasionally what you want (the harness expands it
 itself) and usually not.
 
-**`error: blocked write(s) on 1 target(s) — fix: agentstack secret set LINEAR_TOKEN (or pass --allow-unresolved)`**
+**`error: blocked write on 1 target — fix: agentstack secret set LINEAR_TOKEN (or pass --allow-unresolved)`**
 
 The closing line, and a **nonzero exit** — scripts and CI must not read a
 blocked `apply --write` as success. It names every missing ref, so the fix is
@@ -314,7 +314,7 @@ trust --preview`, review the surface, and pass its `surface_digest` back
 `--yes` alone would make "the user saw the review" the caller's claim rather
 than a checked fact.
 
-**`cannot trust {path}: its loadable surface isn't fully pinned — N item(s) need locking or review`**
+**`cannot trust {path}: its loadable surface isn't fully pinned — N items need locking or review`**
 
 Trust binds to bytes, so everything loadable must be pinned first.
 
@@ -423,7 +423,7 @@ One caveat. The probe inherits the environment you ran it from, so a server can
 pass `--probe` in your terminal and still fail inside a GUI-launched app — which
 is precisely the failure the next advisory is about.
 
-**`N server(s) use a bare launcher that resolves via PATH: linear (npx). A GUI-launched harness (Claude Code.app, Claude Desktop, VS Code) may inherit a minimal PATH and fail to spawn them. Terminal-launched CLIs are unaffected. To pin them, use an absolute path or a login-shell wrapper: command = "zsh", args = ["-lc", "exec <launcher> …"]`**
+**`N servers use a bare launcher that resolves via PATH: linear (npx). A GUI-launched harness (Claude Code.app, Claude Desktop, VS Code) may inherit a minimal PATH and fail to spawn them. Terminal-launched CLIs are unaffected. To pin them, use an absolute path or a login-shell wrapper: command = "zsh", args = ["-lc", "exec <launcher> …"]`**
 
 This is the single most common "it works in my terminal but not in the app"
 failure. Nearly every published MCP server ships as `npx -y …`, and `npx` is

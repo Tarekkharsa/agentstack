@@ -269,7 +269,7 @@ agentstack doctor    # every check, each finding followed by ↳ its fix</code><
 <pre class="block"><code>→ Restart or reopen your agent CLI(s) so they pick up the new config.
   undo: agentstack restore --last --write</code></pre>
 <p>Restart the CLI first, then work down this list.</p>
-<p><strong><code>Claude Code    1 change(s) pending ↳ agentstack apply --write</code></strong></p>
+<p><strong><code>Claude Code    1 change pending ↳ agentstack apply --write</code></strong></p>
 <p>The manifest declares something the native config does not have yet. Nothing is written until you ask.</p>
 <pre class="block"><code>agentstack apply --write</code></pre>
 <p><strong><code>Claude Code    config present but binary not on PATH</code></strong></p>
@@ -299,9 +299,9 @@ agentstack doctor    # every check, each finding followed by ↳ its fix</code><
 <p>Nothing in the resolution chain (env, varlock, project <code>.env</code>, OS keychain) holds a value for that name.</p>
 <pre class="block"><code>agentstack secret set LINEAR_TOKEN
 agentstack apply --write</code></pre>
-<p><strong><code>✗ not written — unresolved secret(s); set them or pass --allow-unresolved</code></strong></p>
+<p><strong><code>✗ not written — unresolved secrets; set them or pass --allow-unresolved</code></strong></p>
 <p>The per-target consequence of the line above: that config file was left untouched. <code>--allow-unresolved</code> writes the literal <code>${REF}</code> through to the native config, which is occasionally what you want (the harness expands it itself) and usually not.</p>
-<p><strong><code>error: blocked write(s) on 1 target(s) — fix: agentstack secret set LINEAR_TOKEN (or pass --allow-unresolved)</code></strong></p>
+<p><strong><code>error: blocked write on 1 target — fix: agentstack secret set LINEAR_TOKEN (or pass --allow-unresolved)</code></strong></p>
 <p>The closing line, and a <strong>nonzero exit</strong> — scripts and CI must not read a blocked <code>apply --write</code> as success. It names every missing ref, so the fix is copy-pasteable.</p>
 <pre class="block"><code>✗ secret read failed LINEAR_TOKEN (server 'linear') — keychain read failed: A
   default keychain could not be found. ↳ run `agentstack secret set LINEAR_TOKEN`,
@@ -365,7 +365,7 @@ agentstack trust --yes --consented-digest sha256:…</code></pre>
 <pre class="block"><code>error: refusing to trust: --yes requires --consented-digest — run `agentstack
 trust --preview`, review the surface, and pass its `surface_digest` back</code></pre>
 <p><code>--yes</code> alone would make "the user saw the review" the caller's claim rather than a checked fact.</p>
-<p><strong><code>cannot trust {path}: its loadable surface isn't fully pinned — N item(s) need locking or review</code></strong></p>
+<p><strong><code>cannot trust {path}: its loadable surface isn't fully pinned — N items need locking or review</code></strong></p>
 <p>Trust binds to bytes, so everything loadable must be pinned first.</p>
 <pre class="block"><code>agentstack lock     # pin whatever is unpinned
 agentstack trust .  # then review and approve the pinned surface</code></pre>
@@ -410,7 +410,7 @@ MCP server startup (--probe)
 </ul>
 <p>Every probe is bounded: ten seconds per server, then the child is killed with its whole process group and reaped. Nothing is left running.</p>
 <p>One caveat. The probe inherits the environment you ran it from, so a server can pass <code>--probe</code> in your terminal and still fail inside a GUI-launched app — which is precisely the failure the next advisory is about.</p>
-<p><strong><code>N server(s) use a bare launcher that resolves via PATH: linear (npx). A GUI-launched harness (Claude Code.app, Claude Desktop, VS Code) may inherit a minimal PATH and fail to spawn them. Terminal-launched CLIs are unaffected. To pin them, use an absolute path or a login-shell wrapper: command = "zsh", args = ["-lc", "exec &lt;launcher&gt; …"]</code></strong></p>
+<p><strong><code>N servers use a bare launcher that resolves via PATH: linear (npx). A GUI-launched harness (Claude Code.app, Claude Desktop, VS Code) may inherit a minimal PATH and fail to spawn them. Terminal-launched CLIs are unaffected. To pin them, use an absolute path or a login-shell wrapper: command = "zsh", args = ["-lc", "exec &lt;launcher&gt; …"]</code></strong></p>
 <p>This is the single most common "it works in my terminal but not in the app" failure. Nearly every published MCP server ships as <code>npx -y …</code>, and <code>npx</code> is found through <code>PATH</code> — which a GUI-launched app does not inherit from your shell. agentstack states this once as an advisory rather than once per server, and it does not count against readiness.</p>
 <p>Two fixes, in the manifest:</p>
 <pre class="block"><code># absolute path — no PATH lookup at all
