@@ -153,5 +153,6 @@ fn run() -> Result<()> {
         Command::UseProfile(args) => commands::panel_edit::use_profile(args, dir),
         Command::LibraryIndex => commands::panel_edit::library_index(dir),
         Command::RemoveFromLibrary(args) => commands::panel_edit::remove_from_library(args, dir),
+        Command::RemoveCapability(args) => commands::panel_edit::remove_capability(args, dir),
     }
 }

@@ -39,8 +39,8 @@ use serde_json::{json, Map, Value};
 
 use crate::cli::{
     PanelAddServerArgs, PanelAddSkillArgs, PanelCreateProfileArgs, PanelDeleteProfileArgs,
-    PanelEditProfileArgs, PanelLibraryKind, PanelRemoveFromLibraryArgs, PanelRenameProfileArgs,
-    PanelUseProfileArgs,
+    PanelEditProfileArgs, PanelLibraryKind, PanelRemoveCapabilityArgs, PanelRemoveFromLibraryArgs,
+    PanelRenameProfileArgs, PanelUseProfileArgs,
 };
 use crate::manifest::Manifest;
 
@@ -118,6 +118,12 @@ fn build_preview(action: &str, digest: &str, mut body: Map<String, Value>) -> Va
              manifest entry and re-locks — nothing is rendered, so no ${{REF}} secret is \
              resolved. Activate it separately with `agentstack use <name>`."
         )
+    } else if action == "remove-capability" {
+        format!(
+            "Review, then apply with --yes --consented {digest}. Applying removes the \
+             project definition and every toolset membership, then re-locks and re-renders. \
+             The machine-wide library is untouched."
+        )
     } else {
         format!(
             "Review, then apply with --yes --consented {digest}. Applying re-locks and \
@@ -166,6 +172,26 @@ fn verify_consent(consented: Option<&str>, actual: &str) -> Result<()> {
 fn activate(profile: &str, allow_unresolved: bool, dir: Option<&Path>) -> Result<()> {
     let args = crate::cli::UseArgs {
         profile: Some(profile.to_string()),
+        targets: vec![],
+        scope: None,
+        write: true,
+        allow_unresolved,
+        prune_foreign: false,
+        no_gitignore: false,
+        list: false,
+        json: false,
+    };
+    crate::commands::use_profile::run(&args, dir)
+}
+
+/// Re-lock and re-render the only unambiguous project selection.
+///
+/// With no toolsets this is the implicit full manifest; with one it is that
+/// toolset. Callers must refuse a multi-toolset manifest before writing,
+/// because choosing one implicitly could widen or narrow a user's active set.
+fn activate_unambiguous(allow_unresolved: bool, dir: Option<&Path>) -> Result<()> {
+    let args = crate::cli::UseArgs {
+        profile: None,
         targets: vec![],
         scope: None,
         write: true,
@@ -919,6 +945,91 @@ fn build_remove_preview(action: &str, digest: &str, mut body: Map<String, Value>
     crate::ui_contract::envelope(Value::Object(body))
 }
 
+// ── remove project capability ───────────────────────────────────────────────
+
+/// Remove one project-owned definition, every membership that names it, then
+/// re-lock and re-render the remaining unambiguous selection.
+pub fn remove_capability(args: &PanelRemoveCapabilityArgs, dir: Option<&Path>) -> Result<()> {
+    let preview = remove_capability_preview(args, dir)?;
+    if !args.consent.yes {
+        return emit(&preview);
+    }
+    verify_consent(args.consent.consented.as_deref(), preview_digest(&preview)?)?;
+
+    let base = crate::commands::project_base(dir)?;
+    let path =
+        crate::manifest::resolve_manifest_dir(&base).join(crate::manifest::load::MANIFEST_FILE);
+    let text =
+        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    let collection = match args.kind {
+        PanelLibraryKind::Skill => "skills",
+        PanelLibraryKind::Server => "servers",
+    };
+    let out = crate::commands::remove::remove_entry(&text, collection, &args.name)?;
+    toml::from_str::<Manifest>(&out).context("resulting manifest would be invalid")?;
+    crate::util::atomic::write(&path, &out)
+        .with_context(|| format!("writing {}", path.display()))?;
+
+    activate_unambiguous(args.consent.allow_unresolved, dir)
+}
+
+/// Validate and describe a project capability removal without writing.
+pub fn remove_capability_preview(
+    args: &PanelRemoveCapabilityArgs,
+    dir: Option<&Path>,
+) -> Result<Value> {
+    let manifest = load_manifest(dir)?;
+    anyhow::ensure!(
+        manifest.profiles.len() <= 1,
+        "this project has multiple toolsets — open the manifest to remove '{}' and choose which toolset to render",
+        args.name
+    );
+    let (collection, exists, profiles): (&str, bool, Vec<String>) = match args.kind {
+        PanelLibraryKind::Skill => (
+            "skills",
+            manifest.skills.contains_key(&args.name),
+            manifest
+                .profiles
+                .iter()
+                .filter(|(_, profile)| profile.skills.iter().any(|name| name == &args.name))
+                .map(|(name, _)| name.clone())
+                .collect(),
+        ),
+        PanelLibraryKind::Server => (
+            "servers",
+            manifest.servers.contains_key(&args.name),
+            manifest
+                .profiles
+                .iter()
+                .filter(|(_, profile)| profile.servers.iter().any(|name| name == &args.name))
+                .map(|(name, _)| name.clone())
+                .collect(),
+        ),
+    };
+    anyhow::ensure!(
+        exists,
+        "{} '{}' is not defined in this project's manifest",
+        args.kind.as_str(),
+        args.name
+    );
+
+    let params = json!({ "kind": args.kind.as_str(), "name": args.name });
+    let digest = action_digest("remove-capability", &params, &manifest_bytes(dir)?);
+    let mut body = Map::new();
+    body.insert(
+        "removal".into(),
+        json!({
+            "kind": args.kind.as_str(),
+            "name": args.name,
+            "scope": "project",
+            "defined_inline_here": true,
+            "profiles": profiles,
+        }),
+    );
+    body.insert("collection".into(), collection.into());
+    Ok(build_preview("remove-capability", &digest, body))
+}
+
 // ── edit-profile ────────────────────────────────────────────────────────────
 
 /// `edit-profile` — every add and every removal for one toolset, applied as a
@@ -1408,6 +1519,37 @@ mod tests {
         assert!(verify_consent(None, "sha256:aa").is_err());
         assert!(verify_consent(Some("sha256:bb"), "sha256:aa").is_err());
         assert!(verify_consent(Some("sha256:aa"), "sha256:aa").is_ok());
+    }
+
+    #[test]
+    fn remove_capability_preview_is_project_scoped_and_digest_bound() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        std::fs::write(
+            tmp.path().join("agentstack.toml"),
+            "version = 1\n\n\
+             [servers.computer-use]\ntype = \"stdio\"\ncommand = \"tool\"\n\n\
+             [profiles.web]\nservers = [\"computer-use\"]\n",
+        )
+        .unwrap();
+        let args = PanelRemoveCapabilityArgs {
+            kind: PanelLibraryKind::Server,
+            name: "computer-use".into(),
+            consent: crate::cli::PanelConsent {
+                preview: true,
+                yes: false,
+                consented: None,
+                allow_unresolved: false,
+            },
+        };
+
+        let preview = remove_capability_preview(&args, Some(tmp.path())).unwrap();
+
+        assert_eq!(preview["action"], "remove-capability");
+        assert_eq!(preview["removal"]["scope"], "project");
+        assert_eq!(preview["removal"]["profiles"], json!(["web"]));
+        assert!(preview["consent_digest"]
+            .as_str()
+            .is_some_and(|digest| digest.starts_with("sha256:")));
     }
 
     /// F05 + H3: making `create-profile` usable by a human must not open a hole

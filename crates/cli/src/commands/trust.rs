@@ -119,6 +119,14 @@ pub fn run(args: &TrustArgs) -> Result<()> {
 /// deliberately shows the surface + category counts, not a re-derived blocker
 /// verdict. Nothing here writes or fetches.
 fn preview(base: &Path) -> Result<()> {
+    let out = preview_value(base)?;
+    println!("{}", serde_json::to_string_pretty(&out)?);
+    Ok(())
+}
+
+/// Build the same read-only, enveloped trust preview emitted by
+/// `trust --preview`.
+pub fn preview_value(base: &Path) -> Result<serde_json::Value> {
     let dir = crate::manifest::resolve_manifest_dir(base);
     // §7.2: ONE immutable read of the consent surface. The parsed display and
     // the digest below both derive from this snapshot, so an edit landing
@@ -154,9 +162,10 @@ fn preview(base: &Path) -> Result<()> {
     // they will at gateway time. Display strings are sanitized (hostile input).
     let library = crate::library::Library::load_default_or_warn();
     let lib_home = crate::util::paths::lib_home();
-    let servers: Vec<serde_json::Value> =
-        crate::resolve::effective_runtime_servers(m, &library, &lib_home, None)
-            .into_iter()
+    let effective_servers = crate::resolve::effective_runtime_servers(m, &library, &lib_home, None);
+    let mut server_blockers: Vec<serde_json::Value> = Vec::new();
+    let servers: Vec<serde_json::Value> = effective_servers
+            .iter()
             .map(|(name, resolved)| match resolved {
                 Ok(r) => {
                     // A library-backed definition resolves from the LIVE
@@ -170,12 +179,17 @@ fn preview(base: &Path) -> Result<()> {
                     let pinned_ok = match r.origin {
                         crate::resolve::ServerOrigin::Inline => true,
                         crate::resolve::ServerOrigin::Library => lock
-                            .get_server(&name)
+                            .get_server(name)
                             .is_some_and(|entry| entry.checksum.hex() == r.checksum),
                     };
                     if !pinned_ok {
+                        server_blockers.push(serde_json::json!({
+                            "name": crate::text::sanitize_line(name),
+                            "reason": "library definition does not match the lockfile pin",
+                            "fix": "agentstack lock",
+                        }));
                         return serde_json::json!({
-                            "name": crate::text::sanitize_line(&name),
+                            "name": crate::text::sanitize_line(name),
                             "kind": "unverified",
                             "target": "library definition does not match the lockfile pin — run `agentstack lock`, review the change, and re-run the preview",
                         });
@@ -196,18 +210,61 @@ fn preview(base: &Path) -> Result<()> {
                         }
                     };
                     serde_json::json!({
-                        "name": crate::text::sanitize_line(&name),
+                        "name": crate::text::sanitize_line(name),
                         "kind": kind,
                         "target": crate::text::sanitize_line(&target),
                     })
                 }
-                Err(e) => serde_json::json!({
-                    "name": crate::text::sanitize_line(&name),
-                    "kind": "unresolvable",
-                    "target": crate::text::sanitize_line(&e.to_string()),
-                }),
+                Err(e) => {
+                    server_blockers.push(serde_json::json!({
+                        "name": crate::text::sanitize_line(name),
+                        "reason": crate::text::sanitize_line(&e.to_string()),
+                        "fix": "edit-manifest",
+                    }));
+                    serde_json::json!({
+                        "name": crate::text::sanitize_line(name),
+                        "kind": "unresolvable",
+                        "target": crate::text::sanitize_line(&e.to_string()),
+                    })
+                }
             })
             .collect();
+
+    // The trust grant also verifies repository-local executable content. Carry
+    // server-specific failures in the machine preview so an external consent
+    // screen can disable a grant that is known to fail and point at the exact
+    // declaration. This is read-only and uses the same resolver/verdict path as
+    // the authoritative grant review below.
+    let executable_servers: Vec<(String, crate::manifest::Server)> = effective_servers
+        .iter()
+        .filter_map(|(name, resolved)| {
+            resolved
+                .as_ref()
+                .ok()
+                .map(|resolved| (name.clone(), resolved.server.clone()))
+        })
+        .collect();
+    for (name, status) in
+        crate::executable::executable_lock_statuses(&dir, &executable_servers, &lock)
+    {
+        match crate::verify::executable_verdict(&status) {
+            crate::verify::Verdict::Ok => {}
+            crate::verify::Verdict::Unpinned => {
+                server_blockers.push(serde_json::json!({
+                    "name": crate::text::sanitize_line(&name),
+                    "reason": "local executable content is not pinned yet",
+                    "fix": "agentstack lock",
+                }));
+            }
+            crate::verify::Verdict::Block(reason) => {
+                server_blockers.push(serde_json::json!({
+                    "name": crate::text::sanitize_line(&name),
+                    "reason": crate::text::sanitize_line(&reason),
+                    "fix": "edit-manifest",
+                }));
+            }
+        }
+    }
 
     let secrets: Vec<String> = m.referenced_secrets();
 
@@ -258,6 +315,7 @@ fn preview(base: &Path) -> Result<()> {
         "re_trust": re_trust,
         "surface_digest": surface_digest,
         "servers": servers,
+        "server_blockers": server_blockers,
         "secrets": secrets,
         "skills": skills,
         "workflows": workflows,
@@ -270,11 +328,7 @@ fn preview(base: &Path) -> Result<()> {
             "instructions": instructions.len(),
         },
     });
-    println!(
-        "{}",
-        serde_json::to_string_pretty(&crate::ui_contract::envelope(out))?
-    );
-    Ok(())
+    Ok(crate::ui_contract::envelope(out))
 }
 
 /// Resolve the project base to act on: walk up from the given path (or cwd) so
@@ -909,11 +963,21 @@ fn grant_gated(base: &Path, yes: bool, consented: Option<&str>, interactive: boo
             .iter()
             .map(|(name, why)| format!("  {name:width$}  {why}"))
             .collect();
+        let next = if blockers
+            .iter()
+            .all(|(_, why)| why.contains("agentstack lock"))
+        {
+            "Run `agentstack lock`, review the result, then `agentstack trust` again."
+        } else {
+            "Fix or remove the blocked declaration(s) above. Then run `agentstack lock` for \
+             anything marked unpinned and review again."
+        };
         anyhow::bail!(
-            "cannot trust {}: its loadable surface isn't fully pinned — {} item(s) need locking or review:\n{}\nRun `agentstack lock`, review the result, then `agentstack trust` again.",
+            "cannot trust {}: its loadable surface isn't fully pinned — {} item(s) need locking or review:\n{}\n{}",
             base.display(),
             blockers.len(),
-            lines.join("\n")
+            lines.join("\n"),
+            next
         );
     }
 

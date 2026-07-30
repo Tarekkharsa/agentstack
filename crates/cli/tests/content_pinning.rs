@@ -198,6 +198,60 @@ fn trust_preview_grants_nothing() {
     assert_eq!(trust::check(&proj), TrustState::Untrusted);
 }
 
+#[test]
+fn trust_preview_reports_an_executable_declaration_that_lock_cannot_fix() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n\n\
+         [servers.computer-use]\ntype = \"stdio\"\ncommand = \"./tool\"\ncwd = \".\"\n",
+    )
+    .unwrap();
+
+    let preview = trust_cmd::preview_value(&proj).unwrap();
+    let blockers = preview["server_blockers"].as_array().unwrap();
+
+    assert_eq!(blockers.len(), 1);
+    assert_eq!(blockers[0]["fix"], "edit-manifest");
+    assert!(blockers[0]["reason"]
+        .as_str()
+        .is_some_and(|reason| reason.contains("project root")));
+}
+
+#[test]
+fn trust_refusal_does_not_prescribe_lock_for_an_unlockable_declaration() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n\n\
+         [servers.computer-use]\ntype = \"stdio\"\ncommand = \"./tool\"\ncwd = \".\"\n",
+    )
+    .unwrap();
+
+    let err = trust_cmd::run(&grant_args(&proj)).unwrap_err().to_string();
+
+    assert!(err.contains("Fix or remove the blocked declaration"));
+    assert!(
+        !err.ends_with("Run `agentstack lock`, review the result, then `agentstack trust` again.")
+    );
+}
+
 /// A project declaring `[policy.tools]` gets that surfaced in the trust
 /// review — the human sees what the bundle REQUESTS on every policy
 /// dimension, not just servers/skills/instructions — and trust still grants

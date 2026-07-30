@@ -426,6 +426,11 @@ argv. Both run one authority path and produce the same consent digest."
     /// `agentstack lib trash --restore <id> --write`.
     #[command(name = "remove-from-library", hide = true)]
     RemoveFromLibrary(PanelRemoveFromLibraryArgs),
+
+    /// Remove a skill or server from this project's manifest (panel action;
+    /// digest-bound), then re-lock and re-render.
+    #[command(name = "remove-capability", hide = true)]
+    RemoveCapability(PanelRemoveCapabilityArgs),
 }
 
 /// The `toolset` group: the human-named entry point to the toolset verbs.
@@ -1965,6 +1970,25 @@ pub struct PanelRemoveFromLibraryArgs {
     pub consent: PanelConsent,
 }
 
+/// `remove-capability` — delete one project-owned server or skill definition.
+///
+/// Unlike [`PanelRemoveFromLibraryArgs`], this is project-scoped: the central
+/// library is untouched. The definition and every toolset membership disappear
+/// together, then AgentStack re-locks and re-renders the resulting manifest.
+#[derive(Args, Debug)]
+pub struct PanelRemoveCapabilityArgs {
+    /// Which manifest collection the name lives in.
+    #[arg(long, value_enum)]
+    pub kind: PanelLibraryKind,
+
+    /// The project-owned capability name to remove.
+    #[arg(long)]
+    pub name: String,
+
+    #[command(flatten)]
+    pub consent: PanelConsent,
+}
+
 #[derive(Args, Debug)]
 pub struct ExplainArgs {
     /// Name of a server or skill in the manifest.
@@ -2612,6 +2636,7 @@ pub fn full_command_inventory() -> String {
         "use-profile",
         "library-index",
         "remove-from-library",
+        "remove-capability",
     ];
 
     fn push(out: &mut String, cmd: &clap::Command, indent: usize, panel: bool) {

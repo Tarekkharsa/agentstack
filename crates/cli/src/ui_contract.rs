@@ -24,6 +24,9 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   `surface_digest`.
 /// - `trust-consent`: `trust --yes --consented-digest <digest>` grants bound
 ///   to the previewed bytes and refuses stale or missing digests.
+/// - `trust-server-blockers-v1`: `trust --preview` carries server-resolution
+///   and local-executable blockers with the safe next step, so an external UI
+///   can disable a grant already known to fail.
 /// - `status-v1`: `doctor --json` carries `state` + `next_action`.
 /// - `profiles-v1`: `use --list --json` lists profiles with readiness.
 /// - `diff-v1`: `diff --json` reports drift per target.
@@ -86,6 +89,11 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   separate name from `profiles-edit-v1` because a binary advertising that
 ///   contract legitimately predates removal — a panel offering a Remove button
 ///   on the older name would offer a button the CLI cannot honor.
+/// - `manifest-remove-v1`: `remove-capability --kind skill|server --name <n>`
+///   removes one project-owned definition and every toolset membership that
+///   names it under a consent digest, then re-locks and re-renders. It never
+///   touches the machine-wide library and refuses when multiple toolsets make
+///   the render selection ambiguous.
 /// - `workflow-observe-v1`: `workflow list --json` surfaces every declared
 ///   `[workflows.*]` entry with its per-entry trust + lock state (project-scoped
 ///   reads), and `workflow runs --json` lists recorded run history. Unlike the
@@ -158,6 +166,8 @@ pub const FEATURES: &[&str] = &[
     "toolset-rename-v1",
     "toolset-delete-v1",
     "library-remove-v1",
+    "manifest-remove-v1",
+    "trust-server-blockers-v1",
     "workflow-observe-v1",
     "workflow-serial-roles-v1",
     "doctor-advisories-v1",

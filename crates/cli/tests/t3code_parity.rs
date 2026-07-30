@@ -26,8 +26,9 @@ use std::sync::Mutex;
 use anyhow::Result;
 use clap::FromArgMatches;
 
-use agentstack::cli::{Cli, Command, WorkflowCmd};
+use agentstack::cli::{ApplyArgs, Cli, Command, WorkflowCmd};
 use agentstack::commands;
+use agentstack::scope::Scope;
 
 // These tests mutate the process-global HOME/AGENTSTACK_HOME; serialize them
 // (also against other test binaries via the same env-var convention).
@@ -52,6 +53,7 @@ fn dispatch(argv: &[&str]) -> Result<()> {
         Command::UseProfile(a) => commands::panel_edit::use_profile(&a, dir),
         Command::LibraryIndex => commands::panel_edit::library_index(dir),
         Command::RemoveFromLibrary(a) => commands::panel_edit::remove_from_library(&a, dir),
+        Command::RemoveCapability(a) => commands::panel_edit::remove_capability(&a, dir),
         // workflow-observe-v1: the two read-only observation verbs t3code emits
         // as fixed argv. They print the enveloped body; the JSON-shape witness
         // asserts on `list_value`/`runs_value` directly (below), while these
@@ -341,6 +343,91 @@ fn panel_create_profile_relocks_and_does_not_render() {
     // The library-index read arm routes too — a fresh read against the same
     // project (pins the LibraryIndex dispatch arm end-to-end).
     dispatch(&["agentstack", "--manifest-dir", proj_root, "library-index"]).unwrap();
+
+    std::env::remove_var("HOME");
+    std::env::remove_var("AGENTSTACK_HOME");
+}
+
+#[test]
+fn panel_remove_capability_updates_manifest_and_rendered_config() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n\
+         [targets]\ndefault = [\"claude-code\"]\n\
+         [servers.keep]\ntype = \"http\"\nurl = \"https://keep.example/mcp\"\n\
+         [servers.remove-me]\ntype = \"http\"\nurl = \"https://remove.example/mcp\"\n",
+    )
+    .unwrap();
+    let proj_root = proj.to_str().unwrap();
+
+    commands::apply::run(
+        &ApplyArgs {
+            targets: vec![],
+            profile: None,
+            dry_run: false,
+            write: true,
+            scope: Some(Scope::Project),
+            allow_unresolved: false,
+            prune_foreign: false,
+            no_gitignore: true,
+            verbose: false,
+        },
+        Some(&proj),
+    )
+    .unwrap();
+    let rendered_before = fs::read_to_string(proj.join(".mcp.json")).unwrap();
+    assert!(rendered_before.contains("remove-me"));
+
+    let preview_argv = [
+        "agentstack",
+        "--manifest-dir",
+        proj_root,
+        "remove-capability",
+        "--kind",
+        "server",
+        "--name",
+        "remove-me",
+        "--preview",
+    ];
+    let digest = match command_of(&preview_argv) {
+        Command::RemoveCapability(args) => {
+            commands::panel_edit::remove_capability_preview(&args, Some(&proj)).unwrap()
+                ["consent_digest"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        }
+        _ => panic!("argv names remove-capability"),
+    };
+    dispatch(&[
+        "agentstack",
+        "--manifest-dir",
+        proj_root,
+        "remove-capability",
+        "--kind",
+        "server",
+        "--name",
+        "remove-me",
+        "--yes",
+        "--consented",
+        &digest,
+    ])
+    .unwrap();
+
+    let manifest = fs::read_to_string(proj.join("agentstack.toml")).unwrap();
+    assert!(!manifest.contains("[servers.remove-me]"));
+    let rendered_after = fs::read_to_string(proj.join(".mcp.json")).unwrap();
+    assert!(!rendered_after.contains("remove-me"));
+    assert!(rendered_after.contains("keep"));
 
     std::env::remove_var("HOME");
     std::env::remove_var("AGENTSTACK_HOME");
