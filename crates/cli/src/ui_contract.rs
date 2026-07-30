@@ -110,6 +110,14 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   name would make it over-promise, and a UI reading `serial_roles` on the
 ///   strength of `workflow-observe-v1` would be sniffing a field — the exact
 ///   thing these names exist to replace.
+/// - `doctor-mode-v1`: `doctor --json` carries top-level `mode` (`static` /
+///   `clean-at-rest` / `zero-files`) and `activation` (`locked` /
+///   `never_activated`) — the two facts `agentstack status` prints, from the
+///   same derivation. Both are null when doctor ran with no project. A UI
+///   needs the name because the absence of the keys is indistinguishable from
+///   "no project" on an older binary, and guessing a mode mislabels whether
+///   the user's files should be on disk at all: every panel surface that names
+///   a rendered path is making a claim only `static` makes true.
 /// - `doctor-advisories-v1`: `doctor --json` carries a top-level `advisories`
 ///   count, and section lines can carry `level: "advisory"` — findings that are
 ///   true and worth stating but are NOT something this project must repair, so
@@ -171,6 +179,7 @@ pub const FEATURES: &[&str] = &[
     "workflow-observe-v1",
     "workflow-serial-roles-v1",
     "doctor-advisories-v1",
+    "doctor-mode-v1",
     "doctor-probe-v1",
     "json-reads-v1",
 ];
@@ -234,6 +243,7 @@ mod tests {
             "workflow-observe-v1",
             "workflow-serial-roles-v1",
             "doctor-advisories-v1",
+            "doctor-mode-v1",
         ] {
             assert!(
                 features.contains(&shipped),

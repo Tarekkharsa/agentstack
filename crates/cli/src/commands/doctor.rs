@@ -62,6 +62,22 @@ struct Report {
     /// JSON omits the key entirely: a consumer can tell "not probed" from
     /// "probed, and there was nothing to probe" (`ran: true`, empty list).
     probe: Option<ProbeResults>,
+    /// This project's delivery mode (`static` / `clean-at-rest` /
+    /// `zero-files`) and whether it has ever been activated — the same two
+    /// facts `agentstack status` prints, from the same derivation.
+    ///
+    /// A UI that shows an on-disk path is making a claim only `static` makes
+    /// true: clean-at-rest removes those files between sessions and zero-files
+    /// never writes them, so without this a panel tells the user to go look
+    /// for something that is not there. `None` when doctor ran with no
+    /// project, where there is no mode to report and guessing one would
+    /// mislabel whether the user's files should exist.
+    mode: Option<&'static str>,
+    /// `locked` / `never_activated`. Kept apart from `mode`: "never activated"
+    /// explains an absent lockfile and absent configs whichever mode the
+    /// manifest asks for, and folding the two would report a mode's normal
+    /// state as a fault.
+    activation: Option<&'static str>,
 }
 
 /// The `--probe` outcome as a whole, so the JSON can distinguish a probe that
@@ -91,6 +107,8 @@ impl Report {
             errors: 0,
             warnings: 0,
             advisories: 0,
+            mode: None,
+            activation: None,
             sections: Vec::new(),
             trust: None,
             probe: None,
@@ -291,6 +309,9 @@ impl Report {
             // status chip (see `state`).
             "advisories": self.advisories,
             "trust": self.trust,
+            // `doctor-mode-v1`. Absent (null) with no project — see the field.
+            "mode": self.mode,
+            "activation": self.activation,
             // Per-server startup results (see `doctor-probe-v1`); null unless
             // `--probe` ran.
             "probe": self.probe_json(),
@@ -325,6 +346,11 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
                 "errors": 0,
                 "warnings": 0,
                 "trust": serde_json::Value::Null,
+                // Present and null, not absent: `doctor-mode-v1` promises the
+                // keys, and a consumer should not have to treat "missing on a
+                // binary that advertises the name" as a third case.
+                "mode": serde_json::Value::Null,
+                "activation": serde_json::Value::Null,
                 "probe": serde_json::Value::Null,
                 "sections": [],
             }));
@@ -650,6 +676,23 @@ fn run_checks(
         crate::trust::TrustState::Changed => "drifted",
         crate::trust::TrustState::Untrusted => "untrusted",
     });
+    // `doctor-mode-v1`: the same two facts `agentstack status` prints, from the
+    // same derivation — every signal it needs is already in hand here (the
+    // gateway count just above, the trust state just read, the lockfile, and
+    // the write ledger). Computed rather than re-checked so the two surfaces
+    // cannot drift into disagreeing about what mode a project is in.
+    let locked = crate::lock::Lock::path(&ctx.dir).exists();
+    report.mode = Some(
+        crate::commands::overview::mode_from_signals(
+            crate::commands::overview::has_rendered_artifacts(&ctx, &target_ids),
+            connected > 0,
+            matches!(trust_state, crate::trust::TrustState::Trusted),
+            locked,
+        )
+        .label(),
+    );
+    report.activation = Some(if locked { "locked" } else { "never_activated" });
+
     match trust_state {
         crate::trust::TrustState::Trusted => {
             report.line(Level::Ok, "this project is trusted for auto mode")
