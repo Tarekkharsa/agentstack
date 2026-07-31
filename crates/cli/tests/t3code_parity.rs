@@ -452,6 +452,13 @@ fn set_mode_switch_unrenders_rerenders_and_fails_closed() {
     fs::create_dir_all(&home).unwrap();
     std::env::set_var("HOME", &home);
     std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
+    // The `detected >= 1` assertion below says "the temp-HOME claude.json is
+    // detected" — so write one. Without it the assertion was really testing
+    // whether the MACHINE running the suite happens to have an agent CLI on
+    // `$PATH`: green on a developer laptop, red on a bare runner. (It had never
+    // failed CI because a `--fail-fast` abort earlier in the run meant this
+    // test was among the 464 that never got to run.)
+    fs::write(home.join(".claude.json"), "{}\n").unwrap();
 
     let proj = tmp.path().join("proj");
     // A git repo, so the managed .gitignore block is written (it is skipped in
