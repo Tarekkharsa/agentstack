@@ -909,15 +909,23 @@ fn run_checks(
         );
     }
     for c in &dropped.collisions {
+        // Same refusal the intake notice gives, and it must name the same
+        // thing: `status` is where a user most often meets a collision, so a
+        // renderer that stopped at "already declared" here would undo the
+        // point of the collision card for the surface that shows it most.
         report.line(
             Level::Warn,
             format!(
-                "{} '{}' in {} is not adopted — that name is already declared \u{21b3} rename the file or remove the existing entry",
+                "{} '{}' in {} is not adopted — declared as {} \u{21b3} rename the file or remove the existing entry",
                 c.kind.noun(),
-                c.name,
-                c.rel_path,
+                crate::text::sanitize_line(&c.name),
+                crate::text::sanitize_line(&c.rel_path),
+                crate::text::sanitize_line(&c.declared_as),
             ),
         );
+        for line in &c.diff {
+            report.line(Level::Warn, format!("  {line}"));
+        }
     }
     if dropped.is_empty() {
         // Nothing waiting: true, but not something this project must act on,
