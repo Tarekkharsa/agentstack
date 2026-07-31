@@ -7,6 +7,11 @@
 > how the results map onto the Stage 1 gate in `TODO.md`. The study is the
 > one planned activity that can falsify the product thesis rather than
 > confirm it — run it before adding features.
+>
+> **P0.1 (2026-07-31):** strategy-v2 instrumentation added — the observation
+> prompts at the end of §5 and the metric baselines in §9. Both are additive
+> observation; the protocol steps, task script, metrics sheet, results
+> template, and the Stage 1 pass condition are unchanged.
 
 ## 1. Participant criteria
 
@@ -101,6 +106,28 @@ they *find* the commands is the study.
      didn't understand why?" (gate: they understood every block and knew a
      safe next action)
 
+### v2 observation prompts (Phase 0 — observe, never coach)
+
+Two more things to watch for while running the protocol above. They add
+observation only: no new tasks, no changes to the task script, no coaching, and
+no new gate. The two gate questions stay exactly two — the follow-up below is
+asked after them and feeds no gate metric. Nothing recorded here changes the §7
+pass condition.
+
+1. **The drop-a-file reach.** Watch for the moment the tester behaves as if
+   placing a file is enough — writing, pasting, or copying a skill,
+   instruction, or config file into the project and expecting it to be live —
+   and then stalls because it is not. Record the exact moment (timestamp and
+   what they had just done), the exact path of the file they created or edited,
+   and what they said, verbatim. Do not tell them whether it works. If they
+   never reach for it, write "not observed"; never steer them toward it.
+2. **What their yes granted.** After the two questions above, ask once: "Earlier
+   you approved this project — in your own words, what did that approve?" Write
+   the answer down verbatim, word for word, then stop: no correcting, no
+   confirming, no filling in gaps, no second attempt. It is scored later against
+   what the review actually showed (§9, review comprehension). If no review
+   appeared in their session, write "no review shown".
+
 ## 6. Metrics sheet (one per participant)
 
 ```text
@@ -161,3 +188,67 @@ the positional name, jargon in the no-such-toolset error and lock summary,
 and a stale hand-edit-the-TOML undo hint. Expected remaining friction to
 watch for: the trust re-review warning after `toolset create` re-locks (the
 intended gate — the cue is one command), and the Codex project-trust note.
+
+## 9. North-star metric baselines (strategy v2, Phase 0)
+
+`STRATEGY.md` names four north-star metrics; Phase 0 is where they get their
+first numbers. Nothing here adds a tester-visible step. Every value is read off
+the §4 task script and the §5 protocol exactly as they already run. A metric a
+session does not naturally produce is recorded as **not observed** — never
+staged, prompted for, or re-run to manufacture a number. These values are a
+baseline, not a gate: the §7 pass condition ignores them.
+
+Keep one addendum sheet per participant alongside the §6 metrics sheet:
+
+```text
+Participant #___   (v2 baselines — addendum; does not feed the §7 gate)
+
+  TTLC                    t = ____  / not observed
+    content in place at ____ · live in CLI 1 at ____ · live in CLI 2 at ____
+  concepts-before-value   count = ____   nouns: ____________________________
+  review comprehension    correct / partial / wrong / no review shown
+    restatement (verbatim): ___________________________________________
+  recovery time           t = ____  / no recovery occurred
+    trigger: ____________________________   working again at ____
+```
+
+**TTLC — time to live capability.** Wall-clock from the moment the tester
+finishes putting a capability's content in place to the moment that capability
+is live in two CLIs. Measure it only when a session naturally includes authoring
+— they write or paste a skill, instruction, or server of their own. Start the
+clock when they save the file (or add the entry); stop when they have seen it
+working in the second CLI. Import-and-switch sessions produce no TTLC: record
+**not observed**. Never ask a tester to author something to produce this number.
+
+**Concepts-before-value.** Count the distinct mechanism nouns the tester read on
+screen, or was shown, before their first successful outcome — first clean
+status, the §6 "time to clean doctor" milestone. Count from this closed list:
+manifest, lock, trust, digest, gateway, policy. Count each noun once, the first
+time it appears in output they actually read or on a doc page they opened; do
+not count nouns they typed themselves or found by reading the source. Record
+both the count and which nouns.
+
+**Review comprehension.** Take the verbatim restatement from §5's second v2
+prompt and score it after the session against what the review actually showed:
+
+- **correct** — they name what was approved and its scope (this project, this
+  pinned content), and grant nothing the review did not.
+- **partial** — directionally right but missing the scope, or vague ("it let
+  the tools run").
+- **wrong** — they name something the review did not grant, or cannot say.
+
+Score once, from the written record, never in the room.
+
+**Recovery time.** Wall-clock from the tester's first signal that something is
+wrong — an error they react to, a "wait, that's not right", an undo attempt —
+to a state they themselves call working again. Take whatever recovery the
+session produces naturally, including the §4 undo step when it follows a real
+mistake. If nothing went wrong, record **no recovery occurred**; never break
+something to create one.
+
+**Privacy.** All four are opt-in observation inside the consented session of §3
+— hand-written notes and timestamps, nothing else. No telemetry, no
+instrumentation of the participant's machine, no collection outside the session,
+and the same deletion terms §3 already promises. The F19 constraint applies
+unchanged: these baselines exist only through opt-in studies until F19's
+privacy-preserving measurement design is approved.
