@@ -19,6 +19,7 @@ of the boundaries below.
 |---|---|---|
 | [`launch-plan.md`](launch-plan.md) | What the completed 2026-07 t3code/workflow prototype built, and why its former launch headline was superseded | Closed implementation record; current launch gate is `TODO.md` |
 | [`ui-control-plane.md`](ui-control-plane.md) | How t3code drives AgentStack — the fixed argv actions, the versioned JSON reads, and why the frontend is never an enforcement boundary | Active |
+| [`panel-wireframe.md`](panel-wireframe.md) | The popover's daily shape: one card + footer, inline toolset switch, and the three-click mode change with its real plan | Active; awaiting §1.6 study evidence |
 | [`workflows-capability.md`](workflows-capability.md) | What a workflow is allowed to be: authoring, authority, and evidence boundaries for the experimental capability kind | Active contract, experimental capability |
 | [`workflow-scaling.md`](workflow-scaling.md) | How governed workflows scale without relaxing the capability contract | Active; Phases 0–1 landed |
 | [`tools-execute-threat-model.md`](tools-execute-threat-model.md) | What `tools_execute` is and is not defended against | Experimental; [`ENFORCEMENT.md`](../ENFORCEMENT.md#experimental-tools_execute) is authoritative |

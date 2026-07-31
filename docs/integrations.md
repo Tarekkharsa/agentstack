@@ -48,6 +48,9 @@ inference), and the panel degrades to its older wording where they are absent:
 | Startup test — actually start the servers | `doctor-probe-v1` | yes |
 | Status — typed delivery mode + activation | `doctor-mode-v1` | no — next release |
 | Drift review — first render vs moved-ahead | `diff-existence-v1` | no — next release |
+| Gitignore opt-out (durable, previewed) | `gitignore-opt-out-v1` | no — next release |
+| Delivery-mode switch (footer word → plan → confirm) | `set-mode-v1` | no — next release |
+| Footer CLI count / live-delivery coverage | `doctor-cli-coverage-v1` | no — next release |
 
 One name in `FEATURES` is deliberately absent from this table.
 `json-reads-v1` names the `--json` form of `status`, `search`, `adapters list`
