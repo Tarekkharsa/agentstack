@@ -66,7 +66,8 @@ The adopted [`STRATEGY.md`](STRATEGY.md) (v2, 2026-07-31) opened with Phase 0
 amendment in `STRATEGY.md`, Phases 1–4 now build in order on maintainer
 acceptance; the activation study is the **v0.18.0 release gate** — the
 release does not publish until the study passes against the completed v2
-journey. Current work: Phase 1, the funnel.
+journey. Current work: **Phase 2, the review card** — Phase 1 is complete
+(block below).
 
 - [x] **P0.1 — study instrumentation.** Add the v2 observation prompts to the
   §1.6 protocol (where does a tester reach for "drop a file" and stall; can
@@ -78,9 +79,11 @@ journey. Current work: Phase 1, the funnel.
 - [ ] **P0.2 — trust-store mutation recording.** Grants, re-grants, and
   revocations become recorder events (the planned mitigation already named in
   `docs/ENFORCEMENT.md`). Adds events, never gates. Touches the trust seam:
-  supervised, line-by-line review per `CLAUDE.md`. (2026-07-31: implemented
-  with witness tests on branch `p0/trust-recording`, unmerged — awaiting the
-  line-by-line review this item requires.)
+  supervised, line-by-line review per `CLAUDE.md`. (2026-07-31: merged to
+  main — `crates/trust/src/lib.rs` `record_mutation` appends to
+  `~/.agentstack/audit/trust.jsonl` inside the store lock, after the store
+  write succeeds. Phase 1's provenance clock and its event-parity witness
+  both read this log, so it is now load-bearing, not just observational.)
 - [x] **P0.3 — structural lint.** Every policy dimension keeps its
   `ENFORCEMENT.md` row; every capability kind has manifest table + lock
   pinning + doctor probe + witness test + an explicit honest enforcement
@@ -99,6 +102,49 @@ journey. Current work: Phase 1, the funnel.
   pages that have a `.md` twin plus the three oversized hand-authored ones,
   so twinless pages stay editable. Ladder and `#install`/`#start` anchors
   byte-identical.)
+
+### Strategy v2 — Phase 1 (The funnel) — COMPLETE 2026-07-31
+
+Dropping a file into the project is now a supported, first-class way to author
+a capability, and for content you demonstrably wrote yourself it ends in one
+confirmation. Two slices, each merged on green witnesses.
+
+- [x] **P1.A — intake detection, provenance, and the offer** (`f5d68ea`).
+  Undeclared content in `.agentstack/skills/`/`.agentstack/instructions/` is
+  noticed at command time by `status`, `doctor`, `use`, `lock`, and `adopt`,
+  and offered with a preview; `adopt` writes the declaration through the same
+  format-preserving insertion path `add` uses, with `--to-library` for
+  cross-project reuse. Provenance: inside a git work tree tracking decides;
+  outside one, the clock is the last recorded grant in `trust.jsonl` (P0.2).
+  Adversarial review of the diff found four real defects, all fixed with
+  witnesses before merge — git rewriting mtime on checkout promoted pulled
+  content to "your own work"; a symlinked `SKILL.md` was followed; a
+  same-named drop could replace a pinned git/library declaration behind a
+  preview that called it an addition; an adopted skill joined no toolset.
+- [x] **P1.B — single-action activation** (`b1bd459`). `agentstack yes`
+  performs declare → lock → trust → render behind one review and one
+  confirmation, through the same functions and the same `grant_gated` gate
+  the explicit path uses. Witnesses: event parity with the explicit sequence
+  (same actions, order, and digests); declining leaves the project
+  byte-identical with no recorded event and nothing materialized; content
+  failing provenance or colliding on name is structurally absent from the
+  compressed path; one yes delivers skills *and* instruction fragments. Also
+  closed the symlinked-ancestor gap slice A left open.
+
+Scope held: servers still require declaration, hooks and extensions are
+excluded entirely, and **re-gates of changed content are not compressed** —
+they stay explicit until Phase 2's diff card exists.
+
+Carried into Phase 2, written down rather than acted on:
+
+- **The collision case wants the diff card.** Today a dropped file whose name
+  is already declared is refused with an explanation. "This name is declared
+  as `git@abc123`; the drop would replace it with repo bytes" is exactly the
+  review-card shape, and is the right home for it.
+- **Phase 1's gate is now countable.** "Zero consent-surprise incidents over
+  the recorded trust-mutation events" is what the decline witness protects:
+  every path that could leave a change the user did not agree to has to keep
+  failing that test.
 
 ## Open review findings — what two product reviews left standing
 
