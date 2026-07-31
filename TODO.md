@@ -88,14 +88,16 @@ failed study stops the v2 plan, not just this block.
   honestly-baselined gaps live in `tools/check-structure-baseline.txt` —
   shrinking that file is follow-on work, settings and the hooks lock pin
   being the substantive entries.)
-- [~] **P0.4 — files-you-create-first docs restructure.** First-contact pages
+- [x] **P0.4 — files-you-create-first docs restructure.** First-contact pages
   lead with the tree the user touches; mechanism nouns move to the moment
   they become relevant. Six-rung ladder unchanged. (2026-07-31: README.md and
-  `docs/concepts.md` restructured, ladder intact. REMAINDER: `docs/start.html`,
-  `docs/index.html`, and `docs/tutorial/` are hand-authored HTML with no `.md`
-  source and are read-denied by `.claude/settings.json` — finishing this item
-  needs either an exception for those hand-written pages or their migration to
-  `.md` sources, which is F09's "one content source" work.)
+  `docs/concepts.md` first, then `docs/start.html`, `docs/index.html` and
+  `docs/tutorial/` — each now shows the `.agentstack/` tree `init` leaves
+  before naming the manifest. The read-deny blocking those three was the
+  wildcard `Read(docs/*.html)`; it is now an explicit list of exactly the
+  pages that have a `.md` twin plus the three oversized hand-authored ones,
+  so twinless pages stay editable. Ladder and `#install`/`#start` anchors
+  byte-identical.)
 
 ## Open review findings — what two product reviews left standing
 

@@ -309,14 +309,10 @@ pre.cmd .c { color: var(--term-muted); }
         <li id="s-import">
           <h2>Import what's already there</h2>
           <p class="muted">
-            <code>agentstack init</code> runs the guided first setup: it opens with a
-            plan (nothing is written until you confirm), detects your installed CLIs,
-            imports their MCP config into one portable
-            <a href="concepts.html">manifest</a>, lifts inline tokens to
-            <code>${REF}</code> references, and asks where those values should live
-            (default: a gitignored <code>.env</code>). Press Enter at every prompt
-            and you get the defaults this page follows. By hand, that flow is
-            <code>init</code> → <code>apply --write</code>.
+            <code>agentstack init</code> is the guided first setup. It opens with a
+            plan and writes nothing until you confirm it, then finds the agent CLIs
+            already on this machine and collects their setup into one place. Press
+            Enter at every prompt and you get the defaults this page follows.
           </p>
           <pre class="cmd">agentstack init</pre>
           <p class="expect">You should see</p>
@@ -366,6 +362,23 @@ pre.cmd .c { color: var(--term-muted); }
 <span class="c">  zero-files — nothing on disk — served live to your CLIs after review</span></code></pre>
           </div>
 
+          <p class="expect">What it left behind</p>
+          <p class="muted">
+            Plain files in your project, which you can open, read, and commit:
+          </p>
+          <pre class="cmd">your-project/
+├── .agentstack/
+│   ├── agentstack.toml   <span class="c"># everything your tools may run: servers, skills, instructions</span>
+│   └── .env              <span class="c"># token values lifted out of your configs (only when init found any)</span>
+└── .gitignore            <span class="c"># one managed line, so that .env is never committed</span></pre>
+          <p class="muted">
+            <code>.agentstack/agentstack.toml</code> is the one file you edit from
+            now on. It is called the <a href="concepts.html">manifest</a>, and every
+            CLI-specific file agentstack writes is rendered from it — that is the
+            next step. It holds <code>${GITHUB_TOKEN}</code>-style placeholders,
+            never the token values themselves: those went to the gitignored
+            <code>.env</code> you just chose.
+          </p>
           <p class="muted">
             Press Enter for <strong>static</strong> — config files on disk, kept out
             of git. It is the right default for a first project and the one this page

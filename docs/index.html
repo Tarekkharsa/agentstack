@@ -99,7 +99,7 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
       <div style="min-width:0">
         <span class="tag tag-accent-2">open source · Rust · 13 CLI adapters · MIT / Apache-2.0</span>
         <h1 style="font-family:var(--font-heading);font-weight:400;font-size:3.4rem;line-height:1.08;margin:var(--space-4) 0 var(--space-4)">One agent setup. Every coding CLI.</h1>
-        <p style="font-size:1.15rem;line-height:1.65;color:var(--color-neutral-700);margin:0 0 var(--space-5)">Import the MCP servers, skills and instructions you already use. AgentStack keeps them in one portable manifest, renders each CLI's native format, switches toolsets by project or task, and makes every change understandable and recoverable.</p>
+        <p style="font-size:1.15rem;line-height:1.65;color:var(--color-neutral-700);margin:0 0 var(--space-5)">AgentStack collects the MCP servers, skills and instructions you already use into one <code style="font-size:0.92em">.agentstack/</code> directory in your project, then renders them back as native configuration for every supported CLI. Named toolsets switch by project or task, and every change stays understandable and recoverable.</p>
         <div class="hero-cmd">
           <div class="row"><span style="color:var(--term-warn);user-select:none">$</span><span style="color:var(--term-text);flex:1">curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh</span></div>
           <div class="row"><span style="color:var(--term-warn);user-select:none">$</span><span style="color:var(--term-text);flex:1">agentstack init</span></div>
@@ -221,6 +221,13 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
         <div style="display:flex;gap:14px;white-space:nowrap"><span style="color:var(--term-warn);user-select:none">$</span><span style="color:var(--term-text);flex:1">agentstack init</span><span style="color:var(--term-muted)"># guided wizard: your CLI configs → one manifest</span></div>
         <div style="display:flex;gap:14px;white-space:nowrap"><span style="color:var(--term-warn);user-select:none">$</span><span style="color:var(--term-text);flex:1">agentstack doctor</span><span style="color:var(--term-muted)"># health + drift; every warning names its fix</span></div>
       </div>
+      <p style="font-size:0.9rem;color:var(--color-neutral-700);margin:var(--space-4) 0 var(--space-2)">Here is what that leaves in your project — plain files you can open, read and commit:</p>
+      <div style="background:var(--term-bg);border-radius:var(--radius-md);padding:16px 24px;font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;font-size:0.82rem;line-height:1.9;overflow-x:auto;color:var(--term-text)"><div style="white-space:pre">your-project/
+├── .agentstack/
+│   ├── agentstack.toml   <span style="color:var(--term-muted)"># everything your tools may run: servers, skills, instructions</span>
+│   └── .env              <span style="color:var(--term-muted)"># token values lifted out of your configs (only when init found any)</span>
+└── .gitignore            <span style="color:var(--term-muted)"># one managed line, so that .env is never committed</span></div></div>
+      <p style="font-size:0.9rem;color:var(--color-neutral-700);margin:var(--space-3) 0 0"><code>.agentstack/agentstack.toml</code> is the one file you edit from now on — the <a href="concepts.html">manifest</a>. Every CLI-specific file AgentStack writes is rendered from it, and can be regenerated or taken back off at any time. It holds <code>${GITHUB_TOKEN}</code>-style placeholders, never the token values.</p>
       <p style="font-size:0.9rem;color:var(--color-neutral-700);margin:var(--space-3) 0 0">That is the run replayed at the top of this page. Reproduce it fenced with <a href="https://github.com/Tarekkharsa/agentstack/blob/main/examples/first-value-demo/run-demo.sh"><code>examples/first-value-demo/run-demo.sh</code></a> — it asserts every step, so the recording stays accurate.</p>
     </div>
   </div>

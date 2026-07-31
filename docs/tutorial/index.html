@@ -147,7 +147,7 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
   <section class="lesson-pane" id="lesson-0">
     <div class="kicker">LESSON 1 · WELCOME</div>
     <h1 class="lesson" style="font-size:33px">One agent setup. Every coding CLI.</h1>
-    <p class="lede" style="font-size:15.5px;margin-bottom:22px">Your AI coding tools — Claude Code, Codex, Cursor — each spell the same setup differently: the same MCP servers, skills, and instructions copied into incompatible files that drift apart. AgentStack imports what you already have into <strong>one portable manifest</strong> and renders every CLI's native format from it — switch by task, diagnose drift, undo any change. There's a quieter problem underneath: adopting repo-supplied agent config is <code>npm install</code> with an agent attached — no lockfile, no review gate. The same manifest is where that gets fixed, one lesson at a time.</p>
+    <p class="lede" style="font-size:15.5px;margin-bottom:22px">Your AI coding tools — Claude Code, Codex, Cursor — each spell the same setup differently: the same MCP servers, skills, and instructions copied into incompatible files that drift apart. AgentStack imports what you already have into <strong>one <code>.agentstack/</code> directory in your project</strong> and renders every CLI's native format from it — switch by task, diagnose drift, undo any change. There's a quieter problem underneath: adopting repo-supplied agent config is <code>npm install</code> with an agent attached — no lockfile, no review gate. The same manifest is where that gets fixed, one lesson at a time.</p>
     <div style="background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md,16px);padding:22px 24px;margin-bottom:22px">
       <div class="mono" style="font-size:11px;font-weight:600;letter-spacing:0.12em;color:var(--muted);margin-bottom:16px">THE FOUR GAPS AGENTSTACK CLOSES</div>
       <div class="grid2" style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
@@ -199,11 +199,17 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
 
   <section class="lesson-pane" id="lesson-2" hidden>
     <div class="kicker">LESSON 3 · RUNG 1 — UNIFY</div>
-    <h1 class="lesson">One manifest for every CLI</h1>
-    <p class="lede"><code>agentstack init</code> scans your machine, imports the MCP servers your CLIs already have, and writes <strong>one reviewed manifest</strong>: <code>.agentstack/agentstack.toml</code>. Then <code>apply --write</code> renders it back into every CLI's native config. Edit once, applied everywhere.</p>
-    <div class="callout" style="margin-bottom:18px"><strong>Secrets get lifted, not stored.</strong> Any inline token found in an imported config becomes a <code class="sm">${REF}</code> placeholder. The real value goes to a gitignored <code class="sm">.env</code> or the OS keychain — the manifest itself never holds a secret value.</div>
+    <h1 class="lesson">One directory your CLIs all read from</h1>
+    <p class="lede"><code>agentstack init</code> scans your machine, imports the MCP servers your CLIs already have, and collects them into one directory in your project: <code>.agentstack/</code>. Then <code>apply --write</code> renders that back into every CLI's native config. Edit once, applied everywhere.</p>
     <div class="hint" style="margin-bottom:10px">▶ Run each command in order — this is a simulation, nothing touches your machine.</div>
     <div class="term" style="margin-bottom:8px" data-term="unify" data-title="your-project — zsh"></div>
+    <div class="termout" style="margin-bottom:14px"><div style="color:var(--term-text);white-space:pre">your-project/
+├── .agentstack/
+│   ├── agentstack.toml   <span style="color:var(--muted)"># everything your tools may run: servers, skills, instructions</span>
+│   └── .env              <span style="color:var(--muted)"># token values lifted out of your configs (only when init found any)</span>
+└── .gitignore            <span style="color:var(--muted)"># one managed line, so that .env is never committed</span></div></div>
+    <div style="font-size:13.5px;color:var(--body);line-height:1.65;margin-bottom:14px"><code class="sm">.agentstack/agentstack.toml</code> is the one file you edit from now on. It is called the <strong>manifest</strong>, and every CLI-specific file AgentStack writes is rendered from it.</div>
+    <div class="callout" style="margin-bottom:18px"><strong>Secrets get lifted, not stored.</strong> Any inline token found in an imported config becomes a <code class="sm">${REF}</code> placeholder. The real value goes to that gitignored <code class="sm">.env</code> or the OS keychain — the manifest itself never holds a secret value.</div>
     <div style="font-size:13px;color:var(--muted);line-height:1.6;margin-bottom:22px">Scripting or CI? <code class="sm">init --secrets skip</code> writes only the manifest — no prompts, no token values.</div>
 
     <h2 class="lesson">Walk the wizard yourself</h2>
