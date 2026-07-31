@@ -13,6 +13,16 @@
 # maintainer sign-off: a new entry here is a real regression in what the
 # structural lint is supposed to catch, not a paperwork step.
 #
+# The one distinction that rule needs, so it does not get relitigated: the
+# baseline never grows under an EXISTING requirement — that is always a
+# regression. Introducing a NEW requirement class may legitimately baseline
+# kinds the requirement does not apply to, with maintainer sign-off recorded
+# in the commit message that adds it; net coverage still goes up, because the
+# new class closes gaps that were previously invisible to the lint. The
+# `:review` class (2026-07-31) is the worked example: it closed two real gaps
+# (hooks and settings were disclosed nowhere on the consent card) and recorded
+# exactly one N/A, `kind:packs:review`.
+#
 # Format: `<domain>:<name>:<requirement> # <reason>`, one gap per line.
 # `python3 tools/check-structure.py --explain` prints the evidence (found or
 # missing) each key maps to.
@@ -43,3 +53,4 @@ kind:packs:lock # packs are documented bookkeeping only (model.rs: "pure bookkee
 kind:packs:doctor # bookkeeping-only by design (see kind:packs:lock); no dedicated doctor section or check_pack_* probe for [packs.*] itself
 kind:packs:witness # bookkeeping-only by design (see kind:packs:lock); no WITNESS_REGISTRY entry for packs — install/remove/upgrade behavior is well tested (vendor_packs.rs, git_packs.rs) but no test targets PackInstall/pack-ledger drift specifically
 kind:packs:enforcement # bookkeeping-only by design (see kind:packs:lock); ENFORCEMENT.md never mentions "pack" because a pack is not itself a runtime capability surface — its members carry their own statements
+kind:packs:review # bookkeeping-only by design (see kind:packs:lock); a pack ledger is not itself a reviewable runtime surface — the servers/skills/instructions a pack installed are disclosed on the consent card through their own kinds, each with its own diff.mark entry, so marking the ledger too would double-count the same consent

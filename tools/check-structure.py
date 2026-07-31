@@ -13,14 +13,18 @@ Per capability kind:
                            pair in WITNESS_REGISTRY below — see that
                            constant's docstring for why this is a registry
                            and not fuzzy name-matching.
-  (e) ENFORCEMENT.md row — a `### <Title>` section with a real (>= 3
+  (e) consent review    — a `diff.mark("<kind>"…)` call in
+                           crates/cli/src/commands/trust.rs, i.e. the kind is
+                           disclosed on the review card AND recorded in the
+                           consented surface. See check_review_disclosure.
+  (f) ENFORCEMENT.md row — a `### <Title>` section with a real (>= 3
                            non-blank line) body, AND — for the kinds in
                            KIND_MATRIX_ROW_REQUIRED — a matching
                            `| **<Title>** |` matrix row. See
                            check_enforcement_row's docstring.
 
 Per policy dimension: the same heading+body(+row) requirement as (e) above,
-via check_dimension_row — except FsDeny, a deliberate exception matched by a
+via check_dimension_row (requirement (f) above) — except FsDeny, a deliberate exception matched by a
 literal prose anchor instead (see FS_DENY_PROSE).
 
 Independently of all the above, KIND-SET INTEGRITY (verify_kind_set) parses
@@ -76,6 +80,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 MODEL_RS = REPO_ROOT / "crates/core/src/manifest/model.rs"
 LOCK_RS = REPO_ROOT / "crates/core/src/lock.rs"
 DOCTOR_RS = REPO_ROOT / "crates/cli/src/commands/doctor.rs"
+TRUST_RS = REPO_ROOT / "crates/cli/src/commands/trust.rs"
 ENFORCEMENT_MD = REPO_ROOT / "docs/ENFORCEMENT.md"
 BASELINE_FILE = REPO_ROOT / "tools/check-structure-baseline.txt"
 
@@ -353,6 +358,36 @@ def check_doctor_probe(kind: str, doctor_rs_text: str) -> tuple[bool, str]:
     return found, "; ".join(bits)
 
 
+def check_review_disclosure(kind: str, trust_rs_text: str) -> tuple[bool, str]:
+    """(e) consent-review disclosure.
+
+    WHERE: crates/cli/src/commands/trust.rs (the review card in `grant_gated`).
+    WHAT: a `diff.mark("<singular>"` or `diff.mark("<kind>"` call.
+
+    WHY `mark` and not a print: `mark` is what records the item into the
+    reviewed surface that the grant persists, so a kind that calls it provably
+    appears on the card AND in the stored surface the next re-trust diffs
+    against. A `println!` alone could show a kind while leaving it out of the
+    consented surface — which is the weaker property, not the one that matters.
+
+    This requirement exists because a real gap shipped: [hooks.*] and
+    [settings.*] were declared, re-gated the trust digest when edited, and were
+    disclosed NOWHERE on the review screen — so a user re-consented to a hook
+    they were never shown. That is a consent surprise on an executable kind.
+    Fixing it was a fact about one commit; this check is what makes it a
+    property, and what stops kind #9 from repeating it.
+    """
+    sing = singular(kind)
+    pat = rf'diff\.mark\(\s*"(?:{re.escape(sing)}|{re.escape(kind)})"'
+    found = re.search(pat, trust_rs_text) is not None
+    evidence = (
+        f'diff.mark("{sing}"…) in trust.rs'
+        if found
+        else f'no diff.mark("{sing}"/"{kind}"…) in trust.rs — kind is not disclosed on the consent card'
+    )
+    return found, evidence
+
+
 def check_witness_test(
     kind: str,
     repo_root: Path,
@@ -542,6 +577,7 @@ def compute_evidence(
     model_text: str,
     lock_text: str,
     doctor_text: str,
+    trust_text: str,
     enforcement_text: str,
     repo_root: Path,
     kinds: list[str] | None = None,
@@ -561,6 +597,7 @@ def compute_evidence(
         evidence[f"kind:{kind}:lock"] = check_lock_pin(kind, lock_text)
         evidence[f"kind:{kind}:doctor"] = check_doctor_probe(kind, doctor_text)
         evidence[f"kind:{kind}:witness"] = check_witness_test(kind, repo_root, witness_registry)
+        evidence[f"kind:{kind}:review"] = check_review_disclosure(kind, trust_text)
         evidence[f"kind:{kind}:enforcement"] = check_enforcement_row(
             kind, enforcement_text, kind_titles, kind_row_required
         )
@@ -602,13 +639,14 @@ def run_structure_check(
     model_text: str,
     lock_text: str,
     doctor_text: str,
+    trust_text: str,
     enforcement_text: str,
     repo_root: Path,
     baseline: dict[str, str],
     **compute_evidence_kwargs,
 ) -> dict[str, tuple[bool, str]]:
     evidence, _kinds, _dims = compute_evidence(
-        model_text, lock_text, doctor_text, enforcement_text, repo_root, **compute_evidence_kwargs
+        model_text, lock_text, doctor_text, trust_text, enforcement_text, repo_root, **compute_evidence_kwargs
     )
     gap_keys = {k for k, (ok, _) in evidence.items() if not ok}
     baseline_keys = set(baseline)
@@ -705,6 +743,33 @@ pub enum Dimension {
             "self-test: check_doctor_probe did NOT fail on a doctor.rs fixture missing the probe "
             "(an always-pass stub would go undetected)"
         )
+
+    # ---- check_review_disclosure: the requirement added because [hooks.*]
+    # and [settings.*] really did ship undisclosed on the consent screen. The
+    # "missing" branch is the whole point of this check, so it is exercised
+    # directly — an always-pass stub here would silently re-open exactly the
+    # gap the requirement exists to close. ---------------------------------
+    review_present_text = 'fn grant_gated() { let mk = diff.mark("hook", name, &identity); }\n'
+    # Printing a kind is NOT disclosure: only `mark` records it into the
+    # consented surface, so a review line without a mark must still read as a
+    # gap. This fixture is the one that would pass a laxer `"hook" in text`.
+    review_printonly_text = 'fn grant_gated() { say!("  hooks: {}", hook.command); }\n'
+    ok_review_present, _ev = check_review_disclosure("hooks", review_present_text)
+    ok_review_missing, ev_review_missing = check_review_disclosure("hooks", review_printonly_text)
+    if not ok_review_present:
+        failures.append('self-test: check_review_disclosure wrongly failed on a present diff.mark("hook") call')
+    if ok_review_missing or "is not disclosed on the consent card" not in ev_review_missing:
+        failures.append(
+            "self-test: check_review_disclosure did NOT fail on a trust.rs fixture that only PRINTS "
+            "the kind without marking it into the consented surface "
+            "(an always-pass stub, or a mere substring check, would go undetected)"
+        )
+    # Plural-named kinds mark under their plural (`settings`), singular-named
+    # ones under the singular (`hook`) — both spellings must count, or the
+    # check would report a false gap for whichever convention it missed.
+    ok_plural, _ev = check_review_disclosure("settings", 'diff.mark("settings", a, &i);\n')
+    if not ok_plural:
+        failures.append('self-test: check_review_disclosure rejected the plural spelling diff.mark("settings")')
 
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
@@ -860,6 +925,12 @@ pub enum Dimension {
 """
         lock_text = "pub struct LockedServer { pub name: String }\npub struct LockedSkill { pub name: String }\n"
         doctor_text = 'fn run_checks() { report.section("Servers"); report.section("Skills"); }\n'
+        # Both fixture kinds ARE disclosed on the card, so `:review` adds no
+        # finding here — this self-test is about the OTHER requirements, and a
+        # new requirement must not silently change what it proves.
+        trust_fixture_text = (
+            'fn grant_gated() { diff.mark("server", n, i); diff.mark("skill", n, i); }\n'
+        )
         enforcement_text = (
             "### Servers\n\n- Servers are pinned.\n- Servers are probed.\n- Servers are reviewed.\n\n"
             "### Skills\n\n- Skills are pinned.\n- Skills are probed.\n- Skills are reviewed.\n\n"
@@ -880,6 +951,7 @@ pub enum Dimension {
             model_text,
             lock_text,
             doctor_text,
+            trust_fixture_text,
             enforcement_text,
             root,
             baseline,
@@ -928,7 +1000,7 @@ def main(argv: list[str]) -> int:
     if rc != 0:
         return rc
 
-    for path in (MODEL_RS, LOCK_RS, DOCTOR_RS, ENFORCEMENT_MD):
+    for path in (MODEL_RS, LOCK_RS, DOCTOR_RS, TRUST_RS, ENFORCEMENT_MD):
         if not path.is_file():
             print(f"ERROR: expected source file not found: {path}")
             return 2
@@ -936,6 +1008,7 @@ def main(argv: list[str]) -> int:
     model_text = MODEL_RS.read_text(encoding="utf-8")
     lock_text = LOCK_RS.read_text(encoding="utf-8")
     doctor_text = DOCTOR_RS.read_text(encoding="utf-8")
+    trust_text = TRUST_RS.read_text(encoding="utf-8")
     enforcement_text = ENFORCEMENT_MD.read_text(encoding="utf-8")
 
     try:
@@ -950,7 +1023,9 @@ def main(argv: list[str]) -> int:
     for err in verify_kind_set(model_text):
         findings.append(f"kind-set integrity: {err}")
 
-    evidence = run_structure_check(findings, model_text, lock_text, doctor_text, enforcement_text, REPO_ROOT, baseline)
+    evidence = run_structure_check(
+        findings, model_text, lock_text, doctor_text, trust_text, enforcement_text, REPO_ROOT, baseline
+    )
 
     if "--explain" in argv:
         print_explain(evidence, baseline)

@@ -19,6 +19,7 @@ of the boundaries below.
 |---|---|---|
 | [`strategy-v2-vision.html`](strategy-v2-vision.html) | What the finished v2 product looks like on screen: the 12-moment journey as CLI mockups, t3code panel wireframes, the full command surface, and the feature inventory | Illustrative record for [`STRATEGY.md`](../../STRATEGY.md); the strategy wins on any divergence |
 | [`launch-plan.md`](launch-plan.md) | What the completed 2026-07 t3code/workflow prototype built, and why its former launch headline was superseded | Closed implementation record; current launch gate is `TODO.md` |
+| [`consent-card.md`](consent-card.md) | What the yes says on screen: the card's bounding rule and its witness, where prior bytes come from for a re-gate diff, and what recognition may and may not shorten | Active contract for Strategy v2 Phase 2 |
 | [`ui-control-plane.md`](ui-control-plane.md) | How t3code drives AgentStack — the fixed argv actions, the versioned JSON reads, and why the frontend is never an enforcement boundary | Active |
 | [`panel-wireframe.md`](panel-wireframe.md) | The popover's daily shape: one card + footer, inline toolset switch, and the three-click mode change with its real plan | Active; awaiting §1.6 study evidence |
 | [`workflows-capability.md`](workflows-capability.md) | What a workflow is allowed to be: authoring, authority, and evidence boundaries for the experimental capability kind | Active contract, experimental capability |

@@ -146,6 +146,50 @@ Carried into Phase 2, written down rather than acted on:
   every path that could leave a change the user did not agree to has to keep
   failing that test.
 
+### Strategy v2 — Phase 2 (One yes: the review card)
+
+Contract: [`docs/design/consent-card.md`](docs/design/consent-card.md) — the
+card format, the prior-bytes source, and the recognition index, in one place
+because they share storage. Three slices; Slice A is the card itself.
+
+- [ ] **P2.A — the review card + undo-in-preview.** The grant screen leads with
+  two to five plain lines (what runs, what it contacts, what it may read, pin
+  status) composed from the walked surface, then the unabridged detail. Same
+  `grant_gated`, same gate, same digest — presentation only. **Fixes a real
+  consent gap found while building it:** `[hooks.*]` and `[settings.*]` were
+  declared capability kinds that re-gated the trust digest when edited but were
+  disclosed *nowhere* on the review screen, so a user re-consented to a hook
+  they had never been shown. Hooks are an executable kind carrying the full
+  ceremony, which made this the sharpest form of the surprise the Phase 2 gate
+  counts. Witnesses: leg 1, `crates/cli/tests/consent_card_coverage.rs` — every
+  item the grant persists into the consented surface appears by name in the
+  review the human read; leg 2, the `:review` requirement in
+  `tools/check-structure.py` — every manifest kind has a `diff.mark` disclosure
+  site or a baselined line, which is what turns the hooks fix from a fact about
+  one commit into a property. Undo is now named before the first byte changes
+  in `adopt`, `apply`, `use --write`, and `session start`.
+- [ ] **P2.B — pin-time snapshots + the re-gate diff card.** Per the design
+  note, this does **not** build a snapshot store: `~/.agentstack/store/content/`
+  already is one (write-once, keyed by the lock checksum, never evicted). The
+  gaps are narrower — `SurfaceItem` carries no pin pointer for skills
+  (`origin_word`) or instructions (`""`), and path-sourced content never
+  snapshots at all, which is exactly the Phase 1 drop case. Then: the re-gate
+  card naming what changed with a capped real diff and accept / keep-pinned /
+  block; the collision refusal upgraded to the same card; the event-parity
+  witness extended to the regrant flow.
+- [ ] **P2.C — recognition.** Machine-local, content-addressed approvals index
+  that shortens the card's body and never the gate. Machine-level standing
+  approval is explicitly out of scope — it widens the gate and gets its own
+  review.
+- [ ] **P2.D — panel follow-up (t3code), blocked on a CLI contract.**
+  `ConsentCard.lines`/`.question` are print-only inside `grant_gated`; the
+  panel reads `preview_value()` JSON and so cannot see the card or the coming
+  diff card at all. The CLI must emit them structurally — a `diff` object
+  mirroring `ReviewDiff` — behind a **new** feature name `trust-review-card-v1`
+  (a new name, never a revision of `trust-preview`, so a binary predating the
+  fields is not misrepresented as supporting them). Fork work does not start
+  until that contract exists here.
+
 ## Open review findings — what two product reviews left standing
 
 Both 2026-07-27 reviews are closed except the items below. Everything else they

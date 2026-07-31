@@ -268,6 +268,29 @@ pub fn run(args: &AdoptArgs, manifest_dir: Option<&Path>) -> Result<()> {
         );
     }
 
+    // Strategy v2 / Moment 5: every material write names its undo IN the
+    // preview, before it runs — not in the success summary afterwards, where a
+    // user who wanted to back out has already had the write happen to them.
+    // `adopt` is the one material write that named its undo nowhere at all.
+    // The manifest is the only thing this writes (the keychain lift below is
+    // named separately, because a stored secret is undone differently).
+    println!(
+        "  {} undo: `git checkout -- {}` restores the manifest; `agentstack restore` reverts the last write.",
+        "↩".dimmed(),
+        ctx.loaded
+            .manifest_path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+    );
+    if !lifted.is_empty() && !args.no_keychain {
+        println!(
+            "  {} the lifted {} above will be stored in this machine's keychain — remove with `agentstack secret rm <REF>`.",
+            "↩".dimmed(),
+            if lifted.len() == 1 { "secret" } else { "secrets" }
+        );
+    }
+
     if args.write {
         if !args.no_keychain {
             for l in &lifted {

@@ -76,6 +76,14 @@ pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
     if outcome.changed_count == 0 {
         return Ok(());
     }
+    // Moment 5: the undo is named HERE — inside the preview, before the
+    // confirm — not only in `restart_hint` after the write. A user deciding
+    // whether to say yes needs to know the way back at the moment they decide,
+    // not once the configs have already moved.
+    crate::outln!(
+        "\n{} undo: every file above is snapshotted first — `agentstack restore` puts them back.",
+        "↩".dimmed()
+    );
     if crate::util::confirm::confirm("\nApply these changes?")? {
         // Confirmed: a quiet second pass writes without re-printing the diff.
         let outcome = render(args, manifest_dir, true, true, true)?;

@@ -157,6 +157,16 @@ pub fn run(args: &SessionArgs, dir: Option<&Path>) -> Result<()> {
                     Scope::default_for(&ctx.dir)
                 }
             };
+            // Moment 5: the way back is named BEFORE the first byte changes,
+            // not only in the report afterwards. `session start` writes
+            // immediately and has no preview step — that is the point of a
+            // temporary activation — so the banner is the honest form of the
+            // rule here. The report below still repeats it, because by then it
+            // can name the exact files.
+            println!(
+                "  {} temporary: `agentstack session end` (or `agentstack restore --last --write`) puts every file back.",
+                "↩".dimmed()
+            );
             let report = crate::session::start(dir, profile, scope)?;
             let root = crate::commands::project_base(dir)?;
             print!("{}", render_start_report(&report, &root));

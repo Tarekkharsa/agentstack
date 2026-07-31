@@ -510,9 +510,20 @@ fn grant_gated(
     // snapshot bytes, so the pins reviewed are the pins the digest covers.
     let lock = lock_from_snapshot(&snapshot, &dir)?;
     let servers = crate::resolve::effective_runtime_servers(m, &library, &lib_home, None);
-    println!("This project declares — review what auto-mode may run/contact:");
+    // Phase 2: the review is COMPOSED into `body` first and rendered after, so
+    // the glanceable card can lead with what this project runs, contacts, and
+    // may read — facts that are only known once the whole surface has been
+    // walked. Nothing is dropped in the process: every line that printed before
+    // is pushed here and printed below, which is what makes "the card never
+    // discloses less than the old preview" a structural property of the
+    // rendering order rather than a claim about the copy.
+    let mut body: Vec<String> = Vec::new();
+    macro_rules! say {
+        ($($t:tt)*) => { body.push(format!($($t)*)) };
+    }
+    say!("This project declares — review what auto-mode may run/contact:");
     if servers.is_empty() {
-        println!("  (no servers)");
+        say!("  (no servers)");
     }
     // Trusting pins the lock bytes into the trust digest, so trusting over a
     // drifted or unpinned surface would bless pins that don't match content
@@ -529,7 +540,7 @@ fn grant_gated(
             Ok(r) => r,
             Err(e) => {
                 let mk = diff.mark("server", name, "unresolvable");
-                println!(
+                say!(
                     "{mk}{} {disp}: unresolvable ({})",
                     "✗".red(),
                     crate::text::sanitize_line(&e.to_string())
@@ -569,7 +580,7 @@ fn grant_gated(
                 let command = r.server.command.as_deref().unwrap_or("?");
                 let args = r.server.args.join(" ");
                 let mk = diff.mark("server", name, &format!("{command} {args}"));
-                println!(
+                say!(
                     "{mk}{} {disp}: runs `{}`{origin}",
                     "▶".yellow(),
                     crate::text::sanitize_line(&format!("{command} {args}"))
@@ -578,7 +589,7 @@ fn grant_gated(
             ServerType::Http => {
                 let url = r.server.url.as_deref().unwrap_or("?");
                 let mk = diff.mark("server", name, url);
-                println!(
+                say!(
                     "{mk}{} {disp}: contacts {}{origin}",
                     "→".cyan(),
                     crate::text::sanitize_line(url)
@@ -593,7 +604,7 @@ fn grant_gated(
         // whole line to `~ changed`.
         let joined = refs.join(", ");
         let mk = diff.mark("secrets", "", &joined);
-        println!(
+        say!(
             "{mk}secrets referenced: {}",
             crate::text::sanitize_line(&joined)
         );
@@ -611,28 +622,28 @@ fn grant_gated(
         .collect();
     let exec_statuses = crate::executable::executable_lock_statuses(&dir, &exec_servers, &lock);
     if !exec_statuses.is_empty() {
-        println!("  local executable content (pinned by current bytes):");
+        say!("  local executable content (pinned by current bytes):");
         for (label, status) in &exec_statuses {
             let disp = crate::text::sanitize_line(label);
             // An executable is identified by its path (the label the review
             // shows); byte drift is caught by the verdict below, not the diff.
             let mk = diff.mark("executable", label, label);
             match crate::verify::executable_verdict(status) {
-                crate::verify::Verdict::Ok => println!("{mk}· {disp}   [pinned]"),
+                crate::verify::Verdict::Ok => say!("{mk}· {disp}   [pinned]"),
                 crate::verify::Verdict::Unpinned => {
-                    println!("{mk}{} {disp}   [{}]", "✗".red(), "unpinned".red());
+                    say!("{mk}{} {disp}   [{}]", "✗".red(), "unpinned".red());
                     blockers.push((
                         label.clone(),
                         "local executable unpinned — run `agentstack lock`".to_string(),
                     ));
                 }
                 crate::verify::Verdict::Block(why) => {
-                    println!("{mk}{} {disp}   [{}]", "✗".red(), why.red());
+                    say!("{mk}{} {disp}   [{}]", "✗".red(), why.red());
                     blockers.push((label.clone(), why));
                 }
             }
         }
-        println!(
+        say!(
             "  (unbound, by design: interpreter/harness binaries from $PATH, and imports outside a declared integrity root)"
         );
     }
@@ -642,7 +653,7 @@ fn grant_gated(
     // outside the policy ceiling — the pin is the only governance there is,
     // so unpinned AND drifted both block, like the D3 executable surface.
     if !m.extensions.is_empty() {
-        println!(
+        say!(
             "  native extensions (EXECUTABLE — run inside the harness process; agentstack pins the bytes but cannot govern them at runtime):"
         );
         let store = crate::store::Store::default_store();
@@ -672,13 +683,13 @@ fn grant_gated(
             };
             match report.status {
                 ExtensionLockStatus::Matches => {
-                    println!(
+                    say!(
                         "{mk}{} {disp} {dest}   [{origin_word}, pinned]",
                         "▶".yellow()
                     );
                 }
                 ExtensionLockStatus::MissingLockEntry => {
-                    println!(
+                    say!(
                         "{mk}{} {disp} {dest}   [{origin_word}, {}]",
                         "✗".red(),
                         "unpinned".red()
@@ -690,7 +701,7 @@ fn grant_gated(
                 }
                 ExtensionLockStatus::ChecksumDrift { .. }
                 | ExtensionLockStatus::RevDrift { .. } => {
-                    println!(
+                    say!(
                         "{mk}{} {disp} {dest}   [{origin_word}, {}]",
                         "✗".red(),
                         "DRIFTED from lock".red()
@@ -701,7 +712,7 @@ fn grant_gated(
                     ));
                 }
                 ExtensionLockStatus::TargetDrift { locked, .. } => {
-                    println!(
+                    say!(
                         "{mk}{} {disp} {dest}   [{origin_word}, {}]",
                         "✗".red(),
                         format!(
@@ -717,13 +728,13 @@ fn grant_gated(
                 }
                 // Reproducibility can't be checked offline; not a blocker —
                 // same posture as skills' un-cached git sources.
-                ExtensionLockStatus::NotAvailableOffline { .. } => println!(
+                ExtensionLockStatus::NotAvailableOffline { .. } => say!(
                     "{mk}{} {disp} {dest}   [{origin_word}, {}]",
                     "▶".yellow(),
                     "offline — pin unverified".yellow()
                 ),
                 ExtensionLockStatus::ResolveFailed { error } => {
-                    println!("{mk}{} {disp} {dest}: {}", "✗".red(), error.red());
+                    say!("{mk}{} {disp} {dest}: {}", "✗".red(), error.red());
                     blockers.push((name.clone(), error));
                 }
             }
@@ -739,7 +750,7 @@ fn grant_gated(
     // extension surface; the diff identity is the sorted role set, so a roles
     // widening reads as `~ changed` even with unchanged bytes.
     if !m.workflows.is_empty() {
-        println!(
+        say!(
             "  workflows (ORCHESTRATION CODE — spawns agent runs under the declared roles; agentstack executes this, gated and sandboxed):"
         );
         let store = crate::store::Store::default_store();
@@ -769,17 +780,17 @@ fn grant_gated(
             );
             match status {
                 WorkflowLockStatus::Matches => {
-                    println!("{mk}{} {disp} {dest}   [pinned]", "▶".yellow());
+                    say!("{mk}{} {disp} {dest}   [pinned]", "▶".yellow());
                 }
                 WorkflowLockStatus::MissingLockEntry => {
-                    println!("{mk}{} {disp} {dest}   [{}]", "✗".red(), "unpinned".red());
+                    say!("{mk}{} {disp} {dest}   [{}]", "✗".red(), "unpinned".red());
                     blockers.push((
                         name.clone(),
                         "workflow unpinned — run `agentstack lock`".to_string(),
                     ));
                 }
                 WorkflowLockStatus::ChecksumDrift { .. } | WorkflowLockStatus::RevDrift { .. } => {
-                    println!(
+                    say!(
                         "{mk}{} {disp} {dest}   [{}]",
                         "✗".red(),
                         "DRIFTED from lock".red()
@@ -790,7 +801,7 @@ fn grant_gated(
                     ));
                 }
                 WorkflowLockStatus::RolesDrift { locked, .. } => {
-                    println!(
+                    say!(
                         "{mk}{} {disp} {dest}   [{}]",
                         "✗".red(),
                         format!(
@@ -806,13 +817,13 @@ fn grant_gated(
                 }
                 // Reproducibility can't be checked offline; not a blocker —
                 // same posture as skills' and extensions' un-cached git sources.
-                WorkflowLockStatus::NotAvailableOffline { .. } => println!(
+                WorkflowLockStatus::NotAvailableOffline { .. } => say!(
                     "{mk}{} {disp} {dest}   [{}]",
                     "▶".yellow(),
                     "offline — pin unverified".yellow()
                 ),
                 WorkflowLockStatus::ResolveFailed { error } => {
-                    println!(
+                    say!(
                         "{mk}{} {disp} {dest}: {}",
                         "✗".red(),
                         crate::text::sanitize_line(&error).red()
@@ -827,7 +838,7 @@ fn grant_gated(
             // message. A reviewer should not have to remember a picture.
             if let Some(declared) = &wf.blueprint {
                 for line in blueprint_review_lines(&dir, name, declared, &lock, &mut blockers) {
-                    println!("      {line}");
+                    say!("      {line}");
                 }
             }
         }
@@ -838,7 +849,7 @@ fn grant_gated(
     // the only thing binding what the human reviews to what gets served.
     let skill_names = review_skill_names(m);
     if !skill_names.is_empty() {
-        println!("  skills loadable over MCP:");
+        say!("  skills loadable over MCP:");
         let store = crate::store::Store::default_store();
         for name in &skill_names {
             let disp = crate::text::sanitize_line(name);
@@ -863,10 +874,10 @@ fn grant_gated(
             let mk = diff.mark("skill", name, origin_word);
             match &report.status {
                 SkillLockStatus::Matches => {
-                    println!("{mk}· {disp}   [{origin_word}, pinned]");
+                    say!("{mk}· {disp}   [{origin_word}, pinned]");
                 }
                 SkillLockStatus::ChecksumDrift { .. } | SkillLockStatus::RevDrift { .. } => {
-                    println!(
+                    say!(
                         "{mk}{} {disp}   [{origin_word}, {}]",
                         "✗".red(),
                         "DRIFTED from lock".red()
@@ -877,7 +888,7 @@ fn grant_gated(
                     // An inline skill's bytes live in the repo under review —
                     // unpinned means trusting would leave them ungoverned.
                     Some(SkillOrigin::Inline) => {
-                        println!("{mk}{} {disp}   [inline, {}]", "✗".red(), "unpinned".red());
+                        say!("{mk}{} {disp}   [inline, {}]", "✗".red(), "unpinned".red());
                         blockers.push((
                             name.clone(),
                             "inline skill unpinned — run `agentstack lock`".to_string(),
@@ -885,18 +896,18 @@ fn grant_gated(
                     }
                     // A library skill's bytes are the user's own curated,
                     // scan-gated content — worth pinning, not worth blocking.
-                    _ => println!(
+                    _ => say!(
                         "{mk}· {disp}   [{origin_word}, {}]",
                         "unpinned — run `agentstack lock`".yellow()
                     ),
                 },
                 // Reproducibility can't be checked offline; not a blocker.
-                SkillLockStatus::NotAvailableOffline { .. } => println!(
+                SkillLockStatus::NotAvailableOffline { .. } => say!(
                     "{mk}· {disp}   [{origin_word}, {}]",
                     "offline — pin unverified".yellow()
                 ),
                 SkillLockStatus::ResolveFailed { error } => {
-                    println!(
+                    say!(
                         "{mk}{} {disp}: broken ref ({})",
                         "✗".red(),
                         crate::text::sanitize_line(error)
@@ -918,7 +929,7 @@ fn grant_gated(
         .filter(|(_, i)| !i.from_user_layer)
         .collect();
     if !instructions.is_empty() {
-        println!("  instruction fragments (compile into CLAUDE.md / AGENTS.md):");
+        say!("  instruction fragments (compile into CLAUDE.md / AGENTS.md):");
         for (name, instr) in instructions {
             let disp = crate::text::sanitize_line(name);
             use crate::resolve::InstructionLockStatus;
@@ -926,23 +937,23 @@ fn grant_gated(
             // show, so they only ever read as added or removed.
             let mk = diff.mark("instruction", name, "");
             match crate::resolve::instruction_lock_status(name, instr, &dir, &lock) {
-                InstructionLockStatus::Matches => println!("{mk}· {disp}   [pinned]"),
+                InstructionLockStatus::Matches => say!("{mk}· {disp}   [pinned]"),
                 InstructionLockStatus::ChecksumDrift { .. } => {
-                    println!("{mk}{} {disp}   [{}]", "✗".red(), "DRIFTED from lock".red());
+                    say!("{mk}{} {disp}   [{}]", "✗".red(), "DRIFTED from lock".red());
                     blockers.push((
                         name.clone(),
                         "instruction content drifted from lock".to_string(),
                     ));
                 }
                 InstructionLockStatus::MissingLockEntry => {
-                    println!("{mk}{} {disp}   [{}]", "✗".red(), "unpinned".red());
+                    say!("{mk}{} {disp}   [{}]", "✗".red(), "unpinned".red());
                     blockers.push((
                         name.clone(),
                         "instruction unpinned — run `agentstack lock`".to_string(),
                     ));
                 }
                 InstructionLockStatus::ResolveFailed { error } => {
-                    println!(
+                    say!(
                         "{mk}{} {disp}: broken ref ({})",
                         "✗".red(),
                         crate::text::sanitize_line(&error)
@@ -953,12 +964,95 @@ fn grant_gated(
         }
     }
 
+    // Hooks: an EXECUTABLE kind. Declaring or editing one re-gates trust
+    // (the manifest bytes move, so the digest moves) — but until Phase 2 this
+    // screen said nothing about them, so the human was re-asked without being
+    // shown what they were re-approving. That is a consent surprise on the one
+    // kind that runs commands in or around the harness at user permission, and
+    // strategy v2 gives hooks the full ceremony with no compressed path. The
+    // diff identity is the whole invocation (event, matcher, command line,
+    // timeout, targets): changing ANY of them must read as `~ changed`, never
+    // hide behind a stable name.
+    if !m.hooks.is_empty() {
+        say!(
+            "  hooks (EXECUTABLE — agentstack compiles these into each harness's native config; the harness runs them at your permission, and agentstack does not govern them at runtime):"
+        );
+        for (name, hook) in &m.hooks {
+            let disp = crate::text::sanitize_line(name);
+            let args = if hook.args.is_empty() {
+                String::new()
+            } else {
+                format!(" {}", hook.args.join(" "))
+            };
+            let invocation = format!("{}{args}", hook.command);
+            let matcher = match &hook.matcher {
+                Some(mt) if !mt.is_empty() => format!(" matching {mt}"),
+                _ => String::new(),
+            };
+            let timeout = match hook.timeout {
+                Some(t) => format!(", timeout {t}s"),
+                None => String::new(),
+            };
+            // `targets` defaults to the wildcard `["*"]`, which is manifest
+            // syntax, not something a consent screen may make the reader
+            // decode — a bare `[*]` is the widest possible scope rendered as
+            // the least alarming glyph. Say what it means. The diff identity
+            // keeps the RAW targets: two manifests that differ only in
+            // wildcard-vs-explicit must still read as `~ changed`.
+            let raw_targets = hook.targets.join(", ");
+            let targets_disp = if hook.targets.iter().any(|t| t == "*") {
+                "every hook-capable CLI".to_string()
+            } else {
+                raw_targets.clone()
+            };
+            let identity = format!(
+                "{}{matcher} runs {invocation}{timeout} → {raw_targets}",
+                hook.event
+            );
+            let mk = diff.mark("hook", name, &identity);
+            say!(
+                "{mk}{} {disp}: on {} runs `{}`{}   [in {}]",
+                "▶".yellow(),
+                crate::text::sanitize_line(&format!("{}{matcher}", hook.event)),
+                crate::text::sanitize_line(&invocation),
+                crate::text::sanitize_line(&timeout),
+                crate::text::sanitize_line(&targets_disp)
+            );
+        }
+    }
+
+    // Settings: inert per-CLI native config (permissions, feature flags) merged
+    // into each harness's settings file. Not executable, but a settings value
+    // can widen what a harness will do without asking — `ENFORCEMENT.md` says
+    // editing one re-gates consent, so the review has to show it. The identity
+    // is the canonical JSON of the whole per-adapter object, so any value
+    // change reads as `~ changed`.
+    if !m.settings.is_empty() {
+        say!("  settings (merged into each CLI's own config file):");
+        for (adapter, value) in &m.settings {
+            let disp = crate::text::sanitize_line(adapter);
+            // Canonical, key-sorted rendering: two objects that differ only in
+            // key order are the same consent, and must not read as changed.
+            let identity = canonical_json(value);
+            let keys = match value.as_object() {
+                Some(o) => {
+                    let mut k: Vec<&str> = o.keys().map(|s| s.as_str()).collect();
+                    k.sort_unstable();
+                    k.join(", ")
+                }
+                None => identity.clone(),
+            };
+            let mk = diff.mark("settings", adapter, &identity);
+            say!("{mk}· {disp}: sets {}", crate::text::sanitize_line(&keys));
+        }
+    }
+
     // Requested policy, shown at the trust boundary (ARCHITECTURE: "review
     // shows … policy changes"). Display-only: a bundle's policy can only
     // narrow — the machine layer caps everything at runtime regardless — so
     // there is nothing here to block on, but the human should see what the
     // repo asks for before blessing it.
-    review_policy(&m.policy, &mut diff);
+    review_policy(&m.policy, &mut diff, &mut body);
 
     // P14: anything the last consented surface carried that is gone now. Printed
     // as part of the review (before the blocker bail) so the human sees the full
@@ -966,7 +1060,7 @@ fn grant_gated(
     {
         let removed = diff.removed();
         if !removed.is_empty() {
-            println!("  no longer present (was trusted before):");
+            say!("  no longer present (was trusted before):");
             for it in removed {
                 let label = if it.name.is_empty() {
                     it.kind.clone()
@@ -978,9 +1072,23 @@ fn grant_gated(
                 } else {
                     format!("  ({})", crate::text::sanitize_line(&it.identity))
                 };
-                println!("{} {label}{detail}", "-".red());
+                say!("{} {label}{detail}", "-".red());
             }
         }
+    }
+
+    // ---- The card ----------------------------------------------------------
+    // Two to five plain lines, answering the only questions the moment asks:
+    // what runs, what it reaches, what it may read, and whether the bytes are
+    // the ones being reviewed. Computed from the surface just walked, so it can
+    // never describe a different set than the detail below it. Then the detail,
+    // unabridged — the card summarizes the review, it does not replace it.
+    for line in card_summary_lines(&diff.current, blockers.len()) {
+        println!("{line}");
+    }
+    println!();
+    for line in &body {
+        println!("{line}");
     }
 
     if !blockers.is_empty() {
@@ -1085,6 +1193,153 @@ fn grant_gated(
         "✓".green()
     );
     Ok(())
+}
+
+/// The card: two to five plain lines summarizing the surface that was just
+/// walked. Public and pure so a test asserts on exactly what the human sees —
+/// the same reason [`policy_requested_lines`] is public.
+///
+/// It reads the reviewed surface (`ReviewDiff::current`) rather than the
+/// manifest, which is deliberate: the card and the detail below it are then
+/// provably the same set of items, and any kind added to the review later shows
+/// up here without a second place to remember to update. `blocked` is the count
+/// of items that failed their pin check, so the pin line is honest on the path
+/// where the review ends in a refusal.
+///
+/// Every value interpolated here is already-sanitized display text or a machine
+/// count; hostile names reach this function only through `SurfaceItem.name`,
+/// which is sanitized at the point of use below.
+pub fn card_summary_lines(items: &[SurfaceItem], blocked: usize) -> Vec<String> {
+    // A server's identity is its command line or its URL; that is the only
+    // place the two are distinguishable once the surface is flattened.
+    let is_url = |s: &str| s.starts_with("http://") || s.starts_with("https://");
+    let named = |kind: &str, items: &[SurfaceItem]| -> Vec<String> {
+        items
+            .iter()
+            .filter(|i| i.kind == kind)
+            .map(|i| crate::text::sanitize_line(&i.name))
+            .collect()
+    };
+
+    let mut runs: Vec<String> = items
+        .iter()
+        .filter(|i| i.kind == "server" && !is_url(&i.identity))
+        .map(|i| crate::text::sanitize_line(&i.name))
+        .collect();
+    // Hooks and extensions are executable too — a card that counted only
+    // servers as "runs" would undercount the executable surface, which is the
+    // one number a reviewer must not be misled about.
+    runs.extend(named("hook", items));
+    runs.extend(named("extension", items));
+
+    let contacts: Vec<String> = items
+        .iter()
+        .filter(|i| i.kind == "server" && is_url(&i.identity))
+        .map(|i| {
+            let host = i
+                .identity
+                .split("://")
+                .nth(1)
+                .and_then(|rest| rest.split('/').next())
+                .unwrap_or(&i.identity);
+            crate::text::sanitize_line(host)
+        })
+        .collect();
+
+    let secrets: Vec<String> = items
+        .iter()
+        .filter(|i| i.kind == "secrets")
+        .flat_map(|i| i.identity.split(", ").map(crate::text::sanitize_line))
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    let context = named("skill", items).len() + named("instruction", items).len();
+
+    let mut lines = vec!["This project will:".to_string()];
+    if !runs.is_empty() {
+        lines.push(format!(
+            "  run {} on your machine — {}",
+            super::count(runs.len(), "command"),
+            preview_names(&runs)
+        ));
+    }
+    if !contacts.is_empty() {
+        lines.push(format!(
+            "  contact {} — {}",
+            super::count(contacts.len(), "host"),
+            preview_names(&contacts)
+        ));
+    }
+    if !secrets.is_empty() {
+        lines.push(format!(
+            "  be able to read {} — {}",
+            super::count(secrets.len(), "secret"),
+            preview_names(&secrets)
+        ));
+    }
+    if context > 0 {
+        lines.push(format!(
+            "  add {} to every agent's context",
+            super::count(context, "file")
+        ));
+    }
+    // A project that declares nothing still gets a card, and it should say so
+    // plainly rather than presenting an empty list as if it were a surface.
+    if lines.len() == 1 {
+        lines.push("  nothing — this project declares no capabilities yet".to_string());
+    }
+    lines.push(if blocked == 0 {
+        "  …using exactly the content shown below, pinned to these bytes.".to_string()
+    } else {
+        // `count` pluralizes by appending `s`, so the irregular verb branches
+        // here, exactly as its doc comment directs.
+        format!(
+            "  …but {} {} not pinned to reviewed bytes — details below.",
+            super::count(blocked, "item"),
+            if blocked == 1 { "is" } else { "are" }
+        )
+    });
+    lines
+}
+
+/// Name the first few items and count the rest, so a project with forty skills
+/// still produces a card a human reads in one glance.
+fn preview_names(names: &[String]) -> String {
+    const SHOWN: usize = 3;
+    if names.len() <= SHOWN {
+        return names.join(", ");
+    }
+    format!(
+        "{}, and {} more",
+        names[..SHOWN].join(", "),
+        names.len() - SHOWN
+    )
+}
+
+/// Render a settings value with object keys sorted, recursively, so the review
+/// diff keys on *meaning* and not on serialization order. Two manifests that
+/// declare the same settings with their keys typed in a different order are the
+/// same consent; without this they would read as `~ changed` and train the user
+/// to wave through a diff that says nothing. Arrays keep their order — element
+/// order in a settings list is meaningful (precedence), unlike key order.
+fn canonical_json(value: &serde_json::Value) -> String {
+    use serde_json::Value;
+    match value {
+        Value::Object(map) => {
+            let mut keys: Vec<&String> = map.keys().collect();
+            keys.sort_unstable();
+            let inner: Vec<String> = keys
+                .iter()
+                .map(|k| format!("{}:{}", k, canonical_json(&map[*k])))
+                .collect();
+            format!("{{{}}}", inner.join(","))
+        }
+        Value::Array(items) => {
+            let inner: Vec<String> = items.iter().map(canonical_json).collect();
+            format!("[{}]", inner.join(","))
+        }
+        other => other.to_string(),
+    }
 }
 
 /// The review lines for a workflow's approved blueprint (F13): the shape the
@@ -1225,25 +1480,27 @@ fn blueprint_review_lines(
 /// labelled honestly: the write scope decides the sandbox workspace mount
 /// (ro unless covered); read scopes are informational, and host mode
 /// enforces neither.
-fn review_policy(p: &crate::manifest::Policy, diff: &mut ReviewDiff) {
+fn review_policy(p: &crate::manifest::Policy, diff: &mut ReviewDiff, body: &mut Vec<String>) {
     let lines = policy_requested_lines(p);
     if !lines.is_empty() {
         // One aggregate item: any change to the requested set flips the header
         // line to `~ changed`.
         let mk = diff.mark("policy", "", &lines.join("\n"));
-        println!("{mk}policy requested by this project (can only narrow the machine layer):");
+        body.push(format!(
+            "{mk}policy requested by this project (can only narrow the machine layer):"
+        ));
         for line in &lines {
-            println!("{line}");
+            body.push(line.clone());
         }
     }
     // P15: ALWAYS name the machine policy ceiling file — even for a policy-free
     // repo — so a user consenting learns a machine layer exists and where it
     // lives. Constant machine fact, so no diff marker; honors AGENTSTACK_HOME.
     let ceiling = crate::util::paths::agentstack_home().join("agentstack.toml");
-    println!(
+    body.push(format!(
         "  machine policy ceiling: {} — the repo can only narrow it, never loosen it",
         ceiling.display()
-    );
+    ));
 }
 
 /// The requested-policy lines the trust review prints, as a pure builder —
@@ -1350,6 +1607,119 @@ fn list() -> Result<()> {
 mod tests {
     use super::*;
     use assert_fs::prelude::*;
+
+    // CONSENT WITNESS (Phase 2, the card): the summary must count the whole
+    // EXECUTABLE surface, not just servers. Hooks and extensions run commands
+    // too, and a card that said "run 1 command" while three things execute is
+    // precisely the consent surprise the phase gate counts.
+    #[test]
+    fn card_counts_hooks_and_extensions_as_things_that_run() {
+        let items = vec![
+            item("server", "fs", "node fs.js"),
+            item("hook", "pre-commit", "PreToolUse runs ./check.sh → *"),
+            item("extension", "pi-ext", "./ext.ts"),
+        ];
+        let lines = card_summary_lines(&items, 0);
+        let runs = lines
+            .iter()
+            .find(|l| l.contains("run "))
+            .expect("runs line");
+        assert!(runs.contains("3 commands"), "{runs}");
+        assert!(runs.contains("fs") && runs.contains("pre-commit") && runs.contains("pi-ext"));
+    }
+
+    // An HTTP server is a thing CONTACTED, not a thing run — the two must never
+    // be conflated, in either direction.
+    #[test]
+    fn card_separates_contacted_hosts_from_run_commands() {
+        let items = vec![
+            item("server", "remote", "https://api.example.com/mcp"),
+            item("server", "local", "node local.js"),
+        ];
+        let lines = card_summary_lines(&items, 0);
+        let runs = lines
+            .iter()
+            .find(|l| l.contains("run "))
+            .expect("runs line");
+        let contacts = lines
+            .iter()
+            .find(|l| l.contains("contact "))
+            .expect("contacts line");
+        assert!(
+            runs.contains("1 command") && runs.contains("local"),
+            "{runs}"
+        );
+        // The host, not the whole URL — a path is noise at card altitude.
+        assert!(
+            contacts.contains("1 host") && contacts.contains("api.example.com"),
+            "{contacts}"
+        );
+        assert!(!contacts.contains("/mcp"), "{contacts}");
+    }
+
+    // The card is a summary, and a summary that lies about pinning is worse
+    // than no summary. When items failed their pin check the card says so
+    // instead of claiming the reviewed bytes are the ones that will be used.
+    #[test]
+    fn card_pin_line_is_honest_when_items_are_unpinned() {
+        let items = vec![item("skill", "greet", "library")];
+        let clean = card_summary_lines(&items, 0);
+        assert!(
+            clean.last().unwrap().contains("pinned to these bytes"),
+            "{:?}",
+            clean.last()
+        );
+        let dirty = card_summary_lines(&items, 2);
+        let last = dirty.last().unwrap();
+        assert!(last.contains("2 items are not pinned"), "{last}");
+        let one = card_summary_lines(&items, 1);
+        assert!(one.last().unwrap().contains("1 item is not pinned"));
+    }
+
+    // Two to five lines: a forty-skill project must still be glanceable, so
+    // names elide rather than wrapping the terminal.
+    #[test]
+    fn card_stays_glanceable_and_elides_long_lists() {
+        let items: Vec<SurfaceItem> = (0..40)
+            .map(|i| item("server", &format!("srv{i}"), "node x.js"))
+            .collect();
+        let lines = card_summary_lines(&items, 0);
+        assert!(
+            lines.len() <= 5,
+            "card grew to {} lines: {lines:?}",
+            lines.len()
+        );
+        let runs = lines.iter().find(|l| l.contains("run ")).unwrap();
+        assert!(
+            runs.contains("40 commands") && runs.contains("and 37 more"),
+            "{runs}"
+        );
+    }
+
+    // A project that declares nothing gets a card that says nothing — never an
+    // empty list rendered as though it were a surface.
+    #[test]
+    fn card_names_the_empty_surface_plainly() {
+        let lines = card_summary_lines(&[], 0);
+        assert!(lines.iter().any(|l| l.contains("declares no capabilities")));
+        assert!(lines.len() <= 5);
+    }
+
+    // Settings identity keys on MEANING, not serialization order: re-typing the
+    // same object with keys in a different order is the same consent, and must
+    // not read as `~ changed` — training a user to wave through diffs that say
+    // nothing is how a real change gets waved through too.
+    #[test]
+    fn settings_identity_ignores_key_order_but_not_values() {
+        let a: serde_json::Value = serde_json::json!({"b": 1, "a": {"y": 2, "x": [3, 4]}});
+        let b: serde_json::Value = serde_json::json!({"a": {"x": [3, 4], "y": 2}, "b": 1});
+        assert_eq!(canonical_json(&a), canonical_json(&b));
+        let changed: serde_json::Value = serde_json::json!({"b": 2, "a": {"y": 2, "x": [3, 4]}});
+        assert_ne!(canonical_json(&a), canonical_json(&changed));
+        // Array ORDER is meaningful (precedence) and must still register.
+        let reordered: serde_json::Value = serde_json::json!({"b": 1, "a": {"y": 2, "x": [4, 3]}});
+        assert_ne!(canonical_json(&a), canonical_json(&reordered));
+    }
 
     // SECURITY WITNESS (trust granting): the non-interactive consent gate. An
     // agent with shell access must NOT be able to self-trust a repo when stdin

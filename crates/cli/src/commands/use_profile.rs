@@ -603,6 +603,16 @@ pub fn activate(
             &crate::manifest::project_root_of(&ctx.dir),
             manifest,
         );
+        // Moment 5: name the undo before the first byte changes. `use --write`
+        // has no confirmation step by design — `--write` is an imperative
+        // contract, not a proposal — so the requirement is satisfied by saying
+        // the way back at the top of the write phase, not by inventing a gate.
+        if args.write {
+            println!(
+                "  {} undo: `agentstack restore --last --write`",
+                "↩".dimmed()
+            );
+        }
     }
 
     // P19: shadowing an inline skill over a same-named central-library skill is

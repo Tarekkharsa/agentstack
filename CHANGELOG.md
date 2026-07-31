@@ -4,6 +4,45 @@ User-facing changes per release. The [GitHub Releases
 page](https://github.com/Tarekkharsa/agentstack/releases) carries the built
 binaries, checksums, and provenance attestations for each entry.
 
+## Unreleased
+
+**The yes gets a card — and stops omitting two capability kinds.** The trust
+review now opens with two to five plain lines saying what the project will run
+on your machine, what it will contact, what secrets it can read, and whether
+the content is pinned to the bytes you are reading. The full line-by-line
+review follows it unchanged: the card summarizes the review, it never replaces
+it. Same gate, same digest, same single grant path — this is presentation.
+
+### Fixed
+
+- **The review screen did not show hooks or settings.** `[hooks.*]` and
+  `[settings.*]` are declared capability kinds. Editing one changes the
+  manifest bytes, so the trust digest moved and AgentStack correctly asked you
+  to review the project again — but the screen it showed you listed servers,
+  skills, instructions, workflows, extensions and policy, and said nothing
+  about the hook or the settings block. **Grants made before this release
+  therefore approved hooks and settings that the review never displayed.** A
+  hook is executable: it runs a command in or around the harness at your
+  permission. Both kinds are now disclosed, and a hook's wildcard target
+  (`["*"]`, previously rendered as a bare `[*]`) is spelled out as "every
+  hook-capable CLI" rather than left as the widest possible scope shown as the
+  least alarming glyph.
+
+  Digests are unchanged, so **nothing re-gates automatically** — already-trusted
+  projects stay trusted and you will not be re-prompted. If you want to see
+  what you previously approved, run `agentstack trust` in the project and read
+  the card; `agentstack trust --revoke` withdraws consent if it is not what you
+  expected.
+
+  A structural check (`tools/check-structure.py`, the `:review` requirement)
+  now fails the build if any manifest kind lacks a disclosure site on the card,
+  so this class of omission cannot recur silently.
+
+- **Undo is named before the write, not after it.** `adopt` never named its
+  undo at all — neither before nor after writing. `apply`, `use --write` and
+  `session start` named it only in the success summary, once the files had
+  already moved. All four now say the way back before the first byte changes.
+
 ## v0.17.1 — 2026-07-31
 
 **The pilot's blocker, fixed before the study runs.** The §1.6 activation
