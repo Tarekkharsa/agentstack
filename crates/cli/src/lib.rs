@@ -41,6 +41,7 @@ pub mod mcp;
 pub mod mcp_server;
 pub mod provider;
 pub mod proxy;
+pub mod regate;
 pub mod render;
 pub mod resolve;
 pub mod runs;

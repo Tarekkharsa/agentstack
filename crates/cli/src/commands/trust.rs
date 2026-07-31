@@ -501,6 +501,13 @@ fn grant_gated(
     // an older entry that recorded no snapshot) stays the flat full review.
     let prior = trust::prior_surface(base);
     let untracked = matches!(prior, PriorSurface::Untracked);
+    // Kept alongside the diff machinery: the re-gate card reads each item's
+    // recorded PIN from here, which is what lets it diff against the bytes the
+    // human approved rather than against the lock that drifted.
+    let prior_items: Vec<SurfaceItem> = match &prior {
+        PriorSurface::Recorded(items) => items.clone(),
+        _ => Vec::new(),
+    };
     let mut diff = ReviewDiff::new(prior);
     if diff.diffing() {
         println!(
@@ -902,11 +909,31 @@ fn grant_gated(
                     say!("{mk}· {disp}   [{origin_word}, pinned]");
                 }
                 SkillLockStatus::ChecksumDrift { .. } | SkillLockStatus::RevDrift { .. } => {
+                    // Phase 2: say WHAT changed, not just that something did.
+                    // The approved bytes are looked up by the pin the last
+                    // consent recorded, so this compares against what the human
+                    // actually said yes to — not against the current lock,
+                    // which is what drifted in the first place.
+                    let pin = prior_pin_for(&prior_items, "skill", name)
+                        .or_else(|| lock.get(name).map(|e| e.checksum.hex().to_string()));
+                    let live = live_skill_dir(name, m, &library, &dir, &lib_home, &store);
+                    let pin_diff = match (&pin, &live) {
+                        (Some(pin), Some(live)) => {
+                            crate::regate::diff_against_pin(store.root(), pin, live)
+                        }
+                        _ => crate::regate::PinDiff::NoSnapshot,
+                    };
+                    let headline = crate::regate::headline(&pin_diff)
+                        .unwrap_or_else(|| "changed since you approved it".to_string());
                     say!(
                         "{mk}{} {disp}   [{origin_word}, {}]",
                         "✗".red(),
-                        "DRIFTED from lock".red()
+                        headline.red()
                     );
+                    for line in crate::regate::render_lines(&pin_diff, crate::regate::DIFF_LINE_CAP)
+                    {
+                        say!("  {line}");
+                    }
                     blockers.push((name.clone(), "skill content drifted from lock".to_string()));
                 }
                 SkillLockStatus::MissingLockEntry => match report.origin {
@@ -1226,6 +1253,45 @@ fn grant_gated(
         "✓".green()
     );
     Ok(())
+}
+
+/// The pin a PREVIOUS consent recorded for an item, if any.
+///
+/// Deliberately preferred over the current lock entry when rendering a re-gate
+/// diff: the lock is what drifted, so diffing against it would answer "what
+/// changed since the machine last re-pinned" when the reviewer asked "what
+/// changed since *I* said yes". Entries recorded before pins existed return
+/// `None` and degrade to the honest no-snapshot message.
+fn prior_pin_for(prior: &[SurfaceItem], kind: &str, name: &str) -> Option<String> {
+    prior
+        .iter()
+        .find(|i| i.kind == kind && i.name == name)
+        .and_then(|i| i.pin.clone())
+}
+
+/// The directory a skill's bytes live in right now, without network access or
+/// content digesting — read-only, through the same seams activation uses.
+/// `None` when the source cannot be located locally (an un-cached git skill),
+/// which the caller renders as "no snapshot" rather than guessing.
+fn live_skill_dir(
+    name: &str,
+    m: &crate::manifest::Manifest,
+    library: &crate::library::Library,
+    // The project's manifest dir — an inline skill's `path` is relative to it.
+    dir: &Path,
+    lib_home: &Path,
+    store: &crate::store::Store,
+) -> Option<PathBuf> {
+    // An inline declaration always wins over a same-named library skill, which
+    // is the same precedence activation applies.
+    if let Some(skill) = m.skills.get(name) {
+        return store
+            .resolve_path_only(skill, dir, None)
+            .ok()
+            .flatten()
+            .map(|r| r.path);
+    }
+    library.get(name)?.body_dir(lib_home)
 }
 
 /// The card: two to five plain lines summarizing the surface that was just
