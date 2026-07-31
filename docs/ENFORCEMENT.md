@@ -120,6 +120,7 @@ Modes are columns; policy dimensions are rows. Legend:
 | **Filesystem — read** | cooperative¶ | cooperative¶ | coarse | coarse |
 | **Audit / recording** | unsupported | **enforced** | **enforced**§ | **enforced** |
 | **Native extensions** | unsupported‖ | unsupported‖ | unsupported‖ | unsupported‖ |
+| **Hooks** | unsupported# | unsupported# | unsupported# | unsupported# |
 
 \* **for proxied traffic only.** Plain `--sandbox` points `HTTPS_PROXY` at the
 proxy but the container keeps an ordinary bridge network — a process that
@@ -165,6 +166,27 @@ re-verifies each delivered copy against its pin before launch. That pipeline is
 provenance and content binding — which bytes, from where, reviewed by whom — not
 runtime enforcement, and it is deliberately labelled as such. See the Native
 extensions section.
+
+# **runtime is unsupported in every mode — a hook is a command the harness
+itself runs at full user permission.** A `[hooks.*]` entry compiles into each
+hook-capable harness's native hooks config; when the harness fires the event,
+it executes the hook's command in its own process context — no policy ceiling,
+gateway, egress fence, container, or guard observes or constrains that
+execution, so there is no runtime cell to earn a stronger label. (The host
+guard's own pre-tool-use hook is this same mechanism pointed at agentstack's
+guard binary — that is why the filesystem rows above top out at
+**cooperative**.) What agentstack governs happens before delivery, and it is a
+*narrower* surface than the extensions pipeline: the hook's declaration — its
+event, matcher, command line, and targets — is part of the manifest bytes, so
+declaring or editing a hook re-gates trust review; rendering is fail-closed
+for untrusted projects; and `doctor` reports declared-vs-installed drift. But
+when a hook's command names a local script, the *script file's bytes are not
+content-pinned* — no lock entry digests them, so editing the script after
+consent changes what runs without re-gating anything. That gap is documented
+here deliberately rather than papered over. Strategy classification: hooks are
+an executable capability kind alongside extensions — the full consent ceremony
+always applies, and no compressed-consent path may ever cover them. See the
+Hooks section.
 
 Two of the four columns are execution modes for a *rendered* config: **host** is
 `agentstack apply` + `agentstack run` (adapters write native config, the harness
@@ -360,6 +382,33 @@ Docker container behind the egress proxy.
   an untrusted or serverless run has no MCP calls and records lifecycle plus
   egress. Trust-store mutations and cost/tokens remain the documented recorder
   gaps. (`crates/cli/src/gateway.rs`, `crates/cli/src/commands/sandbox.rs`)
+
+### Hooks
+
+- **host / gateway / sandbox / lockdown — unsupported (runtime).** A
+  `[hooks.*]` entry is a command the harness runs *in its own process context
+  at full user permission* whenever the declared lifecycle event fires
+  (`PreToolUse`, `SessionStart`, …). No runtime mode consults policy for it:
+  it is not a tool call, so the gateway never sees it; the egress fence and
+  the sandbox container never single it out from the harness that spawned it;
+  and the host guard cannot referee it — the guard *is itself* a hook riding
+  this exact mechanism. Every runtime cell is `unsupported`, and honestly so.
+  (`crates/cli/src/render/hooks.rs`)
+- **pre-delivery — declaration-bound and trust-gated, but NOT content-pinned.**
+  The governed surface is the declaration: a hook's event, matcher, command
+  line, args, timeout, and targets live in the manifest, whose bytes are
+  bound into the trust digest — adding a hook or editing its command line
+  re-gates trust review, and rendering into a harness's native hooks config is
+  fail-closed for untrusted or drifted projects. `doctor`'s Hooks section
+  reports declared-vs-installed render drift. **The honest limit:** unlike a
+  native extension, whose source tree is digest-pinned in `agentstack.lock`, a
+  hook's command typically *names* a script whose file bytes have no lock
+  entry — editing that script after consent changes what the harness executes
+  without re-gating anything. What is bound is *which command line runs*, not
+  *what the named file contains*. Consent policy follows from this: hooks are
+  an executable capability kind alongside extensions and always get the full
+  consent ceremony — never a compressed path. (`crates/cli/src/render/hooks.rs`,
+  `crates/core/src/manifest/model.rs` `Hook`)
 
 ### Native extensions
 
