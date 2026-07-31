@@ -55,13 +55,24 @@ pub fn new_manifest_dir(base: &Path) -> PathBuf {
 /// This is how the zero-files bridge follows the agent into a repo when it was
 /// launched from a subdirectory (or a GUI harness's own cwd).
 ///
-/// The walk stops AT the `$HOME` layer without matching it, and likewise stops
-/// empty-handed at the machine home itself (`~/.agentstack`, or a relocated
-/// `AGENTSTACK_HOME`): the home manifest (`~/.agentstack/agentstack.toml`,
-/// seeded by `init --global`) is the personal machine-level layer, not a
-/// project — it must never be discovered (and so never offered for `trust`,
-/// never activated) by the zero-files bridge, even for sessions rooted inside
-/// it.
+/// The walk stops empty-handed at the `$HOME` layer — or at ANY ancestor of
+/// `$HOME` — without matching it, and likewise at the machine home itself
+/// (`~/.agentstack`, or a relocated `AGENTSTACK_HOME`): the home manifest
+/// (`~/.agentstack/agentstack.toml`, seeded by `init --global`) is the
+/// personal machine-level layer, not a project — it must never be discovered
+/// (and so never offered for `trust`, never activated) by the zero-files
+/// bridge, even for sessions rooted inside it.
+///
+/// Stopping at ancestors of `$HOME` (not just `$HOME` itself) is what keeps an
+/// ISOLATED home honest: a harness that stages `HOME=<sandbox>/home` and works
+/// in `<sandbox>/proj` fences the walk at `<sandbox>` — instead of letting it
+/// climb past the sandbox into the real machine's tree and "discover"
+/// `/Users/me/.agentstack/agentstack.toml` as an ancestor project (the layout
+/// `examples/sandbox/demo-firstrun.sh` runs). The rule costs nothing in normal
+/// operation: the layers above a home (`/Users`, `/home`, `/`) are never
+/// project bases. (A redirected HOME sharing no ancestry with the cwd still
+/// can't be fenced — sandboxes must stage their cwd next to their fake home,
+/// as the demo script does.)
 pub fn discover_project_base(start: &Path) -> Option<PathBuf> {
     discover_project_base_below(start, dirs::home_dir().as_deref())
 }
@@ -73,17 +84,28 @@ fn discover_project_base_below(start: &Path, home: Option<&Path>) -> Option<Path
     // canonicalized so symlinked spellings still match.
     let machine_home = crate::util::paths::agentstack_home();
     let machine_home_canon = machine_home.canonicalize().ok();
+    let home_canon = home.and_then(|h| h.canonicalize().ok());
     let mut cur = Some(start);
     while let Some(dir) = cur {
-        if home == Some(dir) {
+        let dir_canon = dir.canonicalize().ok();
+        // `Path::starts_with` is component-wise (and reflexive), so this reads
+        // "`dir` is `$HOME` or an ancestor of it" — either spelling raw or
+        // canonicalized. Home directories and the layers above them are never
+        // project bases; see the doc comment for why containment (not
+        // equality) is load-bearing for sandboxed HOMEs.
+        if home.is_some_and(|h| h.starts_with(dir))
+            || matches!(
+                (home_canon.as_deref(), dir_canon.as_deref()),
+                (Some(h), Some(d)) if h.starts_with(d)
+            )
+        {
             return None;
         }
         // Checked BEFORE the manifest-existence test: a session rooted at or
         // below the machine home (e.g. editing personal fragments) must never
         // discover the machine manifest as a project — it would become
         // trustable/spawnable via the zero-files bridge.
-        if dir == machine_home
-            || (machine_home_canon.is_some() && dir.canonicalize().ok() == machine_home_canon)
+        if dir == machine_home || (machine_home_canon.is_some() && dir_canon == machine_home_canon)
         {
             return None;
         }
@@ -497,6 +519,33 @@ mod tests {
         let inner = proj.join("src");
         fs::create_dir_all(&inner).unwrap();
         assert_eq!(discover_project_base_below(&inner, Some(&home)), Some(proj));
+    }
+
+    #[test]
+    fn discover_fences_at_a_sandboxed_home_boundary() {
+        // The examples/sandbox/demo-firstrun.sh layout: a fenced sandbox
+        // (fake HOME + project side by side) staged INSIDE a real home that
+        // carries the machine manifest at ~/.agentstack/agentstack.toml.
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let real_home = tmp.path().join("Users/someone");
+        fs::create_dir_all(real_home.join(MANIFEST_SUBDIR)).unwrap();
+        fs::write(
+            real_home.join(MANIFEST_SUBDIR).join(MANIFEST_FILE),
+            "version = 1\n",
+        )
+        .unwrap();
+        let sandbox = real_home.join("repo/examples/sandbox/runtime/firstrun");
+        let fake_home = sandbox.join("home");
+        let proj = sandbox.join("proj");
+        fs::create_dir_all(&fake_home).unwrap();
+        fs::create_dir_all(&proj).unwrap();
+
+        // With HOME redirected into the sandbox, the walk from the sandbox
+        // project must stop at the dir CONTAINING the fake home — never climb
+        // into the real home and mistake the machine manifest for an ancestor
+        // project (which made the demo's `init` refuse with "already
+        // initialized at ~/.agentstack/agentstack.toml").
+        assert_eq!(discover_project_base_below(&proj, Some(&fake_home)), None);
     }
 
     /// The machine `[policy]` health surface distinguishes absence, a valid
