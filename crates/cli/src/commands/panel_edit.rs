@@ -53,7 +53,7 @@ const DIGEST_DOMAIN: &[u8] = b"agentstack:profiles-edit:v1\n";
 /// length-framed so distinct triples cannot collide by concatenation. Binding
 /// the manifest bytes means any drift between preview and apply — a concurrent
 /// edit, a different pending change — flips the digest and the apply refuses.
-fn action_digest(action: &str, params: &Value, manifest_bytes: &[u8]) -> String {
+pub(crate) fn action_digest(action: &str, params: &Value, manifest_bytes: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
     h.update(DIGEST_DOMAIN);
@@ -72,7 +72,7 @@ fn action_digest(action: &str, params: &Value, manifest_bytes: &[u8]) -> String 
 /// The manifest bytes the digest binds to, and that the mutation builders will
 /// edit. Errors (fail closed) when the project has no manifest — these actions
 /// only extend an initialized project.
-fn manifest_bytes(dir: Option<&Path>) -> Result<Vec<u8>> {
+pub(crate) fn manifest_bytes(dir: Option<&Path>) -> Result<Vec<u8>> {
     let base = crate::commands::project_base(dir)?;
     let mdir = crate::manifest::resolve_manifest_dir(&base);
     let path = mdir.join(crate::manifest::load::MANIFEST_FILE);
@@ -93,7 +93,7 @@ fn load_manifest(dir: Option<&Path>) -> Result<Manifest> {
 /// away) lets the apply path reuse the exact digest the preview computed, and
 /// lets callers/tests read it without parsing stdout — the same role
 /// `init::plan_json` plays for setup.
-fn build_preview(action: &str, digest: &str, mut body: Map<String, Value>) -> Value {
+pub(crate) fn build_preview(action: &str, digest: &str, mut body: Map<String, Value>) -> Value {
     body.insert("action".into(), action.into());
     body.insert("consent_digest".into(), digest.to_string().into());
     // Three actions here touch the manifest without rendering: naming a toolset,
@@ -125,6 +125,12 @@ fn build_preview(action: &str, digest: &str, mut body: Map<String, Value>) -> Va
              Disabling also removes a managed block already in .gitignore, which makes \
              the generated files visible to `git status` again."
         )
+    } else if action == "set-mode" {
+        format!(
+            "Review, then apply with --yes --consented {digest}. Applying changes how this \
+             project's capabilities reach your CLIs — the plan above is exactly what is \
+             written and removed. The manifest itself is untouched."
+        )
     } else if action == "remove-capability" {
         format!(
             "Review, then apply with --yes --consented {digest}. Applying removes the \
@@ -143,14 +149,14 @@ fn build_preview(action: &str, digest: &str, mut body: Map<String, Value>) -> Va
 }
 
 /// Print an enveloped Value as pretty JSON — the preview branch of every action.
-fn emit(value: &Value) -> Result<()> {
+pub(crate) fn emit(value: &Value) -> Result<()> {
     println!("{}", serde_json::to_string_pretty(value)?);
     Ok(())
 }
 
 /// Pull the `consent_digest` back out of a built preview so the apply path binds
 /// to the exact digest the preview showed.
-fn preview_digest(preview: &Value) -> Result<&str> {
+pub(crate) fn preview_digest(preview: &Value) -> Result<&str> {
     preview["consent_digest"]
         .as_str()
         .context("preview is missing consent_digest — internal error")
@@ -159,7 +165,7 @@ fn preview_digest(preview: &Value) -> Result<&str> {
 /// The non-interactive consent contract, identical in spirit to
 /// `apply-setup`/`trust-consent`: applying requires a `--consented <digest>`
 /// that matches the freshly recomputed digest. Refuses before any write.
-fn verify_consent(consented: Option<&str>, actual: &str) -> Result<()> {
+pub(crate) fn verify_consent(consented: Option<&str>, actual: &str) -> Result<()> {
     let consented = consented.context(
         "refusing to apply without --consented <digest> — run --preview first, review, \
          then pass the digest it printed",
@@ -611,7 +617,7 @@ fn print_create_review(args: &PanelCreateProfileArgs, digest: &str) {
 
 /// A y/N prompt on stdin. Only ever reached on the interactive path, where
 /// stdin is a terminal; anything that is not an explicit yes cancels.
-fn confirm(question: &str) -> Result<bool> {
+pub(crate) fn confirm(question: &str) -> Result<bool> {
     use std::io::Write;
     print!("{question} [y/N] ");
     std::io::stdout().flush().ok();
@@ -786,11 +792,11 @@ pub fn set_gitignore_preview(args: &PanelSetGitignoreArgs, dir: Option<&Path>) -
 fn print_gitignore_review(preview: &Value) {
     use owo_colors::OwoColorize;
     let enabled = preview
-        .pointer("/body/enabled")
+        .pointer("/enabled")
         .and_then(Value::as_bool)
         .unwrap_or(true);
     let removes = preview
-        .pointer("/body/removes_block")
+        .pointer("/removes_block")
         .and_then(Value::as_bool)
         .unwrap_or(false);
     if enabled {

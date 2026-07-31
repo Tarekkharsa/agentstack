@@ -148,6 +148,7 @@ fn run() -> Result<()> {
         Command::AddServerToProfile(args) => commands::panel_edit::add_server(args, dir),
         Command::CreateProfile(args) => commands::panel_edit::create_profile(args, dir),
         Command::SetGitignore(args) => commands::panel_edit::set_gitignore(args, dir),
+        Command::SetMode(args) => commands::mode_switch::set_mode(args, dir),
         Command::EditProfile(args) => commands::panel_edit::edit_profile(args, dir),
         Command::RenameProfile(args) => commands::panel_edit::rename_profile(args, dir),
         Command::DeleteProfile(args) => commands::panel_edit::delete_profile(args, dir),

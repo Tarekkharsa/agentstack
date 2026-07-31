@@ -216,7 +216,7 @@ fn configure(
             true
         }
         super::overview::Mode::ZeroFiles => {
-            run_zero_files()?;
+            run_zero_files(&ctx, manifest_dir)?;
             true
         }
     };
@@ -508,6 +508,14 @@ fn run_clean_at_rest(ctx: &super::Context, manifest_dir: Option<&Path>) -> Resul
     }
     println!("  {} {what}", "·".dimmed());
 
+    // The un-render leg: files this project already rendered would keep the
+    // derived mode reading "static" — and keep serving stale capabilities —
+    // however faithfully the session rhythm is followed. The switch command
+    // previews exactly what comes off disk and confirms; the wizard only
+    // points at it (a removal is consented in its own review, not inside a
+    // setup run that was about importing).
+    print_switch_pointer(ctx, Mode::CleanAtRest);
+
     println!("\n{}", "Doctor".bold());
     // skip_drift: nothing is rendered here on purpose, so the "N change(s)
     // pending ↳ apply --write" comparison would be a false alarm pointing back
@@ -531,9 +539,13 @@ fn run_clean_at_rest(ctx: &super::Context, manifest_dir: Option<&Path>) -> Resul
 /// The zero-files fork: nothing is rendered. Offer to register the gateway in
 /// every installed harness (one small entry each), then point at `trust` —
 /// which we NEVER run for the user: trust is human consent (principle 3), so
-/// the wizard only ever prints the command.
-fn run_zero_files() -> Result<()> {
+/// the wizard only ever prints the command. If this project already rendered
+/// files, the fork also points at `set-mode zero-files`, the switch that
+/// removes them — without that leg the derived mode keeps reading "static"
+/// however completely the gateway is wired.
+fn run_zero_files(ctx: &super::Context, manifest_dir: Option<&Path>) -> Result<()> {
     use super::overview::Mode;
+    let _ = manifest_dir; // the ctx already carries the resolved dir
 
     println!("\n{}", "Zero-files".bold());
     println!(
@@ -542,8 +554,9 @@ fn run_zero_files() -> Result<()> {
         "·".dimmed()
     );
 
-    // cmds[0] = "agentstack gateway connect --all", cmds[1] = "agentstack trust ."
+    // cmds[0] = "agentstack trust .", cmds[1] = "agentstack set-mode zero-files"
     let (cmds, what) = mode_switch_plan(Mode::ZeroFiles, None);
+    const CONNECT_LATER: &str = "agentstack gateway connect --all --write";
 
     let register = crate::util::confirm::is_interactive()
         && crate::util::confirm::confirm(
@@ -564,20 +577,46 @@ fn run_zero_files() -> Result<()> {
                 "  {} gateway registration failed ({err:#}) — register it later with:",
                 "⚠".yellow()
             );
-            println!("    {} --write", cmds[0].bold());
+            println!("    {}", CONNECT_LATER.bold());
         }
     } else {
         println!("  {} register it later with:", "·".dimmed());
-        println!("    {} --write", cmds[0].bold());
+        println!("    {}", CONNECT_LATER.bold());
     }
 
     println!(
         "\n  {} then trust this repo so the gateway will serve its capabilities:",
         "·".dimmed()
     );
-    println!("    {}", cmds[1].bold());
+    println!("    {}", cmds[0].bold());
     println!("  {} {what}", "·".dimmed());
+
+    print_switch_pointer(ctx, Mode::ZeroFiles);
     Ok(())
+}
+
+/// Point at the `set-mode` switch when this project still has rendered files —
+/// the un-render leg that makes a nothing-at-rest choice real. Printed, never
+/// executed: the switch removes files, and that removal is consented in
+/// `set-mode`'s own review (the same reason the wizard never runs `trust`).
+fn print_switch_pointer(ctx: &super::Context, mode: super::overview::Mode) {
+    let all_ids: Vec<String> = ctx.registry.ids().map(str::to_string).collect();
+    if !super::overview::has_rendered_artifacts(ctx, &all_ids) {
+        return;
+    }
+    println!(
+        "\n  {} this project still has rendered config on disk, so it will keep\n\
+         \x20   reading as \"static\" until that comes off. Complete the switch with:",
+        "·".dimmed()
+    );
+    println!(
+        "    {}",
+        format!("agentstack set-mode {}", mode.label()).bold()
+    );
+    println!(
+        "  {} it previews every removal first and undoes with `agentstack restore --last`.",
+        "·".dimmed()
+    );
 }
 
 /// P1: the opening plan. Four numbered steps and a promise made precise for the
@@ -937,10 +976,11 @@ fn mode_switch_plan(
         ),
         Mode::ZeroFiles => (
             vec![
-                "agentstack gateway connect --all".into(),
                 "agentstack trust .".into(),
+                "agentstack set-mode zero-files".into(),
             ],
-            "Connect your CLIs to agentstack once, then review this repo so its capabilities serve live.",
+            "Review this repo once, then switch: the switch registers the gateway in your CLIs \
+             and removes anything this project rendered, so its capabilities serve live.",
         ),
     }
 }
@@ -994,8 +1034,8 @@ fn fork_plan(mode: super::overview::Mode) -> &'static [&'static str] {
     use super::overview::Mode;
     match mode {
         Mode::Static => &["preview", "confirm", "install", "apply", "skills", "doctor"],
-        Mode::CleanAtRest => &["lock", "session-rhythm", "doctor"],
-        Mode::ZeroFiles => &["gateway-offer", "trust-pointer"],
+        Mode::CleanAtRest => &["lock", "session-rhythm", "switch-pointer", "doctor"],
+        Mode::ZeroFiles => &["gateway-offer", "trust-pointer", "switch-pointer"],
     }
 }
 
@@ -1498,11 +1538,11 @@ mod tests {
         );
         assert_eq!(
             fork_plan(Mode::CleanAtRest),
-            &["lock", "session-rhythm", "doctor"]
+            &["lock", "session-rhythm", "switch-pointer", "doctor"]
         );
         assert_eq!(
             fork_plan(Mode::ZeroFiles),
-            &["gateway-offer", "trust-pointer"]
+            &["gateway-offer", "trust-pointer", "switch-pointer"]
         );
 
         // The two no-render forks must never render into a CLI config.
@@ -1511,6 +1551,11 @@ mod tests {
         assert!(!fork_plan(Mode::ZeroFiles).contains(&"apply"));
         // zero-files never renders and never locks — it points at trust instead.
         assert!(fork_plan(Mode::ZeroFiles).contains(&"trust-pointer"));
+        // Both no-render forks point at the un-render switch: without it, a
+        // project with rendered files keeps deriving "static" whatever was
+        // chosen — the exact display lie set-mode exists to remove.
+        assert!(fork_plan(Mode::CleanAtRest).contains(&"switch-pointer"));
+        assert!(fork_plan(Mode::ZeroFiles).contains(&"switch-pointer"));
     }
 
     // P4: choosing a non-default mode prints a command sequence, never runs it.
@@ -1528,9 +1573,14 @@ mod tests {
         let (cmds, _) = mode_switch_plan(Mode::CleanAtRest, None);
         assert_eq!(cmds[0], "agentstack session start <toolset>");
 
+        // Zero-files: trust FIRST (set-mode refuses an untrusted project so
+        // the derived mode can't disagree with the choice), then the switch
+        // that registers the gateway and un-renders. The un-render leg used to
+        // be missing entirely: a rendered project that "switched" kept
+        // deriving — and displaying — static.
         let (cmds, _) = mode_switch_plan(Mode::ZeroFiles, None);
-        assert_eq!(cmds[0], "agentstack gateway connect --all");
-        assert_eq!(cmds[1], "agentstack trust .");
+        assert_eq!(cmds[0], "agentstack trust .");
+        assert_eq!(cmds[1], "agentstack set-mode zero-files");
     }
 
     // Stage 1.2: the close leads with the concise facts — manifest path, CLIs

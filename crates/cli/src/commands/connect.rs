@@ -297,6 +297,20 @@ pub(crate) fn bridge_command(explicit: Option<&str>) -> String {
         .unwrap_or_else(|| "agentstack".to_string())
 }
 
+/// Whether `desc` can host the stdio bridge at all: it must have an MCP config
+/// location and a renderer able to express a stdio server. The one definition
+/// shared by `run_connect`'s eligibility, doctor's `clis` coverage field, and
+/// the `set-mode` plan — surfaces that must never disagree about which CLIs
+/// live delivery reaches. The command value is irrelevant to representability,
+/// so a placeholder keeps this callable without resolving the real binary.
+pub(crate) fn bridge_capable(desc: &AdapterDescriptor) -> bool {
+    if desc.mcp.is_none() || desc.config.is_none() {
+        return false;
+    }
+    let bridge = bridge_server("agentstack", false, None);
+    render_server(desc, &bridge, &MapResolver::default()).representable
+}
+
 /// Whether a config already carries a bridge entry under (dotted) `location`.
 pub fn has_bridge_entry(existing: &str, location: &str, format: Format) -> bool {
     if existing.trim().is_empty() {
