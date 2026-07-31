@@ -1,5 +1,9 @@
 # Reference field notes
 
+> **Status:** living maintainer reference — operational addenda to
+> `docs/reference.md`. Not a design proposal and not a roadmap; carries no
+> direction. Direction lives in `STRATEGY.md`, the queue in `TODO.md`.
+
 Maintainer-facing addenda split out of [the feature reference](../reference.md):
 operational edge cases, crate-level caveats, and implementation rationale that
 back the reference but are too deep for it. Nothing here is required to *use*
