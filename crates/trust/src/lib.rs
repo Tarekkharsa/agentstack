@@ -294,14 +294,18 @@ pub fn trust_reviewed(base: &Path, digest: String, surface: Vec<SurfaceItem>) ->
 /// (writing nothing) when no entry exists: re-pinning must never CREATE
 /// trust, only carry valid trust across agentstack's own rewrite.
 pub fn repin(base: &Path, digest: String) -> Result<bool> {
+    let key = key_for(base);
     with_store_lock(|| {
         let mut store = TrustStore::load();
-        let Some(entry) = store.trusted.get_mut(&key_for(base)) else {
+        let Some(entry) = store.trusted.get_mut(&key) else {
             return Ok(false);
         };
-        entry.digest = digest;
+        entry.digest = digest.clone();
         entry.trusted_at = now_secs();
         store.save()?;
+        // P0.2: recorded as `Repin`, never `Regrant` — no human consented
+        // here, and the consent metrics must be able to exclude it.
+        record_mutation(agentstack_recorder::TrustAction::Repin, key.clone(), digest);
         Ok(true)
     })
 }
@@ -371,29 +375,64 @@ pub fn prior_surface(base: &Path) -> PriorSurface {
 /// out so the consent path can record the digest it verified rather than
 /// re-reading disk (see [`trust_with_consent`]).
 fn store_entry(base: &Path, digest: String, surface: Option<Vec<SurfaceItem>>) -> Result<()> {
+    let key = key_for(base);
     with_store_lock(|| {
         let mut store = TrustStore::load();
-        store.trusted.insert(
-            key_for(base),
+        let prior = store.trusted.insert(
+            key.clone(),
             TrustEntry {
-                digest,
+                digest: digest.clone(),
                 trusted_at: now_secs(),
                 surface,
             },
         );
-        store.save()
+        store.save()?;
+        // P0.2: evidence, appended only after the save succeeded and inside
+        // the store lock (so the log's order is the store's order). Best-
+        // effort by contract — a recording hiccup must never fail the grant.
+        record_mutation(
+            if prior.is_some() {
+                agentstack_recorder::TrustAction::Regrant
+            } else {
+                agentstack_recorder::TrustAction::Grant
+            },
+            key.clone(),
+            digest.clone(),
+        );
+        Ok(())
     })
+}
+
+/// The one seam between the trust store and the recorder: every mutation path
+/// funnels its event through here. Identity only (project key + digest);
+/// never the reviewed surface or manifest bytes.
+fn record_mutation(action: agentstack_recorder::TrustAction, project: String, digest: String) {
+    agentstack_recorder::record_trust(&agentstack_recorder::TrustMutation {
+        ts: agentstack_recorder::now_epoch(),
+        action,
+        project,
+        digest,
+    });
 }
 
 /// Remove trust for `base`. Returns whether an entry existed.
 pub fn revoke(base: &Path) -> Result<bool> {
+    let key = key_for(base);
     with_store_lock(|| {
         let mut store = TrustStore::load();
-        let existed = store.trusted.shift_remove(&key_for(base)).is_some();
-        if existed {
-            store.save()?;
-        }
-        Ok(existed)
+        let removed = store.trusted.shift_remove(&key);
+        let Some(entry) = removed else {
+            return Ok(false);
+        };
+        store.save()?;
+        // P0.2: the event carries the digest the removed entry had pinned, so
+        // the history says WHAT trust was revoked, not merely that some was.
+        record_mutation(
+            agentstack_recorder::TrustAction::Revoke,
+            key.clone(),
+            entry.digest,
+        );
+        Ok(true)
     })
 }
 
@@ -494,6 +533,74 @@ mod tests {
                 .write_str("version = 1\n[servers.evil]\ntype = \"stdio\"\ncommand = \"sh\"\n")
                 .unwrap();
             assert_ne!(Some(snap.digest()), digest_for(proj.path()));
+        });
+    }
+
+    /// P0.2 witness: every store mutation appends exactly one event, in store
+    /// order, with the store's own key and the pinned/removed digest — and a
+    /// repin that finds no entry (mutates nothing) records nothing.
+    #[test]
+    fn store_mutations_are_recorded_as_events() {
+        use agentstack_recorder::{read_trust_all, TrustAction};
+        with_home(|_| {
+            let proj = project_with_manifest();
+            let key = key_for(proj.path());
+
+            // First-ever trust: exactly one event, action = grant.
+            let d1 = trust_unreviewed(proj.path()).unwrap();
+            let events = read_trust_all();
+            assert_eq!(events.len(), 1);
+            assert_eq!(events[0].action, TrustAction::Grant);
+            assert_eq!(events[0].project, key);
+            assert_eq!(events[0].digest, d1);
+
+            // Trusting again over an existing entry: regrant.
+            proj.child(".agentstack/agentstack.toml")
+                .write_str("version = 1\n[servers.y]\ntype = \"http\"\nurl = \"https://y/mcp\"\n")
+                .unwrap();
+            let d2 = trust_unreviewed(proj.path()).unwrap();
+            assert_ne!(d1, d2);
+
+            // Repin of the existing entry: repin, distinct from regrant.
+            assert!(repin(proj.path(), "sha256:repinned".into()).unwrap());
+
+            // Revoke: the event carries the digest the entry had pinned.
+            assert!(revoke(proj.path()).unwrap());
+
+            // Repin with no entry left mutates nothing — and records nothing.
+            assert!(!repin(proj.path(), "sha256:ghost".into()).unwrap());
+
+            let actions: Vec<_> = read_trust_all()
+                .into_iter()
+                .map(|e| (e.action, e.digest))
+                .collect();
+            assert_eq!(
+                actions,
+                vec![
+                    (TrustAction::Grant, d1),
+                    (TrustAction::Regrant, d2),
+                    (TrustAction::Repin, "sha256:repinned".to_string()),
+                    (TrustAction::Revoke, "sha256:repinned".to_string()),
+                ]
+            );
+        });
+    }
+
+    /// P0.2 witness for the failure posture: recording adds events, NEVER
+    /// gates. With the audit path unwritable (a file squats where the
+    /// directory must go), the grant still lands and verification still
+    /// reads Trusted — only the event is lost.
+    #[test]
+    #[cfg(unix)]
+    fn recording_failure_never_blocks_the_grant() {
+        with_home(|home| {
+            std::fs::create_dir_all(home.path()).unwrap();
+            std::fs::write(home.path().join("audit"), b"not a directory").unwrap();
+
+            let proj = project_with_manifest();
+            trust_unreviewed(proj.path()).expect("grant must succeed without the recorder");
+            assert_eq!(check(proj.path()), TrustState::Trusted);
+            assert!(agentstack_recorder::read_trust_all().is_empty());
         });
     }
 

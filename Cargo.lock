@@ -209,6 +209,7 @@ name = "agentstack-trust"
 version = "0.17.0"
 dependencies = [
  "agentstack-core",
+ "agentstack-recorder",
  "assert_fs",
  "ed25519-dalek",
  "indexmap",

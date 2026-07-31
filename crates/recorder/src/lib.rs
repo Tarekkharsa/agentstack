@@ -255,6 +255,104 @@ pub fn now_epoch() -> u64 {
         .unwrap_or(0)
 }
 
+// ─────────────────────────── trust-store mutation log ─────────────────────────
+//
+// Every mutation of the machine's trust store (`~/.agentstack/trust.json`)
+// becomes one line in `~/.agentstack/audit/trust.jsonl` — the evidence stream
+// the strategy's consent metrics are counted over (STRATEGY.md Phase 0:
+// without recorded grant events, "no consent surprise" is unfalsifiable).
+//
+// What's recorded: timestamp, the action, the project key (the store's own
+// canonical base-dir key), and the consent digest pinned or removed. What's
+// never recorded: manifest bytes, the reviewed surface (its `identity` fields
+// carry command lines), or anything else content-shaped — identity only.
+//
+// Deliberately NO rotation, unlike `calls.jsonl`: mutations are rare
+// (human-paced), and the Phase 1 gate counts consent incidents over the FULL
+// event history — rotating old grants away would corrupt the metric.
+//
+// Same honest scope as the call log: best-effort local evidence, appended by
+// the trust crate only AFTER the store write succeeded — it adds events,
+// never gates, and it is not tamper-evident.
+
+/// What one trust-store mutation did — a closed 4-value set.
+///
+/// `Repin` is deliberately distinct from `Regrant`: a repin carries existing
+/// trust across agentstack's OWN rewrite of the pinned bytes (no human in the
+/// loop), so consent metrics counted over these events must be able to
+/// exclude it; `Grant`/`Regrant` are the human consent moments.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TrustAction {
+    Grant,
+    Regrant,
+    Repin,
+    Revoke,
+}
+
+/// One line in `audit/trust.jsonl`. Identity only — see the module note above
+/// for what is never recorded.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrustMutation {
+    pub ts: u64,
+    pub action: TrustAction,
+    /// Canonical project base dir — the trust store's own key for the entry.
+    pub project: String,
+    /// The `sha256:` consent digest pinned (grant/regrant/repin) or removed
+    /// (revoke).
+    pub digest: String,
+}
+
+pub fn trust_log_path() -> PathBuf {
+    paths::agentstack_home().join("audit").join("trust.jsonl")
+}
+
+/// Append one trust-store mutation. Best-effort: any failure is swallowed —
+/// a recording hiccup must never fail the grant (or revoke) it describes.
+/// Callers append AFTER their store write succeeds, so an event always
+/// describes a mutation that actually happened.
+pub fn record_trust(ev: &TrustMutation) {
+    let path = trust_log_path();
+    let Some(dir) = path.parent() else { return };
+    if fs::create_dir_all(dir).is_err() {
+        return;
+    }
+    agentstack_core::util::restrict(dir, true);
+    let Ok(mut line) = serde_json::to_string(ev) else {
+        return;
+    };
+    // Single-buffer O_APPEND write, same torn-line discipline as
+    // `RunLog::append`: the trust store's own lock serializes today's writers,
+    // but this file must stay whole even if a future caller appends without it.
+    line.push('\n');
+    let mut opts = fs::OpenOptions::new();
+    opts.create(true).append(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    if let Ok(mut f) = opts.open(&path) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+        }
+        let _ = f.write_all(line.as_bytes());
+    }
+}
+
+/// Read the full trust-mutation history, oldest first. Unparseable lines are
+/// skipped (a torn write must not brick the log).
+pub fn read_trust_all() -> Vec<TrustMutation> {
+    let Ok(text) = fs::read_to_string(trust_log_path()) else {
+        return Vec::new();
+    };
+    text.lines()
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect()
+}
+
 // ─────────────────────────── run-scoped flight recorder ───────────────────────
 //
 // The machine-global `calls.jsonl` above is diagnostics across every project.
@@ -703,6 +801,30 @@ mod tests {
         assert!(line.contains("\"event\":\"workflow_resumed\""), "{line}");
         let back: RunEvent = serde_json::from_str(&line).unwrap();
         assert_eq!(back, resumed);
+    }
+
+    /// P0.2 witness: the trust-mutation event is self-describing on the wire
+    /// (snake_case action), round-trips, and `record_trust` appends exactly
+    /// one parseable line per call.
+    #[test]
+    fn trust_mutation_round_trips_and_appends_one_line() {
+        let ev = TrustMutation {
+            ts: 7,
+            action: TrustAction::Regrant,
+            project: "/tmp/proj".into(),
+            digest: "sha256:abc".into(),
+        };
+        let line = serde_json::to_string(&ev).unwrap();
+        assert!(line.contains("\"action\":\"regrant\""), "{line}");
+        let back: TrustMutation = serde_json::from_str(&line).unwrap();
+        assert_eq!(back, ev);
+
+        with_home(|| {
+            record_trust(&ev);
+            assert_eq!(read_trust_all(), vec![ev.clone()]);
+            record_trust(&ev);
+            assert_eq!(read_trust_all().len(), 2);
+        });
     }
 
     fn with_home<T>(f: impl FnOnce() -> T) -> T {

@@ -12,9 +12,12 @@ publish = false
 # strict one and nothing else: serde, serde_json, sha2, ed25519-dalek,
 # thiserror, indexmap (deterministic ordering is digest-relevant), proptest
 # (dev). The 2026-07-11 sweep dropped anyhow (→ thiserror) and toml (store
-# migrated from trust.toml to trust.json).
+# migrated from trust.toml to trust.json). P0.2 (2026-07-31) added the
+# workspace-internal agentstack-recorder so every store mutation appends a
+# trust event at the write choke points — best-effort, never gating.
 [dependencies]
 agentstack-core = { path = "../core" }
+agentstack-recorder = { path = "../recorder" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"
