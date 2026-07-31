@@ -99,6 +99,90 @@ pub struct TrustEntry {
     /// folded into [`digest_for`], so it cannot change what re-gates a project.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub surface: Option<Vec<SurfaceItem>>,
+    /// Standing per-item answers from a re-gate: what the human decided about
+    /// content that changed under a pin they had already approved.
+    ///
+    /// Lives with the trust entry because these ARE consent decisions — they
+    /// are scoped to this project, and revoking trust must discard them along
+    /// with everything else the project was granted. Additive and optional, so
+    /// stores written before re-gate answers existed round-trip unchanged.
+    ///
+    /// Display/behaviour metadata only: like [`Self::surface`], it never enters
+    /// [`digest_for`], so recording an answer cannot re-gate the project.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decisions: Option<Vec<ItemDecision>>,
+}
+
+/// A standing answer to one re-gate question.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ItemDecision {
+    pub kind: String,
+    pub name: String,
+    pub answer: Decision,
+}
+
+/// What the human said when content changed under an approved pin.
+///
+/// `Accept` is deliberately absent: accepting re-pins and re-grants, which
+/// leaves no standing state to remember — the new bytes simply become the
+/// approved ones. Only the two answers that persist past the moment are here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "answer", rename_all = "kebab-case")]
+pub enum Decision {
+    /// Keep using the bytes that were approved. The pin stays where it was and
+    /// delivery materializes from the content store — never from the live
+    /// project directory, which holds the change the user just declined.
+    KeepPinned { pin: String },
+    /// Refuse the item outright: it is excluded from delivery and stays
+    /// excluded until the human revisits it. Recorded so the refusal is a
+    /// standing state `status` reports once, not a question re-asked on every
+    /// command.
+    Blocked,
+}
+
+/// The standing re-gate answers recorded for a project, or an empty vec.
+pub fn decisions_for(base: &Path) -> Vec<ItemDecision> {
+    TrustStore::load()
+        .trusted
+        .get(&key_for(base))
+        .and_then(|e| e.decisions.clone())
+        .unwrap_or_default()
+}
+
+/// The standing answer for one item, if the human gave one.
+pub fn decision_for(base: &Path, kind: &str, name: &str) -> Option<Decision> {
+    decisions_for(base)
+        .into_iter()
+        .find(|d| d.kind == kind && d.name == name)
+        .map(|d| d.answer)
+}
+
+/// Record (or with `None`, clear) the standing answer for one item.
+///
+/// A no-op when the project has no trust entry: an answer about content nobody
+/// approved is meaningless, and creating an entry here would be a second grant
+/// constructor. Never touches the digest, so this cannot re-gate the project.
+pub fn set_decision(base: &Path, kind: &str, name: &str, answer: Option<Decision>) -> Result<bool> {
+    let key = key_for(base);
+    with_store_lock(|| {
+        let mut store = TrustStore::load();
+        let Some(entry) = store.trusted.get_mut(&key) else {
+            return Ok(false);
+        };
+        let mut list = entry.decisions.take().unwrap_or_default();
+        list.retain(|d| !(d.kind == kind && d.name == name));
+        if let Some(answer) = answer {
+            list.push(ItemDecision {
+                kind: kind.to_string(),
+                name: name.to_string(),
+                answer,
+            });
+        }
+        list.sort_by(|a, b| (&a.kind, &a.name).cmp(&(&b.kind, &b.name)));
+        entry.decisions = if list.is_empty() { None } else { Some(list) };
+        store.save()?;
+        Ok(true)
+    })
 }
 
 /// One reviewed item of a project's loadable surface, captured at trust time so
@@ -400,12 +484,20 @@ fn store_entry(base: &Path, digest: String, surface: Option<Vec<SurfaceItem>>) -
     let key = key_for(base);
     with_store_lock(|| {
         let mut store = TrustStore::load();
+        // Standing re-gate answers survive a re-grant. Accepting a change to
+        // ONE item must not silently discard a keep-pinned or blocked answer
+        // the human gave about a DIFFERENT one — that would turn "I refused
+        // this" into "I refused this until something unrelated happened".
+        // Accepting an item clears its own decision at the call site, where
+        // the item is known.
+        let carried = store.trusted.get(&key).and_then(|e| e.decisions.clone());
         let prior = store.trusted.insert(
             key.clone(),
             TrustEntry {
                 digest: digest.clone(),
                 trusted_at: now_secs(),
                 surface,
+                decisions: carried,
             },
         );
         store.save()?;
