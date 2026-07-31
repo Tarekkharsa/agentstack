@@ -1212,6 +1212,9 @@ pub(crate) fn record_lock(
 
 /// Build a lockfile entry from a resolved skill, recovering the source locator
 /// (`path`/`git`) from wherever the name resolved.
+/// The pin comes from [`crate::store::Store::pin`], which deposits a path
+/// source's bytes into the content store as part of producing it — see that
+/// function for why capturing and pinning are deliberately one act.
 fn locked_from_resolved(
     resolved: &ResolvedSkill,
     manifest: &Manifest,
@@ -1239,7 +1242,14 @@ fn locked_from_resolved(
         path,
         git,
         rev: resolved.rev.clone(),
-        checksum: Sha256Hex::parse(&resolved.checksum)
+        checksum: crate::store::Store::default_store()
+            .pin(&crate::store::Resolved {
+                path: resolved.path.clone(),
+                rev: resolved.rev.clone(),
+                checksum: resolved.checksum.clone(),
+                fetched: false,
+                source_kind: resolved.source_kind,
+            })
             .expect("a resolved skill checksum is a digest this process computed"),
     }
 }

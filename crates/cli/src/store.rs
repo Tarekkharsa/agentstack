@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 
+use agentstack_core::digest::Sha256Hex;
+
 use crate::manifest::{Skill, SkillSource};
 use crate::util::paths;
 
@@ -125,6 +127,48 @@ impl Store {
                 })
             }
         }
+    }
+
+    /// **The pinning act.** Turn a resolved skill's checksum into the typed pin
+    /// a lockfile entry carries — and, for a path source, deposit the bytes
+    /// that pin covers into the content-addressed store as part of the same
+    /// call.
+    ///
+    /// This exists so "the approved bytes were captured" is a property of
+    /// PINNING rather than of call-site discipline. A lock entry cannot be
+    /// built without a `Sha256Hex` pin, and the only way to get one from a
+    /// `Resolved` is through here, so every path-sourced entry any code path
+    /// writes has a corresponding store object. The alternative — a helper the
+    /// known call sites remember to call — is the shape that produced two real
+    /// bugs already this phase: a kind disclosed nowhere, and a lint satisfied
+    /// by test code.
+    ///
+    /// Git sources are already deposited during `resolve` (their bytes must be
+    /// stable under a materialized symlink), so this is a no-op for them.
+    ///
+    /// **Best-effort by design.** A failed deposit NEVER fails the pin: the
+    /// lock write proceeds, and the only consequence is that a future re-gate
+    /// shows the honest "no snapshot recorded" message instead of a diff. A
+    /// consent improvement must not become a new way for `lock` to fail.
+    pub fn pin(&self, resolved: &Resolved) -> Result<Sha256Hex> {
+        let pin = Sha256Hex::parse(&resolved.checksum)?;
+        if resolved.source_kind == "path" && resolved.path.exists() {
+            // Re-hash before depositing: `resolved.checksum` was computed
+            // earlier and the live project directory may have moved since. A
+            // deposit under the wrong digest name would make a future diff
+            // card show bytes the user never approved — worse than showing no
+            // diff at all. (Reads are re-verified too, in `verified_snapshot`,
+            // so this is the first of two independent guards.)
+            let still = dir_digest(&resolved.path)
+                .map(|d| d.hex().to_string())
+                .unwrap_or_default();
+            if still == resolved.checksum {
+                // Errors are deliberately swallowed — see the failure posture
+                // above. Nothing here may block the pin.
+                let _ = self.snapshot_content(&resolved.path, &resolved.checksum);
+            }
+        }
+        Ok(pin)
     }
 
     /// Copy `src` (a resolved, symlink-free skill body) into the immutable

@@ -2,7 +2,6 @@
 //! maintain `agentstack.lock` (PLAN §9d). `install` is reproducible (prefers the
 //! locked rev); `update` re-resolves git skills to their latest.
 
-use agentstack_core::digest::Sha256Hex;
 use std::path::Path;
 
 use anyhow::Result;
@@ -260,6 +259,10 @@ fn profile_skill_names(manifest: &crate::manifest::Manifest) -> Vec<String> {
     out.into_iter().collect()
 }
 
+/// Build a lockfile entry from a resolved skill. The pin comes from
+/// [`crate::store::Store::pin`], which deposits a path source's bytes into the
+/// content store as part of producing it — so recording a pin and capturing the
+/// bytes it covers are one act, not two that a call site could get half-right.
 pub(crate) fn locked_entry(
     name: &str,
     skill: &crate::manifest::Skill,
@@ -277,6 +280,6 @@ pub(crate) fn locked_entry(
         path,
         git,
         rev,
-        checksum: Sha256Hex::parse(&resolved.checksum)?,
+        checksum: crate::store::Store::default_store().pin(resolved)?,
     })
 }
