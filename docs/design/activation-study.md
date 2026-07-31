@@ -19,6 +19,17 @@
 > journey actually takes. All additive: the task script, protocol order,
 > metrics, thresholds, and the §7 pass condition are untouched. Findings from
 > the isolated pilot run behind this pass are in §8.1.
+>
+> **Blocker #1 fixed in v0.17.1 (2026-07-31):** the §8.1 pilot's Run B
+> dead-end — a project-scope-only setup reported as "no CLIs detected", an
+> empty manifest written over it, and a clean `doctor` over that — is fixed and
+> published. **Participants install the latest release, so the study now tests
+> the fixed journey.** §8.1 keeps Run B's original transcript as the
+> before-state, with the after-state recorded beside it. Observer briefing
+> changes accordingly: do not expect the Run B stall (Appendix B2's rule is
+> unchanged — still never screen on where a candidate's servers live).
+> Everything else — task script, protocol, metrics,
+> thresholds, §7 pass condition — is unchanged.
 
 ## 1. Participant criteria
 
@@ -67,7 +78,7 @@ docs — participants must arrive cold; the task script hands them the URL.
 - Participant's own machine, their real CLI configs. No sandbox, no demo repo.
 - They pick a real project of theirs (or an empty directory — their choice).
 - Confirm the released binary they'll install carries the current journey:
-  `agentstack --version` ≥ 0.17.0.
+  `agentstack --version` ≥ 0.17.1.
 - Start a timer at the moment they run the install command; note wall-clock
   timestamps at each milestone below.
 
@@ -194,7 +205,9 @@ toolset switch (active-toolset drift awareness), `toolset create` rejecting
 the positional name, jargon in the no-such-toolset error and lock summary,
 and a stale hand-edit-the-TOML undo hint. Expected remaining friction to
 watch for: the trust re-review warning after `toolset create` re-locks (the
-intended gate — the cue is one command), and the Codex project-trust note.
+intended gate — the cue is now one command, see §8.1), and the Codex
+project-trust note. The project-scope shape this section flagged to watch was
+found deterministically by the §8.1 pilot and fixed in v0.17.1.
 
 ### 8.1 Isolated pilot run (2026-07-31) — kit rehearsal, not a participant
 
@@ -213,11 +226,15 @@ named its own undo. Two things to watch in real sessions:
   step even once doctor has been run clean — it does not advance the participant
   toward the toolset task. A participant following only the on-screen next step
   has nothing telling them the journey continues.
+  **Fixed in v0.17.1:** once the wiring is rendered and nothing is grouped yet,
+  `status` advances to `agentstack toolset create <name> --server <server>`.
 - After `toolset create` re-locks, `status` reports `trust stale (content
   changed)` but its **Next** line points at `doctor`, not at re-review; the
   actual instruction (`review + agentstack trust`) appears one hop later, in
   doctor's output. The re-gate itself is intended — the cue costs two commands,
   not one. This is the friction §8 predicted, one hop longer than predicted.
+  **Fixed in v0.17.1:** trust-stale now names `agentstack trust .` on the Next
+  line directly, so the cue is one hop. The re-gate itself is unchanged.
 
 *Run B — the same servers, but configured only in project-scope files*
 (`.mcp.json` and `.codex/config.toml` in the working directory, nothing in the
@@ -242,10 +259,29 @@ user's home). This is the shape §8 flagged to watch, and it fails harder than
   no path to it.
 
 For a participant in this shape the §4 task ("bring the servers you already
-have under one setup") cannot be completed unaided, and the failure is silent
-rather than loud. Observers should expect it, record it on the stall log, and
-**not** rescue the participant. Do not screen participants out for having a
-project-scope setup — see Appendix B2.
+have under one setup") could not be completed unaided, and the failure was
+silent rather than loud.
+
+**Fixed in v0.17.1 (2026-07-31) — the transcript above is the before-state.**
+The root cause was one question asked wrong: every surface except `adopt` was
+asking whether a CLI is installed *on this machine* and answering a question
+about *this directory* with it. Replaying Run B against the fixed binary in the
+same isolated HOME:
+
+- `status` reports `2 of 13 supported detected here: Claude Code · Codex CLI`,
+  and a `Found` line naming the three servers and the two files they are in.
+- `init` imports all three, lifting the plaintext token to `${GITHUB_TOKEN}`.
+- `doctor` warns whenever servers configured here are not in the manifest,
+  naming the file, the servers, and `agentstack adopt` as the one next action —
+  so `0 errors` over an ignored setup is no longer reachable.
+- The one-screen contradiction is gone: detected-here and the adapter catalog
+  are stated as two different facts.
+- The toolset task proceeds; the dead-end does not occur.
+
+**Observers: do not expect this stall.** Participants install the latest
+release. If a project-scope participant stalls anyway, that is a *new* finding
+and belongs on the stall log as one — do not attribute it to this entry. Do not
+screen participants out for having a project-scope setup — see Appendix B2.
 
 ## 9. North-star metric baselines (strategy v2, Phase 0)
 
@@ -499,7 +535,7 @@ never select for it.
 - Print one Appendix A sheet. Have a pen and a clock with a seconds hand or a
   phone timer.
 - Confirm the version they will get is current: the study needs
-  `agentstack --version` ≥ 0.17.0. Check what the public installer serves
+  `agentstack --version` ≥ 0.17.1. Check what the public installer serves
   today, on your own machine, not theirs.
 - Have §3's consent points and §4's task script in front of you as text you can
   read off. You will read both aloud.

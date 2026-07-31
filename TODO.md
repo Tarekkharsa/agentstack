@@ -117,11 +117,15 @@ Ordered by what evidence they are waiting on, not by severity:
   concluded this is now cheaper *after* a public release than before it — the
   gate had been blocking indefinitely, and real installs are where the five
   come from. It is also the only planned activity that could falsify the
-  product thesis rather than confirm it. Study-watch (found verifying the
-  published binary, 2026-07-29): `init` imports only global-scope configs —
-  a participant whose servers live in a project `.mcp.json` sees "no config
-  files found" and imports nothing. If a participant hits it, that is likely
-  blocker #1; fix after the study confirms, not before.
+  product thesis rather than confirm it. **Study-watch CLOSED (2026-07-31,
+  v0.17.1):** the project-scope gap this item was watching for was confirmed
+  deterministically by the §8.1 isolated pilot before any participant met it —
+  and it failed harder than "import misses some servers": `status` reported no
+  CLIs, `init` wrote an empty manifest, and `doctor` then reported 0 errors
+  over it. The "fix after the study confirms" condition was therefore met, and
+  it is fixed and published in v0.17.1. Participants install the latest
+  release, so the study now tests the fixed journey; §8.1 keeps the original
+  transcript as the before-state.
 - [ ] **M1 / F08 — extract the authority data path.** 82% of the workspace's
   Rust lives in `crates/cli`, so `grant.rs` (authority construction) sits in
   the same crate as `lib.rs` (library management) with no compiler-enforced
