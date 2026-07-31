@@ -325,6 +325,59 @@ pub fn preview_value(base: &Path) -> Result<serde_json::Value> {
     // display was parsed from) is exactly what a later grant must present as
     // `--consented-digest` — so "the surface shown" and "the bytes granted"
     // can never diverge without the digest flipping.
+    // `trust-review-card-v1`: the kinds the terminal card discloses that this
+    // read-only preview previously did not. All three are computed from the
+    // manifest alone — no resolver, no store, no network, no worktree
+    // materialization — which is exactly why they can be added here without
+    // giving a read-only command the walk's disk-writing behaviour.
+    //
+    // Hooks matter most: they are an EXECUTABLE kind, and until now they were
+    // absent from the machine-readable surface entirely, so a panel built on
+    // this JSON would have shown a project's executable surface as smaller
+    // than it is.
+    let hooks: Vec<serde_json::Value> = m
+        .hooks
+        .iter()
+        .map(|(name, h)| {
+            let args = if h.args.is_empty() {
+                String::new()
+            } else {
+                format!(" {}", h.args.join(" "))
+            };
+            serde_json::json!({
+                "name": crate::text::sanitize_line(name),
+                "event": crate::text::sanitize_line(&h.event),
+                "matcher": h.matcher.as_deref().map(crate::text::sanitize_line),
+                "runs": crate::text::sanitize_line(&format!("{}{args}", h.command)),
+                "targets": h.targets.iter().map(|t| crate::text::sanitize_line(t)).collect::<Vec<_>>(),
+                "executable": true,
+            })
+        })
+        .collect();
+    let settings: Vec<serde_json::Value> = m
+        .settings
+        .iter()
+        .map(|(adapter, value)| {
+            let mut keys: Vec<String> = value
+                .as_object()
+                .map(|o| o.keys().map(|k| crate::text::sanitize_line(k)).collect())
+                .unwrap_or_default();
+            keys.sort();
+            serde_json::json!({
+                "adapter": crate::text::sanitize_line(adapter),
+                "sets": keys,
+            })
+        })
+        .collect();
+    let policy: Vec<String> = policy_requested_lines(&m.policy)
+        .iter()
+        .map(|l| crate::text::sanitize_line(l))
+        .collect();
+
+    // §7.2: `surface_digest` (computed above, from the same snapshot the
+    // display was parsed from) is exactly what a later grant must present as
+    // `--consented-digest` — so "the surface shown" and "the bytes granted"
+    // can never diverge without the digest flipping.
     let out = serde_json::json!({
         "path": base.display().to_string(),
         "state": state,
@@ -337,11 +390,20 @@ pub fn preview_value(base: &Path) -> Result<serde_json::Value> {
         "workflows": workflows,
         "extensions": extensions,
         "instructions": instructions,
+        "hooks": hooks,
+        "settings": settings,
+        "policy_requested": policy,
+        "machine_policy_ceiling": crate::util::paths::agentstack_home()
+            .join("agentstack.toml")
+            .display()
+            .to_string(),
         "counts": {
             "skills": skills.len(),
             "workflows": workflows.len(),
             "extensions": extensions.len(),
             "instructions": instructions.len(),
+            "hooks": hooks.len(),
+            "settings": settings.len(),
         },
     });
     Ok(crate::ui_contract::envelope(out))

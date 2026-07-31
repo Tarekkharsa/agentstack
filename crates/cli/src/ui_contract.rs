@@ -20,13 +20,43 @@ pub const SCHEMA_VERSION: u64 = 1;
 /// - `init-plan`: `init --plan` emits the detection plan with `plan_digest`.
 /// - `apply-setup`: `init --yes --consented-plan <digest>` applies a reviewed
 ///   plan and refuses when the detected inputs drifted since the plan.
-/// - `trust-preview`: `trust --preview` emits the full reviewed surface with
-///   `surface_digest`.
+/// - `trust-preview`: `trust --preview` emits the reviewed surface with
+///   `surface_digest`. This said "the FULL reviewed surface", which was not
+///   true — see `trust-review-card-v1` for what it covers and what it still
+///   deliberately does not.
 /// - `trust-consent`: `trust --yes --consented-digest <digest>` grants bound
 ///   to the previewed bytes and refuses stale or missing digests.
 /// - `trust-server-blockers-v1`: `trust --preview` carries server-resolution
 ///   and local-executable blockers with the safe next step, so an external UI
 ///   can disable a grant already known to fail.
+/// - `trust-review-card-v1`: `trust --preview` additionally carries `hooks`,
+///   `settings`, `policy_requested`, and `machine_policy_ceiling`, plus `hooks`
+///   and `settings` counts — the kinds the terminal review card discloses that
+///   this JSON previously omitted. Hooks are the reason this exists: they are
+///   an executable kind, and a panel built on the old payload showed a
+///   project's executable surface as smaller than it is.
+///
+///   **What it still does not carry, deliberately.** Two divergences from the
+///   terminal card are load-bearing rather than gaps, and are documented here
+///   so nobody "fixes" them by accident:
+///
+///   1. **A drifted library server stays redacted.** The preview replaces a
+///      library server whose live definition does not match its lock pin with
+///      an `unverified` marker instead of its command line, so an external UI
+///      cannot bind consent to bytes the digest does not cover. The terminal
+///      review prints the live command line with a `DRIFTED` annotation
+///      instead, because the authoritative card may never disclose *less*.
+///      These are opposite answers to the same question, both intentional.
+///   2. **Blockers cover servers and local executables only.** The card's
+///      full per-kind blocker set requires resolving skills, workflows, and
+///      extensions, which reaches git worktree materialization — writes and
+///      subprocesses that must not happen on a read-only, panel-facing
+///      command. `state` and `surface_digest` remain the honest signal that a
+///      grant may still refuse.
+///
+///   Consequently a UI must not present this payload as "everything the
+///   reviewer will see". It is the machine-readable surface; `agentstack
+///   trust` remains authoritative.
 /// - `status-v1`: `doctor --json` carries `state` + `next_action`.
 /// - `profiles-v1`: `use --list --json` lists profiles with readiness.
 /// - `diff-v1`: `diff --json` reports drift per target.
@@ -214,6 +244,7 @@ pub const FEATURES: &[&str] = &[
     "library-remove-v1",
     "manifest-remove-v1",
     "trust-server-blockers-v1",
+    "trust-review-card-v1",
     "workflow-observe-v1",
     "workflow-serial-roles-v1",
     "doctor-advisories-v1",
