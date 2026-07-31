@@ -17,6 +17,7 @@ of the boundaries below.
 
 | Document | Answers | Status |
 |---|---|---|
+| [`strategy-v2-vision.html`](strategy-v2-vision.html) | What the finished v2 product looks like on screen: the 12-moment journey as CLI mockups, t3code panel wireframes, the full command surface, and the feature inventory | Illustrative record for [`STRATEGY.md`](../../STRATEGY.md); the strategy wins on any divergence |
 | [`launch-plan.md`](launch-plan.md) | What the completed 2026-07 t3code/workflow prototype built, and why its former launch headline was superseded | Closed implementation record; current launch gate is `TODO.md` |
 | [`ui-control-plane.md`](ui-control-plane.md) | How t3code drives AgentStack — the fixed argv actions, the versioned JSON reads, and why the frontend is never an enforcement boundary | Active |
 | [`panel-wireframe.md`](panel-wireframe.md) | The popover's daily shape: one card + footer, inline toolset switch, and the three-click mode change with its real plan | Active; awaiting §1.6 study evidence |

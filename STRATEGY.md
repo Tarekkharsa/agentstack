@@ -461,6 +461,12 @@ one needs to read two documents for direction:
 
 - Each phase's build work enters `TODO.md` through its gate, as ordinary
   gated lanes; this file is the map, never the queue.
+- A visual companion —
+  [`docs/design/strategy-v2-vision.html`](docs/design/strategy-v2-vision.html)
+  — shows the end state as CLI mockups, panel wireframes, the full command
+  surface, and the feature inventory. It illustrates; it never overrides.
+  This document wins on any divergence, and command names shown there are
+  working names pending their phases.
 - Before any task starts, v1's admission questions still apply: does it serve
   the current gate; is the smallest useful outcome defined; could existing
   features solve it more simply; are success and exit criteria measurable;
