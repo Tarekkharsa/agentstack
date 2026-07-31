@@ -313,9 +313,18 @@ fn explain_instruction(name: &str, ctx: &crate::commands::Context) -> String {
             "Origin: machine layer ({layer}) — merged beneath this project; compiles at GLOBAL scope only.\n"
         ));
     } else {
-        out.push_str("Origin: this project's manifest.\n");
+        out.push_str("Origin: this project's setup.\n");
     }
     out.push_str(&format!("Source: {}\n", instr.path));
+    let src = Path::new(&instr.path);
+    let resolved = if src.is_absolute() {
+        src.to_path_buf()
+    } else {
+        ctx.dir.join(src)
+    };
+    if !resolved.exists() {
+        out.push_str("  ✗ source file missing\n");
+    }
     // Phase 3 item 5: the two rows every other kind answers. Instructions had
     // origin and source but never said whether these were the approved bytes,
     // or what the fragment actually does once delivered — which for a kind
@@ -330,15 +339,6 @@ fn explain_instruction(name: &str, ctx: &crate::commands::Context) -> String {
          instructions file, so it enters the agent's context on every session. \
          It runs nothing itself.\n",
     );
-    let src = Path::new(&instr.path);
-    let resolved = if src.is_absolute() {
-        src.to_path_buf()
-    } else {
-        ctx.dir.join(src)
-    };
-    if !resolved.exists() {
-        out.push_str("  ✗ source file missing\n");
-    }
     // Only some CLIs have an instruction file agentstack manages (6 of the 13
     // adapters). Split the fragment's effective target set into the CLIs that
     // actually receive it — with the file its managed region lives in — and the
