@@ -1,6 +1,8 @@
 # Scaling governed workflows
 
-> **Status:** active technical design; Phases 0 and 1 landed 2026-07-26.<br/>
+> **Status:** active technical design; Phases 0–3 and 5 shipped in v0.16.0
+> (`ac76fc0`, `49c8f9c`); Phase 2b open, Phase 4 blocked — see the lane in
+> `TODO.md`.<br/>
 > **Capability contract:** [`workflows-capability.md`](workflows-capability.md)
 > — authoring, authority, and evidence boundaries. This document does not
 > restate them and never relaxes them.<br/>
