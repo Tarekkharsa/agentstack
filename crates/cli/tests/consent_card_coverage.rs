@@ -97,6 +97,98 @@ permissions = { allow = ["Bash(git status)"] }
     .unwrap();
 }
 
+/// Item 8 WITNESS: the machine-readable surface covers every kind the terminal
+/// card discloses, or excludes it for a reason stated in the contract.
+///
+/// Leg-1 shaped, and deliberately stated over KINDS rather than over whatever
+/// the fixture happens to contain — the same inversion Slice A made when it
+/// found that anchoring to "what today's screen shows" would have certified
+/// today's omissions. Hooks were absent from this JSON entirely, so a panel
+/// built on it under-reported a project's executable surface.
+///
+/// The two documented exclusions (a drifted library server stays redacted;
+/// blockers cover servers and executables only) are asserted as intentional
+/// here, so a future change that silently "fixes" one of them fails.
+#[test]
+fn the_preview_json_carries_every_kind_the_card_discloses() {
+    let bin = env!("CARGO_BIN_EXE_agentstack");
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&proj).unwrap();
+    write_fixture(&proj);
+
+    let (lock_out, ok) = run(bin, &["lock"], &home, &proj);
+    assert!(ok, "lock failed:\n{lock_out}");
+    let (preview, ok) = run(bin, &["trust", "--preview"], &home, &proj);
+    assert!(ok, "preview failed:\n{preview}");
+    let v: serde_json::Value = serde_json::from_str(&preview).expect("preview is JSON");
+
+    // The feature name gates the new fields; a panel string-matches it.
+    let features: Vec<&str> = v["features"]
+        .as_array()
+        .expect("envelope carries features")
+        .iter()
+        .filter_map(|f| f.as_str())
+        .collect();
+    assert!(
+        features.contains(&"trust-review-card-v1"),
+        "the new payload is not advertised: {features:?}"
+    );
+
+    // Every kind the fixture declares is present by name in the JSON.
+    for (pointer, expected) in [
+        ("/servers", "filesystem"),
+        ("/skills", "summarize"),
+        ("/instructions", "house-rules"),
+        ("/hooks", "pre-commit"),
+        ("/settings", "claude-code"),
+    ] {
+        let section = v
+            .pointer(pointer)
+            .unwrap_or_else(|| panic!("missing {pointer}"));
+        assert!(
+            section.to_string().contains(expected),
+            "{pointer} does not name {expected}: {section}"
+        );
+    }
+    // The machine ceiling is a constant fact the card owes every reader; the
+    // JSON owes it too, or a panel cannot show what the terminal shows.
+    assert!(
+        v["machine_policy_ceiling"].is_string(),
+        "the JSON dropped the machine-ceiling line"
+    );
+    // A hook is EXECUTABLE and must be labelled as such — a panel that renders
+    // it beside inert kinds without the distinction repeats the original bug.
+    assert_eq!(v["hooks"][0]["executable"], serde_json::Value::Bool(true));
+    assert_eq!(v["counts"]["hooks"], 1);
+
+    // Now the terminal side, from the same locked bytes: every name the JSON
+    // carries must also appear in what the human reads. Neither renderer may
+    // silently hold something the other does not.
+    let digest = v["surface_digest"].as_str().unwrap().to_string();
+    let (card, granted) = run(
+        bin,
+        &["trust", "--yes", "--consented-digest", &digest],
+        &home,
+        &proj,
+    );
+    assert!(granted, "grant failed:\n{card}");
+    for name in [
+        "filesystem",
+        "summarize",
+        "house-rules",
+        "pre-commit",
+        "claude-code",
+    ] {
+        assert!(
+            card.contains(name),
+            "the JSON names {name} but the terminal card does not:\n{card}"
+        );
+    }
+}
+
 /// CONSENT WITNESS (Phase 2, the card). NEVER delete or weaken this test: it is
 /// the end-to-end form of "the card shows everything the grant records."
 #[test]

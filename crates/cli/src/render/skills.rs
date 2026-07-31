@@ -26,6 +26,15 @@ pub struct SkillPlan {
     pub to_remove: Vec<String>,
     /// Active names where a non-managed real dir already exists (won't clobber).
     pub conflicts: Vec<String>,
+    /// Names that must be COPIED even when `strategy` is `Symlink`.
+    ///
+    /// This is what makes a re-gate `keep-pinned` answer mean what it says. The
+    /// approved bytes have to be what agents actually load, and a symlink into
+    /// the project tree would track the very drift the user just declined —
+    /// delivering the new content under the old pin's name. Their `active`
+    /// source is the content-store snapshot, and copying detaches the delivered
+    /// artifact from the live file.
+    pub pinned_copies: Vec<String>,
 }
 
 impl SkillPlan {
@@ -54,6 +63,18 @@ pub fn plan(
     active: Vec<(String, PathBuf)>,
     previously_managed: &[String],
 ) -> Result<SkillPlan> {
+    plan_with_pinned(skills_dir, strategy, active, previously_managed, Vec::new())
+}
+
+/// [`plan`], plus the names a re-gate `keep-pinned` answer forces to be copied
+/// from the content store rather than linked to the live project file.
+pub fn plan_with_pinned(
+    skills_dir: PathBuf,
+    strategy: SkillStrategy,
+    active: Vec<(String, PathBuf)>,
+    previously_managed: &[String],
+    pinned_copies: Vec<String>,
+) -> Result<SkillPlan> {
     for (name, _) in &active {
         crate::text::validate_name(name)
             .with_context(|| format!("refusing to materialize skill '{}'", name.escape_debug()))?;
@@ -79,7 +100,93 @@ pub fn plan(
         active,
         to_remove,
         conflicts,
+        pinned_copies,
     })
+}
+
+/// CONSENT WITNESS (Phase 2, keep-pinned). A `keep-pinned` answer means the
+/// APPROVED BYTES ARE WHAT AGENTS LOAD — not merely that the trust digest stays
+/// put. On an adapter that normally symlinks, the delivered artifact must
+/// therefore become a COPY of the content-store snapshot: a link into the
+/// project tree would silently deliver the exact change the human just
+/// declined, under the old pin's name. NEVER weaken this to "the strategy is
+/// respected" — the property is about what is on disk at the delivery point.
+#[cfg(test)]
+mod keep_pinned_tests {
+    use super::*;
+    use assert_fs::prelude::*;
+
+    #[test]
+    fn a_keep_pinned_skill_is_copied_from_the_snapshot_even_when_the_adapter_symlinks() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        // The bytes consent covered, as they live in the content store.
+        let snapshot = tmp.child("store/content/abc");
+        snapshot.child("SKILL.md").write_str("approved\n").unwrap();
+        // A normal skill, delivered the adapter's usual way.
+        let plain = tmp.child("proj/skills/plain");
+        plain.child("SKILL.md").write_str("ordinary\n").unwrap();
+
+        let skills_dir = tmp.child("out").to_path_buf();
+        let plan = plan_with_pinned(
+            skills_dir.clone(),
+            SkillStrategy::Symlink,
+            vec![
+                ("pinned".to_string(), snapshot.to_path_buf()),
+                ("plain".to_string(), plain.to_path_buf()),
+            ],
+            &[],
+            vec!["pinned".to_string()],
+        )
+        .unwrap();
+        materialize(&plan).unwrap();
+
+        let delivered = skills_dir.join("pinned");
+        // 1. It is NOT a link — nothing about it can track the live file.
+        assert!(
+            !is_symlink(&delivered),
+            "a keep-pinned skill was symlinked; it would follow the declined change"
+        );
+        // 2. The delivered content is the APPROVED content.
+        assert_eq!(
+            std::fs::read_to_string(delivered.join("SKILL.md")).unwrap(),
+            "approved\n"
+        );
+        // 3. The adapter's usual strategy still applies to everything else —
+        //    keep-pinned changes delivery for the item it answers, not globally.
+        assert!(
+            is_symlink(&skills_dir.join("plain")),
+            "keep-pinned must not turn every skill into a copy"
+        );
+    }
+
+    /// The reason copying matters, stated as a test: editing the live project
+    /// file after delivery must NOT change what was delivered.
+    #[test]
+    fn editing_the_live_file_cannot_reach_a_keep_pinned_delivery() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let snapshot = tmp.child("store/content/abc");
+        snapshot.child("SKILL.md").write_str("approved\n").unwrap();
+        let skills_dir = tmp.child("out").to_path_buf();
+        let plan = plan_with_pinned(
+            skills_dir.clone(),
+            SkillStrategy::Symlink,
+            vec![("pinned".to_string(), snapshot.to_path_buf())],
+            &[],
+            vec!["pinned".to_string()],
+        )
+        .unwrap();
+        materialize(&plan).unwrap();
+
+        // The user edits the project copy again after deciding to keep the pin.
+        tmp.child("proj/skills/pinned/SKILL.md")
+            .write_str("sneaky\n")
+            .unwrap();
+        assert_eq!(
+            std::fs::read_to_string(skills_dir.join("pinned").join("SKILL.md")).unwrap(),
+            "approved\n",
+            "the delivered artifact tracked a later edit — it is not detached"
+        );
+    }
 }
 
 /// Perform the plan: remove pruned managed skills, then materialize the active
@@ -107,7 +214,14 @@ pub fn materialize(plan: &SkillPlan) -> Result<()> {
         if dest.exists() || is_symlink(&dest) {
             remove_managed(&dest)?;
         }
-        match plan.strategy {
+        // A keep-pinned item is copied whatever the adapter's usual strategy
+        // is: linking would re-attach it to the file whose change was declined.
+        let strategy = if plan.pinned_copies.contains(name) {
+            SkillStrategy::Copy
+        } else {
+            plan.strategy
+        };
+        match strategy {
             SkillStrategy::Symlink => symlink_dir(source, &dest)
                 .with_context(|| format!("symlinking skill '{name}' → {}", dest.display()))?,
             SkillStrategy::Copy => {

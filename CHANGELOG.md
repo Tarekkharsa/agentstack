@@ -15,6 +15,26 @@ it. Same gate, same digest, same single grant path — this is presentation.
 
 ### Fixed
 
+- **The machine-readable trust surface omitted hooks and settings too.**
+  `agentstack trust --preview` is what an external UI reads to show you a
+  project before you approve it. Like the terminal screen, it listed servers,
+  skills, workflows, extensions and instructions — and said nothing about
+  `[hooks.*]` or `[settings.*]`. **A panel built on that payload therefore
+  showed a project's executable surface as smaller than it actually was**, and
+  the contract documentation described the payload as "the full reviewed
+  surface", which was not true.
+
+  The preview now carries hooks (labelled as executable), settings, the
+  requested policy, and the machine-policy ceiling, behind a new feature name
+  `trust-review-card-v1`. Two omissions remain deliberate and are now written
+  down rather than implied: a library server whose definition has drifted from
+  its pin stays redacted in the JSON (so an external UI cannot bind consent to
+  bytes the digest does not cover — the terminal review shows the live command
+  line instead, because the authoritative card may never disclose less), and
+  the payload's blockers cover servers and local executables only, because
+  computing the rest requires resolution steps that must not run on a read-only
+  command. `agentstack trust` remains authoritative.
+
 - **The review screen did not show hooks or settings.** `[hooks.*]` and
   `[settings.*]` are declared capability kinds. Editing one changes the
   manifest bytes, so the trust digest moved and AgentStack correctly asked you

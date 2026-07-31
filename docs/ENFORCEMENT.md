@@ -678,6 +678,55 @@ gate, with the same effect. It is also not a review the tool performs on your
 behalf — nothing here inspects what a skill's text tells a model to do, for the
 reason stated under **Skills** above.
 
+### Review-card state on disk (snapshots, recognition, decisions)
+
+**What ships:** the review card keeps three pieces of state so a re-gate can
+show *what changed* rather than only *that something changed*, and so repeated
+review of identical content gets shorter.
+
+- **The content snapshot store**, `~/.agentstack/store/content/<sha256>/`. The
+  bytes a pin covers, deposited at pin time as part of producing the pin
+  itself: a lockfile entry cannot be built without a checksum, and the only way
+  to obtain one is through the depositing function
+  (`Store::pin` for skills, `Store::pin_instruction` for instruction
+  fragments). Write-once, keyed by exactly the checksum the lockfile records,
+  never evicted — which is what lets both sides of a re-lock coexist so a diff
+  has something to compare. Copies, never links, so a delivered or compared
+  artifact cannot track later edits to the project file. Every read re-hashes
+  the directory against its own name before trusting it.
+- **The recognition index**, `~/.agentstack/recognition.json`. A map from
+  content digest to the project keys that have approved it, written after a
+  grant. It holds digests and project keys — **never content**. Revoking a
+  project's trust removes it from the index.
+- **Standing re-gate decisions**, stored on the project's entry in
+  `~/.agentstack/trust.json`. What the human answered when content changed
+  under a pin they had already approved: `keep-pinned` (with the pin to keep)
+  or `blocked`. Discarded with the rest of consent when trust is revoked.
+
+**What they are not:**
+
+- **Not tamper-evident.** All three live under the user's own `~/.agentstack`
+  at ordinary user permissions. A same-user process that can write there can
+  write the trust store too; the real boundary is the OS user account, as
+  stated at the top of this document. The card must never be read as attesting
+  that the snapshot it diffs against is authentic — it attests that this is
+  what *was recorded* when consent was given.
+- **Not consulted by trust verification.** `check`/`check_digest` read the
+  trust store and the pinned files, exactly as before. Snapshots and the
+  recognition index are read at card-render time only. Deleting all three
+  changes what the review can *show*, never what it *decides*: a missing
+  snapshot degrades to the honest "the bytes you approved were not recorded"
+  message, and a missing index simply produces no recognition line.
+- **Not synced, and not portable.** None of the three is rendered into a
+  project, committed, or shared. Recognition in particular never crosses
+  machines — that is a consequence of where it lives, not a policy promise.
+- **Not a backup.** The snapshot store is not a recovery mechanism and is not
+  what `agentstack restore` reads; it holds approved bytes for comparison, not
+  project history.
+- **Not a widening of consent.** Recognition shortens what the card *says*; it
+  never shortens the gate. The per-project yes still happens in full, and a
+  machine-level "always allow this content anywhere" is deliberately not built.
+
 ## Experimental `tools_execute`
 
 This is a separate, machine-opt-in mode with a narrower runtime surface than a

@@ -254,6 +254,147 @@ fn a_symlinked_intake_directory_is_not_walked() {
     );
 }
 
+/// Phase 2 item 3: the collision refusal names WHAT it is protecting, and shows
+/// the real difference when the approved bytes are on record — while staying
+/// refuse-by-default. The diff informs; it does not unlock a replace path.
+#[test]
+fn a_collision_names_the_declaration_and_shows_the_real_diff() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    isolate_home(tmp.path());
+    let proj = project(tmp.path());
+    // A path-declared, LOCKED skill — so its approved bytes are in the store.
+    fs::create_dir_all(proj.join(".agentstack/declared/review")).unwrap();
+    fs::write(
+        proj.join(".agentstack/declared/review/SKILL.md"),
+        "---\ndescription: r\n---\n# Review\napproved line\n",
+    )
+    .unwrap();
+    fs::write(
+        proj.join(".agentstack/agentstack.toml"),
+        "version = 1\n\n[skills.review]\npath = \"./declared/review\"\n",
+    )
+    .unwrap();
+    agentstack::commands::lock::run(&Default::default(), Some(&proj)).unwrap();
+
+    // Now drop a DIFFERENT body under the same name.
+    drop_skill(
+        &proj,
+        "review",
+        "---\ndescription: r\n---\n# Review\nhostile line\n",
+    );
+
+    let dir = proj.join(".agentstack");
+    let loaded = agentstack::manifest::load_from_dir(&dir).unwrap();
+    let found = intake::scan(&dir, &proj, &loaded.manifest);
+
+    // Refuse-by-default is unchanged: never offered as an addition.
+    assert!(found.items.is_empty(), "{:?}", found.items);
+    assert_eq!(found.collisions.len(), 1);
+    let c = &found.collisions[0];
+
+    // It names what is being protected…
+    assert!(
+        c.declared_as.contains("path ./declared/review"),
+        "the refusal does not name the declaration: {}",
+        c.declared_as
+    );
+    // …and shows the actual difference.
+    let diff = c.diff.join("\n");
+    assert!(
+        diff.contains("approved line") && diff.contains("hostile line"),
+        "the collision showed no real diff: {diff}"
+    );
+}
+
+/// The collision card must reach the surface where users actually meet it.
+///
+/// Found by producing the hard-stop transcripts: `doctor`/`status` renders
+/// collisions through its OWN formatter, not `intake::print_notice`, so the
+/// first version of this feature upgraded one renderer and left the other
+/// saying "that name is already declared" — on the surface that shows
+/// collisions most often. Two renderers, one message.
+#[test]
+fn status_shows_the_collision_card_not_just_the_bare_refusal() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    isolate_home(tmp.path());
+    let proj = project(tmp.path());
+    fs::create_dir_all(proj.join(".agentstack/declared/review")).unwrap();
+    fs::write(
+        proj.join(".agentstack/declared/review/SKILL.md"),
+        "---\ndescription: r\n---\n# Review\napproved line\n",
+    )
+    .unwrap();
+    fs::write(
+        proj.join(".agentstack/agentstack.toml"),
+        "version = 1\n\n[skills.review]\npath = \"./declared/review\"\n",
+    )
+    .unwrap();
+    agentstack::commands::lock::run(&Default::default(), Some(&proj)).unwrap();
+    drop_skill(
+        &proj,
+        "review",
+        "---\ndescription: r\n---\n# Review\nhostile line\n",
+    );
+
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_agentstack"))
+        .arg("doctor")
+        .current_dir(&proj)
+        .env_clear()
+        .env("HOME", std::env::var("HOME").unwrap())
+        .env("AGENTSTACK_HOME", std::env::var("AGENTSTACK_HOME").unwrap())
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        text.contains("declared as path ./declared/review"),
+        "status does not name the declaration being protected:\n{text}"
+    );
+    assert!(
+        text.contains("approved line") && text.contains("hostile line"),
+        "status shows no diff for the collision:\n{text}"
+    );
+}
+
+/// The honest degrade: a declaration that was never locked has no approved
+/// bytes on record, so there is nothing to diff. The refusal still names the
+/// declaration — more than it said before — and must not invent a diff.
+#[test]
+fn an_unlocked_declaration_collides_without_inventing_a_diff() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    isolate_home(tmp.path());
+    let proj = project(tmp.path());
+    fs::write(
+        proj.join(".agentstack/agentstack.toml"),
+        "version = 1\n\n[skills.review]\ngit = \"https://example.invalid/skills\"\nrev = \"abc123def\"\n",
+    )
+    .unwrap();
+    drop_skill(&proj, "review", "# Repo-controlled\n");
+
+    let dir = proj.join(".agentstack");
+    let loaded = agentstack::manifest::load_from_dir(&dir).unwrap();
+    let found = intake::scan(&dir, &proj, &loaded.manifest);
+    assert!(found.items.is_empty());
+    let c = &found.collisions[0];
+    assert!(
+        c.declared_as.contains("git@abc123d"),
+        "the git declaration is not named: {}",
+        c.declared_as
+    );
+    assert!(
+        c.diff.is_empty(),
+        "a diff was invented for bytes that were never recorded: {:?}",
+        c.diff
+    );
+}
+
 /// Review follow-up — a dropped file may not silently replace a pinned entry.
 ///
 /// A git-sourced skill has no `path`, so a same-named drop is invisible to the

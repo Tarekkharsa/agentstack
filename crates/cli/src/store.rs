@@ -8,6 +8,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 
+use agentstack_core::digest::Sha256Hex;
+
 use crate::manifest::{Skill, SkillSource};
 use crate::util::paths;
 
@@ -125,6 +127,109 @@ impl Store {
                 })
             }
         }
+    }
+
+    /// **The pinning act.** Turn a resolved skill's checksum into the typed pin
+    /// a lockfile entry carries — and, for a path source, deposit the bytes
+    /// that pin covers into the content-addressed store as part of the same
+    /// call.
+    ///
+    /// This exists so "the approved bytes were captured" is a property of
+    /// PINNING rather than of call-site discipline. A lock entry cannot be
+    /// built without a `Sha256Hex` pin, and the only way to get one from a
+    /// `Resolved` is through here, so every path-sourced entry any code path
+    /// writes has a corresponding store object. The alternative — a helper the
+    /// known call sites remember to call — is the shape that produced two real
+    /// bugs already this phase: a kind disclosed nowhere, and a lint satisfied
+    /// by test code.
+    ///
+    /// Git sources are already deposited during `resolve` (their bytes must be
+    /// stable under a materialized symlink), so this is a no-op for them.
+    ///
+    /// **Best-effort by design.** A failed deposit NEVER fails the pin: the
+    /// lock write proceeds, and the only consequence is that a future re-gate
+    /// shows the honest "no snapshot recorded" message instead of a diff. A
+    /// consent improvement must not become a new way for `lock` to fail.
+    pub fn pin(&self, resolved: &Resolved) -> Result<Sha256Hex> {
+        let pin = Sha256Hex::parse(&resolved.checksum)?;
+        if resolved.source_kind == "path" && resolved.path.exists() {
+            // Re-hash before depositing: `resolved.checksum` was computed
+            // earlier and the live project directory may have moved since. A
+            // deposit under the wrong digest name would make a future diff
+            // card show bytes the user never approved — worse than showing no
+            // diff at all. (Reads are re-verified too, in `verified_snapshot`,
+            // so this is the first of two independent guards.)
+            let still = dir_digest(&resolved.path)
+                .map(|d| d.hex().to_string())
+                .unwrap_or_default();
+            if still == resolved.checksum {
+                // Errors are deliberately swallowed — see the failure posture
+                // above. Nothing here may block the pin.
+                let _ = self.snapshot_content(&resolved.path, &resolved.checksum);
+            }
+        }
+        Ok(pin)
+    }
+
+    /// **The pinning act, for an instruction fragment.** Sibling of [`pin`],
+    /// same contract: the checksum a lock entry needs is obtainable only by
+    /// depositing the bytes it covers.
+    ///
+    /// Why this is a second function rather than a branch inside [`pin`]: the
+    /// two kinds genuinely pin different things. A skill's checksum is a TREE
+    /// digest over its directory (`dir_digest`); an instruction's is a plain
+    /// SHA-256 over the file's raw bytes. Both shapes are load-bearing in the
+    /// lockfile, so collapsing them into one function would mean one of the
+    /// two kinds silently changing its pin format. What they DO share — the
+    /// deposit, the re-hash guard, and the copy-never-link rule — is shared,
+    /// in [`deposit_file`] and [`snapshot_content`] respectively.
+    ///
+    /// The deposited layout is `content/<hex>/<file name>`: a directory even
+    /// for one file, so the diff renderer walks both kinds identically instead
+    /// of growing a second code path on the read side.
+    ///
+    /// Best-effort, exactly like [`pin`]: a failed deposit never fails the pin.
+    ///
+    /// [`pin`]: Store::pin
+    /// [`deposit_file`]: Store::deposit_file
+    pub fn pin_instruction(&self, src: &Path) -> Result<Sha256Hex> {
+        let bytes = fs::read(src).with_context(|| format!("reading {}", src.display()))?;
+        let pin = Sha256Hex::of(&bytes);
+        // The bytes just read ARE the bytes hashed, so unlike the skill path
+        // there is no window to re-hash against — `bytes` is the single read.
+        let _ = self.deposit_file(src, &bytes, pin.hex());
+        Ok(pin)
+    }
+
+    /// Place one file's bytes at `content/<hex>/<file name>`, write-once.
+    ///
+    /// The bytes are passed in rather than re-read, so what is deposited is
+    /// exactly what was hashed — the file cannot change between the two.
+    /// Crash-safe via temp-then-rename, and a copy rather than a link, for the
+    /// same reason the skill snapshot is: the delivered/compared artifact must
+    /// never track later edits to the project file.
+    fn deposit_file(&self, src: &Path, bytes: &[u8], digest_hex: &str) -> Result<()> {
+        let name = src
+            .file_name()
+            .map(std::ffi::OsStr::to_os_string)
+            .unwrap_or_else(|| std::ffi::OsString::from("fragment"));
+        let content_root = self.root.join("content");
+        let dest = content_root.join(digest_hex);
+        if dest.join(&name).is_file() {
+            return Ok(()); // already deposited, content-addressed
+        }
+        fs::create_dir_all(&content_root)
+            .with_context(|| format!("creating {}", content_root.display()))?;
+        let tmp = content_root.join(format!(".tmp-{}", crate::runs::gen_id()));
+        fs::create_dir_all(&tmp).with_context(|| format!("creating {}", tmp.display()))?;
+        fs::write(tmp.join(&name), bytes)?;
+        if fs::rename(&tmp, &dest).is_err() {
+            let _ = fs::remove_dir_all(&tmp);
+            if !dest.join(&name).is_file() {
+                bail!("could not place the content snapshot at {}", dest.display());
+            }
+        }
+        Ok(())
     }
 
     /// Copy `src` (a resolved, symlink-free skill body) into the immutable

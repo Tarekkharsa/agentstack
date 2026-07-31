@@ -168,6 +168,27 @@ because they share storage. Three slices; Slice A is the card itself.
   site or a baselined line, which is what turns the hooks fix from a fact about
   one commit into a property. Undo is now named before the first byte changes
   in `adopt`, `apply`, `use --write`, and `session start`.
+- [ ] **P2.B.5 — the three-way answer, in order.** Branch `phase2/slice-b`
+  carries the mechanism; what remains is the wiring, in this sequence:
+  1. **`grant_gated` wiring.** Collect accept / keep-pinned / block per drifted
+     item while the review walks. **Binding constraint:** answers *stage* —
+     nothing re-locks, records a decision, adds a pinned copy, or excludes an
+     item until the single final confirmation that already gates the grant.
+     Witness: extend `declining_leaves_nothing_behind` — give all three answer
+     kinds, decline, then assert manifest, lock, trust store *including
+     decisions*, delivered artifacts, and event log are byte-identical.
+  2. **Blocked exclusion + status.** Excluded from delivery, failing closed;
+     `status` reports it once as a standing state with the way out named, never
+     a per-command nag. The drift-still-reported assertion lands here — a
+     keep-pinned item's live file still shows as diverged.
+  3. **Collision card.** Phase 1's refusal gains the diff. Still
+     refuse-by-default: the diff informs, it does not unlock a replace path.
+  4. **Instruction deposits + regrant parity.** Instructions get their own
+     deposit choke point at instruction-pin time (the `Store::pin` shape), with
+     a universal witness over the lock's instruction entries; only then does the
+     diff card cover them. Parity runs last over the finished flow, covering
+     accept *and* keep-pinned: both must leave the event trail their explicit
+     equivalents leave.
 - [ ] **P2.B — pin-time snapshots + the re-gate diff card.** Per the design
   note, this does **not** build a snapshot store: `~/.agentstack/store/content/`
   already is one (write-once, keyed by the lock checksum, never evicted). The

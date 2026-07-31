@@ -278,12 +278,19 @@ pub(crate) fn record_instruction_pins(
         }
         declared.push(name.clone());
         let src = crate::render::instructions::fragment_source(dir, &instr.path);
-        match std::fs::read(&src) {
-            Ok(bytes) => {
+        // The pin comes from `Store::pin_instruction`, which deposits the bytes
+        // it hashes into the content store as part of producing the checksum —
+        // so a later re-gate can show WHICH LINES of this fragment moved
+        // instead of only that it changed. This is the sole production site
+        // that builds a LockedInstruction, so routing it here makes the
+        // deposit a property of pinning rather than of call-site discipline,
+        // exactly as `Store::pin` does for skills.
+        match crate::store::Store::default_store().pin_instruction(&src) {
+            Ok(checksum) => {
                 lock.upsert_instruction(agentstack_core::lock::LockedInstruction {
                     name: name.clone(),
                     path: instr.path.clone(),
-                    checksum: Sha256Hex::of(&bytes),
+                    checksum,
                 });
                 pinned += 1;
             }

@@ -909,15 +909,23 @@ fn run_checks(
         );
     }
     for c in &dropped.collisions {
+        // Same refusal the intake notice gives, and it must name the same
+        // thing: `status` is where a user most often meets a collision, so a
+        // renderer that stopped at "already declared" here would undo the
+        // point of the collision card for the surface that shows it most.
         report.line(
             Level::Warn,
             format!(
-                "{} '{}' in {} is not adopted — that name is already declared \u{21b3} rename the file or remove the existing entry",
+                "{} '{}' in {} is not adopted — declared as {} \u{21b3} rename the file or remove the existing entry",
                 c.kind.noun(),
-                c.name,
-                c.rel_path,
+                crate::text::sanitize_line(&c.name),
+                crate::text::sanitize_line(&c.rel_path),
+                crate::text::sanitize_line(&c.declared_as),
             ),
         );
+        for line in &c.diff {
+            report.line(Level::Warn, format!("  {line}"));
+        }
     }
     if dropped.is_empty() {
         // Nothing waiting: true, but not something this project must act on,
@@ -2147,6 +2155,14 @@ fn check_reproducibility(
 
     let mut seen = std::collections::BTreeSet::new();
     let mut emitted = 0usize;
+    // Read once, outside the loop: standing answers are per-project state, and
+    // re-reading the trust store per skill would be a lot of file I/O for a
+    // status command that runs constantly.
+    let standing: Vec<crate::trust::ItemDecision> =
+        crate::trust::decisions_for(&crate::manifest::project_root_of(dir))
+            .into_iter()
+            .filter(|d| d.kind == "skill")
+            .collect();
     for pname in manifest.profiles.keys() {
         for name in active_skill_names(manifest, pname) {
             if !seen.insert(name.clone()) {
@@ -2162,6 +2178,29 @@ fn check_reproducibility(
                 &lock,
                 ResolveMode::NoFetch,
             );
+            // A standing re-gate answer is reported as a STATE, once, with the
+            // way out named — not as a question re-asked on every command.
+            // Crucially it is reported ALONGSIDE the drift below, never
+            // instead of it: keep-pinned resolves one consent moment, it does
+            // not silence the fact that the live file and the delivered
+            // version have diverged.
+            match standing.iter().find(|d| d.name == *name).map(|d| &d.answer) {
+                Some(crate::trust::Decision::Blocked) => {
+                    report.line(
+                        Level::Warn,
+                        format!("{name:<20} blocked by you — not delivered ↳ agentstack trust"),
+                    );
+                    emitted += 1;
+                }
+                Some(crate::trust::Decision::KeepPinned { .. }) => {
+                    report.line(
+                        Level::Warn,
+                        format!("{name:<20} using the version you approved ↳ agentstack trust"),
+                    );
+                    emitted += 1;
+                }
+                None => {}
+            }
             match &r.status {
                 SkillLockStatus::ResolveFailed { error } => {
                     report.line(Level::Error, format!("{name:<20} broken ref — {error}"));

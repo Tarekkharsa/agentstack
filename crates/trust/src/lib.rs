@@ -99,6 +99,90 @@ pub struct TrustEntry {
     /// folded into [`digest_for`], so it cannot change what re-gates a project.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub surface: Option<Vec<SurfaceItem>>,
+    /// Standing per-item answers from a re-gate: what the human decided about
+    /// content that changed under a pin they had already approved.
+    ///
+    /// Lives with the trust entry because these ARE consent decisions — they
+    /// are scoped to this project, and revoking trust must discard them along
+    /// with everything else the project was granted. Additive and optional, so
+    /// stores written before re-gate answers existed round-trip unchanged.
+    ///
+    /// Display/behaviour metadata only: like [`Self::surface`], it never enters
+    /// [`digest_for`], so recording an answer cannot re-gate the project.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decisions: Option<Vec<ItemDecision>>,
+}
+
+/// A standing answer to one re-gate question.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ItemDecision {
+    pub kind: String,
+    pub name: String,
+    pub answer: Decision,
+}
+
+/// What the human said when content changed under an approved pin.
+///
+/// `Accept` is deliberately absent: accepting re-pins and re-grants, which
+/// leaves no standing state to remember — the new bytes simply become the
+/// approved ones. Only the two answers that persist past the moment are here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "answer", rename_all = "kebab-case")]
+pub enum Decision {
+    /// Keep using the bytes that were approved. The pin stays where it was and
+    /// delivery materializes from the content store — never from the live
+    /// project directory, which holds the change the user just declined.
+    KeepPinned { pin: String },
+    /// Refuse the item outright: it is excluded from delivery and stays
+    /// excluded until the human revisits it. Recorded so the refusal is a
+    /// standing state `status` reports once, not a question re-asked on every
+    /// command.
+    Blocked,
+}
+
+/// The standing re-gate answers recorded for a project, or an empty vec.
+pub fn decisions_for(base: &Path) -> Vec<ItemDecision> {
+    TrustStore::load()
+        .trusted
+        .get(&key_for(base))
+        .and_then(|e| e.decisions.clone())
+        .unwrap_or_default()
+}
+
+/// The standing answer for one item, if the human gave one.
+pub fn decision_for(base: &Path, kind: &str, name: &str) -> Option<Decision> {
+    decisions_for(base)
+        .into_iter()
+        .find(|d| d.kind == kind && d.name == name)
+        .map(|d| d.answer)
+}
+
+/// Record (or with `None`, clear) the standing answer for one item.
+///
+/// A no-op when the project has no trust entry: an answer about content nobody
+/// approved is meaningless, and creating an entry here would be a second grant
+/// constructor. Never touches the digest, so this cannot re-gate the project.
+pub fn set_decision(base: &Path, kind: &str, name: &str, answer: Option<Decision>) -> Result<bool> {
+    let key = key_for(base);
+    with_store_lock(|| {
+        let mut store = TrustStore::load();
+        let Some(entry) = store.trusted.get_mut(&key) else {
+            return Ok(false);
+        };
+        let mut list = entry.decisions.take().unwrap_or_default();
+        list.retain(|d| !(d.kind == kind && d.name == name));
+        if let Some(answer) = answer {
+            list.push(ItemDecision {
+                kind: kind.to_string(),
+                name: name.to_string(),
+                answer,
+            });
+        }
+        list.sort_by(|a, b| (&a.kind, &a.name).cmp(&(&b.kind, &b.name)));
+        entry.decisions = if list.is_empty() { None } else { Some(list) };
+        store.save()?;
+        Ok(true)
+    })
 }
 
 /// One reviewed item of a project's loadable surface, captured at trust time so
@@ -114,6 +198,28 @@ pub struct SurfaceItem {
     pub kind: String,
     pub name: String,
     pub identity: String,
+    /// The content digest this item was pinned to when consent was given, for
+    /// the kinds whose bytes live outside the manifest (skills, instructions).
+    ///
+    /// Deliberately SEPARATE from `identity` rather than folded into it.
+    /// `identity` means "what the human agreed to run/contact" and is the diff
+    /// key; overloading it with the pin would (a) contradict the documented
+    /// meaning above, and (b) make every already-recorded skill read as
+    /// `~ changed` on the first re-trust after upgrade — training the user to
+    /// wave through a diff that says nothing real.
+    ///
+    /// This is display/provenance metadata, exactly like the rest of
+    /// `SurfaceItem`: it does NOT enter the consent digest, which covers the
+    /// manifest, local, and lock bytes only (see [`ConsentSnapshot::digest`]).
+    /// Adding it therefore re-gates nothing — witnessed in this module's tests.
+    ///
+    /// `None` means "no pin was recorded" and is the honest, permanent state
+    /// for entries written before this field existed: there is no backfill,
+    /// because the bytes that were approved then were never captured. A
+    /// re-gate against a `None` pin says so plainly rather than inventing a
+    /// diff.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin: Option<String>,
 }
 
 /// What a prior `trust` recorded for a project, for re-trust diffing (P14).
@@ -378,12 +484,20 @@ fn store_entry(base: &Path, digest: String, surface: Option<Vec<SurfaceItem>>) -
     let key = key_for(base);
     with_store_lock(|| {
         let mut store = TrustStore::load();
+        // Standing re-gate answers survive a re-grant. Accepting a change to
+        // ONE item must not silently discard a keep-pinned or blocked answer
+        // the human gave about a DIFFERENT one — that would turn "I refused
+        // this" into "I refused this until something unrelated happened".
+        // Accepting an item clears its own decision at the call site, where
+        // the item is known.
+        let carried = store.trusted.get(&key).and_then(|e| e.decisions.clone());
         let prior = store.trusted.insert(
             key.clone(),
             TrustEntry {
                 digest: digest.clone(),
                 trusted_at: now_secs(),
                 surface,
+                decisions: carried,
             },
         );
         store.save()?;
@@ -658,6 +772,187 @@ mod tests {
         });
     }
 
+    /// Phase 2 LOAD-COMPAT WITNESS: a `trust.json` written before `SurfaceItem`
+    /// gained its `pin` field must still deserialize, and must still render its
+    /// card. The field is additive and optional precisely so an existing grant
+    /// is never invalidated by an upgrade — a store that failed to load would
+    /// silently drop every project to `Untrusted` and re-prompt for everything,
+    /// which is the worst possible way to ship a consent improvement.
+    ///
+    /// `None` is the permanent, honest answer for these entries: the bytes they
+    /// approved were never captured, so there is nothing to backfill.
+    #[test]
+    fn a_trust_store_written_before_the_pin_field_still_loads_and_keeps_its_surface() {
+        with_home(|_| {
+            let proj = project_with_manifest();
+            let key = key_for(proj.path());
+            let digest = digest_for(proj.path()).unwrap();
+            // Hand-written in the OLD shape: surface items with no `pin` key at
+            // all. This is the byte shape already on the maintainer's disk.
+            let legacy = format!(
+                r#"{{"trusted":{{"{key}":{{"digest":"{digest}","trusted_at":1,"surface":[
+                    {{"kind":"server","name":"fs","identity":"node fs.js"}},
+                    {{"kind":"skill","name":"greet","identity":"library"}}
+                ]}}}}}}"#
+            );
+            // Written through `store_path()` so this witness tracks wherever
+            // the store actually lives, rather than re-deriving the layout.
+            let path = store_path();
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::write(&path, legacy).unwrap();
+
+            // It loads, the project is still trusted, and the surface survives.
+            assert_eq!(check(proj.path()), TrustState::Trusted);
+            let PriorSurface::Recorded(items) = prior_surface(proj.path()) else {
+                panic!("a legacy surface must still read as Recorded, not Untracked");
+            };
+            assert_eq!(items.len(), 2);
+            assert_eq!(items[1].name, "greet");
+            assert_eq!(items[1].identity, "library");
+            // Absent in the file => None in memory. Never a fabricated pin.
+            assert!(
+                items.iter().all(|i| i.pin.is_none()),
+                "a legacy entry must not invent pins it never recorded"
+            );
+        });
+    }
+
+    /// Phase 2 CONSENT WITNESS: a standing re-gate answer about one item
+    /// survives a re-grant driven by a DIFFERENT item.
+    ///
+    /// This exists because the first implementation got it wrong: `store_entry`
+    /// replaced the whole `TrustEntry`, so accepting a change to skill B
+    /// silently discarded a refusal the human had recorded about skill A. That
+    /// turns "I refused this" into "I refused this until something unrelated
+    /// happened" — a consent decision quietly undone by an action that never
+    /// mentioned it. NEVER weaken this.
+    #[test]
+    fn a_standing_answer_survives_a_regrant_driven_by_another_item() {
+        with_home(|_| {
+            let proj = project_with_manifest();
+            let first = digest_for(proj.path()).unwrap();
+            trust_reviewed(proj.path(), first, Vec::new()).unwrap();
+
+            // The human keeps the approved bytes of skill A.
+            set_decision(
+                proj.path(),
+                "skill",
+                "alpha",
+                Some(Decision::KeepPinned {
+                    pin: "sha256:aaa".into(),
+                }),
+            )
+            .unwrap();
+            // …and blocks skill C outright.
+            set_decision(proj.path(), "skill", "gamma", Some(Decision::Blocked)).unwrap();
+
+            // Something unrelated changes and the project is re-granted — the
+            // manifest moved, which is what accepting a change to B looks like
+            // at this layer.
+            proj.child(".agentstack/agentstack.toml")
+                .write_str(
+                    "version = 1\n[servers.beta]\ntype = \"http\"\nurl = \"https://b/mcp\"\n",
+                )
+                .unwrap();
+            let second = digest_for(proj.path()).unwrap();
+            trust_reviewed(proj.path(), second, Vec::new()).unwrap();
+
+            assert_eq!(
+                decision_for(proj.path(), "skill", "alpha"),
+                Some(Decision::KeepPinned {
+                    pin: "sha256:aaa".into()
+                }),
+                "a keep-pinned answer was discarded by an unrelated re-grant"
+            );
+            assert_eq!(
+                decision_for(proj.path(), "skill", "gamma"),
+                Some(Decision::Blocked),
+                "a block was discarded by an unrelated re-grant"
+            );
+        });
+    }
+
+    /// The inverse, and the reason decisions live on the trust entry at all:
+    /// revoking consent discards them with everything else the project was
+    /// granted. A refusal that outlived its trust would be a standing behaviour
+    /// with no consent behind it.
+    #[test]
+    fn revoking_trust_discards_standing_answers_with_the_rest_of_consent() {
+        with_home(|_| {
+            let proj = project_with_manifest();
+            let digest = digest_for(proj.path()).unwrap();
+            trust_reviewed(proj.path(), digest, Vec::new()).unwrap();
+            set_decision(proj.path(), "skill", "alpha", Some(Decision::Blocked)).unwrap();
+            assert!(decision_for(proj.path(), "skill", "alpha").is_some());
+
+            assert!(revoke(proj.path()).unwrap());
+            assert!(
+                decisions_for(proj.path()).is_empty(),
+                "standing answers outlived the consent they belonged to"
+            );
+
+            // Re-granting starts clean: the human answers again, from scratch.
+            let digest = digest_for(proj.path()).unwrap();
+            trust_reviewed(proj.path(), digest, Vec::new()).unwrap();
+            assert!(decisions_for(proj.path()).is_empty());
+        });
+    }
+
+    /// An answer about a project nobody trusted is meaningless, and recording
+    /// one must not create a trust entry — that would be a second grant
+    /// constructor, which invariant 6 forbids.
+    #[test]
+    fn recording_an_answer_never_creates_trust() {
+        with_home(|_| {
+            let proj = project_with_manifest();
+            assert!(!set_decision(proj.path(), "skill", "a", Some(Decision::Blocked)).unwrap());
+            assert_eq!(check(proj.path()), TrustState::Untrusted);
+            assert!(decisions_for(proj.path()).is_empty());
+        });
+    }
+
+    /// Phase 2 NO-REGATE WITNESS: recording a pin changes no digest. The consent
+    /// digest covers the manifest, local overlay, and lock bytes — the surface
+    /// snapshot is metadata stored beside it. If the pin leaked into the digest,
+    /// upgrading would re-gate every project on the machine for a change the
+    /// user did not make. NEVER weaken this.
+    #[test]
+    fn recording_a_pin_changes_no_digest_and_re_gates_nothing() {
+        with_home(|_| {
+            let proj = project_with_manifest();
+            let before = digest_for(proj.path()).unwrap();
+
+            let pinned = vec![SurfaceItem {
+                kind: "skill".into(),
+                name: "greet".into(),
+                identity: "library".into(),
+                pin: Some("sha256:cafe".into()),
+            }];
+            trust_reviewed(proj.path(), before.clone(), pinned.clone()).unwrap();
+
+            // The digest over the same bytes is unchanged by what we recorded…
+            assert_eq!(digest_for(proj.path()).unwrap(), before);
+            // …and the project stays trusted rather than reading as Changed.
+            assert_eq!(check(proj.path()), TrustState::Trusted);
+            // The pin round-trips through JSON exactly as written.
+            assert_eq!(prior_surface(proj.path()), PriorSurface::Recorded(pinned));
+
+            // The same surface WITHOUT pins yields the same digest too: the two
+            // differ only in metadata, so neither can re-gate the other.
+            let unpinned = vec![SurfaceItem {
+                kind: "skill".into(),
+                name: "greet".into(),
+                identity: "library".into(),
+                pin: None,
+            }];
+            trust_reviewed(proj.path(), before.clone(), unpinned).unwrap();
+            assert_eq!(digest_for(proj.path()).unwrap(), before);
+            assert_eq!(check(proj.path()), TrustState::Trusted);
+        });
+    }
+
     // P14: the reviewed surface round-trips through the store, and the three
     // prior-surface cases are distinguished — while the snapshot stays out of
     // the digest, so recording one must NOT re-gate the project.
@@ -676,11 +971,13 @@ mod tests {
                     kind: "server".into(),
                     name: "evil".into(),
                     identity: "sh -c pwn".into(),
+                    pin: None,
                 },
                 SurfaceItem {
                     kind: "skill".into(),
                     name: "greet".into(),
                     identity: "library".into(),
+                    pin: None,
                 },
             ];
             let reviewed = digest_for(proj.path()).unwrap();
@@ -867,6 +1164,7 @@ mod tests {
                 kind: "server".into(),
                 name: "x".into(),
                 identity: "https://x/mcp".into(),
+                pin: None,
             }];
             let reviewed = digest_for(proj.path()).unwrap();
             trust_reviewed(proj.path(), reviewed, surface.clone()).unwrap();

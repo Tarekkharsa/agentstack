@@ -170,8 +170,64 @@ real diff **when it is small**, and offers three first-class answers:
 | **block** | refuse; nothing activates |
 
 `keep pinned` must actually keep the pinned bytes in use, which is what makes
-the snapshot load-bearing rather than decorative. The diff is **capped**: a
-400-line rewrite names the files and the counts and never floods the terminal.
+the snapshot load-bearing rather than decorative. Concretely: trust and lock
+stay at the consented pin, **and the delivered artifact is materialized from
+the content-store snapshot**. Where delivery normally symlinks into the project,
+a keep-pinned item switches to a copy — a link would track the very drift the
+user just declined, shipping the new bytes under the old pin's name. Status then
+reports the divergence honestly; keep-pinned resolves *this consent moment*, it
+does not silence drift.
+
+`block` excludes the item from delivery (failing closed, as drift does today)
+**and records the refusal as a standing state**, so `status` shows it once with
+the way out named rather than re-asking on every command.
+
+The diff is **capped**: a 400-line rewrite names the files and the counts and
+never floods the terminal.
+
+### Answers stage; the single final yes commits
+
+> **The review loop may collect per-item answers as it walks. Nothing acts on
+> them — no re-lock, no recorded decision, no pinned-copy, no exclusion — until
+> the one final confirmation that already gates the grant.**
+
+This is the constraint the wiring is most likely to violate, because acting on
+each answer as it is given is the obvious implementation and it quietly creates
+three or four moments where a human commits to something. There is exactly one
+such moment, and it is the same one there has always been.
+
+**Where the commit moment is (decided 2026-07-31, during wiring).** The contract
+above says "the single final yes", and on the `agentstack yes` funnel that is
+literally `ConsentCard`'s confirmation. On plain `agentstack trust` there was no
+such moment: typing the command at a terminal *is* the consent, and that happens
+**before** any per-item answer is given. Rather than let N answers commit with no
+closing yes — the exact shape this section forbids — a re-gate that collected any
+answer asks one final confirmation before committing. A clean review, or a
+re-gate where the human answered nothing, is unchanged and prompts nothing.
+
+**What `accept` must do (decided 2026-07-31, from an adversarial review).**
+Accept re-locks, and the consent digest covers the lock bytes, so accept moves
+the very digest the review rendered from. Both naive commit paths are broken:
+with `--consented-digest` the grant fails `ConsentMismatch` *after* the lock was
+rewritten (residue after a failed grant), and without one the grant records the
+pre-accept digest and the project immediately reads `Changed` — the user accepts
+and silently gets an untrusted project. The correct handling recomputes rather
+than re-reads, following `repin`'s existing precedent ("computed from the written
+content, never from a disk re-read"): the new digest is taken over
+`snapshot.manifest` + `snapshot.local` + the lock bytes this process just
+serialized. Two conditions keep that honest — the lock delta must contain
+*exactly* the accepted items (never a manifest-wide re-pin, which would fold
+un-consented moves, including items the human answered keep-pinned or block on,
+into the granted digest), and the new checksum must be obtained through
+`Store::pin` so the accepted bytes reach the content store and the next re-gate
+can still diff.
+
+Its witness extends Phase 1's `declining_leaves_nothing_behind`: walk a re-gate
+giving all three answer kinds, decline the final gate, then assert the manifest,
+the lock, the trust store **including its recorded decisions**, the delivered
+artifacts, and the event log are all byte-identical to before. Answers given and
+then declined leave no residue anywhere. `Rollback::capture` is the existing
+shape; the trust store's decisions are the new thing it has to cover.
 
 Two consequences follow, both inherited obligations rather than new scope:
 
@@ -225,6 +281,43 @@ lives beside its neighbours:
   and `restore` are unrelated paths.
 
 ## Panel
+
+**Why the two renderers are not merged (decided 2026-07-31, from an adversarial
+review).** The obvious plan — extract one `review_surface()` walk that both the
+terminal review and `trust --preview` consume — is refuted by three properties
+that are each deliberate:
+
+1. **They disclose different things on purpose.** `preview_value` *redacts* a
+   library server whose live definition does not match its lock pin, emitting
+   an `unverified` marker instead of the command line, so an external UI cannot
+   bind consent to bytes the digest does not cover. The authoritative review
+   does the opposite — it prints the live command line with a `DRIFTED`
+   annotation — because the card may never disclose *less*. A shared surface
+   must pick one, and one of the two choices is a consent regression.
+2. **Preview must not write.** The review walk reaches `Store::ensure_worktree`
+   (git worktree materialization) through the lock-status resolvers. Preview's
+   read-only contract is shipped, witnessed, and consumed by the panel RPC;
+   sharing the walk would add git subprocesses and unbounded latency to it.
+3. **The lint anchor pins the walk in place.** `tools/check-structure.py`
+   locates the `:review` disclosure evidence by matching literal `diff.mark(`
+   inside `crates/cli/src/commands/trust.rs`. Moving the walk silently voids
+   the requirement for every kind.
+
+So the contract is narrower and honest: the preview gains the kinds it can
+compute with **no resolver and no store** — hooks, settings, and policy, which
+are pure manifest reads — and says plainly what it still excludes and why. That
+closes the disclosure gap that mattered most (hooks are executable and were
+absent from the machine-readable surface entirely) without moving a walk that
+must not move.
+
+A related hazard, recorded so a future refactor does not rediscover it:
+`PendingAnswer.blocker_ix` is a positional index into one global `blockers`
+vector. Decomposing the walk into per-kind functions with local vectors would
+misalign it, and the failure is silent — accepting one item could clear an
+unrelated item's blocker, emptying the vector so the bail never fires and an
+unpinned surface is trusted. Any future decomposition must key blockers by
+`(kind, name)` first.
+
 
 The panel consumes structured JSON from `preview_value()` through
 `ui_contract::envelope`, so re-labelling existing fields flows through with no
