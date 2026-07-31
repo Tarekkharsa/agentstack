@@ -36,6 +36,14 @@ enum Level {
     /// "start with" next action. Between [`Level::Info`] and [`Level::Warn`]:
     /// louder than context, quieter than a thing to fix.
     Advisory,
+    /// The check could not examine anything, because the project declares
+    /// nothing for it to examine. Distinct from [`Level::Ok`] on purpose:
+    /// green has to mean *verified*, and a check that read zero items verified
+    /// nothing. Rendering it as a pass is the same false-ready shape the
+    /// v0.17.1 fix removed from `status` — the report looked healthier than
+    /// the evidence behind it. Counted in no total, never a next action, and
+    /// never forces a section into view; it only refuses to claim a pass.
+    Unchecked,
     Warn,
     Error,
 }
@@ -158,6 +166,7 @@ impl Report {
         let tag = match level {
             Level::Ok => "ok",
             Level::Info => "info",
+            Level::Unchecked => "unchecked",
             Level::Advisory => {
                 self.advisories += 1;
                 "advisory"
@@ -222,6 +231,12 @@ impl Report {
                     // is dimmed whole) but a quiet marker, so the eye reads it
                     // once without filing it next to the things to fix.
                     "info" | "advisory" => "·".dimmed().to_string(),
+                    // Deliberately not "✓": the check verified nothing. The
+                    // marker is quiet but the body stays at full contrast, so
+                    // the non-coverage is legible rather than buried — the
+                    // point is that the user *reads* "nothing declared to
+                    // check" instead of scanning a green tick.
+                    "unchecked" => "–".dimmed().to_string(),
                     _ => "✓".green().to_string(),
                 };
                 // Dim info lines whole so the eye skips them on a first read.
@@ -274,6 +289,39 @@ impl Report {
             .copied()
     }
 
+    /// Exactly one recommended command, always — the Phase-3 "status as one
+    /// next action" rule. [`first_fix`](Self::first_fix) answers "what should
+    /// I repair?", which is `None` for a healthy setup and for findings whose
+    /// remedy is prose; this answers the strictly broader "what do I do now?",
+    /// which always has an answer. A report that ends in findings-without-a-
+    /// path, or in nothing at all, makes the user invent the next step — the
+    /// one thing a status surface exists to remove.
+    ///
+    /// The ladder below is ordered by what blocks what: an unrepaired finding
+    /// first, then the review that gates activation, then the one-screen
+    /// summary. Each rung is reachable and non-destructive.
+    fn next_action(&self) -> (String, &'static str) {
+        if let Some(fix) = self.first_fix() {
+            return (fix.to_string(), "the finding to start with");
+        }
+        if self.trust == Some("untrusted") {
+            return (
+                "agentstack trust .".to_string(),
+                "review this project — nothing it declares is active until you do",
+            );
+        }
+        if self.trust == Some("drifted") {
+            return (
+                "agentstack trust .".to_string(),
+                "the content changed since you last said yes — review what moved",
+            );
+        }
+        (
+            "agentstack status".to_string(),
+            "nothing to repair — this is where the project stands, on one screen",
+        )
+    }
+
     /// The one-word answer an external status surface leads with (UI
     /// control-plane §"Status"). `needs_setup` never comes from here — a
     /// report only exists once a manifest loaded; [`run`] emits that state
@@ -322,9 +370,13 @@ impl Report {
         );
         serde_json::json!({
             "state": self.state(),
-            // The same triage line the text report prints ("start with: …") —
-            // exactly one recommended command, or null when nothing to fix.
-            "next_action": self.first_fix(),
+            // The same line the text report prints ("next: …") — exactly one
+            // recommended command, always. It was previously null whenever
+            // there was nothing to *repair*, which left a consumer with a
+            // healthy report and no step to offer; `state` already carries
+            // "is anything wrong?", so this key is free to answer the broader
+            // "what now?" without ambiguity. Never a command that would refuse.
+            "next_action": self.next_action().0,
             "protection": { "guard": guard, "machine_policy": machine_policy },
             "errors": self.errors,
             "warnings": self.warnings,
@@ -430,12 +482,11 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
             super::count(report.errors, "error"),
             super::count(report.warnings, "warning")
         );
-        // Triage, not just totals: name the one fix to start with.
-        if report.errors + report.warnings > 0 {
-            if let Some(fix) = report.first_fix() {
-                println!("  start with: {}", fix.bold());
-            }
-        }
+        // Every report ends the same way: one command, and why it is the one.
+        // Unconditional — a clean report that simply stops leaves the reader
+        // to guess whether "0 errors" means "done" or "I forgot a step".
+        let (cmd, why) = report.next_action();
+        println!("  next: {}   {}", cmd.green().bold(), why.dimmed());
     }
 
     // In CI mode any error fails the trust gate. Return an error rather than
@@ -851,7 +902,7 @@ fn run_checks(
     report.section("Secrets");
     let refs = manifest.referenced_secrets();
     if refs.is_empty() {
-        report.line(Level::Ok, "no secrets referenced");
+        report.line(Level::Unchecked, "no secrets referenced — nothing to check");
         report.mark_irrelevant();
     }
     // Name the layer each ref resolves from (env / varlock / keychain / .env) —
@@ -1293,7 +1344,10 @@ fn run_checks(
     // it); a stale region is drift, so it warns.
     report.section("Instructions");
     if manifest.instructions.is_empty() {
-        report.line(Level::Ok, "no instruction fragments defined");
+        report.line(
+            Level::Unchecked,
+            "no instruction fragments declared — nothing to check",
+        );
         // Codex quirk checks below may still append warn lines here — a
         // flagged section is shown regardless of relevance.
         report.mark_irrelevant();
@@ -1480,7 +1534,7 @@ fn run_checks(
     // manifest would compile (global scope, mirroring drift/fix).
     report.section("Hooks");
     if manifest.hooks.is_empty() {
-        report.line(Level::Ok, "no lifecycle hooks defined");
+        report.line(Level::Unchecked, "no hooks declared — nothing to check");
         report.mark_irrelevant();
     } else {
         let machine_hooks = crate::commands::guard::machine_hooks_for_apply();
@@ -1554,7 +1608,7 @@ fn run_checks(
     // library skill the profile pulls in.
     let skill_names = super::trust::review_skill_names(manifest);
     if skill_names.is_empty() {
-        report.line(Level::Ok, "no skills defined");
+        report.line(Level::Unchecked, "no skills declared — nothing to check");
         // The broken-symlink sweep below still appends warn lines when a
         // detected adapter's skills dir is unhealthy — those keep it visible.
         report.mark_irrelevant();
@@ -1893,7 +1947,10 @@ fn run_checks(
         if let Some(msg) = live_refusal {
             report.line(Level::Warn, msg);
         } else if http.is_empty() {
-            report.line(Level::Ok, "no HTTP servers to probe");
+            report.line(
+                Level::Unchecked,
+                "no HTTP servers declared — nothing to probe",
+            );
         }
         for (name, server) in http {
             let Some(url) = &server.url else { continue };
@@ -2016,7 +2073,10 @@ fn probe_stdio_servers(
         .filter(|(_, s)| s.server_type == ServerType::Stdio)
         .collect();
     if stdio.is_empty() {
-        report.line(Level::Ok, "no stdio servers to probe");
+        report.line(
+            Level::Unchecked,
+            "no stdio servers declared — nothing to probe",
+        );
     }
 
     // Ctrl-C would otherwise kill agentstack outright and orphan whatever
@@ -2250,7 +2310,10 @@ fn check_reproducibility(
         }
     }
     if emitted == 0 {
-        report.line(Level::Ok, "no library-backed toolset skills to verify");
+        report.line(
+            Level::Unchecked,
+            "reproducibility: nothing declared to check — no toolset here pulls a skill from the library",
+        );
     }
 }
 
