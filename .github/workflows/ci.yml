@@ -170,3 +170,15 @@ jobs:
         run: |
           python3 tools/make-docs-pages.py
           git diff --exit-code docs/
+
+  # Phase 0 structural lint (TODO.md P0.3): every capability kind and policy
+  # dimension in the manifest model must have a lock pin, doctor probe,
+  # witness test, and ENFORCEMENT.md statement — or a signed-off baseline
+  # entry explaining why not. Fast and dependency-light, same rationale as
+  # docs-checks above.
+  structure-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - name: Manifest kind / policy dimension governance check
+        run: python3 tools/check-structure.py

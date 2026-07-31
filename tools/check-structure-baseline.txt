@@ -1,0 +1,33 @@
+# Phase 0 honest-gap record (structural lint baseline, TODO.md P0.3).
+#
+# This is the committed record of every governance gap
+# tools/check-structure.py currently finds for real, on real code — per
+# capability kind (lock pin / doctor probe / witness test / ENFORCEMENT.md
+# statement) and per policy dimension (ENFORCEMENT.md row). The lint fails
+# on any real gap NOT listed here, and on any listed line that no longer
+# corresponds to a real gap (a stale entry) — so this file can only shrink
+# honestly, one fixed gap at a time.
+#
+# Removing a line (by adding the missing lock struct, doctor probe, witness
+# test, or ENFORCEMENT.md statement) is the goal. ADDING a line requires
+# maintainer sign-off: a new entry here is a real regression in what the
+# structural lint is supposed to catch, not a paperwork step.
+#
+# Format: `<domain>:<name>:<requirement> # <reason>`, one gap per line.
+# `python3 tools/check-structure.py --explain` prints the evidence (found or
+# missing) each key maps to.
+
+kind:settings:lock # [settings.*] is raw serde_json::Value merged into native config; no LockedSetting struct exists, content is not pinned at all
+kind:settings:doctor # no doctor section or check_setting_* probe for [settings.*] content
+kind:settings:witness # no drift/pinning test for [settings.*] content
+kind:settings:enforcement # ENFORCEMENT.md never mentions "settings"; no honest per-kind statement exists
+kind:hooks:lock # Hook.command/args can name a repo-relative script but LockedHook does not exist; only the manifest-level declaration (event/matcher/command line/args) is trust-gated, not the named script's own file bytes (see docs/ENFORCEMENT.md's Hooks section, "declaration-bound... but NOT content-pinned")
+kind:hooks:witness # hooks.rs tests (hooks_render_prune_and_preserve, codex_guard_is_registered_exactly_once_across_both_hook_files, ...) cover render/prune/dedup output shape, not pinning or drift; no test name combines "hook" with a drift/regate/checksum witness word
+kind:packs:lock # packs are documented bookkeeping only (model.rs: "pure bookkeeping"); decided here to still lint packs like a real kind rather than quietly exempt them — the accepted consequence is no LockedPack, since a pack's members (servers/skills/instructions it installed) are pinned through those kinds' own lock entries instead
+kind:packs:doctor # bookkeeping-only by design (see kind:packs:lock); no dedicated doctor section or check_pack_* probe for [packs.*] itself
+kind:packs:witness # bookkeeping-only by design (see kind:packs:lock); pack install/remove/upgrade behavior is well tested (vendor_packs.rs, git_packs.rs) but no test targets PackInstall/pack-ledger drift specifically
+kind:packs:enforcement # bookkeeping-only by design (see kind:packs:lock); ENFORCEMENT.md never mentions "pack" because a pack is not itself a runtime capability surface — its members carry their own statements
+kind:servers:enforcement # ENFORCEMENT.md has only a one-line prose mention ("the lockfile separately pins resolved server definitions..."), no dedicated "### Servers" section or "**Servers**" matrix row
+kind:skills:enforcement # same one-line prose mention as servers; no dedicated "### Skills" section or "**Skills**" matrix row
+kind:instructions:enforcement # same one-line prose mention as servers; no dedicated "### Instructions" section or "**Instructions**" matrix row
+kind:workflows:enforcement # workflows are pinned (LockedWorkflow), doctor-probed (check_workflow_reproducibility/check_workflow_ceilings), and witness-tested (workflow_drift_and_roles_widening_block_trust_until_relocked), but ENFORCEMENT.md never mentions "workflow" at all -- no statement of what a governed workflow run does or does not confine
