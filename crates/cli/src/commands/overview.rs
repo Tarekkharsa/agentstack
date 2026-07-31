@@ -371,6 +371,16 @@ pub(crate) enum ManifestState {
 pub(crate) struct ProjectFacts {
     servers: usize,
     skills: usize,
+    /// The other declared kinds. Phase 3 item 5: `status` counted servers and
+    /// skills only, so a project whose setup was mostly instruction fragments,
+    /// hooks, or CLI settings reported a footprint of "0 servers" — a true
+    /// number and a false impression, on the surface whose whole job is
+    /// saying what you have. Counted, not enumerated: `explain` is where a
+    /// kind is looked at one at a time.
+    instructions: usize,
+    settings: usize,
+    hooks: usize,
+    extensions: usize,
     /// `[targets].default`, empty when nothing is pinned.
     pinned_targets: Vec<String>,
     /// How many detected CLIs the commands would fan out to when nothing is
@@ -775,6 +785,10 @@ fn collect(manifest_dir: Option<&Path>, with_secrets: bool) -> Result<Orientatio
         manifest: ManifestState::Loaded(Box::new(ProjectFacts {
             servers: m.servers.len(),
             skills: m.skills.len(),
+            instructions: m.instructions.len(),
+            settings: m.settings.len(),
+            hooks: m.hooks.len(),
+            extensions: m.extensions.len(),
             pinned_targets: m.targets.default.clone(),
             fanout_targets,
             fanout_detected: any_detected,
@@ -847,6 +861,19 @@ fn print_orientation(o: &Orientation, status: bool) {
             let mut parts = vec![super::count(f.servers, "server")];
             if f.skills > 0 {
                 parts.push(super::count(f.skills, "skill"));
+            }
+            // Every other declared kind, on the same line and in the same
+            // shape. Shown only when non-zero, so a plain server project reads
+            // exactly as it did before.
+            for (n, noun) in [
+                (f.instructions, "instruction"),
+                (f.settings, "CLI's settings"),
+                (f.hooks, "hook"),
+                (f.extensions, "extension"),
+            ] {
+                if n > 0 {
+                    parts.push(super::count(n, noun));
+                }
             }
             let targets_note = if f.pinned_targets.is_empty() {
                 if f.fanout_detected {
@@ -1191,6 +1218,10 @@ mod tests {
             manifest_path: std::path::PathBuf::from("/repo/.agentstack/agentstack.toml"),
             manifest: ManifestState::Loaded(Box::new(ProjectFacts {
                 servers: 2,
+                instructions: 0,
+                settings: 0,
+                hooks: 0,
+                extensions: 0,
                 skills: 1,
                 pinned_targets: vec!["claude-code".into()],
                 fanout_targets: 1,

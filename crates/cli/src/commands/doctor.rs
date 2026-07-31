@@ -1532,6 +1532,54 @@ fn run_checks(
     // Lifecycle hooks: the same staleness contract as instructions — the
     // rendered hooks key of each hook-capable target must match what the
     // manifest would compile (global scope, mirroring drift/fix).
+    // Phase 3 item 5, kind convergence: `[settings.*]` was the one declared
+    // kind with no doctor section at all — it rendered into native config and
+    // `doctor` never mentioned it, so "check the setup" quietly meant "check
+    // the setup except this part". The check is deliberately modest, matching
+    // what settings actually are: values the user wrote, merged into a named
+    // CLI's own file. There is nothing fetched to pin and nothing remote to
+    // verify, so the honest checks are that the CLI is one we know and that
+    // the value is an object we can merge.
+    report.section("Settings");
+    if manifest.settings.is_empty() {
+        report.line(
+            Level::Unchecked,
+            "no CLI settings declared — nothing to check",
+        );
+        report.mark_irrelevant();
+    } else {
+        for (id, value) in &manifest.settings {
+            match ctx.registry.get(id) {
+                None => report.line(
+                    Level::Warn,
+                    format!(
+                        "{id}: unknown CLI — these settings reach nothing ↳ agentstack doctor --all"
+                    ),
+                ),
+                Some(desc) if !value.is_object() => report.line(
+                    Level::Error,
+                    format!(
+                        "{:<14} settings must be a table of keys to merge, got {} ↳ edit [settings.{id}] in the manifest",
+                        desc.display,
+                        match value {
+                            serde_json::Value::Array(_) => "a list",
+                            serde_json::Value::Null => "nothing",
+                            _ => "a single value",
+                        }
+                    ),
+                ),
+                Some(desc) => report.line(
+                    Level::Ok,
+                    format!(
+                        "{:<14} {} merged into its settings",
+                        desc.display,
+                        super::count(value.as_object().map(|o| o.len()).unwrap_or(0), "key")
+                    ),
+                ),
+            }
+        }
+    }
+
     report.section("Hooks");
     if manifest.hooks.is_empty() {
         report.line(Level::Unchecked, "no hooks declared — nothing to check");

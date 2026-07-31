@@ -43,11 +43,125 @@ fn explain_text_with_context(name: &str, ctx: &crate::commands::Context) -> Resu
         Ok(explain_skill(name, ctx))
     } else if manifest.instructions.contains_key(name) {
         Ok(explain_instruction(name, ctx))
+    } else if manifest.hooks.contains_key(name) {
+        Ok(explain_hook(name, ctx))
+    } else if manifest.extensions.contains_key(name) {
+        Ok(explain_extension(name, ctx))
+    } else if manifest.settings.contains_key(name) {
+        Ok(explain_settings(name, ctx))
     } else {
         anyhow::bail!(
-            "no server, skill, or instruction '{name}' in the manifest or central library. Try `agentstack search {name}` to find one to add."
+            "nothing named '{name}' in this project's setup or the central library. Try `agentstack search {name}` to find one to add."
         )
     }
+}
+
+/// The one shape every kind answers in, Phase 3 item 5.
+///
+/// A person asking "what is this?" asks the same four questions whatever they
+/// are pointing at: what is it called, where did it come from, is it the exact
+/// content I approved, and what does it want to do. Before this, three kinds
+/// answered and three said "no server, skill, or instruction" — which reads as
+/// *it does not exist*, when in fact it is declared, is being delivered, and
+/// was on the consent card. That gap is worse than a missing feature: the
+/// review card names all seven kinds, so `explain` disagreed with the surface
+/// the user had already said yes on.
+///
+/// This is presentation only. No manifest schema changed, no kind gained or
+/// lost a field, and nothing here decides anything — it reads what is already
+/// declared and prints it in a consistent order.
+fn kind_header(name: &str, kind: &str) -> String {
+    format!("# {name} ({kind})\n\n")
+}
+
+/// Hooks are an executable kind: the harness runs the command at full user
+/// permission. The explanation says so in the same place every time, because
+/// "what it asks" is the question whose answer differs most between an
+/// instruction fragment and a hook.
+fn explain_hook(name: &str, ctx: &crate::commands::Context) -> String {
+    let hook = &ctx.loaded.manifest.hooks[name];
+    let mut out = kind_header(name, "hook");
+    out.push_str("Origin: this project's setup.\n");
+    out.push_str(&format!("Source: {}\n", hook.command));
+    if !hook.args.is_empty() {
+        out.push_str(&format!("  args: {}\n", hook.args.join(" ")));
+    }
+    // Pin status, stated as the honest negative rather than omitted. A hook's
+    // DECLARATION is part of the manifest bytes and re-gates review when
+    // edited, but when the command names a local script the script's bytes are
+    // not digested — editing it afterwards changes what runs without
+    // re-gating. `docs/ENFORCEMENT.md` documents this gap; leaving it off the
+    // per-hook explanation would be the place a reader most easily misses it.
+    out.push_str(
+        "Pin: the declaration is content-bound (editing it re-gates review); \
+         if the command names a local script, that script's bytes are NOT pinned.\n",
+    );
+    out.push_str(&format!(
+        "What it asks: run `{}` on {} — in the harness's own process, at your \
+         full user permission. No policy ceiling, gateway, egress fence, or \
+         guard observes it.\n",
+        hook.command,
+        hook.matcher
+            .as_ref()
+            .map(|m| format!("{} matching {m}", hook.event))
+            .unwrap_or_else(|| hook.event.clone())
+    ));
+    out.push_str(&format!("Reaches: {}\n", hook.targets.join(", ")));
+    out
+}
+
+/// Native extensions: code loaded into the harness process. Governed entirely
+/// before delivery, which is exactly what the explanation has to say so the
+/// pin is not mistaken for a runtime fence.
+fn explain_extension(name: &str, ctx: &crate::commands::Context) -> String {
+    let ext = &ctx.loaded.manifest.extensions[name];
+    let mut out = kind_header(name, "native extension");
+    out.push_str("Origin: this project's setup.\n");
+    match (&ext.path, &ext.git) {
+        (Some(p), _) => out.push_str(&format!("Source: {p} (local path)\n")),
+        (None, Some(g)) => {
+            out.push_str(&format!("Source: {g}"));
+            if let Some(r) = &ext.rev {
+                out.push_str(&format!(" @ {r}"));
+            }
+            if let Some(sp) = &ext.subpath {
+                out.push_str(&format!(" · {sp}"));
+            }
+            out.push('\n');
+        }
+        (None, None) => out.push_str("Source: none declared\n"),
+    }
+    out.push_str(
+        "Pin: content-bound in the lock (strict integrity root — traversal and \
+         symlinks rejected). An untrusted or drifted project renders zero bytes.\n",
+    );
+    out.push_str(
+        "What it asks: run inside the harness process at your full user \
+         permission. What agentstack governs happens BEFORE delivery — which \
+         bytes, from where, reviewed by whom — not at runtime.\n",
+    );
+    out
+}
+
+/// Settings are the one inert kind with no source and no pin, and saying so
+/// plainly is more useful than omitting the rows: "there is nothing to pin
+/// here" is an answer, and a reader comparing two kinds needs it.
+fn explain_settings(name: &str, ctx: &crate::commands::Context) -> String {
+    let value = &ctx.loaded.manifest.settings[name];
+    let mut out = kind_header(name, "CLI settings");
+    out.push_str("Origin: this project's setup.\n");
+    out.push_str(&format!("Source: declared inline, for {name}\n"));
+    out.push_str(
+        "Pin: none — settings are values you wrote, not fetched content, so \
+         there are no foreign bytes to bind consent to. Editing them still \
+         re-gates review, because they are part of the manifest.\n",
+    );
+    out.push_str("What it asks: merge these keys into that CLI's own settings file:\n");
+    let body = serde_json::to_string_pretty(value).unwrap_or_else(|_| "<unreadable>".into());
+    for line in body.lines() {
+        out.push_str(&format!("  {line}\n"));
+    }
+    out
 }
 
 /// Structured counterpart to the human trust lens. The stable top-level
@@ -202,6 +316,20 @@ fn explain_instruction(name: &str, ctx: &crate::commands::Context) -> String {
         out.push_str("Origin: this project's manifest.\n");
     }
     out.push_str(&format!("Source: {}\n", instr.path));
+    // Phase 3 item 5: the two rows every other kind answers. Instructions had
+    // origin and source but never said whether these were the approved bytes,
+    // or what the fragment actually does once delivered — which for a kind
+    // whose whole effect is "text enters the agent's context" is the row that
+    // most needs saying out loud.
+    out.push_str(
+        "Pin: content-bound in the lock — editing the fragment re-gates review \
+         before it is delivered again.\n",
+    );
+    out.push_str(
+        "What it asks: its text is merged into the managed region of each CLI's \
+         instructions file, so it enters the agent's context on every session. \
+         It runs nothing itself.\n",
+    );
     let src = Path::new(&instr.path);
     let resolved = if src.is_absolute() {
         src.to_path_buf()

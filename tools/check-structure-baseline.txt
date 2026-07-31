@@ -45,7 +45,6 @@
 #     all, so none of them changed meaning.
 
 kind:settings:lock # [settings.*] is raw serde_json::Value merged into native config; no LockedSetting struct exists, content is not pinned at all
-kind:settings:doctor # no doctor section or check_setting_* probe for [settings.*] content
 kind:settings:witness # no WITNESS_REGISTRY entry for settings; no drift/pinning test for [settings.*] content exists to register
 kind:hooks:lock # Hook.command/args can name a repo-relative script but LockedHook does not exist; only the manifest-level declaration (event/matcher/command line/args) is trust-gated, not the named script's own file bytes (see docs/ENFORCEMENT.md's Hooks section, "declaration-bound... but NOT content-pinned")
 kind:hooks:witness # no WITNESS_REGISTRY entry for hooks; hooks.rs tests (hooks_render_prune_and_preserve, codex_guard_is_registered_exactly_once_across_both_hook_files, ...) cover render/prune/dedup output shape, not pinning or drift
