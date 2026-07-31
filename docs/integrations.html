@@ -295,6 +295,38 @@
 <p>For per-session run identity, create a transparent launcher:</p>
 <pre class="block"><code>agentstack shim make claude</code></pre>
 <p>Point the matching t3code provider's binary-path setting at the generated shim. Each launched session then appears in <code>agentstack report runs</code> and receives its own run report.</p>
+<h3 id="project-actions-fresh-worktrees-set-themselves-up">Project actions: fresh worktrees set themselves up<a class="hlink" href="#project-actions-fresh-worktrees-set-themselves-up" aria-label="Link to this section">#</a></h3>
+<p>t3code runs each task in a fresh git worktree — a clean checkout in which AgentStack's rendered configuration (<code>.mcp.json</code>, <code>.claude/skills/</code>, and the other native files) does not exist, because the managed <code>.gitignore</code> block deliberately keeps generated artifacts out of git. Left alone, every t3code task therefore starts without the project's servers and skills, and nothing announces the loss.</p>
+<p>t3code's project actions close that gap with no panel and no new AgentStack surface, so they work in any t3code build. A <code>t3.json</code> checked into the repository root offers named commands; t3code shows them for one-click import, runs them in a real terminal inside the worktree, and can run one of them automatically when a worktree is created:</p>
+<pre class="block"><code>{
+  "$schema": "https://t3.codes/schema/t3.json",
+  "scripts": [
+    {
+      "name": "Set up toolset",
+      "command": "agentstack use --write",
+      "icon": "configure",
+      "runOnWorktreeCreate": true
+    },
+    {
+      "name": "Check setup",
+      "command": "agentstack doctor",
+      "icon": "lint"
+    }
+  ]
+}</code></pre>
+<ul>
+<li><strong>Set up toolset</strong> runs the moment a worktree is created, before the coding agent starts. With the project's manifest and lockfile committed, <code>agentstack use --write</code> activates the single declared toolset and renders every native config in place; a project that declares several toolsets must name one (<code>agentstack use &lt;toolset&gt; --write</code>). Verified on v0.17.0: the first activation in a fresh worktree exits 0 and materializes servers and skills for every CLI with project scope, and re-runs are idempotent.</li>
+<li><strong>Check setup</strong> is the same <code>agentstack doctor</code> the CLI journey already teaches, one click — or one keybinding — away when a session seems to be missing a capability.</li>
+</ul>
+<p>What to expect:</p>
+<ul>
+<li>t3code runs only the <strong>first</strong> <code>runOnWorktreeCreate</code> script. If the project already has a worktree setup command, chain them: <code>"command": "bun install &amp;&amp; agentstack use --write"</code>.</li>
+<li>If AgentStack needs a decision — an unfamiliar project awaiting review, a drifted lockfile — the action's terminal shows the same message the CLI shows anywhere else, with the exact next step. The action adds no authority and skips no consent check.</li>
+<li><code>t3.json</code> is repository content. t3code never runs a file script before you import it, and it shows the literal command at import time — read it, particularly in repositories you did not author. AgentStack's own review gate for repository-declared capabilities is unchanged underneath.</li>
+<li>Keybindings are personal. The file format deliberately has none; each person attaches their own after importing.</li>
+<li>Clean-at-rest projects should not import the setup action — materializing configuration on worktree creation is exactly what that mode avoids. Keep the doctor action, and launch through <code>agentstack run &lt;cli&gt;</code> instead.</li>
+<li>Switching toolsets stays in the CLI: actions take no arguments, so a generic switcher is not possible, and one imported action per toolset ages badly. <code>agentstack use &lt;toolset&gt; --write</code> remains the way to switch.</li>
+</ul>
 <h3 id="the-panel-journey">The panel journey<a class="hlink" href="#the-panel-journey" aria-label="Link to this section">#</a></h3>
 <p>The native t3code panel implements the first launch slice end to end:</p>
 <ol>

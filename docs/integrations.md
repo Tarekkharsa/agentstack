@@ -91,6 +91,73 @@ Point the matching t3code provider's binary-path setting at the generated shim.
 Each launched session then appears in `agentstack report runs` and receives its
 own run report.
 
+### Project actions: fresh worktrees set themselves up
+
+t3code runs each task in a fresh git worktree — a clean checkout in which
+AgentStack's rendered configuration (`.mcp.json`, `.claude/skills/`, and the
+other native files) does not exist, because the managed `.gitignore` block
+deliberately keeps generated artifacts out of git. Left alone, every t3code
+task therefore starts without the project's servers and skills, and nothing
+announces the loss.
+
+t3code's project actions close that gap with no panel and no new AgentStack
+surface, so they work in any t3code build. A `t3.json` checked into the
+repository root offers named commands; t3code shows them for one-click import,
+runs them in a real terminal inside the worktree, and can run one of them
+automatically when a worktree is created:
+
+```json
+{
+  "$schema": "https://t3.codes/schema/t3.json",
+  "scripts": [
+    {
+      "name": "Set up toolset",
+      "command": "agentstack use --write",
+      "icon": "configure",
+      "runOnWorktreeCreate": true
+    },
+    {
+      "name": "Check setup",
+      "command": "agentstack doctor",
+      "icon": "lint"
+    }
+  ]
+}
+```
+
+- **Set up toolset** runs the moment a worktree is created, before the coding
+  agent starts. With the project's manifest and lockfile committed,
+  `agentstack use --write` activates the single declared toolset and renders
+  every native config in place; a project that declares several toolsets must
+  name one (`agentstack use <toolset> --write`). Verified on v0.17.0: the
+  first activation in a fresh worktree exits 0 and materializes servers and
+  skills for every CLI with project scope, and re-runs are idempotent.
+- **Check setup** is the same `agentstack doctor` the CLI journey already
+  teaches, one click — or one keybinding — away when a session seems to be
+  missing a capability.
+
+What to expect:
+
+- t3code runs only the **first** `runOnWorktreeCreate` script. If the project
+  already has a worktree setup command, chain them:
+  `"command": "bun install && agentstack use --write"`.
+- If AgentStack needs a decision — an unfamiliar project awaiting review, a
+  drifted lockfile — the action's terminal shows the same message the CLI
+  shows anywhere else, with the exact next step. The action adds no authority
+  and skips no consent check.
+- `t3.json` is repository content. t3code never runs a file script before you
+  import it, and it shows the literal command at import time — read it,
+  particularly in repositories you did not author. AgentStack's own review
+  gate for repository-declared capabilities is unchanged underneath.
+- Keybindings are personal. The file format deliberately has none; each person
+  attaches their own after importing.
+- Clean-at-rest projects should not import the setup action — materializing
+  configuration on worktree creation is exactly what that mode avoids. Keep
+  the doctor action, and launch through `agentstack run <cli>` instead.
+- Switching toolsets stays in the CLI: actions take no arguments, so a
+  generic switcher is not possible, and one imported action per toolset ages
+  badly. `agentstack use <toolset> --write` remains the way to switch.
+
 ### The panel journey
 
 The native t3code panel implements the first launch slice end to end:
