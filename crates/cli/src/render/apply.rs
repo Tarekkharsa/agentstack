@@ -558,10 +558,16 @@ pub fn effective_servers(
 /// Manifest-sourced `[targets]` entries are NOT gated here: each command
 /// reports those per target so `doctor` can diagnose a broken manifest
 /// instead of dying on it.
+///
+/// Detection is asked of `project_dir`, not of the machine: a repo whose only
+/// setup is a project-scope `.mcp.json` fans out to the CLIs that file belongs
+/// to, instead of falling through to "nothing detected → every adapter in the
+/// catalog".
 pub fn resolve_targets(
     manifest: &Manifest,
     registry: &Registry,
     requested: &[String],
+    project_dir: &std::path::Path,
 ) -> anyhow::Result<Vec<String>> {
     if !requested.is_empty() {
         for id in requested {
@@ -581,7 +587,7 @@ pub fn resolve_targets(
     }
     let detected: Vec<String> = registry
         .iter()
-        .filter(|d| d.detected())
+        .filter(|d| d.detected_in(project_dir))
         .map(|d| d.id.clone())
         .collect();
     Ok(if detected.is_empty() {
@@ -632,8 +638,13 @@ mod tests {
     fn unknown_requested_target_errors_with_suggestion() {
         let registry = Registry::load().expect("built-in registry loads");
         let manifest: Manifest = toml::from_str("version = 1").expect("minimal manifest");
-        let err = resolve_targets(&manifest, &registry, &["codx".to_string()])
-            .expect_err("typo must not silently no-op");
+        let err = resolve_targets(
+            &manifest,
+            &registry,
+            &["codx".to_string()],
+            std::path::Path::new("."),
+        )
+        .expect_err("typo must not silently no-op");
         let msg = format!("{err:#}");
         assert!(msg.contains("did you mean 'codex'"), "{msg}");
         assert!(msg.contains("adapters list"), "{msg}");

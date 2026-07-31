@@ -221,7 +221,7 @@ fn render(
         crate::verify::ensure_instructions_compilable(&ctx.dir.display().to_string(), &statuses)?;
     }
 
-    let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets)?;
+    let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets, &ctx.dir)?;
     if target_ids.is_empty() {
         if !quiet {
             crate::outln!("No targets to apply to. Set [targets].default or pass --target.");

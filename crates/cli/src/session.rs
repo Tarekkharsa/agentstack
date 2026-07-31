@@ -299,7 +299,7 @@ pub fn start(manifest_dir: Option<&Path>, profile: &str, scope: Scope) -> Result
     }
 
     let state = State::load().unwrap_or_default();
-    let target_ids = resolve_targets(manifest, &ctx.registry, &[])?;
+    let target_ids = resolve_targets(manifest, &ctx.registry, &[], &ctx.dir)?;
 
     // Resolve the profile once (library-aware, inline-first) — the same
     // prepared set drives the snapshot planning below AND the activation, so

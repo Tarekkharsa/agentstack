@@ -533,8 +533,15 @@ fn detect_import(dir: &Path) -> Result<DetectedImport> {
     let mut settings: IndexMap<String, serde_json::Value> = IndexMap::new();
     let mut conflict_counts: IndexMap<String, usize> = IndexMap::new();
     let mut skipped: Vec<(String, crate::adapter::SkippedImport)> = Vec::new();
+    // Which scopes this import reads. A project manifest imports what is
+    // configured in the project too — before this, `init` asked the machine-scope
+    // `detected()` and then read only global files, so a repo whose whole setup
+    // lived in `.mcp.json` got "No supported CLIs detected to import" and an
+    // empty starter manifest (pilot Run B). At global scope there is no project
+    // to read, so the extra pass is skipped rather than pointed at the cwd.
+    let import_project = crate::scope::Scope::default_for(dir) == crate::scope::Scope::Project;
     for desc in registry.iter() {
-        if !desc.detected() {
+        if !(desc.detected() || (import_project && desc.project_config_present(dir))) {
             continue;
         }
         // The evidence behind "detected": which files exist. The settings file
@@ -544,6 +551,13 @@ fn detect_import(dir: &Path) -> Result<DetectedImport> {
             let path = crate::util::paths::expand_tilde(&config.path);
             if path.exists() {
                 configs.push(path);
+            }
+        }
+        if import_project {
+            if let Some((path, _)) = desc.config_for(crate::scope::Scope::Project, dir) {
+                if path.exists() && !configs.contains(&path) {
+                    configs.push(path);
+                }
             }
         }
         if let Some((path, _)) = desc.settings_for(crate::scope::Scope::Global, dir) {
@@ -558,7 +572,17 @@ fn detect_import(dir: &Path) -> Result<DetectedImport> {
             configs,
         });
         let mut contributed = false;
-        if let Some(value) = desc.read_config_value()? {
+        // Global first, then project: `merge_servers` keeps the first definition
+        // of a name, so a machine-wide server stays the one imported and the
+        // project copy is reported as a conflict rather than silently winning.
+        let mut scopes = vec![crate::scope::Scope::Global];
+        if import_project {
+            scopes.push(crate::scope::Scope::Project);
+        }
+        for scope in scopes {
+            let Some(value) = desc.read_config_value_for(scope, dir)? else {
+                continue;
+            };
             let (imported, skips) = extract_servers_with_skips(desc, &value);
             skipped.extend(skips.into_iter().map(|s| (desc.display.clone(), s)));
             contributed |= !imported.is_empty();
@@ -1090,6 +1114,35 @@ fn run_impl(
     }
 
     if detected.is_empty() {
+        // Backstop for the silent-empty-manifest shape: if ANY native config is
+        // readable here, say so and name the command that takes it, instead of
+        // writing an empty manifest and sending the user to a catalog search.
+        // Detection above should now cover every such file — this fires only
+        // when a config exists that detection could not claim (an unparseable
+        // file, a shape we cannot read), and it must still not be silent.
+        let leftovers =
+            crate::discover::native_configs(&Registry::load()?, &dir, &Default::default(), false);
+        if !leftovers.is_empty() {
+            println!(
+                "{} Config files for {} are present here but nothing could be imported from them:",
+                "⚠".yellow(),
+                leftovers
+                    .iter()
+                    .map(|n| n.display.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            for n in &leftovers {
+                println!(
+                    "    {}",
+                    crate::text::sanitize_line(&n.path.display().to_string())
+                );
+            }
+            println!(
+                "  {}",
+                "Run `agentstack adopt` after this to bring them in.".dimmed()
+            );
+        }
         // A clean machine is a first-timer's machine. Refusing to create a
         // manifest here is a circular blocker — every other command's error
         // says "run `agentstack init`" — so scaffold a commented starter
@@ -1480,6 +1533,11 @@ version = 1
                 settings_count,
                 &refs_needing_values,
                 &also_detected,
+                // Every file this import read lives inside the project root.
+                detected
+                    .iter()
+                    .flat_map(|c| c.configs.iter())
+                    .all(|p| p.starts_with(&project_root)),
             )
         );
     }
@@ -1570,6 +1628,12 @@ fn render_import_summary(
     settings_count: usize,
     needing_values: &[String],
     also_detected: &[String],
+    // True when every source config this import read is a project-scope file —
+    // i.e. exactly the files `apply --write` will manage here. The
+    // two-uncoordinated-places note is then false, and pointing at
+    // `--scope global` would send the user to write machine-wide files they
+    // never asked about.
+    sources_are_project_scope: bool,
 ) -> String {
     let mut out = String::new();
     out.push_str("\nImport complete.\n");
@@ -1617,11 +1681,16 @@ fn render_import_summary(
     // described in two uncoordinated places — which is the exact problem this
     // product exists to remove, so it gets named here rather than discovered
     // later as drift.
-    if server_count > 0 {
+    if server_count > 0 && !sources_are_project_scope {
         out.push_str(
             "  Note:      the CLI configs above are unchanged — after `apply --write` these\n\
              \x20            servers are described in two places. To manage the originals from\n\
              \x20            this manifest too: agentstack apply --scope global --write\n",
+        );
+    } else if server_count > 0 {
+        out.push_str(
+            "  Note:      those config files are this project's own — `apply --write`\n\
+             \x20            manages them from this manifest, so there is no second copy.\n",
         );
     }
     out.push_str("  Undo:      agentstack restore --last --write\n");
@@ -1915,6 +1984,7 @@ mod tests {
             2,
             &["GITHUB_TOKEN".to_string()],
             &["Gemini CLI".to_string(), "OpenCode".to_string()],
+            false,
         );
         assert!(out.contains("Manifest:  /tmp/proj/.agentstack/agentstack.toml"));
         assert!(out.contains("From:      Claude Code · Codex CLI"));
@@ -1947,24 +2017,27 @@ mod tests {
 
         // Nothing left out → no "also seen" line at all, not an empty one.
         let all_contributed =
-            render_import_summary("/m", &["Claude Code".to_string()], 2, 0, &[], &[]);
+            render_import_summary("/m", &["Claude Code".to_string()], 2, 0, &[], &[], false);
         assert!(!all_contributed.contains("Also seen:"));
 
         // Nothing pending → no secrets section at all, not an empty one.
-        let clean = render_import_summary("/m", &["Claude Code".to_string()], 1, 0, &[], &[]);
+        let clean =
+            render_import_summary("/m", &["Claude Code".to_string()], 1, 0, &[], &[], false);
         assert!(!clean.contains("Secrets:"));
         assert!(!clean.contains("settings from"));
         assert!(clean.contains("agentstack doctor"));
         assert!(!clean.contains("create-profile"));
 
         // No servers at all → nothing was copied, so no duplication note.
-        let empty = render_import_summary("/m", &["Claude Code".to_string()], 0, 1, &[], &[]);
+        let empty =
+            render_import_summary("/m", &["Claude Code".to_string()], 0, 1, &[], &[], false);
         assert!(!empty.contains("the CLI configs above are unchanged"));
         assert!(!empty.contains("create-profile"));
 
         // Server count and whether a name was available used to gate the
         // toolset offer; now no input produces one.
-        let unnamed = render_import_summary("/m", &["Claude Code".to_string()], 4, 0, &[], &[]);
+        let unnamed =
+            render_import_summary("/m", &["Claude Code".to_string()], 4, 0, &[], &[], false);
         assert!(!unnamed.contains("create-profile"));
     }
 

@@ -36,17 +36,51 @@ impl AdapterDescriptor {
     }
 
     /// Detected = installed or already configured on this machine.
+    ///
+    /// Machine-scope only, and deliberately so: this answers "is this CLI on
+    /// this machine?". It is NOT the right question for "does this directory
+    /// have a setup?" — a repo carrying only `.mcp.json` has no global config
+    /// and may not have the binary installed either. Callers that describe a
+    /// *project* must use [`AdapterDescriptor::detected_in`], which is the
+    /// question `status`/`init` were silently asking with this answer.
     pub fn detected(&self) -> bool {
         self.is_installed() || self.config_present()
     }
 
-    /// Read and parse this CLI's config into a JSON-shaped value tree (TOML is
-    /// converted to the same shape), or `None` if absent/empty.
+    /// Whether this CLI's project-scope config exists under `project_dir`.
+    /// `false` for a CLI with no project-scope config concept.
+    pub fn project_config_present(&self, project_dir: &std::path::Path) -> bool {
+        self.config_for(agentstack_core::scope::Scope::Project, project_dir)
+            .is_some_and(|(path, _)| path.exists())
+    }
+
+    /// Detected *for this directory*: installed, configured on this machine, or
+    /// carrying a project-scope config here. The discovery question every
+    /// project-facing surface asks.
+    pub fn detected_in(&self, project_dir: &std::path::Path) -> bool {
+        self.detected() || self.project_config_present(project_dir)
+    }
+
+    /// Read and parse this CLI's global config into a JSON-shaped value tree
+    /// (TOML is converted to the same shape), or `None` if absent/empty.
     pub fn read_config_value(&self) -> Result<Option<serde_json::Value>> {
-        let Some(config) = self.config.as_ref() else {
+        self.read_config_value_for(
+            agentstack_core::scope::Scope::Global,
+            std::path::Path::new("."),
+        )
+    }
+
+    /// [`read_config_value`](Self::read_config_value) for an explicit scope, so
+    /// a project-scope `.mcp.json` is read through the same parse and the same
+    /// adapter lens as the global file — one discovery path, not two.
+    pub fn read_config_value_for(
+        &self,
+        scope: agentstack_core::scope::Scope,
+        project_dir: &std::path::Path,
+    ) -> Result<Option<serde_json::Value>> {
+        let Some((path, format)) = self.config_for(scope, project_dir) else {
             return Ok(None);
         };
-        let path = paths::expand_tilde(&config.path);
         let text = match std::fs::read_to_string(&path) {
             Ok(t) => t,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -55,7 +89,7 @@ impl AdapterDescriptor {
         if text.trim().is_empty() {
             return Ok(None);
         }
-        let value = match config.format {
+        let value = match format {
             Format::Json => serde_json::from_str(&text)
                 .with_context(|| format!("parsing {}", path.display()))?,
             Format::Toml => {

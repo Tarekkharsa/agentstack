@@ -169,6 +169,82 @@ fn sanitize(name: &str) -> String {
         .to_ascii_uppercase()
 }
 
+/// One CLI's native config found on disk, with the servers it declares that the
+/// manifest does not.
+///
+/// This is the reading behind "you already have a setup here". Before it, three
+/// surfaces asked the question three ways: `adopt` looked at the right files,
+/// while `status` and `init` asked `detected()` — a machine-scope answer — and
+/// so reported "none detected on this machine" over a `.mcp.json` sitting in
+/// the working directory. One reading, three callers.
+#[derive(Debug, Clone)]
+pub struct NativeConfig {
+    pub id: String,
+    pub display: String,
+    pub scope: crate::scope::Scope,
+    pub path: std::path::PathBuf,
+    /// Server names the file declares. Empty means the file exists but has no
+    /// servers we can read — still worth naming, never worth an alarm.
+    pub servers: Vec<String>,
+    /// The subset of `servers` absent from the manifest passed to
+    /// [`native_configs`] (all of `servers` when there is no manifest yet).
+    pub unimported: Vec<String>,
+}
+
+/// Every native config present under `dir` (and, when `include_global`, on this
+/// machine) with the servers it declares.
+///
+/// Unreadable or unparseable files are skipped rather than failing the caller:
+/// this feeds orientation and diagnosis, and a broken third-party config is a
+/// thing to survive, not to die on. `doctor`'s own parse checks still report
+/// it. Repository content is hostile input (invariant 7) — nothing here is
+/// executed or interpolated, only counted and named.
+pub fn native_configs(
+    registry: &crate::adapter::Registry,
+    dir: &std::path::Path,
+    manifest_servers: &IndexMap<String, Server>,
+    include_global: bool,
+) -> Vec<NativeConfig> {
+    use crate::scope::Scope;
+    let mut out = Vec::new();
+    let scopes: &[Scope] = if include_global {
+        &[Scope::Project, Scope::Global]
+    } else {
+        &[Scope::Project]
+    };
+    for desc in registry.iter() {
+        for scope in scopes {
+            let Some((path, _)) = desc.config_for(*scope, dir) else {
+                continue;
+            };
+            if !path.exists() {
+                continue;
+            }
+            let Ok(Some(value)) = desc.read_config_value_for(*scope, dir) else {
+                continue;
+            };
+            let servers: Vec<String> = crate::adapter::extract_servers(desc, &value)
+                .into_iter()
+                .map(|(name, _)| name)
+                .collect();
+            let unimported: Vec<String> = servers
+                .iter()
+                .filter(|n| !manifest_servers.contains_key(*n))
+                .cloned()
+                .collect();
+            out.push(NativeConfig {
+                id: desc.id.clone(),
+                display: desc.display.clone(),
+                scope: *scope,
+                path,
+                servers,
+                unimported,
+            });
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

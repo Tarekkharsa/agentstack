@@ -586,7 +586,7 @@ pub fn activate(
         }
     }
 
-    let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets)?;
+    let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets, &ctx.dir)?;
     let ruleset = crate::render::ruleset_for(manifest)?;
     println!(
         "Activating toolset '{}' (scope: {scope}) — {}, {}",

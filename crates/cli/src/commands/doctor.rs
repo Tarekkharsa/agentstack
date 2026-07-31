@@ -587,7 +587,7 @@ fn run_checks(
         report.line(level, msg);
     }
 
-    let target_ids = resolve_targets(manifest, &ctx.registry, &[])?;
+    let target_ids = resolve_targets(manifest, &ctx.registry, &[], &ctx.dir)?;
     let mut state = State::load()?;
     let mut fixed = 0;
 
@@ -636,6 +636,18 @@ fn run_checks(
                         Level::Advisory,
                         format!("{:<14} config present but binary not on PATH", desc.display),
                     );
+                } else if desc.project_config_present(&ctx.dir) {
+                    // Not on this machine, but this project carries its config —
+                    // the shape `status` now reports as detected here. Printing
+                    // "not detected" over a `.mcp.json` in the working directory
+                    // is the same one-screen contradiction, one surface over.
+                    report.line(
+                        Level::Info,
+                        format!(
+                            "{:<14} configured in this project · binary not on PATH",
+                            desc.display
+                        ),
+                    );
                 } else {
                     // Not having a CLI installed is a fact, not a fault — Info,
                     // so a machine with 5 of 13 CLIs isn't greeted by 8 warnings.
@@ -675,6 +687,49 @@ fn run_checks(
                 )
             },
         );
+    }
+
+    // Servers configured natively HERE that this manifest does not declare.
+    //
+    // This is the Status pillar's load-bearing check: without it, a project
+    // whose whole setup sits in an unimported `.mcp.json` got
+    // "0 error(s), 0 warning(s)" — doctor reporting health over a setup it had
+    // silently ignored (pilot Run B). A clean doctor has to MEAN ready.
+    //
+    // Warn, not Error: the setup is not broken, it is uncovered, and `adopt`
+    // is a one-command fix that is named right here. Project scope only —
+    // machine-wide configs belong to whichever manifest manages them, and
+    // warning every project about them would be noise, not a finding.
+    report.section("Unmanaged setup");
+    let unmanaged = crate::discover::native_configs(
+        &ctx.registry,
+        &ctx.dir,
+        &manifest.servers,
+        false, // project scope only
+    );
+    let pending: Vec<_> = unmanaged
+        .iter()
+        .filter(|n| !n.unimported.is_empty())
+        .collect();
+    if pending.is_empty() {
+        report.line(
+            Level::Ok,
+            "no servers configured here outside this manifest",
+        );
+        report.mark_irrelevant();
+    } else {
+        for n in &pending {
+            report.line(
+                Level::Warn,
+                format!(
+                    "{:<14} {} in {} not in this manifest: {} ↳ agentstack adopt",
+                    n.display,
+                    super::count(n.unimported.len(), "server"),
+                    tidy_path(&n.path),
+                    crate::text::sanitize_line(&n.unimported.join(", ")),
+                ),
+            );
+        }
     }
 
     check_t3code(report);

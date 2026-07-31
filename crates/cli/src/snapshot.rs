@@ -600,7 +600,7 @@ fn render_drift_targets(
     scope: Scope,
     set: DriftSet,
 ) -> Result<Vec<DriftTarget>> {
-    let selected = crate::render::resolve_targets(manifest, &ctx.registry, &[])?;
+    let selected = crate::render::resolve_targets(manifest, &ctx.registry, &[], &ctx.dir)?;
     let ids: Vec<String> = match set {
         DriftSet::Selected => selected.clone(),
         DriftSet::InstalledNonSelected => ctx

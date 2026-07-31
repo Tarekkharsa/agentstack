@@ -166,23 +166,49 @@ pub(crate) fn next_step(
     rendered: bool,
     has_capabilities: bool,
     trust_relevant: bool,
+    no_toolsets: bool,
+    unimported_native: bool,
 ) -> (&'static str, &'static str) {
     use crate::trust::TrustState;
     match trust {
         TrustState::Untrusted if trust_relevant => {
             ("agentstack trust .", "review it to unlock its servers")
         }
-        TrustState::Changed if trust_relevant => (
+        // Trust-stale routes here whether or not trust is "relevant". The
+        // relevance test asks whether trusting *unlocks* something, which is the
+        // right question for a project that has never been trusted. It is the
+        // wrong question once content the user already approved has CHANGED:
+        // that state is a re-review the Status line is already reporting, and
+        // routing it to `doctor` made the cue cost two commands — status naming
+        // doctor, doctor naming the review (pilot Run A).
+        TrustState::Changed => (
             "agentstack trust .",
-            "the manifest or lock changed — review and re-trust",
+            "the content changed since you reviewed it — review and re-trust",
         ),
-        // Untrusted or trust-stale but trust changes nothing here (static, no
-        // gateway), or already trusted: fall through to the normal ladder.
+        // Untrusted but trust changes nothing here (static, no gateway), or
+        // already trusted: fall through to the normal ladder.
         _ => {
-            if has_capabilities && !rendered {
+            // Servers configured natively here that this manifest doesn't know
+            // about. Ahead of `apply`, because rendering a manifest that omits
+            // half the setup is not the step that helps.
+            if unimported_native {
+                (
+                    "agentstack adopt",
+                    "servers are configured here that this setup doesn't cover yet",
+                )
+            } else if has_capabilities && !rendered {
                 (
                     "agentstack apply --write",
                     "render this setup into your CLIs",
+                )
+            } else if rendered && no_toolsets {
+                // The wiring is done. `doctor` here was a dead end: a user who
+                // ran it clean was offered it again, with nothing on screen
+                // saying the journey continues (pilot Run A). The next rung of
+                // the ladder is Switch, and it is stated as one.
+                (
+                    "agentstack toolset create <name> --server <server>",
+                    "group these for a task, then switch between toolsets",
                 )
             } else {
                 (
@@ -308,8 +334,17 @@ pub(crate) fn session_status_line(
 /// built alongside would have been a second implementation of the same
 /// questions, free to answer them differently.
 pub(crate) struct Orientation {
-    /// Display names of the CLIs detected on this machine.
+    /// Display names of the CLIs detected FOR THIS DIRECTORY — installed,
+    /// configured on this machine, or carrying a project-scope config here.
     detected_clis: Vec<String>,
+    /// How many adapters the catalog knows about at all. Kept apart from
+    /// `detected_clis` because they answer different questions: the screen used
+    /// to print "none detected on this machine" above "13 detected CLI(s)",
+    /// which is one screen contradicting itself. The second number was never
+    /// detection — it is the fan-out fallback, i.e. the catalog.
+    catalog_size: usize,
+    /// Native configs found here that the manifest does not (yet) cover.
+    native: Vec<crate::discover::NativeConfig>,
     /// Where the manifest is (or would be).
     manifest_path: std::path::PathBuf,
     manifest: ManifestState,
@@ -338,6 +373,10 @@ pub(crate) struct ProjectFacts {
     /// How many detected CLIs the commands would fan out to when nothing is
     /// pinned — the honest number behind "no [targets] pinned".
     fanout_targets: usize,
+    /// Whether `fanout_targets` counts CLIs actually detected here, or is the
+    /// whole-catalog fallback `resolve_targets` uses when nothing is detected.
+    /// Without it the line cannot be phrased truthfully.
+    fanout_detected: bool,
     toolsets: Vec<String>,
     session: Option<SessionFacts>,
     locked: bool,
@@ -417,6 +456,20 @@ pub(crate) fn status_json(o: &Orientation) -> serde_json::Value {
         // Display names, not ids — the same list the screen prints. Adapter
         // ids live in `adapters list --json`, which is the read for that.
         "clis_detected": o.detected_clis,
+        // The catalog size, kept a separate key for the same reason the screen
+        // keeps it a separate sentence — it is not a detection count.
+        "clis_supported": o.catalog_size,
+        // Native configs found here carrying servers this manifest doesn't
+        // declare. Names only; a discovered config's contents never land here.
+        "native_unimported": o.native.iter()
+            .filter(|n| !n.unimported.is_empty())
+            .map(|n| serde_json::json!({
+                "id": n.id,
+                "scope": n.scope.as_str(),
+                "path": n.path.display().to_string(),
+                "servers": n.unimported,
+            }))
+            .collect::<Vec<_>>(),
         "manifest": {
             "path": o.manifest_path.display().to_string(),
             "present": present,
@@ -509,16 +562,55 @@ fn print_secrets_line(facts: &SecretFacts) {
     }
 }
 
+/// The "you already have a setup here" line. Silent when every native config
+/// found is already covered by the manifest — there is nothing to act on and a
+/// permanent line would be noise. `no_manifest` changes only the pointer:
+/// before a manifest exists the path in is `init`, after it, `adopt`.
+fn print_native_line(native: &[crate::discover::NativeConfig], no_manifest: bool) {
+    let pending: Vec<&crate::discover::NativeConfig> =
+        native.iter().filter(|n| !n.unimported.is_empty()).collect();
+    if pending.is_empty() {
+        return;
+    }
+    let servers: usize = pending.iter().map(|n| n.unimported.len()).sum();
+    let files = pending
+        .iter()
+        .map(|n| crate::text::sanitize_line(&tidy(&n.path)))
+        .collect::<Vec<_>>()
+        .join(" · ");
+    println!(
+        "  {}  {} configured here, not in this setup — {}",
+        "Found   ".bold(),
+        super::count(servers, "server"),
+        files.dimmed()
+    );
+    println!(
+        "            {}",
+        if no_manifest {
+            "`agentstack init` imports them"
+        } else {
+            "`agentstack adopt` brings them into the manifest"
+        }
+        .dimmed()
+    );
+}
+
+/// Project-relative display for a discovered config path, falling back to the
+/// full path when it is not under the current directory.
+fn tidy(path: &std::path::Path) -> String {
+    std::env::current_dir()
+        .ok()
+        .and_then(|cwd| path.strip_prefix(cwd).ok())
+        .unwrap_or(path)
+        .display()
+        .to_string()
+}
+
 /// Read every fact the orientation screen states. `with_secrets` is the one
 /// knob: bare `agentstack` has never consulted the resolvers, and gathering
 /// unconditionally would make it slower for a line it does not print.
 fn collect(manifest_dir: Option<&Path>, with_secrets: bool) -> Result<Orientation> {
     let registry = Registry::load()?;
-    let detected_clis: Vec<String> = registry
-        .iter()
-        .filter(|d| d.detected())
-        .map(|d| d.display.clone())
-        .collect();
 
     // Walk up to the project root so `agentstack` from `src/deep` describes
     // the ROOT manifest instead of steering toward a nested `init`.
@@ -526,9 +618,24 @@ fn collect(manifest_dir: Option<&Path>, with_secrets: bool) -> Result<Orientatio
     let dir = crate::manifest::resolve_manifest_dir(&base);
     let manifest_path = dir.join(MANIFEST_FILE);
 
+    // Detection is asked OF THIS DIRECTORY (`detected_in`), not of the machine.
+    // A repo whose only setup is a project-scope `.mcp.json` used to be reported
+    // as "none detected on this machine" while four servers sat in the working
+    // directory — the pilot's blocker #1.
+    let detected_clis: Vec<String> = registry
+        .iter()
+        .filter(|d| d.detected_in(&dir))
+        .map(|d| d.display.clone())
+        .collect();
+
     if !manifest_path.exists() {
+        // Nothing of ours here yet — so anything native we can see is the whole
+        // story, and `init` must be told to expect it.
+        let native = crate::discover::native_configs(&registry, &dir, &Default::default(), false);
         return Ok(Orientation {
             detected_clis,
+            catalog_size: registry.ids().count(),
+            native,
             manifest_path,
             manifest: ManifestState::Missing,
             next: (
@@ -543,6 +650,8 @@ fn collect(manifest_dir: Option<&Path>, with_secrets: bool) -> Result<Orientatio
         Err(err) => {
             return Ok(Orientation {
                 detected_clis,
+                catalog_size: registry.ids().count(),
+                native: Vec::new(),
                 manifest_path,
                 manifest: ManifestState::Broken(format!("{err:#}")),
                 next: ("agentstack doctor".to_string(), "diagnose the manifest"),
@@ -553,7 +662,7 @@ fn collect(manifest_dir: Option<&Path>, with_secrets: bool) -> Result<Orientatio
     let m = &ctx.loaded.manifest;
     // No [targets] pinned → commands fan out to the detected CLIs (see
     // render::resolve_targets); "0 target(s)" would be false.
-    let fanout_targets = crate::render::resolve_targets(m, &ctx.registry, &[])
+    let fanout_targets = crate::render::resolve_targets(m, &ctx.registry, &[], &ctx.dir)
         .map(|t| t.len())
         .unwrap_or_default();
 
@@ -592,7 +701,22 @@ fn collect(manifest_dir: Option<&Path>, with_secrets: bool) -> Result<Orientatio
     // distinguishes "imported but not applied" from "set up and resting".
     // `locked` does not: a static project stays unlocked until `use`/`lock` runs.
     let rendered = has_rendered_artifacts(&ctx, &target_ids);
-    let fallback = next_step(trust, rendered, has_capabilities, trust_relevant);
+
+    // Native configs here whose servers this manifest does not declare. Cheap
+    // (a handful of small files at project scope) and the answer to the pilot's
+    // silent case: a manifest that covers none of what is actually configured.
+    let native = crate::discover::native_configs(&ctx.registry, &ctx.dir, &m.servers, false);
+    let unimported = native.iter().any(|n| !n.unimported.is_empty());
+    let any_detected = !detected_clis.is_empty();
+
+    let fallback = next_step(
+        trust,
+        rendered,
+        has_capabilities,
+        trust_relevant,
+        m.profiles.is_empty(),
+        unimported,
+    );
     let profile = if m.profiles.len() == 1 {
         m.profiles
             .keys()
@@ -606,13 +730,16 @@ fn collect(manifest_dir: Option<&Path>, with_secrets: bool) -> Result<Orientatio
         .unwrap_or_else(|| (fallback.0.to_string(), fallback.1));
 
     Ok(Orientation {
+        catalog_size: ctx.registry.ids().count(),
         detected_clis,
+        native,
         manifest_path,
         manifest: ManifestState::Loaded(Box::new(ProjectFacts {
             servers: m.servers.len(),
             skills: m.skills.len(),
             pinned_targets: m.targets.default.clone(),
             fanout_targets,
+            fanout_detected: any_detected,
             toolsets: m.profiles.keys().cloned().collect(),
             session,
             locked,
@@ -640,16 +767,30 @@ fn print_orientation(o: &Orientation, status: bool) {
         env!("CARGO_PKG_VERSION")
     );
 
+    // Two different facts, never merged into one number: how many CLIs are
+    // detected HERE, and how many the catalog supports. Printing "none
+    // detected" above "13 detected CLI(s)" was one screen contradicting itself
+    // (pilot Run B); the second number was always the catalog.
     if o.detected_clis.is_empty() {
-        println!("  {}  none detected on this machine", "CLIs    ".bold());
+        println!(
+            "  {}  none detected here — {} supported",
+            "CLIs    ".bold(),
+            o.catalog_size
+        );
     } else {
         println!(
-            "  {}  {} detected: {}",
+            "  {}  {} of {} supported detected here: {}",
             "CLIs    ".bold(),
             o.detected_clis.len(),
+            o.catalog_size,
             o.detected_clis.join(" · ")
         );
     }
+
+    // Native config found in this directory that our manifest doesn't cover.
+    // Naming it is the whole point: `adopt` could always read these files, but
+    // no surface said they existed, so an uncoached user never reached it.
+    print_native_line(&o.native, matches!(o.manifest, ManifestState::Missing));
 
     match &o.manifest {
         ManifestState::Missing => println!("  {}  none in this directory", "Manifest".bold()),
@@ -665,10 +806,20 @@ fn print_orientation(o: &Orientation, status: bool) {
                 parts.push(super::count(f.skills, "skill"));
             }
             let targets_note = if f.pinned_targets.is_empty() {
-                format!(
-                    "{}, no [targets] pinned",
-                    super::count(f.fanout_targets, "detected CLI")
-                )
+                if f.fanout_detected {
+                    format!(
+                        "{}, no [targets] pinned",
+                        super::count(f.fanout_targets, "detected CLI")
+                    )
+                } else {
+                    // Nothing detected: `resolve_targets` falls back to the
+                    // whole catalog. Say that, rather than calling the catalog
+                    // "detected".
+                    format!(
+                        "no [targets] pinned and no CLI detected here — would try all {}",
+                        super::count(f.fanout_targets, "supported CLI")
+                    )
+                }
             } else {
                 super::count(f.pinned_targets.len(), "target")
             };
@@ -840,52 +991,71 @@ mod tests {
         // Trust-relevant (bridge registered / gate-dependent mode): untrusted
         // and stale both send the human to `trust .`, whatever is rendered.
         assert_eq!(
-            next_step(TrustState::Untrusted, false, true, true).0,
+            next_step(TrustState::Untrusted, false, true, true, false, false).0,
             "agentstack trust ."
         );
         assert_eq!(
-            next_step(TrustState::Untrusted, true, false, true).0,
+            next_step(TrustState::Untrusted, true, false, true, false, false).0,
             "agentstack trust ."
         );
         assert_eq!(
-            next_step(TrustState::Changed, true, true, true).0,
+            next_step(TrustState::Changed, true, true, true, false, false).0,
             "agentstack trust ."
         );
 
-        // Static, no-gateway (trust irrelevant): the untrusted/stale state does
+        // Static, no-gateway (trust irrelevant): a NEVER-trusted project does
         // NOT hijack the headline — it falls through to the normal ladder.
         // Declared but unrendered → `apply --write`; rendered (or empty) →
         // `doctor`. This is the fix for the never-converging trust nag.
         assert_eq!(
-            next_step(TrustState::Untrusted, false, true, false).0,
+            next_step(TrustState::Untrusted, false, true, false, false, false).0,
             "agentstack apply --write"
         );
         assert_eq!(
-            next_step(TrustState::Untrusted, true, false, false).0,
+            next_step(TrustState::Untrusted, true, false, false, false, false).0,
             "agentstack doctor"
         );
+
+        // Trust-STALE is different, and routes to the review whatever the
+        // relevance flag says (v0.17.1): content the user already approved has
+        // changed, `status` is already reporting it, and sending them to
+        // `doctor` first made the cue cost two commands instead of one.
         assert_eq!(
-            next_step(TrustState::Changed, true, true, false).0,
-            "agentstack doctor"
+            next_step(TrustState::Changed, true, true, false, false, false).0,
+            "agentstack trust ."
         );
         assert_eq!(
-            next_step(TrustState::Changed, false, false, false).0,
-            "agentstack doctor"
+            next_step(TrustState::Changed, false, false, false, false, false).0,
+            "agentstack trust ."
+        );
+
+        // The wiring is done and nothing is grouped yet → the next rung is
+        // Switch, named as a runnable command. `doctor` here was a dead end: a
+        // user who ran it clean was offered it again (pilot Run A).
+        let (cmd, _) = next_step(TrustState::Trusted, true, true, false, true, false);
+        assert_eq!(cmd, "agentstack toolset create <name> --server <server>");
+
+        // Servers configured here that the manifest doesn't cover outrank both
+        // — rendering a manifest that omits half the setup is not the step
+        // that helps.
+        assert_eq!(
+            next_step(TrustState::Trusted, false, true, false, false, true).0,
+            "agentstack adopt"
         );
 
         // Once trusted the trust-relevance flag is moot: the render vs. verify
         // ladder applies either way.
         for relevant in [true, false] {
             assert_eq!(
-                next_step(TrustState::Trusted, false, true, relevant).0,
+                next_step(TrustState::Trusted, false, true, relevant, false, false).0,
                 "agentstack apply --write"
             );
             assert_eq!(
-                next_step(TrustState::Trusted, true, false, relevant).0,
+                next_step(TrustState::Trusted, true, false, relevant, false, false).0,
                 "agentstack doctor"
             );
             assert_eq!(
-                next_step(TrustState::Trusted, false, false, relevant).0,
+                next_step(TrustState::Trusted, false, false, relevant, false, false).0,
                 "agentstack doctor"
             );
         }
@@ -908,8 +1078,14 @@ mod tests {
             for rendered in [true, false] {
                 for has_capabilities in [true, false] {
                     for trust_relevant in [true, false] {
-                        let (cmd, why) =
-                            next_step(trust, rendered, has_capabilities, trust_relevant);
+                        let (cmd, why) = next_step(
+                            trust,
+                            rendered,
+                            has_capabilities,
+                            trust_relevant,
+                            false,
+                            false,
+                        );
                         assert!(
                             !cmd.contains("init"),
                             "a loaded manifest must never be sent back to init \
@@ -925,7 +1101,7 @@ mod tests {
         // holding capabilities that are already on disk is set up — verify it,
         // don't re-import it.
         assert_eq!(
-            next_step(TrustState::Untrusted, true, true, false).0,
+            next_step(TrustState::Untrusted, true, true, false, false, false).0,
             "agentstack doctor"
         );
     }
@@ -966,12 +1142,15 @@ mod tests {
     fn loaded_orientation(secrets: Option<SecretFacts>) -> Orientation {
         Orientation {
             detected_clis: vec!["Claude Code".into()],
+            catalog_size: 13,
+            native: Vec::new(),
             manifest_path: std::path::PathBuf::from("/repo/.agentstack/agentstack.toml"),
             manifest: ManifestState::Loaded(Box::new(ProjectFacts {
                 servers: 2,
                 skills: 1,
                 pinned_targets: vec!["claude-code".into()],
                 fanout_targets: 1,
+                fanout_detected: true,
                 toolsets: vec!["dev".into(), "prod".into()],
                 session: Some(SessionFacts {
                     profile: "dev".into(),
@@ -1028,6 +1207,8 @@ mod tests {
     fn status_json_distinguishes_missing_from_broken() {
         let missing = status_json(&Orientation {
             detected_clis: Vec::new(),
+            catalog_size: 13,
+            native: Vec::new(),
             manifest_path: std::path::PathBuf::from("/repo/.agentstack/agentstack.toml"),
             manifest: ManifestState::Missing,
             next: ("agentstack init".into(), "guided one-command setup"),
@@ -1038,6 +1219,8 @@ mod tests {
 
         let broken = status_json(&Orientation {
             detected_clis: Vec::new(),
+            catalog_size: 13,
+            native: Vec::new(),
             manifest_path: std::path::PathBuf::from("/repo/.agentstack/agentstack.toml"),
             manifest: ManifestState::Broken("missing field `type`\nin `servers.a`".into()),
             next: ("agentstack doctor".into(), "diagnose the manifest"),

@@ -124,7 +124,7 @@ fn collect(args: &DiffArgs, manifest_dir: Option<&Path>, print_text: bool) -> Re
         }
     }
 
-    let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets)?;
+    let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets, &ctx.dir)?;
     let state = State::load()?;
     let mut drift = 0;
     // The reconcile command for the closing hint — `use <p> --write` when an

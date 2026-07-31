@@ -4,12 +4,43 @@ User-facing changes per release. The [GitHub Releases
 page](https://github.com/Tarekkharsa/agentstack/releases) carries the built
 binaries, checksums, and provenance attestations for each entry.
 
-## Unreleased
+## v0.17.1 — 2026-07-31
+
+**The pilot's blocker, fixed before the study runs.** The §1.6 activation
+study rehearsal found a shape that failed silently: a project whose whole
+agent setup lives in project-scope config files (`.mcp.json`,
+`.codex/config.toml`) and nothing in the user's home. Every surface except
+`adopt` was asking a machine-scope question — "is this CLI installed here?" —
+and answering a project-scope one with it. So `status` said "none detected on
+this machine" over four servers in the working directory, `init` wrote an
+empty manifest, and `doctor` then reported zero problems with it. The
+capability was never missing; only the discovery was. Participants install
+the latest release, so the study now tests the fixed journey.
 
 ### Fixed
 
+- **Project-scope detection.** `status`, `init`, `doctor`, and target fan-out
+  now ask whether a CLI is configured *in this directory*, not just on this
+  machine. A repo carrying only `.mcp.json` or `.codex/config.toml` is no
+  longer reported as "none detected on this machine".
+- **`init` imports project-scope configs** instead of writing an empty starter
+  manifest over them. If a config is present that cannot be imported, `init`
+  names the file and points at `agentstack adopt` rather than staying silent.
+- **The false ready.** `doctor` gains an `Unmanaged setup` check: servers
+  configured here that the manifest does not declare are a warning naming the
+  file, the servers, and `agentstack adopt`. A clean `doctor` now means ready.
+  The section is hidden when nothing is uncovered.
+- **One truthful CLI count.** The orientation screen no longer prints
+  "none detected" above "13 detected CLI(s)" — detected-here and the adapter
+  catalog are stated as the two different facts they are.
+- **Next-step chain.** After a completed setup, `status` advances to
+  `toolset create` instead of re-offering `doctor`; a trust-stale project's
+  Next line names `agentstack trust .` directly instead of routing through
+  `doctor` first.
+- `init`'s post-import note no longer tells a project-scope import to run
+  `apply --scope global --write` — those files are the ones `apply` manages.
 - The interactive tutorial's install transcript and the cookbook's CI recipe
-  now pin v0.17.0; both had stayed one release behind.
+  now pin the current release; both had stayed one release behind.
 
 ### Added
 

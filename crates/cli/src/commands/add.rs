@@ -864,7 +864,8 @@ struct ActivationCtx {
 
 impl ActivationCtx {
     fn detect(ctx: &super::Context) -> Result<Self> {
-        let target_ids = crate::render::resolve_targets(&ctx.loaded.manifest, &ctx.registry, &[])?;
+        let target_ids =
+            crate::render::resolve_targets(&ctx.loaded.manifest, &ctx.registry, &[], &ctx.dir)?;
         Ok(ActivationCtx {
             mode: super::overview::detect_mode(ctx, &target_ids),
             scope: Scope::default_for(&ctx.dir),

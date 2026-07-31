@@ -22,7 +22,7 @@ inputs:
     # the binary that shipped with vX — never a newer one. This MUST be bumped
     # to the new tag on every release (RELEASING.md § 0 owns the stamp step).
     # Override with `version: latest` to opt into the newest published binary.
-    default: v0.17.0
+    default: v0.17.1
   working-directory:
     description: Directory containing .agentstack/ (or a legacy root manifest)
     required: false

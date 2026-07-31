@@ -912,6 +912,14 @@ const VOCAB_ALLOWLIST: &[&str] = &[
 /// they are internal engineering records rather than reader-facing prose, and
 /// the sibling `every_prose_command_is_real` scan skips them for the same
 /// reason. Anything a reader reaches from the docs site is in scope.
+///
+/// `docs/archive/` is excluded for a different reason: it is the historical
+/// record, and history is not rewritten to match current vocabulary. The
+/// archived v1 strategy says "profile" because that is the word it was written
+/// with; conjugating it would falsify what was actually decided, and CLAUDE.md
+/// already forbids taking direction from it. (Adopting strategy v2 put those
+/// files under `docs/` for the first time, which is what made this scan start
+/// failing on `main`.)
 fn vocab_doc_files(root: &Path) -> Vec<PathBuf> {
     fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
@@ -920,7 +928,10 @@ fn vocab_doc_files(root: &Path) -> Vec<PathBuf> {
         for entry in entries {
             let path = entry.expect("readable dir entry").path();
             if path.is_dir() {
-                if path.file_name().is_some_and(|n| n == "design") {
+                if path
+                    .file_name()
+                    .is_some_and(|n| n == "design" || n == "archive")
+                {
                     continue;
                 }
                 walk(&path, out);
