@@ -46,7 +46,14 @@ fn skill(proj: &Path, name: &str, body: &str) {
 /// A project with three path skills, locked and trusted — the state a re-gate
 /// starts from.
 fn trusted_project(root: &Path) -> PathBuf {
-    let proj = root.join("proj");
+    trusted_project_at(root, "proj")
+}
+
+/// The same fixture under a chosen directory name, so two byte-identical
+/// projects can be built side by side — parity compares their digests, which
+/// are over content and must therefore agree.
+fn trusted_project_at(root: &Path, name: &str) -> PathBuf {
+    let proj = root.join(name);
     fs::create_dir_all(proj.join(".agentstack")).unwrap();
     skill(&proj, "alpha", "---\ndescription: a\n---\n# Alpha\nfirst\n");
     skill(&proj, "beta", "---\ndescription: b\n---\n# Beta\nfirst\n");
@@ -450,6 +457,163 @@ fn keep_pinned_never_silences_the_drift_report() {
         text.contains("content drifted from lock"),
         "keep-pinned silenced the drift report: {text}"
     );
+}
+
+/// Item 5 PARITY WITNESS: **the card compresses presentation, never evidence.**
+///
+/// Accepting a changed skill through the re-gate card must leave exactly the
+/// event trail its explicit-path equivalent leaves — re-lock, then grant bound
+/// to the previewed digest. Same actions, same digests, same order. A consent
+/// surface that recorded less than the scripted sequence would make the
+/// recorded history depend on which UI the human happened to use, and the
+/// trust-mutation log is what Phase 1's countable gate rests on.
+#[test]
+fn accepting_leaves_the_same_event_trail_as_relock_then_trust() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    isolate_home(tmp.path());
+
+    // Two projects, byte-identical content, so their digests are comparable.
+    let card = trusted_project_at(tmp.path(), "card");
+    let script = trusted_project_at(tmp.path(), "script");
+    let edited = "---\ndescription: a\n---\n# Alpha\nEDITED\n";
+    skill(&card, "alpha", edited);
+    skill(&script, "alpha", edited);
+
+    let card_before = events(&card).len();
+    let script_before = events(&script).len();
+
+    // Through the card: accept.
+    agentstack::commands::trust::grant_with_answers(
+        &card,
+        false,
+        None,
+        true,
+        Some(&ReGateProbe {
+            answers: vec![("alpha".to_string(), Answer::Accept)],
+            confirm: true,
+        }),
+    )
+    .unwrap();
+
+    // The scripted equivalent: re-pin, preview, grant bound to that digest.
+    agentstack::commands::lock::run(&Default::default(), Some(&script)).unwrap();
+    let digest = agentstack::commands::trust::preview_value(&script).unwrap()["surface_digest"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    agentstack::commands::trust::grant_with_answers(&script, true, Some(&digest), false, None)
+        .unwrap();
+
+    // Compare only the events each flow ADDED — both projects already have a
+    // first grant, and parity is a claim about the incremental tail.
+    let card_tail = &events(&card)[card_before..];
+    let script_tail = &events(&script)[script_before..];
+    assert!(
+        !card_tail.is_empty(),
+        "accepting through the card recorded nothing — an unrecorded yes is an \
+         unfalsifiable one"
+    );
+    assert_eq!(
+        card_tail, script_tail,
+        "the card's event trail diverged from the scripted sequence's"
+    );
+}
+
+/// Item 5 PARITY WITNESS, keep-pinned.
+///
+/// Finding, recorded because it corrects the obvious premise: keep-pinned has
+/// NO pre-Phase-2 explicit equivalent. A plain re-trust of a drifted project
+/// refuses — the blocker bails — so before the card the only ways out of drift
+/// were to re-lock (accept) or to put the file back. Keep-pinned is a genuinely
+/// new answer, not a compression of an existing sequence.
+///
+/// So parity is asserted against the state it produces rather than a command
+/// nobody could run: restoring the approved bytes and re-trusting reaches the
+/// same place — the approved content in use, the digest unchanged — and must
+/// leave the same trail. This is the honest comparison, and it still catches
+/// the failure that matters: keep-pinned inventing a new digest, recording
+/// nothing, or recording extra events.
+#[test]
+fn keeping_the_pin_leaves_the_same_event_trail_as_a_plain_retrust() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    isolate_home(tmp.path());
+
+    let card = trusted_project_at(tmp.path(), "card");
+    let script = trusted_project_at(tmp.path(), "script");
+    let edited = "---\ndescription: b\n---\n# Beta\nEDITED\n";
+    skill(&card, "beta", edited);
+    skill(&script, "beta", edited);
+
+    let card_before = events(&card).len();
+    let script_before = events(&script).len();
+
+    agentstack::commands::trust::grant_with_answers(
+        &card,
+        false,
+        None,
+        true,
+        Some(&ReGateProbe {
+            answers: vec![("beta".to_string(), Answer::KeepPinned)],
+            confirm: true,
+        }),
+    )
+    .unwrap();
+
+    // The scripted route to the same state: put the approved bytes back, then
+    // re-trust. (Re-trusting the DRIFTED project simply refuses, which is the
+    // finding above.)
+    skill(&script, "beta", "---\ndescription: b\n---\n# Beta\nfirst\n");
+    let digest = agentstack::commands::trust::preview_value(&script).unwrap()["surface_digest"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    agentstack::commands::trust::grant_with_answers(&script, true, Some(&digest), false, None)
+        .unwrap();
+
+    let card_tail = &events(&card)[card_before..];
+    let script_tail = &events(&script)[script_before..];
+    assert!(!card_tail.is_empty(), "keep-pinned recorded nothing");
+    assert_eq!(
+        card_tail, script_tail,
+        "keep-pinned's event trail diverged from a plain re-trust's"
+    );
+}
+
+/// Item 5: the closing gate appears EXACTLY when answers were collected, and
+/// not otherwise. Scripts and CI must be byte-for-byte unaffected by the new
+/// prompt — typing the command remains the consent when nothing was asked.
+#[test]
+fn a_review_with_nothing_to_answer_is_unchanged_for_scripts() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    isolate_home(tmp.path());
+    let proj = trusted_project(tmp.path());
+
+    // Nothing drifted, so nothing is staged and nothing can be asked. The
+    // probe supplies `confirm: false` — which WOULD cancel if the closing gate
+    // ran. It must not run.
+    agentstack::commands::trust::grant_with_answers(
+        &proj,
+        false,
+        None,
+        true,
+        Some(&ReGateProbe {
+            answers: Vec::new(),
+            confirm: false,
+        }),
+    )
+    .expect("a clean re-review must not be gated by a question nobody was asked");
+    assert_eq!(
+        agentstack::trust::check(&proj),
+        agentstack::trust::TrustState::Trusted
+    );
+
+    // And the non-interactive scripted form still works untouched.
+    let digest = agentstack::trust::digest_for(&proj).unwrap();
+    agentstack::commands::trust::grant_with_answers(&proj, true, Some(&digest), false, None)
+        .expect("the scripted path is unchanged");
 }
 
 /// The other half of the contract: an item the human did NOT answer keeps its
