@@ -110,3 +110,122 @@ fn scripted_init_apply_doctor_needs_no_advanced_vocabulary() {
     assert!(proj.join(".agentstack/agentstack.toml").exists());
     assert!(transcript.contains("0 errors, 0 warnings"));
 }
+
+/// Mechanism nouns: the names of the parts, as opposed to the names of the
+/// modes. `ADVANCED_VOCAB` above keeps *stronger features* out of the ordinary
+/// journey; these keep *implementation vocabulary* off the surfaces a person
+/// meets before they have seen a single result.
+///
+/// They are all real, all still documented, and none of them was renamed — the
+/// Phase-3 change is only about which door they are behind. `--help --all`
+/// still defines every one of them, on purpose, because someone eventually
+/// needs to know.
+const MECHANISM_NOUNS: &[&str] = &[
+    "manifest",
+    "adapter",
+    "lockfile",
+    "digest",
+    "render",
+    "materialize",
+    "[targets]",
+];
+
+/// The default `agentstack --help` speaks the four ideas and no mechanism.
+///
+/// This is the single most first-contact surface there is: it is what someone
+/// runs before they have decided whether to keep the tool. It used to end with
+/// a glossary defining CLI, harness, adapter, and `[targets]` — five
+/// mechanism nouns ahead of any result.
+#[test]
+fn the_default_help_speaks_the_four_ideas_and_no_mechanism() {
+    let bin = env!("CARGO_BIN_EXE_agentstack");
+    let out = Command::new(bin)
+        .arg("--help")
+        .stdin(Stdio::null())
+        .output()
+        .expect("spawn agentstack");
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+
+    // Everything above `Options:` — the commands and the guidance, which is
+    // the prose a first-time reader actually reads.
+    //
+    // The options block is excluded for a reason worth stating rather than
+    // hiding: `--manifest-dir` is an existing flag NAME, and Phase 3's hard
+    // constraint is that no existing name breaks. A flag cannot be reworded
+    // without being renamed, so the honest scope of this witness is the prose,
+    // not the identifiers. If `--manifest-dir` is ever softened, it will be by
+    // adding an alias, not by breaking the name.
+    let prose = text.split("Options:").next().unwrap_or(&text).to_string();
+    let lower = prose.to_lowercase();
+
+    for noun in MECHANISM_NOUNS {
+        assert!(
+            !lower.contains(noun),
+            "the default --help printed the mechanism noun '{noun}' — it belongs \
+             behind `--help --all`:\n{text}"
+        );
+    }
+
+    // And it does teach the four ideas, so this is not merely a subtraction:
+    // a help screen that says nothing would also pass the loop above.
+    for idea in ["Setup", "Toolset", "Status", "Undo"] {
+        assert!(
+            text.contains(idea),
+            "the default --help must name the idea '{idea}':\n{text}"
+        );
+    }
+}
+
+/// The mechanism vocabulary is *moved*, not deleted. If `--help --all` ever
+/// stops defining these words, the product has quietly become less explicable
+/// rather than more approachable — which is the failure mode this whole pass
+/// could produce if it were done carelessly.
+#[test]
+fn the_full_help_still_defines_the_mechanism() {
+    let bin = env!("CARGO_BIN_EXE_agentstack");
+    let out = Command::new(bin)
+        .args(["--help", "--all"])
+        .stdin(Stdio::null())
+        .output()
+        .expect("spawn agentstack");
+    let text = String::from_utf8_lossy(&out.stdout).to_lowercase();
+
+    for noun in ["manifest", "adapter", "lock", "[targets]"] {
+        assert!(
+            text.contains(noun),
+            "`--help --all` must still explain '{noun}' — the words moved, they did not go away"
+        );
+    }
+}
+
+/// `status` leads with the four ideas too. Its first column used to be
+/// "Manifest", which named the file rather than the question the line answers.
+#[test]
+fn status_leads_with_setup_not_the_file_name() {
+    let bin = env!("CARGO_BIN_EXE_agentstack");
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(proj.join(".agentstack")).unwrap();
+    fs::write(
+        proj.join(".agentstack/agentstack.toml"),
+        "version = 1\n[servers.demo]\ntype = \"stdio\"\ncommand = \"/bin/echo\"\n",
+    )
+    .unwrap();
+    let stub_bin = tmp.path().join("bin");
+    fs::create_dir_all(&stub_bin).unwrap();
+
+    let (text, _ok) = run(bin, &["status"], &home, &proj, &stub_bin);
+
+    assert!(
+        text.contains("Setup"),
+        "status must lead with the idea, not the file:\n{text}"
+    );
+    // The old label named the artifact. Nothing about the file changed — only
+    // what the line is called.
+    assert!(
+        !text.contains("Manifest "),
+        "status must not label a line with the mechanism noun:\n{text}"
+    );
+}

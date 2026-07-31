@@ -836,10 +836,10 @@ fn print_orientation(o: &Orientation, status: bool) {
     print_intake_line(&o.intake);
 
     match &o.manifest {
-        ManifestState::Missing => println!("  {}  none in this directory", "Manifest".bold()),
+        ManifestState::Missing => println!("  {}  none in this directory", "Setup".bold()),
         ManifestState::Broken(err) => println!(
             "  {}  {} — {}",
-            "Manifest".bold(),
+            "Setup".bold(),
             o.manifest_path.display(),
             format!("failed to load: {err}").red()
         ),
@@ -851,7 +851,7 @@ fn print_orientation(o: &Orientation, status: bool) {
             let targets_note = if f.pinned_targets.is_empty() {
                 if f.fanout_detected {
                     format!(
-                        "{}, no [targets] pinned",
+                        "{}, no CLIs pinned",
                         super::count(f.fanout_targets, "detected CLI")
                     )
                 } else {
@@ -859,7 +859,7 @@ fn print_orientation(o: &Orientation, status: bool) {
                     // whole catalog. Say that, rather than calling the catalog
                     // "detected".
                     format!(
-                        "no [targets] pinned and no CLI detected here — would try all {}",
+                        "no CLIs pinned and none detected here — would try all {}",
                         super::count(f.fanout_targets, "supported CLI")
                     )
                 }
@@ -868,7 +868,7 @@ fn print_orientation(o: &Orientation, status: bool) {
             };
             println!(
                 "  {}  {} — {} → {}",
-                "Manifest".bold(),
+                "Setup".bold(),
                 o.manifest_path.display(),
                 parts.join(" · "),
                 targets_note
