@@ -61,11 +61,12 @@ contradicts a toolset switch.** What separates here from a validated launch:
 
 ### Strategy v2 — Phase 0 (Instrument), runs alongside the study
 
-The adopted [`STRATEGY.md`](STRATEGY.md) (v2, 2026-07-31) opens with Phase 0,
-which is ungated and current. Later phases (funnel, review card, four ideas,
-exchange) may **not** enter this queue until the Phase 0 gate passes — the
-gate is the Stage 1 study result itself plus its three top blockers fixed; a
-failed study stops the v2 plan, not just this block.
+The adopted [`STRATEGY.md`](STRATEGY.md) (v2, 2026-07-31) opened with Phase 0
+— complete as of v0.17.1 (all four items below shipped). Per the 2026-07-31
+amendment in `STRATEGY.md`, Phases 1–4 now build in order on maintainer
+acceptance; the activation study is the **v0.18.0 release gate** — the
+release does not publish until the study passes against the completed v2
+journey. Current work: Phase 1, the funnel.
 
 - [x] **P0.1 — study instrumentation.** Add the v2 observation prompts to the
   §1.6 protocol (where does a tester reach for "drop a file" and stall; can

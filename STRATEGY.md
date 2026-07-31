@@ -172,6 +172,17 @@ and an evidence gate to the next. Phases are sequential in ambition but not
 strictly in time — a later phase's design doc may be written early, but its
 build waits for its gate.
 
+> **Amendment (2026-07-31, maintainer decision):** with zero external users,
+> the activation study moves from *inter-phase gate* to *release gate*.
+> Phases 1–4 build now, in order, on maintainer acceptance and the invariant
+> checks below; the study runs once, against the completed v2 journey, and
+> **v0.18.0 does not publish until it passes** (its pass condition and the
+> three-blocker rule unchanged, per `docs/design/activation-study.md`). The
+> trade is explicit: pre-build falsification is exchanged for post-build
+> validation, accepted because the maintainer is currently the only
+> stakeholder and bears the rework risk knowingly. Everything in "What never
+> changes" is untouched by this amendment.
+
 ### Phase 0 — Instrument (now; runs alongside the activation study)
 
 **Outcome:** we know which deltas are felt, not theoretical — and consent
@@ -206,10 +217,12 @@ Workstreams:
 **Invariant check:** no product behavior changes in this phase (the recorder
 wiring adds events, never gates).
 
-**Gate to Phase 1:** the activation study's own pass condition in `TODO.md`
-Stage 1 is met (unaided success at its stated threshold), and its three most
-common blockers are fixed. A study that falsifies the thesis stops this plan,
-not just this phase.
+**Gate to Phase 1:** ~~the activation study passes~~ — amended 2026-07-31:
+Phase 0's build work is complete and verified (metrics defined, trust-mutation
+recording live, structural lint in CI, files-first docs); Phase 1 may build.
+The study becomes the v0.18.0 release gate — a study that falsifies the
+thesis still stops the *release* and forces rework, it just does so after the
+build instead of before it.
 
 ### Phase 1 — The funnel (authoring: D1)
 
@@ -256,11 +269,11 @@ test); the provenance split is witness-tested; all staged content is parsed
 as hostile input per invariant 7; the combined preview shows everything the
 separate steps showed.
 
-**Gate to Phase 2:** funnel used successfully by study testers **and** in the
-maintainer's daily use for two weeks, with zero consent-surprise incidents
-counted over the recorded trust-mutation events from Phase 0; TTLC drops
-measurably against baseline. Tester evidence is required — maintainer use
-alone never satisfies this gate.
+**Gate to Phase 2:** (amended 2026-07-31) the funnel works end to end in the
+maintainer's own use with zero consent-surprise incidents counted over the
+recorded trust-mutation events, and the witnesses (inertness, provenance
+split) are green. Tester evidence moves to the release gate: the study
+exercises the funnel journey before v0.18.0 publishes.
 
 ### Phase 2 — One yes (consent: D2, D3)
 
