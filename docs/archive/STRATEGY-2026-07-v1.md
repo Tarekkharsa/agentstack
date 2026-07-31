@@ -570,9 +570,9 @@ Two things follow:
    trust gate.
 
 The north-star response — the version of AgentStack that beats eve on its own
-clarity terms without weakening an invariant — is developed in
-[`STRATEGY-v2.md`](STRATEGY-v2.md) as a gated horizon plan. This document
-remains operative until v2 is explicitly adopted.
+clarity terms without weakening an invariant — became strategy v2, adopted
+2026-07-31 as the operative [`STRATEGY.md`](../../STRATEGY.md). This document
+was superseded by that adoption.
 
 ## Scope and non-goals
 
@@ -677,7 +677,7 @@ and fallback. No beginner-facing promise depends on this research.
 
 ## Roadmap and gates
 
-The exact executable queue lives in [`TODO.md`](TODO.md). These stages describe
+The exact executable queue lives in [`TODO.md`](../../TODO.md). These stages describe
 outcomes, not parallel feature lanes.
 
 ### Stage 0 — close confirmed correctness gaps
