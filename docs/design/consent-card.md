@@ -170,8 +170,38 @@ real diff **when it is small**, and offers three first-class answers:
 | **block** | refuse; nothing activates |
 
 `keep pinned` must actually keep the pinned bytes in use, which is what makes
-the snapshot load-bearing rather than decorative. The diff is **capped**: a
-400-line rewrite names the files and the counts and never floods the terminal.
+the snapshot load-bearing rather than decorative. Concretely: trust and lock
+stay at the consented pin, **and the delivered artifact is materialized from
+the content-store snapshot**. Where delivery normally symlinks into the project,
+a keep-pinned item switches to a copy — a link would track the very drift the
+user just declined, shipping the new bytes under the old pin's name. Status then
+reports the divergence honestly; keep-pinned resolves *this consent moment*, it
+does not silence drift.
+
+`block` excludes the item from delivery (failing closed, as drift does today)
+**and records the refusal as a standing state**, so `status` shows it once with
+the way out named rather than re-asking on every command.
+
+The diff is **capped**: a 400-line rewrite names the files and the counts and
+never floods the terminal.
+
+### Answers stage; the single final yes commits
+
+> **The review loop may collect per-item answers as it walks. Nothing acts on
+> them — no re-lock, no recorded decision, no pinned-copy, no exclusion — until
+> the one final confirmation that already gates the grant.**
+
+This is the constraint the wiring is most likely to violate, because acting on
+each answer as it is given is the obvious implementation and it quietly creates
+three or four moments where a human commits to something. There is exactly one
+such moment, and it is the same one there has always been.
+
+Its witness extends Phase 1's `declining_leaves_nothing_behind`: walk a re-gate
+giving all three answer kinds, decline the final gate, then assert the manifest,
+the lock, the trust store **including its recorded decisions**, the delivered
+artifacts, and the event log are all byte-identical to before. Answers given and
+then declined leave no residue anywhere. `Rollback::capture` is the existing
+shape; the trust store's decisions are the new thing it has to cover.
 
 Two consequences follow, both inherited obligations rather than new scope:
 
