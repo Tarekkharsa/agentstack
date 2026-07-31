@@ -130,6 +130,82 @@ pub struct Collision {
     pub kind: Kind,
     pub name: String,
     pub rel_path: String,
+    /// What the name is ALREADY declared as — `git@abc123`, `library`, or a
+    /// declared path. The refusal is more useful when it names the thing being
+    /// protected, not just the fact of the conflict.
+    pub declared_as: String,
+    /// The real difference between the bytes already approved under this name
+    /// and the bytes that were dropped, capped for the terminal. Empty when the
+    /// approved bytes are not recorded (never locked, or pinned before
+    /// snapshots existed) — in which case the refusal degrades to naming the
+    /// declaration, which is still more than it said before.
+    ///
+    /// **This informs; it does not unlock anything.** The drop is still refused
+    /// by default, and nothing here creates a path to replace the declaration.
+    pub diff: Vec<String>,
+}
+
+/// What the colliding name is already declared as, and how the dropped bytes
+/// differ from the bytes approved under it.
+///
+/// Read-only and best-effort in both halves: a manifest without the entry, an
+/// unlocked declaration, or a missing snapshot each degrade to a less specific
+/// answer rather than failing the scan. Intake runs on every ordinary command,
+/// so nothing here may bail — and repository content is hostile input, so the
+/// diff comes back through the same capped, sanitized renderer the re-gate
+/// card uses.
+fn collision_detail(
+    kind: Kind,
+    manifest: &crate::manifest::Manifest,
+    dir: &Path,
+    name: &str,
+    dropped: &Path,
+) -> (String, Vec<String>) {
+    let declared_as = match kind {
+        Kind::Skill => match manifest.skills.get(name) {
+            Some(s) => match (&s.git, &s.rev, &s.path) {
+                (Some(url), rev, _) => {
+                    let short = rev
+                        .as_deref()
+                        .map(|r| r[..r.len().min(7)].to_string())
+                        .unwrap_or_else(|| "unpinned".to_string());
+                    format!("git@{short} ({url})")
+                }
+                (None, _, Some(p)) => format!("path {p}"),
+                _ => "a library skill".to_string(),
+            },
+            None => "already declared".to_string(),
+        },
+        Kind::Instruction => match manifest.instructions.get(name) {
+            Some(i) => format!("path {}", i.path),
+            None => "already declared".to_string(),
+        },
+    };
+
+    // The approved bytes, if this declaration was ever pinned. Without a lock
+    // entry there is no snapshot to compare against and the refusal simply
+    // names the declaration.
+    let Ok(lock) = crate::lock::Lock::load(dir) else {
+        return (declared_as, Vec::new());
+    };
+    let pin = match kind {
+        Kind::Skill => lock.get(name).map(|e| e.checksum.hex().to_string()),
+        Kind::Instruction => lock
+            .get_instruction(name)
+            .map(|e| e.checksum.hex().to_string()),
+    };
+    let Some(pin) = pin else {
+        return (declared_as, Vec::new());
+    };
+    let store = crate::store::Store::default_store();
+    // An instruction is a single file; the snapshot layout is a directory, so
+    // compare the dropped file against the snapshot's directory either way —
+    // `diff_against_pin` walks both sides and is tolerant of shape.
+    let diff = crate::regate::diff_against_pin(store.root(), &pin, dropped);
+    let lines = crate::regate::render_lines(&diff, crate::regate::DIFF_LINE_CAP);
+    // `NoSnapshot` renders its own honest sentence; keep it, it is true here
+    // too — we know what it is declared as but not what its bytes were.
+    (declared_as, lines)
 }
 
 impl Found {
@@ -212,10 +288,13 @@ fn collect(
         // says so; resolving the collision is the user's call, by renaming the
         // file or removing the old entry.
         if declares_name(kind, manifest, &name) {
+            let (declared_as, diff) = collision_detail(kind, manifest, dir, &name, &content);
             out.collisions.push(Collision {
                 kind,
                 name,
                 rel_path: rel,
+                declared_as,
+                diff,
             });
             continue;
         }
@@ -563,13 +642,17 @@ pub fn print_notice(dir: &Path, base: &Path, manifest: &Manifest) {
             "  {} {}",
             "·".dimmed(),
             format!(
-                "{} '{}' in {} is not adopted — that name is already declared",
+                "{} '{}' in {} is not adopted — that name is declared as {}; the drop would replace it",
                 c.kind.noun(),
-                c.name,
-                c.rel_path
+                crate::text::sanitize_line(&c.name),
+                crate::text::sanitize_line(&c.rel_path),
+                crate::text::sanitize_line(&c.declared_as)
             )
             .dimmed()
         );
+        for line in &c.diff {
+            println!("    {}", line.dimmed());
+        }
     }
 }
 
