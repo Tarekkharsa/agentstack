@@ -16,16 +16,33 @@
 # Format: `<domain>:<name>:<requirement> # <reason>`, one gap per line.
 # `python3 tools/check-structure.py --explain` prints the evidence (found or
 # missing) each key maps to.
+#
+# Two of the requirement definitions were hardened after an adversarial
+# review defeated the previous, fuzzier versions (this doesn't change which
+# lines below are gaps, only how the checker proves each one):
+#   - `:witness` gaps are now defined against an explicit registry of exact
+#     (file, #[test] fn name) pairs (WITNESS_REGISTRY in check-structure.py),
+#     not fuzzy name-matching. A kind with no registry entry is a gap by
+#     definition, same conclusion as before for hooks/settings/packs — the
+#     registry approach just makes deleting the *specific* witness fn fail
+#     the lint instead of silently tolerating it.
+#   - `:enforcement` gaps now require BOTH a `### <Title>` heading with a
+#     real (>= 3 non-blank line) body AND, for extensions/hooks/the policy
+#     dimensions, a surviving `| **<Title>** |` matrix row — closing the
+#     "gut the body" / "delete just the row" / "bold throwaway mention"
+#     tampers a heading-or-bold-cell check couldn't tell apart from the real
+#     thing. Every gap line below is still a real *absence* of any heading at
+#     all, so none of them changed meaning.
 
 kind:settings:lock # [settings.*] is raw serde_json::Value merged into native config; no LockedSetting struct exists, content is not pinned at all
 kind:settings:doctor # no doctor section or check_setting_* probe for [settings.*] content
-kind:settings:witness # no drift/pinning test for [settings.*] content
+kind:settings:witness # no WITNESS_REGISTRY entry for settings; no drift/pinning test for [settings.*] content exists to register
 kind:settings:enforcement # ENFORCEMENT.md never mentions "settings"; no honest per-kind statement exists
 kind:hooks:lock # Hook.command/args can name a repo-relative script but LockedHook does not exist; only the manifest-level declaration (event/matcher/command line/args) is trust-gated, not the named script's own file bytes (see docs/ENFORCEMENT.md's Hooks section, "declaration-bound... but NOT content-pinned")
-kind:hooks:witness # hooks.rs tests (hooks_render_prune_and_preserve, codex_guard_is_registered_exactly_once_across_both_hook_files, ...) cover render/prune/dedup output shape, not pinning or drift; no test name combines "hook" with a drift/regate/checksum witness word
+kind:hooks:witness # no WITNESS_REGISTRY entry for hooks; hooks.rs tests (hooks_render_prune_and_preserve, codex_guard_is_registered_exactly_once_across_both_hook_files, ...) cover render/prune/dedup output shape, not pinning or drift
 kind:packs:lock # packs are documented bookkeeping only (model.rs: "pure bookkeeping"); decided here to still lint packs like a real kind rather than quietly exempt them — the accepted consequence is no LockedPack, since a pack's members (servers/skills/instructions it installed) are pinned through those kinds' own lock entries instead
 kind:packs:doctor # bookkeeping-only by design (see kind:packs:lock); no dedicated doctor section or check_pack_* probe for [packs.*] itself
-kind:packs:witness # bookkeeping-only by design (see kind:packs:lock); pack install/remove/upgrade behavior is well tested (vendor_packs.rs, git_packs.rs) but no test targets PackInstall/pack-ledger drift specifically
+kind:packs:witness # bookkeeping-only by design (see kind:packs:lock); no WITNESS_REGISTRY entry for packs — install/remove/upgrade behavior is well tested (vendor_packs.rs, git_packs.rs) but no test targets PackInstall/pack-ledger drift specifically
 kind:packs:enforcement # bookkeeping-only by design (see kind:packs:lock); ENFORCEMENT.md never mentions "pack" because a pack is not itself a runtime capability surface — its members carry their own statements
 kind:servers:enforcement # ENFORCEMENT.md has only a one-line prose mention ("the lockfile separately pins resolved server definitions..."), no dedicated "### Servers" section or "**Servers**" matrix row
 kind:skills:enforcement # same one-line prose mention as servers; no dedicated "### Skills" section or "**Skills**" matrix row
