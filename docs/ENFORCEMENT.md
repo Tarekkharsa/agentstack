@@ -375,16 +375,102 @@ Docker container behind the egress proxy.
   (`SecretAccess`: ref *name* only). The gateway mirrors these into the run's own
   `events.jsonl` because it inherits the run id (`Gateway::from_frozen`), so
   `agentstack report run <id>` reads a self-contained record without the
-  cross-project audit log. Still missing from a run's log: trust-store mutations
-  (below) and cost/tokens. A run that isn't gateway-routed (untrusted bundle, or
+  cross-project audit log. Trust-store mutations are recorded, but in their own
+  machine-global stream rather than any run's log (see [Trust-store mutation
+  logging](#trust-store-mutation-logging)); cost/tokens remain unrecorded.
+  A run that isn't gateway-routed (untrusted bundle, or
   no servers) records only lifecycle + egress. (`crates/cli/src/gateway.rs`
   `log_call`, `crates/cli/src/commands/sandbox.rs`)
 - **lockdown — enforced.** Run-log creation remains mandatory, and D4 makes the
   gateway the only route to declared MCP endpoints. Every possible declared
   MCP call therefore produces the same tool/secret evidence described above;
   an untrusted or serverless run has no MCP calls and records lifecycle plus
-  egress. Trust-store mutations and cost/tokens remain the documented recorder
-  gaps. (`crates/cli/src/gateway.rs`, `crates/cli/src/commands/sandbox.rs`)
+  egress. Cost/tokens remain the documented recorder gap; trust-store mutations
+  are recorded outside the run log, as above.
+  (`crates/cli/src/gateway.rs`, `crates/cli/src/commands/sandbox.rs`)
+
+### Servers
+
+- **pre-delivery — content-pinned by definition, trust-gated.** A
+  `[servers.*]` entry *is* its definition: transport, command, args, env, url.
+  `agentstack.lock` pins that resolved definition's checksum
+  (`LockedServer`), the manifest bytes are bound into the trust digest, and
+  `doctor`'s `check_server_reproducibility` reports pin-vs-manifest drift.
+  Editing a server's command line therefore re-gates trust review, and an
+  untrusted or drifted project renders no server config and spawns nothing.
+  A stdio server's *executable* is a separate pin: repo-local commands and
+  interpreter-script args are pinned as D3 `LockedExecutable` entries, which
+  `run --locked` re-verifies before launch.
+- **runtime — this is the tools row, not a separate one.** Once a server is
+  spawned, what it may do is governed as tool calls: see [Tools](#tools) for
+  what each mode enforces, and [Egress](#egress) for where it may talk. The
+  honest limit is that pinning binds *what gets launched*, never what the
+  launched process then does. A server fetched from a registry at a floating
+  version is pinned at the definition agentstack resolved — the upstream
+  package it names can still change beneath that definition unless the
+  definition itself pins a version. (`crates/core/src/lock.rs` `LockedServer`,
+  `crates/cli/src/commands/doctor.rs` `check_server_reproducibility`)
+
+### Skills
+
+- **pre-delivery — content-pinned, trust-gated, materialized on activation.**
+  A skill is instructional text an agent reads, not code agentstack executes.
+  `agentstack.lock` pins each skill's bytes (`LockedSkill`, carrying its
+  source — path, git, or library), the manifest bytes are trust-bound, and an
+  untrusted or drifted project materializes no skill files: nothing enters an
+  agent's context before the gate passes. Skills land on disk through
+  `agentstack use <toolset> --write`, not `apply`, and pruning is scoped by
+  the ownership ledger to what agentstack placed.
+- **runtime — unsupported, and the honest reason matters.** A skill's content
+  is prose the model reads. No mode inspects, filters, or contains it, because
+  there is nothing to intercept: it is context, not a call. A reviewed skill
+  can still contain text that steers a model badly — content pinning binds
+  *which words you consented to*, never what the model does with them. That is
+  why skill review is a human reading step, not a check.
+  (`crates/core/src/lock.rs` `LockedSkill`)
+
+### Instructions
+
+- **pre-delivery — content-pinned per fragment, trust-gated, compiled into
+  managed regions.** Each `[instructions.*]` fragment is a local file pinned
+  by the SHA-256 of its raw bytes (`LockedInstruction`), and
+  `doctor`'s `check_instruction_reproducibility` reports drift between pin and
+  file. Compilation writes only into agentstack's managed region of
+  `CLAUDE.md` / `AGENTS.md`, leaving hand-written content outside that region
+  untouched and restorable.
+- **Layer scope — machine fragments are not repo content.** User/global-layer
+  fragments are deliberately *not* pinned: they are yours, not the project's,
+  and binding them into a project's consent digest would make your own
+  machine's notes re-gate every repo. Project fragments are pinned; machine
+  fragments are trusted by ownership.
+- **runtime — unsupported, same reason as skills.** Instructions are text in
+  an agent's context. Nothing intercepts them at run time, and a trusted
+  fragment that says something unwise is still executed by the model's
+  judgement, not agentstack's. (`crates/core/src/lock.rs` `LockedInstruction`,
+  `crates/cli/src/commands/doctor.rs` `check_instruction_reproducibility`)
+
+### Settings
+
+- **Not pinned, not probed, not witnessed — the one capability kind with no
+  binding of its own.** `[settings.*]` values are merged into native CLI
+  configuration as raw JSON. There is no `LockedSetting`, so settings content
+  never reaches `agentstack.lock`; no `doctor` probe reports settings drift in
+  either direction; and no test witnesses the behavior. Every other kind on
+  this page can answer "are the delivered bytes the reviewed bytes?" — settings
+  cannot.
+- **Why this is stated rather than fixed here.** The gap was surfaced by the
+  P0.3 structural lint and is recorded as **F20** in `TODO.md`. Closing it is
+  a behavior change — pinning settings values, re-gating on change, adding a
+  probe and a witness — which is scheduled as its own supervised item. Until
+  then, treat a settings value the way you would treat any un-pinned config:
+  read it at review time, and expect no machinery to tell you if it moves.
+- **What still applies, precisely.** Settings live in the manifest, and
+  manifest bytes are bound into the trust digest — so editing a
+  `[settings.*]` value *in the manifest* does re-gate consent, exactly like
+  any other manifest edit. What is missing is everything downstream of that:
+  no pin means a rendered value that is changed, or a lock that is
+  regenerated, is checked against nothing, and no probe will tell you.
+  (`crates/core/src/manifest/model.rs`)
 
 ### Hooks
 
@@ -436,6 +522,41 @@ Docker container behind the egress proxy.
   extension. All of this is provenance and content binding — not runtime
   enforcement. (`crates/cli/src/render/extensions.rs` `render` / `verify_rendered`,
   `crates/cli/src/commands/locked.rs`, `agentstack_core::digest::integrity_root_digest`)
+
+### Workflows
+
+- **pre-delivery — pinned, probed, and witnessed.** A `[workflows.*]` entry is
+  orchestration script bytes plus a declared role set. `agentstack.lock` pins
+  both (`LockedWorkflow`: script checksum and `roles`, stored sorted and
+  de-duplicated so a role-set change is drift even when the bytes are
+  identical), which means widening a workflow's roles re-gates trust exactly
+  like editing its code. `doctor` probes it from two sides —
+  `check_workflow_reproducibility` for pin-vs-disk drift and
+  `check_workflow_ceilings` for a declaration that exceeds machine policy —
+  and the invariant has a named witness
+  (`workflow_drift_and_roles_widening_block_trust_until_relocked`).
+- **admission — the grant is frozen before anything runs.** A workflow's own
+  grant is constructed once, re-asserting `meta.roles ⊆ admitted roles` and
+  re-clamping ceilings, and every child step is spawned under a grant derived
+  from it. No step can widen what the workflow was admitted with, and machine
+  policy remains the ceiling over the whole tree.
+- **runtime — NOT enforced by the workflow; each step gets its own posture's
+  enforcement.** This is the sentence that matters. "Governed workflow" does
+  not mean uniform containment: a step that runs in host mode is
+  cooperative-guard-only, and only a sandbox or lockdown step gets kernel and
+  egress fences. The report labels each step with its posture slug rather than
+  letting the workflow's name imply the strongest one.
+- **Step outputs are model output — untrusted data.** Results flow into later
+  steps' prompts by design, so a prompt-injected step can mislead its
+  successors. It cannot escalate: roles are a closed, pre-reviewed set and the
+  ceiling is frozen at admission. Can mislead, cannot widen — that is the
+  honest boundary.
+- **Not enforced: token and cost accounting.** `budget` meters agent count and
+  wall clock, which the engine observes; tokens it cannot observe uniformly
+  across harnesses, and the recorder's cost dimension is still unwired.
+  (`crates/core/src/lock.rs` `LockedWorkflow`, `crates/workflow/src/lib.rs`,
+  `crates/cli/src/commands/doctor.rs` `check_workflow_reproducibility` /
+  `check_workflow_ceilings`)
 
 ### The locked run's frozen grant (`run --locked`)
 

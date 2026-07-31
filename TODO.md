@@ -138,6 +138,15 @@ Ordered by what evidence they are waiting on, not by severity:
 - [x] **F18 — migration recipes** (2026-07-28: one generated page covering
   Claude + Codex, Cursor + Gemini, dotfiles, teams without shared secrets, and
   complete removal; link/sitemap/a11y checks green).
+- [ ] **F20 — the settings kind is unpinned.** `[settings.*]` values merge
+  into native configs with no lock pin, no doctor probe, no witness, and — until
+  this session — no ENFORCEMENT statement. Surfaced by the P0.3 structural lint
+  and honestly baselined there (`kind:settings:lock` / `:doctor` / `:witness`
+  remain in `tools/check-structure-baseline.txt`; the `:enforcement` gap is now
+  closed by ENFORCEMENT.md's "Settings" section, which states the gap in the
+  open). Fixing it is a behavior change, not documentation: pin settings values
+  in the lock, re-gate on change, add a doctor probe and a witness test.
+  Schedule it as its own supervised item — not inside any P0 or P1 lane.
 - [ ] **F19 — a privacy-respecting learning loop.** Local-only by default, with
   an inspectable export of outcomes — never paths, commands, or content.
   Interviews and diary studies before any telemetry.
