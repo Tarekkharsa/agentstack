@@ -8,6 +8,35 @@ For every reader. This page defines each term AgentStack uses, in two or three
 plain sentences. Every other page links here on first use instead of
 re-explaining — so keep it open the first time through.
 
+## Start with the files
+
+Before any of the terms below, this is what AgentStack actually puts in a
+project. Two groups: the ones you write and commit, and the ones written for you.
+
+```text
+your-project/
+├── .agentstack/
+│   ├── agentstack.toml   # what your tools may run — you edit this      ← manifest
+│   ├── agentstack.lock   # the exact bytes that resolved to             ← lockfile
+│   ├── skills/           # skill files this project carries (when used)
+│   ├── instructions/     # instruction fragments (when used)
+│   └── .env              # local secret values — gitignored, never committed
+│
+├── .mcp.json             # ─┐
+├── .claude/skills/       #  │ rendered for each CLI: generated output, not
+└── AGENTS.md             # ─┘ hand-edited — regenerate or remove it any time
+```
+
+Commit the first group; it is the portable part. The second group is written by
+`agentstack apply` in one shape per CLI, and how much of it exists at rest is
+your [delivery mode](#delivery-modes) — the default writes real files, the other
+two write none. Machine-wide counterparts of the same idea live in
+`~/.agentstack/`; everything above is what one repository carries.
+
+The rest of this page names each piece, in the order the pieces are used.
+
+## How the pieces fit together
+
 <!-- Diagram source (regenerate concepts-flow.svg by hand from this):
 flowchart LR
   library["central library"] --> manifest["manifest"]

@@ -1,15 +1,12 @@
 <img alt="agentstack" src="docs/logo.svg" width="380">
 
 > **One agent setup. Every coding CLI.**
-> AgentStack imports the MCP servers, skills, and instructions you already use,
-> keeps them in one portable manifest, and renders the right native configuration
-> for Claude Code, Codex, Cursor, Gemini CLI, OpenCode, and
+> AgentStack collects the MCP servers, skills, and instructions you already use
+> into one `.agentstack/` directory in your project, then renders them back as
+> native configuration for Claude Code, Codex, Cursor, Gemini CLI, OpenCode, and
 > [eight more](https://tarekkharsa.github.io/agentstack/adapters.html). Named toolsets
 > let you switch by project or task; doctor, diff, and restore keep every
 > change understandable and recoverable.
-
-Portable does not mean automatic: configuration from an unfamiliar repository
-stays inert until you review it, and no project can loosen your machine policy.
 
 **[Website](https://tarekkharsa.github.io/agentstack/)** ·
 [Docs](https://tarekkharsa.github.io/agentstack/docs.html) ·
@@ -18,37 +15,36 @@ stays inert until you review it, and no project can loosen your machine policy.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/Tarekkharsa/agentstack/ci.yml?branch=main&style=flat&label=CI)](https://github.com/Tarekkharsa/agentstack/actions/workflows/ci.yml) [![Conformance](https://img.shields.io/github/actions/workflow/status/Tarekkharsa/agentstack/conformance.yml?branch=main&style=flat&label=conformance)](https://github.com/Tarekkharsa/agentstack/actions/workflows/conformance.yml) [![Release](https://img.shields.io/github/v/release/Tarekkharsa/agentstack?style=flat&label=release)](https://github.com/Tarekkharsa/agentstack/releases) [![License](https://img.shields.io/badge/license-MIT_OR_Apache--2.0-blue?style=flat)](https://github.com/Tarekkharsa/agentstack/blob/main/LICENSE-MIT)
 
-## Why
-
-Every agent CLI has its own configuration format, file locations, and way to
-install the same underlying capabilities. AgentStack gives the whole lifecycle
-one source of truth:
-
-- **Stop repeating configuration.** Import what you already have, then render
-  one [manifest](https://tarekkharsa.github.io/agentstack/concepts.html) into
-  every supported CLI's native format.
-- **Switch by project or task.** A toolset is a named subset of your setup;
-  temporary sessions activate it and restore the previous native files afterward.
-- **Understand and repair drift.** `doctor` finds the problem, `diff` shows the
-  consequence, `adopt` keeps an intentional hand edit, and `restore` undoes a
-  bad change.
-- **Share without sharing credentials.** Manifests and lockfiles contain
-  `${REF}` placeholders, never secret values; each machine supplies its own.
-- **Stay safe as setups become portable.** Unfamiliar repository declarations
-  stay inert until reviewed, machine policy remains the ceiling, and governed
-  calls are recorded.
-
-Using one CLI with a small hand-managed setup? You may not need AgentStack yet.
-It becomes useful when you repeat the same setup across tools, projects,
-machines, or teammates.
-
 ## Try it in 60 seconds
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh
-agentstack init      # your CLI configs → one reviewed manifest, previewed and applied
+agentstack init      # finds what your CLIs already have and writes it into .agentstack/
 agentstack doctor    # verify it landed — every warning names its exact fix
 ```
+
+That is the whole first run. Here is what it left in your project — plain files
+you can open, read, and commit:
+
+```text
+your-project/
+├── .agentstack/
+│   ├── agentstack.toml   # everything your tools may run: servers, skills, instructions
+│   └── .env              # token values lifted out of your configs (only when init found any)
+└── .gitignore            # one managed line, so that .env is never committed
+```
+
+`.agentstack/agentstack.toml` is the one file you edit from now on. It is called
+the **[manifest](https://tarekkharsa.github.io/agentstack/concepts.html)**, and
+every CLI-specific file AgentStack writes — `.mcp.json`, `.claude/skills/`, the
+compiled `AGENTS.md` — is rendered from it and can be regenerated, or taken back
+off, at any time. It holds `${GITHUB_TOKEN}`-style placeholders, never the token
+values.
+
+That same directory arriving in a repository you *cloned* behaves differently: it
+stays inert until you review it — no server spawns, no skill enters an agent's
+context, no secret resolves — and nothing a project declares can loosen the
+limits your own machine sets.
 
 `init` is a guided wizard. Scripting or CI? `agentstack init --secrets skip` writes only the manifest
 — no prompts, no token values — then `agentstack apply --write`. Inline tokens are lifted into
@@ -76,6 +72,29 @@ Reproduce it yourself, fenced (an isolated temp `HOME` — it never touches your
 real configs, and it asserts every step, so it doubles as the witness that this
 output stays accurate):
 [`examples/first-value-demo/run-demo.sh`](examples/first-value-demo/run-demo.sh).
+
+## Why
+
+Every agent CLI has its own configuration format, file locations, and way to
+install the same underlying capabilities. AgentStack gives the whole lifecycle
+one source of truth:
+
+- **Stop repeating configuration.** Import what you already have, then render
+  that one manifest into every supported CLI's native format.
+- **Switch by project or task.** A toolset is a named subset of your setup;
+  temporary sessions activate it and restore the previous native files afterward.
+- **Understand and repair drift.** `doctor` finds the problem, `diff` shows the
+  consequence, `adopt` keeps an intentional hand edit, and `restore` undoes a
+  bad change.
+- **Share without sharing credentials.** Manifests and lockfiles contain
+  `${REF}` placeholders, never secret values; each machine supplies its own.
+- **Stay safe as setups become portable.** Unfamiliar repository declarations
+  stay inert until reviewed, machine policy remains the ceiling, and governed
+  calls are recorded.
+
+Using one CLI with a small hand-managed setup? You may not need AgentStack yet.
+It becomes useful when you repeat the same setup across tools, projects,
+machines, or teammates.
 
 ## Install
 
