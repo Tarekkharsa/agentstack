@@ -189,10 +189,12 @@ fn reproducibility_over_nothing_is_not_reported_as_a_pass() {
         }
     }
 
-    let (level, msg) = found.expect(&format!(
-        "the reproducibility check must still report on a no-toolset project — \
-         staying silent is the same failure as a false pass: {report}"
-    ));
+    let (level, msg) = found.unwrap_or_else(|| {
+        panic!(
+            "the reproducibility check must still report on a no-toolset project — \
+             staying silent is the same failure as a false pass: {report}"
+        )
+    });
 
     assert_ne!(
         level, "ok",

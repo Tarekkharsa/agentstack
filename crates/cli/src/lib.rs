@@ -48,6 +48,7 @@ pub mod resolve;
 pub mod runs;
 pub mod scan;
 pub use agentstack_core::scope;
+pub mod seatbelt;
 pub mod secret;
 pub mod session;
 pub mod snapshot;

@@ -354,8 +354,22 @@ impl Upstream {
             } else {
                 "them"
             };
+            // A policy REFUSAL and a MISSING value are different failures with
+            // different answers, and this message used to give the missing
+            // value's answer to both. "Set it with `agentstack secret set`" is
+            // actively wrong advice for a ref `[policy.secrets]` refuses:
+            // setting it changes nothing, and the user is sent to do work that
+            // cannot help. A denied ref already carries its own next step
+            // (widen the rule, or use a covered ref), so the generic tail is
+            // dropped rather than contradicted.
+            let any_denied = self.unresolved.iter().any(|u| u.contains("blocked:"));
+            let tail = if any_denied {
+                String::new()
+            } else {
+                format!(" Set {pronoun} with `agentstack secret set`.")
+            };
             anyhow::bail!(
-                "{}: cannot call '{tool}' — {secrets} did not resolve on this machine: {}. Set {pronoun} with `agentstack secret set`.",
+                "{}: cannot call '{tool}' — {secrets} did not resolve on this machine: {}.{tail}",
                 self.name,
                 self.unresolved.join(", ")
             );
@@ -777,7 +791,8 @@ impl Gateway {
                 // server's effective [policy.secrets] never reaches any
                 // backing store, and the policy message rides the same
                 // fail-fast channel (folded in by `substitute`).
-                let scoped = crate::secret::ScopedResolver::new(&ctx.resolver, &ruleset, &name);
+                let scoped = crate::secret::ScopedResolver::new(&ctx.resolver, &ruleset, &name)
+                    .in_run(run_id.clone());
                 let mut unresolved = Vec::new();
                 // The secret ref NAMES that actually resolved for this server.
                 // A `RefCell` gives interior mutability so `sub` stays an `Fn`
@@ -812,17 +827,55 @@ impl Gateway {
                         match crate::render::declared_host(&url) {
                             Some(host) => {
                                 if let Err(rule) = ruleset.egress_decision(&name, &host, None) {
-                                    eprintln!(
-                                        "gateway: skipping '{name}': declared host {host} — {rule}"
+                                    // Phase 3 seatbelt: this refusal used to be
+                                    // a bare stderr line and nothing else — the
+                                    // user saw it only if they were watching,
+                                    // and `agentstack report` could not show it
+                                    // afterwards. Now it says its next step and
+                                    // leaves evidence. The refusal itself is
+                                    // unchanged: `continue` still drops the
+                                    // server, and `refuse` cannot alter that.
+                                    let rule = rule.to_string();
+                                    crate::seatbelt::refuse(
+                                        &crate::seatbelt::Denial {
+                                            family: crate::seatbelt::Family::Egress,
+                                            subject: &name,
+                                            attempted: &format!("reach {host}"),
+                                            why: &rule,
+                                            next_step: "allow the host in [policy.egress] if you meant to, or drop the server",
+                                        },
+                                        project.clone(),
+                                        run_id.as_deref(),
+                                    );
+                                    crate::seatbelt::record_egress_denied(
+                                        run_id.as_deref(),
+                                        &name,
+                                        &host,
+                                        &rule,
                                     );
                                     continue;
                                 }
                             }
                             None => {
                                 if ruleset.egress_constrained(&name) {
-                                    eprintln!(
-                                        "gateway: skipping '{name}': an egress policy constrains it but its URL host can't be determined"
+                                    let why = "an egress policy constrains this server but its URL host can't be determined — fail closed";
+                                    crate::seatbelt::refuse(
+                                        &crate::seatbelt::Denial {
+                                            family: crate::seatbelt::Family::Egress,
+                                            subject: &name,
+                                            attempted: "open its declared URL",
+                                            why,
+                                            next_step:
+                                                "give the server a URL with a literal host, or lift its [policy.egress] rule",
+                                        },
+                                        project.clone(),
+                                        run_id.as_deref(),
                                     );
+                                    // No host to attribute the run-scoped
+                                    // `Egress` event to; the audit record above
+                                    // carries the refusal. Inventing a host
+                                    // string would put a fact in the log that
+                                    // nothing established.
                                     continue;
                                 }
                             }
@@ -1041,7 +1094,16 @@ impl Gateway {
                     execution_id,
                 },
             );
-            return Some(Err(anyhow!("{server}__{tool}: call refused — {rule}")));
+            // Phase 3 seatbelt: what, why, and — new — the safe next step.
+            // This message is what the agent's harness shows the user, so it
+            // was the one denial the user was guaranteed to read and the one
+            // that told them least about what to do with it. The refusal is
+            // unchanged; only the sentence grew.
+            return Some(Err(anyhow!(
+                "blocked: {server} tried to call {tool} — {rule}\n  \
+                 nothing ran · allow it in [policy.tools] if you meant to, \
+                 or ask the agent for a different tool"
+            )));
         }
         // Lock ONLY this server for the round trip: a 60s call here does not
         // block a concurrent call to any other upstream. Same-server calls
@@ -1655,8 +1717,14 @@ mod tests {
         let v: Value = serde_json::from_str(&body.unwrap()).unwrap();
         assert_eq!(v["result"]["isError"], true);
         let text = v["result"]["content"][0]["text"].as_str().unwrap();
-        assert!(text.contains("call refused"), "{text}");
-        assert!(text.contains("machine policy"), "{text}");
+        // Still a denial (`isError` above), and now a legible one: the
+        // Phase-3 seatbelt shape — what was stopped, why (the rule, named,
+        // with its source), and the safe next step.
+        assert!(text.contains("blocked:"), "{text}");
+        assert!(text.contains("post_comment"), "what was stopped: {text}");
+        assert!(text.contains("machine policy"), "why: {text}");
+        assert!(text.contains("nothing ran"), "{text}");
+        assert!(text.contains("[policy.tools]"), "next step: {text}");
 
         std::env::remove_var("AGENTSTACK_HOME");
     }

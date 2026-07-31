@@ -127,7 +127,15 @@ fn deny_glob_check(ctx: &GuardContext, path: &str) -> Decision {
     let refs: Vec<&str> = spellings.iter().map(String::as_str).collect();
     match ctx.ruleset.fs_deny_decision(&refs) {
         Ok(()) => Decision::Allow,
-        Err(rule) => Decision::deny(format!("{path}: {rule}")),
+        // Phase 3 seatbelt: the deny-glob branch named the path and the rule
+        // but stopped there — the write-scope branch below has taught its
+        // exact fix for a while, and this one had no reason not to. The rule
+        // text already names its source file, so the next step is where to go
+        // and change it.
+        Err(rule) => Decision::deny(format!(
+            "blocked: a write to {path} was refused — {rule}\n  \
+             nothing was written · edit that [policy.filesystem] rule if this path should be allowed"
+        )),
     }
 }
 
@@ -147,8 +155,8 @@ fn write_scope_check(ctx: &GuardContext, path: &str) -> Decision {
     // directory, and the file it goes in.
     let dir = abs.parent().unwrap_or(&abs);
     Decision::deny(format!(
-        "write outside the workspace: {} (allowed: the workspace, [guard] allow_roots, temp dirs)\n  \
-         to allow writes here, add to {} →\n    [guard]\n    allow_roots = [\"{}\"]",
+        "blocked: a write to {} was refused — outside the workspace (allowed: the workspace, [guard] allow_roots, temp dirs)\n  \
+         nothing was written · to allow writes here, add to {} →\n    [guard]\n    allow_roots = [\"{}\"]",
         abs.display(),
         machine_manifest(ctx).display(),
         dir.display(),
