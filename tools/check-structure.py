@@ -43,6 +43,24 @@ The lint also fails on a *stale* baseline entry: a line that no longer
 corresponds to a real gap, because baselines drift stale exactly the way
 code drifts stale, and a lint that only ever grows permissive isn't one.
 
+ACCEPTED RESIDUALS (deliberate scope limits, not oversights — round-3
+hardening closed the bypasses that were actually found; these two remain by
+design):
+
+  (a) Body-line thresholds (MIN_SECTION_BODY_LINES) can be met with three
+      lines of filler prose that say nothing. This lint pins STRUCTURE — a
+      heading exists, has a body of real length, and (where required) a
+      matrix row — not MEANING. It cannot tell a genuine explanation of what
+      is and isn't confined from three throwaway sentences that happen to
+      clear the line count.
+  (b) The WITNESS_REGISTRY only pins that a named `#[test]` fn exists in its
+      registered file and is not `#[ignore]`d — i.e. that it will run. It
+      does not and cannot pin that the fn's assertions are meaningful; a
+      registered witness reduced to `assert!(true)` still passes this check.
+      Semantic strength of a witness — whether it actually exercises the
+      drift/pin/regate behavior it claims to — is the job of code review and
+      mutation testing, not this script.
+
 Python 3 standard library only. Exits nonzero with a per-finding listing on
 any failure.
 """
@@ -184,7 +202,20 @@ FS_DENY_PROSE = "[policy.filesystem] deny"
 MIN_SECTION_BODY_LINES = 3
 
 _BASELINE_LINE_RE = re.compile(r"^([a-zA-Z0-9_]+:[a-zA-Z0-9_]+:[a-zA-Z0-9_]+)\s*#\s*(.+)$")
-_TEST_FN_RE = re.compile(r"#\[test\](?:\s*#\[[^\]]*\])*\s*fn\s+(\w+)")
+_TEST_FN_RE = re.compile(r"#\[test\]((?:\s*#\[[^\]]*\])*)\s*fn\s+(\w+)")
+_IGNORE_ATTR_RE = re.compile(r"#\[ignore\b")
+_FENCED_BLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
+
+
+def strip_fenced_code_blocks(text: str) -> str:
+    """B8c hardening: a ``` ... ``` fenced code block must never count as
+    prose evidence. Without this, a section's body-line-count requirement or
+    the FS_DENY_PROSE literal-anchor search can both be satisfied by planting
+    filler or the exact anchor string inside a fence instead of real
+    narrative text. Fences always come in open/close pairs in valid
+    Markdown, so a non-greedy match from one ``` to the next removes each
+    block whole; anything left over is real prose."""
+    return _FENCED_BLOCK_RE.sub("", text)
 
 
 # --------------------------------------------------------------------------
@@ -200,6 +231,13 @@ def parse_manifest_fields(model_rs_text: str) -> list[str]:
     IndexMap, or any other type-shape change must still show up as a field
     name here. verify_kind_set() is what turns this list into a pass/fail.
     """
+    count = model_rs_text.count("pub struct Manifest {")
+    if count != 1:
+        print(
+            f"refusing: {count} declarations of pub struct Manifest — the kind-set "
+            f"parser needs exactly one"
+        )
+        sys.exit(2)
     m = re.search(r"pub struct Manifest \{(.*?)\n\}", model_rs_text, re.DOTALL)
     if not m:
         raise RuntimeError("could not find `pub struct Manifest { ... }` in model.rs")
@@ -238,6 +276,13 @@ def parse_dimensions(model_rs_text: str) -> list[str]:
     WHERE: `pub enum Dimension { ... }` in model.rs.
     WHAT: each bare variant name.
     """
+    count = model_rs_text.count("pub enum Dimension {")
+    if count != 1:
+        print(
+            f"refusing: {count} declarations of enum Dimension — the kind-set "
+            f"parser needs exactly one"
+        )
+        sys.exit(2)
     m = re.search(r"pub enum Dimension \{(.*?)\n\}", model_rs_text, re.DOTALL)
     if not m:
         raise RuntimeError("could not find `pub enum Dimension { ... }` in model.rs")
@@ -296,9 +341,12 @@ def check_witness_test(
 
     WHERE: the exact `(file, fn name)` pairs registered for `kind`.
     WHAT: each registered fn must exist in its registered file, preceded by
-    `#[test]` (other attributes may sit between). A kind with no registry
-    entry is a gap by definition — the baseline decides whether that gap is
-    acceptable, same as any other requirement.
+    `#[test]` (other attributes may sit between), and that attribute block
+    must NOT contain `#[ignore]` (or `#[ignore = "..."]`) — a registered
+    witness that is `#[ignore]`d never runs, so it proves nothing and fails
+    the lint exactly like a deleted witness would (G2 hardening). A kind with
+    no registry entry is a gap by definition — the baseline decides whether
+    that gap is acceptable, same as any other requirement.
     """
     if registry is None:
         registry = WITNESS_REGISTRY
@@ -316,7 +364,17 @@ def check_witness_test(
         found = False
         if file_path.is_file():
             text = file_path.read_text(encoding="utf-8", errors="replace")
-            found = any(m.group(1) == fn_name for m in _TEST_FN_RE.finditer(text))
+            for m in _TEST_FN_RE.finditer(text):
+                if m.group(2) != fn_name:
+                    continue
+                if _IGNORE_ATTR_RE.search(m.group(1)):
+                    return (
+                        False,
+                        f"registered witness {fn_name} is #[ignore]d — a witness that "
+                        f"never runs is not a witness",
+                    )
+                found = True
+                break
         (present if found else missing).append(f"{fn_name} ({rel_path})")
     if missing:
         return False, f"missing registered witness fn(s): {', '.join(missing)}"
@@ -325,13 +383,17 @@ def check_witness_test(
 
 def get_section_body(title: str, text: str) -> str | None:
     """Text of a `### <title>` section body: everything between the heading
-    line and the next `##`- or `###`-level heading (or end of file). Returns
-    None if no such heading exists. Shared by check_enforcement_row and
-    check_dimension_row so a tamper only has one extraction path to defeat.
+    line and the next `##`- or `###`-level heading (or end of file), with any
+    fenced code blocks (``` ... ```) stripped out first (B8c hardening) — a
+    fence of filler lines must not be able to satisfy the non-blank-line
+    floor, and a fence-planted anchor string must not be able to satisfy a
+    prose-anchor search either. Returns None if no such heading exists.
+    Shared by check_enforcement_row and check_dimension_row so a tamper only
+    has one extraction path to defeat.
     """
     pattern = rf"^### {re.escape(title)}[ \t]*\n(.*?)(?=\n#{{2,3}}[ \t]|\Z)"
     m = re.search(pattern, text, re.MULTILINE | re.DOTALL)
-    return m.group(1) if m else None
+    return strip_fenced_code_blocks(m.group(1)) if m else None
 
 
 def _count_nonblank_lines(body: str) -> int:
@@ -403,7 +465,7 @@ def check_dimension_row(
     if titles_map is None:
         titles_map = DIMENSION_TITLES
     if dim == "FsDeny":
-        found = FS_DENY_PROSE in enforcement_md_text
+        found = FS_DENY_PROSE in strip_fenced_code_blocks(enforcement_md_text)
         evidence = f'prose mention of "{FS_DENY_PROSE}"' if found else f'no prose mention of "{FS_DENY_PROSE}"'
         return found, evidence
     title = titles_map.get(dim)
@@ -558,6 +620,41 @@ pub enum Dimension {
     ) + "\n}\n"
     if verify_kind_set(fully_covered_model_text):
         failures.append("self-test: fully-covered Manifest field set wrongly flagged by kind-set integrity")
+
+    # ---- Findings F1/F2: check_lock_pin / check_doctor_probe must actually
+    # fail on a fixture missing their evidence, not merely pass when the
+    # evidence happens to be present. Without a fixture exercising the
+    # "missing" branch directly, an always-pass stub of either function
+    # (`return True, "stub"` regardless of input) would sail through
+    # self-test undetected, since every other self-test fixture only ever
+    # calls these through a fully-covered lock_text/doctor_text. -----------
+    lock_present_text = "pub struct LockedServer { pub name: String }\n"
+    lock_missing_text = "pub struct SomethingElseEntirely { pub name: String }\n"
+    ok_lock_present, _ev_lock_present = check_lock_pin("servers", lock_present_text)
+    ok_lock_missing, ev_lock_missing = check_lock_pin("servers", lock_missing_text)
+    if not ok_lock_present:
+        failures.append("self-test: check_lock_pin wrongly failed on a present LockedServer struct")
+    if ok_lock_missing or "no `pub struct LockedServer`" not in ev_lock_missing:
+        failures.append(
+            "self-test: check_lock_pin did NOT fail on a lock.rs fixture missing LockedServer "
+            "(an always-pass stub would go undetected)"
+        )
+
+    doctor_present_text = 'fn run_checks() { report.section("Servers"); }\n'
+    doctor_missing_text = 'fn run_checks() { report.section("SomethingElse"); }\n'
+    ok_doctor_present, _ev_doctor_present = check_doctor_probe("servers", doctor_present_text)
+    ok_doctor_missing, ev_doctor_missing = check_doctor_probe("servers", doctor_missing_text)
+    if not ok_doctor_present:
+        failures.append('self-test: check_doctor_probe wrongly failed on a present report.section("Servers") probe')
+    if (
+        ok_doctor_missing
+        or 'no report.section("Servers")' not in ev_doctor_missing
+        or "no fn check_server_*" not in ev_doctor_missing
+    ):
+        failures.append(
+            "self-test: check_doctor_probe did NOT fail on a doctor.rs fixture missing the probe "
+            "(an always-pass stub would go undetected)"
+        )
 
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
