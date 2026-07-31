@@ -68,6 +68,12 @@ struct Report {
     /// or not (`never_activated`) — the same fact `status` words as
     /// "not locked (never activated)". `None` when doctor ran with no project.
     activation: Option<&'static str>,
+    /// Whether this project maintains the managed `.gitignore` block
+    /// (`[meta] gitignore`). `None` when doctor ran with no project. A panel
+    /// needs it to label its toggle honestly — offering "Keep .gitignore as
+    /// is" to a project that already opted out is the kind of small lie the
+    /// consent work exists to remove (`gitignore-opt-out-v1`).
+    gitignore: Option<bool>,
     /// Structured `--probe` results. `None` on every other invocation, so the
     /// JSON omits the key entirely: a consumer can tell "not probed" from
     /// "probed, and there was nothing to probe" (`ran: true`, empty list).
@@ -105,6 +111,7 @@ impl Report {
             trust: None,
             mode: None,
             activation: None,
+            gitignore: None,
             probe: None,
         }
     }
@@ -310,6 +317,7 @@ impl Report {
             // section prose like "Mode zero-files" or "never activated".
             "mode": self.mode,
             "activation": self.activation,
+            "gitignore": self.gitignore,
             // Per-server startup results (see `doctor-probe-v1`); null unless
             // `--probe` ran.
             "probe": self.probe_json(),
@@ -349,6 +357,7 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
                 // binary that advertises the name" as a third case.
                 "mode": serde_json::Value::Null,
                 "activation": serde_json::Value::Null,
+                "gitignore": serde_json::Value::Null,
                 "probe": serde_json::Value::Null,
                 "sections": [],
             }));
@@ -748,6 +757,7 @@ fn run_checks(
     let locked = crate::lock::Lock::path(&ctx.dir).exists();
     report.mode = Some(mode.label());
     report.activation = Some(if locked { "locked" } else { "never_activated" });
+    report.gitignore = Some(manifest.meta.manages_gitignore());
 
     report.section("Secrets");
     let refs = manifest.referenced_secrets();

@@ -401,6 +401,24 @@ argv. Both run one authority path and produce the same consent digest."
     )]
     CreateProfile(PanelCreateProfileArgs),
 
+    /// Record whether this project manages its `.gitignore` block (panel
+    /// action; digest-bound).
+    ///
+    /// The durable answer a per-run `--no-gitignore` cannot give: the next
+    /// toolset switch would re-add the block. Disabling also removes a block
+    /// already on disk — consented here and nowhere else.
+    #[command(
+        name = "set-gitignore",
+        hide = true,
+        after_help = "\
+Machine surface. Records `[meta] gitignore` in the project manifest — the
+durable answer a per-run `--no-gitignore` cannot give, since the next toolset
+switch would re-add the block. Disabling also removes a block already on disk:
+that removal is consented HERE and nowhere else, because routine commands must
+never strip a block a team may have committed."
+    )]
+    SetGitignore(PanelSetGitignoreArgs),
+
     /// Change one toolset's membership as a batch (panel action; digest-bound).
     #[command(name = "edit-profile", hide = true)]
     EditProfile(PanelEditProfileArgs),
@@ -1819,6 +1837,23 @@ pub struct UninstallArgs {
     pub keep_home: bool,
 }
 
+/// `set-gitignore` — this project's durable answer to whether agentstack
+/// maintains its managed `.gitignore` block.
+///
+/// A per-run `--no-gitignore` cannot express the panel's "keep .gitignore as
+/// is": the next toolset switch would re-add the block. So this records the
+/// decision in the manifest, where every later command reads it.
+#[derive(Args, Debug)]
+pub struct PanelSetGitignoreArgs {
+    /// `true` restores the default (the block is maintained and the key is
+    /// removed); `false` opts this project out.
+    #[arg(long, action = clap::ArgAction::Set)]
+    pub enabled: bool,
+
+    #[command(flatten)]
+    pub consent: PanelConsent,
+}
+
 /// `create-profile` — a new toolset bundling existing/library skills + servers.
 #[derive(Args, Debug)]
 pub struct PanelCreateProfileArgs {
@@ -2637,6 +2672,7 @@ pub fn full_command_inventory() -> String {
         "library-index",
         "remove-from-library",
         "remove-capability",
+        "set-gitignore",
     ];
 
     fn push(out: &mut String, cmd: &clap::Command, indent: usize, panel: bool) {

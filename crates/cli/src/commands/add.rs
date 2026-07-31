@@ -1753,6 +1753,43 @@ pub fn build_manifest_with(
     Ok(new_text)
 }
 
+/// Set `meta.gitignore` — the project's durable answer to whether agentstack
+/// maintains its managed `.gitignore` block.
+///
+/// One text builder, shared by the wizard and the panel verb, so there is a
+/// single way this key enters a manifest (same rule the profile builders
+/// follow). `toml_edit` preserves surrounding formatting and comments, so
+/// flipping the setting never reflows a hand-written manifest.
+///
+/// `true` REMOVES the key rather than writing `gitignore = true`: managing the
+/// block is the default, and a manifest that states its defaults back to the
+/// user grows noise every time an option is added.
+pub fn set_meta_gitignore(text: &str, enabled: bool) -> Result<String> {
+    use toml_edit::{Item, Table};
+    let mut doc: DocumentMut = text.parse().context("parsing manifest as TOML")?;
+
+    if enabled {
+        if let Some(meta) = doc.get_mut("meta").and_then(Item::as_table_mut) {
+            meta.remove("gitignore");
+            // Drop a `[meta]` left holding nothing, matching the model's
+            // `skip_serializing_if = "Meta::is_empty"`.
+            if meta.is_empty() {
+                doc.remove("meta");
+            }
+        }
+        return Ok(doc.to_string());
+    }
+
+    if doc.get("meta").is_none() {
+        doc.insert("meta", Item::Table(Table::new()));
+    }
+    let meta = doc["meta"]
+        .as_table_mut()
+        .context("`meta` is not a table")?;
+    meta["gitignore"] = toml_edit::value(false);
+    Ok(doc.to_string())
+}
+
 /// Append `name` to `profiles.<profile>.<field>` (creating the array if needed).
 pub fn add_to_profile(text: &str, profile: &str, field: &str, name: &str) -> Result<String> {
     use toml_edit::{Item, Table};

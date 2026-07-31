@@ -40,7 +40,7 @@ use serde_json::{json, Map, Value};
 use crate::cli::{
     PanelAddServerArgs, PanelAddSkillArgs, PanelCreateProfileArgs, PanelDeleteProfileArgs,
     PanelEditProfileArgs, PanelLibraryKind, PanelRemoveCapabilityArgs, PanelRemoveFromLibraryArgs,
-    PanelRenameProfileArgs, PanelUseProfileArgs,
+    PanelRenameProfileArgs, PanelSetGitignoreArgs, PanelUseProfileArgs,
 };
 use crate::manifest::Manifest;
 
@@ -117,6 +117,13 @@ fn build_preview(action: &str, digest: &str, mut body: Map<String, Value>) -> Va
             "Review, then apply with --yes --consented {digest}. Applying writes the \
              manifest entry and re-locks — nothing is rendered, so no ${{REF}} secret is \
              resolved. Activate it separately with `agentstack use <name>`."
+        )
+    } else if action == "set-gitignore" {
+        format!(
+            "Review, then apply with --yes --consented {digest}. Applying writes the \
+             manifest setting — nothing is rendered and no ${{REF}} secret is resolved. \
+             Disabling also removes a managed block already in .gitignore, which makes \
+             the generated files visible to `git status` again."
         )
     } else if action == "remove-capability" {
         format!(
@@ -659,6 +666,145 @@ pub fn create_profile_preview(args: &PanelCreateProfileArgs, dir: Option<&Path>)
     body.insert("skills".into(), json!(args.skills));
     body.insert("servers".into(), json!(args.servers));
     Ok(build_preview("create-profile", &digest, body))
+}
+
+// ── set-gitignore ───────────────────────────────────────────────────────────
+
+/// `set-gitignore` — record whether this project manages its `.gitignore`
+/// block, and clear a block already on disk when opting out.
+///
+/// Sits in the `create-profile` family: `mutate manifest → re-lock`, nothing
+/// rendered, no `${REF}` resolved. It is deliberately NOT a per-call flag on
+/// `use-profile`/`apply-*`. A flag would put the durability in t3code's memory
+/// of which flag to pass — policy in the frontend, which is never an
+/// enforcement boundary here. Recording it in the manifest means the panel's
+/// Switch button needs no contract change at all: `use` reads the setting
+/// itself.
+pub fn set_gitignore(args: &PanelSetGitignoreArgs, dir: Option<&Path>) -> Result<()> {
+    set_gitignore_gated(args, dir, std::io::stdin().is_terminal())
+}
+
+fn set_gitignore_gated(
+    args: &PanelSetGitignoreArgs,
+    dir: Option<&Path>,
+    interactive: bool,
+) -> Result<()> {
+    let preview = set_gitignore_preview(args, dir)?;
+    if !args.consent.yes {
+        if args.consent.preview {
+            return emit(&preview);
+        }
+        if !interactive {
+            anyhow::bail!(
+                "nothing was changed — this is not a terminal, so there is no one to ask.\n\
+                 Run it at a terminal, or pass --preview to get the plan and its consent \
+                 digest, then re-run with --yes --consented <digest>."
+            );
+        }
+        print_gitignore_review(&preview);
+        if !confirm("Record it?")? {
+            println!("cancelled — nothing was written.");
+            return Ok(());
+        }
+        let fresh = set_gitignore_preview(args, dir)?;
+        verify_consent(Some(preview_digest(&preview)?), preview_digest(&fresh)?)
+            .context("the manifest changed while you were reviewing")?;
+    } else {
+        verify_consent(args.consent.consented.as_deref(), preview_digest(&preview)?)?;
+    }
+
+    let base = crate::commands::project_base(dir)?;
+    let mdir = crate::manifest::resolve_manifest_dir(&base);
+    let path = mdir.join(crate::manifest::load::MANIFEST_FILE);
+    let original =
+        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    // The same single-authority text builder the wizard uses — no second way
+    // for this key to enter a manifest.
+    let updated = crate::commands::add::set_meta_gitignore(&original, args.enabled)?;
+
+    let mut backups = Vec::new();
+    if updated != original {
+        backups.push(crate::history::capture(
+            &path,
+            "agentstack.toml · gitignore setting",
+        ));
+        crate::util::atomic::write(&path, &updated)
+            .with_context(|| format!("writing {}", path.display()))?;
+    }
+
+    // Removing the block is consented HERE and nowhere else: routine commands
+    // must leave a committed block alone, but a user who just declared this
+    // project commits its artifacts would otherwise still have them hidden
+    // from `git status` by the stale block.
+    if !args.enabled {
+        let root = crate::manifest::project_root_of(&mdir);
+        let gitignore = root.join(".gitignore");
+        if let Ok(existing) = std::fs::read_to_string(&gitignore) {
+            if let Some(without) = crate::render::gitignore::remove_block(&existing) {
+                backups.push(crate::history::capture(
+                    &gitignore,
+                    ".gitignore · managed block removed",
+                ));
+                crate::util::atomic::write(&gitignore, &without)
+                    .with_context(|| format!("writing {}", gitignore.display()))?;
+            }
+        }
+    }
+
+    if !backups.is_empty() {
+        let _ = crate::history::record("project", "set-gitignore".to_string(), vec![], backups);
+    }
+    println!(
+        "{}",
+        if args.enabled {
+            "agentstack manages this project's .gitignore block again."
+        } else {
+            "recorded — no command will manage this project's .gitignore."
+        }
+    );
+    Ok(())
+}
+
+/// The preview: what the setting becomes, and — when opting out — whether a
+/// block is on disk that this call would remove. Naming the removal before it
+/// happens is the whole point; it is the one irreversible-looking half.
+pub fn set_gitignore_preview(args: &PanelSetGitignoreArgs, dir: Option<&Path>) -> Result<Value> {
+    let base = crate::commands::project_base(dir)?;
+    let mdir = crate::manifest::resolve_manifest_dir(&base);
+    let root = crate::manifest::project_root_of(&mdir);
+    let removes_block = !args.enabled && crate::render::gitignore::has_block(&root);
+
+    let params = json!({ "enabled": args.enabled });
+    let digest = action_digest("set-gitignore", &params, &manifest_bytes(dir)?);
+
+    let mut body = Map::new();
+    body.insert("enabled".into(), args.enabled.into());
+    body.insert("removes_block".into(), removes_block.into());
+    Ok(build_preview("set-gitignore", &digest, body))
+}
+
+fn print_gitignore_review(preview: &Value) {
+    use owo_colors::OwoColorize;
+    let enabled = preview
+        .pointer("/body/enabled")
+        .and_then(Value::as_bool)
+        .unwrap_or(true);
+    let removes = preview
+        .pointer("/body/removes_block")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    if enabled {
+        println!("\nagentstack will manage this project's .gitignore block again.");
+    } else {
+        println!("\nagentstack will stop managing this project's .gitignore block.");
+        if removes {
+            println!(
+                "  {} the managed block already on disk will be removed, so the generated \
+                 files become visible to `git status`",
+                "−".yellow()
+            );
+        }
+    }
 }
 
 // ── use-profile ─────────────────────────────────────────────────────────────

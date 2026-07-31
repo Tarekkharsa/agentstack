@@ -50,6 +50,7 @@ fn dispatch(argv: &[&str]) -> Result<()> {
         Command::AddSkillToProfile(a) => commands::panel_edit::add_skill(&a, dir),
         Command::AddServerToProfile(a) => commands::panel_edit::add_server(&a, dir),
         Command::CreateProfile(a) => commands::panel_edit::create_profile(&a, dir),
+        Command::SetGitignore(a) => commands::panel_edit::set_gitignore(&a, dir),
         Command::UseProfile(a) => commands::panel_edit::use_profile(&a, dir),
         Command::LibraryIndex => commands::panel_edit::library_index(dir),
         Command::RemoveFromLibrary(a) => commands::panel_edit::remove_from_library(&a, dir),

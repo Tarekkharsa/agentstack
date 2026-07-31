@@ -1582,6 +1582,7 @@ you need the exact verb, flag, or subcommand.
 - **`add-server-to-profile`** _(hidden)_ — Add a server to a toolset and activate it (panel action; digest-bound) — flags `--profile/--name/--type/--url/--header/--command/--arg/--cwd/--env/--preview/--yes/--consented/--allow-unresolved`
 - **`uninstall`** _(hidden)_ — Remove everything AgentStack manages, previewing first — flags `--scope/--write/--verbose/--keep-home`
 - **`create-profile`** _(hidden)_ — Fixed-argv alias of `agentstack toolset create` (panel action) — flags `--name/--skill/--server/--preview/--yes/--consented/--allow-unresolved`
+- **`set-gitignore`** _(hidden)_ — Record whether this project manages its `.gitignore` block (panel action; digest-bound) — flags `--enabled/--preview/--yes/--consented/--allow-unresolved`
 - **`edit-profile`** _(hidden)_ — Change one toolset's membership as a batch (panel action; digest-bound) — flags `--profile/--add-skill/--remove-skill/--add-server/--remove-server/--preview/--yes/--consented/--allow-unresolved`
 - **`rename-profile`** _(hidden)_ — Fixed-argv alias of `agentstack toolset rename` (panel action) — flags `--name/--to/--preview/--yes/--consented/--allow-unresolved`
 - **`delete-profile`** _(hidden)_ — Fixed-argv alias of `agentstack toolset delete` (panel action) — flags `--name/--preview/--yes/--consented/--allow-unresolved`

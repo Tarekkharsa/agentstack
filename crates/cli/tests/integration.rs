@@ -454,7 +454,10 @@ fn init_pipeline_roundtrips_through_valid_toml() {
 
     let manifest = Manifest {
         version: 1,
-        meta: Meta { name: None },
+        meta: Meta {
+            name: None,
+            gitignore: None,
+        },
         servers,
         skills: IndexMap::new(),
         profiles: IndexMap::new(),

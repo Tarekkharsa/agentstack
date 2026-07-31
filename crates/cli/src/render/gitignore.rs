@@ -118,9 +118,31 @@ pub fn ensure_block(project_root: &Path, entries: &[String], write: bool) -> Res
     Ok(true)
 }
 
+/// Whether a managed block is currently present in this project's
+/// `.gitignore`.
+///
+/// Only used to *report* a leftover block once a project has opted out
+/// (`[meta] gitignore = false`). Routine commands deliberately never strip the
+/// block — see [`remove_block`]'s rationale — so a project that opts out with
+/// one already committed keeps it until someone removes it on purpose. Saying
+/// so is then the only honest move: silence would let a user believe their
+/// artifacts are visible to `git status` when they are not.
+pub fn has_block(project_root: &Path) -> bool {
+    let existing = fs::read_to_string(project_root.join(".gitignore")).unwrap_or_default();
+    let lines: Vec<&str> = existing.lines().collect();
+    lines.iter().any(|l| l.trim() == BEGIN) && lines.iter().any(|l| l.trim() == END)
+}
+
 /// Take the managed block back out entirely, for `uninstall` (review finding
-/// N3). Returns the new file content when a block was present, `None` when
-/// there was nothing to remove.
+/// N3) and for the explicitly consented opt-out (`[meta] gitignore = false`,
+/// chosen in the wizard or through the panel's `set-gitignore` verb). Returns
+/// the new file content when a block was present, `None` when there was
+/// nothing to remove.
+///
+/// Both callers share one property that routine commands do not: a human just
+/// said, in that moment, that this project should not have the block. That is
+/// what separates them from deactivation, which must leave a committed block
+/// alone.
 ///
 /// This is deliberately NOT `ensure_block(&[])`: [`splice`] treats an empty
 /// entry set as "leave the block alone", because *deactivation* must not strip

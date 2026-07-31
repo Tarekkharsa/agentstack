@@ -498,7 +498,10 @@ pub(crate) fn materialize_skills_additive(
         }
         out.written.push((id.clone(), skills_dir));
     }
-    if scope == Scope::Project && !no_gitignore && !out.written.is_empty() {
+    // Same effective setting every other write path reads: the caller's
+    // per-run flag OR the project's durable opt-out.
+    let gitignore_off = no_gitignore || !ctx.loaded.manifest.meta.manages_gitignore();
+    if scope == Scope::Project && !gitignore_off && !out.written.is_empty() {
         // The block is one shared artifact: harvest extension entries too
         // (write=false — plan only) so rewriting it never drops them.
         ignore_entries.extend(crate::render::extensions::render(
@@ -630,6 +633,9 @@ pub fn activate(
     // (the config file, the whole skills dir) so the block never churns as
     // profile membership changes.
     let project_root = crate::manifest::project_root_of(&ctx.dir);
+    // Derived once, from the manifest this activation already loaded, so the
+    // preview arm and the write arm below read the same answer.
+    let gitignore_off = args.no_gitignore || !manifest.meta.manages_gitignore();
     let mut ignore_entries: Vec<String> = Vec::new();
     // Pre-write snapshots of every server config this activation touches, so
     // `agentstack restore` can undo a `use --write` exactly like an `apply
@@ -645,6 +651,13 @@ pub fn activate(
         };
         let key = target_key(id, scope, &ctx.dir);
         println!("\n{}", desc.display.bold());
+
+        // Dry-run counterparts of the state records the managed .gitignore
+        // block reads. A dry run records nothing, so those reads report an
+        // empty block and the preview would omit the .gitignore edit this
+        // activation is about to make — see the block at the end of this loop.
+        let mut would_manage_config = false;
+        let mut would_manage_skills = false;
 
         // --- servers ---
         let mut previously = state.managed_servers(&key);
@@ -723,6 +736,11 @@ pub fn activate(
                 let blocked = ((!plan.unresolved.is_empty() || !plan.failed.is_empty())
                     && !args.allow_unresolved)
                     || !plan.denied.is_empty();
+                // What a write WOULD leave managed here. `blocked` gates it
+                // exactly as it gates the write below: an activation that
+                // writes nothing must not preview hiding a hand-maintained
+                // config.
+                would_manage_config = !blocked && (!plan.managed.is_empty() || !foreign.is_empty());
                 if plan.changed() {
                     if args.write && blocked {
                         blocked_targets.push(desc.display.clone());
@@ -815,6 +833,7 @@ pub fn activate(
                         skills_dir.display()
                     );
                 } else {
+                    would_manage_skills = !plan.managed_names().is_empty();
                     println!(
                         "  {} {} to {} into {}",
                         "→".cyan(),
@@ -849,18 +868,28 @@ pub fn activate(
         // compiles instructions, so its instruction flag is the on-disk managed
         // marker `apply` leaves — the record that keeps the two commands'
         // blocks byte-identical.
-        if scope == Scope::Project && args.write {
+        //
+        // The dry-run arm derives the same flags prospectively (what this
+        // activation would leave managed) OR'd with what is already recorded,
+        // so the preview names the edit. The write arm is untouched: its
+        // byte-for-byte agreement with `apply` is a pinned witness.
+        if scope == Scope::Project {
             let instr_path = desc
                 .instructions
                 .as_ref()
                 .and_then(|s| s.path_for(scope, &ctx.dir));
+            // `use` never compiles instructions in either mode, so this stays
+            // the on-disk marker `apply` leaves.
+            let instr_managed = instr_path
+                .as_deref()
+                .is_some_and(crate::render::instructions::manages_file);
             let managed = crate::render::gitignore::Managed {
-                config: !state.managed_servers(&key).is_empty()
+                config: (!args.write && would_manage_config)
+                    || !state.managed_servers(&key).is_empty()
                     || !state.kept_foreign(&key).is_empty(),
-                skills: !state.managed_skills(&key).is_empty(),
-                instructions: instr_path
-                    .as_deref()
-                    .is_some_and(crate::render::instructions::manages_file),
+                skills: (!args.write && would_manage_skills)
+                    || !state.managed_skills(&key).is_empty(),
+                instructions: instr_managed,
             };
             ignore_entries.extend(crate::render::gitignore::managed_entries(
                 desc, scope, &ctx.dir, managed,
@@ -878,13 +907,50 @@ pub fn activate(
 
     if args.write
         && scope == Scope::Project
-        && !args.no_gitignore
+        && !gitignore_off
         && crate::render::gitignore::ensure_block(&project_root, &ignore_entries, true)?
     {
         println!(
             "\n{} .gitignore: managed block updated — generated artifacts stay out of git ({} to commit them instead)",
             "✓".green(),
             "--no-gitignore".bold()
+        );
+    } else if !args.write
+        && scope == Scope::Project
+        && !gitignore_off
+        && crate::render::gitignore::ensure_block(&project_root, &ignore_entries, false)?
+    {
+        // `write: false` answers "would this change?" without touching the
+        // file, so preview and write agree by construction rather than by a
+        // second implementation of the block.
+        println!(
+            "\n{} .gitignore: would add a managed block so generated artifacts stay out of git",
+            "→".cyan()
+        );
+        // Sorted + deduped to match `splice`, so the previewed lines are the
+        // lines that land.
+        let mut shown: Vec<&str> = ignore_entries.iter().map(String::as_str).collect();
+        shown.sort_unstable();
+        shown.dedup();
+        for entry in shown {
+            println!("  {} {entry}", "+".green());
+        }
+        println!(
+            "  {} {} to leave .gitignore alone and commit them instead",
+            "·".dimmed(),
+            "--no-gitignore".bold()
+        );
+    } else if scope == Scope::Project
+        && gitignore_off
+        && crate::render::gitignore::has_block(&project_root)
+    {
+        // Opted out with a block already on disk. Activation never strips it,
+        // so report the leftover rather than let the user believe these files
+        // show up in `git status`.
+        println!(
+            "\n{} .gitignore: this project opted out, but a managed block is still present — \
+             delete the marked lines to un-hide the generated files",
+            "·".dimmed()
         );
     }
 

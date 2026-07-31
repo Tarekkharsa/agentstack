@@ -8,6 +8,7 @@
 //! non-interactive shell (CI, pipes) only ever previews — it never writes and
 //! never blocks on input.
 
+use std::fs;
 use std::path::Path;
 
 use anyhow::{Context, Result};
@@ -243,6 +244,115 @@ fn configure(
 /// apply, activate skills, doctor. Returns `false` when the user declines the
 /// write confirm (so the caller skips the machine-change summary), `true`
 /// once the write path has run.
+/// What the wizard's apply step should do once the user has read the preview.
+enum ApplyChoice {
+    Apply,
+    /// Apply, and first record `[meta] gitignore = false` so this project never
+    /// manages the block — here or on any later activation.
+    ApplyWithoutGitignore,
+    Stop,
+}
+
+/// The apply confirm.
+///
+/// A plain yes/no unless this run would actually touch `.gitignore`, in which
+/// case the opt-out becomes a third answer to the SAME question rather than a
+/// second question. The interaction count never grows, and the boundary is
+/// explained only when it is real — a project that isn't a git repo, or has
+/// already opted out, sees exactly the prompt it saw before.
+fn confirm_apply(gitignore_pending: bool) -> Result<ApplyChoice> {
+    if !gitignore_pending {
+        return Ok(if crate::util::confirm::confirm("\nApply this setup?")? {
+            ApplyChoice::Apply
+        } else {
+            ApplyChoice::Stop
+        });
+    }
+    // Non-interactive keeps the old contract exactly: stop without blocking.
+    // Scripts opt out with `--no-gitignore`, which needs no terminal.
+    if !crate::util::confirm::is_interactive() {
+        return Ok(ApplyChoice::Stop);
+    }
+    // The middle label states what it records, because "never" is a claim
+    // about every future run and the user is agreeing to it here.
+    let items = [
+        "Apply".to_string(),
+        "Apply, but never manage .gitignore in this project \
+         (records `gitignore = false` in agentstack.toml)"
+            .to_string(),
+        "Cancel".to_string(),
+    ];
+    let idx = dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
+        .with_prompt("\nApply this setup?")
+        .items(&items)
+        .default(0)
+        .interact_opt()?;
+    Ok(match idx {
+        Some(0) => ApplyChoice::Apply,
+        Some(1) => ApplyChoice::ApplyWithoutGitignore,
+        // Esc/q, like Cancel.
+        _ => ApplyChoice::Stop,
+    })
+}
+
+/// Record the durable opt-out, and clear any block already on disk.
+///
+/// Removal belongs here and nowhere else. Routine commands must never strip
+/// the block (a team may have committed it — see `gitignore::remove_block`),
+/// but this is the moment a human said this project commits its generated
+/// files; leaving the block would keep every not-yet-tracked artifact
+/// invisible to `git status` immediately after that declaration. One history
+/// entry covers both files, so Undo restores the pair together.
+fn record_gitignore_optout(manifest_dir: Option<&Path>) -> Result<()> {
+    let ctx = super::load(manifest_dir)?;
+    let path = ctx.loaded.manifest_path.clone();
+    let original =
+        fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    let updated = super::add::set_meta_gitignore(&original, false)?;
+
+    let mut backups = Vec::new();
+    if updated != original {
+        backups.push(crate::history::capture(
+            &path,
+            "agentstack.toml · gitignore opt-out",
+        ));
+        crate::util::atomic::write(&path, &updated)
+            .with_context(|| format!("writing {}", path.display()))?;
+        println!(
+            "  {} recorded {} — no command will manage this project's .gitignore",
+            "✓".green(),
+            "[meta] gitignore = false".bold()
+        );
+    }
+
+    let root = crate::manifest::project_root_of(&ctx.dir);
+    let gitignore = root.join(".gitignore");
+    if let Ok(existing) = fs::read_to_string(&gitignore) {
+        if let Some(without) = crate::render::gitignore::remove_block(&existing) {
+            backups.push(crate::history::capture(
+                &gitignore,
+                ".gitignore · managed block removed",
+            ));
+            crate::util::atomic::write(&gitignore, &without)
+                .with_context(|| format!("writing {}", gitignore.display()))?;
+            println!(
+                "  {} removed the managed block from .gitignore",
+                "✓".green()
+            );
+        }
+    }
+
+    if !backups.is_empty() {
+        let _ = crate::history::record(
+            "project",
+            "init (gitignore opt-out)".to_string(),
+            vec![],
+            backups,
+        );
+    }
+    Ok(())
+}
+
 fn run_static(args: &SetupArgs, scope: Scope, manifest_dir: Option<&Path>) -> Result<bool> {
     // Preview the exact config changes (no "re-run with --write" hint — we
     // drive our own confirm next).
@@ -265,18 +375,30 @@ fn run_static(args: &SetupArgs, scope: Scope, manifest_dir: Option<&Path>) -> Re
             "\n{} Configs already match the manifest — nothing to apply.",
             "·".dimmed()
         );
-    } else
-    // `confirm` returns false without blocking when there's no terminal, so
-    // CI/pipes stop here. Note the honest scope: no CLI config was written here,
-    // but the wizard's import step may already have (the caller closes with the
-    // truthful mini-summary), so this line no longer claims "nothing written".
-    if !crate::util::confirm::confirm("\nApply this setup?")? {
-        println!(
-            "\n{} Stopped before writing any CLI config. Re-run in a terminal to apply, or use {}.",
-            "·".dimmed(),
-            "agentstack apply --write".bold()
-        );
-        return Ok(false);
+    } else {
+        // `confirm` returns false without blocking when there's no terminal, so
+        // CI/pipes stop here. Note the honest scope: no CLI config was written here,
+        // but the wizard's import step may already have (the caller closes with the
+        // truthful mini-summary), so this line no longer claims "nothing written".
+        match confirm_apply(preview.gitignore_pending)? {
+            ApplyChoice::Apply => {}
+            ApplyChoice::ApplyWithoutGitignore => {
+                // BEFORE the write path, deliberately: the apply below reloads
+                // the manifest, so recording the opt-out first means its
+                // derivation and every later activation's read the same file.
+                // A wizard-local flag would have been forgotten by the next
+                // `use <toolset>`.
+                record_gitignore_optout(manifest_dir)?;
+            }
+            ApplyChoice::Stop => {
+                println!(
+                    "\n{} Stopped before writing any CLI config. Re-run in a terminal to apply, or use {}.",
+                    "·".dimmed(),
+                    "agentstack apply --write".bold()
+                );
+                return Ok(false);
+            }
+        }
     }
 
     println!("\n{}", "Install".bold());

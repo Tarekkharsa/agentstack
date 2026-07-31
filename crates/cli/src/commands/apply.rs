@@ -30,6 +30,14 @@ pub(crate) struct Outcome {
     /// Targets actually written this pass (0 on any dry run) — drives the
     /// "restart your CLI" hint, which only matters once something changed on disk.
     pub written_count: usize,
+    /// Whether this pass would add or update the managed `.gitignore` block.
+    ///
+    /// Only ever true on a dry run — a write has already made the change, so
+    /// there is nothing pending. The wizard reads it to decide whether its
+    /// confirm needs to offer the opt-out at all: asking about a file edit
+    /// that isn't happening is exactly the kind of question progressive
+    /// disclosure exists to suppress.
+    pub gitignore_pending: bool,
 }
 
 pub fn run(args: &ApplyArgs, manifest_dir: Option<&Path>) -> Result<()> {
@@ -223,6 +231,7 @@ fn render(
             validation_errors: has_errors,
             write_blockers: 0,
             written_count: 0,
+            gitignore_pending: false,
         });
     }
 
@@ -254,6 +263,13 @@ fn render(
     // history entry for this apply.
     let mut backups: Vec<crate::history::FileChange> = Vec::new();
     let project_root = crate::manifest::project_root_of(&ctx.dir);
+    // Derived ONCE, from the manifest both arms below already share, so the
+    // preview and the write can never disagree about whether this project
+    // manages the block — the divergence that made the block un-consented in
+    // the first place. `--no-gitignore` overrides in the off direction only;
+    // the manifest setting is the durable answer (a per-run flag can't be one:
+    // the next `use <toolset>` would re-add the block).
+    let gitignore_off = args.no_gitignore || !manifest.meta.manages_gitignore();
     let mut ignore_entries: Vec<String> = Vec::new();
     let mut touched_targets: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     // Every target this scope actually covers — written or already in sync. The
@@ -296,6 +312,11 @@ fn render(
             // Whether this run compiled the instruction file — one input to the
             // managed .gitignore block computed at the end of this target's loop.
             let mut wrote_instructions = false;
+            // The dry-run counterpart: whether a write WOULD compile it. The
+            // block's write-mode inputs are all post-write records, which a
+            // dry run never sets — so previewing the block needs the
+            // prospective answer alongside the recorded one.
+            let mut would_write_instructions = false;
 
             let mut previously = state.managed_servers(&key);
             // Names an earlier guarded write kept on disk (state bookkeeping —
@@ -674,6 +695,10 @@ fn render(
                                 super::count(ip.fragments.len(), "instruction fragment")
                             );
                         } else {
+                            // Dry run: a blocked compile writes nothing, so it
+                            // must not contribute an ignore entry either —
+                            // mirroring the write path's blocked arm.
+                            would_write_instructions = !iblocked;
                             crate::outln!(
                                 "  {} {} to apply",
                                 "→".cyan(),
@@ -706,19 +731,43 @@ fn render(
             // persistent records `use` shares, keeping the block churn-free across
             // the two commands. `apply` never materializes skills, so its skills
             // flag is purely the record a prior `use` left.
-            if scope == Scope::Project && will_write {
+            //
+            // A dry run records nothing, so those same reads would report an
+            // empty block and the preview would omit the .gitignore edit the
+            // apply is about to make — which is how this write came to be the
+            // one nobody consented to. The dry-run arm therefore derives the
+            // SAME flags prospectively, from what this run would write
+            // (`plan.managed` / `foreign` / `would_write_instructions`) OR'd
+            // with the records already on disk. The write arm is untouched:
+            // its byte-for-byte agreement with `use` is a pinned witness.
+            if scope == Scope::Project {
                 let instr_path = desc
                     .instructions
                     .as_ref()
                     .and_then(|s| s.path_for(scope, &ctx.dir));
-                let managed = crate::render::gitignore::Managed {
-                    config: !state.managed_servers(&key).is_empty()
-                        || !state.kept_foreign(&key).is_empty(),
-                    skills: !state.managed_skills(&key).is_empty(),
-                    instructions: wrote_instructions
-                        || instr_path
-                            .as_deref()
-                            .is_some_and(crate::render::instructions::manages_file),
+                let instr_managed_on_disk = instr_path
+                    .as_deref()
+                    .is_some_and(crate::render::instructions::manages_file);
+                let managed = if will_write {
+                    crate::render::gitignore::Managed {
+                        config: !state.managed_servers(&key).is_empty()
+                            || !state.kept_foreign(&key).is_empty(),
+                        skills: !state.managed_skills(&key).is_empty(),
+                        instructions: wrote_instructions || instr_managed_on_disk,
+                    }
+                } else {
+                    crate::render::gitignore::Managed {
+                        // `blocked` gates the prospective half exactly as it
+                        // gates the write: a run that would write nothing must
+                        // not preview hiding a hand-maintained .mcp.json.
+                        config: (!blocked && (!plan.managed.is_empty() || !foreign.is_empty()))
+                            || !state.managed_servers(&key).is_empty()
+                            || !state.kept_foreign(&key).is_empty(),
+                        // `apply` never materializes skills in either mode, so
+                        // this stays purely the record a prior `use` left.
+                        skills: !state.managed_skills(&key).is_empty(),
+                        instructions: would_write_instructions || instr_managed_on_disk,
+                    }
                 };
                 ignore_entries.extend(crate::render::gitignore::managed_entries(
                     desc, scope, &ctx.dir, managed,
@@ -875,7 +924,8 @@ fn render(
     }
 
     let history_targets: Vec<String> = touched_targets.iter().cloned().collect();
-    if will_write && scope == Scope::Project && !args.no_gitignore {
+    let mut gitignore_pending = false;
+    if will_write && scope == Scope::Project && !gitignore_off {
         let gitignore = project_root.join(".gitignore");
         let capture = crate::history::capture(&gitignore, ".gitignore · managed artifacts");
         match crate::render::gitignore::ensure_block(&project_root, &ignore_entries, true) {
@@ -900,6 +950,50 @@ fn render(
                 return Err(err);
             }
         }
+    } else if scope == Scope::Project && !gitignore_off {
+        // The .gitignore edit, named in the preview the user actually reads
+        // before consenting. `ensure_block` with `write: false` answers "would
+        // this change?" without touching the file, so the preview and the
+        // write agree by construction rather than by a second implementation.
+        //
+        // Listing the entries matters more than the count: ".gitignore will be
+        // updated" is a claim about a file the user may have hand-curated,
+        // and the only thing that makes it reviewable is which lines land.
+        if let Ok(true) =
+            crate::render::gitignore::ensure_block(&project_root, &ignore_entries, false)
+        {
+            gitignore_pending = true;
+            crate::outln!(
+                "\n{} .gitignore: would add a managed block so generated artifacts stay out of git",
+                "→".cyan()
+            );
+            // Sorted + deduped to match `splice`, so the previewed lines are
+            // the lines that land — not a per-target order the block collapses.
+            let mut shown: Vec<&str> = ignore_entries.iter().map(String::as_str).collect();
+            shown.sort_unstable();
+            shown.dedup();
+            for entry in shown {
+                crate::outln!("  {} {entry}", "+".green());
+            }
+            crate::outln!(
+                "  {} {} to leave .gitignore alone and commit them instead",
+                "·".dimmed(),
+                "--no-gitignore".bold()
+            );
+        }
+    } else if scope == Scope::Project
+        && gitignore_off
+        && crate::render::gitignore::has_block(&project_root)
+    {
+        // Opted out, but a block is already on disk. Routine commands never
+        // strip it (a team may have committed it), so the leftover is reported
+        // instead — otherwise the user believes these files are visible to
+        // `git status` when the stale block is still hiding them.
+        crate::outln!(
+            "\n{} .gitignore: this project opted out, but a managed block is still present — \
+             delete the marked lines to un-hide the generated files",
+            "·".dimmed()
+        );
     }
 
     if will_write {
@@ -1076,6 +1170,7 @@ fn render(
         validation_errors: has_errors,
         write_blockers,
         written_count: if will_write { written_count } else { 0 },
+        gitignore_pending,
     })
 }
 

@@ -191,6 +191,7 @@ pub const FEATURES: &[&str] = &[
     "doctor-probe-v1",
     "diff-existence-v1",
     "json-reads-v1",
+    "gitignore-opt-out-v1",
 ];
 
 /// Wrap a response body in the envelope. The two envelope keys are injected

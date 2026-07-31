@@ -793,11 +793,32 @@ impl Instruction {
 pub struct Meta {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
+
+    /// Whether agentstack maintains the managed `.gitignore` block for this
+    /// project's generated artifacts.
+    ///
+    /// `Some(false)` opts out durably: no command creates or updates the block
+    /// here. A per-run `--no-gitignore` cannot express that — the next
+    /// `use <toolset>` would put the block straight back — so the decision
+    /// lives with the project, in the file that travels with it. That also
+    /// makes it the same answer on every clone: a machine-local setting would
+    /// guarantee the block ping-pongs through a team's diffs as each member
+    /// activates a toolset.
+    ///
+    /// `None` / `Some(true)` is the default: the block is maintained.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gitignore: Option<bool>,
 }
 
 impl Meta {
     pub fn is_empty(&self) -> bool {
-        self.name.is_none()
+        self.name.is_none() && self.gitignore.is_none()
+    }
+
+    /// Whether the managed `.gitignore` block is maintained for this project.
+    /// Absent means yes — the opt-out is explicit or it is not in effect.
+    pub fn manages_gitignore(&self) -> bool {
+        self.gitignore.unwrap_or(true)
     }
 }
 
