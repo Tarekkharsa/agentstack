@@ -159,6 +159,22 @@ impl State {
         entry.active_profile = profile;
     }
 
+    /// Forget every managed set (and the written-content hash) for `key`,
+    /// after an un-render removed the corresponding files. Everything else
+    /// survives on purpose: `active_profile` is the memory a later switch back
+    /// to on-disk delivery re-renders, and `kept_foreign` still describes
+    /// entries that remain in the live config (an un-render never removes
+    /// foreign entries). A no-op for a key never recorded.
+    pub fn clear_managed(&mut self, key: &str) {
+        if let Some(entry) = self.targets.get_mut(key) {
+            entry.managed_servers.clear();
+            entry.managed_skills.clear();
+            entry.managed_settings.clear();
+            entry.managed_hooks.clear();
+            entry.last_hash.clear();
+        }
+    }
+
     /// Foreign-manifest server names a guarded write left on disk under
     /// `key` — in the live config but not in `managed_servers` (see
     /// [`TargetState::kept_foreign`]).

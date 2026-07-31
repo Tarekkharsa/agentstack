@@ -74,10 +74,30 @@ struct Report {
     /// is" to a project that already opted out is the kind of small lie the
     /// consent work exists to remove (`gitignore-opt-out-v1`).
     gitignore: Option<bool>,
+    /// This machine's CLI coverage: how many CLIs are installed, and how many
+    /// of those can host the stdio bridge — the honest denominator for any
+    /// "served live" claim. A zero-files project reaches `bridge_capable` of
+    /// `detected`, and the ones it cannot reach are NAMED, because a coverage
+    /// number that shrinks silently is worse than no number
+    /// (`doctor-cli-coverage-v1`). `None` when doctor ran with no project.
+    clis: Option<CliCoverage>,
     /// Structured `--probe` results. `None` on every other invocation, so the
     /// JSON omits the key entirely: a consumer can tell "not probed" from
     /// "probed, and there was nothing to probe" (`ran: true`, empty list).
     probe: Option<ProbeResults>,
+}
+
+/// The machine's bridge coverage, from the ONE definition `gateway connect`
+/// itself uses ([`crate::commands::connect::bridge_capable`]) — so this field,
+/// the connect command, and the `set-mode` plan can never disagree.
+struct CliCoverage {
+    /// CLIs detected on this machine.
+    detected: usize,
+    /// Of those, how many can host the stdio bridge (zero-files delivery).
+    bridge_capable: usize,
+    /// Display names of detected CLIs that cannot — the ones a "served live"
+    /// project must not claim to reach.
+    bridge_incapable: Vec<String>,
 }
 
 /// The `--probe` outcome as a whole, so the JSON can distinguish a probe that
@@ -112,6 +132,7 @@ impl Report {
             mode: None,
             activation: None,
             gitignore: None,
+            clis: None,
             probe: None,
         }
     }
@@ -318,6 +339,11 @@ impl Report {
             "mode": self.mode,
             "activation": self.activation,
             "gitignore": self.gitignore,
+            "clis": self.clis.as_ref().map(|c| serde_json::json!({
+                "detected": c.detected,
+                "bridge_capable": c.bridge_capable,
+                "bridge_incapable": c.bridge_incapable,
+            })),
             // Per-server startup results (see `doctor-probe-v1`); null unless
             // `--probe` ran.
             "probe": self.probe_json(),
@@ -358,6 +384,7 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
                 "mode": serde_json::Value::Null,
                 "activation": serde_json::Value::Null,
                 "gitignore": serde_json::Value::Null,
+                "clis": serde_json::Value::Null,
                 "probe": serde_json::Value::Null,
                 "sections": [],
             }));
@@ -758,6 +785,13 @@ fn run_checks(
     report.mode = Some(mode.label());
     report.activation = Some(if locked { "locked" } else { "never_activated" });
     report.gitignore = Some(manifest.meta.manages_gitignore());
+    let (detected, capable, incapable) =
+        crate::commands::mode_switch::bridge_coverage(&ctx.registry);
+    report.clis = Some(CliCoverage {
+        detected,
+        bridge_capable: capable,
+        bridge_incapable: incapable,
+    });
 
     report.section("Secrets");
     let refs = manifest.referenced_secrets();

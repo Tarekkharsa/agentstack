@@ -419,6 +419,28 @@ never strip a block a team may have committed."
     )]
     SetGitignore(PanelSetGitignoreArgs),
 
+    /// Switch this project's delivery mode (panel action; digest-bound).
+    ///
+    /// Previews the real plan — what comes off disk, what is registered, who
+    /// stops being served — then applies it. The mode is derived from disk, so
+    /// the switch changes the facts the derivation reads; see the module doc.
+    #[command(
+        name = "set-mode",
+        hide = true,
+        after_help = "\
+Machine surface. Changes how this project's capabilities reach your CLIs:
+`static` renders configs to disk, `clean-at-rest` keeps them only inside a
+session, `zero-files` serves them live through the gateway. The switch to a
+nothing-at-rest mode removes everything this manifest rendered (undo:
+`agentstack restore --last`); zero-files also registers the bridge machine-wide
+and requires the project to be trusted first — trust is never granted here.
+
+  agentstack set-mode zero-files             review the plan, confirm at the prompt
+  agentstack set-mode static --preview       the JSON plan + consent digest
+  agentstack set-mode static --yes --consented <digest>   apply non-interactively"
+    )]
+    SetMode(PanelSetModeArgs),
+
     /// Change one toolset's membership as a batch (panel action; digest-bound).
     #[command(name = "edit-profile", hide = true)]
     EditProfile(PanelEditProfileArgs),
@@ -1849,6 +1871,18 @@ pub struct PanelSetGitignoreArgs {
     /// removed); `false` opts this project out.
     #[arg(long, action = clap::ArgAction::Set)]
     pub enabled: bool,
+
+    #[command(flatten)]
+    pub consent: PanelConsent,
+}
+
+/// `set-mode` — switch this project's delivery mode, previewing the real plan.
+#[derive(Args, Debug)]
+pub struct PanelSetModeArgs {
+    /// The target mode: static | clean-at-rest | zero-files — the same labels
+    /// `doctor --json` reports, so a panel round-trips the string it read.
+    #[arg(value_name = "MODE")]
+    pub mode: String,
 
     #[command(flatten)]
     pub consent: PanelConsent,

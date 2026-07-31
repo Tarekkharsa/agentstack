@@ -148,6 +148,36 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   The UI's stopgap was parsing the unified-diff hunk header (`@@ -0,0`),
 ///   which an empty-but-present file already misclassifies. Its own name for
 ///   the usual reason: reading the field on an older binary would be sniffing.
+/// - `doctor-cli-coverage-v1`: `doctor --json` carries `clis` — `detected`
+///   (CLIs installed on this machine), `bridge_capable` (of those, how many can
+///   host the stdio bridge, i.e. be served live), and `bridge_incapable` (the
+///   display names of the rest). One definition shared with `gateway connect`'s
+///   own eligibility, so the count a UI shows and the set the command reaches
+///   cannot disagree. This is the honest denominator for any "served live"
+///   claim: a zero-files footer must say "11 of 13 CLIs", and NAME the two,
+///   because a coverage number that shrinks silently is worse than no number.
+///   `null` when doctor ran with no project. Its own name for the usual
+///   reason: a binary predating the field legitimately advertises
+///   `doctor-mode-v1` without it.
+/// - `set-mode-v1`: `set-mode <static|clean-at-rest|zero-files>` switches the
+///   project's delivery mode with the full house consent pipeline —
+///   `--preview` returns the REAL transition plan (every file the un-render
+///   removes, whether the bridge is registered and its machine-wide scope,
+///   bridge coverage, the toolset a render would activate, the undo command,
+///   and every blocker) plus a `consent_digest` binding the direction
+///   (current→target) and the manifest bytes; apply requires `--yes
+///   --consented <digest>`. Fail-closed edges are first-class: an active
+///   session refuses every direction, zero-files refuses an untrusted project
+///   (trust is never granted here — the review is), and clean-at-rest refuses
+///   while the machine-wide bridge serves this trusted project (those facts
+///   derive zero-files whatever is removed; the exit is `gateway disconnect`,
+///   a machine-scope decision this project-scope verb must not make). The
+///   un-render leg is shared with `uninstall`, records ONE history entry, and
+///   clears the state ledger's managed sets so the derived mode stops reading
+///   "static" over files that no longer exist. A UI must not offer a mode
+///   picker on a binary without this name — before it, `mode_switch_plan` had
+///   no un-render leg, so a rendered project that "switched" kept deriving
+///   static.
 /// - `json-reads-v1`: the four orientation reads that had no machine form now
 ///   accept `--json` and emit an enveloped body — `status`, `search`,
 ///   `adapters list`, and `session list`. Each is the SAME reading the human
@@ -192,6 +222,8 @@ pub const FEATURES: &[&str] = &[
     "diff-existence-v1",
     "json-reads-v1",
     "gitignore-opt-out-v1",
+    "doctor-cli-coverage-v1",
+    "set-mode-v1",
 ];
 
 /// Wrap a response body in the envelope. The two envelope keys are injected

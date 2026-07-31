@@ -51,6 +51,7 @@ fn dispatch(argv: &[&str]) -> Result<()> {
         Command::AddServerToProfile(a) => commands::panel_edit::add_server(&a, dir),
         Command::CreateProfile(a) => commands::panel_edit::create_profile(&a, dir),
         Command::SetGitignore(a) => commands::panel_edit::set_gitignore(&a, dir),
+        Command::SetMode(a) => commands::mode_switch::set_mode(&a, dir),
         Command::UseProfile(a) => commands::panel_edit::use_profile(&a, dir),
         Command::LibraryIndex => commands::panel_edit::library_index(dir),
         Command::RemoveFromLibrary(a) => commands::panel_edit::remove_from_library(&a, dir),
@@ -429,6 +430,226 @@ fn panel_remove_capability_updates_manifest_and_rendered_config() {
     let rendered_after = fs::read_to_string(proj.join(".mcp.json")).unwrap();
     assert!(!rendered_after.contains("remove-me"));
     assert!(rendered_after.contains("keep"));
+
+    std::env::remove_var("HOME");
+    std::env::remove_var("AGENTSTACK_HOME");
+}
+
+/// Witness (set-mode-v1): the delivery-mode switch has a real un-render leg,
+/// a real render leg, digest-bound consent, and fail-closed edges.
+///
+/// The property under test is the one the panel's mode picker depends on: the
+/// DERIVED mode actually flips. Before this verb existed, `mode_switch_plan`
+/// had no un-render leg — a rendered project that "switched" to a
+/// nothing-at-rest mode kept its files, so `mode_from_signals` (rendered
+/// first) kept deriving static, and any UI truthfully rendering the derivation
+/// displayed a mode the user had explicitly left.
+#[test]
+fn set_mode_switch_unrenders_rerenders_and_fails_closed() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
+
+    let proj = tmp.path().join("proj");
+    // A git repo, so the managed .gitignore block is written (it is skipped in
+    // a non-repo) and the un-render witness covers its removal too.
+    fs::create_dir_all(proj.join(".git")).unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n\
+         [targets]\ndefault = [\"claude-code\"]\n\
+         [servers.search]\ntype = \"http\"\nurl = \"https://search.example/mcp\"\n",
+    )
+    .unwrap();
+    let proj_root = proj.to_str().unwrap();
+
+    // Render the project (the static state the switch must undo).
+    commands::apply::run(
+        &ApplyArgs {
+            targets: vec![],
+            profile: None,
+            dry_run: false,
+            write: true,
+            scope: Some(Scope::Project),
+            allow_unresolved: false,
+            prune_foreign: false,
+            no_gitignore: false,
+            verbose: false,
+        },
+        Some(&proj),
+    )
+    .unwrap();
+    assert!(
+        proj.join(".mcp.json").exists(),
+        "rendered before the switch"
+    );
+    assert!(
+        fs::read_to_string(proj.join(".gitignore"))
+            .unwrap()
+            .contains(".mcp.json"),
+        "managed block written before the switch"
+    );
+
+    let doctor = commands::doctor::collect(Some(&proj)).unwrap();
+    assert_eq!(doctor["mode"], "static", "rendered project derives static");
+    // doctor-cli-coverage-v1: the field is present and internally consistent.
+    // Counts are machine-dependent (detection reads PATH), so the witness pins
+    // the invariants, not the numbers.
+    let clis = &doctor["clis"];
+    let detected = clis["detected"].as_u64().unwrap();
+    let capable = clis["bridge_capable"].as_u64().unwrap();
+    let incapable = clis["bridge_incapable"].as_array().unwrap();
+    assert!(detected >= 1, "the temp-HOME claude.json is detected");
+    assert_eq!(
+        capable + incapable.len() as u64,
+        detected,
+        "every detected CLI is either bridge-capable or named as not"
+    );
+
+    let preview_of = |mode: &str| {
+        let argv = [
+            "agentstack",
+            "--manifest-dir",
+            proj_root,
+            "set-mode",
+            mode,
+            "--preview",
+        ];
+        match command_of(&argv) {
+            Command::SetMode(args) => {
+                commands::mode_switch::set_mode_preview(&args, Some(&proj)).unwrap()
+            }
+            _ => panic!("argv names set-mode"),
+        }
+    };
+
+    // ── zero-files on an untrusted project: the plan says so, the apply
+    // refuses, and NOTHING is removed. Trust is never granted here.
+    let preview = preview_of("zero-files");
+    assert_eq!(preview["requires_trust"], true);
+    assert_eq!(preview["machine_scope"], true);
+    assert!(
+        !preview["removes"].as_array().unwrap().is_empty(),
+        "the plan names what would come off disk"
+    );
+    assert!(preview["bridge"].is_object(), "the plan carries coverage");
+    let digest = preview["consent_digest"].as_str().unwrap().to_string();
+    let err = dispatch(&[
+        "agentstack",
+        "--manifest-dir",
+        proj_root,
+        "set-mode",
+        "zero-files",
+        "--yes",
+        "--consented",
+        &digest,
+    ])
+    .expect_err("zero-files must refuse an untrusted project");
+    assert!(err.to_string().contains("not trusted"), "{err}");
+    assert!(
+        proj.join(".mcp.json").exists(),
+        "a refused switch removes nothing"
+    );
+
+    // ── clean-at-rest: consent binds the manifest bytes — an edit after the
+    // preview flips the digest and the apply refuses before writing.
+    let stale = preview_of("clean-at-rest")["consent_digest"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let manifest_path = proj.join("agentstack.toml");
+    let mut text = fs::read_to_string(&manifest_path).unwrap();
+    text.push_str("# reviewed\n");
+    fs::write(&manifest_path, text).unwrap();
+    let err = dispatch(&[
+        "agentstack",
+        "--manifest-dir",
+        proj_root,
+        "set-mode",
+        "clean-at-rest",
+        "--yes",
+        "--consented",
+        &stale,
+    ])
+    .expect_err("a stale digest must refuse");
+    assert!(err.to_string().contains("consent digest mismatch"), "{err}");
+
+    // Fresh preview, real switch: the un-render leg runs.
+    let digest = preview_of("clean-at-rest")["consent_digest"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    dispatch(&[
+        "agentstack",
+        "--manifest-dir",
+        proj_root,
+        "set-mode",
+        "clean-at-rest",
+        "--yes",
+        "--consented",
+        &digest,
+    ])
+    .unwrap();
+    assert!(
+        !proj.join(".mcp.json").exists(),
+        "the switch removed the rendered config"
+    );
+    assert!(
+        !proj.join(".gitignore").exists(),
+        "our block was the whole file, so the file went with it"
+    );
+    let doctor = commands::doctor::collect(Some(&proj)).unwrap();
+    assert_eq!(
+        doctor["mode"], "clean-at-rest",
+        "the DERIVED mode flips — the ledger stopped claiming the render"
+    );
+    assert_eq!(doctor["activation"], "locked", "the switch pinned the lock");
+
+    // The removal is one recorded, undoable decision.
+    let registry = agentstack::adapter::Registry::load().unwrap();
+    let inventory = commands::restore::list_json_value(&registry, &proj);
+    assert!(
+        inventory["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["operation"]
+                .as_str()
+                .is_some_and(|o| o.contains("set-mode"))
+                && e["touches_project"] == true),
+        "the un-render is in the undo ledger: {inventory}"
+    );
+
+    // ── back to static: the render leg is the one activation path.
+    let preview = preview_of("static");
+    assert!(
+        preview["renders"].is_object(),
+        "the plan names what a render would activate: {preview}"
+    );
+    let digest = preview["consent_digest"].as_str().unwrap().to_string();
+    dispatch(&[
+        "agentstack",
+        "--manifest-dir",
+        proj_root,
+        "set-mode",
+        "static",
+        "--yes",
+        "--consented",
+        &digest,
+    ])
+    .unwrap();
+    assert!(
+        proj.join(".mcp.json").exists(),
+        "switching back re-renders the config"
+    );
+    let doctor = commands::doctor::collect(Some(&proj)).unwrap();
+    assert_eq!(
+        doctor["mode"], "static",
+        "the round trip lands where it started"
+    );
 
     std::env::remove_var("HOME");
     std::env::remove_var("AGENTSTACK_HOME");

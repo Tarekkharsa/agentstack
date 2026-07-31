@@ -282,6 +282,9 @@
 <tr><td>Startup test — actually start the servers</td><td><code>doctor-probe-v1</code></td><td>yes</td></tr>
 <tr><td>Status — typed delivery mode + activation</td><td><code>doctor-mode-v1</code></td><td>no — next release</td></tr>
 <tr><td>Drift review — first render vs moved-ahead</td><td><code>diff-existence-v1</code></td><td>no — next release</td></tr>
+<tr><td>Gitignore opt-out (durable, previewed)</td><td><code>gitignore-opt-out-v1</code></td><td>no — next release</td></tr>
+<tr><td>Delivery-mode switch (footer word → plan → confirm)</td><td><code>set-mode-v1</code></td><td>no — next release</td></tr>
+<tr><td>Footer CLI count / live-delivery coverage</td><td><code>doctor-cli-coverage-v1</code></td><td>no — next release</td></tr>
 </tbody></table></div>
 <p>One name in <code>FEATURES</code> is deliberately absent from this table. <code>json-reads-v1</code> names the <code>--json</code> form of <code>status</code>, <code>search</code>, <code>adapters list</code> and <code>session list</code> — an integrator contract for callers that scrape those screens, which the panel does not use because it reads the richer payloads directly. Every other name appears above; <code>profiles-edit-v1</code> covers the digest-bound add verbs and is listed with the toolset rows.</p>
 <p>Check any build yourself — the envelope is part of the read:</p>
