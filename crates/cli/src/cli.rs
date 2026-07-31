@@ -2707,6 +2707,7 @@ pub fn full_command_inventory() -> String {
         "remove-from-library",
         "remove-capability",
         "set-gitignore",
+        "set-mode",
     ];
 
     fn push(out: &mut String, cmd: &clap::Command, indent: usize, panel: bool) {
