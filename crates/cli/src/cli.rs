@@ -270,6 +270,17 @@ Examples:
   agentstack restore claude-code --write")]
     Restore(RestoreArgs),
 
+    /// Take it back: pick a point from your recent changes and revert to it.
+    ///
+    /// The same recorded changes `restore` works with, asked the other way
+    /// round — newest first, pick one. The revert is itself recorded, so
+    /// going one step too far is recoverable.
+    #[command(after_help = "\
+Examples:
+  agentstack undo                    what changed recently
+  agentstack undo --to 2 --write     back to before change 2")]
+    Undo(UndoArgs),
+
     /// Keep a hand-edit: pull drifted native config back into the manifest.
     ///
     /// Imports hand-added servers and hand-edited fields from target configs
@@ -2134,6 +2145,25 @@ pub enum SessionCmd {
 }
 
 #[derive(Args, Debug)]
+pub struct UndoArgs {
+    /// Revert to before change <n> from the timeline — everything newer comes
+    /// off with it, because that is what "back to that point" means. Omit to
+    /// be asked (or, with no terminal, just to see the list).
+    #[arg(long, value_name = "N")]
+    pub to: Option<usize>,
+
+    /// Do it (else preview which files would move).
+    #[arg(long)]
+    pub write: bool,
+
+    /// Machine-readable timeline. Read-only — there is no JSON path that
+    /// performs a revert, so a UI has to go through the same explicit
+    /// `--write` a person does.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Args, Debug)]
 pub struct RestoreArgs {
     /// What to undo: a recorded change id (unique prefix; `restore` with no
     /// argument lists them) or an adapter id for its single-slot config
@@ -2770,7 +2800,8 @@ pub fn full_command_inventory() -> String {
          \n  \
          Set up      init · status · adapters · settings · self · completions\n  \
          Edit        add · set · search · remove · install · lib · toolset · adopt · export · import\n  \
-         Render      apply · use · yes · instructions · lock · session · diff · restore · uninstall\n  \
+         Render      apply · use · yes · instructions · lock · session · diff · uninstall\n  \
+         Undo        undo · restore\n  \
          Protect     trust · explain · secret · guard · sign · verify\n  \
          Run         run · kill · shim · workflow · gateway · mcp · try\n  \
          Inspect     doctor · report · optimize · proxy\n\

@@ -225,6 +225,80 @@ pub fn undo(id: &str) -> Result<()> {
     Ok(())
 }
 
+/// Revert every entry in `ids` (newest first), and record the revert itself
+/// as a new entry — so an undo is undoable.
+///
+/// This is the whole difference between [`undo`] and the timeline's revert.
+/// [`undo`] flips `undone = true` in place and leaves no row of its own: the
+/// action that changed the user's files is the one action the ledger does not
+/// contain, so "I undid one step too far" has no way back through any command
+/// we expose. Capturing the *pre-undo* bytes first turns the revert into an
+/// ordinary entry like any other, and undoing that entry is a redo.
+///
+/// No new destructive machinery: the reverting is still [`undo`] per entry,
+/// which is still [`rollback`] per file. The only addition is the capture
+/// before and the [`record`] after — and it deliberately happens in that
+/// order, so a crash mid-revert leaves a durable way back rather than a
+/// half-reverted project with nothing describing it.
+///
+/// `ids` must already be newest-first; the caller owns the selection, because
+/// "which point to revert to" is a product decision and this is the ledger.
+pub fn undo_recorded(ids: &[String]) -> Result<Option<String>> {
+    if ids.is_empty() {
+        return Ok(None);
+    }
+    // Capture what is on disk NOW, across every file the revert will touch.
+    // Deduplicated by path, keeping the FIRST sighting: `ids` is newest-first,
+    // and the newest entry's view of a path is the state the revert starts
+    // from. Capturing the same path twice would make the redo replay an
+    // intermediate state that never existed as a resting point.
+    let mut seen = std::collections::HashSet::new();
+    let mut before = Vec::new();
+    // The revert inherits the scope of the newest entry it reverses — it acts
+    // on the same files, so claiming a different scope would misdescribe it.
+    let mut scope = String::from("project");
+    for id in ids {
+        let path = dir().join(format!("{id}.json"));
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(entry) = serde_json::from_str::<Entry>(&text) else {
+            continue;
+        };
+        if before.is_empty() {
+            scope = entry.scope.clone();
+        }
+        for f in &entry.files {
+            if seen.insert(f.path.clone()) {
+                before.push(capture(Path::new(&f.path), f.label.clone()));
+            }
+        }
+    }
+
+    let summary_targets = vec![format!("back to before {} change(s)", ids.len())];
+    // Recorded BEFORE the reverting starts, for the same reason every other
+    // record-before-mutation call site does it: an interrupted revert must
+    // still leave a way back.
+    let recorded = record(
+        &scope,
+        format!("undo of {} change(s)", ids.len()),
+        summary_targets,
+        before,
+    )?;
+
+    for id in ids {
+        // A revert spanning several entries must not abort halfway on one that
+        // was already undone concurrently — the remaining entries are still
+        // the user's request. A genuinely broken entry still errors.
+        match undo(id) {
+            Ok(()) => {}
+            Err(e) if e.to_string().contains("already undone") => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(recorded)
+}
+
 /// Drop an entry that turned out to describe nothing.
 ///
 /// This exists for the record-before-mutation pattern: a command that must
