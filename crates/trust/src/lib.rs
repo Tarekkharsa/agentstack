@@ -819,6 +819,100 @@ mod tests {
         });
     }
 
+    /// Phase 2 CONSENT WITNESS: a standing re-gate answer about one item
+    /// survives a re-grant driven by a DIFFERENT item.
+    ///
+    /// This exists because the first implementation got it wrong: `store_entry`
+    /// replaced the whole `TrustEntry`, so accepting a change to skill B
+    /// silently discarded a refusal the human had recorded about skill A. That
+    /// turns "I refused this" into "I refused this until something unrelated
+    /// happened" — a consent decision quietly undone by an action that never
+    /// mentioned it. NEVER weaken this.
+    #[test]
+    fn a_standing_answer_survives_a_regrant_driven_by_another_item() {
+        with_home(|_| {
+            let proj = project_with_manifest();
+            let first = digest_for(proj.path()).unwrap();
+            trust_reviewed(proj.path(), first, Vec::new()).unwrap();
+
+            // The human keeps the approved bytes of skill A.
+            set_decision(
+                proj.path(),
+                "skill",
+                "alpha",
+                Some(Decision::KeepPinned {
+                    pin: "sha256:aaa".into(),
+                }),
+            )
+            .unwrap();
+            // …and blocks skill C outright.
+            set_decision(proj.path(), "skill", "gamma", Some(Decision::Blocked)).unwrap();
+
+            // Something unrelated changes and the project is re-granted — the
+            // manifest moved, which is what accepting a change to B looks like
+            // at this layer.
+            proj.child(".agentstack/agentstack.toml")
+                .write_str(
+                    "version = 1\n[servers.beta]\ntype = \"http\"\nurl = \"https://b/mcp\"\n",
+                )
+                .unwrap();
+            let second = digest_for(proj.path()).unwrap();
+            trust_reviewed(proj.path(), second, Vec::new()).unwrap();
+
+            assert_eq!(
+                decision_for(proj.path(), "skill", "alpha"),
+                Some(Decision::KeepPinned {
+                    pin: "sha256:aaa".into()
+                }),
+                "a keep-pinned answer was discarded by an unrelated re-grant"
+            );
+            assert_eq!(
+                decision_for(proj.path(), "skill", "gamma"),
+                Some(Decision::Blocked),
+                "a block was discarded by an unrelated re-grant"
+            );
+        });
+    }
+
+    /// The inverse, and the reason decisions live on the trust entry at all:
+    /// revoking consent discards them with everything else the project was
+    /// granted. A refusal that outlived its trust would be a standing behaviour
+    /// with no consent behind it.
+    #[test]
+    fn revoking_trust_discards_standing_answers_with_the_rest_of_consent() {
+        with_home(|_| {
+            let proj = project_with_manifest();
+            let digest = digest_for(proj.path()).unwrap();
+            trust_reviewed(proj.path(), digest, Vec::new()).unwrap();
+            set_decision(proj.path(), "skill", "alpha", Some(Decision::Blocked)).unwrap();
+            assert!(decision_for(proj.path(), "skill", "alpha").is_some());
+
+            assert!(revoke(proj.path()).unwrap());
+            assert!(
+                decisions_for(proj.path()).is_empty(),
+                "standing answers outlived the consent they belonged to"
+            );
+
+            // Re-granting starts clean: the human answers again, from scratch.
+            let digest = digest_for(proj.path()).unwrap();
+            trust_reviewed(proj.path(), digest, Vec::new()).unwrap();
+            assert!(decisions_for(proj.path()).is_empty());
+        });
+    }
+
+    /// An answer about a project nobody trusted is meaningless, and recording
+    /// one must not create a trust entry — that would be a second grant
+    /// constructor, which invariant 6 forbids.
+    #[test]
+    fn recording_an_answer_never_creates_trust() {
+        with_home(|_| {
+            let proj = project_with_manifest();
+            assert!(!set_decision(proj.path(), "skill", "a", Some(Decision::Blocked)).unwrap());
+            assert_eq!(check(proj.path()), TrustState::Untrusted);
+            assert!(decisions_for(proj.path()).is_empty());
+        });
+    }
+
     /// Phase 2 NO-REGATE WITNESS: recording a pin changes no digest. The consent
     /// digest covers the manifest, local overlay, and lock bytes — the surface
     /// snapshot is metadata stored beside it. If the pin leaked into the digest,
