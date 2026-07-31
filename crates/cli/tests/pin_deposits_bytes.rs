@@ -79,6 +79,26 @@ fn path_entries(lock_text: &str) -> Vec<(String, String)> {
     out
 }
 
+/// Every `[[instruction]]` row's `(name, checksum)`. Same deliberately dumb
+/// scanner as `path_entries`, and for the same reason: this witness must not go
+/// green because a parser tolerated a lockfile shape change.
+fn instruction_entries(lock_text: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for block in lock_text.split("[[instruction]]").skip(1) {
+        let block = block.split("\n[[").next().unwrap_or(block);
+        let field = |key: &str| -> Option<String> {
+            block.lines().find_map(|l| {
+                let rest = l.trim().strip_prefix(key)?.trim_start();
+                Some(rest.strip_prefix('=')?.trim().trim_matches('"').to_string())
+            })
+        };
+        if let (Some(name), Some(checksum)) = (field("name"), field("checksum")) {
+            out.push((name, checksum));
+        }
+    }
+    out
+}
+
 fn write_project(proj: &std::path::Path) {
     let a = proj.join(".agentstack");
     fs::create_dir_all(a.join("skills/summarize")).unwrap();
@@ -93,6 +113,8 @@ fn write_project(proj: &std::path::Path) {
         "---\ndescription: reviews\n---\n# Review\nanother body\n",
     )
     .unwrap();
+    fs::create_dir_all(a.join("instructions")).unwrap();
+    fs::write(a.join("instructions/house.md"), "Prefer boring code.\n").unwrap();
     fs::write(
         a.join("agentstack.toml"),
         r#"version = 1
@@ -102,6 +124,9 @@ path = "./skills/summarize"
 
 [skills.review]
 path = "./skills/review"
+
+[instructions.house]
+path = "./instructions/house.md"
 "#,
     )
     .unwrap();
@@ -111,12 +136,18 @@ path = "./skills/review"
 fn assert_every_path_pin_has_bytes(home: &std::path::Path, proj: &std::path::Path, after: &str) {
     let lock_text = fs::read_to_string(proj.join(".agentstack/agentstack.lock"))
         .unwrap_or_else(|e| panic!("no lockfile after {after}: {e}"));
-    let entries = path_entries(&lock_text);
+    // One assertion, two kinds: skills pin a tree digest and instructions pin
+    // raw file bytes, but BOTH must have their approved bytes on disk or a
+    // re-gate cannot show what changed.
+    let mut entries = path_entries(&lock_text);
+    let instructions = instruction_entries(&lock_text);
     assert!(
-        !entries.is_empty(),
-        "after {after} the lock recorded no path-sourced skills, so this witness \
-         would be vacuous — the fixture or the lock format changed:\n{lock_text}"
+        !entries.is_empty() && !instructions.is_empty(),
+        "after {after} the lock recorded no path-sourced skills or no instructions, \
+         so this witness would be vacuous — the fixture or the lock format \
+         changed:\n{lock_text}"
     );
+    entries.extend(instructions);
     let content_root = home.join(".agentstack/store/content");
     let mut missing = Vec::new();
     for (name, checksum) in &entries {

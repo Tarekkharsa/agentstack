@@ -237,6 +237,21 @@ fn plural_lines(n: usize) -> String {
 /// escape the directory entirely. Unreadable or non-UTF-8 files are skipped
 /// too; a binary blob has no line diff, and this must never fail the review.
 fn read_tree(root: &Path) -> Vec<(String, String)> {
+    // An instruction fragment is a single FILE, while its snapshot is a
+    // directory holding that file under its own name (see
+    // `Store::deposit_file`). Reading a lone file as a one-entry tree keyed by
+    // its file name makes both sides line up, so one comparison serves both
+    // kinds instead of the read side growing a second code path.
+    if root.is_file() {
+        let name = root
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "fragment".to_string());
+        return match std::fs::read_to_string(root) {
+            Ok(text) => vec![(name, text)],
+            Err(_) => Vec::new(),
+        };
+    }
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {

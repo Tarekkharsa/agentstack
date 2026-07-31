@@ -1046,11 +1046,43 @@ pub(crate) fn grant_probed(
             match crate::resolve::instruction_lock_status(name, instr, &dir, &lock) {
                 InstructionLockStatus::Matches => say!("{mk}· {disp}   [pinned]"),
                 InstructionLockStatus::ChecksumDrift { .. } => {
-                    say!("{mk}{} {disp}   [{}]", "✗".red(), "DRIFTED from lock".red());
+                    // Instructions now deposit their bytes at pin time
+                    // (`Store::pin_instruction`), so this shows the changed
+                    // LINES of the fragment — the same treatment skills get,
+                    // and the reason the always-degraded fallback is gone.
+                    let pin = prior_pin_for(&prior_items, "instruction", name).or_else(|| {
+                        lock.get_instruction(name)
+                            .map(|e| e.checksum.hex().to_string())
+                    });
+                    let live = crate::render::instructions::fragment_source(&dir, &instr.path);
+                    // Same path-derived singleton the skills walk uses; that
+                    // binding is scoped to its own block.
+                    let store = crate::store::Store::default_store();
+                    let pin_diff = match &pin {
+                        Some(pin) => crate::regate::diff_against_pin(store.root(), pin, &live),
+                        None => crate::regate::PinDiff::NoSnapshot,
+                    };
+                    let headline = crate::regate::headline(&pin_diff)
+                        .unwrap_or_else(|| "changed since you approved it".to_string());
+                    say!("{mk}{} {disp}   [{}]", "✗".red(), headline.red());
+                    for line in crate::regate::render_lines(&pin_diff, crate::regate::DIFF_LINE_CAP)
+                    {
+                        say!("  {line}");
+                    }
                     blockers.push((
                         name.clone(),
                         "instruction content drifted from lock".to_string(),
                     ));
+                    if !matches!(pin_diff, crate::regate::PinDiff::NoSnapshot) {
+                        pending.push(PendingAnswer {
+                            kind: "instruction",
+                            name: name.clone(),
+                            blocker_ix: blockers.len() - 1,
+                            approved_pin: pin.clone(),
+                            live: Some(live),
+                            headline: headline.clone(),
+                        });
+                    }
                 }
                 InstructionLockStatus::MissingLockEntry => {
                     say!("{mk}{} {disp}   [{}]", "✗".red(), "unpinned".red());

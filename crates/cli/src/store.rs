@@ -171,6 +171,67 @@ impl Store {
         Ok(pin)
     }
 
+    /// **The pinning act, for an instruction fragment.** Sibling of [`pin`],
+    /// same contract: the checksum a lock entry needs is obtainable only by
+    /// depositing the bytes it covers.
+    ///
+    /// Why this is a second function rather than a branch inside [`pin`]: the
+    /// two kinds genuinely pin different things. A skill's checksum is a TREE
+    /// digest over its directory (`dir_digest`); an instruction's is a plain
+    /// SHA-256 over the file's raw bytes. Both shapes are load-bearing in the
+    /// lockfile, so collapsing them into one function would mean one of the
+    /// two kinds silently changing its pin format. What they DO share — the
+    /// deposit, the re-hash guard, and the copy-never-link rule — is shared,
+    /// in [`deposit_file`] and [`snapshot_content`] respectively.
+    ///
+    /// The deposited layout is `content/<hex>/<file name>`: a directory even
+    /// for one file, so the diff renderer walks both kinds identically instead
+    /// of growing a second code path on the read side.
+    ///
+    /// Best-effort, exactly like [`pin`]: a failed deposit never fails the pin.
+    ///
+    /// [`pin`]: Store::pin
+    /// [`deposit_file`]: Store::deposit_file
+    pub fn pin_instruction(&self, src: &Path) -> Result<Sha256Hex> {
+        let bytes = fs::read(src).with_context(|| format!("reading {}", src.display()))?;
+        let pin = Sha256Hex::of(&bytes);
+        // The bytes just read ARE the bytes hashed, so unlike the skill path
+        // there is no window to re-hash against — `bytes` is the single read.
+        let _ = self.deposit_file(src, &bytes, pin.hex());
+        Ok(pin)
+    }
+
+    /// Place one file's bytes at `content/<hex>/<file name>`, write-once.
+    ///
+    /// The bytes are passed in rather than re-read, so what is deposited is
+    /// exactly what was hashed — the file cannot change between the two.
+    /// Crash-safe via temp-then-rename, and a copy rather than a link, for the
+    /// same reason the skill snapshot is: the delivered/compared artifact must
+    /// never track later edits to the project file.
+    fn deposit_file(&self, src: &Path, bytes: &[u8], digest_hex: &str) -> Result<()> {
+        let name = src
+            .file_name()
+            .map(std::ffi::OsStr::to_os_string)
+            .unwrap_or_else(|| std::ffi::OsString::from("fragment"));
+        let content_root = self.root.join("content");
+        let dest = content_root.join(digest_hex);
+        if dest.join(&name).is_file() {
+            return Ok(()); // already deposited, content-addressed
+        }
+        fs::create_dir_all(&content_root)
+            .with_context(|| format!("creating {}", content_root.display()))?;
+        let tmp = content_root.join(format!(".tmp-{}", crate::runs::gen_id()));
+        fs::create_dir_all(&tmp).with_context(|| format!("creating {}", tmp.display()))?;
+        fs::write(tmp.join(&name), bytes)?;
+        if fs::rename(&tmp, &dest).is_err() {
+            let _ = fs::remove_dir_all(&tmp);
+            if !dest.join(&name).is_file() {
+                bail!("could not place the content snapshot at {}", dest.display());
+            }
+        }
+        Ok(())
+    }
+
     /// Copy `src` (a resolved, symlink-free skill body) into the immutable
     /// content-addressed cache `store/content/<digest>` and return that path.
     /// Write-once: if the digest dir already exists it is reused as-is, so
