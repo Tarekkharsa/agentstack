@@ -1225,6 +1225,19 @@ pub(crate) fn grant_probed(
     for line in card_summary_lines(&diff.current, blockers.len()) {
         println!("{line}");
     }
+    // Recognition shortens the card's BODY and nothing else: it adds one line
+    // saying how much of this has already been reviewed on this machine, and
+    // changes no outcome, no gate, and no recorded event. An absent or corrupt
+    // index simply produces no line.
+    {
+        let index = crate::recognition::Index::load();
+        let key = trust::key_for(base);
+        let known = crate::recognition::recognized_count(&index, &key, &diff.current);
+        let elsewhere = crate::recognition::other_projects(&index, &key, &diff.current);
+        if let Some(line) = crate::recognition::line(known, diff.current.len(), elsewhere) {
+            println!("{line}");
+        }
+    }
     println!();
     for line in &body {
         println!("{line}");
@@ -1480,6 +1493,9 @@ pub(crate) fn grant_probed(
     // of the SNAPSHOT this review rendered — never a fresh disk read — so a
     // mid-review byte swap leaves the project `Changed`, not blessed.
     let recorded_surface = diff.current;
+    // Cloned before the surface moves into the grant; recognition needs its
+    // pins and the grant consumes the vector.
+    let recorded_for_recognition = recorded_surface.clone();
     let digest = match consented {
         Some(consented) => trust::trust_with_consent(base, recorded_surface, consented)?,
         None => {
@@ -1487,6 +1503,15 @@ pub(crate) fn grant_probed(
             effective_digest
         }
     };
+
+    // Recognition, after the grant: this project has now approved these exact
+    // digests, which is what lets the NEXT project's card be shorter. Records
+    // digests and project keys only — never content — and cannot fail the
+    // grant, because a convenience must never be able to.
+    crate::recognition::record(
+        &trust::key_for(base),
+        crate::recognition::digests_of(&recorded_for_recognition),
+    );
 
     // Standing answers, last — see the ordering note above.
     for (ix, answer) in &answers {
@@ -1966,6 +1991,10 @@ pub(crate) fn review_skill_names(m: &crate::manifest::Manifest) -> Vec<String> {
 }
 
 fn revoke(base: &Path) -> Result<()> {
+    // Recognition is derived from consent, so it does not outlive it: this
+    // project stops corroborating any other project's card the moment its own
+    // trust is withdrawn.
+    crate::recognition::forget(&trust::key_for(base));
     if trust::revoke(base)? {
         println!(
             "{} trust revoked for {} — auto-mode is control-plane only there now.",

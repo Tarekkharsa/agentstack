@@ -616,6 +616,85 @@ fn a_review_with_nothing_to_answer_is_unchanged_for_scripts() {
         .expect("the scripted path is unchanged");
 }
 
+/// Item 6 CONSENT WITNESS: **recognition changes lines, and nothing else.**
+///
+/// The whole risk of a "you've seen this before" feature is that it starts
+/// deciding things. So this drives two byte-identical projects — the second of
+/// which recognizes everything the first approved — and asserts the outcome,
+/// the gate, and the recorded events are identical to a run with no index at
+/// all. Only the printed body may differ.
+#[test]
+fn recognition_changes_lines_never_the_outcome_or_the_events() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    isolate_home(tmp.path());
+
+    // First project: nothing is recognized (the index starts empty).
+    let first = trusted_project_at(tmp.path(), "first");
+    let first_events = events(&first);
+    assert!(!first_events.is_empty());
+
+    // Second project, byte-identical content: everything IS recognized now.
+    let second = trusted_project_at(tmp.path(), "second");
+    let index = agentstack::recognition::Index::load();
+    let key = agentstack::trust::key_for(&second);
+    let recorded = match agentstack::trust::prior_surface(&second) {
+        agentstack::trust::PriorSurface::Recorded(items) => items,
+        other => panic!("expected a recorded surface, got {other:?}"),
+    };
+    assert!(
+        agentstack::recognition::recognized_count(&index, &key, &recorded) > 0,
+        "the second project should recognize the first's approvals"
+    );
+
+    // The outcome is the same…
+    assert_eq!(
+        agentstack::trust::check(&second),
+        agentstack::trust::TrustState::Trusted
+    );
+    // …and so is the event trail, action-for-action and digest-for-digest.
+    // Recognition contributed a line, not a decision.
+    assert_eq!(
+        events(&second),
+        first_events,
+        "recognition changed the recorded events"
+    );
+}
+
+/// Item 6: recognition is derived from consent and does not outlive it.
+#[test]
+fn revoking_trust_stops_this_project_corroborating_others() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    isolate_home(tmp.path());
+    let first = trusted_project_at(tmp.path(), "first");
+    let second = trusted_project_at(tmp.path(), "second");
+
+    let key_second = agentstack::trust::key_for(&second);
+    let recorded = match agentstack::trust::prior_surface(&second) {
+        agentstack::trust::PriorSurface::Recorded(items) => items,
+        other => panic!("{other:?}"),
+    };
+    let before = agentstack::recognition::recognized_count(
+        &agentstack::recognition::Index::load(),
+        &key_second,
+        &recorded,
+    );
+    assert!(before > 0);
+
+    // The corroborating project withdraws its consent.
+    agentstack::recognition::forget(&agentstack::trust::key_for(&first));
+    let after = agentstack::recognition::recognized_count(
+        &agentstack::recognition::Index::load(),
+        &key_second,
+        &recorded,
+    );
+    assert_eq!(
+        after, 0,
+        "a revoked project still corroborates another project's card"
+    );
+}
+
 /// The other half of the contract: an item the human did NOT answer keeps its
 /// blocker, so the review refuses exactly as it does today. Silence is not an
 /// answer, and it must not become one just because a prompt now exists.

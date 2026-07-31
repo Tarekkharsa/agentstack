@@ -282,6 +282,43 @@ lives beside its neighbours:
 
 ## Panel
 
+**Why the two renderers are not merged (decided 2026-07-31, from an adversarial
+review).** The obvious plan — extract one `review_surface()` walk that both the
+terminal review and `trust --preview` consume — is refuted by three properties
+that are each deliberate:
+
+1. **They disclose different things on purpose.** `preview_value` *redacts* a
+   library server whose live definition does not match its lock pin, emitting
+   an `unverified` marker instead of the command line, so an external UI cannot
+   bind consent to bytes the digest does not cover. The authoritative review
+   does the opposite — it prints the live command line with a `DRIFTED`
+   annotation — because the card may never disclose *less*. A shared surface
+   must pick one, and one of the two choices is a consent regression.
+2. **Preview must not write.** The review walk reaches `Store::ensure_worktree`
+   (git worktree materialization) through the lock-status resolvers. Preview's
+   read-only contract is shipped, witnessed, and consumed by the panel RPC;
+   sharing the walk would add git subprocesses and unbounded latency to it.
+3. **The lint anchor pins the walk in place.** `tools/check-structure.py`
+   locates the `:review` disclosure evidence by matching literal `diff.mark(`
+   inside `crates/cli/src/commands/trust.rs`. Moving the walk silently voids
+   the requirement for every kind.
+
+So the contract is narrower and honest: the preview gains the kinds it can
+compute with **no resolver and no store** — hooks, settings, and policy, which
+are pure manifest reads — and says plainly what it still excludes and why. That
+closes the disclosure gap that mattered most (hooks are executable and were
+absent from the machine-readable surface entirely) without moving a walk that
+must not move.
+
+A related hazard, recorded so a future refactor does not rediscover it:
+`PendingAnswer.blocker_ix` is a positional index into one global `blockers`
+vector. Decomposing the walk into per-kind functions with local vectors would
+misalign it, and the failure is silent — accepting one item could clear an
+unrelated item's blocker, emptying the vector so the bail never fires and an
+unpinned surface is trusted. Any future decomposition must key blockers by
+`(kind, name)` first.
+
+
 The panel consumes structured JSON from `preview_value()` through
 `ui_contract::envelope`, so re-labelling existing fields flows through with no
 panel work. **`ConsentCard` content has no machine-readable form today** — it
