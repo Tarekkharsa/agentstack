@@ -67,8 +67,11 @@ Trusted does **not** mean:
   wrapper) reads as interactive — no stronger than the store-file boundary
   above, and not claimed to be. What the gate does enforce is that headless
   callers (pipes, RPC servers) cannot grant without `--yes` plus the reviewed
-  `--consented-digest`. (A recorder-backed tamper log for trust-store
-  mutations is *intended* but not yet wired — see the audit/recording row.)
+  `--consented-digest`. Every store mutation now leaves an identity-only
+  event behind (see [Trust-store mutation
+  logging](#trust-store-mutation-logging)), which makes silent self-trust
+  harder to miss — but the log lives in the same user-writable directory, so
+  it is evidence, not a defence.
 
 Conversely, **untrusted project declarations are inert on automatic and
 experimental execution paths**: the auto-project gateway does not spawn or
@@ -464,13 +467,25 @@ Docker container behind the egress proxy.
   machine-policy tightening mid-run takes effect at the next run, matching
   the in-process gateway's snapshot-at-start semantics.
 
-### Not yet wired: trust-store mutation logging
+### Trust-store mutation logging
 
-ARCHITECTURE Layer 2 describes logging every trust-store mutation as tamper
-evidence, as mitigation for the host-mode self-trust risk. **As of this writing
-that is intended, not implemented** — the trust command and `crates/trust` call no
-recorder. Treat it as a planned mitigation, not a shipped guarantee, until a
-run/audit event for trust mutations exists.
+**What ships:** every mutation of the machine trust store appends one
+identity-only line to `~/.agentstack/audit/trust.jsonl` — timestamp, action
+(`grant`, `regrant`, `repin`, `revoke`), the store's own project key, and the
+consent digest pinned or removed. Never the manifest bytes, never the reviewed
+surface. The append happens inside the store lock and only after the store
+write succeeded, so log order is store order and every event describes a
+mutation that actually happened. `repin` is recorded distinctly from
+`regrant` because no human consented to it. The file is created `0600` and is
+never rotated: consent metrics count over the full history.
+
+**What it is not:** the append is best-effort — if it fails, the grant still
+succeeds and the event is simply lost, because recording must never gate
+consent. The log is append-only by convention, **not tamper-evident**, and it
+sits under the same user-writable `~/.agentstack/` as the trust store itself.
+A compromised host-mode agent that can self-trust can also delete or rewrite
+this log. It raises the cost of unnoticed self-trust; it does not prevent it.
+Only sandbox mode removes the underlying risk.
 
 ## Experimental `tools_execute`
 

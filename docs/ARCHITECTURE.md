@@ -237,11 +237,15 @@ usernames never enter the content digest.
 **Honest limitation:** the trust store and machine policy live under
 `~/.agentstack/`, which is writable by the user — and in host mode the agent
 CLI runs *as* the user, so a compromised agent could modify them and
-self-trust a bundle. Only sandbox mode removes this. The intended mitigation —
-having the recorder log every trust-store mutation as tamper evidence — is
-**not yet wired** (the trust command and `crates/trust` call no recorder today);
-until it is, treat it as planned, not a shipped guarantee. See
-[`ENFORCEMENT.md`](ENFORCEMENT.md) for the exact per-mode enforcement status.
+self-trust a bundle. Only sandbox mode removes this. What ships today is the
+evidence half: every trust-store mutation appends an identity-only event
+(timestamp, action `grant`/`regrant`/`repin`/`revoke`, project key, digest —
+never content) to `~/.agentstack/audit/trust.jsonl`. The append is best-effort
+and never gates the mutation, the file is `0600` and append-only by
+convention, and it is **not tamper-evident**: a compromised agent in host mode
+can still delete or rewrite it. It makes unnoticed self-trust harder, not
+impossible. See [`ENFORCEMENT.md`](ENFORCEMENT.md) for the exact per-mode
+enforcement status.
 
 This layer must work standalone — valuable with no sandbox, no registry.
 
@@ -475,8 +479,14 @@ secret-reference access (reference names, never values). `agentstack report
 run <id>` renders that evidence for humans or JSON consumers and can supplement
 older runs from the separate global call audit log.
 
-Trust-store mutations and per-run token/cost events are not yet wired. The
-JSONL is append-only by convention, not cryptographically tamper-evident.
+Trust-store mutations have their own stream: `crates/trust` appends one
+identity-only event per store mutation (timestamp, action, project key,
+digest) to `~/.agentstack/audit/trust.jsonl`, inside the store lock and only
+after the store write succeeds — so log order is store order and an event
+always describes a mutation that happened. It is deliberately unrotated: the
+consent metrics count over the full history. Per-run token/cost events are
+still not wired. All of this JSONL is append-only by convention, not
+cryptographically tamper-evident; a compromised host-mode agent can delete it.
 
 Scope discipline: a log with a good viewer, not an observability platform.
 
@@ -493,7 +503,7 @@ Exact internal edges (anything not listed is forbidden):
 
 ```
 core     → (nothing)
-trust    → core
+trust    → core, recorder
 policy   → core
 recorder → core
 adapters → core
@@ -502,6 +512,15 @@ egress   → core, policy, recorder
 executor → (nothing)
 cli      → everything
 ```
+
+`trust → recorder` is the one edge added for trust-mutation evidence (P0.2).
+It keeps `trust` a small review boundary: `recorder` depends on `core` alone
+and forbids unsafe code, so the edge adds no new external dependency and no
+new authority. The recording call sits *inside* the store lock, immediately
+after the successful save, which is what makes evidence unskippable by
+construction and makes log order equal store order. The alternative — a
+callback the caller supplies — was rejected: it is skippable by construction,
+and a mutation path that forgets to record would be silently unwitnessed.
 
 `executor` holds no internal edges: it is a self-contained, policy-agnostic
 domain built on `serde`/`sha2`/`thiserror`, and the `cli` crate is what composes
