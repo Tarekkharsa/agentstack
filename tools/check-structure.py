@@ -202,8 +202,22 @@ FS_DENY_PROSE = "[policy.filesystem] deny"
 MIN_SECTION_BODY_LINES = 3
 
 _BASELINE_LINE_RE = re.compile(r"^([a-zA-Z0-9_]+:[a-zA-Z0-9_]+:[a-zA-Z0-9_]+)\s*#\s*(.+)$")
-_TEST_FN_RE = re.compile(r"#\[test\]((?:\s*#\[[^\]]*\])*)\s*fn\s+(\w+)")
 _IGNORE_ATTR_RE = re.compile(r"#\[ignore\b")
+_CFG_ATTR_RE = re.compile(r"#\[cfg\b")
+
+
+def _attr_block_for_fn(text: str, fn_name: str) -> str | None:
+    """The contiguous attribute lines directly above `fn <fn_name>`, or None
+    when the fn does not exist. Scanning the WHOLE block (not just what
+    follows `#[test]`) closes the round-3 bypasses where `#[ignore]` or a
+    compiling-it-out `#[cfg(...)]` sits BEFORE `#[test]` — attribute order is
+    irrelevant to rustc, so it must be irrelevant here too."""
+    m = re.search(
+        rf"((?:^[ \t]*#\[[^\n]*\n)*)[ \t]*(?:pub[ \t]+)?fn[ \t]+{re.escape(fn_name)}\b",
+        text,
+        re.MULTILINE,
+    )
+    return m.group(1) if m else None
 _FENCED_BLOCK_RE = re.compile(r"```.*?```", re.DOTALL)
 
 
@@ -231,11 +245,17 @@ def parse_manifest_fields(model_rs_text: str) -> list[str]:
     IndexMap, or any other type-shape change must still show up as a field
     name here. verify_kind_set() is what turns this list into a pass/fail.
     """
-    count = model_rs_text.count("pub struct Manifest {")
+    # Decoy guard (E3/1e/1f hardening): count the bare IDENTIFIER, not one
+    # exact declaration spelling — a decoy struct planted to shadow this
+    # parser must itself contain `struct Manifest`, whatever whitespace,
+    # attributes, or where-clauses dress up either declaration. Exactly one
+    # occurrence in the file or the parser refuses outright; a mention in a
+    # doc comment trips this too, and the refusal message says how to fix it.
+    count = len(re.findall(r"\bstruct\s+Manifest\b", model_rs_text))
     if count != 1:
         print(
-            f"refusing: {count} declarations of pub struct Manifest — the kind-set "
-            f"parser needs exactly one"
+            f"refusing: {count} occurrences of `struct Manifest` in model.rs — the "
+            f"kind-set parser needs exactly one (no decoys, no doc-comment mentions)"
         )
         sys.exit(2)
     m = re.search(r"pub struct Manifest \{(.*?)\n\}", model_rs_text, re.DOTALL)
@@ -276,11 +296,12 @@ def parse_dimensions(model_rs_text: str) -> list[str]:
     WHERE: `pub enum Dimension { ... }` in model.rs.
     WHAT: each bare variant name.
     """
-    count = model_rs_text.count("pub enum Dimension {")
+    # Same decoy guard as parse_manifest_fields: bare-identifier count.
+    count = len(re.findall(r"\benum\s+Dimension\b", model_rs_text))
     if count != 1:
         print(
-            f"refusing: {count} declarations of enum Dimension — the kind-set "
-            f"parser needs exactly one"
+            f"refusing: {count} occurrences of `enum Dimension` in model.rs — the "
+            f"dimension parser needs exactly one (no decoys, no doc-comment mentions)"
         )
         sys.exit(2)
     m = re.search(r"pub enum Dimension \{(.*?)\n\}", model_rs_text, re.DOTALL)
@@ -340,13 +361,14 @@ def check_witness_test(
     """(d) witness test, per WITNESS_REGISTRY.
 
     WHERE: the exact `(file, fn name)` pairs registered for `kind`.
-    WHAT: each registered fn must exist in its registered file, preceded by
-    `#[test]` (other attributes may sit between), and that attribute block
-    must NOT contain `#[ignore]` (or `#[ignore = "..."]`) — a registered
-    witness that is `#[ignore]`d never runs, so it proves nothing and fails
-    the lint exactly like a deleted witness would (G2 hardening). A kind with
-    no registry entry is a gap by definition — the baseline decides whether
-    that gap is acceptable, same as any other requirement.
+    WHAT: each registered fn must exist in its registered file with `#[test]`
+    somewhere in the contiguous attribute block directly above it, and that
+    WHOLE block (attribute order is irrelevant to rustc, so it is irrelevant
+    here) must contain neither `#[ignore]` nor any `#[cfg(...)]` — a witness
+    that never runs, or that a cfg can compile out, proves nothing and fails
+    the lint exactly like a deleted witness would. A kind with no registry
+    entry is a gap by definition — the baseline decides whether that gap is
+    acceptable, same as any other requirement.
     """
     if registry is None:
         registry = WITNESS_REGISTRY
@@ -364,17 +386,22 @@ def check_witness_test(
         found = False
         if file_path.is_file():
             text = file_path.read_text(encoding="utf-8", errors="replace")
-            for m in _TEST_FN_RE.finditer(text):
-                if m.group(2) != fn_name:
-                    continue
-                if _IGNORE_ATTR_RE.search(m.group(1)):
+            block = _attr_block_for_fn(text, fn_name)
+            if block is not None and "#[test]" in block:
+                if _IGNORE_ATTR_RE.search(block):
                     return (
                         False,
                         f"registered witness {fn_name} is #[ignore]d — a witness that "
                         f"never runs is not a witness",
                     )
+                if _CFG_ATTR_RE.search(block):
+                    return (
+                        False,
+                        f"registered witness {fn_name} carries #[cfg(...)] — a witness "
+                        f"that can be compiled out is not unconditional; registered "
+                        f"witnesses must run everywhere",
+                    )
                 found = True
-                break
         (present if found else missing).append(f"{fn_name} ({rel_path})")
     if missing:
         return False, f"missing registered witness fn(s): {', '.join(missing)}"
@@ -393,7 +420,16 @@ def get_section_body(title: str, text: str) -> str | None:
     """
     pattern = rf"^### {re.escape(title)}[ \t]*\n(.*?)(?=\n#{{2,3}}[ \t]|\Z)"
     m = re.search(pattern, text, re.MULTILINE | re.DOTALL)
-    return strip_fenced_code_blocks(m.group(1)) if m else None
+    if not m:
+        return None
+    body = strip_fenced_code_blocks(m.group(1))
+    # Round-3 hardening (2b): 4-space/tab-indented lines are Markdown code
+    # blocks outside list context and must not count as prose either — the
+    # real ENFORCEMENT.md bodies indent list continuations by two spaces, so
+    # this strips only genuine code plants, verified against the live doc.
+    return "\n".join(
+        line for line in body.splitlines() if not re.match(r"^(?: {4}|\t)\S", line)
+    )
 
 
 def _count_nonblank_lines(body: str) -> int:
@@ -465,8 +501,22 @@ def check_dimension_row(
     if titles_map is None:
         titles_map = DIMENSION_TITLES
     if dim == "FsDeny":
-        found = FS_DENY_PROSE in strip_fenced_code_blocks(enforcement_md_text)
-        evidence = f'prose mention of "{FS_DENY_PROSE}"' if found else f'no prose mention of "{FS_DENY_PROSE}"'
+        # Round-3 hardening (2c): the anchor must live where the doc claims
+        # it lives — inside a Filesystem section's own (code-stripped) body —
+        # not merely anywhere in the file, so a literal planted at EOF or in
+        # a trailing code region is never evidence.
+        found = any(
+            body is not None and FS_DENY_PROSE in body
+            for body in (
+                get_section_body(titles_map["FsWrite"], enforcement_md_text),
+                get_section_body(titles_map["FsRead"], enforcement_md_text),
+            )
+        )
+        evidence = (
+            f'prose mention of "{FS_DENY_PROSE}" inside a Filesystem section'
+            if found
+            else f'no prose mention of "{FS_DENY_PROSE}" inside a Filesystem section'
+        )
         return found, evidence
     title = titles_map.get(dim)
     if title is None:
@@ -682,6 +732,26 @@ pub enum Dimension {
         if ok_c or "no WITNESS_REGISTRY entry" not in ev_c:
             failures.append("self-test: kind with no witness registry entry NOT treated as a gap")
 
+        # Round-3: the WHOLE attribute block is scanned — #[ignore] and
+        # #[cfg(...)] must fail whether they sit before or after #[test].
+        for label, attrs in [
+            ("ignore-after-test", "#[test]\n#[ignore]\n"),
+            ("ignore-before-test", "#[ignore]\n#[test]\n"),
+            ("ignore-with-reason-before-test", '#[ignore = "wip"]\n#[test]\n'),
+            ("cfg-before-test", "#[cfg(any())]\n#[test]\n"),
+            ("cfg-after-test", "#[test]\n#[cfg(any())]\n"),
+        ]:
+            (tests_dir / "fixture_witness.rs").write_text(
+                f"{attrs}fn kind_a_drift_blocks_apply() {{}}\n", encoding="utf-8"
+            )
+            ok_dis, _ = check_witness_test("kinda", root, registry=fixture_registry)
+            if ok_dis:
+                failures.append(f"self-test: disabled registered witness ({label}) NOT caught")
+        # Restore the healthy fixture for anything below that reuses it.
+        (tests_dir / "fixture_witness.rs").write_text(
+            "#[test]\nfn kind_a_drift_blocks_apply() {}\n", encoding="utf-8"
+        )
+
         # ---- Finding 2: gutted section body / missing matrix row -----
         gutted_text = "### Widget\n\none line only.\n\n| **Widget** | enforced |\n"
         missing_row_text = (
@@ -727,13 +797,31 @@ pub enum Dimension {
         if not ok_dim_healthy:
             failures.append("self-test: fully-covered dimension (heading+body+row) wrongly flagged as a gap")
 
-        # FsDeny stays anchor-only regardless of titles_map.
-        ok_fsdeny, _ = check_dimension_row("FsDeny", f"prose containing {FS_DENY_PROSE} somewhere.")
+        # FsDeny stays anchor-only, but the anchor must sit INSIDE a
+        # Filesystem section's own body (round-3 scoping) — a plant at EOF,
+        # in a fence, or in an indented code line is never evidence.
+        fs_write_title = DIMENSION_TITLES["FsWrite"]
+        fsdeny_scoped = (
+            f"### {fs_write_title}\n\nreal prose mentioning {FS_DENY_PROSE} here.\nmore prose.\nand more.\n"
+        )
+        ok_fsdeny, _ = check_dimension_row("FsDeny", fsdeny_scoped)
         if not ok_fsdeny:
             failures.append("self-test: FsDeny prose anchor wrongly flagged as missing")
         ok_fsdeny_missing, _ = check_dimension_row("FsDeny", "no anchor text here.")
         if ok_fsdeny_missing:
             failures.append("self-test: FsDeny prose anchor absence NOT caught")
+        ok_fsdeny_eof, _ = check_dimension_row(
+            "FsDeny",
+            f"### {fs_write_title}\n\nprose without the anchor.\nmore.\nand more.\n\n## Other\n\n{FS_DENY_PROSE}\n",
+        )
+        if ok_fsdeny_eof:
+            failures.append("self-test: FsDeny anchor OUTSIDE a Filesystem section wrongly accepted")
+        ok_fsdeny_indent, _ = check_dimension_row(
+            "FsDeny",
+            f"### {fs_write_title}\n\nprose without the anchor.\nmore.\nand more.\n\n    {FS_DENY_PROSE}\n",
+        )
+        if ok_fsdeny_indent:
+            failures.append("self-test: FsDeny anchor in an indented code line wrongly accepted")
 
         # ---- Baseline mechanics (missing-from-baseline + stale entry) -
         (tests_dir / "servers_witness.rs").write_text(
