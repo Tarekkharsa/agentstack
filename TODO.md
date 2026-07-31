@@ -67,22 +67,35 @@ exchange) may **not** enter this queue until the Phase 0 gate passes — the
 gate is the Stage 1 study result itself plus its three top blockers fixed; a
 failed study stops the v2 plan, not just this block.
 
-- [ ] **P0.1 — study instrumentation.** Add the v2 observation prompts to the
+- [x] **P0.1 — study instrumentation.** Add the v2 observation prompts to the
   §1.6 protocol (where does a tester reach for "drop a file" and stall; can
   they restate what they consented to) and baseline the four metrics: TTLC,
   concepts-before-value, review comprehension, recovery time. Opt-in
-  observation only — the F19 constraint applies unchanged.
+  observation only — the F19 constraint applies unchanged. (2026-07-31:
+  additions-only in `docs/design/activation-study.md` §5 + new §9; protocol
+  and pass condition byte-identical.)
 - [ ] **P0.2 — trust-store mutation recording.** Grants, re-grants, and
   revocations become recorder events (the planned mitigation already named in
   `docs/ENFORCEMENT.md`). Adds events, never gates. Touches the trust seam:
-  supervised, line-by-line review per `CLAUDE.md`.
-- [ ] **P0.3 — structural lint.** Every policy dimension keeps its
+  supervised, line-by-line review per `CLAUDE.md`. (2026-07-31: implemented
+  with witness tests on branch `p0/trust-recording`, unmerged — awaiting the
+  line-by-line review this item requires.)
+- [x] **P0.3 — structural lint.** Every policy dimension keeps its
   `ENFORCEMENT.md` row; every capability kind has manifest table + lock
   pinning + doctor probe + witness test + an explicit honest enforcement
-  statement (the `[hooks.*]` statement is in flight as its own task).
-- [ ] **P0.4 — files-you-create-first docs restructure.** First-contact pages
+  statement (the `[hooks.*]` statement landed with this task). (2026-07-31:
+  `tools/check-structure.py` + CI job, three adversarial rounds; the 14
+  honestly-baselined gaps live in `tools/check-structure-baseline.txt` —
+  shrinking that file is follow-on work, settings and the hooks lock pin
+  being the substantive entries.)
+- [~] **P0.4 — files-you-create-first docs restructure.** First-contact pages
   lead with the tree the user touches; mechanism nouns move to the moment
-  they become relevant. Six-rung ladder unchanged.
+  they become relevant. Six-rung ladder unchanged. (2026-07-31: README.md and
+  `docs/concepts.md` restructured, ladder intact. REMAINDER: `docs/start.html`,
+  `docs/index.html`, and `docs/tutorial/` are hand-authored HTML with no `.md`
+  source and are read-denied by `.claude/settings.json` — finishing this item
+  needs either an exception for those hand-written pages or their migration to
+  `.md` sources, which is F09's "one content source" work.)
 
 ## Open review findings — what two product reviews left standing
 
