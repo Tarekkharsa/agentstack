@@ -30,6 +30,7 @@ pub mod gitx;
 pub mod grant;
 pub mod guard;
 pub mod history;
+pub mod intake;
 pub mod library;
 pub mod machine_policy;
 // TODO(phase-1): re-export shims — migrate callers to agentstack_core:: paths

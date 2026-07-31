@@ -888,6 +888,44 @@ fn run_checks(
         );
     }
 
+    report.section("Dropped files");
+    // Dropped-but-undeclared content in this project's own intake dirs. Not a
+    // defect — the files are inert and the setup is still `ready` — so it is
+    // Advisory: an offer the user has to be told exists, not a repair.
+    let dropped = crate::intake::scan(
+        &ctx.dir,
+        &crate::manifest::project_root_of(&ctx.dir),
+        manifest,
+    );
+    for item in &dropped.items {
+        report.line(
+            Level::Advisory,
+            format!(
+                "{} '{}' is in {} but not in this setup — inert until adopted ↳ agentstack adopt",
+                item.kind.noun(),
+                item.name,
+                item.rel_path,
+            ),
+        );
+    }
+    for c in &dropped.collisions {
+        report.line(
+            Level::Warn,
+            format!(
+                "{} '{}' in {} is not adopted — that name is already declared \u{21b3} rename the file or remove the existing entry",
+                c.kind.noun(),
+                c.name,
+                c.rel_path,
+            ),
+        );
+    }
+    if dropped.is_empty() {
+        // Nothing waiting: true, but not something this project must act on,
+        // so the section stays hidden unless `--all`.
+        report.line(Level::Ok, "nothing dropped in waiting to be adopted");
+        report.mark_irrelevant();
+    }
+
     report.section("Drift");
     if args.skip_drift || mode == super::overview::Mode::ZeroFiles {
         // Both delivery modes that keep rendered configs off disk ON PURPOSE:

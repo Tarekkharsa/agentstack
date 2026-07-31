@@ -135,8 +135,35 @@ pub fn run(args: &AdoptArgs, manifest_dir: Option<&Path>) -> Result<()> {
         }
     }
 
-    if collected.is_empty() {
-        println!("Nothing to adopt — every on-disk server already matches the manifest.");
+    // Files dropped into this project's own intake dirs. Same verb, because it
+    // is the same question — "something is here that your setup doesn't know
+    // about, bring it in" — and one verb is one thing for a user to learn.
+    let found = crate::intake::scan(
+        &ctx.dir,
+        &crate::manifest::project_root_of(&ctx.dir),
+        manifest,
+    );
+
+    let dropped = &found.items;
+    // A dropped file whose name a manifest entry already uses is reported, not
+    // adopted: replacing a pinned declaration is not "bringing in something
+    // new", and this slice will not do it behind a preview that says `+`.
+    for c in &found.collisions {
+        println!(
+            "  {} {} '{}' in {} — that name is already declared; rename the file \
+             or remove the existing entry",
+            "!".yellow(),
+            c.kind.noun(),
+            c.name,
+            c.rel_path
+        );
+    }
+
+    if collected.is_empty() && dropped.is_empty() {
+        println!(
+            "Nothing to adopt — every on-disk server already matches the manifest, and no \
+             undeclared files are waiting."
+        );
         return Ok(());
     }
 
@@ -158,15 +185,72 @@ pub fn run(args: &AdoptArgs, manifest_dir: Option<&Path>) -> Result<()> {
             ctx.loaded.manifest_path.display()
         )
     })?;
-    let new_text = merge_toml::merge(&manifest_text, "servers", &entries, true)
-        .context("cannot update the manifest — fix its TOML syntax with `agentstack doctor`, then rerun `agentstack adopt`")?;
+    let mut new_text = manifest_text.clone();
+    if !entries.is_empty() {
+        new_text = merge_toml::merge(&new_text, "servers", &entries, true)
+            .context("cannot update the manifest — fix its TOML syntax with `agentstack doctor`, then rerun `agentstack adopt`")?;
+    }
+    // Dropped files become ordinary manifest entries through the same single
+    // insertion path `add` uses, so there is no second way content enters a
+    // manifest — and `toml_edit` keeps the file's comments and formatting.
+    for item in dropped {
+        new_text = super::add::build_manifest_with(
+            &new_text,
+            item.kind.section(),
+            &item.name,
+            &intake_entry(item),
+            None,
+        )
+        .with_context(|| {
+            format!(
+                "cannot add {} '{}' to the manifest — fix its TOML syntax with `agentstack doctor`, then rerun `agentstack adopt`",
+                item.kind.noun(),
+                item.name
+            )
+        })?;
+    }
 
+    let mut what = Vec::new();
+    if !collected.is_empty() {
+        what.push(super::count(collected.len(), "server"));
+    }
+    if !dropped.is_empty() {
+        what.push(super::count(dropped.len(), "dropped file"));
+    }
     println!(
         "\n{} {} to adopt into {}",
         "→".cyan(),
-        super::count(collected.len(), "server"),
+        what.join(" and "),
         ctx.loaded.manifest_path.display()
     );
+    // The preview names each dropped file, where it came from, and which path
+    // its provenance puts it on — a classification the user cannot see is not
+    // a consent story.
+    for item in dropped {
+        println!(
+            "  {} {} {} ({})",
+            "+".green(),
+            item.kind.noun(),
+            item.name,
+            item.rel_path.dimmed()
+        );
+        if let Some(summary) = &item.summary {
+            println!("      {}", summary.dimmed());
+        }
+        println!(
+            "      {}",
+            format!(
+                "{} — {}",
+                if item.provenance.is_local() {
+                    "your own work"
+                } else {
+                    "came with this project"
+                },
+                item.provenance.reason()
+            )
+            .dimmed()
+        );
+    }
     print!(
         "{}",
         diff::render(&manifest_text, &new_text)
@@ -193,16 +277,107 @@ pub fn run(args: &AdoptArgs, manifest_dir: Option<&Path>) -> Result<()> {
         }
         crate::util::atomic::write(&ctx.loaded.manifest_path, &new_text)
             .with_context(|| format!("writing {}", ctx.loaded.manifest_path.display()))?;
-        println!(
-            "\n{} adopted {}.",
-            "✓".green(),
-            super::count(collected.len(), "server")
-        );
+        if args.to_library {
+            save_to_library(dropped)?;
+        }
+        println!("\n{} adopted {}.", "✓".green(), what.join(" and "));
+        if !dropped.is_empty() {
+            // Declaring content does not deliver it: the lock still has to pin
+            // the new bytes and the consent surface still has to be reviewed.
+            // Saying so is the honest version of "adopted".
+            println!(
+                "  {}",
+                "next: `agentstack lock` to pin it, then `agentstack trust .` to review it"
+                    .dimmed()
+            );
+            // A skill that belongs to no toolset is declared but unreachable:
+            // `use <toolset>` activates a toolset's members, so with toolsets
+            // declared, adoption alone never makes it live. Say it here rather
+            // than let the user discover it as a silent no-op. (Enrolling is a
+            // choice, not a default — which toolset is the user's call.)
+            let orphan_skills: Vec<&str> = dropped
+                .iter()
+                .filter(|i| i.kind == crate::intake::Kind::Skill)
+                .map(|i| i.name.as_str())
+                .collect();
+            if !manifest.profiles.is_empty() && !orphan_skills.is_empty() {
+                println!(
+                    "  {}",
+                    format!(
+                        "{} in no toolset yet ({}) — `agentstack edit-profile --profile <toolset> --add-skill <name>` to include it",
+                        super::count(orphan_skills.len(), "skill"),
+                        orphan_skills.join(", ")
+                    )
+                    .dimmed()
+                );
+            }
+        }
     } else {
+        if args.to_library && !dropped.is_empty() {
+            println!(
+                "  {} {} would also be saved to the central library",
+                "→".cyan(),
+                super::count(
+                    dropped
+                        .iter()
+                        .filter(|i| i.kind == crate::intake::Kind::Skill)
+                        .count(),
+                    "skill"
+                )
+            );
+        }
         println!(
             "\nDry run. Re-run with {} to update the manifest.",
             "--write".bold()
         );
+    }
+    Ok(())
+}
+
+/// The manifest body for a dropped file: a path entry, exactly what a
+/// hand-written declaration of the same file would be. Nothing is invented —
+/// adoption declares content that is already sitting in the project.
+fn intake_entry(item: &crate::intake::Item) -> Value {
+    match item.kind {
+        crate::intake::Kind::Skill => serde_json::json!({ "path": item.rel_path }),
+        // `targets` is left off deliberately: omitted means `["*"]`, and a
+        // manifest that states its defaults back to the user grows noise.
+        crate::intake::Kind::Instruction => serde_json::json!({ "path": item.rel_path }),
+    }
+}
+
+/// Copy adopted skills into the central library so other projects can use
+/// them. Instructions are project-local by nature and are skipped with a word,
+/// not silently. A library failure does not undo the manifest write that
+/// already succeeded — it is reported and the adoption stands.
+fn save_to_library(dropped: &[crate::intake::Item]) -> Result<()> {
+    let lib_home = crate::util::paths::lib_home();
+    for item in dropped {
+        if item.kind != crate::intake::Kind::Skill {
+            println!(
+                "  {} {} '{}' stays project-local — the library holds skills",
+                "·".dimmed(),
+                item.kind.noun(),
+                item.name
+            );
+            continue;
+        }
+        match super::lib::add_skill(
+            &lib_home,
+            &item.name,
+            super::lib::LibSource::Path(&item.abs_path),
+            false,
+            true,
+            false,
+        ) {
+            Ok(_) => println!("  {} saved '{}' to the library", "✓".green(), item.name),
+            Err(e) => println!(
+                "  {} '{}' was adopted here but not saved to the library: {}",
+                "!".yellow(),
+                item.name,
+                crate::text::sanitize_line(&format!("{e:#}"))
+            ),
+        }
     }
     Ok(())
 }
@@ -510,6 +685,7 @@ mod tests {
             scope: Some(Scope::Project),
             write: true,
             no_keychain: true,
+            to_library: false,
         };
         run(&args, Some(proj.path())).unwrap();
         let manifest_text = fs::read_to_string(proj.child("agentstack.toml").path()).unwrap();

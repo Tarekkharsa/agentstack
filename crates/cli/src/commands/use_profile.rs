@@ -594,6 +594,13 @@ pub fn activate(
         super::count(server_map.len(), "server"),
         super::count(active_skills.len(), "skill")
     );
+    // Activation delivers what the manifest declares; dropped-but-undeclared
+    // content is not part of this toolset until it is adopted.
+    crate::intake::print_notice(
+        &ctx.dir,
+        &crate::manifest::project_root_of(&ctx.dir),
+        manifest,
+    );
 
     // P19: shadowing an inline skill over a same-named central-library skill is
     // legal (an inline definition always wins), but silence is not — one warning

@@ -345,6 +345,9 @@ pub(crate) struct Orientation {
     catalog_size: usize,
     /// Native configs found here that the manifest does not (yet) cover.
     native: Vec<crate::discover::NativeConfig>,
+    /// Files dropped into this project's own `skills/`/`instructions/` that the
+    /// manifest does not declare. Inert until adopted — see `crate::intake`.
+    intake: Vec<crate::intake::Item>,
     /// Where the manifest is (or would be).
     manifest_path: std::path::PathBuf,
     manifest: ManifestState,
@@ -470,6 +473,16 @@ pub(crate) fn status_json(o: &Orientation) -> serde_json::Value {
                 "servers": n.unimported,
             }))
             .collect::<Vec<_>>(),
+        // Dropped-but-undeclared content in this project's own intake dirs.
+        // Names, kinds, and the provenance classification — never file bodies.
+        "intake": o.intake.iter().map(|i| serde_json::json!({
+            "kind": i.kind.noun(),
+            "name": i.name,
+            "path": i.rel_path,
+            "summary": i.summary,
+            "locally_authored": i.provenance.is_local(),
+            "provenance": i.provenance.reason(),
+        })).collect::<Vec<_>>(),
         "manifest": {
             "path": o.manifest_path.display().to_string(),
             "present": present,
@@ -595,6 +608,28 @@ fn print_native_line(native: &[crate::discover::NativeConfig], no_manifest: bool
     );
 }
 
+/// Name dropped-but-undeclared skills/instructions, and what to do about them.
+fn print_intake_line(items: &[crate::intake::Item]) {
+    if items.is_empty() {
+        return;
+    }
+    let names = items
+        .iter()
+        .map(|i| i.name.as_str())
+        .collect::<Vec<_>>()
+        .join(" · ");
+    println!(
+        "  {}  {} here, not in this setup — {}",
+        "Dropped ".bold(),
+        super::count(items.len(), "file"),
+        names.dimmed()
+    );
+    println!(
+        "            {}",
+        "`agentstack adopt` reviews and adds them".dimmed()
+    );
+}
+
 /// Project-relative display for a discovered config path, falling back to the
 /// full path when it is not under the current directory.
 fn tidy(path: &std::path::Path) -> String {
@@ -636,6 +671,7 @@ fn collect(manifest_dir: Option<&Path>, with_secrets: bool) -> Result<Orientatio
             detected_clis,
             catalog_size: registry.ids().count(),
             native,
+            intake: Vec::new(),
             manifest_path,
             manifest: ManifestState::Missing,
             next: (
@@ -652,6 +688,7 @@ fn collect(manifest_dir: Option<&Path>, with_secrets: bool) -> Result<Orientatio
                 detected_clis,
                 catalog_size: registry.ids().count(),
                 native: Vec::new(),
+                intake: Vec::new(),
                 manifest_path,
                 manifest: ManifestState::Broken(format!("{err:#}")),
                 next: ("agentstack doctor".to_string(), "diagnose the manifest"),
@@ -733,6 +770,7 @@ fn collect(manifest_dir: Option<&Path>, with_secrets: bool) -> Result<Orientatio
         catalog_size: ctx.registry.ids().count(),
         detected_clis,
         native,
+        intake: crate::intake::scan(&ctx.dir, &project_root, m).items,
         manifest_path,
         manifest: ManifestState::Loaded(Box::new(ProjectFacts {
             servers: m.servers.len(),
@@ -791,6 +829,11 @@ fn print_orientation(o: &Orientation, status: bool) {
     // Naming it is the whole point: `adopt` could always read these files, but
     // no surface said they existed, so an uncoached user never reached it.
     print_native_line(&o.native, matches!(o.manifest, ManifestState::Missing));
+
+    // Files the user dropped into their own `.agentstack/` tree. Same reason
+    // the native line exists: the content is sitting right there, and until a
+    // surface names it, nothing tells the user it has to be adopted to count.
+    print_intake_line(&o.intake);
 
     match &o.manifest {
         ManifestState::Missing => println!("  {}  none in this directory", "Manifest".bold()),
@@ -1144,6 +1187,7 @@ mod tests {
             detected_clis: vec!["Claude Code".into()],
             catalog_size: 13,
             native: Vec::new(),
+            intake: Vec::new(),
             manifest_path: std::path::PathBuf::from("/repo/.agentstack/agentstack.toml"),
             manifest: ManifestState::Loaded(Box::new(ProjectFacts {
                 servers: 2,
@@ -1209,6 +1253,7 @@ mod tests {
             detected_clis: Vec::new(),
             catalog_size: 13,
             native: Vec::new(),
+            intake: Vec::new(),
             manifest_path: std::path::PathBuf::from("/repo/.agentstack/agentstack.toml"),
             manifest: ManifestState::Missing,
             next: ("agentstack init".into(), "guided one-command setup"),
@@ -1221,6 +1266,7 @@ mod tests {
             detected_clis: Vec::new(),
             catalog_size: 13,
             native: Vec::new(),
+            intake: Vec::new(),
             manifest_path: std::path::PathBuf::from("/repo/.agentstack/agentstack.toml"),
             manifest: ManifestState::Broken("missing field `type`\nin `servers.a`".into()),
             next: ("agentstack doctor".into(), "diagnose the manifest"),

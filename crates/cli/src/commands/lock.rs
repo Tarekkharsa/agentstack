@@ -113,6 +113,10 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
     // stale trust. `check` recomputes the digest against the trust store; the
     // lockfile bytes are what we compare afterward to know pins actually moved.
     let trust_base = crate::manifest::project_root_of(&ctx.dir);
+    // `lock` pins what the manifest declares. Anything dropped into the intake
+    // dirs but not declared is NOT pinned by this run, so say so here rather
+    // than let the user infer that a green lock covered it.
+    crate::intake::print_notice(&ctx.dir, &trust_base, manifest);
     let was_trusted = crate::trust::check(&trust_base) == crate::trust::TrustState::Trusted;
     let lock_before = std::fs::read(Lock::path(&ctx.dir)).ok();
 

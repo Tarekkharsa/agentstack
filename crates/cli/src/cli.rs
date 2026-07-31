@@ -2158,6 +2158,11 @@ pub struct AdoptArgs {
     /// Don't store lifted secrets in the keychain (just reference them).
     #[arg(long)]
     pub no_keychain: bool,
+
+    /// Also save adopted skills to the central library, so other projects can
+    /// use them. Skills only — instructions stay project-local.
+    #[arg(long)]
+    pub to_library: bool,
 }
 
 #[derive(Args, Debug)]

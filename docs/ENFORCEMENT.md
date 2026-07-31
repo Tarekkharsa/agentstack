@@ -608,6 +608,45 @@ A compromised host-mode agent that can self-trust can also delete or rewrite
 this log. It raises the cost of unnoticed self-trust; it does not prevent it.
 Only sandbox mode removes the underlying risk.
 
+### Intake detection (dropped files)
+
+**What ships:** files sitting in a project's own `skills/` and `instructions/`
+directories that no manifest entry declares are noticed at command time by
+`status`, `doctor`, `use`, `lock`, and `adopt`, and offered for adoption with a
+preview. Undeclared content is **inert**, and that is a property of the
+existing design rather than a new check: nothing enumerates those directories,
+so undeclared content is never resolved, pinned, materialized, or placed in an
+agent's context. Detection reads it and reports names, paths, and a one-line
+summary; adoption writes a manifest entry and nothing else — the lock still has
+to pin the bytes and the trust gate still has to pass before anything is
+delivered. Every byte read is treated as hostile input (invariant 7): bounded
+reads, bounded entry counts, symlinks refused rather than followed (the
+directory entry *and* the file whose bytes would be read), names validated
+before they can become manifest keys, and all displayed text passed through the
+shared terminal sanitizer. A dropped file whose name a manifest entry already
+uses is reported and **not** adopted: replacing a pinned declaration is a
+different act from bringing in something new, and it never happens behind a
+preview that presents it as an addition.
+
+Each item is classified by provenance. Inside a git work tree, tracking alone
+decides — untracked is the user's own work, tracked came with the project.
+Outside one, the clock is this project's last recorded grant in `trust.jsonl`
+(above): content modified since then is local work. The classification is shown
+to the user and gates only *compression* of the first-time adoption path; it
+never gates adoption itself, and a project with no recorded grant history
+always takes the full staged review.
+
+**What it is not:** provenance is a heuristic about origin, **not an integrity
+claim**. Untracked-in-git means git has not seen the file, which anything with
+write access to the working tree can arrange; the grant timestamp is read from
+the same user-writable log named above. Modification time is deliberately *not*
+consulted for tracked files, because git rewrites it on every checkout — but
+outside a work tree it is the only signal there is, and it is as forgeable as
+any other filesystem timestamp. Neither signal survives an attacker who already
+has local write access, and neither is a substitute for reading what you are
+adopting. Detection is also not a monitor: it runs when you run a command, so
+content dropped and removed between commands is never seen.
+
 ## Experimental `tools_execute`
 
 This is a separate, machine-opt-in mode with a narrower runtime surface than a
