@@ -542,10 +542,60 @@ pub fn activate(
         .unwrap_or_default();
     // (name, source dir) pairs drive skill materialization; the richer
     // `ResolvedSkill` list is kept for lockfile recording below.
+    // Standing re-gate answers reshape delivery before anything is verified or
+    // materialized (`docs/design/consent-card.md`, §b). Two effects, both of
+    // which must happen HERE so every downstream consumer — the verify gate,
+    // the printed counts, the plan — sees the same set:
+    //
+    //   blocked      → the item is dropped entirely. It fails closed, exactly
+    //                  as drift does, but as a standing state rather than a
+    //                  question re-asked on every command.
+    //   keep-pinned  → the item is delivered FROM THE CONTENT STORE, not from
+    //                  the project. This is what makes keep-pinned mean "the
+    //                  approved bytes are what agents load"; delivering the
+    //                  live path would ship the very change the user declined.
+    let decisions = crate::trust::decisions_for(&crate::manifest::project_root_of(&ctx.dir));
+    let store_root = crate::store::Store::default_store().root().to_path_buf();
+    let mut blocked_names: Vec<String> = Vec::new();
+    let mut pinned_copies: Vec<String> = Vec::new();
     let active_skills: Vec<(String, PathBuf)> = resolved_skills
         .iter()
-        .map(|r| (r.name.clone(), r.path.clone()))
+        .filter_map(|r| {
+            match decisions
+                .iter()
+                .find(|d| d.kind == "skill" && d.name == r.name)
+                .map(|d| &d.answer)
+            {
+                Some(crate::trust::Decision::Blocked) => {
+                    blocked_names.push(r.name.clone());
+                    None
+                }
+                Some(crate::trust::Decision::KeepPinned { pin }) => {
+                    let hex = pin.rsplit(':').next().unwrap_or(pin);
+                    let snapshot = store_root.join("content").join(hex);
+                    if snapshot.is_dir() {
+                        pinned_copies.push(r.name.clone());
+                        Some((r.name.clone(), snapshot))
+                    } else {
+                        // The approved bytes are gone. Fail closed rather than
+                        // silently falling back to the live path, which is the
+                        // content the human declined.
+                        blocked_names.push(r.name.clone());
+                        None
+                    }
+                }
+                None => Some((r.name.clone(), r.path.clone())),
+            }
+        })
         .collect();
+    if !args.quiet && !blocked_names.is_empty() {
+        println!(
+            "  {} {} excluded by a standing decision: {} — revisit with `agentstack trust`",
+            "⊘".dimmed(),
+            super::count(blocked_names.len(), "skill"),
+            blocked_names.join(", ")
+        );
+    }
 
     // Fail-closed drift gate (--write only): everything resolved above must
     // still match its agentstack.lock pin before a single byte is
@@ -559,6 +609,13 @@ pub fn activate(
         let lock = Lock::load(&ctx.dir)?;
         let skill_statuses: Vec<_> = resolved_skills
             .iter()
+            // A keep-pinned skill is drifted BY DEFINITION — that is what the
+            // human was asked about — and it is not being delivered from the
+            // drifted path anyway, so the fail-closed gate must not stop the
+            // activation over it. A blocked skill is not being delivered at
+            // all. Both were already answered at the consent gate; re-blocking
+            // here would make an answered question unanswerable.
+            .filter(|r| !blocked_names.contains(&r.name) && !pinned_copies.contains(&r.name))
             .map(|r| {
                 let status =
                     crate::resolve::classify_skill(&r.name, &r.checksum, r.rev.as_deref(), &lock);
@@ -824,11 +881,15 @@ pub fn activate(
         if let Some(skills_dir) = desc.skills_dir_for(scope, &ctx.dir) {
             let strategy = desc.skills.as_ref().map(|s| s.strategy).unwrap_or_default();
             let prev_skills = state.managed_skills(&key);
-            let plan = skills::plan(
+            // Keep-pinned names are COPIED even where this adapter symlinks:
+            // their source is the content-store snapshot, and a link would
+            // re-attach the delivered artifact to the live file.
+            let plan = skills::plan_with_pinned(
                 skills_dir.clone(),
                 strategy,
                 active_skills.clone(),
                 &prev_skills,
+                pinned_copies.clone(),
             )?;
 
             for c in &plan.conflicts {

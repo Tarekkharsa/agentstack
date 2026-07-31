@@ -56,7 +56,8 @@ fn trusted_project(root: &Path) -> PathBuf {
         "version = 1\n\n\
          [skills.alpha]\npath = \"./skills/alpha\"\n\n\
          [skills.beta]\npath = \"./skills/beta\"\n\n\
-         [skills.gamma]\npath = \"./skills/gamma\"\n",
+         [skills.gamma]\npath = \"./skills/gamma\"\n\n\
+         [profiles.default]\nskills = [\"alpha\", \"beta\", \"gamma\"]\n",
     )
     .unwrap();
     agentstack::commands::lock::run(&Default::default(), Some(&proj)).unwrap();
@@ -64,6 +65,30 @@ fn trusted_project(root: &Path) -> PathBuf {
     agentstack::commands::trust::grant_with_answers(&proj, true, Some(&digest), false, None)
         .unwrap();
     proj
+}
+
+/// Run the real binary against the isolated home this test set up. `doctor`
+/// exits nonzero when it finds problems, which is the normal case here, so the
+/// caller decides whether success matters.
+fn cli(proj: &Path, args: &[&str]) -> (String, bool) {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_agentstack"))
+        .args(args)
+        .current_dir(proj)
+        .env_clear()
+        .env("HOME", std::env::var("HOME").unwrap())
+        .env("AGENTSTACK_HOME", std::env::var("AGENTSTACK_HOME").unwrap())
+        .env("PATH", "/usr/bin:/bin")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("spawn agentstack");
+    (
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        ),
+        out.status.success(),
+    )
 }
 
 fn events(proj: &Path) -> Vec<String> {
@@ -313,6 +338,117 @@ fn blocking_records_a_standing_refusal() {
     assert_eq!(
         agentstack::trust::decision_for(&proj, "skill", "gamma"),
         Some(agentstack::trust::Decision::Blocked)
+    );
+}
+
+/// Item 2 CONSENT WITNESS: a standing answer reshapes DELIVERY.
+///
+/// Three properties in one activation, because they are one behaviour:
+///   - a blocked skill is not delivered at all (fails closed, like drift);
+///   - a keep-pinned skill IS delivered, from the content-store snapshot, as a
+///     copy — so the approved bytes are what an agent loads;
+///   - an unanswered, undrifted skill is untouched.
+#[test]
+fn standing_answers_reshape_delivery() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    isolate_home(tmp.path());
+    let proj = trusted_project(tmp.path());
+
+    // beta is kept at its approved bytes; gamma is blocked.
+    skill(&proj, "beta", "---\ndescription: b\n---\n# Beta\nCHANGED\n");
+    skill(
+        &proj,
+        "gamma",
+        "---\ndescription: g\n---\n# Gamma\nCHANGED\n",
+    );
+    agentstack::commands::trust::grant_with_answers(
+        &proj,
+        false,
+        None,
+        true,
+        Some(&ReGateProbe {
+            answers: vec![
+                ("beta".to_string(), Answer::KeepPinned),
+                ("gamma".to_string(), Answer::Block),
+            ],
+            confirm: true,
+        }),
+    )
+    .unwrap();
+
+    let (out, ok) = cli(&proj, &["use", "--write"]);
+    assert!(ok, "use --write failed:\n{out}");
+
+    // Find whichever harness skills dir this machine's adapters produced.
+    let delivered = ["\u{2e}claude/skills", ".agents/skills", ".pi/skills"]
+        .iter()
+        .map(|d| proj.join(d))
+        .find(|d| d.is_dir())
+        .expect("something was materialized");
+
+    // Blocked: absent entirely.
+    assert!(
+        !delivered.join("gamma").exists(),
+        "a blocked skill was delivered anyway"
+    );
+    // Keep-pinned: present, and holding the APPROVED bytes, not the live edit.
+    let beta = delivered.join("beta").join("SKILL.md");
+    let body = fs::read_to_string(&beta).expect("keep-pinned skill was delivered");
+    assert!(
+        body.contains("first") && !body.contains("CHANGED"),
+        "keep-pinned delivered the declined content: {body}"
+    );
+    // …and it is a real file, not a link into the project.
+    assert!(
+        !delivered
+            .join("beta")
+            .symlink_metadata()
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "keep-pinned was symlinked; it would follow the declined change"
+    );
+    // Unanswered and unchanged: delivered normally.
+    assert!(delivered.join("alpha").exists());
+}
+
+/// Item 2 CONSENT WITNESS: keep-pinned resolves ONE consent moment. It must
+/// never silence the drift itself — the live file and the delivered version
+/// really have diverged, and a status that hid that would be lying by omission.
+#[test]
+fn keep_pinned_never_silences_the_drift_report() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    isolate_home(tmp.path());
+    let proj = trusted_project(tmp.path());
+    skill(&proj, "beta", "---\ndescription: b\n---\n# Beta\nCHANGED\n");
+    agentstack::commands::trust::grant_with_answers(
+        &proj,
+        false,
+        None,
+        true,
+        Some(&ReGateProbe {
+            answers: vec![("beta".to_string(), Answer::KeepPinned)],
+            confirm: true,
+        }),
+    )
+    .unwrap();
+
+    let (text, _) = cli(&proj, &["doctor"]);
+    // The standing state is named, with the way out…
+    assert!(
+        text.contains("using the version you approved"),
+        "the standing answer is not reported: {text}"
+    );
+    assert!(
+        text.contains("agentstack trust"),
+        "no way out named: {text}"
+    );
+    // …AND the drift is still reported. Both lines, for the same skill.
+    assert!(
+        text.contains("content drifted from lock"),
+        "keep-pinned silenced the drift report: {text}"
     );
 }
 
