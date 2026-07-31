@@ -114,6 +114,28 @@ pub struct SurfaceItem {
     pub kind: String,
     pub name: String,
     pub identity: String,
+    /// The content digest this item was pinned to when consent was given, for
+    /// the kinds whose bytes live outside the manifest (skills, instructions).
+    ///
+    /// Deliberately SEPARATE from `identity` rather than folded into it.
+    /// `identity` means "what the human agreed to run/contact" and is the diff
+    /// key; overloading it with the pin would (a) contradict the documented
+    /// meaning above, and (b) make every already-recorded skill read as
+    /// `~ changed` on the first re-trust after upgrade — training the user to
+    /// wave through a diff that says nothing real.
+    ///
+    /// This is display/provenance metadata, exactly like the rest of
+    /// `SurfaceItem`: it does NOT enter the consent digest, which covers the
+    /// manifest, local, and lock bytes only (see [`ConsentSnapshot::digest`]).
+    /// Adding it therefore re-gates nothing — witnessed in this module's tests.
+    ///
+    /// `None` means "no pin was recorded" and is the honest, permanent state
+    /// for entries written before this field existed: there is no backfill,
+    /// because the bytes that were approved then were never captured. A
+    /// re-gate against a `None` pin says so plainly rather than inventing a
+    /// diff.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pin: Option<String>,
 }
 
 /// What a prior `trust` recorded for a project, for re-trust diffing (P14).
@@ -658,6 +680,93 @@ mod tests {
         });
     }
 
+    /// Phase 2 LOAD-COMPAT WITNESS: a `trust.json` written before `SurfaceItem`
+    /// gained its `pin` field must still deserialize, and must still render its
+    /// card. The field is additive and optional precisely so an existing grant
+    /// is never invalidated by an upgrade — a store that failed to load would
+    /// silently drop every project to `Untrusted` and re-prompt for everything,
+    /// which is the worst possible way to ship a consent improvement.
+    ///
+    /// `None` is the permanent, honest answer for these entries: the bytes they
+    /// approved were never captured, so there is nothing to backfill.
+    #[test]
+    fn a_trust_store_written_before_the_pin_field_still_loads_and_keeps_its_surface() {
+        with_home(|_| {
+            let proj = project_with_manifest();
+            let key = key_for(proj.path());
+            let digest = digest_for(proj.path()).unwrap();
+            // Hand-written in the OLD shape: surface items with no `pin` key at
+            // all. This is the byte shape already on the maintainer's disk.
+            let legacy = format!(
+                r#"{{"trusted":{{"{key}":{{"digest":"{digest}","trusted_at":1,"surface":[
+                    {{"kind":"server","name":"fs","identity":"node fs.js"}},
+                    {{"kind":"skill","name":"greet","identity":"library"}}
+                ]}}}}}}"#
+            );
+            // Written through `store_path()` so this witness tracks wherever
+            // the store actually lives, rather than re-deriving the layout.
+            let path = store_path();
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).unwrap();
+            }
+            std::fs::write(&path, legacy).unwrap();
+
+            // It loads, the project is still trusted, and the surface survives.
+            assert_eq!(check(proj.path()), TrustState::Trusted);
+            let PriorSurface::Recorded(items) = prior_surface(proj.path()) else {
+                panic!("a legacy surface must still read as Recorded, not Untracked");
+            };
+            assert_eq!(items.len(), 2);
+            assert_eq!(items[1].name, "greet");
+            assert_eq!(items[1].identity, "library");
+            // Absent in the file => None in memory. Never a fabricated pin.
+            assert!(
+                items.iter().all(|i| i.pin.is_none()),
+                "a legacy entry must not invent pins it never recorded"
+            );
+        });
+    }
+
+    /// Phase 2 NO-REGATE WITNESS: recording a pin changes no digest. The consent
+    /// digest covers the manifest, local overlay, and lock bytes — the surface
+    /// snapshot is metadata stored beside it. If the pin leaked into the digest,
+    /// upgrading would re-gate every project on the machine for a change the
+    /// user did not make. NEVER weaken this.
+    #[test]
+    fn recording_a_pin_changes_no_digest_and_re_gates_nothing() {
+        with_home(|_| {
+            let proj = project_with_manifest();
+            let before = digest_for(proj.path()).unwrap();
+
+            let pinned = vec![SurfaceItem {
+                kind: "skill".into(),
+                name: "greet".into(),
+                identity: "library".into(),
+                pin: Some("sha256:cafe".into()),
+            }];
+            trust_reviewed(proj.path(), before.clone(), pinned.clone()).unwrap();
+
+            // The digest over the same bytes is unchanged by what we recorded…
+            assert_eq!(digest_for(proj.path()).unwrap(), before);
+            // …and the project stays trusted rather than reading as Changed.
+            assert_eq!(check(proj.path()), TrustState::Trusted);
+            // The pin round-trips through JSON exactly as written.
+            assert_eq!(prior_surface(proj.path()), PriorSurface::Recorded(pinned));
+
+            // The same surface WITHOUT pins yields the same digest too: the two
+            // differ only in metadata, so neither can re-gate the other.
+            let unpinned = vec![SurfaceItem {
+                kind: "skill".into(),
+                name: "greet".into(),
+                identity: "library".into(),
+                pin: None,
+            }];
+            trust_reviewed(proj.path(), before.clone(), unpinned).unwrap();
+            assert_eq!(digest_for(proj.path()).unwrap(), before);
+            assert_eq!(check(proj.path()), TrustState::Trusted);
+        });
+    }
+
     // P14: the reviewed surface round-trips through the store, and the three
     // prior-surface cases are distinguished — while the snapshot stays out of
     // the digest, so recording one must NOT re-gate the project.
@@ -676,11 +785,13 @@ mod tests {
                     kind: "server".into(),
                     name: "evil".into(),
                     identity: "sh -c pwn".into(),
+                    pin: None,
                 },
                 SurfaceItem {
                     kind: "skill".into(),
                     name: "greet".into(),
                     identity: "library".into(),
+                    pin: None,
                 },
             ];
             let reviewed = digest_for(proj.path()).unwrap();
@@ -867,6 +978,7 @@ mod tests {
                 kind: "server".into(),
                 name: "x".into(),
                 identity: "https://x/mcp".into(),
+                pin: None,
             }];
             let reviewed = digest_for(proj.path()).unwrap();
             trust_reviewed(proj.path(), reviewed, surface.clone()).unwrap();

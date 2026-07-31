@@ -70,10 +70,26 @@ impl ReviewDiff {
     /// Record a reviewed item and return its two-char line marker. Called
     /// exactly once per item, in render order.
     fn mark(&mut self, kind: &str, name: &str, identity: &str) -> &'static str {
+        self.mark_pinned(kind, name, identity, None)
+    }
+
+    /// `mark`, additionally recording the content digest this item is pinned
+    /// to. Only the kinds whose bytes live outside the manifest carry one —
+    /// skills and instructions — because they are the kinds a re-gate has to
+    /// diff. The pin never affects the marker: it is not part of the diff key,
+    /// so a re-lock that changes only the pin is not a `~ changed` surface.
+    fn mark_pinned(
+        &mut self,
+        kind: &str,
+        name: &str,
+        identity: &str,
+        pin: Option<String>,
+    ) -> &'static str {
         self.current.push(SurfaceItem {
             kind: kind.to_string(),
             name: name.to_string(),
             identity: identity.to_string(),
+            pin,
         });
         let Some(prior) = &self.prior else {
             return "  ";
@@ -871,7 +887,16 @@ fn grant_gated(
             };
             // A skill has no command/url; its diff identity is where its body
             // comes from (inline vs library), so a source flip shows `~ changed`.
-            let mk = diff.mark("skill", name, origin_word);
+            // The PIN — the lock checksum of the bytes being consented to — is
+            // recorded alongside, not folded into the identity: it is what a
+            // later re-gate needs to find the approved bytes in the content
+            // store and render a real diff instead of "digest mismatch".
+            let mk = diff.mark_pinned(
+                "skill",
+                name,
+                origin_word,
+                lock.get(name).map(|e| e.checksum.hex().to_string()),
+            );
             match &report.status {
                 SkillLockStatus::Matches => {
                     say!("{mk}· {disp}   [{origin_word}, pinned]");
@@ -934,8 +959,16 @@ fn grant_gated(
             let disp = crate::text::sanitize_line(name);
             use crate::resolve::InstructionLockStatus;
             // Instructions are keyed by name; there is no finer identity to
-            // show, so they only ever read as added or removed.
-            let mk = diff.mark("instruction", name, "");
+            // show, so they only ever read as added or removed. The pin is
+            // what makes a re-gate able to show which lines of the fragment
+            // moved — the identity alone could never carry that.
+            let mk = diff.mark_pinned(
+                "instruction",
+                name,
+                "",
+                lock.get_instruction(name)
+                    .map(|e| e.checksum.hex().to_string()),
+            );
             match crate::resolve::instruction_lock_status(name, instr, &dir, &lock) {
                 InstructionLockStatus::Matches => say!("{mk}· {disp}   [pinned]"),
                 InstructionLockStatus::ChecksumDrift { .. } => {
@@ -1772,6 +1805,9 @@ mod tests {
             kind: kind.to_string(),
             name: name.to_string(),
             identity: identity.to_string(),
+            // The card summary reads kinds and identities, never pins — a pin
+            // is for the re-gate diff, not for what the card counts.
+            pin: None,
         }
     }
 

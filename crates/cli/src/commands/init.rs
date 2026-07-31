@@ -1603,6 +1603,11 @@ fn grant_trust_for_import(base: &Path, manifest_bytes: &str, manifest: &Manifest
                     server.url.as_deref().unwrap_or("?").to_string()
                 }
             },
+            // Servers are pinned through the lock's own server entries, not
+            // through a content snapshot — a server has no body of bytes for a
+            // re-gate to diff, only a command line, which `identity` already
+            // carries.
+            pin: None,
         })
         .collect();
     let refs = manifest.referenced_secrets();
@@ -1611,6 +1616,8 @@ fn grant_trust_for_import(base: &Path, manifest_bytes: &str, manifest: &Manifest
             kind: "secrets".to_string(),
             name: String::new(),
             identity: refs.join(", "),
+            // An aggregate row over the referenced refs; nothing to pin.
+            pin: None,
         });
     }
 

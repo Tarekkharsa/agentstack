@@ -377,13 +377,23 @@ def check_review_disclosure(kind: str, trust_rs_text: str) -> tuple[bool, str]:
     Fixing it was a fact about one commit; this check is what makes it a
     property, and what stops kind #9 from repeating it.
     """
+    # PRODUCTION code only. The unit tests in trust.rs drive `mark` directly
+    # with fixture kind names, and those calls would otherwise satisfy this
+    # requirement for a kind the real review never discloses — which is exactly
+    # the bug this check exists to catch, passing itself off as the fix. Found
+    # for real: `kind:skills:review` was briefly green off a line in the test
+    # module while the production call site had been renamed.
+    production = trust_rs_text.split("#[cfg(test)]", 1)[0]
     sing = singular(kind)
-    pat = rf'diff\.mark\(\s*"(?:{re.escape(sing)}|{re.escape(kind)})"'
-    found = re.search(pat, trust_rs_text) is not None
+    # Both recorders count: `mark` and `mark_pinned` push the same SurfaceItem
+    # into the consented surface; the latter additionally records the pin.
+    pat = rf'diff\.mark(?:_pinned)?\(\s*"(?:{re.escape(sing)}|{re.escape(kind)})"'
+    found = re.search(pat, production) is not None
     evidence = (
         f'diff.mark("{sing}"…) in trust.rs'
         if found
-        else f'no diff.mark("{sing}"/"{kind}"…) in trust.rs — kind is not disclosed on the consent card'
+        else f'no diff.mark("{sing}"/"{kind}"…) in trust.rs (outside #[cfg(test)]) '
+        f"— kind is not disclosed on the consent card"
     )
     return found, evidence
 
@@ -770,6 +780,22 @@ pub enum Dimension {
     ok_plural, _ev = check_review_disclosure("settings", 'diff.mark("settings", a, &i);\n')
     if not ok_plural:
         failures.append('self-test: check_review_disclosure rejected the plural spelling diff.mark("settings")')
+    # `mark_pinned` records the same item plus its pin, so it is disclosure too.
+    ok_pinned, _ev = check_review_disclosure("skills", 'diff.mark_pinned("skill", n, o, p);\n')
+    if not ok_pinned:
+        failures.append('self-test: check_review_disclosure did not accept diff.mark_pinned("skill")')
+    # A mark that exists ONLY in the test module must NOT satisfy the
+    # requirement — found for real, see check_review_disclosure's docstring.
+    test_only_text = (
+        'fn grant_gated() { say!("skills:"); }\n'
+        "#[cfg(test)]\nmod tests {\n    fn t() { diff.mark(\"skill\", n, i); }\n}\n"
+    )
+    ok_test_only, ev_test_only = check_review_disclosure("skills", test_only_text)
+    if ok_test_only or "outside #[cfg(test)]" not in ev_test_only:
+        failures.append(
+            "self-test: check_review_disclosure was satisfied by a diff.mark call that exists only "
+            "in the test module (production disclosure could be deleted undetected)"
+        )
 
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
