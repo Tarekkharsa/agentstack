@@ -130,6 +130,29 @@ maintainer approval. The approved Boa dependency stays isolated in `workflow`;
 its module loading and other ambient capabilities must remain explicitly
 disabled or brokered.
 
+## Context and test discipline
+
+The two scarcest resources in a session are context tokens and local test
+minutes. Two hard rules bound them:
+
+- **Never read compiled docs into context.** Every `.html` under `docs/`
+  (root pages, `howto/`, `tutorial/`, `panel/`, `design/`) is build output of
+  a sibling `.md` source or of `tools/make-docs-pages.py` itself — up to
+  128&nbsp;KB per page of pure noise for a model. Read and edit the `.md`,
+  regenerate with `python3 tools/make-docs-pages.py`, verify with
+  `python3 tools/check-docs-site.py`. `.claude/settings.json` denies the Read
+  tool on these paths and on `target/`; for the rare structural check of
+  generated output, use `grep` through Bash. `docs/theme/` is source and
+  stays readable. `docs/archive/` is history — open it only when researching
+  lineage, never for direction.
+- **Never run the full test suite locally.** The workspace has 60+ test
+  binaries; a bare `cargo test` at the root (or `--workspace`) costs minutes
+  and belongs to CI. The loop is: `cargo check -p <crate>` while iterating;
+  `cargo test -p <crate>` — or `cargo test -p agentstack-cli --test <name>`
+  for a single binary — for the crates the change can actually break;
+  `cargo fmt --check` before handoff. Run exactly the tests your change can
+  break, nothing more.
+
 ## Working rules
 
 - Work only on the current gate in `TODO.md`; new capability lanes require user

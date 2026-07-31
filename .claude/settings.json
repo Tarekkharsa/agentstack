@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(docs/*.html)",
+      "Read(docs/howto/*.html)",
+      "Read(docs/tutorial/*.html)",
+      "Read(docs/panel/*.html)",
+      "Read(docs/design/*.html)",
+      "Read(target/**)"
+    ]
+  }
+}
