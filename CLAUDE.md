@@ -30,7 +30,9 @@ Improve t3code or the CLI/API that supports it.
 
 Read in this order:
 
-1. `STRATEGY.md` — product vision, progressive-disclosure rules, outcome gates.
+1. `STRATEGY.md` — the operative v2 strategy: north-star goal, the design law
+   ("automate everything except the yes"), and the phased gates. v1 is archived
+   under `docs/archive/`; never take direction from the archive.
 2. `TODO.md` — the only ordered work queue.
 3. `docs/ARCHITECTURE.md` — system boundaries.
 4. `docs/ENFORCEMENT.md` — exactly what each mode does and does not enforce.
@@ -70,7 +72,8 @@ Prefer plain user language in UI and docs:
 - profile → **toolset**
 - doctor → **status/check setup**
 - session → **use temporarily**
-- trust → **review this project** when the gate actually appears
+- trust → **review this project** when the gate actually appears; strategy v2
+  names the consent moment itself **the yes**
 - policy/gateway/lockdown → **more protection**, with precise details available
 
 ## Existing system
@@ -116,6 +119,11 @@ trait, or error-handling choices in code comments or the handoff.
    and never interpolate it into shell commands.
 8. **Claims match enforcement.** Host advisory checks are not confinement;
    recording is not prevention; allowed destinations can still exfiltrate.
+
+Strategy v2 classification: **hooks are an executable capability kind alongside
+extensions** — they run commands in or around the harness at user permission,
+so the full consent ceremony always applies; no compressed-consent path may
+ever cover them.
 
 `trust` and `policy` remain small review boundaries. Any new dependency requires
 maintainer approval. The approved Boa dependency stays isolated in `workflow`;

@@ -59,6 +59,31 @@ contradicts a toolset switch.** What separates here from a validated launch:
 - Workflows ship visible and honestly labeled experimental; their promotion
   gate (under "Experimental workflows") is separate and does not block launch.
 
+### Strategy v2 — Phase 0 (Instrument), runs alongside the study
+
+The adopted [`STRATEGY.md`](STRATEGY.md) (v2, 2026-07-31) opens with Phase 0,
+which is ungated and current. Later phases (funnel, review card, four ideas,
+exchange) may **not** enter this queue until the Phase 0 gate passes — the
+gate is the Stage 1 study result itself plus its three top blockers fixed; a
+failed study stops the v2 plan, not just this block.
+
+- [ ] **P0.1 — study instrumentation.** Add the v2 observation prompts to the
+  §1.6 protocol (where does a tester reach for "drop a file" and stall; can
+  they restate what they consented to) and baseline the four metrics: TTLC,
+  concepts-before-value, review comprehension, recovery time. Opt-in
+  observation only — the F19 constraint applies unchanged.
+- [ ] **P0.2 — trust-store mutation recording.** Grants, re-grants, and
+  revocations become recorder events (the planned mitigation already named in
+  `docs/ENFORCEMENT.md`). Adds events, never gates. Touches the trust seam:
+  supervised, line-by-line review per `CLAUDE.md`.
+- [ ] **P0.3 — structural lint.** Every policy dimension keeps its
+  `ENFORCEMENT.md` row; every capability kind has manifest table + lock
+  pinning + doctor probe + witness test + an explicit honest enforcement
+  statement (the `[hooks.*]` statement is in flight as its own task).
+- [ ] **P0.4 — files-you-create-first docs restructure.** First-contact pages
+  lead with the tree the user touches; mechanism nouns move to the moment
+  they become relevant. Six-rung ladder unchanged.
+
 ## Open review findings — what two product reviews left standing
 
 Both 2026-07-27 reviews are closed except the items below. Everything else they
