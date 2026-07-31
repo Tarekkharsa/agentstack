@@ -165,7 +165,10 @@ say "Is everything healthy? One status command:"
 run "agentstack doctor"
 DOCTOR_OUT="$(as doctor 2>&1)" && DOCTOR_EXIT=0 || DOCTOR_EXIT=$?
 printf '%s\n' "$DOCTOR_OUT" | tail -4 | sed 's/^/  /'
-if [ "$DOCTOR_EXIT" -eq 0 ] && printf '%s' "$DOCTOR_OUT" | grep -q "0 error(s), 0 warning(s)"; then
+# Match the summary line doctor actually prints: "0 errors, 0 warnings" with
+# an optional ", N notes" tail. The old literal "0 error(s), 0 warning(s)"
+# predates the conjugation sweep and had stopped matching anything.
+if [ "$DOCTOR_EXIT" -eq 0 ] && printf '%s' "$DOCTOR_OUT" | grep -qE "0 errors, 0 warnings"; then
   ok "doctor is clean (0 errors, 0 warnings)"
 else
   bad "doctor should be clean after the guided journey (exit $DOCTOR_EXIT)"
