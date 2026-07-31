@@ -484,6 +484,7 @@ fn run_clean_at_rest(ctx: &super::Context, manifest_dir: Option<&Path>) -> Resul
             with_instructions: false,
             yes: false,
             write: false,
+            quiet: false,
         },
         manifest_dir,
     )?;
@@ -821,6 +822,7 @@ pub fn materialize_profile(
         no_gitignore: false,
         list: false,
         json: false,
+        quiet: false,
     };
     let libctx = ctx.library_ctx();
     let prepared = super::use_profile::prepare(ctx, &libctx, &use_args)?;

@@ -33,8 +33,8 @@ fn status_parses_and_help_maps_every_command() {
     assert_eq!(
         visible,
         [
-            "init", "status", "add", "search", "apply", "doctor", "toolset", "use", "run", "trust",
-            "restore", "adopt"
+            "init", "status", "add", "search", "apply", "doctor", "toolset", "use", "yes", "run",
+            "trust", "restore", "adopt"
         ],
         "the visible list is the beginner loop, in task order — `workflow` stays \
          reachable but out of it until the repeated-use gate closes. `toolset` is \

@@ -36,6 +36,7 @@ fn use_args(write: bool) -> UseArgs {
         no_gitignore: true,
         list: false,
         json: false,
+        quiet: false,
     }
 }
 

@@ -52,6 +52,7 @@ pub mod workflow_dispatch;
 pub mod workflow_replay;
 pub mod workflow_result;
 pub mod workflow_schema;
+pub mod yes;
 
 use std::path::{Path, PathBuf};
 

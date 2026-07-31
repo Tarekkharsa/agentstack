@@ -224,6 +224,36 @@ fn a_symlinked_skill_body_is_never_read() {
     );
 }
 
+/// Review follow-up — the refusal covers ANCESTORS, not just entries.
+///
+/// Per-entry symlink checks never see an escape that happened above them: if
+/// `.agentstack/skills` is itself a link out of the repo, every "dropped file"
+/// found there came from outside the project.
+#[cfg(unix)]
+#[test]
+fn a_symlinked_intake_directory_is_not_walked() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    isolate_home(tmp.path());
+    let proj = project(tmp.path());
+
+    // Content that lives outside the project entirely.
+    let outside = tmp.path().join("elsewhere");
+    fs::create_dir_all(outside.join("smuggled")).unwrap();
+    fs::write(outside.join("smuggled/SKILL.md"), "# Not from here\n").unwrap();
+
+    // …reached by replacing the intake directory with a link to it.
+    let root = proj.join(".agentstack/skills");
+    fs::remove_dir_all(&root).unwrap();
+    std::os::unix::fs::symlink(&outside, &root).unwrap();
+
+    let items = scan(&proj);
+    assert!(
+        items.is_empty(),
+        "an intake directory that leaves the project is not walked: {items:?}"
+    );
+}
+
 /// Review follow-up — a dropped file may not silently replace a pinned entry.
 ///
 /// A git-sourced skill has no `path`, so a same-named drop is invisible to the

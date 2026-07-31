@@ -193,6 +193,7 @@ fn activate(profile: &str, allow_unresolved: bool, dir: Option<&Path>) -> Result
         no_gitignore: false,
         list: false,
         json: false,
+        quiet: false,
     };
     crate::commands::use_profile::run(&args, dir)
 }
@@ -213,6 +214,7 @@ fn activate_unambiguous(allow_unresolved: bool, dir: Option<&Path>) -> Result<()
         no_gitignore: false,
         list: false,
         json: false,
+        quiet: false,
     };
     crate::commands::use_profile::run(&args, dir)
 }

@@ -34,6 +34,7 @@ fn use_args(profile: &str) -> UseArgs {
         prune_foreign: false,
         list: false,
         json: false,
+        quiet: false,
     }
 }
 

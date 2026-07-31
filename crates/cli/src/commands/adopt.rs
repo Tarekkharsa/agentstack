@@ -337,7 +337,7 @@ pub fn run(args: &AdoptArgs, manifest_dir: Option<&Path>) -> Result<()> {
 /// The manifest body for a dropped file: a path entry, exactly what a
 /// hand-written declaration of the same file would be. Nothing is invented —
 /// adoption declares content that is already sitting in the project.
-fn intake_entry(item: &crate::intake::Item) -> Value {
+pub(crate) fn intake_entry(item: &crate::intake::Item) -> Value {
     match item.kind {
         crate::intake::Kind::Skill => serde_json::json!({ "path": item.rel_path }),
         // `targets` is left off deliberately: omitted means `["*"]`, and a

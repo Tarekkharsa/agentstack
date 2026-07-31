@@ -388,8 +388,13 @@ settled directions and now live in Phase 2's and Phase 1's text.)
 1. **Where does the yes live in zero-files mode?** Leases activate without
    files on disk; the review card must be equally strong in the MCP path.
    Blocks the dynamic-default flip until answered.
-2. **Does `agentstack yes` exist as a command or a mode?** Naming and
-   placement decided after Phase 1 prototyping, not before.
+2. ~~**Does `agentstack yes` exist as a command or a mode?**~~ **Decided
+   2026-07-31 by Phase 1 prototyping: a `yes` verb.** Both candidates were
+   built and run; folding the funnel into `use --write` was rejected because
+   `use` is toolset-scoped (a freshly dropped file is a member of no toolset,
+   so activation would have to silently enrol it) and because `--write` is an
+   imperative contract that a review-then-confirm prompt breaks. The rejected
+   surface was removed before merge.
 3. **Scoped-MITM credential brokering** (from the eve teardown) is adjacent
    but separate: it extends what the vault protects, not how the yes works.
    It keeps its own design-doc lane after the activation study and is not a

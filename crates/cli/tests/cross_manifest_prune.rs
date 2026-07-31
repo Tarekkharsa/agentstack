@@ -243,6 +243,7 @@ fn use_prune_foreign_still_works_after_guarded_use() {
         no_gitignore: true,
         list: false,
         json: false,
+        quiet: false,
     };
 
     use_profile::run(&use_args(false), Some(&proj_b)).unwrap();

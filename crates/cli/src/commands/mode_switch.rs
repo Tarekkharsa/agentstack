@@ -311,6 +311,7 @@ fn apply(args: &PanelSetModeArgs, dir: Option<&Path>) -> Result<()> {
                 no_gitignore: false,
                 list: false,
                 json: false,
+                quiet: false,
             };
             super::use_profile::run(&use_args, dir)?;
             println!(
@@ -365,6 +366,7 @@ fn apply(args: &PanelSetModeArgs, dir: Option<&Path>) -> Result<()> {
                     with_instructions: false,
                     yes: false,
                     write: false,
+                    quiet: false,
                 },
                 dir,
             )?;

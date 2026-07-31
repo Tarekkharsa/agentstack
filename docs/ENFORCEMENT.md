@@ -647,6 +647,37 @@ has local write access, and neither is a substitute for reading what you are
 adopting. Detection is also not a monitor: it runs when you run a command, so
 content dropped and removed between commands is never seen.
 
+### Single-action activation (`agentstack yes`)
+
+**What ships:** for locally-authored dropped files with no name collision, one
+command performs declare → lock → trust → render behind one review and one
+confirmation. **The collapse is presentation, not semantics.** It calls the
+same functions the explicit sequence calls, and the grant goes through the one
+`grant_gated` path `agentstack trust` uses — same surface, same digest, same
+recorded `trust.jsonl` events in the same order. That parity is a witness test
+(`crates/cli/tests/funnel_activation.rs`), not a claim. The review shows
+everything the separate steps show — including the real activation dry run,
+which is the actual `use` code path with writing off, so the preview cannot
+drift from what follows it — plus, for each item, the provenance line saying
+why it qualified. Declining restores the manifest and lockfile to their
+previous bytes, so a refusal leaves the project as it was.
+
+The command requires a terminal. It is a review a human reads and answers;
+headless callers keep the explicit path, where `--consented-digest` binds the
+acknowledgement to previewed bytes (§7.2). Content that fails provenance or
+collides with an existing declaration is not filtered out downstream — it is
+never in the set the compressed path acts on, and the user is told which
+command reviews it properly.
+
+**What it is not:** this is **first-time adoption only**. Re-consent to
+*changed* content is not compressed and stays on the explicit path until the
+review card can render a real diff of what changed — compressing a re-gate
+before the change is visible would be worse than the friction it removes. It
+does not widen what a yes grants: the same bytes are consented to, in the same
+gate, with the same effect. It is also not a review the tool performs on your
+behalf — nothing here inspects what a skill's text tells a model to do, for the
+reason stated under **Skills** above.
+
 ## Experimental `tools_execute`
 
 This is a separate, machine-opt-in mode with a narrower runtime surface than a

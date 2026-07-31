@@ -27,6 +27,7 @@ fn use_args(profile: Option<&str>) -> UseArgs {
         no_gitignore: true,
         list: false,
         json: false,
+        quiet: false,
     }
 }
 

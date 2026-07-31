@@ -588,19 +588,22 @@ pub fn activate(
 
     let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets, &ctx.dir)?;
     let ruleset = crate::render::ruleset_for(manifest)?;
-    println!(
-        "Activating toolset '{}' (scope: {scope}) — {}, {}",
-        label.bold(),
-        super::count(server_map.len(), "server"),
-        super::count(active_skills.len(), "skill")
-    );
-    // Activation delivers what the manifest declares; dropped-but-undeclared
-    // content is not part of this toolset until it is adopted.
-    crate::intake::print_notice(
-        &ctx.dir,
-        &crate::manifest::project_root_of(&ctx.dir),
-        manifest,
-    );
+    if !args.quiet {
+        println!(
+            "Activating toolset '{}' (scope: {scope}) — {}, {}",
+            label.bold(),
+            super::count(server_map.len(), "server"),
+            super::count(active_skills.len(), "skill")
+        );
+        // Activation delivers what the manifest declares;
+        // dropped-but-undeclared content is not part of this toolset until it
+        // is adopted.
+        crate::intake::print_notice(
+            &ctx.dir,
+            &crate::manifest::project_root_of(&ctx.dir),
+            manifest,
+        );
+    }
 
     // P19: shadowing an inline skill over a same-named central-library skill is
     // legal (an inline definition always wins), but silence is not — one warning
@@ -1059,7 +1062,7 @@ pub fn activate(
                 super::count(blocked_targets.len(), "target")
             );
         }
-    } else {
+    } else if !args.quiet {
         println!("\nDry run. Re-run with {} to apply.", "--write".bold());
     }
     Ok(())

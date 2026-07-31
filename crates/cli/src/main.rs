@@ -91,6 +91,7 @@ fn run() -> Result<()> {
             commands::use_profile::run(&read, dir)
         }
         Command::Use(args) => commands::use_profile::run(args, dir),
+        Command::Yes(args) => commands::yes::run(args, dir),
         Command::Session(args) => commands::session::run(args, dir),
         Command::Instructions(args) => commands::instructions::run(args, dir),
         Command::Adopt(args) => commands::adopt::run(args, dir),

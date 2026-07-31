@@ -9,13 +9,37 @@ For anyone giving their agent CLIs a skill — a portable directory with a
 `.agentstack/agentstack.toml` [manifest](../concepts.md) (run
 `agentstack init` if you don't have one).
 
-Four verbs, by where the skill lives and how long you want it:
+## Writing one yourself: drop the file, then say yes
+
+The shortest path, and the one to reach for when the skill is your own work.
+Write the directory where skills live and answer one question:
+
+```bash
+mkdir -p .agentstack/skills/pdf-review
+$EDITOR .agentstack/skills/pdf-review/SKILL.md   # your instructions
+
+agentstack yes
+```
+
+Until you answer, the file is **inert** — nothing resolves, pins, renders, or
+reads it, and no agent sees it. `agentstack yes` shows one review: what will be
+declared, what will be pinned, what each CLI will get, and the full consent
+surface. One confirmation makes it live everywhere. Undo is
+`agentstack restore --last --write`, named in the preview before it runs.
+
+The short path is for content you demonstrably wrote here — untracked in git,
+or newer than this project's last review. A skill that **came with the
+repository** is somebody else's work and takes the full staged review instead;
+`agentstack yes` says so and names the commands (`agentstack adopt` →
+`agentstack lock` → `agentstack trust .`). `agentstack lib new <name>`
+scaffolds the template if you'd rather not start from an empty file.
+
+## Bringing in someone else's skill
 
 | You have | Use |
 | --- | --- |
 | Any skills repo (GitHub shorthand, git URL) or a local dir | `agentstack add skill <source>` |
 | A skill you want reusable across projects by name | `agentstack lib add <source>` + reference it from a [toolset](../concepts.md) |
-| Nothing yet — you're writing one | `agentstack lib new <name>` scaffolds the template |
 | Curiosity — run it once, install nothing | `agentstack try <source> \| <your agent CLI>` |
 
 ```bash
@@ -32,9 +56,8 @@ agentstack add skill ./my-skill --write
 agentstack lib add anthropics/skills --skill pdf --write
 #   then in any manifest:  [profiles.backend]  skills = ["pdf"]
 
-# 3. Author one from scratch
+# 3. Author one from scratch (see "drop the file, then say yes" above)
 agentstack lib new code-review        # scaffolds ./code-review/SKILL.md
-#   edit it, then adopt with verb 1 or 2
 
 # 4. Try before anything: ephemeral, manifest-free
 agentstack try anthropics/skills --skill pdf | claude

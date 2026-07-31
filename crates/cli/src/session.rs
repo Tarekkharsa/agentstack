@@ -314,6 +314,7 @@ pub fn start(manifest_dir: Option<&Path>, profile: &str, scope: Scope) -> Result
         no_gitignore: false,
         list: false,
         json: false,
+        quiet: false,
     };
     let libctx = ctx.library_ctx();
     let prepared = crate::commands::use_profile::prepare(&ctx, &libctx, &use_args)?;

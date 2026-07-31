@@ -162,6 +162,15 @@ fn collect(
     out: &mut Found,
 ) {
     let root = dir.join(kind.dir());
+    // The intake directory itself — and every ancestor up to the manifest dir —
+    // must be real. A repo shipping `.agentstack/skills -> /elsewhere` would
+    // otherwise have its "dropped files" read from outside the project entirely,
+    // and per-entry symlink checks never see it: the escape happened above them.
+    // Canonicalizing both sides catches the root being a link, an ancestor being
+    // one, and `..` segments, in one comparison.
+    if !contained_in(dir, &root) {
+        return;
+    }
     let Ok(entries) = std::fs::read_dir(&root) else {
         return;
     };
@@ -219,6 +228,17 @@ fn collect(
             abs_path: content,
         });
     }
+}
+
+/// Whether `path` really lives under `parent` once every link and `..` in both
+/// is resolved. Used to confirm an intake directory is inside the project
+/// rather than a doorway out of it.
+fn contained_in(parent: &Path, path: &Path) -> bool {
+    let (Ok(parent), Ok(path)) = (std::fs::canonicalize(parent), std::fs::canonicalize(path))
+    else {
+        return false;
+    };
+    path.starts_with(&parent)
 }
 
 /// A real file, not a link to one. `symlink_metadata` does not follow, which

@@ -208,6 +208,13 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
     } else {
         pinned_parts.join(" + ")
     };
+    if args.quiet {
+        // Composed into the funnel's single card: the pin happened, and the
+        // card says so in its own words. A second summary plus a competing
+        // "Next:" is exactly the three-screens experience slice B removes.
+        println!("  {} pinned {pinned_summary}", "✓".green());
+        return Ok(());
+    }
     println!(
         "{} pinned {pinned_summary} from {from} in {}",
         "✓".green(),

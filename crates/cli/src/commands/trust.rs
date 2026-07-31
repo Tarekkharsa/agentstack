@@ -391,7 +391,32 @@ fn lock_from_snapshot(snapshot: &trust::ConsentSnapshot, dir: &Path) -> Result<c
 }
 
 fn grant(base: &Path, yes: bool, consented: Option<&str>) -> Result<()> {
-    grant_gated(base, yes, consented, std::io::stdin().is_terminal())
+    grant_gated(base, yes, consented, std::io::stdin().is_terminal(), None)
+}
+
+/// Extra review lines and the one question, supplied by the funnel. Held by
+/// reference through the single grant path — it never becomes a second one.
+pub(crate) struct ConsentCard {
+    pub lines: Vec<String>,
+    pub question: String,
+    /// The answer, when it is supplied instead of read from stdin — the same
+    /// kind of injected probe as `grant_gated`'s `interactive`, and for the
+    /// same reason: a consent gate whose refusal path cannot be exercised in a
+    /// test is a consent gate whose refusal path is unverified. Production
+    /// always passes `None` and prompts; only the funnel's test seam sets it.
+    pub answer: Option<bool>,
+}
+
+/// Review-and-grant with the funnel's card folded into the same screen. The
+/// only entry point besides `trust` itself, and it reaches the identical
+/// [`grant_gated`] — same surface, same digest, same recorded event.
+pub(crate) fn grant_with_card(
+    base: &Path,
+    yes: bool,
+    interactive: bool,
+    card: &ConsentCard,
+) -> Result<()> {
+    grant_gated(base, yes, None, interactive, Some(card))
 }
 
 /// The grant path with the TTY probe injected, so the non-interactive consent
@@ -421,7 +446,19 @@ fn grant(base: &Path, yes: bool, consented: Option<&str>) -> Result<()> {
 /// the no-digest grant records that snapshot's digest — never a re-read — so
 /// bytes swapped in mid-review are not blessed: the store then holds the
 /// reviewed digest, the project reads `Changed`, and use sites fail closed.
-fn grant_gated(base: &Path, yes: bool, consented: Option<&str>, interactive: bool) -> Result<()> {
+/// `card` extends this one consent screen for the Phase 1 funnel instead of
+/// giving the funnel a screen of its own: extra review lines are printed with
+/// the surface (so the combined preview shows everything the separate steps
+/// show, and never less), and the funnel's single confirmation is asked HERE,
+/// after the whole review and before any grant. There is exactly one place a
+/// human says yes to a project, whichever verb brought them to it.
+fn grant_gated(
+    base: &Path,
+    yes: bool,
+    consented: Option<&str>,
+    interactive: bool,
+    card: Option<&ConsentCard>,
+) -> Result<()> {
     let dir = crate::manifest::resolve_manifest_dir(base);
     let Some(snapshot) = trust::ConsentSnapshot::read(base) else {
         // No readable manifest: surface the same friendly first-contact error
@@ -982,6 +1019,15 @@ fn grant_gated(base: &Path, yes: bool, consented: Option<&str>, interactive: boo
         );
     }
 
+    // The funnel's own review lines join the surface above, inside the same
+    // screen, before the same gate — presentation is combined, the disclosure
+    // is additive.
+    if let Some(card) = card {
+        for line in &card.lines {
+            println!("{line}");
+        }
+    }
+
     // Consent gate: the review above is now fully printed. Trust is granted by
     // a human who read it — typing the command at a terminal IS that consent.
     // When stdin is not a terminal (a pipe, a here-string, an agent driving the
@@ -1002,6 +1048,21 @@ fn grant_gated(base: &Path, yes: bool, consented: Option<&str>, interactive: boo
         anyhow::bail!(
             "refusing to trust: --yes requires --consented-digest — run `agentstack trust --preview`, review the surface, and pass its `surface_digest` back"
         );
+    }
+
+    // The funnel asks its single question here — after the complete review,
+    // before anything is granted or rendered. A refusal leaves the trust store
+    // untouched, exactly like every other refusal on this path.
+    if let Some(card) = card {
+        if interactive && !yes {
+            let said_yes = match card.answer {
+                Some(answer) => answer,
+                None => super::panel_edit::confirm(&card.question)?,
+            };
+            if !said_yes {
+                anyhow::bail!("cancelled — nothing was granted or activated");
+            }
+        }
     }
 
     // Store the reviewed surface alongside the pin so the NEXT re-trust can
@@ -1314,23 +1375,23 @@ mod tests {
             .unwrap();
 
         // (a) Non-TTY, no --yes: refuse, and the trust store keeps no grant.
-        assert!(grant_gated(proj.path(), false, None, false).is_err());
+        assert!(grant_gated(proj.path(), false, None, false, None).is_err());
         assert_eq!(trust::check(proj.path()), TrustState::Untrusted);
 
         // (b) Non-TTY with --yes but NO consented digest: still refuses —
         // the §7.2 binding, not just the acknowledgement, is required.
-        let err = grant_gated(proj.path(), true, None, false).unwrap_err();
+        let err = grant_gated(proj.path(), true, None, false, None).unwrap_err();
         assert!(format!("{err:#}").contains("--consented-digest"));
         assert_eq!(trust::check(proj.path()), TrustState::Untrusted);
 
         // (c) --yes with a WRONG digest: refuses (the trust-crate witness
         // covers the store staying clean; here we prove the CLI wiring).
-        assert!(grant_gated(proj.path(), true, Some("sha256:beef"), false).is_err());
+        assert!(grant_gated(proj.path(), true, Some("sha256:beef"), false, None).is_err());
         assert_eq!(trust::check(proj.path()), TrustState::Untrusted);
 
         // (d) --yes with the previewed digest: grants.
         let previewed = trust::digest_for(proj.path()).unwrap();
-        grant_gated(proj.path(), true, Some(&previewed), false).unwrap();
+        grant_gated(proj.path(), true, Some(&previewed), false, None).unwrap();
         assert_eq!(trust::check(proj.path()), TrustState::Trusted);
 
         std::env::remove_var("AGENTSTACK_HOME");

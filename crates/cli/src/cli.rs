@@ -45,6 +45,7 @@ Start here:
   agentstack                     orientation + the one next step for this directory
   agentstack init                one command sets up everything: import, choose, apply, verify
   agentstack status              where this project stands, on one screen
+  agentstack yes                 review and activate the files you dropped in
 
 Words: a CLI (a.k.a. harness) is the agent tool you run; an adapter compiles
 its native config; [targets] in the manifest lists which CLIs commands act on.
@@ -168,6 +169,9 @@ pub enum Command {
 
     /// Activate a toolset: render its servers + materialize its skills.
     Use(UseArgs),
+
+    /// Review and activate the files you dropped into this project — one step.
+    Yes(YesArgs),
 
     /// Use a toolset temporarily: load it for now, then put every file back.
     #[command(hide = true)]
@@ -681,6 +685,7 @@ impl ToolsetListArgs {
             no_gitignore: false,
             list: true,
             json: self.json,
+            quiet: false,
         }
     }
 }
@@ -847,7 +852,7 @@ pub struct DisconnectArgs {
     pub write: bool,
 }
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Default)]
 pub struct TrustArgs {
     /// Project directory (walks up to find the manifest). Defaults to `.`.
     #[arg(value_name = "PATH")]
@@ -1295,6 +1300,12 @@ pub struct TryArgs {
 
 #[derive(Args, Debug, Default)]
 pub struct LockArgs {
+    /// Composed-call only: suppress this command's own summary and next-step
+    /// lines. Set by the funnel, which prints ONE card and must not have three
+    /// sub-commands each proposing a competing next action. Never a flag.
+    #[arg(skip)]
+    pub quiet: bool,
+
     /// Only pin this toolset's refs (default: every toolset in the manifest).
     #[arg(long, value_name = "NAME")]
     pub profile: Option<String>,
@@ -1688,8 +1699,12 @@ pub struct DiffArgs {
     pub json: bool,
 }
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Default)]
 pub struct UseArgs {
+    /// Composed-call only — see [`LockArgs::quiet`]. Never a flag.
+    #[arg(skip)]
+    pub quiet: bool,
+
     /// Toolset to activate. Optional: with one toolset declared it is chosen
     /// automatically, and with none declared the implicit default — every
     /// inline skill and server — activates. Several toolsets need a name.
@@ -1739,6 +1754,17 @@ pub struct UseArgs {
 /// default (nothing writes); applying requires `--yes` AND a `--consented`
 /// digest from a prior preview — the same non-interactive gate `apply-setup`
 /// and `trust-consent` enforce.
+/// `yes` — the Phase 1 funnel's single action: declare, pin, review, activate
+/// the locally-authored files waiting in this project, behind one preview and
+/// one confirmation.
+#[derive(Args, Debug, Default)]
+pub struct YesArgs {
+    /// Acknowledge the review without an interactive prompt. Same meaning it
+    /// has on `trust`: the reviewer asserts they read what was printed.
+    #[arg(long)]
+    pub yes: bool,
+}
+
 #[derive(clap::Args, Debug, Clone)]
 pub struct PanelConsent {
     /// Emit the enveloped plan + consent digest and write nothing. The default
@@ -2406,7 +2432,7 @@ pub struct LibAddArgs {
     pub write: bool,
 }
 
-#[derive(Args, Debug)]
+#[derive(Args, Debug, Default)]
 pub struct InstructionsArgs {
     /// Only act on these CLIs (repeatable). Defaults to [targets].default.
     #[arg(long = "target", value_name = "CLI")]
@@ -2744,7 +2770,7 @@ pub fn full_command_inventory() -> String {
          \n  \
          Set up      init · status · adapters · settings · self · completions\n  \
          Edit        add · set · search · remove · install · lib · toolset · adopt · export · import\n  \
-         Render      apply · use · instructions · lock · session · diff · restore · uninstall\n  \
+         Render      apply · use · yes · instructions · lock · session · diff · restore · uninstall\n  \
          Protect     trust · explain · secret · guard · sign · verify\n  \
          Run         run · kill · shim · workflow · gateway · mcp · try\n  \
          Inspect     doctor · report · optimize · proxy\n\

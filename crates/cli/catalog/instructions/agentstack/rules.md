@@ -17,6 +17,34 @@ layer `~/.agentstack/agentstack.toml`).
 - Nothing touches disk without `--write`; dry-run output is always safe.
   Propose (edit the manifest, show the dry-run), let a human apply.
 
+## Authoring a skill or instruction: write the file, let the user say yes
+
+Dropping a file into the project is a first-class way to author a capability.
+Write it where it belongs and stop there:
+
+- a skill → `.agentstack/skills/<name>/SKILL.md`
+- an instruction fragment → `.agentstack/instructions/<name>.md`
+
+An undeclared file there is **inert** — nothing resolves, pins, renders, or
+reads it, and it enters no agent's context. That is the point: you can create
+it without asking, because creating it grants nothing.
+
+Then tell the user to run **`agentstack yes`**. It shows one review — what will
+be declared, what will be pinned, what will be written, and the full consent
+surface — and their single confirmation makes it live in every CLI. Do not run
+it for them: it is the human's yes, and it refuses without a terminal anyway.
+
+Do not hand-edit `[skills.*]` / `[instructions.*]` to declare what you just
+wrote, and do not run `lock`/`trust`/`use` yourself to shortcut the review.
+Content you did not write — anything that came with the repository — is not
+eligible for that path and takes the full staged review
+(`agentstack adopt` → `lock` → `trust`), which is also the path to name when
+`yes` says a file was held back.
+
+Servers are different: they carry commands, env, and secrets, so there is no
+file to drop — declare them (`agentstack add server …`). Hooks and extensions
+are executable and always get the full ceremony.
+
 ## Recognize the artifact mode before "fixing" anything
 
 1. **Static** — `.mcp.json` / `.claude/skills/` exist on disk, gitignored via a
