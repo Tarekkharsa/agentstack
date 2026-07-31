@@ -66,8 +66,8 @@ The adopted [`STRATEGY.md`](STRATEGY.md) (v2, 2026-07-31) opened with Phase 0
 amendment in `STRATEGY.md`, Phases 1–4 now build in order on maintainer
 acceptance; the activation study is the **v0.18.0 release gate** — the
 release does not publish until the study passes against the completed v2
-journey. Current work: **Phase 2, the review card** — Phase 1 is complete
-(block below).
+journey. Phases 1 and 2 are complete (blocks below); **next is Phase 3, the
+four ideas**, which starts in a fresh session.
 
 - [x] **P0.1 — study instrumentation.** Add the v2 observation prompts to the
   §1.6 protocol (where does a tester reach for "drop a file" and stall; can
@@ -146,70 +146,67 @@ Carried into Phase 2, written down rather than acted on:
   every path that could leave a change the user did not agree to has to keep
   failing that test.
 
-### Strategy v2 — Phase 2 (One yes: the review card)
+### Strategy v2 — Phase 2 (One yes: the review card) — COMPLETE 2026-07-31
 
-Contract: [`docs/design/consent-card.md`](docs/design/consent-card.md) — the
-card format, the prior-bytes source, and the recognition index, in one place
-because they share storage. Three slices; Slice A is the card itself.
+The yes is now glanceable, plain-language, and diff-aware, and repeated review
+of identical content is cheaper without being weaker. Contract:
+[`docs/design/consent-card.md`](docs/design/consent-card.md). Merged to main as
+`phase2/slice-b`; every witness tamper-tested.
 
-- [ ] **P2.A — the review card + undo-in-preview.** The grant screen leads with
-  two to five plain lines (what runs, what it contacts, what it may read, pin
-  status) composed from the walked surface, then the unabridged detail. Same
-  `grant_gated`, same gate, same digest — presentation only. **Fixes a real
-  consent gap found while building it:** `[hooks.*]` and `[settings.*]` were
-  declared capability kinds that re-gated the trust digest when edited but were
-  disclosed *nowhere* on the review screen, so a user re-consented to a hook
-  they had never been shown. Hooks are an executable kind carrying the full
-  ceremony, which made this the sharpest form of the surprise the Phase 2 gate
-  counts. Witnesses: leg 1, `crates/cli/tests/consent_card_coverage.rs` — every
-  item the grant persists into the consented surface appears by name in the
-  review the human read; leg 2, the `:review` requirement in
-  `tools/check-structure.py` — every manifest kind has a `diff.mark` disclosure
-  site or a baselined line, which is what turns the hooks fix from a fact about
-  one commit into a property. Undo is now named before the first byte changes
-  in `adopt`, `apply`, `use --write`, and `session start`.
-- [ ] **P2.B.5 — the three-way answer, in order.** Branch `phase2/slice-b`
-  carries the mechanism; what remains is the wiring, in this sequence:
-  1. **`grant_gated` wiring.** Collect accept / keep-pinned / block per drifted
-     item while the review walks. **Binding constraint:** answers *stage* —
-     nothing re-locks, records a decision, adds a pinned copy, or excludes an
-     item until the single final confirmation that already gates the grant.
-     Witness: extend `declining_leaves_nothing_behind` — give all three answer
-     kinds, decline, then assert manifest, lock, trust store *including
-     decisions*, delivered artifacts, and event log are byte-identical.
-  2. **Blocked exclusion + status.** Excluded from delivery, failing closed;
-     `status` reports it once as a standing state with the way out named, never
-     a per-command nag. The drift-still-reported assertion lands here — a
-     keep-pinned item's live file still shows as diverged.
-  3. **Collision card.** Phase 1's refusal gains the diff. Still
-     refuse-by-default: the diff informs, it does not unlock a replace path.
-  4. **Instruction deposits + regrant parity.** Instructions get their own
-     deposit choke point at instruction-pin time (the `Store::pin` shape), with
-     a universal witness over the lock's instruction entries; only then does the
-     diff card cover them. Parity runs last over the finished flow, covering
-     accept *and* keep-pinned: both must leave the event trail their explicit
-     equivalents leave.
-- [ ] **P2.B — pin-time snapshots + the re-gate diff card.** Per the design
-  note, this does **not** build a snapshot store: `~/.agentstack/store/content/`
-  already is one (write-once, keyed by the lock checksum, never evicted). The
-  gaps are narrower — `SurfaceItem` carries no pin pointer for skills
-  (`origin_word`) or instructions (`""`), and path-sourced content never
-  snapshots at all, which is exactly the Phase 1 drop case. Then: the re-gate
-  card naming what changed with a capped real diff and accept / keep-pinned /
-  block; the collision refusal upgraded to the same card; the event-parity
-  witness extended to the regrant flow.
-- [ ] **P2.C — recognition.** Machine-local, content-addressed approvals index
-  that shortens the card's body and never the gate. Machine-level standing
-  approval is explicitly out of scope — it widens the gate and gets its own
-  review.
-- [ ] **P2.D — panel follow-up (t3code), blocked on a CLI contract.**
-  `ConsentCard.lines`/`.question` are print-only inside `grant_gated`; the
-  panel reads `preview_value()` JSON and so cannot see the card or the coming
-  diff card at all. The CLI must emit them structurally — a `diff` object
-  mirroring `ReviewDiff` — behind a **new** feature name `trust-review-card-v1`
-  (a new name, never a revision of `trust-preview`, so a binary predating the
-  fields is not misrepresented as supporting them). Fork work does not start
-  until that contract exists here.
+- [x] **P2.A — the review card + undo-in-preview.** Two to five plain lines
+  composed from the walked surface, then the unabridged detail. Fixed a real
+  consent gap found while building it: `[hooks.*]` and `[settings.*]` re-gated
+  the trust digest when edited but were disclosed **nowhere** on the review
+  screen, so grants before this approved hooks the user was never shown. The
+  `:review` requirement in `tools/check-structure.py` is what makes the fix a
+  property rather than a fact about one commit. Undo is named before the first
+  byte changes in `adopt`, `apply`, `use --write`, and `session start`.
+- [x] **P2.B — prior bytes.** `~/.agentstack/store/content/` already was the
+  content-addressed store; the gaps were a missing pin pointer on `SurfaceItem`
+  and no deposit for path sources. Both closed, with the deposit inside the
+  pinning act (`Store::pin`, `Store::pin_instruction`) so "the approved bytes
+  were captured" is a property of pinning rather than of call-site discipline.
+- [x] **P2.B.5 — the three-way answer.** accept / keep-pinned / block, staged
+  behind one commit point; blocked exclusion at delivery with a standing status
+  line; the collision refusal upgraded to the informed card; instruction
+  deposits and their diff card; regrant event parity.
+- [x] **P2.C — recognition.** Machine-local approvals index keyed by content
+  digest. Shortens the card's body and nothing else — witnessed
+  outcome-invariant, event-invariant, and content-free.
+- [x] **P2.D — the panel contract.** `trust-review-card-v1` ships; the preview
+  gained hooks, settings, policy, and the machine ceiling, and
+  `ui_contract.rs`'s false "full reviewed surface" claim is now true.
+
+**Carried forward by name, so none of it is rediscovered as a bug:**
+
+- **The two deliberate preview omissions.** (a) A library server whose live
+  definition has drifted from its lock pin stays redacted in the JSON, so an
+  external UI cannot bind consent to bytes the digest does not cover — the
+  terminal review deliberately does the opposite. (b) The JSON's blockers cover
+  servers and local executables only; the full per-kind set needs resolution
+  steps that reach git worktree materialization, which must not happen on a
+  read-only command. Documented in `crates/cli/src/ui_contract.rs` and
+  `docs/design/consent-card.md` (§Panel). **Future work only if the panel
+  actually needs them**, and only with the write question answered first.
+- **Machine-level standing approval** ("always allow this exact content
+  anywhere on this machine") is **unbuilt by design**. It is a widening of the
+  gate rather than a presentation of it, and gets its own review.
+- **t3code fork rendering against `trust-review-card-v1`** — follow-up in the
+  other repo. The CLI contract it was blocked on now exists; the fork was not
+  opened this phase.
+- **Two historical under-disclosure entries are in `CHANGELOG.md`** and must
+  both survive editing: the terminal review omitted hooks and settings before
+  Slice A, and the machine-readable preview omitted them before P2.D.
+- **A refactor hazard.** `PendingAnswer.blocker_ix` is a positional index into
+  one global `blockers` vector. Any future decomposition of the walk must key
+  blockers by `(kind, name)` first — misaligning it would let accepting one
+  item clear an unrelated item's blocker, emptying the vector so the bail never
+  fires and an unpinned surface is trusted. Silent, and the most dangerous
+  shape in this area.
+
+**Gate to Phase 3:** review-comprehension metric improves against baseline, and
+zero instances — counted over recorded grant events — of a user saying yes to
+something the card did not surface. Phase 3 starts in a fresh session.
 
 ## Open review findings — what two product reviews left standing
 
