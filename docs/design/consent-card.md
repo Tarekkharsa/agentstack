@@ -196,6 +196,32 @@ each answer as it is given is the obvious implementation and it quietly creates
 three or four moments where a human commits to something. There is exactly one
 such moment, and it is the same one there has always been.
 
+**Where the commit moment is (decided 2026-07-31, during wiring).** The contract
+above says "the single final yes", and on the `agentstack yes` funnel that is
+literally `ConsentCard`'s confirmation. On plain `agentstack trust` there was no
+such moment: typing the command at a terminal *is* the consent, and that happens
+**before** any per-item answer is given. Rather than let N answers commit with no
+closing yes — the exact shape this section forbids — a re-gate that collected any
+answer asks one final confirmation before committing. A clean review, or a
+re-gate where the human answered nothing, is unchanged and prompts nothing.
+
+**What `accept` must do (decided 2026-07-31, from an adversarial review).**
+Accept re-locks, and the consent digest covers the lock bytes, so accept moves
+the very digest the review rendered from. Both naive commit paths are broken:
+with `--consented-digest` the grant fails `ConsentMismatch` *after* the lock was
+rewritten (residue after a failed grant), and without one the grant records the
+pre-accept digest and the project immediately reads `Changed` — the user accepts
+and silently gets an untrusted project. The correct handling recomputes rather
+than re-reads, following `repin`'s existing precedent ("computed from the written
+content, never from a disk re-read"): the new digest is taken over
+`snapshot.manifest` + `snapshot.local` + the lock bytes this process just
+serialized. Two conditions keep that honest — the lock delta must contain
+*exactly* the accepted items (never a manifest-wide re-pin, which would fold
+un-consented moves, including items the human answered keep-pinned or block on,
+into the granted digest), and the new checksum must be obtained through
+`Store::pin` so the accepted bytes reach the content store and the next re-gate
+can still diff.
+
 Its witness extends Phase 1's `declining_leaves_nothing_behind`: walk a re-gate
 giving all three answer kinds, decline the final gate, then assert the manifest,
 the lock, the trust store **including its recorded decisions**, the delivered

@@ -475,6 +475,31 @@ fn grant_gated(
     interactive: bool,
     card: Option<&ConsentCard>,
 ) -> Result<()> {
+    grant_probed(base, yes, consented, interactive, card, None)
+}
+
+/// The `trust` path (no funnel card) with re-gate answers injected — the entry
+/// integration tests drive. Kept card-free so [`ConsentCard`], which belongs to
+/// the funnel, stays crate-private.
+pub fn grant_with_answers(
+    base: &Path,
+    yes: bool,
+    consented: Option<&str>,
+    interactive: bool,
+    probe: Option<&ReGateProbe>,
+) -> Result<()> {
+    grant_probed(base, yes, consented, interactive, None, probe)
+}
+
+/// [`grant_gated`] with the re-gate answers injectable. See [`ReGateProbe`].
+pub(crate) fn grant_probed(
+    base: &Path,
+    yes: bool,
+    consented: Option<&str>,
+    interactive: bool,
+    card: Option<&ConsentCard>,
+    probe: Option<&ReGateProbe>,
+) -> Result<()> {
     let dir = crate::manifest::resolve_manifest_dir(base);
     let Some(snapshot) = trust::ConsentSnapshot::read(base) else {
         // No readable manifest: surface the same friendly first-contact error
@@ -554,6 +579,8 @@ fn grant_gated(
     // time therefore has to be pinned and matching BEFORE trust is granted:
     // `agentstack lock` is a prerequisite of `agentstack trust`.
     let mut blockers: Vec<(String, String)> = Vec::new();
+    // Re-gate questions the walk stages but does not ask; see PendingAnswer.
+    let mut pending: Vec<PendingAnswer> = Vec::new();
     for (name, resolved) in &servers {
         // This review is the consent screen for content that may be hostile —
         // display copies are sanitized; diff identities and lookups stay RAW
@@ -935,6 +962,26 @@ fn grant_gated(
                         say!("  {line}");
                     }
                     blockers.push((name.clone(), "skill content drifted from lock".to_string()));
+                    // STAGE the question — do not ask it here. The walk has not
+                    // printed anything yet (Slice A composes into `body` and
+                    // renders afterwards), so prompting at this point would ask
+                    // the human to judge a change before showing them the diff
+                    // that is, at this instant, still sitting unrendered in
+                    // `body`. The answer loop runs after the render.
+                    if !matches!(pin_diff, crate::regate::PinDiff::NoSnapshot) {
+                        pending.push(PendingAnswer {
+                            kind: "skill",
+                            name: name.clone(),
+                            // Which blocker this answer clears. Keyed by INDEX,
+                            // not by name: `blockers` is `(name, why)` with no
+                            // kind, so a skill and an instruction sharing a
+                            // name would clear each other's.
+                            blocker_ix: blockers.len() - 1,
+                            approved_pin: pin.clone(),
+                            live: live.clone(),
+                            headline: headline.clone(),
+                        });
+                    }
                 }
                 SkillLockStatus::MissingLockEntry => match report.origin {
                     // An inline skill's bytes live in the repo under review —
@@ -1151,6 +1198,67 @@ fn grant_gated(
         println!("{line}");
     }
 
+    // ---- The answer loop -----------------------------------------------
+    // The only place a re-gate question is asked, and it asks NOTHING that
+    // acts: every answer is recorded in memory and applied at the commit
+    // point below. This is the staging contract
+    // (`docs/design/consent-card.md`, "Answers stage; the single final yes
+    // commits"), and this is the one function to audit for effects leaking
+    // early — there are none between here and the commit.
+    //
+    // Placement is forced: after the render (so the human has seen the diff
+    // they are judging) and before the blocker bail (so an answer can still
+    // clear its blocker). `consented.is_none()` is load-bearing beyond the
+    // usual non-interactive check — `--consented-digest` does NOT require
+    // `--yes`, so a TTY caller passing only a digest is `interactive && !yes`
+    // yet bound to a digest that accepting would invalidate.
+    let mut answers: Vec<(usize, Answer)> = Vec::new();
+    if let Some(probe) = probe {
+        for (ix, p) in pending.iter().enumerate() {
+            if let Some((_, a)) = probe.answers.iter().find(|(n, _)| *n == p.name) {
+                answers.push((ix, *a));
+            }
+        }
+    } else if interactive && !yes && consented.is_none() && !pending.is_empty() {
+        println!(
+            "\n{}",
+            "This content changed since you approved it. For each item:".bold()
+        );
+        for (ix, p) in pending.iter().enumerate() {
+            let disp = crate::text::sanitize_line(&p.name);
+            let picked = crate::util::confirm::choose(
+                &format!("\n  {} {disp} — {}", p.kind, p.headline),
+                &[
+                    ("a", "accept the change"),
+                    ("k", "keep the approved version"),
+                    ("b", "block this item"),
+                ],
+            )?;
+            // `None` is not a fourth answer: it means nothing was decided, so
+            // this item's blocker stays and the review refuses exactly as it
+            // does today. Silence never resolves a consent question.
+            match picked.as_deref() {
+                Some("a") => answers.push((ix, Answer::Accept)),
+                Some("k") => answers.push((ix, Answer::KeepPinned)),
+                Some("b") => answers.push((ix, Answer::Block)),
+                _ => {}
+            }
+        }
+    }
+    // Answers only ever REMOVE blockers; nothing here can add surface.
+    {
+        let cleared: Vec<usize> = answers
+            .iter()
+            .map(|(ix, _)| pending[*ix].blocker_ix)
+            .collect();
+        let mut keep = 0usize;
+        blockers.retain(|_| {
+            let this = keep;
+            keep += 1;
+            !cleared.contains(&this)
+        });
+    }
+
     if !blockers.is_empty() {
         // Names and reasons carry manifest/resolver text — hostile input, so
         // the summary sanitizes exactly like the per-line review above.
@@ -1233,6 +1341,104 @@ fn grant_gated(
         }
     }
 
+    // `agentstack trust` has no closing confirmation — typing the command at a
+    // terminal IS the consent, and that already happened, BEFORE the answers
+    // above were given. Without this, N per-item answers would commit with no
+    // further yes: exactly the many-moments shape the staging contract exists
+    // to prevent. So a re-gate that collected answers asks once, here, at the
+    // same point the funnel's card asks. A clean review, or a re-gate the human
+    // answered nothing on, prompts nothing and is unchanged.
+    if card.is_none() && !answers.is_empty() {
+        let summary = answers
+            .iter()
+            .map(|(ix, a)| {
+                format!(
+                    "{} {}",
+                    match a {
+                        Answer::Accept => "accept",
+                        Answer::KeepPinned => "keep approved version of",
+                        Answer::Block => "block",
+                    },
+                    crate::text::sanitize_line(&pending[*ix].name)
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        let said_yes = match probe {
+            Some(probe) => probe.confirm,
+            None => crate::util::confirm::confirm(&format!("\nApply: {summary}?"))?,
+        };
+        if !said_yes {
+            anyhow::bail!("cancelled — nothing was granted or changed");
+        }
+    }
+
+    // ---- The commit point ----------------------------------------------
+    // Everything the answers imply happens from here down, in one place, after
+    // every gate. Order matters and is witnessed:
+    //
+    //   1. accepted items re-pin (deposit → patch lock → write → recompute the
+    //      digest), because accept CHANGES the bytes the consent digest covers;
+    //   2. the grant records that digest;
+    //   3. standing decisions are written LAST — `set_decision` is a no-op
+    //      without a trust entry (it must never be a second grant
+    //      constructor), so on a first-ever trust an answer written before the
+    //      grant would be silently dropped.
+    let mut effective_digest = surface_digest.clone();
+    let accepted: Vec<&PendingAnswer> = answers
+        .iter()
+        .filter(|(_, a)| *a == Answer::Accept)
+        .map(|(ix, _)| &pending[*ix])
+        .collect();
+    if !accepted.is_empty() {
+        // Patch the lock parsed FROM THE SNAPSHOT — never a manifest-wide
+        // re-lock. `agentstack lock` re-pins every kind, which would fold
+        // un-consented pin moves — including the very items answered
+        // keep-pinned or block — into the digest this grant is about to bless.
+        let mut patched = lock_from_snapshot(&snapshot, &dir)?;
+        // The review's `store` binding is scoped to the skills block; this is
+        // the same path-derived singleton, not a second store.
+        let store = crate::store::Store::default_store();
+        for p in &accepted {
+            let Some(live) = &p.live else { continue };
+            let checksum = crate::store::dir_digest(live)?.hex().to_string();
+            // Through `Store::pin`, so the newly approved bytes land in the
+            // content store and the NEXT re-gate can still show a diff.
+            let pinned = store.pin(&crate::store::Resolved {
+                path: live.clone(),
+                rev: None,
+                checksum: checksum.clone(),
+                fetched: false,
+                source_kind: "path",
+            })?;
+            if let Some(entry) = patched.skills.iter_mut().find(|s| s.name == p.name) {
+                entry.checksum = pinned;
+            }
+            // The recorded surface must carry the pin the human just approved,
+            // or the next re-gate would diff against the superseded one.
+            if let Some(item) = diff
+                .current
+                .iter_mut()
+                .find(|i| i.kind == p.kind && i.name == p.name)
+            {
+                item.pin = Some(checksum);
+            }
+        }
+        patched.save(&dir)?;
+        // Recompute, never re-read (§7.2). The manifest and local bytes are the
+        // ones this review rendered from; only the lock moved, and these are
+        // the exact bytes we just serialized — so a concurrent edit cannot
+        // sneak into the digest this grant records. Same precedent `repin`
+        // documents: computed from written content, never from a disk re-read.
+        let lock_bytes = std::fs::read(crate::lock::Lock::path(&dir)).ok();
+        effective_digest = trust::ConsentSnapshot {
+            manifest: snapshot.manifest.clone(),
+            local: snapshot.local.clone(),
+            lock: lock_bytes,
+        }
+        .digest();
+    }
+
     // Store the reviewed surface alongside the pin so the NEXT re-trust can
     // diff against it (P14). Display metadata only — it does not enter the
     // trust digest, so recording it never re-gates the project. When a
@@ -1241,18 +1447,80 @@ fn grant_gated(
     // matches the bytes on disk. Without one, the grant records the digest
     // of the SNAPSHOT this review rendered — never a fresh disk read — so a
     // mid-review byte swap leaves the project `Changed`, not blessed.
+    let recorded_surface = diff.current;
     let digest = match consented {
-        Some(consented) => trust::trust_with_consent(base, diff.current, consented)?,
+        Some(consented) => trust::trust_with_consent(base, recorded_surface, consented)?,
         None => {
-            trust::trust_reviewed(base, surface_digest.clone(), diff.current)?;
-            surface_digest
+            trust::trust_reviewed(base, effective_digest.clone(), recorded_surface)?;
+            effective_digest
         }
     };
+
+    // Standing answers, last — see the ordering note above.
+    for (ix, answer) in &answers {
+        let p = &pending[*ix];
+        let decision = match answer {
+            // Accepting clears any prior standing answer for this item: the new
+            // bytes ARE the approved ones now, so there is nothing to keep or
+            // refuse.
+            Answer::Accept => None,
+            Answer::KeepPinned => p
+                .approved_pin
+                .clone()
+                .map(|pin| trust::Decision::KeepPinned { pin }),
+            Answer::Block => Some(trust::Decision::Blocked),
+        };
+        trust::set_decision(base, p.kind, &p.name, decision)?;
+    }
     println!(
         "\n{} trusted at {digest}.\nEditing the manifest or lockfile invalidates this — re-run `agentstack trust` after reviewing changes.\nPinned skill/server content that drifts is blocked at use time until re-locked.\nWithdraw anytime with `agentstack trust --revoke`.",
         "✓".green()
     );
     Ok(())
+}
+
+/// A re-gate question the review walk STAGED but did not ask.
+///
+/// The separation is the whole staging contract in one type: the walk records
+/// what could be asked, the render happens, and only then is anything asked —
+/// and even then, nothing is acted on until the commit point. Answering happens
+/// in one place, so there is one place to audit for "did an effect leak early".
+struct PendingAnswer {
+    /// `"skill"` / `"instruction"` — the surface kind, needed because
+    /// `blockers` does not carry one.
+    kind: &'static str,
+    name: String,
+    /// Index into `blockers`; the answer clears exactly this entry.
+    blocker_ix: usize,
+    /// The pin whose bytes the human previously approved — what `keep pinned`
+    /// keeps, and what the shown diff was taken against.
+    approved_pin: Option<String>,
+    /// The live content directory, re-pinned on `accept`.
+    live: Option<PathBuf>,
+    headline: String,
+}
+
+/// What the human said about one staged question. Distinct from
+/// [`trust::Decision`] because `Accept` exists here (it is a thing to do at the
+/// commit point) but leaves no standing state to store afterwards.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Answer {
+    Accept,
+    KeepPinned,
+    Block,
+}
+
+/// Test seam for the re-gate answer loop, injected exactly like `grant_gated`'s
+/// `interactive` probe and `ConsentCard::answer`, and for the same stated
+/// reason: a consent path whose answers cannot be driven in a test is a consent
+/// path whose staging contract is unverified. Production always passes `None`
+/// and prompts.
+pub struct ReGateProbe {
+    /// Answers by item name; items absent from this list are left undecided,
+    /// which must keep their blocker exactly as it is today.
+    pub answers: Vec<(String, Answer)>,
+    /// What the closing confirmation returns.
+    pub confirm: bool,
 }
 
 /// The pin a PREVIOUS consent recorded for an item, if any.
