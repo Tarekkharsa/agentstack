@@ -58,6 +58,28 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   reviewer will see". It is the machine-readable surface; `agentstack
 ///   trust` remains authoritative.
 /// - `status-v1`: `doctor --json` carries `state` + `next_action`.
+/// - `status-honesty-v1`: `doctor --json` carries `readiness`, and
+///   `snapshot --json` carries a singular `nextAction`. Both are ADDITIVE:
+///   `state` and `nextActions` keep their `status-v1` meanings byte for byte,
+///   because a panel already rendering "Ready" from `state` must not have that
+///   word change meaning under its users.
+///
+///   `readiness` is the field to render instead. `state` answers only "did any
+///   check find something to repair?", so it says `ready` over a project that
+///   is untrusted and has never been activated — zero findings is true, and
+///   "ready" is not, since nothing the project declares is live. `readiness`
+///   answers "is this project actually live?" over the same report and takes
+///   one of: `needs_attention` (findings to repair), `untrusted` /
+///   `drifted` (the consent gate is what stands between here and live),
+///   `never_activated` (consented or not, no lockfile — nothing was ever
+///   rendered), `ready` (findings-free, trusted, activated), or `unknown`
+///   (doctor ran with no project, so there is no project readiness to claim).
+///   `needs_setup` appears in the pre-manifest payload, matching `state`.
+///
+///   A consumer migrating off `state`: render `readiness`, and treat every
+///   value except `ready` as "not live", with `next_action` as the step. The
+///   t3code fork's "Ready" chip is the known caller — it reads `state` today
+///   and is exactly the mislabel this exists to fix.
 /// - `profiles-v1`: `use --list --json` lists profiles with readiness.
 /// - `diff-v1`: `diff --json` reports drift per target.
 /// - `restore-last`: `restore --json` lists undoable writes; `restore --last
@@ -255,6 +277,7 @@ pub const FEATURES: &[&str] = &[
     "gitignore-opt-out-v1",
     "doctor-cli-coverage-v1",
     "set-mode-v1",
+    "status-honesty-v1",
 ];
 
 /// Wrap a response body in the envelope. The two envelope keys are injected

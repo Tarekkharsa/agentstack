@@ -339,6 +339,39 @@ impl Report {
         }
     }
 
+    /// What `state` would say if it answered the question users actually ask.
+    ///
+    /// [`state`](Self::state) reports whether any check found something to
+    /// repair, and nothing more — so it says `ready` over a project that is
+    /// untrusted and never activated, where zero findings is true and "ready"
+    /// is a lie: nothing the project declares is live. That word cannot be
+    /// changed in place (a panel rendering "Ready" from it would silently
+    /// change meaning under its users), so the honest answer ships beside it
+    /// under `status-honesty-v1` and `state` keeps its `status-v1` meaning.
+    ///
+    /// The order is what-blocks-what, matching [`next_action`](Self::next_action):
+    /// repair the findings, then pass the consent gate, then activate.
+    fn readiness(&self) -> &'static str {
+        // No project context (doctor ran outside one): there is no project
+        // readiness to report, and reporting the machine's as the project's is
+        // the substitution this whole item exists to remove.
+        if self.trust.is_none() && self.activation.is_none() {
+            return "unknown";
+        }
+        if self.errors + self.warnings > 0 {
+            return "needs_attention";
+        }
+        match self.trust {
+            Some("untrusted") => return "untrusted",
+            Some("drifted") => return "drifted",
+            _ => {}
+        }
+        if self.activation == Some("never_activated") {
+            return "never_activated";
+        }
+        "ready"
+    }
+
     /// The `probe` key, or `null` when `--probe` was not asked for. Absent and
     /// `ran: false` mean different things (never asked vs asked and refused),
     /// which is exactly why this is an object rather than a bare array.
@@ -370,6 +403,11 @@ impl Report {
         );
         serde_json::json!({
             "state": self.state(),
+            // The honest readiness (`status-honesty-v1`). `state` above stays
+            // exactly as `status-v1` defined it; this is the field a UI should
+            // render, because it does not call an untrusted, never-activated
+            // project ready. See `Report::readiness`.
+            "readiness": self.readiness(),
             // The same line the text report prints ("next: …") — exactly one
             // recommended command, always. It was previously null whenever
             // there was nothing to *repair*, which left a consumer with a
@@ -425,6 +463,11 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
         if !dir.join(crate::manifest::load::MANIFEST_FILE).exists() {
             let out = crate::ui_contract::envelope(serde_json::json!({
                 "state": "needs_setup",
+                // Hand-written twin of `Report::to_json` — every key that
+                // contract promises has to appear in BOTH, or a consumer sees
+                // the field vanish on the one path where it is least able to
+                // guess. `needs_setup` is a readiness like any other.
+                "readiness": "needs_setup",
                 "next_action": "agentstack init",
                 "protection": serde_json::Value::Null,
                 "errors": 0,
@@ -911,9 +954,41 @@ fn run_checks(
     // `resolve()` that only answers yes/no. `source_of` returns `None` exactly
     // when nothing in the chain resolves, so the not-found arm is unchanged.
     let sources = crate::secret::SecretSources::detect(&ctx.dir);
+    // Resolving is only half the answer. `[policy.secrets]` decides whether
+    // the servers that reference a ref may actually READ it, and a ref every
+    // one of them is refused is dead weight no matter how well it resolves —
+    // so a green "resolved from env" over it is the same vacuous pass P3.1
+    // removed elsewhere: technically true, and it tells the user the opposite
+    // of what will happen. `check_effective_policy` already errors on each
+    // refusal in the Policy section; this stops the Secrets section from
+    // contradicting it. Read-only: `secret_decision` is a pure verdict over
+    // the compiled ruleset, so nothing is resolved, recorded, or spawned here.
+    let refusal = SecretRefusal::compute(manifest);
     for name in &refs {
         match sources.source_of(name) {
-            Some(source) => report.line(Level::Ok, format!("{name:<20} resolved from {source}")),
+            Some(source) => match refusal.verdict(name) {
+                RefVerdict::Usable => {
+                    report.line(Level::Ok, format!("{name:<20} resolved from {source}"))
+                }
+                // Not an Error: the Policy section already raised one per
+                // refused (server, ref) pair, and counting the same defect
+                // twice would inflate the total the closing line reports.
+                RefVerdict::RefusedEverywhere => report.line(
+                    Level::Warn,
+                    format!(
+                        "{name:<20} resolves from {source}, but [policy.secrets] refuses it for \
+                         every server that references it — nothing can read it \
+                         ↳ widen that policy, or drop the reference"
+                    ),
+                ),
+                RefVerdict::RefusedSomewhere(refused) => report.line(
+                    Level::Warn,
+                    format!(
+                        "{name:<20} resolves from {source}, but [policy.secrets] refuses it for \
+                         {refused} of the servers that reference it — see Policy below"
+                    ),
+                ),
+            },
             None => report.line(
                 Level::Error,
                 format!("{name:<20} not found ↳ agentstack secret set {name}"),
@@ -2884,6 +2959,65 @@ fn check_named_policy_keys(
 /// hidden behind a `${REF}` can't be checked statically; that's only worth a
 /// Warn when this particular server IS actually egress-constrained (an
 /// unconstrained server passes regardless, so silence is correct there).
+/// Whether a `${REF}` that RESOLVES is actually readable by the servers that
+/// reference it, per the effective (machine ∩ project) `[policy.secrets]`.
+enum RefVerdict {
+    /// At least one referencing server may read it — or no server references
+    /// it at all, in which case `[policy.secrets]` (a per-server dimension)
+    /// has no opinion and silence is the correct answer.
+    Usable,
+    /// Every server that references it is refused: it resolves and nothing
+    /// can read it.
+    RefusedEverywhere,
+    /// Refused for some referencing servers, allowed for others. Carries the
+    /// refused count so the line can say how many without listing them (the
+    /// Policy section names each one).
+    RefusedSomewhere(usize),
+}
+
+/// Per-ref refusal tallies, computed once over the compiled ruleset rather
+/// than per line — `ruleset_for` intersects the machine ceiling, and doing
+/// that inside the render loop would be both slower and a second place for
+/// the two sections to disagree.
+struct SecretRefusal {
+    /// ref name -> (servers referencing it, of those, servers refused)
+    tallies: std::collections::HashMap<String, (usize, usize)>,
+}
+
+impl SecretRefusal {
+    fn compute(manifest: &Manifest) -> Self {
+        let mut tallies: std::collections::HashMap<String, (usize, usize)> =
+            std::collections::HashMap::new();
+        // A ruleset that will not compile is already an Error in the Policy
+        // section; here it means "no verdict available", and the Secrets
+        // section falls back to reporting resolution only. Claiming a refusal
+        // we could not compute would be the same dishonesty in the mirror.
+        let Ok(ruleset) = ruleset_for(manifest) else {
+            return SecretRefusal { tallies };
+        };
+        for (name, server) in &manifest.servers {
+            for r in server.referenced_secrets() {
+                let entry = tallies.entry(r.clone()).or_insert((0, 0));
+                entry.0 += 1;
+                if ruleset.secret_decision(name, &r).is_err() {
+                    entry.1 += 1;
+                }
+            }
+        }
+        SecretRefusal { tallies }
+    }
+
+    fn verdict(&self, reference: &str) -> RefVerdict {
+        match self.tallies.get(reference) {
+            Some(&(referencing, refused)) if refused > 0 && refused == referencing => {
+                RefVerdict::RefusedEverywhere
+            }
+            Some(&(_, refused)) if refused > 0 => RefVerdict::RefusedSomewhere(refused),
+            _ => RefVerdict::Usable,
+        }
+    }
+}
+
 fn check_effective_policy(manifest: &Manifest, report: &mut Report) {
     let ruleset = match ruleset_for(manifest) {
         Ok(ruleset) => ruleset,
@@ -4224,6 +4358,16 @@ mod tests {
     /// still means something and survives.
     #[test]
     fn tidy_path_folds_and_abbreviates() {
+        // The `$HOME` leg below reads a process-global that other tests in this
+        // binary mutate, so it has to hold the same lock they do. Without it
+        // this passes or fails on scheduling: it was green for as long as
+        // nothing happened to run beside it, and adding unrelated tests
+        // elsewhere in the crate was enough to make it flake. A test whose
+        // result depends on how many other tests exist is not testing what it
+        // claims to.
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         assert_eq!(
             tidy_path(Path::new("/srv/proj/../home/.claude.json")),
             "/srv/home/.claude.json"

@@ -543,6 +543,13 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
         "statsReport": stats_report,
         "health": health,
         "nextActions": next_actions,
+        // The one to act on (`status-honesty-v1`). `nextActions` above keeps
+        // its shape and contents for the consumers that already read it; this
+        // is a list where a decision belongs, and `doctor`/`status` both settle
+        // on exactly one recommended step. A panel that renders the array makes
+        // the user pick between remedies — which is the work a status surface
+        // exists to have already done.
+        "nextAction": one_next_action(&next_actions),
         "runs": runs,
         "session": crate::session::active(&ctx.dir).map(|s| json!({
             "profile": s.profile,
@@ -799,6 +806,29 @@ fn push_drift_health(
             Some(json!({ "type": "preview", "scope": "global", "all": true })),
         );
     }
+}
+
+/// The single action from `next_actions` a user should take first: the most
+/// severe one, earliest-wins within a severity (the list is already built in
+/// what-blocks-what order).
+///
+/// Null only when there is genuinely nothing to do. That differs from
+/// `doctor`'s never-null `next_action` on purpose: `doctor` is a command whose
+/// whole output is "what now?", so it always offers a rung even on a healthy
+/// setup, while this is one key of a dashboard payload where an invented
+/// suggestion would compete with the screen's real content. A consumer reads
+/// null as "nothing needs you".
+fn one_next_action(actions: &[Value]) -> Value {
+    let by_level = |want: &str| {
+        actions
+            .iter()
+            .find(|a| a.get("level").and_then(Value::as_str) == Some(want))
+    };
+    by_level("error")
+        .or_else(|| by_level("warn"))
+        .or_else(|| actions.first())
+        .cloned()
+        .unwrap_or(Value::Null)
 }
 
 fn next_actions(

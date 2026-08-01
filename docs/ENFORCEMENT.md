@@ -373,11 +373,28 @@ Which is which, per denial family:
 | Egress refusal — host path | **coarse** — a write-time check on the declared host, not a wire-level fence | yes, **new in Phase 3** | `calls.jsonl` (`tool: egress`) + run `events.jsonl` (`Egress`) when inside a run |
 | Secret-scope refusal | **enforced** — the ref reaches no backing store | yes, **new in Phase 3** | `calls.jsonl` (`tool: secret`) + run `events.jsonl` (`SecretDenied`) |
 | Filesystem guard | **cooperative** — the harness chose to ask | yes | `calls.jsonl` (`server: host-guard`, `run: None`) |
+| Content-pin refusal | **enforced** — the server is dropped before it is spawned or dialled | yes, **new in Phase 4** | `calls.jsonl` (`tool: pin`) + run `events.jsonl` (`PinRejected`) |
+
+The content-pin row is the fifth family, added in Phase 4. It differs from the
+other four in what refused: nothing the user *authored* denied anything here,
+the delivered bytes simply are not the bytes they reviewed — which is why it
+has its own family and its own next step (review what changed, or re-pin
+deliberately), rather than borrowing the tool block's. It only ever fires for
+a project that is already trusted: an unreviewed bundle is refused whole,
+earlier, and never reaches per-server verification.
+
+One honesty note specific to it: its refusal text is composed from lockfile and
+manifest fragments, which are repository content and therefore hostile input
+(invariant 7). It is control-character-stripped and length-bounded before it is
+printed or recorded, so the reason in the log is deliberately lossy — a denial
+the reader can trust to be a denial is worth more than a complete one.
 
 The two rows marked *new in Phase 3* were previously refusals that happened,
 printed once, and left nothing behind. Adding their events changed **only**
 what is written: both were already fail-closed refusals, both still are, and
-neither row's enforcement claim moved as a result. The host-path egress row in
+neither row's enforcement claim moved as a result. The same is true of the
+Phase 4 row: `Gateway::build` drops exactly the servers it dropped before, and
+`refuse` still returns `()`. The host-path egress row in
 particular stays `coarse` — recording a write-time decision does not make it a
 runtime fence, and reading this table as though it did is the exact error the
 paragraph above exists to prevent.
@@ -757,6 +774,66 @@ review of identical content gets shorter.
 - **Not a widening of consent.** Recognition shortens what the card *says*; it
   never shortens the gate. The per-project yes still happens in full, and a
   machine-level "always allow this content anywhere" is deliberately not built.
+
+## Sharing, intake, and what a signature is worth
+
+Phase 4 added three surfaces that all handle content from outside this machine.
+Each is written down here because each is a place where a reader could
+reasonably assume more protection than exists.
+
+### Bundle signatures — `share` / `receive`
+
+A `.astack` bundle carries an ed25519 signature over its own contents
+(everything except the signature and the key that made it). What the signature
+proves, exactly: **these bytes came from the holder of this key, unchanged
+since they signed.**
+
+What it does not prove, and must never be read as proving:
+
+- **Nothing about whether the content is safe.** A publisher can sign malware
+  perfectly well. Verification is an authenticity check, not a review.
+- **Nothing about who the key belongs to.** There is no certificate authority
+  and no web of trust here. A key is a stranger's until the user runs
+  `agentstack publisher trust` and says whose it is — a purely local claim,
+  based on whatever out-of-band check they did or did not perform.
+- **It is not a second way to say yes.** A valid signature from a recognized
+  publisher changes the card's wording — the question of *whose* key it is is
+  settled — and changes nothing else. The review body is identical, and a
+  witness compares both runs byte for byte to keep that true.
+
+An unsigned bundle and an invalid signature are both stated on the card and
+neither aborts: the full review stands in both cases. An invalid signature is
+the loudest of the three, because it means the bytes changed after signing.
+
+### Quarantine — where intake waits
+
+Fetched content is staged under `.agentstack/quarantine/` before the card is
+shown, so what the card describes is what is on disk rather than what was in
+memory. Inertness there is structural rather than enforced: the path is not an
+intake directory, is named by no manifest entry, is on no search path, and is
+reachable by no server. **There is no sandbox around it** — it is a directory
+of files nothing is arranged to read. That is the whole mechanism, and it is
+honest precisely because there is nothing to bypass.
+
+Declining removes the directory. The property is the Phase 1 one: fetched then
+declined leaves the project byte-identical with nothing to clean up later.
+
+Path traversal is refused at one choke point (`quarantine::check_relative`),
+allow-list shaped, called both by the caller and inside staging so the
+guarantee belongs to the module rather than to call-site diligence.
+
+### Attribution — `license` and `origin` in the lock
+
+Recorded per pinned skill, and carried forward by `Lock::upsert` so an ordinary
+re-lock cannot erase it. NOTICE/LICENSE text travels with the content rather
+than being summarized into a tag.
+
+The honest limit: **this records what a source declared, and verifies none of
+it.** A registry claiming `Apache-2.0` gets `Apache-2.0` written down. AgentStack
+does not check that the claim is true, that the publisher had the right to make
+it, or that the NOTICE text is complete. It makes the obligation *visible and
+durable*, which is strictly more than a promise and strictly less than a legal
+review.
 
 ## Experimental `tools_execute`
 

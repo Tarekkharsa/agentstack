@@ -3004,6 +3004,8 @@ mod tests {
             git: None,
             rev: None,
             checksum,
+            license: None,
+            origin: None,
         });
         lock.save(proj.path()).unwrap();
         (home, proj)
@@ -3045,6 +3047,8 @@ mod tests {
                     manifest_dir.child(format!("skills/{name}")).path(),
                 )
                 .unwrap(),
+                license: None,
+                origin: None,
             });
         }
         lock.save(manifest_dir.path()).unwrap();

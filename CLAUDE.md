@@ -152,6 +152,14 @@ minutes. Two hard rules bound them:
   for a single binary — for the crates the change can actually break;
   `cargo fmt --check` before handoff. Run exactly the tests your change can
   break, nothing more.
+- **Compile-verify with `cargo check --workspace --all-targets` before
+  handoff.** It is fast, and it is the only cheap check that sees test
+  targets. `cargo check` skips `cfg(test)`, and `cargo test --test <name>`
+  builds one binary — so a change to a widely-constructed type compiles and
+  passes everything a focused loop runs while leaving other test targets
+  unbuildable. This is a structural blind spot in the focused loop above, not
+  a lapse of care: it broke the build twice in one session on the same change
+  before being caught by an unrelated `--all-targets` run.
 
 ## Working rules
 

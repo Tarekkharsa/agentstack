@@ -45,6 +45,14 @@ pub fn run_set(args: &crate::cli::SetArgs, manifest_dir: Option<&Path>) -> Resul
 fn add_from(a: &AddFromArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let ctx = super::load(manifest_dir)?;
 
+    // An external ecosystem's supply: a URL, or a local path to an eve-format
+    // package or registry listing. Claimed narrowly (see `claims`) so catalog
+    // ids and git refs still reach their own paths below.
+    if crate::commands::intake_external::claims(&a.id) {
+        let dir = crate::manifest::resolve_manifest_dir(&ctx.dir);
+        return crate::commands::intake_external::run(&a.id, &dir, a.write);
+    }
+
     // `git:<url>[@<tag>][#subdir]` — a versioned pack from any git host.
     if let Some(git_ref) = crate::provider::gitpack::GitPackRef::parse(&a.id) {
         return add_git_pack(a, &ctx, &git_ref);

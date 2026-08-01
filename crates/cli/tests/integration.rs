@@ -579,6 +579,8 @@ fn store_resolves_path_skill_and_lock_roundtrips() {
         git: None,
         rev: None,
         checksum: agentstack_core::digest::Sha256Hex::parse(&resolved.checksum).unwrap(),
+        license: None,
+        origin: None,
     });
     lock.save(tmp.path()).unwrap();
     let reloaded = Lock::load(tmp.path()).unwrap();
