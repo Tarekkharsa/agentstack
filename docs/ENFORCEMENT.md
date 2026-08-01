@@ -775,6 +775,66 @@ review of identical content gets shorter.
   never shortens the gate. The per-project yes still happens in full, and a
   machine-level "always allow this content anywhere" is deliberately not built.
 
+## Sharing, intake, and what a signature is worth
+
+Phase 4 added three surfaces that all handle content from outside this machine.
+Each is written down here because each is a place where a reader could
+reasonably assume more protection than exists.
+
+### Bundle signatures — `share` / `receive`
+
+A `.astack` bundle carries an ed25519 signature over its own contents
+(everything except the signature and the key that made it). What the signature
+proves, exactly: **these bytes came from the holder of this key, unchanged
+since they signed.**
+
+What it does not prove, and must never be read as proving:
+
+- **Nothing about whether the content is safe.** A publisher can sign malware
+  perfectly well. Verification is an authenticity check, not a review.
+- **Nothing about who the key belongs to.** There is no certificate authority
+  and no web of trust here. A key is a stranger's until the user runs
+  `agentstack publisher trust` and says whose it is — a purely local claim,
+  based on whatever out-of-band check they did or did not perform.
+- **It is not a second way to say yes.** A valid signature from a recognized
+  publisher changes the card's wording — the question of *whose* key it is is
+  settled — and changes nothing else. The review body is identical, and a
+  witness compares both runs byte for byte to keep that true.
+
+An unsigned bundle and an invalid signature are both stated on the card and
+neither aborts: the full review stands in both cases. An invalid signature is
+the loudest of the three, because it means the bytes changed after signing.
+
+### Quarantine — where intake waits
+
+Fetched content is staged under `.agentstack/quarantine/` before the card is
+shown, so what the card describes is what is on disk rather than what was in
+memory. Inertness there is structural rather than enforced: the path is not an
+intake directory, is named by no manifest entry, is on no search path, and is
+reachable by no server. **There is no sandbox around it** — it is a directory
+of files nothing is arranged to read. That is the whole mechanism, and it is
+honest precisely because there is nothing to bypass.
+
+Declining removes the directory. The property is the Phase 1 one: fetched then
+declined leaves the project byte-identical with nothing to clean up later.
+
+Path traversal is refused at one choke point (`quarantine::check_relative`),
+allow-list shaped, called both by the caller and inside staging so the
+guarantee belongs to the module rather than to call-site diligence.
+
+### Attribution — `license` and `origin` in the lock
+
+Recorded per pinned skill, and carried forward by `Lock::upsert` so an ordinary
+re-lock cannot erase it. NOTICE/LICENSE text travels with the content rather
+than being summarized into a tag.
+
+The honest limit: **this records what a source declared, and verifies none of
+it.** A registry claiming `Apache-2.0` gets `Apache-2.0` written down. AgentStack
+does not check that the claim is true, that the publisher had the right to make
+it, or that the NOTICE text is complete. It makes the obligation *visible and
+durable*, which is strictly more than a promise and strictly less than a legal
+review.
+
 ## Experimental `tools_execute`
 
 This is a separate, machine-opt-in mode with a narrower runtime surface than a
