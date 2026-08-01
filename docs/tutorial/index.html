@@ -259,7 +259,7 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
       <div id="quizDriftOpts" style="display:flex;flex-direction:column;gap:8px"></div>
       <div id="quizDriftFb" hidden style="margin-top:12px;font-size:13px;line-height:1.55"></div>
     </div>
-    <div style="margin-top:16px;font-size:13px;color:var(--muted);line-height:1.6"><strong>Undo, two faces:</strong> every rendered-config write (<code class="sm">apply</code>, <code class="sm">use</code>, sessions) is recorded. <code class="sm">agentstack undo</code> lists your recent changes newest-first and reverts to the point you pick — the revert is recorded too, so going one step too far is recoverable. <code class="sm">agentstack restore --last --write</code> is the same record as a one-shot, script-friendly command. The manifest itself is yours: an <code class="sm">adopt</code> you regret is undone in your editor or git.</div>
+    <div style="margin-top:16px;font-size:13px;color:var(--muted);line-height:1.6"><strong>Undo, two faces:</strong> every rendered-config write (<code class="sm">apply</code>, <code class="sm">use</code>, sessions) is recorded. <code class="sm">agentstack undo</code> (v0.18.0+) lists your recent changes newest-first and reverts to the point you pick — the revert is recorded too, so going one step too far is recoverable. <code class="sm">agentstack restore --last --write</code> is the same record as a one-shot, script-friendly command, and it is present in every release. The manifest itself is yours: an <code class="sm">adopt</code> you regret is undone in your editor or git.</div>
   </section>
 
   <section class="lesson-pane" id="lesson-6" hidden>
@@ -309,7 +309,7 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
       <div class="rowcard" style="align-items:baseline"><span class="mono" style="font-size:13px;font-weight:700;color:var(--accent);flex:none;width:110px">toolsets</span><span style="font-size:13.5px;color:var(--body);line-height:1.55">Named subsets of the manifest ("backend", "design"). <code class="sm">use &lt;toolset&gt; --write</code> materializes only that toolset's skills and prunes the rest it owns.</span></div>
       <div class="rowcard" style="align-items:baseline"><span class="mono" style="font-size:13px;font-weight:700;color:var(--accent);flex:none;width:110px">library</span><span style="font-size:13.5px;color:var(--body);line-height:1.55">Your central home at <code class="sm">~/.agentstack/lib/</code> — skills and server definitions projects reference <em>by name</em> instead of copying. <code class="sm">lib sync</code> carries it across machines.</span></div>
       <div class="rowcard" style="align-items:baseline"><span class="mono" style="font-size:13px;font-weight:700;color:var(--accent);flex:none;width:110px">search + add</span><span style="font-size:13.5px;color:var(--body);line-height:1.55">One search over your library, the bundled catalog, and the official MCP Registry. <code class="sm">add from &lt;id&gt; --write</code> adds it to the manifest with its secrets lifted to <code class="sm">${REF}</code>s; one <code class="sm">apply --write</code> then renders it to <strong>all your CLIs at once</strong>. Skills also install from any repo: <code class="sm">add skill owner/repo --write</code>.</span></div>
-      <div class="rowcard" style="align-items:baseline"><span class="mono" style="font-size:13px;font-weight:700;color:var(--accent);flex:none;width:110px">write your own</span><span style="font-size:13.5px;color:var(--body);line-height:1.55">Drop a folder with a <code class="sm">SKILL.md</code> under <code class="sm">.agentstack/skills/</code> and run <code class="sm">agentstack yes</code> — one review, and it is pinned and live in every CLI; the manifest and lock update themselves. Content you wrote here gets the one-step review; anything that arrived with a clone always gets the full staged one.</span></div>
+      <div class="rowcard" style="align-items:baseline"><span class="mono" style="font-size:13px;font-weight:700;color:var(--accent);flex:none;width:110px">write your own</span><span style="font-size:13.5px;color:var(--body);line-height:1.55">Drop a folder with a <code class="sm">SKILL.md</code> under <code class="sm">.agentstack/skills/</code> and run <code class="sm">agentstack yes</code> (v0.18.0+) — one review, and it is pinned and live in every CLI; the manifest and lock update themselves. Content you wrote here gets the one-step review; anything that arrived with a clone always gets the full staged one.</span></div>
     </div>
     <div class="term" style="margin-bottom:8px" data-term="scale" data-title="your-project — zsh"></div>
     <div style="font-size:13px;color:var(--muted);line-height:1.6;margin-top:10px">Try before installing: <code class="sm">agentstack try owner/repo --skill &lt;name&gt;</code> stages and scans a skill and emits a wrapper prompt for piping into any CLI — no manifest, lock, or config is touched.</div>
@@ -412,7 +412,7 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
 
 var LESSONS=['Welcome — the problem','The map — four ideas, six rungs','Rung 1 · Unify','Rung 2 · Switch','Rungs 3–4 · Diagnose & Recover','Rung 5 · Share','Rung 6 · Guard','Rung 6 · Trust','Rung 6 · Confine','Rung 6 · Policy & audit','Recap & cheat sheet'];
 var W='var(--term-text)',G='var(--term-ok)',R='var(--term-bad)',A='var(--term-warn)',D='var(--term-muted)';
-var VERSION='0.17.0'; /* one shared value — keep in sync with the released tag */
+var VERSION='0.17.1'; /* one shared value — keep in sync with the released tag */
 var TERM={
   unify:[
     {cmd:'curl -fsSL …/install.sh | sh',out:[['downloading agentstack v'+VERSION+'…',D],['verifying tarball against checksums.txt… ok',D],['✓ installed to ~/.local/bin/agentstack',G]]},
@@ -768,14 +768,19 @@ var CHEATS=[
   ['init','rung 1 — scan CLIs → write one reviewed manifest; lift inline tokens to ${REF}s'],
   ['apply --write','rung 1 — render the manifest into every CLI’s native config'],
   ['status','rung 1 — one screen: what is here, whether it is ready, the one next step'],
+  ['yes','rung 1 — a file you dropped in: one review card, then it is pinned and live everywhere (v0.18.0+)'],
   ['use <toolset> --write','rung 2 — switch to one named subset of the manifest'],
   ['session start / end','rung 2 — use a toolset for now, then put every file back'],
   ['doctor','rung 3 — the deep check: adapters, secrets, drift, skills, supply chain'],
   ['diff','rung 3 — show the consequence of drift before anything changes'],
   ['adopt | apply --write','rung 4 — keep the hand edit, or re-assert the manifest'],
-  ['restore --last --write','rung 4 — the one undo verb for every recorded write'],
+  ['undo','rung 4 — the timeline: your recent changes newest-first, pick a point and revert (v0.18.0+)'],
+  ['restore --last --write','rung 4 — the same record, script-friendly: one recorded write at a time'],
   ['search / add from <id> --write','rung 5 — find in library + catalog + MCP Registry; apply renders it everywhere'],
   ['lib sync','rung 5 — carry the central library across machines; secrets stay put'],
+  ['share <name>','rung 5 — bundle this setup, signed as part of sharing, not as a flag (v0.18.0+)'],
+  ['receive <path>','rung 5 — the other side: the bundle is staged inert and carded before anything lands (v0.18.0+)'],
+  ['up','rung 5 — a machine with the checkout and nothing else: detect, verify, render, name what is left (v0.18.0+)'],
   ['guard install','rung 6 — block rm -rf, git reset --hard, .env reads before they run'],
   ['gateway connect','rung 6 — register the gateway once per CLI (zero-files mode)'],
   ['trust . / --list / --revoke','rung 6 — review a repo, pin its digest; any edit re-gates it'],

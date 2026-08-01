@@ -266,6 +266,7 @@
 $EDITOR .agentstack/skills/pdf-review/SKILL.md   # your instructions
 
 agentstack yes</code></pre>
+<blockquote><code>agentstack yes</code> is v0.18.0 and later; the current stable install serves v0.17.1, where a skill has to be declared in the manifest before it renders. <code>agentstack --version</code> says which you have.</blockquote>
 <p>Until you answer, the file is <strong>inert</strong> — nothing resolves, pins, renders, or reads it, and no agent sees it. <code>agentstack yes</code> shows one review: what will be declared, what will be pinned, what each CLI will get, and the full consent surface. One confirmation makes it live everywhere. Undo is <code>agentstack restore --last --write</code>, named in the preview before it runs.</p>
 <p>The short path is for content you demonstrably wrote here — untracked in git, or newer than this project's last review. A skill that <strong>came with the repository</strong> is somebody else's work and takes the full staged review instead; <code>agentstack yes</code> says so and names the commands (<code>agentstack adopt</code> → <code>agentstack lock</code> → <code>agentstack trust .</code>). <code>agentstack lib new &lt;name&gt;</code> scaffolds the template if you'd rather not start from an empty file.</p>
 <h2 id="bringing-in-someone-elses-skill">Bringing in someone else's skill<a class="hlink" href="#bringing-in-someone-elses-skill" aria-label="Link to this section">#</a></h2>

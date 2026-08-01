@@ -102,6 +102,19 @@ content it approved, so a `git pull` that changes pinned bytes drops the repo
 back to inert on purpose. `agentstack trust .` prints the full declared surface
 and asks. Details: [trust a cloned repo](howto/trust-a-repo.md).
 
+## I dropped a skill folder into `.agentstack/skills/` — how do I use it without editing any config?
+
+Run `agentstack yes` (v0.18.0 and later; the current stable install serves
+v0.17.1). The dropped files are noticed, pinned, and shown on one review card —
+what gets declared, what each CLI will receive, and the undo that reverses it —
+and one confirmation records them in the manifest and lock and renders them
+everywhere. No manifest edit, no `.mcp.json`, no per-CLI skills directory.
+
+The one caveat is provenance: files you demonstrably wrote here (untracked in
+git, or newer than the last review) get that one-step path, while anything that
+arrived with a clone is somebody else's work and takes the full staged review
+instead. Walkthrough: [add a skill](howto/add-a-skill.md).
+
 ## Does agentstack replace my agent CLI?
 
 No. It configures the CLIs you already run — you keep launching `claude`,

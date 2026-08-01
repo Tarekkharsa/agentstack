@@ -20,6 +20,10 @@ $EDITOR .agentstack/skills/pdf-review/SKILL.md   # your instructions
 agentstack yes
 ```
 
+> `agentstack yes` is v0.18.0 and later; the current stable install serves
+> v0.17.1, where a skill has to be declared in the manifest before it renders.
+> `agentstack --version` says which you have.
+
 Until you answer, the file is **inert** — nothing resolves, pins, renders, or
 reads it, and no agent sees it. `agentstack yes` shows one review: what will be
 declared, what will be pinned, what each CLI will get, and the full consent

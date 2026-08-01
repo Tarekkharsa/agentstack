@@ -15,6 +15,10 @@ agentstack restore a1b2 --write    # undo one write by its id prefix
 agentstack restore claude-code     # fallback: restore one adapter's config from its backup
 ```
 
+> `agentstack undo` is v0.18.0 and later; the current stable install serves
+> v0.17.1, where `restore` is the whole story. `agentstack --version` says
+> which you have.
+
 Undo has two faces over one record. Every write agentstack makes — servers,
 settings, hooks, instructions, even the owned-server manifest refresh — is
 recorded before it lands. `agentstack undo` shows those recorded changes as a

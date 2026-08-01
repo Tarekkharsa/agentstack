@@ -129,7 +129,8 @@ re-lock — and the project drops back to untrusted until you re-trust it. More:
 
 **The yes** — the consent moment itself, and the one thing never automated. For
 files you drop into `.agentstack/skills/` or `.agentstack/instructions/`,
-`agentstack yes` is the whole ceremony in one step: notice, pin, review, render.
+`agentstack yes` (v0.18.0+) is the whole ceremony in one step: notice, pin,
+review, render.
 
 **Review card** — what a yes shows you before it means anything: what the
 content adds, what it would run, contact, or read, and — on a re-gate — what
@@ -140,9 +141,11 @@ demonstrably wrote here (untracked in git, or newer than the last review) may
 take the one-step path; anything that arrived with a clone always takes the
 full staged review. Selection is by evidence, never by politeness.
 
-**Undo timeline** — `agentstack undo`: every recorded write, newest first; pick
-a point and revert to it. The revert is itself recorded, so it can be undone
-too. `restore` is the same record as a script-friendly, one-write primitive.
+**Undo timeline** — `agentstack undo` (v0.18.0+): every recorded write, newest
+first; pick a point and revert to it. The revert is itself recorded, so it can
+be undone too. `restore` is the same record as a script-friendly, one-write
+primitive, and works in every release. More:
+[undo anything](howto/undo.md).
 
 ## Drift
 

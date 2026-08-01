@@ -16,6 +16,9 @@ reviews with `agentstack receive <path>`: staged inert and carded first, and a
 publisher they recognize shortens the card, never skips it. Use the bundle
 when there is no shared repo to commit to.
 
+(`share` and `receive` are v0.18.0 and later; the current stable install
+serves v0.17.1, where committing the manifest is the whole story.)
+
 ```bash
 # You, once: commit the manifest and its lockfile
 git add .agentstack/          # manifest + agentstack.lock

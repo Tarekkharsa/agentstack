@@ -106,6 +106,7 @@
           <a href="#r16" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">16</span><span>Versioned vendor packs</span></a>
           <a href="#r23" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">23</span><span>Extend it</span></a>
           <a href="#r24" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">24</span><span>The personal layer &amp; app-owned servers</span></a>
+          <a href="#r26" class="rail-link" style="display:flex;align-items:baseline;gap:8px;text-decoration:none;color:var(--color-neutral-700);font-size:0.85rem;line-height:1.35;padding:4px 8px;border-radius:999px"><span style="font-family:ui-monospace,Menlo,monospace;font-size:0.7rem;color:var(--color-neutral-500);flex:none;min-width:16px;text-align:right">26</span><span>Move a setup to another person or machine</span></a>
         </div>
       </div>
 
@@ -150,7 +151,7 @@
 
     <div id="main-content" role="main" tabindex="-1" style="flex:1;min-width:0">
       <h1 style="font-family:var(--font-heading);font-weight:400;font-size:2.6rem;margin:0 0 var(--space-3)">Cookbook — AgentStack, by example</h1>
-      <p style="font-size:1.05rem;line-height:1.65;color:var(--color-neutral-700);margin:0 0 var(--space-4);max-width:640px">Twenty-five copy-paste recipes for <strong>using the CLI</strong>, building from a one-line manifest shared by every CLI up to governed automation. The manifest is the source of truth; generated native configuration is compiled output. Watching the security claims <em>proven</em> instead? That's the <a href="examples.html">Demos page</a>.</p>
+      <p style="font-size:1.05rem;line-height:1.65;color:var(--color-neutral-700);margin:0 0 var(--space-4);max-width:640px">Twenty-six copy-paste recipes for <strong>using the CLI</strong>, building from a one-line manifest shared by every CLI up to governed automation. The manifest is the source of truth; generated native configuration is compiled output. Watching the security claims <em>proven</em> instead? That's the <a href="examples.html">Demos page</a>.</p>
       <div class="card" style="background:var(--color-accent-100);margin-bottom:var(--space-6)"><div class="card-body" style="font-size:0.92rem;line-height:1.6"><strong>How to read the evidence:</strong> unless a recipe is marked <em>runnable fixture</em>, treat its code as a focused, CLI-validated recipe rather than a self-asserting end-to-end proof.</div></div>
 
       <!-- ═══════════════ GROUP: Configure ═══════════════ -->
@@ -405,16 +406,28 @@
           <span style="width:34px;height:34px;flex:none;border-radius:999px;background:var(--color-accent);color:#FDF6EE;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:0.95rem">9</span>
           <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700;margin:0">The everyday loop</div>
         </div>
-        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">The four commands you'll actually run. Two habits worth keeping: agentstack with no arguments tells you the single next step for the directory you're in; doctor --ci fails a build on errors, drift, policy, or unsafe content.</div>
+        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">What you actually run once a project exists: status says where you stand, a file you drop in goes live with one yes, use switches toolsets, and undo takes any write back. Two habits worth keeping: agentstack with no arguments tells you the single next step for the directory you're in; doctor --ci fails a build on errors, drift, policy, or unsafe content.</div>
         <div style="border:1px dashed var(--color-neutral-300);border-radius:var(--radius-md,16px);padding:12px 16px;margin-bottom:var(--space-3)">
           <div style="font-size:0.7rem;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-neutral-600);margin-bottom:8px">the everyday loop</div>
           <div style="display:flex;align-items:stretch;gap:6px;flex-wrap:wrap">
-            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-surface);border:1.5px solid var(--color-divider);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-text);font-family:ui-monospace,Menlo,monospace">init</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">configs → manifest</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
-            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-surface);border:1.5px solid var(--color-divider);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-text);font-family:ui-monospace,Menlo,monospace">doctor</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">what's missing?</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
-            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-100);border:1.5px solid var(--color-accent);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-700);font-family:ui-monospace,Menlo,monospace">apply</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">preview → write</div></div><span style="color:var(--color-accent);font-weight:700">→</span></div>
-            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-2-100);border:1.5px solid var(--color-accent-2);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-2-700);font-family:ui-monospace,Menlo,monospace">doctor</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">verify + fix</div></div></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-surface);border:1.5px solid var(--color-divider);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-text);font-family:ui-monospace,Menlo,monospace">status</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">where do I stand?</div></div><span style="color:var(--color-accent);font-weight:700">&rarr;</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-100);border:1.5px solid var(--color-accent);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-700);font-family:ui-monospace,Menlo,monospace">drop a file &rarr; yes</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">one review, live</div></div><span style="color:var(--color-accent);font-weight:700">&rarr;</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-surface);border:1.5px solid var(--color-divider);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-text);font-family:ui-monospace,Menlo,monospace">use</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">switch toolset</div></div><span style="color:var(--color-accent);font-weight:700">&rarr;</span></div>
+            <div style="display:flex;align-items:center;gap:6px"><div style="border-radius:12px;padding:7px 12px;background:var(--color-accent-2-100);border:1.5px solid var(--color-accent-2);min-width:86px"><div style="font-size:0.8rem;font-weight:700;color:var(--color-accent-2-700);font-family:ui-monospace,Menlo,monospace">undo</div><div style="font-size:0.72rem;color:var(--color-neutral-600);line-height:1.3">take a write back</div></div></div>
           </div>
         </div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="display:flex;justify-content:flex-end;padding:8px 10px 0">
+            <button data-copy="agentstack status" style="font-size:0.72rem;font-weight:700;padding:4px 12px;border-radius:999px;border:1px solid var(--term-bd);background:var(--term-btn);color:var(--term-text);font-family:inherit;cursor:pointer">copy</button>
+          </div>
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack status</span><span style="color:var(--term-muted)">   # where you stand, and the one next step</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack yes</span><span style="color:var(--term-muted)">   # a file you dropped in: one review, then live everywhere (v0.18.0+)</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack use backend --write</span><span style="color:var(--term-muted)">   # switch to one named toolset</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack undo</span><span style="color:var(--term-muted)">   # recent changes newest-first: pick a point, revert (v0.18.0+)</span></div>
+          </div>
+        </div>
+        <div style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700);margin-bottom:var(--space-2)"><strong style="color:var(--color-accent-700)">The explicit path (all versions) &rarr;</strong> yes, undo, up, share, and receive are v0.18.0 and later. The longer spelling below is what every release understands, and it stays correct on v0.18.0 too &mdash; the new verbs compress it, they do not replace it.</div>
         <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
           <div style="display:flex;justify-content:flex-end;padding:8px 10px 0">
             <button data-copy="agentstack init" style="font-size:0.72rem;font-weight:700;padding:4px 12px;border-radius:999px;border:1px solid var(--term-bd);background:var(--term-btn);color:var(--term-text);font-family:inherit;cursor:pointer">copy</button>
@@ -528,6 +541,27 @@
           </div>
         </div>
         <div style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700)"><strong style="color:var(--color-accent-700)">Result →</strong> Machine policy survives bad edits: a validated policy continues from a secret-free last-known-good snapshot and reports DEGRADED; first-run corruption reports BLOCKED.</div>
+      </div>
+
+      <!-- Recipe 26 -->
+      <div id="r26" class="card elev-sm" style="margin-bottom:var(--space-4);scroll-margin-top:24px">
+        <div style="display:flex;align-items:center;gap:var(--space-3);margin-bottom:var(--space-2)">
+          <span style="width:34px;height:34px;flex:none;border-radius:999px;background:var(--color-accent);color:#FDF6EE;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:0.95rem">26</span>
+          <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700;margin:0">Move a setup to another person or machine</div>
+        </div>
+        <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-2)">Hand a working setup over without handing over credentials. share bundles the manifest, the lock, and the pinned content and signs it as part of sharing; receive is the other side, where the bundle is staged inert and reviewed before anything activates; up is what the receiving machine runs to turn a reviewed setup into rendered config. Committing .agentstack/ to a shared repo is the same story without the bundle &mdash; up is the last step either way.</div>
+        <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
+          <div style="display:flex;justify-content:flex-end;padding:8px 10px 0">
+            <button data-copy="agentstack share team-backend" style="font-size:0.72rem;font-weight:700;padding:4px 12px;border-radius:999px;border:1px solid var(--term-bd);background:var(--term-btn);color:var(--term-text);font-family:inherit;cursor:pointer">copy</button>
+          </div>
+          <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack share team-backend</span><span style="color:var(--term-muted)">   # you: bundle this setup into team-backend.astack, signed (v0.18.0+)</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack receive team-backend.astack</span><span style="color:var(--term-muted)">   # them: staged inert, carded, then their yes (v0.18.0+)</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack up</span><span style="color:var(--term-muted)">   # their machine: detect CLIs, verify the lock, render, name what is left (v0.18.0+)</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack secret set GH_PAT</span><span style="color:var(--term-muted)">   # the one thing that never travels: their own value</span></div>
+          </div>
+        </div>
+        <div style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700)"><strong style="color:var(--color-accent-700)">Result &rarr;</strong> Intent and pinned bytes move; secret values never do. A signature from a publisher they already recognize makes the review card shorter, never optional, and up ends by naming each ${REF} this machine still needs. On releases before v0.18.0 the same journey is apply --write then doctor.</div>
       </div>
 
       <!-- ═══════════════ GROUP: Protect ═══════════════ -->

@@ -285,10 +285,12 @@ pre.cmd .c { color: var(--term-muted); }
           </div>
           <p class="small muted">
             <code>agentstack yes</code>, <code>undo</code>, <code>up</code>,
-            <code>share</code>, and <code>receive</code> (steps 5 and 7 below) are
-            v0.18.0 and later; the install line above serves the current stable
-            release. If your version is older, <code>agentstack self update
-            --write</code> upgrades once v0.18.0 is final.
+            <code>share</code>, and <code>receive</code> are v0.18.0 and later;
+            the install line above serves the current stable release. Steps 5 and
+            7 below walk through <code>undo</code> and <code>yes</code>; the other
+            three are the Share card further down. If your version is older,
+            <code>agentstack self update --write</code> upgrades once v0.18.0 is
+            final.
           </p>
         </li>
       </ol>
@@ -585,11 +587,16 @@ Codex CLI
                <code>restore</code> reverts one recorded write.</p>
           </div>
           <div class="fcard">
-            <h3><a href="howto/team-setup.html">5 · Share — lock, library, export</a></h3>
+            <h3><a href="howto/team-setup.html">5 · Share — lock, library, bundle</a></h3>
             <p>Commit the manifest and <code>agentstack.lock</code> — both hold
                <code>${REF}</code> placeholders, never secret values, so each machine
                supplies its own. The <a href="reference.html#the-central-library">central
-               library</a> reuses one skill across projects by name.</p>
+               library</a> reuses one skill across projects by name. Where there is no
+               shared repo, three verbs carry the same setup over
+               (<strong>v0.18.0+</strong>):</p>
+            <pre class="cmd">agentstack share backend            <span class="c"># you: one signed .astack bundle of manifest, lock, pinned bytes</span>
+agentstack receive backend.astack   <span class="c"># them: staged inert and carded before anything activates</span>
+agentstack up                       <span class="c"># their machine: detect CLIs, verify the lock, render, name what's left</span></pre>
           </div>
         </div>
       </section>

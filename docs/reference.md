@@ -17,14 +17,16 @@ implementation internals — live in
 
 **[Part I — The everyday loop](#part-i--the-everyday-loop)**
 
+- [The everyday loop, new in v0.18.0](#the-everyday-loop-new-in-v0180)
+  - [Drop a file, say yes (`agentstack yes`)](#drop-a-file-say-yes-agentstack-yes)
+  - [Undo: `undo` and `restore`](#undo-undo-and-restore)
+  - [Sharing is signing: `share` and `receive`](#sharing-is-signing-share-and-receive)
+  - [A setup that already exists (`agentstack up`)](#a-setup-that-already-exists-agentstack-up)
 - [Secrets and trust](#secrets-and-trust)
   - [Secret resolution](#secret-resolution)
   - [Where lifted secrets go (`init`)](#where-lifted-secrets-go-init)
   - [Unresolved secrets block writes](#unresolved-secrets-block-writes)
   - [Does it actually run? `doctor --live` and `doctor --probe`](#does-it-actually-run-doctor---live-and-doctor---probe)
-  - [Drop a file, say yes (`agentstack yes`)](#drop-a-file-say-yes-agentstack-yes)
-  - [Undo: `undo` and `restore`](#undo-undo-and-restore)
-  - [Sharing is signing: `share` and `receive`](#sharing-is-signing-share-and-receive)
   - [The whole way out: `uninstall`](#the-whole-way-out-uninstall)
   - [`doctor` shows what you use](#doctor-shows-what-you-use)
 - [Drift: adopt or apply?](#drift-adopt-or-apply)
@@ -87,7 +89,94 @@ implementation internals — live in
 
 ## Part I — The everyday loop
 
-This part is everything `agentstack --help` shows by default: the everyday commands — from `init`, `status`, and `add` through `apply`, `use`, `yes`, and `undo`, to `share` and `receive` — and the machinery directly behind them. Read only what is here and you can reach a working setup: one manifest rendered into every CLI's native config, credentials kept out of that config, hand-edits caught, and a toolset activated. The power surface in Part II is entirely opt-in — nothing in the everyday loop requires it.
+This part is everything `agentstack --help` shows by default: the everyday commands — `init`, `status`, and `add` through `apply` and `use`, plus `yes`, `undo`, `up`, `share`, and `receive`, which are **v0.18.0 and later** — and the machinery directly behind them. Read only what is here and you can reach a working setup: one manifest rendered into every CLI's native config, credentials kept out of that config, hand-edits caught, and a toolset activated. The power surface in Part II is entirely opt-in — nothing in the everyday loop requires it.
+
+## The everyday loop, new in v0.18.0
+
+Four moments the older releases spell out as several commands each: taking in
+a file you wrote, taking a write back, handing a setup to someone else, and
+standing one up on a new machine.
+
+> These five verbs — `yes`, `undo`, `share`, `receive`, and `up` — are v0.18.0
+> and later; the current stable install serves v0.17.1, which spells the same
+> moments out the long way. Where there is a longer equivalent, the section
+> below names it. `agentstack --version` says which you have, and
+> `agentstack self update --write` upgrades once v0.18.0 is final.
+
+### Drop a file, say yes (`agentstack yes`)
+
+Writing a skill of your own needs no manifest edit: drop the folder under
+`.agentstack/skills/` and run `agentstack yes` (v0.18.0+). The files are
+noticed at the next command touchpoint, pinned, and reviewed on one card; one
+yes records them in the manifest and lock and renders them to every CLI, with
+the undo named in the preview before anything is written. The one-step path
+applies only to content you demonstrably wrote here (untracked in git, or
+newer than the last review) — anything that arrived with a clone takes the
+full staged review that `trust` owns, and declining leaves the staged bytes
+untouched and inert. Walkthrough: [add a skill](howto/add-a-skill.md); exact
+boundaries: [ENFORCEMENT](ENFORCEMENT.md#intake-detection-dropped-files).
+
+### Undo: `undo` and `restore`
+
+Two faces of one record. Every recorded **write** — servers, settings, hooks,
+instructions, even the owned-server manifest refresh — can be taken back.
+`agentstack undo` (v0.18.0+) lists your recent changes newest-first and
+reverts to the point you pick; the revert is itself recorded, so going one
+step too far is recoverable. `restore` works the same record as the
+script-friendly primitive, one write at a time by id, and is present in every
+release — on v0.17.1 it is the whole undo story. Full walkthrough and the
+table of the five actions undone by their own verb:
+[undo anything](howto/undo.md).
+
+```text
+agentstack undo                    # timeline: pick a point, revert to it
+agentstack restore                 # list the recorded changes (ids)
+agentstack restore <id> --write    # revert one (unique id prefix)
+agentstack restore --last --write  # revert the most recent
+agentstack restore <adapter>       # single-slot config restore (fallback)
+```
+
+Reverted files show up as pending again; both verbs read the same recorded
+writes and either can roll each one back.
+
+### Sharing is signing: `share` and `receive`
+
+`agentstack share <name>` (v0.18.0+) bundles this setup — manifest, lock, and
+pinned content — and signs it as part of sharing (signing is not a flag: an
+opt-in signature is one nobody opts into). `agentstack receive <path>`
+(v0.18.0+) is the other side: the bundle is staged inert and carded first,
+exactly like every other intake path — a signature from a publisher you
+recognize makes the card shorter, never optional. `agentstack publisher`
+manages your publishing key and the publishers you recognize; `sign`/`verify`
+remain the scriptable primitives on the lockfile itself, and on releases
+without `share` they are how a lockfile gets signed at all.
+
+### A setup that already exists (`agentstack up`)
+
+The moment is sitting down at a machine that has the checkout but nothing
+configured. `agentstack up` (v0.18.0+) is that whole moment in one command: it
+finds the agent CLIs this machine actually has, verifies the environment
+against `agentstack.lock`, renders each CLI's config, and then names what is
+left — which on a new machine is this machine's secrets, since values never
+travel with a manifest.
+
+The division of labour with `init` is the easy way to remember it: **`init`
+creates a setup that does not exist yet** (it reads what your CLIs already
+hold and writes the manifest), while **`up` materializes one that already
+does**. You run `init` once, ever, per project; you run `up` once per machine.
+
+```text
+agentstack up                     # detect, verify, render, then say what's missing
+agentstack up --targets claude    # only render these CLIs
+agentstack up --toolset review    # materialize this toolset rather than the active one
+agentstack up --no-gitignore      # skip the managed .gitignore block
+```
+
+`--manifest-dir <DIR>` points it at a project or manifest directory other than
+the current one. On v0.17.1 the same journey is `agentstack apply --write`
+followed by `agentstack doctor`, reading the missing-secret fix off the doctor
+report yourself. Walkthrough: [share one setup with your
+team](howto/team-setup.md).
 
 ## Secrets and trust
 
@@ -194,51 +283,6 @@ the bare-launcher advisory warns about. Pin the launcher and the two agree.
 `doctor --json` carries the same results under a top-level `probe` object
 (`ran`, `skipped_reason`, and per-server `status` of `ok` / `failed` /
 `not_probeable`); gate on the `doctor-probe-v1` feature name.
-
-### Drop a file, say yes (`agentstack yes`)
-
-Writing a skill of your own needs no manifest edit: drop the folder under
-`.agentstack/skills/` and run `agentstack yes`. The files are noticed at the
-next command touchpoint, pinned, and reviewed on one card; one yes records
-them in the manifest and lock and renders them to every CLI, with the undo
-named in the preview before anything is written. The one-step path applies
-only to content you demonstrably wrote here (untracked in git, or newer than
-the last review) — anything that arrived with a clone takes the full staged
-review that `trust` owns, and declining leaves the staged bytes untouched and
-inert. Walkthrough: [add a skill](howto/add-a-skill.md); exact boundaries:
-[ENFORCEMENT](ENFORCEMENT.md#intake-detection-dropped-files).
-
-### Undo: `undo` and `restore`
-
-Two faces of one record. Every recorded **write** — servers, settings, hooks,
-instructions, even the owned-server manifest refresh — can be taken back.
-`agentstack undo` lists your recent changes newest-first and reverts to the
-point you pick; the revert is itself recorded, so going one step too far is
-recoverable. `restore` works the same record as the script-friendly
-primitive, one write at a time by id. Full walkthrough and the table of the
-five actions undone by their own verb: [undo anything](howto/undo.md).
-
-```text
-agentstack undo                    # timeline: pick a point, revert to it
-agentstack restore                 # list the recorded changes (ids)
-agentstack restore <id> --write    # revert one (unique id prefix)
-agentstack restore --last --write  # revert the most recent
-agentstack restore <adapter>       # single-slot config restore (fallback)
-```
-
-Reverted files show up as pending again; both verbs read the same recorded
-writes and either can roll each one back.
-
-### Sharing is signing: `share` and `receive`
-
-`agentstack share <name>` bundles this setup — manifest, lock, and pinned
-content — and signs it as part of sharing (signing is not a flag: an opt-in
-signature is one nobody opts into). `agentstack receive <path>` is the other
-side: the bundle is staged inert and carded first, exactly like every other
-intake path — a signature from a publisher you recognize makes the card
-shorter, never optional. `agentstack publisher` manages your publishing key
-and the publishers you recognize; `sign`/`verify` remain the scriptable
-primitives on the lockfile itself.
 
 ### The whole way out: `uninstall`
 
