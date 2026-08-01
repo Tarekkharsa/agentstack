@@ -186,7 +186,15 @@ pub fn parse_skill_package(
         .map(|(path, body)| Entry {
             name: name.to_string(),
             kind: "skill".to_string(),
-            path: path.clone(),
+            // Prefixed with the package name, matching what `share` produces:
+            // an `Entry.path` is relative to the KIND's root
+            // (`.agentstack/skills/`), not to the package. Without the prefix a
+            // package's `SKILL.md` adopts to `skills/SKILL.md` — the skill's own
+            // directory vanishes, and the second package imported collides with
+            // the first. Found by the end-to-end witness, which checks where
+            // the file actually lands rather than that the command said a
+            // number.
+            path: format!("{name}/{path}"),
             body: body.clone(),
             license: license.clone(),
             origin: Some(text::sanitize_line(origin)),
