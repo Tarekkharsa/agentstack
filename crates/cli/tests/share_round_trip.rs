@@ -446,3 +446,29 @@ fn recorded_attribution_travels_with_the_bundle() {
         "recorded attribution must render on the receive card:\n{text}"
     );
 }
+
+/// Nit (FINDINGS.md, SEC): an unknown key in a bundle is refused at parse
+/// time — it is not covered by the signature (which re-serializes only the
+/// known fields), so accepting one would let a sender attach signed-past
+/// data. The tamper adds a top-level key the schema does not declare.
+#[test]
+fn an_unknown_bundle_field_is_refused() {
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let (sender, receiver) = two_machines(tmp.path());
+    let bundle = share(&sender, tmp.path());
+
+    let mut v: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&bundle).unwrap()).unwrap();
+    v["smuggled"] = serde_json::Value::String("rides past the signature".into());
+    fs::write(&bundle, serde_json::to_string_pretty(&v).unwrap()).unwrap();
+
+    let (text, ok) = receiver.run(&["receive", bundle.to_str().unwrap(), "--yes"]);
+    assert!(!ok, "an unknown top-level key must be refused:\n{text}");
+    assert!(
+        !receiver
+            .proj
+            .join(".agentstack/skills/summarize/SKILL.md")
+            .exists(),
+        "nothing may land from a bundle with uncovered fields:\n{text}"
+    );
+}

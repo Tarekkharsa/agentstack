@@ -384,8 +384,8 @@ separate item.
 - `doctor.rs:1045` `"↳ rename the file or remove the existing entry"` renders as prose in a copy-pasteable command slot. (UX)
 - Collision diff bodies each increment the warning count (one collision → `0 errors, 6 warnings`) — the inflation `doctor.rs:973-975` avoided for secrets one commit earlier. (UX)
 - `trust.jsonl` never rotates; `read_trust_all()` parses the whole file on the intake hot path (`intake.rs:601`). Machine-paced, not human-paced. (SEC)
-- `share.rs:121` `to_vec(&bare).unwrap_or_default()` — a signature over `b""` would verify; unreachable today, wrong fallback direction. (SEC)
-- `ShareBundle` lacks `deny_unknown_fields` — unknown keys aren't signature-covered. (SEC)
+- ~~`share.rs:121` `to_vec(&bare).unwrap_or_default()` — a signature over `b""` would verify; unreachable today, wrong fallback direction. (SEC)~~ **✅ FIXED**: sentinel fallback, fails closed.
+- ~~`ShareBundle` lacks `deny_unknown_fields` — unknown keys aren't signature-covered. (SEC)~~ **✅ FIXED**: `deny_unknown_fields` on `ShareBundle` + `Entry`; witness `an_unknown_bundle_field_is_refused`.
 - `fetch_url` builds a bare reqwest client, bypassing the `egress` crate's anti-SSRF IP-class checks (`http://169.254.169.254/…` fetches and stages). URL is from argv, so low. (SEC)
 - Vocabulary leaks on first contact: two taglines (`cli.rs:40` vs the `--version` banner); `manifest`/`auto-mode`/`skills loadable over MCP`/`[inline, pinned]`/`machine policy ceiling`/`--consented-digest` all reachable in one `yes` on a one-file project; `session` leaks into plain `--help` (`cli.rs:296`); the pin-denial prints two bare 64-char digests and truncates its own next step to `— re…` (`seatbelt.rs:118` 200-char cap) while `verify.rs:348` already has a 12-char abbreviator. (UX)
 

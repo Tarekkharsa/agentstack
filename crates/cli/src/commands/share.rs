@@ -54,7 +54,13 @@ const MAX_ENTRY_BYTES: usize = 4 * 1024 * 1024;
 const MAX_NAME_LEN: usize = 128;
 
 /// One piece of pinned content travelling with the bundle.
+///
+/// `deny_unknown_fields` (nit): a bundle is hostile input, and an unknown key
+/// is either a newer format we should refuse loudly or a field smuggled past
+/// the signature — the signed message is built from the KNOWN fields, so any
+/// extra key rides along uncovered. Rejecting at parse time closes both.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Entry {
     pub name: String,
     /// `skill` / `instruction` — what kind of capability this is.
@@ -80,7 +86,13 @@ pub struct Entry {
 
 /// The share artifact. Plain JSON on purpose: a receiver should be able to read
 /// what they are being asked to trust with the tools they already have.
+///
+/// `deny_unknown_fields` for the same reason as [`Entry`]: an unknown top-level
+/// key is not covered by the signature (`signed_message` re-serializes only
+/// the declared fields), so accepting one would let a sender attach signed-past
+/// data. Refuse it at parse time.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ShareBundle {
     pub version: u32,
     /// The manifest text.
@@ -118,7 +130,13 @@ impl ShareBundle {
         // `to_vec` on a struct with declared field order is deterministic here;
         // this is our own type, not arbitrary JSON, so there is no map-ordering
         // ambiguity to worry about.
-        serde_json::to_vec(&bare).unwrap_or_default()
+        //
+        // A serialization failure returns a SENTINEL, never `b""` (nit): the
+        // empty message is a value an all-empty bundle could plausibly sign,
+        // so an `unwrap_or_default()` here would make a failed re-serialization
+        // verify against a signature over nothing. This byte string cannot be
+        // any bundle's real signed content, so a failure fails closed.
+        serde_json::to_vec(&bare).unwrap_or_else(|_| b"\0agentstack:unserializable-bundle".to_vec())
     }
 
     /// What a receiver can establish about where this came from.
