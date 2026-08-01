@@ -1,9 +1,16 @@
 # v0.18.0-rc.1 review findings — the rc.2 blocker queue
 
-> **Status:** open work queue. Produced 2026-08-01 from a five-lane review of the
-> strategy-v2 implementation arc (`git diff 5e10da5..HEAD`, the byte-set behind
-> `v0.18.0-rc.1`). **Verdict: do not recruit on this byte-set; fix the BLOCKING
-> set, re-cut rc.2.**
+> **Status:** BLOCKING set cleared 2026-08-01 — closed review record. Produced
+> 2026-08-01 from a five-lane review of the strategy-v2 implementation arc
+> (`git diff 5e10da5..HEAD`, the byte-set behind `v0.18.0-rc.1`), whose verdict
+> was: do not recruit on the rc.1 byte-set. Every BLOCKING item (F1–F11) is now
+> fixed with a tampering witness (fix arc `f0ce707..efaa09d`; F5's end-to-end
+> swap witness independently verified, including a guard-removal mutation
+> check). The two deliberately-open non-blocking items are labeled in the
+> v0.18.0-rc.2 release notes: the inbound `add`→`Lock::upsert` attribution
+> wire, and `fetch_url`'s bare-client SSRF (fix should reuse the egress
+> crate's address-class validation). **rc.2 is the study byte-set; recruiting
+> happens on rc.2, never rc.1.**
 >
 > **This is a review record, not direction.** Direction is `STRATEGY.md`; the
 > ordered product queue is `TODO.md`. When an item here is fixed and verified,

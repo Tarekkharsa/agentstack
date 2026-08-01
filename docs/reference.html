@@ -654,7 +654,7 @@ agentstack instructions --manifest-dir ~ --write    # compile personal fragments
 agentstack settings unset &lt;target&gt; &lt;key&gt;</code></pre>
 <p>Dry-run by default; <code>--write</code> applies.</p>
 <h3 id="lifecycle-hooks">Lifecycle hooks<a class="hlink" href="#lifecycle-hooks" aria-label="Link to this section">#</a></h3>
-<p>Declare <code>[hooks.*]</code> once (event + optional matcher + command) and <code>apply</code> renders them into each harness's native hooks config (Claude Code <code>settings.json</code>, Codex <code>config.toml</code>), resolving secrets and pruning hooks that leave the manifest.</p>
+<p>Declare <code>[hooks.*]</code> once (event + optional matcher + command) and <code>apply</code> renders them into each harness's native hooks config (Claude Code <code>settings.json</code>, Codex <code>config.toml</code>), resolving secrets and pruning hooks that leave the manifest. A hook's command runs inside the harness's own lifecycle at full user permission — agentstack governs the declaration and its delivery, never the hook at runtime; see <a href="enforcement.html#hooks">ENFORCEMENT.md</a>.</p>
 <pre class="block"><code>[hooks.&lt;name&gt;]             # event + optional matcher + command
 agentstack apply --write   # render them into each harness's native hooks config</code></pre>
 <p><code>doctor</code> verifies the rendered hooks.</p>

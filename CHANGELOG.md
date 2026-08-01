@@ -4,6 +4,43 @@ User-facing changes per release. The [GitHub Releases
 page](https://github.com/Tarekkharsa/agentstack/releases) carries the built
 binaries, checksums, and provenance attestations for each entry.
 
+## v0.18.0-rc.2 — 2026-08-01
+
+**The study byte-set.** rc.1's five-lane review produced a blocker queue
+(`FINDINGS.md`); this candidate clears it. The activation study recruits on
+this version — never on rc.1. Like rc.1, this is a pre-release: `install.sh`
+and `brew install` keep serving v0.17.1 until v0.18.0 is final.
+
+- **Consent core hardened, witnessed end to end.** Every BLOCKING finding
+  (F1–F11) closed with a tampering witness. Headline: the accept path now
+  refuses a content swap performed in the review→commit window — witnessed by
+  a real on-disk swap test driven through the production seam, verified
+  independently including a guard-removal mutation check (the test fails when
+  the guard is deleted). Nothing pins that was not displayed.
+- **One grant path everywhere.** The refusal semantics hold across every
+  surface that can reach a grant — `trust`, `yes`, and the panel action route
+  through the same gate (F7, F8), and the funnel is reachable from every
+  surface that detects a drop (F9).
+- **Intake is one hostile-input pass.** The from-anywhere surfaces (dropped
+  files, cloned content, `add from`) share one defensive parse (F1–F3,
+  F13–F18).
+- **Green means verified.** Status surfaces no longer report ready states they
+  did not check, and every dead end names its exit (F10–F12, F19–F22).
+- **Share hardening.** Signed-message fallback uses a sentinel and
+  `deny_unknown_fields` on the envelope.
+- **Docs match the territory.** The findings ledger, `ENFORCEMENT.md` (incl.
+  the lifecycle-hooks honesty statement and cross-reference), and the command
+  reference are reconciled with what ships.
+
+**Known-open, deliberately (not regressions, labeled here so they read as
+known):**
+
+- Inbound `add` does not yet thread attribution into `Lock::upsert` —
+  production `LockedSkill` sites still write `None` for origin.
+- `fetch_url` uses a bare HTTP client (SSRF class; low severity — the URL
+  comes from the user's own argv, not repo content). The planned fix reuses
+  the egress crate's resolve-once address-class validation.
+
 ## v0.18.0-rc.1 — 2026-08-01
 
 **A release candidate, published for the activation study.** This is not the

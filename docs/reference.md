@@ -1263,7 +1263,10 @@ Dry-run by default; `--write` applies.
 
 Declare `[hooks.*]` once (event + optional matcher + command) and `apply` renders
 them into each harness's native hooks config (Claude Code `settings.json`, Codex
-`config.toml`), resolving secrets and pruning hooks that leave the manifest.
+`config.toml`), resolving secrets and pruning hooks that leave the manifest. A
+hook's command runs inside the harness's own lifecycle at full user permission —
+agentstack governs the declaration and its delivery, never the hook at runtime;
+see [ENFORCEMENT.md](ENFORCEMENT.md#hooks).
 
 ```text
 [hooks.<name>]             # event + optional matcher + command
