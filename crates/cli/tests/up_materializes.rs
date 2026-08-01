@@ -160,9 +160,11 @@ fn an_unresolved_ref_is_named_with_its_command_and_its_consequence() {
         out.contains("fail closed"),
         "the fail-closed consequence must be stated:\n{out}"
     );
-    // And stated as it ACTUALLY behaves. The whole target is held back, not
-    // just the servers with missing refs — `up` must not describe the
-    // per-server pausing the product does not do, however much nicer it reads.
+    // And stated as it ACTUALLY behaves. The target's server config is held
+    // back whole — a ref-less server in the same project is held back too,
+    // while instructions and settings (which need no secret) still render.
+    // `up` must not describe the per-server pausing the product does not do,
+    // however much nicer it reads.
     assert!(
         out.contains("held back whole"),
         "the copy must describe the shipped whole-target rule, not the relaxed \

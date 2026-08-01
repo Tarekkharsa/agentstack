@@ -160,18 +160,20 @@ pub fn run(args: &UpArgs, manifest_dir: Option<&Path>) -> Result<()> {
         // an oversight. It is not per-server (a ref-less server in the same
         // project is held back too), and it is not per-CLI-whole either: a
         // target's instructions and settings do not depend on the secret and
-        // still render. So the honest scope is "the server configs that need
-        // these secrets" — narrower than "everything", wider than "just the
-        // servers that use them".
+        // still render. The sentence below carries all three facts — and the
+        // `up_materializes` witness holds it to them: "held back whole" must
+        // appear (the ref-less server is held back too — per-server phrasing
+        // like "the configs that need them" reads as a rule the product does
+        // not have), and per-server pausing language must not.
         //
         // Relaxing the rule to per-server is tracked as its own reviewed item;
         // until then this line says what actually happens.
         crate::outln!(
             "{:<20}{}",
             "",
-            "until they are set, the server configs that need them are held back — no server \
-             is written with a missing credential (fail closed); a CLI's instructions and \
-             settings still render"
+            "until they are set, each CLI's server config is held back whole — even servers \
+             that need no secret; nothing is written with a missing credential (fail \
+             closed); instructions and settings still render"
                 .dimmed()
         );
     }
