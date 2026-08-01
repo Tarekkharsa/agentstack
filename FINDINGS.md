@@ -100,7 +100,7 @@ separate item.
   refusal leaves everything untouched. A `None` displayed digest also
   refuses (fail closed). Witness tampers the field that moved — the live
   bytes after display (`accept_refuses_bytes_that_were_not_displayed`);
-  the happy path is covered by the existing accept-repins e2e witnesses.
+  the happy path is covered by the existing accept-repins e2e witnesses. **UPDATE 2026-08-01:** the verifier's one caveat (unit-only witness) is closed — `accept_refuses_a_swap_performed_between_review_and_commit` performs a REAL on-disk swap inside the production window (a test-only hook firing after every displayed digest is captured, before commit), asserts the TOCTOU refusal, and confirms the un-displayed bytes never reach the lock or the content store.
 - **Confidence:** HIGH (SEC S2 + CODEX #1)
 - **Invariant:** 4 (pinned byte changes re-gate), exact-byte consent.
 - **Location:** diff read at `crates/cli/src/commands/trust.rs:1011`; commit point independently re-reads at `trust.rs:1511` and writes that checksum to the lock. `PendingAnswer` (`trust.rs:1607-1620`) captures no digest at diff time. The comment at `trust.rs:1535-1539` reasons correctly about exactly this hazard for lock/manifest, while the skill-body path does the disk re-read it warns against.

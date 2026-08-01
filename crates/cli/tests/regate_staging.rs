@@ -1146,3 +1146,80 @@ fn doctor_sees_content_drift_on_the_default_path() {
     let (_, ci_ok) = cli(&proj, &["doctor", "--ci"]);
     assert!(!ci_ok, "content drift must fail the doctor --ci gate");
 }
+
+/// F5 END-TO-END WITNESS (FINDINGS.md): the TOCTOU swap, performed on disk in
+/// the real window between the review and the commit — not the unit gate with
+/// hand-fed hashes. The verifier's exact break attempt: review benign state B,
+/// then an adversarial writer replaces the bytes with M in the human-scale
+/// window before the closing yes. The commit must pin nothing and leave the
+/// project as it was — never bless M un-displayed.
+///
+/// The swap runs inside the production hook that fires after every `displayed`
+/// digest is captured and before the commit re-reads to pin — the exact
+/// interval `refuse_undisplayed` guards.
+#[test]
+fn accept_refuses_a_swap_performed_between_review_and_commit() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    isolate_home(tmp.path());
+    let proj = trusted_project(tmp.path());
+    let dir = proj.join(".agentstack");
+    let lock_before = fs::read(agentstack::lock::Lock::path(&dir)).unwrap();
+
+    // The reviewed drift: benign state B.
+    skill(
+        &proj,
+        "alpha",
+        "---\ndescription: a\n---\n# Alpha\nBENIGN B\n",
+    );
+    let alpha_md = proj.join(".agentstack/skills/alpha/SKILL.md");
+
+    // Accept B — but an adversarial writer swaps in M during the window.
+    let swapped = std::sync::atomic::AtomicBool::new(false);
+    let swap = || {
+        fs::write(
+            &alpha_md,
+            "---\ndescription: a\n---\n# Alpha\nMALICIOUS M\n",
+        )
+        .unwrap();
+        swapped.store(true, std::sync::atomic::Ordering::SeqCst);
+    };
+    let err = agentstack::commands::trust::grant_with_swap_between_review_and_commit(
+        &proj,
+        true,
+        Some(&ReGateProbe {
+            answers: vec![("alpha".to_string(), Answer::Accept)],
+            confirm: true,
+        }),
+        &swap,
+    )
+    .expect_err("accepting must refuse once the reviewed bytes changed under it");
+
+    // The swap really happened, and the refusal names it.
+    assert!(
+        swapped.load(std::sync::atomic::Ordering::SeqCst),
+        "the hook must have run"
+    );
+    assert!(
+        err.to_string().contains("changed while you were reviewing"),
+        "the refusal must name the TOCTOU, got: {err:#}"
+    );
+
+    // Fail-closed: nothing pinned, and the malicious bytes were never blessed.
+    assert_eq!(
+        fs::read(agentstack::lock::Lock::path(&dir)).unwrap(),
+        lock_before,
+        "a swapped-in version must not move the lock"
+    );
+    // The store holds no snapshot for M's digest — it was never deposited.
+    let alpha_dir = proj.join(".agentstack/skills/alpha");
+    let m_digest_hash = agentstack_core::digest::dir_digest(&alpha_dir).unwrap();
+    let m_digest = m_digest_hash.hex();
+    let m_snapshot = PathBuf::from(std::env::var("AGENTSTACK_HOME").unwrap())
+        .join("store/content")
+        .join(m_digest);
+    assert!(
+        !m_snapshot.exists(),
+        "the un-displayed bytes must never reach the content store"
+    );
+}

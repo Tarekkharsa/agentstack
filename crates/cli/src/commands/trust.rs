@@ -537,7 +537,7 @@ fn grant_gated(
     interactive: bool,
     card: Option<&ConsentCard>,
 ) -> Result<()> {
-    grant_probed(base, yes, consented, interactive, card, None)
+    grant_probed(base, yes, consented, interactive, card, None, None)
 }
 
 /// The `trust` path (no funnel card) with re-gate answers injected — the entry
@@ -550,10 +550,38 @@ pub fn grant_with_answers(
     interactive: bool,
     probe: Option<&ReGateProbe>,
 ) -> Result<()> {
-    grant_probed(base, yes, consented, interactive, None, probe)
+    grant_probed(base, yes, consented, interactive, None, probe, None)
+}
+
+/// [`grant_with_answers`] with a hook fired AFTER the review is fully staged
+/// (the displayed digest captured, the diff rendered, the answers collected)
+/// and BEFORE the commit re-reads the bytes to pin them. It exists to witness
+/// the F5 TOCTOU end to end: a test swaps the live content inside the hook —
+/// the real human-scale window an adversarial writer would use — and asserts
+/// the commit refuses to pin bytes different from those displayed. It is the
+/// same injection philosophy as [`ReGateProbe`] and the `interactive` probe:
+/// a consent path whose time-of-check/time-of-use window cannot be driven in a
+/// test is a window whose guard is unwitnessed. Production never passes a hook.
+pub fn grant_with_swap_between_review_and_commit(
+    base: &Path,
+    interactive: bool,
+    probe: Option<&ReGateProbe>,
+    on_reviewed: &dyn Fn(),
+) -> Result<()> {
+    grant_probed(
+        base,
+        false,
+        None,
+        interactive,
+        None,
+        probe,
+        Some(on_reviewed),
+    )
 }
 
 /// [`grant_gated`] with the re-gate answers injectable. See [`ReGateProbe`].
+/// `on_reviewed`, when present, fires once between the staged review and the
+/// commit — a test-only seam for the F5 swap witness; production passes `None`.
 pub(crate) fn grant_probed(
     base: &Path,
     yes: bool,
@@ -561,6 +589,7 @@ pub(crate) fn grant_probed(
     interactive: bool,
     card: Option<&ConsentCard>,
     probe: Option<&ReGateProbe>,
+    on_reviewed: Option<&dyn Fn()>,
 ) -> Result<()> {
     let dir = crate::manifest::resolve_manifest_dir(base);
     let Some(snapshot) = trust::ConsentSnapshot::read(base) else {
@@ -1493,6 +1522,16 @@ pub(crate) fn grant_probed(
         if !said_yes {
             anyhow::bail!("cancelled — nothing was granted or changed");
         }
+    }
+
+    // Test-only F5 seam: the review is fully staged (every `displayed` digest
+    // captured, the diff rendered, the answers collected) and nothing has
+    // committed yet. A swap performed here is exactly the time-of-check /
+    // time-of-use window an adversarial writer would use. Production passes
+    // `None`; the witness overwrites the live content and asserts the commit
+    // below refuses to pin it.
+    if let Some(hook) = on_reviewed {
+        hook();
     }
 
     // ---- The commit point ----------------------------------------------
