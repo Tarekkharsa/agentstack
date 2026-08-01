@@ -252,6 +252,16 @@ pub struct LockedSkill {
     /// SPDX identifier declared by the source this content came from, when it
     /// declared one (Phase 4, governed intake).
     ///
+    /// **The convention these two fields follow, stated here because this is
+    /// where the next person adding a field will be looking:** additive
+    /// `#[serde(default)]` optionals keep [`SUPPORTED_LOCK_VERSION`] as it is,
+    /// and the compatibility guarantee is carried by property tests
+    /// (`crates/cli/tests/attribution_schema.rs`) rather than by the version
+    /// number. A version bump is for a SHAPE change — a field whose meaning or
+    /// type moves, or one an older binary would misread rather than ignore.
+    /// So: another addition should follow this precedent and leave the version
+    /// alone; a shape change cannot, and must bump.
+    ///
     /// Recorded in the lock rather than only in the library because the lock is
     /// what travels with the project and what the trust digest covers: an
     /// attribution obligation that lived only on the importing machine would be

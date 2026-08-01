@@ -411,6 +411,32 @@ untouched by this.
   question is settled. The wording says exactly that, after a first draft
   claimed a saving it had not made.
 
+**Carried forward by name — v2's build arc is complete, so this is the whole
+of what it leaves behind.** Nothing here gates the §1.6 study.
+
+1. **Apply-per-server rendering.** Tracked by the failing-when-fixed test
+   `a_refless_server_is_still_blocked_by_another_servers_missing_ref`. The bar
+   is set: a relaxation of a documented fail-closed boundary
+   (`docs/ARCHITECTURE.md:333`), so it gets a line-by-line review with the
+   original rule's rationale in front of the reviewer, answering the consent
+   question the rule encodes — can a user tell a partial render from a
+   complete one? Not inferred from the test going red.
+2. **The dynamic-default flip and its three preconditions.** Post-study
+   business. All three remain unmet as P3.6 assessed them: open question #1
+   (where the yes lives in zero-files mode), the `ENFORCEMENT.md` lease column
+   (which does not exist, and is **not** a documentation task that can be
+   closed on its own), and first-run friction (unmeasurable until §1.6 runs).
+3. **The t3code fork migration set — now TWO contracts waiting.**
+   `trust-review-card-v1` (from Phase 2) and `status-honesty-v1` (from P3.7).
+   The fork renders neither. The second matters more: the fork's "Ready" chip
+   reads `state`, which is exactly the mislabel P3.7 exists to fix, and it
+   keeps reading it until the fork migrates to `readiness`.
+4. **Two pre-v2 items still open on their own tracks:** F20 (settings pinning)
+   and the §9.3 workflows re-run, which is still blocked on the
+   import-denying module loader. Neither gates the study. Whether either gates
+   v0.18.0 is a maintainer call at release time, not a decision this block
+   makes.
+
 **Non-goals held, none touched:** the dynamic default still ships STATIC and
 precondition #2 (the `ENFORCEMENT.md` lease column) remains unbuilt and is not
 a documentation task to close alone; open question #1 stays open; machine-level
