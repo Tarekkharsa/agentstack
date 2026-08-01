@@ -66,8 +66,9 @@ The adopted [`STRATEGY.md`](STRATEGY.md) (v2, 2026-07-31) opened with Phase 0
 amendment in `STRATEGY.md`, Phases 1–4 now build in order on maintainer
 acceptance; the activation study is the **v0.18.0 release gate** — the
 release does not publish until the study passes against the completed v2
-journey. Phases 1, 2, and 3 are complete (blocks below); **next is Phase 4,
-Anywhere** — gated on the §1.6 study, which remains the v0.18.0 release gate.
+journey. Phases 1, 2, 3, and 4 are complete (blocks below). **v2's build arc is
+finished**; what remains is the §1.6 activation study, which is the v0.18.0
+release gate.
 
 - [x] **P0.1 — study instrumentation.** Add the v2 observation prompts to the
   §1.6 protocol (where does a tester reach for "drop a file" and stall; can
@@ -335,6 +336,94 @@ touch this one, because it sits on the verification path rather than beside it.
 - **Its own review**, line by line, because the diff touches verification.
 - The existing `seatbelt::refuse` seam already returns `()`, so the "legible
   denial is still a denial" invariant is inherited rather than re-argued.
+
+### Strategy v2 — Phase 4 (Anywhere) — COMPLETE 2026-08-01
+
+Environments teleport and content flows in and out, governed. Merged as
+`phase4/anywhere`; every witness tamper-tested. **v2's build arc ends here** —
+what remains is the §1.6 activation study, the release gate it holds, and
+v0.18.0. No release cut.
+
+**The trigger sentence is satisfied, recorded once so it is not re-litigated.**
+`STRATEGY.md` says this phase's external-intake build starts on user demand.
+That sentence predates the 2026-07-31 amendment under which Phases 1–4 build in
+order on maintainer acceptance; the maintainer's directive to finish v2 is the
+demand. Competitive-watch tripwire 3 (eve's registry becoming de-facto
+distribution) remains a *strategy revisit*, not a build trigger, and is
+untouched by this.
+
+- [x] **P3.7 — status contract honesty.** `state` said `ready` over an
+  untrusted, never-activated project. Fixed as a versioned contract revision,
+  not an edit: `readiness` ships beside an untouched `state` under the new
+  advertised `status-honesty-v1`, so a panel rendering "Ready" today does not
+  change meaning under its users. `snapshot` gained a singular `nextAction`
+  beside its plural array, and the green ✓ over a ref every server's
+  `[policy.secrets]` refuses became a warning that says why. **The t3code fork
+  was NOT opened**; what it must migrate to is written into `ui_contract.rs` —
+  render `readiness`, treat everything except `ready` as not-live.
+- [x] **P3.8 — the pin-verification refusal is recorded.** The most
+  security-relevant unrecorded refusal in the product now has the seatbelt
+  one-liner and `RunEvent::PinRejected`. Additive, identity-shaped,
+  best-effort, never gating — the verification decision and the fail-closed
+  drop are byte-identical. Added the **fifth** denial family (`Family::Pin`):
+  not a policy dimension, because nothing the user authored refused — the
+  delivered content is not what they reviewed, and "this changed" has a
+  different next step from "you disallowed this". Its reason is the one denial
+  text built from repository content, so it is control-character-stripped and
+  bounded (invariant 7). **Reviewed line by line — it sits on the verification
+  path.**
+- [x] **`agentstack up` — one-command materialization.** Composes
+  `install --locked` + render + the P3.1 next-action seam; a witness asserts
+  the module contains no filesystem call at all. Ends through the seam rather
+  than a verdict of its own, which is why P3.7 landed first: `up`
+  characteristically finishes unfinished.
+- [x] **Share — sharing is signing.** Signing is not a flag. Receiving stages
+  into quarantine, cards, and asks. `crates/trust`'s `sign` module had been
+  complete and callerless since it was written; this is its first caller, and
+  the crate itself is byte-identical. A valid signature from a recognized
+  publisher changes the card's words and nothing else — witnessed as an
+  *invariance*, comparing both runs byte for byte.
+- [x] **Governed intake from external ecosystems.** `add from <url-or-path>`
+  reads eve-format packages, MCP connections, and registry JSON through
+  fetch → bound → quarantine → card → yes. Credentials become `${REF}` on the
+  way in. A registry only ever lists, even with `--write`. **No registry or
+  marketplace is hosted — intake consumes ecosystems, it does not create one.**
+- [x] **Attribution capture** (the one sanctioned schema change). `license` and
+  `origin` on `[[skill]]`, additive and serde-default, legacy and v1 locks
+  witnessed loading, version deliberately not bumped with the reasoning in the
+  constant's doc comment. Preserved at the `Lock::upsert` choke point so a
+  re-lock cannot launder it away. The re-gate on first re-lock is **asserted,
+  not suppressed** — lock bytes are consent-digest material by design.
+
+**Deferred by name:**
+
+- **Per-server rendering** (`a_refless_server_is_still_blocked_by_another_
+  servers_missing_ref`, a failing-when-fixed test). `render` blocks per TARGET,
+  so one unresolved `${REF}` holds back a whole CLI config including servers
+  that reference no secret. Moment 9's transcript implies the relaxed
+  behaviour; the shipped rule is documented fail-closed behaviour
+  (`docs/ARCHITECTURE.md:333`). Relaxing it is a deliberate loosening of a
+  fail-closed boundary and gets its own line-by-line review with the original
+  rationale in hand, answering the consent question it encodes: can a user tell
+  a partial render from a complete one? `up`'s copy describes what actually
+  happens, not the nicer version.
+- **The card body does not shrink on recognition.** Only the provenance
+  question is settled. The wording says exactly that, after a first draft
+  claimed a saving it had not made.
+
+**Non-goals held, none touched:** the dynamic default still ships STATIC and
+precondition #2 (the `ENFORCEMENT.md` lease column) remains unbuilt and is not
+a documentation task to close alone; open question #1 stays open; machine-level
+standing approval stays unbuilt; the t3code fork stays unopened; no registry is
+hosted; no release cut.
+
+**The lesson worth carrying, because it now has two instances.** Both this
+phase and Phase 3 reintroduced the vacuous-green class *in the same session
+that knew the doctrine*: `up` printed "verified against lock" over a manifest
+where `install --locked` had examined nothing, which is P3.1's bug wearing new
+clothes. Neither instance was caught by review or by writing the tests — both
+were caught by capturing a transcript from the real binary. That is why
+transcript capture is a hard-stop requirement and stays one.
 
 ## Open review findings — what two product reviews left standing
 

@@ -98,25 +98,30 @@ pub fn run(id: &str, dir: &Path, assume_yes: bool) -> Result<()> {
             Ok(())
         }
         Parsed::Skill(entries) => stage_review_and_decide(entries, dir, id, assume_yes),
-        Parsed::Connection { name, server, refs } => {
+        Parsed::Connection(c) => {
             // A server is a DECLARATION, not content: there are no bytes to
             // quarantine, and it activates through the manifest plus the trust
             // gate rather than through this funnel. So the honest thing is to
             // show what was found — with the credentials already turned into
             // `${REF}` — and hand the user the declaration to make.
-            report_connection(&name, &server, &refs, id)
+            report_connection(&c.name, &c.server, &c.refs, id)
         }
     }
 }
 
 enum Parsed {
     Skill(Vec<Entry>),
-    Connection {
-        name: String,
-        server: agentstack_core::manifest::Server,
-        refs: Vec<String>,
-    },
+    /// Boxed because `Server` is much larger than the other variants, and an
+    /// enum is sized for its biggest one — every `Parsed` on the stack would
+    /// otherwise pay for the connection case, which is the rarest of the three.
+    Connection(Box<Connection>),
     Registry(Vec<crate::eve::RegistryItem>),
+}
+
+struct Connection {
+    name: String,
+    server: agentstack_core::manifest::Server,
+    refs: Vec<String>,
 }
 
 /// What was fetched, and from where.
@@ -282,7 +287,11 @@ fn interpret(f: &Fetched, origin: &str) -> Result<Parsed> {
             }
             let (name, server, refs) = crate::eve::parse_connection(body, origin)
                 .context("this JSON is neither a registry listing nor an MCP connection")?;
-            return Ok(Parsed::Connection { name, server, refs });
+            return Ok(Parsed::Connection(Box::new(Connection {
+                name,
+                server,
+                refs,
+            })));
         }
     }
     let entries = crate::eve::parse_skill_package(&f.name, &f.files, origin)?;
