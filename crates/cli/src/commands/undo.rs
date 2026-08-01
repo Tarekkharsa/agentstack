@@ -217,6 +217,24 @@ pub fn run(args: &UndoArgs, manifest_dir: Option<&Path>) -> Result<()> {
         "✓".green(),
         crate::text::sanitize_line(&target.operation)
     );
+    // F10: a `yes` row captures only the manifest declaration and the lock pin
+    // — deliberately, per its own comment — so undoing it does NOT retract the
+    // files `use --write` already delivered into each CLI. "nothing else
+    // touched" was true of the files this revert covers and false of the
+    // harness state the user actually sees (`ls .claude/skills/` still shows
+    // it). So a yes-revert states plainly what it did and did not undo, and
+    // names the command that finishes the job — the same honesty the `yes`
+    // success line already keeps about its own undo.
+    let reconciles_harness = target.operation == "yes" || target.operation.starts_with("yes ");
+    if reconciles_harness {
+        println!(
+            "  {}",
+            "the manifest and pin are reverted, but files already delivered to your CLIs are \
+             not — run `agentstack use --write` to reconcile what each CLI holds"
+                .dimmed()
+        );
+        return Ok(());
+    }
     match recorded {
         Some(_) => println!(
             "  {}",

@@ -155,21 +155,23 @@ pub fn run(args: &UpArgs, manifest_dir: Option<&Path>) -> Result<()> {
         }
         // Describes the SHIPPED rule, not the nicer one.
         //
-        // `render` blocks a whole target while any `${REF}` in the selection is
-        // unresolved — a documented fail-closed boundary, not an oversight. The
-        // obvious copy here ("servers using those secrets stay paused") would
-        // describe per-server pausing, which is a real and reasonable behaviour
-        // that this product does not currently have: a ref-less server in the
-        // same project is held back too. Writing the nicer sentence would leave
-        // a user waiting for three of four CLIs to work while none of them do.
+        // `render` blocks a whole target's SERVER config while any `${REF}` in
+        // the selection is unresolved — a documented fail-closed boundary, not
+        // an oversight. It is not per-server (a ref-less server in the same
+        // project is held back too), and it is not per-CLI-whole either: a
+        // target's instructions and settings do not depend on the secret and
+        // still render. So the honest scope is "the server configs that need
+        // these secrets" — narrower than "everything", wider than "just the
+        // servers that use them".
         //
         // Relaxing the rule to per-server is tracked as its own reviewed item;
         // until then this line says what actually happens.
         crate::outln!(
             "{:<20}{}",
             "",
-            "until they are set, each CLI's config is held back whole — nothing is \
-             written with a missing credential (fail closed)"
+            "until they are set, the server configs that need them are held back — no server \
+             is written with a missing credential (fail closed); a CLI's instructions and \
+             settings still render"
                 .dimmed()
         );
     }
@@ -198,7 +200,13 @@ pub fn run(args: &UpArgs, manifest_dir: Option<&Path>) -> Result<()> {
         // per-machine by design. Say what happened rather than what we
         // guessed; the closing next action already knows to send them to the
         // review, because `doctor` reads the same trust state.
-        crate::outln!("  {} {err:#}", "nothing rendered —".yellow());
+        //
+        // "stopped early" not "nothing rendered": `apply` can fail on one
+        // target AFTER writing others (an IO error on the fourth of four),
+        // and claiming nothing happened over three written configs is the
+        // kind of false all-or-nothing this doc pass exists to remove. The
+        // closing `doctor` reads the real on-disk state.
+        crate::outln!("  {} {err:#}", "rendering stopped early —".yellow());
     }
 
     // ------------------------------------------------------- one next step

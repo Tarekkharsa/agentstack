@@ -216,3 +216,43 @@ fn the_promise_names_only_what_the_row_can_put_back() {
          wide false one."
     );
 }
+
+/// F10 witness (FINDINGS.md): `undo` after a `yes` must not claim "nothing
+/// else touched". A `yes` row covers only the manifest declaration and the
+/// lock pin — the files `use --write` delivered into each CLI are NOT in it.
+/// Part one, on disk: after undo the manifest/lock are reverted (the row's
+/// files) — the honesty gap is what the message claims about everything else.
+/// Part two, in source: the `undo` command routes a `yes` revert to a line
+/// that names the delivered files it did NOT retract and the command that
+/// reconciles them, instead of the unconditional "nothing else touched".
+#[test]
+fn undo_after_yes_is_honest_about_the_delivered_files() {
+    let _g = agentstack::util::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let proj = project(tmp.path());
+
+    say_yes(&proj).expect("the funnel must complete");
+    let entry = agentstack::history::list();
+    let row = entry.first().expect("a yes row");
+    assert_eq!(row.operation, "yes");
+    // The row genuinely covers only manifest + lock — the premise of the
+    // honesty gap. (The delivered CLI files are not among its captures.)
+    let labels: Vec<String> = row.files.iter().map(|f| f.label.to_lowercase()).collect();
+    assert!(labels
+        .iter()
+        .all(|l| l.contains("manifest") || l.contains("lock")));
+
+    // The `undo` command's success path names the reconcile step for a `yes`
+    // revert, and does not reach the bare "nothing else touched" for it.
+    let src = include_str!("../src/commands/undo.rs");
+    assert!(
+        src.contains("run `agentstack use --write` to reconcile"),
+        "undo must name how to reconcile the still-delivered files after a yes"
+    );
+    assert!(
+        src.contains("target.operation == \"yes\""),
+        "undo must special-case the yes revert whose row omits delivered files"
+    );
+}

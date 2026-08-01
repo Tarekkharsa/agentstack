@@ -108,6 +108,13 @@ impl Signals {
         let now = crate::calllog::now_epoch();
 
         let mut calls = crate::calllog::read_all();
+        // F20: the seatbelt writes enforcement denials into the SAME audit
+        // log as brokered gateway calls. Counting them as calls made a
+        // never-contacted server report "gateway calls" and "denied by the
+        // tool firewall" — a denial that never happened as a call, counted as
+        // one. They are dropped here so every downstream count (`analyze`,
+        // the report header, the per-server stats) sees only real calls.
+        calls.retain(|c| !crate::seatbelt::is_enforcement_record(c));
         if let Some(days) = since {
             let cutoff = now.saturating_sub(days * 86_400);
             calls.retain(|c| c.ts >= cutoff);

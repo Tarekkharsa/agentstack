@@ -120,6 +120,7 @@ fn readiness_is_drawn_from_the_documented_set() {
         "untrusted",
         "drifted",
         "never_activated",
+        "empty",
         "unknown",
         "needs_setup",
     ];

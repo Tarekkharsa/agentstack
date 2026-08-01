@@ -183,6 +183,7 @@ separate item.
 - **Fix shape:** wire `next_step` and `print_intake_line` (the intake notice) to recommend `agentstack yes` when undeclared drops are present. Small change; prerequisite for the study regardless of the security fixes.
 
 ## F10 — `undo` after `yes` reports success while the capability is still live
+- **Status: ✅ FIXED** 2026-08-01 (`fix/honest-surfaces-f10-f22`). A `yes`-row revert in `undo` no longer prints "nothing else touched": it states that the manifest+pin are reverted but files already delivered to each CLI are not, and names `agentstack use --write` to reconcile. Witness: `undo_after_yes_is_honest_about_the_delivered_files`.
 - **Confidence:** HIGH (UX, verified live)
 - **Rule:** the recovery rung must be honest; "green means verified".
 - **Location:** success line `yes.rs:231` and `undo.rs:223` print `✓ back to before yes / nothing else touched`, but `ls .claude/skills/` still shows the skill and the manifest still declares it. The disclosure exists only in the *preview* (`yes.rs:157-158`: "`agentstack use --write` then reconciles what each CLI holds"), not on the success/undo line.
@@ -190,6 +191,7 @@ separate item.
 - **Fix shape:** either undo reconciles the rendered harness state too, or the success line states plainly what undo did and did not retract and names the command that completes it.
 
 ## F11 — Status/doctor are green over drifted approved content
+- **Status: ✅ FIXED** 2026-08-01. Three parts: doctor's Skills check now compares each pinned skill's live tree digest against its lock pin on the DEFAULT path (an edited approved body is an Error pointing at `trust .`, and fails `doctor --ci`); `readiness` gained an `empty` coverage term so "ready" is never reported over a manifest that declares nothing; the readiness verdict is mirrored to the terminal footer, not JSON-only. Witnesses: `doctor_sees_content_drift_on_the_default_path`, `readiness_is_not_ready_over_an_empty_manifest`, plus the widened `readiness_is_drawn_from_the_documented_set`.
 - **Confidence:** HIGH (UX verified live + CONF notes the `readiness` gap) — the surface 8bc2538 ("green that means verified") claimed to fix.
 - **Location:** after editing an approved skill body, `status` shows `locked · trusted`, `doctor` shows `✓ hello present · SKILL.md ok`, `0 errors`. Drift surfaces only under `agentstack trust .`, which nothing recommends. `readiness` (`doctor.rs:354-373`) never consults `self.sections` — no coverage term — so a manifest reduced to `version = 1` with a leftover lockfile reports `readiness = ready`; and `readiness` is JSON-only (terminal prints `0 errors, 0 warnings`).
 - **Fix shape:** status/doctor must detect content drift against pins on the default path and surface it with a next action; `readiness` needs a coverage term so "ready" cannot be reported over zero coverage; mirror the JSON readiness verdict to the terminal.
@@ -199,6 +201,7 @@ separate item.
 # SHOULD-FIX — before real users touch these paths
 
 ## F12 — Ctrl-C at the `yes` prompt leaves declared state with no undo row
+- **Status: ✅ FIXED** 2026-08-01. `yes` installs a `SigintGuard` around the declare+activate window (interactive only), turning Ctrl-C into an observable cancellation so the blocked prompt read returns; the existing `before.restore()` then runs, making cancel transactional and "cancelled — nothing happened" literally true. The rollback itself is the witnessed decline path; the guard mechanism is witnessed in `sys.rs`.
 - **Confidence:** MED (UX verified live)
 - **Location:** `yes.rs:186` captures rollback and `yes.rs:217` records history *after* the grant. The `yes.rs:185` comment ("'cancelled — nothing happened' has to be literally true") holds only for a typed `n`.
 - **Scenario:** SIGINT (the natural "I'm not sure") leaves the manifest declared and the lock written; then `undo` says "nothing recorded", `yes` says "nothing new to activate", `status` says `trust .` on a 0-server project. Related to F10; also a SIGKILL window between write and record.
@@ -245,6 +248,7 @@ separate item.
 - **Fix shape:** connect intake → `Lock::upsert` so `license`/`origin` are captured; until then, correct the ENFORCEMENT claim to match reality (see F19).
 
 ## F19 — Documentation claims run ahead of the code (claims-match-enforcement, inverted)
+- **Status: ✅ FIXED** 2026-08-01. Reconciled each claim: the "every read re-hashes" claim is now TRUE in code (F4), so it stands; attribution prose qualified to "outbound share wire live, inbound add-wire pending" (F18); settings "not probed" → "not drift-probed" (doctor validates shape/target, not drift); the seatbelt report comment names the CallRecord path it actually renders; `up`'s "held back whole" → precise (server configs held, instructions/settings still render) and "nothing rendered" → "rendering stopped early"; doctor's skipped content-scan is `Unchecked` (honest `–`), not a green `✓`.
 - **Confidence:** HIGH (UX, each checked against code)
 - **Locations & corrections needed:**
   - `ENFORCEMENT.md:743` "every read re-hashes the directory" — false; `verified_snapshot` is write-path only, both readers (`regate.rs:76`, keep-pinned delivery `use_profile.rs:575`) do bare `is_dir()`. Stale echo at `store.rs:160`. (Ties to F4.)
@@ -256,16 +260,19 @@ separate item.
 - **Fix shape:** make each claim true in code, or correct the claim. Prefer code where it's a real gap (F4, F18); prefer doc correction where the honest scope is fine.
 
 ## F20 — `optimize` counts seatbelt audit records unfiltered (variant-overloading, one layer down)
+- **Status: ✅ FIXED** 2026-08-01. `seatbelt::AUDIT_TOOLS` + `is_enforcement_record` expose the closed set of enforcement-denial tags; `optimize` filters them out of the call log before any count, so a never-contacted server no longer reports gateway calls or "denied by the tool firewall". Witness: `an_enforcement_denial_is_distinguishable_from_a_brokered_call`.
 - **Confidence:** MED (UX)
 - **Location:** `seatbelt::record` writes `tool: "egress"|"secret"|"pin"` into the audit `CallRecord`; `optimize.rs:240-261` counts every record unfiltered — so a never-contacted server reports gateway calls and "denied by the tool firewall". This is exactly the overloading `recorder/src/lib.rs:465-475` refuses for `SecretAccess` at the recorder layer.
 - **Fix shape:** filter seatbelt/denial records out of the brokered-call counts in `optimize`, or give them a distinct record kind the counter ignores. (See the `assert-effects-not-claims` / `secret-denied-not-an-outcome-field` house rules.)
 
 ## F21 — `status` and `doctor` name each other as the one next action
+- **Status: ✅ FIXED** 2026-08-01. doctor's clean terminal points at the next rung (Switch), not `status` (which named `doctor` back); a finding with no parseable `↳ fix` now yields "review the errors/warnings above" instead of "nothing to repair" printed over a nonzero count. Witness: `an_error_without_a_fix_still_yields_a_real_next_action`.
 - **Confidence:** MED (UX) — the pilot Run A dead-end, reintroduced one surface over.
 - **Location:** `overview.rs:214-217` ↔ `doctor.rs:319-322`. Also `doctor.rs:303-306` never consults `self.errors`, so a real error with no `↳` prints `1 error` above `next: agentstack status nothing to repair`.
 - **Fix shape:** break the mutual referral; make the error path produce a real next action.
 
 ## F22 — `share`/`receive` never delivers the manifest or lock it advertises
+- **Status: ✅ FIXED** 2026-08-01. The receive card stops advertising "review and adopt what you want from" a manifest the funnel drops; it now says the manifest/lock verify the files but do not merge — servers, toolsets, and policy do not cross. Only the skill/instruction entries land, which is what `adopt` actually moves.
 - **Confidence:** MED (UX)
 - **Location:** `share.rs:404` says "Brings a manifest — review and adopt what you want from it", but `run_receive` stages only `bundle.entries`; `quarantine::adopt` moves only `skill`/`instruction` subtrees. `bundle.manifest`/`bundle.lock` are parsed, counted on the card, then dropped. Servers, toolsets, policy, hooks do not survive the round trip.
 - **Fix shape:** either deliver manifest/lock through a governed adopt, or stop advertising them on the card.

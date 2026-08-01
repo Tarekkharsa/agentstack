@@ -1104,3 +1104,45 @@ fn a_standing_block_refuses_a_locked_run() {
         "the refusal does not name the standing decision:\n{out}"
     );
 }
+
+/// F11 witness (FINDINGS.md): `doctor` detects content drift against the pin
+/// on the DEFAULT path. The trust digest covers manifest+lock, not the skill
+/// BODY — so editing an approved skill in place used to leave `doctor` reading
+/// `✓ present · SKILL.md ok` and `0 errors` over bytes that changed under the
+/// approval. The tamper is the skill body; the surface must go red without
+/// `--deep`, `--ci`, or `trust .`.
+#[test]
+fn doctor_sees_content_drift_on_the_default_path() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    isolate_home(tmp.path());
+    let proj = trusted_project(tmp.path());
+
+    // Before the edit, doctor is clean about alpha.
+    let (before, _) = cli(&proj, &["doctor"]);
+    assert!(
+        before.contains("alpha"),
+        "fixture: alpha is checked:\n{before}"
+    );
+
+    // Edit an approved skill in place — manifest and lock untouched.
+    skill(
+        &proj,
+        "alpha",
+        "---\ndescription: a\n---\n# Alpha\nEDITED AFTER APPROVAL\n",
+    );
+
+    // Plain `doctor` names the drift on the DEFAULT path (no --deep/--ci).
+    let (after, _) = cli(&proj, &["doctor"]);
+    assert!(
+        after.contains("content changed since you approved it"),
+        "doctor must name the drift on the default path:\n{after}"
+    );
+    assert!(
+        after.contains("agentstack trust"),
+        "and point at the review:\n{after}"
+    );
+    // …and it is an ERROR: `doctor --ci` (the trust gate) fails over it.
+    let (_, ci_ok) = cli(&proj, &["doctor", "--ci"]);
+    assert!(!ci_ok, "content drift must fail the doctor --ci gate");
+}

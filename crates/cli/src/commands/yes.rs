@@ -188,14 +188,37 @@ pub fn run_answered(
         &crate::lock::Lock::path(&ctx.dir),
     );
 
+    // F12: Ctrl-C between the declare below and the closing yes must be
+    // transactional. Without this guard, SIGINT's default disposition kills
+    // the process mid-`activate` — after the manifest write, before the
+    // history row — leaving a declared, locked project that `undo` says
+    // "nothing recorded" about. The guard turns Ctrl-C into an observable
+    // cancellation (the blocked prompt read returns instead of the process
+    // dying), so the same rollback a typed `n` takes runs here too, and
+    // "cancelled — nothing happened" stays literally true. Interactive only:
+    // a headless caller has no prompt to interrupt.
+    let sigint = interactive
+        .then(crate::sys::SigintGuard::install)
+        .transpose()?;
+
     crate::util::atomic::write(&ctx.loaded.manifest_path, &new_text)
         .with_context(|| format!("writing {}", ctx.loaded.manifest_path.display()))?;
 
     // The rest runs inside a closure so one `?` cannot escape past the
     // rollback. Only a granted, rendered run leaves the writes in place.
     let outcome = activate(&ctx, &base, args, interactive, answer);
-    if outcome.is_err() {
+    let interrupted = sigint.as_ref().is_some_and(|g| g.interrupted());
+    if outcome.is_err() || interrupted {
         before.restore();
+    }
+    if interrupted {
+        // A cancel, not a failure: the project is byte-identical to before
+        // this ran, and there is nothing to record or report as an error.
+        println!(
+            "\n{} cancelled — nothing was declared or activated.",
+            "·".dimmed()
+        );
+        return Ok(());
     }
     outcome?;
 

@@ -16,9 +16,12 @@
 //! - **why** — the rule that refused, named so it can be found and changed;
 //! - **the safe next step** — the one thing to do about it.
 //!
-//! And it is backed by evidence: the same denial is recorded, so
-//! `agentstack report` can show it later rather than the user having to have
-//! been watching the terminal at the time.
+//! And it is backed by evidence: the same denial is recorded as a `Denied`
+//! `CallRecord` in the audit log, so `agentstack report run <id>` surfaces it
+//! in the Tool-calls section rather than the user having to have been watching
+//! the terminal at the time. (The run-scoped `SecretDenied` / `PinRejected`
+//! events carry the same fact structured for `--json`; the terminal report
+//! renders the `CallRecord`, not those variants.)
 //!
 //! # The invariant this module must never break
 //!
@@ -99,6 +102,27 @@ impl Family {
             Family::Pin => "pin",
         }
     }
+}
+
+/// Every `tool` tag [`record`] writes — the closed set of ENFORCEMENT-denial
+/// families, distinct from a brokered gateway call to a server.
+///
+/// Exposed so consumers of the shared audit log can tell the two apart
+/// without re-deriving the list (F20). A seatbelt record means "an attempt to
+/// reach a host / resolve a ref / load drifted content was refused" — it is
+/// not evidence that a server was contacted, so `optimize` must not fold it
+/// into per-server brokered-call counts. This is the same non-overloading
+/// discipline the recorder applies with `SecretDenied` vs `SecretAccess`, one
+/// layer up: a denial that never happened as a call must not be counted as
+/// one.
+pub const AUDIT_TOOLS: &[&str] = &["tool", "egress", "secret", "filesystem", "pin"];
+
+/// Whether a call record is a seatbelt enforcement denial rather than a
+/// brokered call. Both live in `calls.jsonl`; only the latter is a signal
+/// about whether a server is used.
+pub fn is_enforcement_record(rec: &agentstack_recorder::CallRecord) -> bool {
+    matches!(rec.outcome, agentstack_recorder::CallOutcome::Denied)
+        && AUDIT_TOOLS.contains(&rec.tool.as_str())
 }
 
 /// Bound a refusal reason before it is printed or recorded.
@@ -261,6 +285,45 @@ fn now_epoch() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// F20 witness: a seatbelt enforcement denial is recognizable as one, so
+    /// `optimize` can exclude it from brokered-call counts. The tamper is the
+    /// exact shape the seatbelt writes — a `Denied` record whose `tool` is a
+    /// family tag — which used to be counted as a gateway call to the subject.
+    #[test]
+    fn an_enforcement_denial_is_distinguishable_from_a_brokered_call() {
+        let mk = |tool: &str, outcome: agentstack_recorder::CallOutcome| {
+            agentstack_recorder::CallRecord {
+                ts: 0,
+                run: None,
+                pid: 1,
+                project: None,
+                server: "web-search".into(),
+                tool: tool.into(),
+                args_digest: String::new(),
+                outcome,
+                detail: None,
+                ms: 0,
+            }
+        };
+        // Every seatbelt family tag, denied → recognized as enforcement.
+        for tag in AUDIT_TOOLS {
+            assert!(
+                is_enforcement_record(&mk(tag, agentstack_recorder::CallOutcome::Denied)),
+                "'{tag}' denial must read as enforcement"
+            );
+        }
+        // A real brokered tool call is NOT enforcement, whatever its outcome —
+        // even a denied one, because its tool name is not a family tag.
+        assert!(!is_enforcement_record(&mk(
+            "search_web",
+            agentstack_recorder::CallOutcome::Denied
+        )));
+        assert!(!is_enforcement_record(&mk(
+            "egress",
+            agentstack_recorder::CallOutcome::Ok
+        )));
+    }
 
     /// The sentence carries all three parts, in the order a reader needs them.
     #[test]

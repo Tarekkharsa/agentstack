@@ -93,6 +93,12 @@ struct Report {
     /// JSON omits the key entirely: a consumer can tell "not probed" from
     /// "probed, and there was nothing to probe" (`ran: true`, empty list).
     probe: Option<ProbeResults>,
+    /// Whether the manifest declares ANY capability (F11 coverage term).
+    /// `readiness` was purely a findings-and-trust verdict, so a manifest
+    /// reduced to `version = 1` with a leftover lockfile reported `ready` —
+    /// "ready" over nothing to be ready with. Set in `run_checks`; `None`
+    /// when doctor ran with no project.
+    declares_anything: Option<bool>,
 }
 
 /// The machine's bridge coverage, from the ONE definition `gateway connect`
@@ -142,6 +148,7 @@ impl Report {
             gitignore: None,
             clis: None,
             probe: None,
+            declares_anything: None,
         }
     }
 
@@ -304,6 +311,18 @@ impl Report {
         if let Some(fix) = self.first_fix() {
             return (fix.to_string(), "the finding to start with");
         }
+        // A finding with no parseable `↳ fix` still needs a real next step
+        // (F21): `first_fix` returns `None` for a prose remedy, and falling
+        // through to "nothing to repair" printed `1 error` directly above a
+        // next step that claimed there was nothing wrong. Point at the findings
+        // themselves — the report is right here — rather than at another
+        // surface.
+        if self.errors > 0 {
+            return (
+                "review the errors above".to_string(),
+                "each is a problem this project has to fix before it is ready",
+            );
+        }
         if self.trust == Some("untrusted") {
             return (
                 "agentstack trust .".to_string(),
@@ -316,9 +335,20 @@ impl Report {
                 "the content changed since you last said yes — review what moved",
             );
         }
+        if self.warnings > 0 {
+            return (
+                "review the warnings above".to_string(),
+                "none blocks activation, but each names something worth knowing",
+            );
+        }
+        // Nothing to repair, trusted, no findings. This used to name
+        // `agentstack status`, which names `agentstack doctor` right back —
+        // the A↔B dead end the pilot hit (F21). The honest terminal is the
+        // next RUNG, not a lateral hop to the other summary: the wiring is
+        // verified, so the journey continues at Switch.
         (
-            "agentstack status".to_string(),
-            "nothing to repair — this is where the project stands, on one screen",
+            "agentstack toolset create <name> --server <server>".to_string(),
+            "nothing to repair — group these for a task, then switch between toolsets",
         )
     }
 
@@ -366,10 +396,46 @@ impl Report {
             Some("drifted") => return "drifted",
             _ => {}
         }
+        // A coverage term (F11): "ready" is a claim that this project has a
+        // working setup, and a manifest that declares nothing has no setup to
+        // be ready with — a `version = 1` husk beside a leftover lockfile used
+        // to report `ready`. This is the term that was missing.
+        if self.declares_anything == Some(false) {
+            return "empty";
+        }
         if self.activation == Some("never_activated") {
             return "never_activated";
         }
         "ready"
+    }
+
+    /// The readiness verdict as a human line for the terminal footer, or
+    /// `None` when there is no project verdict to state (`unknown`). One
+    /// short clause each, matching the JSON verdict word for word so the two
+    /// surfaces cannot drift (F11).
+    fn readiness_line(&self) -> Option<String> {
+        let (word, gloss) = match self.readiness() {
+            "unknown" => return None,
+            "needs_attention" => ("needs attention", "fix the findings above first"),
+            "untrusted" => (
+                "not ready",
+                "untrusted — nothing it declares is active until you review it",
+            ),
+            "drifted" => (
+                "not ready",
+                "the content changed since you approved it — review what moved",
+            ),
+            "empty" => (
+                "not ready",
+                "this setup declares nothing yet — add a server, skill, or instruction",
+            ),
+            "never_activated" => (
+                "not ready",
+                "set up but never activated — `agentstack use --write` makes it live",
+            ),
+            _ => ("ready", "trusted, activated, and verified"),
+        };
+        Some(format!("{}: {}", word, gloss).to_string())
     }
 
     /// The `probe` key, or `null` when `--probe` was not asked for. Absent and
@@ -525,6 +591,14 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
             super::count(report.errors, "error"),
             super::count(report.warnings, "warning")
         );
+        // Mirror the JSON readiness verdict to the terminal (F11): the count
+        // line alone read `0 errors, 0 warnings` over an untrusted, empty, or
+        // drifted project — true about findings, silent about whether the
+        // project is actually ready. The one-word verdict the JSON already
+        // computed belongs on the screen the human reads too.
+        if let Some(line) = report.readiness_line() {
+            println!("  {line}");
+        }
         // Every report ends the same way: one command, and why it is the one.
         // Unconditional — a clean report that simply stops leaves the reader
         // to guess whether "0 errors" means "done" or "I forgot a step".
@@ -933,6 +1007,17 @@ fn run_checks(
     let locked = crate::lock::Lock::path(&ctx.dir).exists();
     report.mode = Some(mode.label());
     report.activation = Some(if locked { "locked" } else { "never_activated" });
+    // Coverage term for `readiness` (F11): does this project declare anything
+    // at all? Every inert and executable kind counts — a project can be a pure
+    // instruction or settings setup — so "ready" is never reported over a husk.
+    report.declares_anything = Some(
+        !manifest.skills.is_empty()
+            || !manifest.servers.is_empty()
+            || !manifest.instructions.is_empty()
+            || !manifest.settings.is_empty()
+            || !manifest.hooks.is_empty()
+            || !manifest.extensions.is_empty(),
+    );
     report.gitignore = Some(manifest.meta.manages_gitignore());
     let (detected, capable, incapable) =
         crate::commands::mode_switch::bridge_coverage(&ctx.registry);
@@ -1784,6 +1869,30 @@ fn run_checks(
                      ↳ add `description:` so search and agents can find it"
                 ),
             ),
+            // F11: content drift against the pin, on the DEFAULT path. The
+            // trust digest covers the manifest and lockfile bytes, not the
+            // skill BODY — so editing an approved skill in place leaves
+            // `trust::check` reading `trusted` and this section reading `ok`,
+            // while the bytes an agent loads have changed under the approval.
+            // The pin is what binds them, so doctor verifies it here rather
+            // than leaving drift to surface only under `agentstack trust .`
+            // (which nothing on a green screen recommends). Unpinned skills
+            // are not drift — the first activation records the pin — so only
+            // a real checksum mismatch flags.
+            Some(dir)
+                if skills_lock
+                    .get(name)
+                    .zip(crate::store::dir_digest(&dir).ok())
+                    .is_some_and(|(entry, live)| entry.checksum.hex() != live.hex()) =>
+            {
+                report.line(
+                    Level::Error,
+                    format!(
+                        "{name:<20} content changed since you approved it — the pinned bytes \
+                         and the files on disk differ ↳ agentstack trust ."
+                    ),
+                );
+            }
             Some(_) => report.line(Level::Ok, format!("{name:<20} present · SKILL.md ok")),
         }
     }
@@ -1943,9 +2052,14 @@ fn run_checks(
             report.line(Level::Ok, "no hidden-unicode or injection findings");
         }
     } else {
+        // Not `Level::Ok` (F19): a green ✓ over a scan that did not run claims
+        // a clean result nobody checked. `Unchecked` renders the quiet `–`
+        // marker at full contrast, so the reader sees "this was skipped" —
+        // the same non-coverage honesty the skills section uses for
+        // "nothing declared to check".
         report.line(
-            Level::Ok,
-            "skipped (reads every skill body) ↳ agentstack doctor --deep — always on in --ci",
+            Level::Unchecked,
+            "not scanned (reads every skill body) ↳ agentstack doctor --deep — always on in --ci",
         );
     }
 
@@ -3740,6 +3854,56 @@ fn check_quirks(manifest: &Manifest) -> Vec<Quirk> {
 mod tests {
     use super::*;
 
+    /// F11 witness: `readiness` gains a coverage term. A project that declares
+    /// nothing has no setup to be "ready" with — before this, a `version = 1`
+    /// husk beside a leftover lockfile reported `ready`. The tamper is the
+    /// coverage signal itself.
+    #[test]
+    fn readiness_is_not_ready_over_an_empty_manifest() {
+        let mut r = Report::new();
+        r.trust = Some("trusted");
+        r.activation = Some("locked");
+        r.declares_anything = Some(false);
+        assert_eq!(r.readiness(), "empty");
+        assert!(r.readiness_line().unwrap().starts_with("not ready"));
+
+        // Same project, once it declares something: ready is now honest.
+        r.declares_anything = Some(true);
+        assert_eq!(r.readiness(), "ready");
+        assert!(r.readiness_line().unwrap().starts_with("ready"));
+    }
+
+    /// F21 witness: a real error with no parseable `↳ fix` must still produce a
+    /// real next action — never "nothing to repair" printed above a nonzero
+    /// error count, and never a lateral hop to `status` (which names `doctor`
+    /// right back, the A↔B dead end).
+    #[test]
+    fn an_error_without_a_fix_still_yields_a_real_next_action() {
+        let mut r = Report::new();
+        r.trust = Some("trusted");
+        r.section("X");
+        // An error line with no `↳` — first_fix() returns None for it.
+        r.line(Level::Error, "something is wrong but there is no one-liner");
+        let (cmd, _) = r.next_action();
+        assert!(
+            !cmd.contains("nothing to repair") && !cmd.contains("agentstack status"),
+            "an error must not route to 'nothing to repair' or bounce to status: {cmd}"
+        );
+        assert!(cmd.contains("review the errors"), "{cmd}");
+
+        // The clean terminal must not name `status` either (the mutual
+        // referral); it names the next rung.
+        let mut clean = Report::new();
+        clean.trust = Some("trusted");
+        clean.declares_anything = Some(true);
+        clean.activation = Some("locked");
+        let (cmd, _) = clean.next_action();
+        assert!(
+            !cmd.contains("agentstack status"),
+            "the clean terminal must not bounce back to status: {cmd}"
+        );
+    }
+
     #[test]
     fn t3code_findings_flags_overrides_and_ungoverned_defensively() {
         let json = r#"{
@@ -4283,10 +4447,11 @@ mod tests {
             .write_str("version = 1\n[targets]\ndefault = [\"claude-code\"]\n")
             .unwrap();
 
-        // Fast default skips; --deep and --ci both run the real scan.
-        assert!(scan_line(false, false, proj.path()).contains("skipped"));
-        assert!(!scan_line(true, false, proj.path()).contains("skipped"));
-        assert!(!scan_line(false, true, proj.path()).contains("skipped"));
+        // Fast default does not scan (and says so honestly, not with a green
+        // ✓); --deep and --ci both run the real scan.
+        assert!(scan_line(false, false, proj.path()).contains("not scanned"));
+        assert!(!scan_line(true, false, proj.path()).contains("not scanned"));
+        assert!(!scan_line(false, true, proj.path()).contains("not scanned"));
 
         std::env::remove_var("AGENTSTACK_HOME");
         std::env::remove_var("HOME");

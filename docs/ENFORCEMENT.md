@@ -499,13 +499,15 @@ paragraph above exists to prevent.
 
 ### Settings
 
-- **Not pinned, not probed, not witnessed — the one capability kind with no
-  binding of its own.** `[settings.*]` values are merged into native CLI
-  configuration as raw JSON. There is no `LockedSetting`, so settings content
-  never reaches `agentstack.lock`; no `doctor` probe reports settings drift in
-  either direction; and no test witnesses the behavior. Every other kind on
-  this page can answer "are the delivered bytes the reviewed bytes?" — settings
-  cannot.
+- **Not pinned, not drift-probed — the one capability kind with no binding of
+  its own.** `[settings.*]` values are merged into native CLI configuration as
+  raw JSON. There is no `LockedSetting`, so settings content never reaches
+  `agentstack.lock`, and no `doctor` check compares the delivered bytes against
+  the reviewed ones in either direction. (`doctor` DOES open a Settings section
+  — it validates that each `[settings.<id>]` targets a known CLI and is a table
+  of keys, and reports what merged where — but that is shape and destination
+  validation, not drift detection.) Every other kind on this page can answer
+  "are the delivered bytes the reviewed bytes?" — settings cannot.
 - **Why this is stated rather than fixed here.** The gap was surfaced by the
   P0.3 structural lint and is recorded as **F20** in `TODO.md`. Closing it is
   a behavior change — pinning settings values, re-gating on change, adding a
@@ -824,7 +826,16 @@ guarantee belongs to the module rather than to call-site diligence.
 
 ### Attribution — `license` and `origin` in the lock
 
-Recorded per pinned skill, and carried forward by `Lock::upsert` so an ordinary
+The lock schema carries `license` and `origin`, `Lock::upsert` preserves them
+across a re-lock, and `agentstack share` reads them from the sender's lock onto
+each bundle entry so a receiver's card can show provenance. The one wire not yet
+connected is inbound capture: the production paths that build a `LockedSkill`
+(`use`/`lock`/`add`) still write `license: None, origin: None`, so a locally
+added skill records no attribution until that wire lands. What follows describes
+the carry-forward and share behaviour, which are live; treat "recorded per
+pinned skill" as the intended end state, not today's default for every add path.
+
+Carried forward by `Lock::upsert` so an ordinary
 re-lock cannot erase it. NOTICE/LICENSE text travels with the content rather
 than being summarized into a tag.
 

@@ -433,15 +433,22 @@ fn summary_lines(bundle: &ShareBundle) -> Vec<String> {
     if instr > 0 {
         out.push(format!("Adds {}", count(instr, "instruction file")));
     }
-    // The manifest is the part that can declare servers, hooks, and policy —
-    // the executable surface. Named separately because "a few files" and "a
-    // manifest that can start processes" are very different asks.
-    out.push(
-        "Brings a manifest — it is NOT merged; review and adopt what you want from it".to_string(),
-    );
-    if bundle.lock.is_some() {
-        out.push("Brings a lockfile, so the content it names is pinned".to_string());
+    // F22: only the skill/instruction ENTRIES survive the round trip —
+    // `adopt` moves those two subtrees and nothing else. The manifest and
+    // lockfile are parsed (for attribution and the signature) but never
+    // delivered: servers, toolsets, policy, and hooks in a bundle's manifest
+    // do not cross. Advertising "review and adopt what you want from it" over
+    // a manifest the funnel then drops was the card promising a door that
+    // isn't there. So the card describes what actually lands, and names the
+    // manifest only as context for the signature, not as something to adopt.
+    if skills == 0 && instr == 0 {
+        out.push("No skill or instruction files — nothing would be added".to_string());
     }
+    out.push(
+        "The bundle's manifest and lockfile are used to verify these files, not merged — \
+         servers, toolsets, and policy do not cross over"
+            .to_string(),
+    );
     out
 }
 
