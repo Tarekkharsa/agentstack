@@ -1,18 +1,28 @@
 # The consent card
 
 > **Status:** Active — the contract for Strategy v2 Phase 2 (the review card).
-> Direction lives in [`STRATEGY.md`](../../STRATEGY.md) "Phase 2 — One yes";
-> the ordered work lives in [`TODO.md`](../../TODO.md). This document does not
-> restate either. It fixes the three *contracts* Phase 2 introduces, because
-> they share storage and would otherwise be designed three times.
+> Phase 2 shipped 2026-07-31, so most of this document now describes behaviour
+> that exists; the one part still unbuilt is the structured `ConsentCard`
+> payload in §Panel, and it is marked there. Direction lives in
+> [`STRATEGY.md`](../../STRATEGY.md) "Phase 2 — One yes"; the ordered work
+> lives in [`TODO.md`](../../TODO.md). This document does not restate either.
+> It fixes the three *contracts* Phase 2 introduces, because they share storage
+> and would otherwise be designed three times.
+>
+> **Where feature names are decided:** `crates/cli/src/ui_contract.rs` is the
+> single source of truth for every advertised contract string. When this
+> document and that file disagree, the file wins and this document is wrong —
+> see the naming correction at the end of §Panel.
 
 Three pieces, one document:
 
 - **(a) the card** — what the grant screen says, and the rule that bounds it;
 - **(b) prior bytes** — how a re-gate renders "3 lines changed" instead of
   "digest mismatch";
-- **(c) recognition** — how repeated review of identical content gets cheaper
-  without getting weaker.
+- **(c) content-digest recognition** — how repeated review of identical content
+  gets cheaper without getting weaker. (Named in full to keep it apart from
+  *publisher-key recognition* in the share/receive flow, which changes the
+  card's words about provenance and deliberately does not shorten it.)
 
 They share one property: **all three degrade to today's behaviour and never
 gate.** A missing snapshot, a missing index, a corrupt record — each falls back
@@ -239,7 +249,7 @@ Two consequences follow, both inherited obligations rather than new scope:
   identity, so it becomes "this name is declared as `<pin>`; the drop would
   replace it" with the diff — **still refuse-by-default, now informed.**
 
-## (c) Recognition
+## (c) Content-digest recognition
 
 A machine-local index of past approvals, keyed by content digest, written on
 grant and read at card time. Its only effect: **it shortens the card's body**
@@ -324,7 +334,26 @@ The panel consumes structured JSON from `preview_value()` through
 panel work. **`ConsentCard` content has no machine-readable form today** — it
 is print-only inside `grant_gated`, so the funnel's and the diff card's lines
 reach the terminal and nothing else. Emitting them structurally (a `diff`
-object mirroring `ReviewDiff`, behind a new feature name such as
-`trust-review-card-v1` — a new name, never a revision of `trust-preview`, so an
-older binary is not misrepresented) is CLI-side work; the panel cannot pick it
-up until the CLI emits it. Recorded here as the t3code follow-up.
+object mirroring `ReviewDiff`, behind a new feature name — a new name, never a
+revision of `trust-preview`, so an older binary is not misrepresented) is
+CLI-side work; the panel cannot pick it up until the CLI emits it. Recorded
+here as the t3code follow-up.
+
+> **Naming correction, 2026-08-01. `trust-review-card-v1` is taken.** An
+> earlier draft of this paragraph proposed that name for the unbuilt structured
+> `ConsentCard` payload above. P2.D then shipped it meaning something narrower:
+> in `crates/cli/src/ui_contract.rs` the advertised feature
+> `trust-review-card-v1` means *`trust --preview` additionally carries `hooks`,
+> `settings`, `policy_requested`, and `machine_policy_ceiling`, plus `hooks`
+> and `settings` counts*. **The shipped meaning is authoritative** — external
+> consumers (the t3code fork) negotiate against the binary, not against this
+> document, and a fork built from the old draft would have targeted a payload
+> that does not exist.
+>
+> The unbuilt structured-`ConsentCard` payload therefore needs a *different*
+> name when it is built. Working name: **`trust-card-diff-v1`** — chosen over
+> `trust-review-card-v2` because it is not a revision of the shipped payload
+> (that one carries kinds; this one would carry the card's rendered lines and a
+> `diff` object), and a `-v2` would falsely imply a migration path off `-v1`.
+> The final name is fixed when the payload ships, in `ui_contract.rs`, which
+> stays the single source of truth for every advertised feature string.

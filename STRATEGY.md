@@ -5,7 +5,7 @@
 > [`docs/archive/STRATEGY-2026-07-v1.md`](docs/archive/STRATEGY-2026-07-v1.md));
 > revised same day after independent adversarial review.
 >
-> **Current as of:** AgentStack 0.17.x
+> **Current as of:** AgentStack 0.18.0-rc.1
 >
 > **Relationship to the other documents:** [`TODO.md`](TODO.md) remains the
 > only ordered work queue. *New product-capability work* enters it only through
@@ -148,9 +148,12 @@ guarantees.
   re-gate says "digest mismatch." North star: one glanceable review card, and
   a re-gate shows the three lines that changed.
 - **D3 — Consent memory.** Today: trust is keyed to project path on one
-  machine; identical content asks again everywhere. North star: recognition —
-  *"seen and approved in two other projects"* — shortens the card, never skips
-  it.
+  machine; identical content asks again everywhere. North star:
+  **content-digest recognition** — *"seen and approved in two other
+  projects"* — shortens the card, never skips it. (Not to be confused with
+  **publisher-key recognition** in Phase 4's share flow, which changes the
+  receive card's *words* about provenance and deliberately does **not** shrink
+  it. Two mechanisms, two nouns, opposite effects on card length.)
 - **D4 — Surface uniformity.** Today: seven capability kinds with per-kind
   quirks. North star: the inert kinds (skills, instructions, settings, packs,
   and servers' declarations) present one shape, learned once,
@@ -224,6 +227,16 @@ The study becomes the v0.18.0 release gate — a study that falsifies the
 thesis still stops the *release* and forces rework, it just does so after the
 build instead of before it.
 
+**The 2026-07-31 amendment is blanket: it covers every inter-phase gate below,
+not just this one.** No tester has run at any point in the v2 build arc, so no
+inter-phase gate could ever have been cleared on tester evidence. The rule that
+actually governed each transition: the maintainer-observable half of the gate
+had to hold (counts over recorded events, green witnesses) before the next
+phase started, and the tester half moved to the v0.18.0 release gate — the
+§1.6 activation study, which exercises the whole journey before the release
+publishes. Each remaining gate below is marked individually so the reading is
+not left to inference.
+
 ### Phase 1 — The funnel (authoring: D1)
 
 **Outcome:** dropping a file into the project is a supported, first-class way
@@ -233,9 +246,12 @@ ends in one confirmation.
 Workstreams:
 
 - **Intake detection:** content dropped into `.agentstack/skills/` or
-  `.agentstack/instructions/` is noticed at the next command touchpoint
-  (`doctor`, `use`, `lock`, panel open) and offered for adoption with a
-  preview. No daemon; detection is command-time, which also keeps it honest.
+  `.agentstack/instructions/` is noticed at the next command touchpoint and
+  offered for adoption with a preview. No daemon; detection is command-time,
+  which also keeps it honest. **Shipped touchpoint set (P1.A): `status`,
+  `doctor`, `use`, `lock`, `adopt`.** ~~panel open~~ — deferred, unbuilt, and
+  listed by name in `TODO.md`'s fork/deferral ledger (Phase 4 block, carried
+  forward item 3); no `panel_open` touchpoint exists in `crates/cli/src`.
 - **Provenance before compression:** the single-action path applies only to
   content with a local-authorship signal — untracked in git, or created after
   the project's last trust grant. Content that *arrived with the clone* (or
@@ -290,7 +306,7 @@ Workstreams:
   ("this skill changed 3 lines") instead of "digest mismatch." CLI first;
   panel mirrors the same card via the existing trust-from-UI flow. Once the
   diff card ships, re-gates join the compressed path.
-- **Consent recognition** — settled direction, detailed in a design doc
+- **Content-digest recognition** — settled direction, detailed in a design doc
   before build: a content-addressed memory of past approvals that *pre-fills
   and shortens* the card ("this exact content is approved in two other
   projects on this machine") but does **not** auto-skip the per-project
@@ -305,9 +321,14 @@ Workstreams:
 recognition never crosses machines; the review card never shows less than the
 current prompt does (it shows it better).
 
-**Gate to Phase 3:** review-comprehension metric improves against baseline;
+**Gate to Phase 3:** ~~review-comprehension metric improves against baseline;~~
 zero instances, counted over recorded grant events, of a user saying yes to
-something the card did not surface.
+something the card did not surface. Amended 2026-08-01 under the blanket
+2026-07-31 amendment: the comprehension metric needs testers and has no
+baseline to improve against yet, so it moved to the v0.18.0 release gate
+(§1.6). What held before Phase 3 started is the countable half — the
+consent-surprise count over recorded grant events is zero, and the card's
+witnesses are green.
 
 ### Phase 3 — Four ideas (surface: D4, D5)
 
@@ -322,7 +343,10 @@ Workstreams:
   migration. Hooks and extensions share the presentation shape but keep
   their ceremony; workflows are out of scope here.
 - **Vocabulary completion:** first-contact surfaces (CLI help, `init`,
-  `doctor`, panel) speak only the four ideas; mechanism nouns move behind
+  `doctor`) speak only the four ideas — ~~panel~~ deferred with the rest of the
+  fork work and listed by name in `TODO.md`'s fork/deferral ledger (Phase 4
+  block, carried forward item 3); the fork was never opened this arc, so
+  nothing made its surfaces speak the four ideas. Mechanism nouns move behind
   `--explain` and the architecture docs. The six-rung ladder keeps naming
   the journey in README, landing, and tutorial. Finish the rename ladder the
   toolset/status work started.
@@ -339,9 +363,14 @@ Workstreams:
 **Invariant check:** renames never change semantics; a legible denial is still
 a denial (no "explain then allow anyway" path).
 
-**Gate to Phase 4:** concepts-before-value at or near four; testers describe a
-blocked action correctly in their own words. The dynamic-default preconditions
-(experience contract above) are evaluated here.
+**Gate to Phase 4:** concepts-before-value at or near four; ~~testers describe
+a blocked action correctly in their own words.~~ The dynamic-default
+preconditions (experience contract above) are evaluated here. Amended
+2026-08-01 under the blanket 2026-07-31 amendment: the tester half moved to the
+v0.18.0 release gate (§1.6); the concepts count before Phase 4 started is the
+maintainer's own reading of the first-contact surfaces. The three
+dynamic-default preconditions were evaluated and **all three remain unmet**
+(`TODO.md`, Phase 4 block, carried-forward item 2).
 
 ### Phase 4 — Anywhere (exchange: D6, D7)
 
@@ -366,11 +395,18 @@ Workstreams:
   **Attribution capture is an explicit workstream:** the library/lock schema
   gains license + origin fields so upstream LICENSE/NOTICE obligations are
   carried mechanically, not by promise.
-- **Trigger discipline:** this phase's external-intake build starts on
+- **Trigger discipline:** ~~this phase's external-intake build starts on
   *user demand* — a study participant or real user asks to import from an
-  external registry. That trigger is deliberately distinct from
-  competitive-watch tripwire 3 (eve's registry becoming de-facto
-  distribution), which triggers a strategy revisit, not a build.
+  external registry.~~ **Amended 2026-08-01: the actual trigger was the
+  maintainer's directive to finish v2.** External intake shipped (`de5c37d`)
+  with zero external users and no participant request, under the blanket
+  2026-07-31 amendment that moved Phases 1–4 to building in order on
+  maintainer acceptance — which this sentence predates. The deviation is
+  argued once, in full, at `TODO.md`'s Phase 4 block ("The trigger sentence is
+  satisfied, recorded once so it is not re-litigated"); this line records it in
+  the operative doc so the two agree. Unchanged: competitive-watch tripwire 3
+  (eve's registry becoming de-facto distribution) triggers a strategy revisit,
+  not a build.
 
 **Invariant check:** intake never becomes activation; signature verification
 and local consent remain separate decisions (a valid signature shortens
