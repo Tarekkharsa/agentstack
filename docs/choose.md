@@ -7,8 +7,6 @@
 AgentStack has two decisions to make: where the rendered files should live,
 and how much protection you want. This page picks both from what you are trying
 to do. New to a word below? Every term is defined in [concepts](concepts.md).
-For the architect-grade version of these same two decisions, see
-[ARCHITECTURE — operating model](ARCHITECTURE.md#operating-model--choose-the-boundary-you-need).
 
 Your *CLIs* are the agent tools you run — Claude Code, Codex, Cursor, and the
 rest.
@@ -50,4 +48,7 @@ The legend words — **cooperative**, **enforced**, coarse, unsupported — are
 defined once in the [enforcement matrix](ENFORCEMENT.md), which spells out
 exactly what each mode does and does not stop. `--lockdown` needs Docker;
 `--locked` does not.
+
+**Not sure?** Static plus `guard install` is the right answer for almost
+everyone. [Get started](start.html) sets both up.
 

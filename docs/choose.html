@@ -259,7 +259,7 @@
   <main id="main-content" tabindex="-1">
 <p class="versionbar">These pages describe <b>v0.18.0</b>, the current release.</p>
 <h1 id="which-mode-do-i-need">Which mode do I need?</h1>
-<p>AgentStack has two decisions to make: where the rendered files should live, and how much protection you want. This page picks both from what you are trying to do. New to a word below? Every term is defined in <a href="concepts.html">concepts</a>. For the architect-grade version of these same two decisions, see <a href="architecture.html#operating-model--choose-the-boundary-you-need">ARCHITECTURE — operating model</a>.</p>
+<p>AgentStack has two decisions to make: where the rendered files should live, and how much protection you want. This page picks both from what you are trying to do. New to a word below? Every term is defined in <a href="concepts.html">concepts</a>.</p>
 <p>Your <em>CLIs</em> are the agent tools you run — Claude Code, Codex, Cursor, and the rest.</p>
 <h2 id="first-where-do-the-rendered-files-live">First: where do the rendered files live?<a class="hlink" href="#first-where-do-the-rendered-files-live" aria-label="Link to this section">#</a></h2>
 <p>This is your <em>delivery mode</em> — how your chosen capabilities reach each CLI.</p>
@@ -281,6 +281,7 @@
 <tr><td>running sensitive work that must not leak</td><td>Lockdown (Docker)</td><td><code>run &lt;cli&gt; --sandbox --lockdown</code></td><td>Container with no route out; egress is <strong>enforced</strong>. Unapproved egress is blocked — that never means exfiltration is impossible. Labelled <code>LOCKDOWN / ENFORCED</code>.</td></tr>
 </tbody></table></div>
 <p>The rows stack: guard, the trust gate, and a locked or lockdown run each add protection the one above does not, so most people end up combining several. The legend words — <strong>cooperative</strong>, <strong>enforced</strong>, coarse, unsupported — are defined once in the <a href="enforcement.html">enforcement matrix</a>, which spells out exactly what each mode does and does not stop. <code>--lockdown</code> needs Docker; <code>--locked</code> does not.</p>
+<p><strong>Not sure?</strong> Static plus <code>guard install</code> is the right answer for almost everyone. <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/start.html">Get started</a> sets both up.</p>
   <p class="srcline">Source of truth: <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/choose.md">docs/choose.md</a> — this page is generated from it.</p>
   </main>
 </div>

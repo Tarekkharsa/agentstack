@@ -39,20 +39,9 @@ agentstack optimize                   # evidence-backed recommendations (--write
 agentstack explain <name>             # provenance, effective policy, and context cost, for one capability
 ```
 
-**After a run.** `report runs` lists tracked runs; `report run <id>` reads that
-run's [flight recorder](../concepts.md) — its full lifecycle, egress, tool-call,
-and secret-ref record — plus the run's [posture](../concepts.md) label. A run
-that's still going and shouldn't be: `agentstack kill <id>` stops it and
-reverts any toolset it owned.
-`report calls` summarizes the global [call audit log](../concepts.md) across all
-runs (argument *digests* only, never values). The two context lenses differ:
-`report usage --live` estimates a server's `tools/list` footprint, `report wire`
-measures what the `tools` block actually costs on the wire.
-
-**Optimize.** `agentstack optimize` turns the same signals into
-recommendations, each carrying its evidence and the exact command or TOML;
-`--write` applies only the provably-inert safe class. The same machine-readable
-reports feed external tools and integrations.
+**Start here:** `agentstack report runs`. If it is empty, nothing has been
+brokered yet — runs are tracked when launched with `agentstack run`, and calls
+are brokered through the [gateway](trust-a-repo.md).
 
 **Before you trust.** `agentstack explain <name>` is the vet-first command: it
 shows one server or skill's origin and provenance, whether it has drifted from

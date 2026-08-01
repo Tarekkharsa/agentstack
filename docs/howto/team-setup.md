@@ -23,18 +23,21 @@ git commit -m "Add agentstack setup"
 git push
 
 # Each teammate, after cloning:
-agentstack secret set GH_PAT   # store their own value (keychain by default)
-agentstack apply --write       # render the shared manifest into their CLIs
-agentstack doctor              # verify everything is wired
+agentstack up                  # one command: detects their CLIs, renders the shared setup, names what's left
+agentstack secret set GH_PAT   # their own value (keychain by default) — `up` says if one is needed
 ```
+
+(`up` is v0.18.0 and later; on older releases the same journey is
+`agentstack apply --write` then `agentstack doctor`.)
 
 You commit **intent**, not credentials. The [manifest](../concepts.md) is the
 reviewed source of truth and the [lockfile](../concepts.md) pins exact
 versions and digests, so everyone resolves the same bytes. Secrets appear in
 the manifest only as `${REF}` placeholders — each teammate stores their own
-value locally with `agentstack secret set`, and `apply --write` renders the
-shared config into whatever CLIs they have installed. `doctor` confirms the
-result and names the fix for anything missing.
+value locally with `agentstack secret set`, and `up` renders the shared
+config into whatever CLIs they have installed, confirms the result, and
+names the fix for anything missing (`apply --write` and `doctor` remain the
+step-by-step equivalents).
 
 **Never committed:** secret values (they live per-machine in the OS keychain or
 a gitignored `.env`) and the rendered native artifacts — `.mcp.json`,

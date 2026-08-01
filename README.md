@@ -20,8 +20,13 @@
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh
 agentstack init      # finds what your CLIs already have and writes it into .agentstack/
-agentstack doctor    # verify it landed — every warning names its exact fix
+agentstack status    # is it ready — and if not, the one thing that fixes it
 ```
+
+> `agentstack yes`, `undo`, `up`, `share`, and `receive` are v0.18.0 and later;
+> the install line above serves the current stable release. `agentstack
+> --version` says which you have, and `agentstack self update --write` upgrades
+> once v0.18.0 is final.
 
 That is the whole first run. Here is what it left in your project — plain files
 you can open, read, and commit:
@@ -39,20 +44,17 @@ the **[manifest](https://tarekkharsa.github.io/agentstack/concepts.html)**, and
 every CLI-specific file AgentStack writes — `.mcp.json`, `.claude/skills/`, the
 compiled `AGENTS.md` — is rendered from it and can be regenerated, or taken back
 off, at any time. Mostly the system writes it for you: `init` and `add` fill it
-in, and when you write a skill of your own you don't open it at all — drop the
-folder under `.agentstack/skills/` and run `agentstack yes`; one review, and it
-is pinned, recorded in the manifest and lock, and live in every CLI
-([how-to](https://tarekkharsa.github.io/agentstack/howto/add-a-skill.html)). It
-holds `${GITHUB_TOKEN}`-style placeholders, never the token values.
+in, and so does
+[dropping a skill folder in](https://tarekkharsa.github.io/agentstack/howto/add-a-skill.html).
+It holds `${GITHUB_TOKEN}`-style placeholders, never the token values.
 
 That same directory arriving in a repository you *cloned* behaves differently: it
 stays inert until you review it — no server spawns, no skill enters an agent's
 context, no secret resolves — and nothing a project declares can loosen the
 limits your own machine sets.
 
-`init` is a guided wizard. Scripting or CI? `agentstack init --secrets skip` writes only the manifest
-— no prompts, no token values — then `agentstack apply --write`. Inline tokens are lifted into
-`${REF}` placeholders, resolved per machine and never stored in the manifest.
+`init` is a guided wizard. Scripting or CI?
+[Use it in CI](https://tarekkharsa.github.io/agentstack/howto/ci.html).
 
 Here is the whole loop, condensed from a real run of the current binary:
 
@@ -125,23 +127,9 @@ evidence that would move it.
 
 ### Upgrading
 
-```sh
-agentstack self update           # what a newer release would install; downloads nothing
-agentstack self update --write   # download, verify the sha256, install it
-```
-
-Like every other mutating command it previews by default. The archive is verified against the
-release's published `checksums.txt` **before** it is unpacked or moved into place; a mismatch aborts
-and leaves your existing binary untouched. That proves the transfer, not the provenance of the
-release — for provenance, `gh attestation verify <asset> --repo Tarekkharsa/agentstack`.
-
-A Homebrew install upgrades with `brew upgrade agentstack`, a source build with `cargo build
---release`, and a binary in a directory you cannot write needs `sudo` — each is detected and
-explained before anything is downloaded.
-
-`agentstack doctor` shows a one-line note when a newer release exists (a note, never a warning:
-it cannot make a healthy setup look unhealthy). The check is cached for 24 hours, never blocks, and
-is silent offline. Turn it off entirely with `AGENTSTACK_NO_UPDATE_CHECK=1`.
+`agentstack self update` previews; `--write` verifies the sha256 before
+installing. Homebrew installs upgrade with `brew upgrade agentstack`.
+[Details](https://tarekkharsa.github.io/agentstack/reference.html).
 
 ## Grow into it
 
@@ -151,7 +139,7 @@ governance only when you need them:
 | Step | You run | You get |
 | --- | --- | --- |
 | [1 — Unify](https://tarekkharsa.github.io/agentstack/start.html) | `agentstack init` → `apply` | import once, render everywhere |
-| 2 — Switch | toolsets · `session start/end` | toolsets and temporary sessions |
+| [2 — Switch](https://tarekkharsa.github.io/agentstack/howto/name-a-toolset.html) | toolsets · `session start/end` | toolsets and temporary sessions |
 | [3 — Diagnose](https://tarekkharsa.github.io/agentstack/start.html#s-verify) | `agentstack doctor` · `diff` | doctor and diff explain drift |
 | [4 — Recover](https://tarekkharsa.github.io/agentstack/howto/undo.html) | `adopt` · `apply` · `restore` · `uninstall` | keep an edit, or undo the write |
 | [5 — Share](https://tarekkharsa.github.io/agentstack/howto/team-setup.html) | manifest · lock · library | locked, secret-free setups |
@@ -173,7 +161,7 @@ Everything is explained on the website — that is the one place docs live:
 - **[Reference](https://tarekkharsa.github.io/agentstack/reference.html)** — the complete feature and command inventory
 - **[Adapter support matrix](https://tarekkharsa.github.io/agentstack/adapters.html)** — which of the thirteen CLIs is verified nightly against the real tool, which is best-effort, and what each one manages
 
-**Go deeper** — the [enforcement matrix](https://tarekkharsa.github.io/agentstack/enforcement.html) (what each mode actually enforces, checked against the source), the [architecture](https://tarekkharsa.github.io/agentstack/architecture.html) (how it works inside), the power how-tos ([lock down a run](https://tarekkharsa.github.io/agentstack/howto/lock-down-a-run.html), [team setup](https://tarekkharsa.github.io/agentstack/howto/team-setup.html), [CI](https://tarekkharsa.github.io/agentstack/howto/ci.html)), and [18 runnable walkthroughs](https://tarekkharsa.github.io/agentstack/examples.html).
+**Go deeper** — the [enforcement matrix](https://tarekkharsa.github.io/agentstack/enforcement.html) (what each mode actually enforces, checked against the source), the [architecture](https://tarekkharsa.github.io/agentstack/architecture.html) (how it works inside), and [18 runnable walkthroughs](https://tarekkharsa.github.io/agentstack/examples.html).
 
 ## Develop
 

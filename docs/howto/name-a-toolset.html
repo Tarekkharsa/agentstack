@@ -266,7 +266,7 @@
 <pre class="block"><code>agentstack toolset create --name backend --server postgres --server github --skill sql-review</code></pre>
 <p>At a terminal it shows what it will create, asks, and on yes writes the <code>[profiles.backend]</code> block and re-locks. <code>--skill '*'</code> means every inline skill.</p>
 <p><strong>Naming a toolset does not switch to it.</strong> Nothing is rendered and none of your CLIs change — you have defined a subset, not chosen it. Activate it when you want it, with <code>agentstack session start backend</code> (see <a href="#which-activation-session-or-apply">below</a>). To undo the creation itself, delete the <code>[profiles.backend]</code> block from the manifest.</p>
-<p>Scripts and graphical clients get a two-step contract instead — <code>--preview</code> emits the plan plus a consent digest, and applying needs <code>--yes --consented &lt;digest&gt;</code>, so nothing writes without something having reviewed exactly that plan against exactly those manifest bytes. A bare non-interactive call refuses and says which flag it wants, rather than printing a digest at a person who did not ask for one.</p>
+<p>Scripts and graphical clients get a two-step consent contract instead — <a href="../reference.html#selective-skills-via-toolsets">reference: selective skills via toolsets</a>.</p>
 <h2 id="or-write-it-by-hand">Or write it by hand<a class="hlink" href="#or-write-it-by-hand" aria-label="Link to this section">#</a></h2>
 <p>A toolset is four lines of TOML, and reading it is often clearer than reading a command. Add one <code>[profiles.&lt;name&gt;]</code> block that lists the servers and skills that task needs:</p>
 <pre class="block"><code># .agentstack/agentstack.toml — you already have these servers and skills.
@@ -294,16 +294,7 @@ skills  = ["sql-review", "api-conventions"]
 servers = ["grafana", "logs"]
 skills  = ["oncall-runbook"]</code></pre>
 <p><code>agentstack session start incident</code> for the duration of the page, then <code>agentstack session end</code> puts every file back exactly as it was — the incident tools never linger in your everyday setup.</p>
-<p><strong>A minimal project toolset vs. a broad personal one.</strong> Check a lean toolset into a repo so a teammate gets precisely what the project needs; keep your wider, personal set in your <a href="../howto/team-setup.html">machine manifest</a> for your own work:</p>
-<pre class="block"><code># ./.agentstack/agentstack.toml — committed, deliberately minimal
-[profiles.project]
-servers = ["github"]
-skills  = ["repo-conventions"]</code></pre>
-<pre class="block"><code># ~/.agentstack/agentstack.toml — yours, broader
-[profiles.personal]
-servers = ["github", "postgres", "search"]
-skills  = ["sql-review", "pdf", "notes"]</code></pre>
-<p>The project toolset travels with the repo and stays small; the personal one is yours across every project. Neither grants extra authority — a toolset only selects from capabilities that already passed review.</p>
+<p>A project toolset can be committed and deliberately minimal while your machine manifest keeps a broader personal one — see <a href="../howto/team-setup.html">team setup</a>. Neither grants extra authority: a toolset only selects from capabilities that already passed review.</p>
 <h2 id="which-activation-session-or-apply">Which activation: session or apply<a class="hlink" href="#which-activation-session-or-apply" aria-label="Link to this section">#</a></h2>
 <ul>
 <li><strong>Beginner path — use it temporarily.</strong> <code>agentstack session start &lt;name&gt;</code> renders the toolset, and <code>agentstack session end</code> restores every native file to its pre-session bytes. Nothing lingers between tasks, and an interrupted session is always one <code>session end</code> from clean — this is the recommended way to switch toolsets.</li>

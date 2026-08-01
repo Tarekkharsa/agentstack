@@ -11,8 +11,7 @@ For anyone giving their agent CLIs a skill — a portable directory with a
 
 ## Writing one yourself: drop the file, then say yes
 
-The shortest path, and the one to reach for when the skill is your own work.
-Write the directory where skills live and answer one question:
+Write the directory where skills live, then answer one question:
 
 ```bash
 mkdir -p .agentstack/skills/pdf-review

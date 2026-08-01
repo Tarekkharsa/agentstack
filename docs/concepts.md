@@ -68,12 +68,6 @@ definitions, skill bytes, instruction bytes) to SHA-256 digests, so the same
 inputs reproduce and any change is visible. It is part of what you consent to
 when you trust a project.
 
-**Why the architecture docs say "bundle"** — `ARCHITECTURE.md` calls this same
-declared unit a *bundle*, its strategic term for what the registry will one day
-distribute. In user-facing prose the word is **manifest**; they are the same
-thing. More: [reference.md — the manifest](reference.md#the-manifest),
-[ARCHITECTURE.md — the bundle](ARCHITECTURE.md#layer-1--the-bundle-cratescore).
-
 ## Toolset
 
 **Toolset** — a named subset of the manifest ("backend", "design") you activate
@@ -82,11 +76,8 @@ default, so you only name one when you have more than one. In the manifest file
 a toolset is a `[profiles.<name>]` table — the key kept its original spelling so
 existing manifests keep working.
 
-**Preset (unrelated)** — the policy *presets* in
-[`examples/policies/`](../examples/policies/) (`compatible`, `developer`,
-`locked-down`, `ci`) are unrelated starter machine-policy files you copy and
-edit, not toolsets. More:
-[reference.md — selective skills via toolsets](reference.md#selective-skills-via-toolsets).
+(The policy *presets* in `examples/policies/` are unrelated — starter
+machine-policy files you copy and edit, not toolsets.)
 
 ## CLI, adapter, target
 
@@ -202,25 +193,10 @@ one actually guarantees is
 rather than by label. "Posture" always means this label.
 
 **Machine-policy summary** — a separate one-word line `doctor` prints,
-describing your machine policy's shape, not a run. It is one of six states:
-
-- `unconfigured` — no `~/.agentstack/agentstack.toml` at all, so projects use
-  their own policy unconstrained. **This is what a fresh machine reports**, and
-  it is the state to fix first if you want a ceiling.
-- `open` — a machine `[policy]` exists but is empty, so nothing in it narrows
-  what a project may do.
-- `restrictive` — a rename-proof `"*"` rule **or** any `[policy.filesystem]`
-  scope constrains every server. Not a verdict that the policy is tight: a
-  `"*"` allowlist can still be broad.
-- `mixed` — some dimensions are constrained and others are not.
-- `degraded` — the machine policy file became unreadable, so enforcement is
-  running from the last-known-good snapshot.
-- `blocked` — the source is unreadable *and* the snapshot is unusable, so
-  protected activation refuses rather than silently falling back to
-  project-only policy.
-
-The last three are the security-relevant ones: `degraded` and `blocked` mean
-the file you think is enforcing is not the file being enforced. More:
+describing your machine policy's shape rather than a run. A fresh machine
+reports `unconfigured` — no ceiling at all, and the state to fix first. Two of
+the six states, `degraded` and `blocked`, mean the file you think is enforcing
+is not the file being enforced. All six:
 [reference.md — execution posture](reference.md#execution-posture).
 
 ## Machine manifest and machine policy
@@ -262,20 +238,14 @@ Not sure which you need? See [which mode do I need?](choose.md). More:
 
 ## Lease, session, or locked-run fence
 
-Three ways to give a run only *part* of a manifest for a while, then take it
-back. They differ in what they touch and how they clean up:
-
-| Mechanism | What it scopes | How long it lives | How it ends | Read more |
-|---|---|---|---|---|
-| **MCP toolset lease** (`agentstack_lease_open` / `_status` / `_close` / `_freeze`) | the live gateway and the loadable-skill menu, narrowed to one toolset — no native files rendered | one MCP connection, in the memory of a single `agentstack mcp` process | `lease_close` or process exit; nothing to restore, since it rendered nothing | [reference.md — MCP toolset leases](reference.md#mcp-toolset-leases-one-connection-one-capability-fence) |
-| **Native session** (`agentstack session start` / `end` / `freeze`) | a toolset's servers, skills, instructions, settings, and hooks, *rendered to disk* | from `session start` until you end it | `session end` (or `end --all`) reverts the write | [reference.md — ephemeral sessions](reference.md#ephemeral-sessions-agentstack-session) |
-| **Locked-run fence** (`agentstack run <cli> --locked --toolset <p>`) | the run's frozen capability surface, narrowed to that toolset's server subset — a fence, not a session, so no native state is applied or reverted | the life of the run process | the run process exits | [reference.md — the Protected tier](reference.md#the-protected-tier-in-detail-run---locked) |
-
-The lease is the zero-file counterpart of a native session, so the two are
-mutually exclusive: the MCP control plane refuses to place a lease over an active
-native session, or to start a native session over an active lease. `freeze` (on
-either the lease or the session) promotes the observed set into a new manifest
-toolset — a proposal you review, then `agentstack lock`.
+Three ways to give a run only *part* of a manifest for a while. A **session**
+renders a toolset to disk and reverts it on `session end`; a **lease** does the
+same for one live MCP connection without rendering anything; a **locked-run
+fence** narrows one run's frozen surface and ends when the process does. A
+lease and a session are mutually exclusive, and `freeze` on either promotes
+what was actually used into a new toolset — a proposal you review, then
+`agentstack lock`. Full comparison:
+[reference.md — MCP toolset leases](reference.md#mcp-toolset-leases-one-connection-one-capability-fence).
 
 ## Secrets
 
@@ -341,3 +311,8 @@ storing argument *digests* only, never values. It is best-effort local
 diagnostics, not tamper-evident forensic evidence. More:
 [ARCHITECTURE.md — flight recorder](ARCHITECTURE.md#layer-5--flight-recorder-cratesrecorder),
 [reference.md — call log](reference.md#call-log).
+
+---
+
+Have the words you needed? [Get started](start.html) is the guided path, and
+[which mode do I need?](choose.md) picks your two defaults.

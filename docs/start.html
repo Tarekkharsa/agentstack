@@ -245,28 +245,18 @@ pre.cmd .c { color: var(--term-muted); }
         <p class="eyebrow">Get started · install, then climb one rung at a time</p>
         <h1 style="font-family:var(--font-heading);font-weight:400;font-size:2.6rem;margin:0 0 var(--space-3)">Start with one command. Climb as far as you need.</h1>
         <p class="lede">
-          agentstack is adopted in <strong>six rungs</strong>, the same six the
-          <a href="index.html#climb">home page</a> lists. Each pays off on its own,
-          and nothing later is required to keep the earlier wins. This page walks
-          them in order — <strong>rung 1 is the whole first session</strong>, and you
-          can stop there.
+          Five minutes from here, every coding CLI on this machine shares one
+          setup — and you can put it all back. That is <strong>rung 1</strong> of
+          six, and you can stop there; the five rungs after it are each optional
+          and each pays off on its own.
         </p>
         <div class="callout">
           <b>Rung 1 is ~5 minutes and needs no Docker</b>
-          <p>Import your CLIs into one manifest, render it back to all of them, check
-            it landed, and undo it. That is first value; steps 2–5 below are the
-            whole of it.</p>
+          <p>Steps 2–5 below are the whole of it. Nothing to sign up for, and
+            step 5 undoes every earlier step.</p>
           <p>Rungs 2–5 (switch by task, diagnose, recover, share) are the everyday
             tool. Rung 6 — trust, policy, confined runs — is for repos you didn't
             write, and only its last two steps want Docker.</p>
-        </div>
-        <div class="ladder" aria-label="The six rungs">
-          <a href="#s-import"><b>1 · Unify</b> import once, render everywhere</a>
-          <a href="#s-switch"><b>2 · Switch</b> toolsets and temporary sessions</a>
-          <a href="#s-deeper"><b>3 · Diagnose</b> doctor and diff explain drift</a>
-          <a href="#s-deeper"><b>4 · Recover</b> keep an edit, or undo the write</a>
-          <a href="#s-deeper"><b>5 · Share</b> locked, secret-free setups</a>
-          <a href="#track-b"><b>6 · Govern</b> trust, policy, confined runs</a>
         </div>
       </section>
 
@@ -293,6 +283,13 @@ pre.cmd .c { color: var(--term-muted); }
             <pre><code><span class="p">$</span> agentstack --version
 <span class="c">agentstack 0.17.x</span></code></pre>
           </div>
+          <p class="small muted">
+            <code>agentstack yes</code>, <code>undo</code>, <code>up</code>,
+            <code>share</code>, and <code>receive</code> (steps 5 and 7 below) are
+            v0.18.0 and later; the install line above serves the current stable
+            release. If your version is older, <code>agentstack self update
+            --write</code> upgrades once v0.18.0 is final.
+          </p>
         </li>
       </ol>
 
@@ -375,12 +372,8 @@ pre.cmd .c { color: var(--term-muted); }
             <code>.agentstack/agentstack.toml</code> records your whole setup. It
             is called the <a href="concepts.html">manifest</a>, and every
             CLI-specific file agentstack writes is rendered from it — that is the
-            next step. Mostly the system writes it for you: <code>init</code> just
-            did, <code>add</code> does, and when you later write a skill of your
-            own you won't open it either — drop the folder under
-            <code>.agentstack/skills/</code> and run <code>agentstack yes</code>;
-            one review and it is live in every CLI
-            (<a href="howto/add-a-skill.html">how-to</a>). It holds
+            next step. Mostly the system writes it for you — <code>init</code>
+            just did, and step 7 shows the rest. It holds
             <code>${GITHUB_TOKEN}</code>-style placeholders,
             never the token values themselves: those went to the gitignored
             <code>.env</code> you just chose.
@@ -467,9 +460,7 @@ pre.cmd .c { color: var(--term-muted); }
             an undo. Without <code>--write</code> it is a dry run that names each
             file it would revert.
           </p>
-          <pre class="cmd">agentstack undo                      <span class="c"># the timeline: recent changes, pick a point, revert</span>
-agentstack restore --last            <span class="c"># dry run: what undoing the last write would touch</span>
-agentstack restore --last --write    <span class="c"># actually undo it</span></pre>
+          <pre class="cmd">agentstack undo                      <span class="c"># the timeline: recent changes, pick a point, revert</span></pre>
           <p class="expect">You should see</p>
           <div class="term">
             <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>one write, one undo</b></div>
@@ -482,7 +473,10 @@ agentstack restore --last --write    <span class="c"># actually undo it</span></
 <span class="c">Dry run. Re-run with --write to undo.</span></code></pre>
           </div>
           <p class="small muted">
-            Taking all of it off is <code>agentstack uninstall</code>, which previews
+            Scripts use the same record one write at a time:
+            <code>agentstack restore --last</code> previews,
+            <code>--write</code> reverts. Taking all of it off is
+            <code>agentstack uninstall</code>, which previews
             the same way. Full walkthrough: <a href="howto/undo.html">undo anything</a>.
           </p>
         </li>

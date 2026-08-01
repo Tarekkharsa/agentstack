@@ -124,7 +124,7 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
             <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-100);display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-700)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg></div>
             <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700">Every CLI spells setup differently</div>
           </div>
-          <div class="card-body" style="font-size:0.95rem;line-height:1.6">Import your existing configuration once. One manifest then renders the correct native format for every supported client.</div>
+          <div class="card-body" style="font-size:0.95rem;line-height:1.6">Import your existing configuration once. It then renders the correct native format for every supported client.</div>
           <div style="display:flex;align-items:center;gap:var(--space-2);margin-top:var(--space-1);padding-top:var(--space-2);border-top:1px solid var(--color-divider)">
             <span style="font-size:0.72rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-accent-700);font-weight:700">closed by</span>
             <code style="font-size:0.85rem;background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">agentstack init</code>
@@ -167,16 +167,6 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
     </div>
 
     <div style="margin-top:calc(var(--space-8) * 1.5)">
-      <h2 style="font-family:var(--font-heading);font-weight:400;font-size:2.1rem;margin:0 0 var(--space-2)">One lifecycle, one source of truth</h2>
-      <p style="color:var(--color-neutral-700);margin:0 0 var(--space-4);max-width:620px">Bring in what you already use, organize it into toolsets, activate the right one, diagnose changes and recover without rebuilding native files by hand.</p>
-      <div style="display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap;margin-bottom:var(--space-8)">
-        <span style="display:inline-flex;align-items:center;gap:var(--space-2)"><span style="border-radius:999px;padding:8px 18px;font-weight:700;font-size:0.95rem;background:var(--color-surface);color:var(--color-text);border:1.5px solid var(--color-divider)">import</span><span style="color:var(--color-accent);font-weight:700">→</span></span>
-        <span style="display:inline-flex;align-items:center;gap:var(--space-2)"><span style="border-radius:999px;padding:8px 18px;font-weight:700;font-size:0.95rem;background:var(--color-surface);color:var(--color-text);border:1.5px solid var(--color-divider)">manifest</span><span style="color:var(--color-accent);font-weight:700">→</span></span>
-        <span style="display:inline-flex;align-items:center;gap:var(--space-2)"><span style="border-radius:999px;padding:8px 18px;font-weight:700;font-size:0.95rem;background:var(--color-surface);color:var(--color-text);border:1.5px solid var(--color-divider)">toolset</span><span style="color:var(--color-accent);font-weight:700">→</span></span>
-        <span style="display:inline-flex;align-items:center;gap:var(--space-2)"><span style="border-radius:999px;padding:8px 18px;font-weight:700;font-size:0.95rem;background:var(--color-surface);color:var(--color-text);border:1.5px solid var(--color-divider)">activate</span><span style="color:var(--color-accent);font-weight:700">→</span></span>
-        <span style="display:inline-flex;align-items:center;gap:var(--space-2)"><span style="border-radius:999px;padding:8px 18px;font-weight:700;font-size:0.95rem;background:var(--color-surface);color:var(--color-text);border:1.5px solid var(--color-divider)">doctor</span><span style="color:var(--color-accent);font-weight:700">→</span></span>
-        <span style="display:inline-flex;align-items:center;gap:var(--space-2)"><span style="border-radius:999px;padding:8px 18px;font-weight:700;font-size:0.95rem;background:var(--color-text);color:var(--color-bg);border:1.5px solid var(--color-text)">restore</span><span style="color:var(--color-accent);font-weight:700"></span></span>
-      </div>
       <h2 id="climb" style="font-family:var(--font-heading);font-weight:400;font-size:2.1rem;margin:0 0 var(--space-2)">Climb in six steps</h2>
       <p style="color:var(--color-neutral-700);margin:0 0 var(--space-6);max-width:560px">Each step pays off on its own — nothing later is required to keep the earlier wins.</p>
       <div class="grid-steps" style="display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-4)">
@@ -219,8 +209,9 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
       <div style="background:var(--term-bg);border-radius:var(--radius-md);padding:20px 24px;font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;font-size:0.85rem;line-height:2.1;overflow-x:auto">
         <div style="display:flex;gap:14px;white-space:nowrap"><span style="color:var(--term-warn);user-select:none">$</span><span style="color:var(--term-text);flex:1">curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh</span></div>
         <div style="display:flex;gap:14px;white-space:nowrap"><span style="color:var(--term-warn);user-select:none">$</span><span style="color:var(--term-text);flex:1">agentstack init</span><span style="color:var(--term-muted)"># guided wizard: your CLI configs → one manifest</span></div>
-        <div style="display:flex;gap:14px;white-space:nowrap"><span style="color:var(--term-warn);user-select:none">$</span><span style="color:var(--term-text);flex:1">agentstack doctor</span><span style="color:var(--term-muted)"># health + drift; every warning names its fix</span></div>
+        <div style="display:flex;gap:14px;white-space:nowrap"><span style="color:var(--term-warn);user-select:none">$</span><span style="color:var(--term-text);flex:1">agentstack status</span><span style="color:var(--term-muted)"># is it ready — and the one thing that fixes it</span></div>
       </div>
+      <p style="font-size:0.85rem;color:var(--color-neutral-700);margin:var(--space-2) 0 0"><code>agentstack yes</code>, <code>undo</code>, <code>up</code>, <code>share</code>, and <code>receive</code> are v0.18.0 and later; the install line above serves the current stable release. <code>agentstack --version</code> says which you have.</p>
       <p style="font-size:0.9rem;color:var(--color-neutral-700);margin:var(--space-4) 0 var(--space-2)">Here is what that leaves in your project — plain files you can open, read and commit:</p>
       <div style="background:var(--term-bg);border-radius:var(--radius-md);padding:16px 24px;font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;font-size:0.82rem;line-height:1.9;overflow-x:auto;color:var(--term-text)"><div style="white-space:pre">your-project/
 ├── .agentstack/
@@ -250,14 +241,14 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
 <span style="color:var(--term-text)">Codex CLI</span>
 <span style="color:var(--term-text)">  → 1 skill to symlink into .agents/skills</span>
 <span style="color:var(--term-muted)">  …</span></div></div>
-          <p style="font-size:0.85rem;color:var(--color-neutral-700);margin:var(--space-2) 0 0"><b>Write a skill: drop the folder, say yes.</b> No manifest edit — it is pinned, recorded, and live in every CLI. The one-step review is only for work that is provably yours; anything that arrived with a clone gets the full staged review.</p>
+          <p style="font-size:0.85rem;color:var(--color-neutral-700);margin:var(--space-2) 0 0"><b>Write a skill: drop the folder, say yes.</b> No manifest edit — it is pinned, recorded, and live in every CLI. The one-step review is only for work that is provably yours; anything that arrived with a clone gets the full staged review. <a href="howto/add-a-skill.html">Add a skill →</a></p>
         </div>
         <div>
           <div style="background:var(--term-bg);border-radius:var(--radius-md);padding:14px 18px;font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;font-size:0.78rem;line-height:1.8;overflow-x:auto"><div style="white-space:pre"><span style="color:var(--term-warn)">$</span> <span style="color:var(--term-text)">agentstack undo</span>
 <span style="color:var(--term-text)">recent changes (newest first)</span>
 <span style="color:var(--term-text)">  1  </span><span style="color:var(--term-muted)">just now  </span><span style="color:var(--term-text)">init</span><span style="color:var(--term-muted)">  1 file · Claude Code, Codex CLI, Gemini CLI, …</span>
 <span style="color:var(--term-text)">  pick a point: </span><span style="color:var(--term-ok)">agentstack undo --to &lt;n&gt; --write</span></div></div>
-          <p style="font-size:0.85rem;color:var(--color-neutral-700);margin:var(--space-2) 0 0"><b>Take it back, from a timeline.</b> Every write is recorded before it lands; pick a point and revert to it. The revert is recorded too — going one step too far is recoverable.</p>
+          <p style="font-size:0.85rem;color:var(--color-neutral-700);margin:var(--space-2) 0 0"><b>Take it back, from a timeline.</b> Every write is recorded before it lands; pick a point and revert to it. The revert is recorded too — going one step too far is recoverable. <a href="howto/undo.html">Undo anything →</a></p>
         </div>
         <div>
           <div style="background:var(--term-bg);border-radius:var(--radius-md);padding:14px 18px;font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;font-size:0.78rem;line-height:1.8;overflow-x:auto"><div style="white-space:pre"><span style="color:var(--term-bad)">blocked:</span> <span style="color:var(--term-text)">web-search tried to reach api.evil.example</span>
@@ -271,7 +262,7 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
 <span style="color:var(--term-warn)">$</span> <span style="color:var(--term-text)">agentstack receive team.astack</span>
 <span style="color:var(--term-muted)">  # staged inert and carded first; a recognized publisher</span>
 <span style="color:var(--term-muted)">  # makes the card shorter — never optional</span></div></div>
-          <p style="font-size:0.85rem;color:var(--color-neutral-700);margin:var(--space-2) 0 0"><b>Sharing is signing; receiving is reviewing.</b> A bundle carries the manifest, lock, and pinned content. Nothing a teammate receives activates without their own yes.</p>
+          <p style="font-size:0.85rem;color:var(--color-neutral-700);margin:var(--space-2) 0 0"><b>Sharing is signing; receiving is reviewing.</b> A bundle carries the manifest, lock, and pinned content. Nothing a teammate receives activates without their own yes. <a href="howto/team-setup.html">Share a setup →</a></p>
         </div>
       </div>
     </div>

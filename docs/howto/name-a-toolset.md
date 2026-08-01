@@ -34,12 +34,8 @@ want it, with `agentstack session start backend` (see
 [below](#which-activation-session-or-apply)). To undo the creation itself,
 delete the `[profiles.backend]` block from the manifest.
 
-Scripts and graphical clients get a two-step contract instead — `--preview`
-emits the plan plus a consent digest, and applying needs
-`--yes --consented <digest>`, so nothing writes without something having
-reviewed exactly that plan against exactly those manifest bytes. A bare
-non-interactive call refuses and says which flag it wants, rather than printing
-a digest at a person who did not ask for one.
+Scripts and graphical clients get a two-step consent contract instead —
+[reference: selective skills via toolsets](../reference.md#selective-skills-via-toolsets).
 
 ## Or write it by hand
 
@@ -93,27 +89,10 @@ skills  = ["oncall-runbook"]
 `agentstack session end` puts every file back exactly as it was — the incident
 tools never linger in your everyday setup.
 
-**A minimal project toolset vs. a broad personal one.** Check a lean toolset
-into a repo so a teammate gets precisely what the project needs; keep your
-wider, personal set in your [machine manifest](team-setup.md) for your own work:
-
-```toml
-# ./.agentstack/agentstack.toml — committed, deliberately minimal
-[profiles.project]
-servers = ["github"]
-skills  = ["repo-conventions"]
-```
-
-```toml
-# ~/.agentstack/agentstack.toml — yours, broader
-[profiles.personal]
-servers = ["github", "postgres", "search"]
-skills  = ["sql-review", "pdf", "notes"]
-```
-
-The project toolset travels with the repo and stays small; the personal one is
-yours across every project. Neither grants extra authority — a toolset only
-selects from capabilities that already passed review.
+A project toolset can be committed and deliberately minimal while your machine
+manifest keeps a broader personal one — see [team setup](team-setup.md).
+Neither grants extra authority: a toolset only selects from capabilities that
+already passed review.
 
 ## Which activation: session or apply
 
