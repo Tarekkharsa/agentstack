@@ -143,10 +143,19 @@ pub fn run_answered(
         );
     }
     print_held(&plan);
+    // The undo named here is the one the ledger row below actually contains:
+    // the manifest declaration and the lock pin. It deliberately does not claim
+    // to revert everything the funnel writes — the files delivered into each
+    // CLI are not in that row, and a promise wider than the mechanism is worse
+    // than a narrow true one. (The earlier, wider wording is asserted absent by
+    // the witness, so it cannot be quoted here either.)
+    // `use --write` is what reconciles the delivered files afterwards, and it
+    // is named so the sentence ends somewhere useful rather than in a caveat.
     println!(
         "\n{}",
         "This declares them in the manifest and pins their bytes, then shows you the \
-         full review below. Undo any of it with `agentstack restore --last --write`."
+         full review below. Undo the declaration and pin with `agentstack restore \
+         --last --write`; `agentstack use --write` then reconciles what each CLI holds."
             .dimmed()
     );
 
@@ -190,10 +199,36 @@ pub fn run_answered(
     }
     outcome?;
 
+    // The write is done and kept — so it becomes an ordinary undoable row.
+    //
+    // Until this call existed, `yes` promised an undo and then recorded
+    // nothing: on a skills-only project the ledger stayed empty, so both
+    // `undo` and `restore --list` answered "nothing recorded" and the promised
+    // undo did not exist. (The exact old wording is quoted in
+    // `tests/yes_is_undoable.rs` and in the changelog — not here, because a
+    // witness asserts that phrasing is absent from this file.) The recording
+    // seam is the one `apply` and `init` already use; this reuses it rather
+    // than adding a second history path.
+    //
+    // Best-effort, like every other caller: `record` swallows its own failures
+    // and a lost ledger row must never fail an activation that already
+    // succeeded. It cannot gate — there is nothing after it to gate.
+    let names: Vec<String> = plan.qualified.iter().map(|i| i.name.clone()).collect();
+    if let Err(err) = crate::history::record("project", "yes", names, before.as_changes()) {
+        // Say so rather than swallow it silently: the next line promises an
+        // undo, and if the row is missing that promise is false. The activation
+        // itself stands.
+        println!(
+            "  {} could not record this in the undo history ({err:#}) — \
+             the change is live, but `agentstack restore` will not list it",
+            "⚠".yellow()
+        );
+    }
+
     println!(
         "\n{} live. {}",
         "✓".green(),
-        "Undo: `agentstack restore --last --write`".dimmed()
+        "Undo the declaration and pin: `agentstack restore --last --write`".dimmed()
     );
     Ok(())
 }
@@ -271,6 +306,28 @@ impl Rollback {
             ),
             lock: (lock.to_path_buf(), std::fs::read_to_string(lock).ok()),
         }
+    }
+
+    /// The same two captures, as ledger rows.
+    ///
+    /// This struct already holds exactly what [`crate::history::FileChange`]
+    /// holds — a path and its prior contents — because both exist for the same
+    /// reason. Converting rather than re-capturing matters: a second capture
+    /// would read the files again, after the write, and record the new bytes as
+    /// though they were the old ones. The undo the user is offered is therefore
+    /// bound to the same snapshot the failure path would have restored.
+    fn as_changes(&self) -> Vec<crate::history::FileChange> {
+        [
+            (&self.manifest, "manifest · yes"),
+            (&self.lock, "lock · yes"),
+        ]
+        .into_iter()
+        .map(|((path, before), label)| crate::history::FileChange {
+            path: path.to_string_lossy().into_owned(),
+            before: before.clone(),
+            label: label.to_string(),
+        })
+        .collect()
     }
 
     /// Best-effort by design: this runs while another error is already on its

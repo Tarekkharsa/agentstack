@@ -169,6 +169,18 @@ true:
 
 ### Fixed
 
+- **`agentstack yes` promised an undo it had not recorded.** It printed "Undo
+  any of it with `agentstack restore --last --write`" before writing and again
+  on success, but recorded no history row — so on a skills-only project both
+  `agentstack undo` and `restore --list` answered "nothing recorded" and the
+  promised undo did not exist. The promise predated the ledger row. Accepting
+  now records one revertable entry covering the declaration and the pin,
+  through the same history seam `apply` and `init` use, and the message names
+  only what that entry puts back: the files already delivered into each CLI
+  are reconciled by `agentstack use --write`, which the message now says. A
+  narrow true promise beats a wide false one. Found by replaying the journey
+  against this release candidate, not by review.
+
 - **`doctor` reported `state: "ready"` for a project nothing had activated.**
   Zero errors and zero warnings was true; "ready" was not, because an
   untrusted, never-activated project has nothing live in it. `state` keeps its
