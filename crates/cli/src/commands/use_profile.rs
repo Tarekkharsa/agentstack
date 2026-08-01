@@ -1312,6 +1312,10 @@ fn locked_from_resolved(
                 source_kind: resolved.source_kind,
             })
             .expect("a resolved skill checksum is a digest this process computed"),
+        // Not known from resolved state — `Lock::upsert` carries forward
+        // whatever intake recorded, so a re-lock cannot launder it away.
+        license: None,
+        origin: None,
     }
 }
 

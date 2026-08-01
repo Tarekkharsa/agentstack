@@ -21,6 +21,7 @@ pub mod cli;
 pub mod codemode;
 pub mod commands;
 pub mod discover;
+pub mod eve;
 pub mod executable;
 pub mod execution;
 pub mod footprint;

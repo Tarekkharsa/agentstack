@@ -19,6 +19,20 @@ pub const LOCK_FILE: &str = "agentstack.lock";
 /// is permissive (no `deny_unknown_fields`): a v1 binary reading a lock with
 /// instruction pins would silently drop them — and write them away on its next
 /// save. The version guard turns that silent unpinning into a loud refusal.
+///
+/// Phase 4 added `license` and `origin` to [`LockedSkill`] for attribution
+/// capture, and did NOT bump this — for the same reason the executable,
+/// extension, and workflow pins did not. They are `#[serde(default)]` optional
+/// fields, so every lock written before them parses unchanged; and an older
+/// binary that rewrote them away would change the lock bytes, which flips the
+/// trust digest and forces a re-review rather than losing them silently.
+///
+/// That last point cuts both ways and is worth stating plainly: lock bytes are
+/// consent-digest material by design, so the first re-lock that records an
+/// attribution field on an existing project WILL re-gate it. That is the
+/// mechanism working, not a regression — the content the user consented to is
+/// now described differently, and they get to see that. A witness asserts the
+/// re-gate happens rather than trying to suppress it.
 pub const SUPPORTED_LOCK_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -235,6 +249,23 @@ pub struct LockedSkill {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rev: Option<String>,
     pub checksum: Sha256Hex,
+    /// SPDX identifier declared by the source this content came from, when it
+    /// declared one (Phase 4, governed intake).
+    ///
+    /// Recorded in the lock rather than only in the library because the lock is
+    /// what travels with the project and what the trust digest covers: an
+    /// attribution obligation that lived only on the importing machine would be
+    /// lost by the first person to clone the repo. `None` means the source said
+    /// nothing — deliberately distinct from a source that declared no licence,
+    /// because "unknown" and "unlicensed" are different facts and only one of
+    /// them is a reason to stop.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub license: Option<String>,
+    /// Where these bytes came from, verbatim from the intake source (a URL or a
+    /// registry id). Not a second copy of `git`/`path`: those say how to fetch
+    /// it again, this says who it belongs to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
 }
 
 impl Lock {
@@ -285,8 +316,29 @@ impl Lock {
     }
 
     /// Insert or replace a skill entry, keeping entries sorted by name.
-    pub fn upsert(&mut self, entry: LockedSkill) {
+    /// Insert or replace a skill pin, carrying attribution forward.
+    ///
+    /// Attribution is preserved HERE rather than at each call site, and that is
+    /// the whole reason this function has a body worth reading. `license` and
+    /// `origin` are known only at intake — the moment the content arrived from
+    /// somewhere with a licence to honour. Every later re-lock rebuilds the
+    /// entry from resolved state, which has no idea where the content came
+    /// from, and would therefore hand us `None`. If that `None` won, an
+    /// ordinary `agentstack install` would quietly erase an attribution
+    /// obligation, which is exactly the "carried by promise" failure the
+    /// attribution work exists to replace.
+    ///
+    /// So: an incoming `None` never overwrites a recorded value, while an
+    /// incoming `Some` does. Re-importing from a source that now declares a
+    /// different licence updates it; re-locking never launders it away.
+    pub fn upsert(&mut self, mut entry: LockedSkill) {
         if let Some(existing) = self.skills.iter_mut().find(|s| s.name == entry.name) {
+            if entry.license.is_none() {
+                entry.license = existing.license.clone();
+            }
+            if entry.origin.is_none() {
+                entry.origin = existing.origin.clone();
+            }
             *existing = entry;
         } else {
             self.skills.push(entry);
@@ -434,6 +486,8 @@ mod tests {
             git: None,
             rev: None,
             checksum: Sha256Hex::parse(&hex).unwrap(),
+            license: None,
+            origin: None,
         });
         let text = toml::to_string_pretty(&lock).unwrap();
         // Bare hex, no `sha256:` prefix, no struct wrapper — byte-identical to
@@ -467,6 +521,8 @@ mod tests {
             git: Some("u".into()),
             rev: None,
             checksum: Sha256Hex::of(b"sha256:bb"),
+            license: None,
+            origin: None,
         });
         let toml = toml::to_string_pretty(&lock).unwrap();
         assert!(toml.contains("source = \"library\""), "{toml}");
@@ -531,6 +587,8 @@ mod tests {
             git: None,
             rev: None,
             checksum: Sha256Hex::of(b"deadbeef"),
+            license: None,
+            origin: None,
         });
         lock.upsert(LockedSkill {
             name: "a".into(),
@@ -539,6 +597,8 @@ mod tests {
             git: Some("https://x".into()),
             rev: Some("abc".into()),
             checksum: Sha256Hex::of(b"cafe"),
+            license: None,
+            origin: None,
         });
         // Sorted by name.
         assert_eq!(lock.skills[0].name, "a");

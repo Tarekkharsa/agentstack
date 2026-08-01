@@ -281,5 +281,9 @@ pub(crate) fn locked_entry(
         git,
         rev,
         checksum: crate::store::Store::default_store().pin(resolved)?,
+        // Not known from resolved state — `Lock::upsert` carries forward
+        // whatever intake recorded, so a re-lock cannot launder it away.
+        license: None,
+        origin: None,
     })
 }
