@@ -34,10 +34,13 @@ fn status_parses_and_help_maps_every_command() {
         visible,
         [
             "init", "status", "add", "search", "apply", "doctor", "toolset", "use", "yes", "run",
-            "trust", "restore", "adopt"
+            "trust", "restore", "undo", "adopt"
         ],
         "the visible list is the beginner loop, in task order — `workflow` stays \
-         reachable but out of it until the repeated-use gate closes. `toolset` is \
+         reachable but out of it until the repeated-use gate closes. `undo` is \
+         visible because Undo is one of the four ideas and the one a person \
+         reaches for while something is already wrong — it must be findable \
+         without knowing that `restore` is its other name. `toolset` is \
          visible because naming one is a step a person takes by hand (H2); the \
          `create-profile` argv behind it stays hidden for t3code. `restore` and \
          `adopt` close the loop: Undo is one of the four beginner concepts, so \

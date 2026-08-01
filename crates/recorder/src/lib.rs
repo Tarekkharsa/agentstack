@@ -462,6 +462,29 @@ pub enum RunEvent {
         #[serde(rename = "ref")]
         reference: String,
     },
+    /// A secret reference `[policy.secrets]` refused to resolve for this
+    /// server. Deliberately a separate variant rather than an outcome field on
+    /// [`RunEvent::SecretAccess`]: that variant means "this run *read* this
+    /// secret", and it is what a reviewer counts to see a run's secret
+    /// surface. A refused ref was never read — folding the two together would
+    /// make the existing reading wrong.
+    ///
+    /// Identity-shaped like every other event here: the server, the ref NAME,
+    /// and the policy rule that refused it. Never the value, never whether the
+    /// value exists — a denied ref does not reach any backing store, so this
+    /// event cannot leak the one bit that scoping exists to withhold.
+    SecretDenied {
+        ts: u64,
+        server: String,
+        /// The `${REF}` name. `ref` is a Rust keyword, so the field is
+        /// `reference` in code but `"ref"` on the wire — matching
+        /// [`RunEvent::SecretAccess`].
+        #[serde(rename = "ref")]
+        reference: String,
+        /// The matching `[policy.secrets]` line. Policy-authored text from
+        /// this machine's own configuration, never upstream-authored.
+        rule: String,
+    },
     /// The sandbox container exited. `code` is absent when it was killed by a
     /// signal (e.g. teardown).
     SandboxExited {

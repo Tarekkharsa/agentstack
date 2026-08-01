@@ -37,20 +37,29 @@ pub const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (sandbox: no)");
 #[command(
     name = "agentstack",
     version = VERSION,
-    about = "One portable manifest, every agent CLI.",
-    long_about = "Manage MCP servers + skills across Claude Code, Codex, and more, \
-                  from a single portable .agentstack/agentstack.toml.",
+    about = "Define your agent setup once. Use it across every coding CLI.",
+    long_about = "Set up your MCP servers and skills once, and use them across \
+                  Claude Code, Codex, and every other coding CLI you have — \
+                  switchable by task, and reversible.",
+    // Phase 3, vocabulary completion: the default help teaches the four ideas
+    // and nothing else. It used to end with a "Words:" glossary defining CLI,
+    // harness, adapter, and [targets] — five mechanism nouns before the reader
+    // had seen a single result. Those words still exist and still matter; they
+    // are now in `--help --all`, where someone who has a reason to want them
+    // will look. Nothing was renamed to achieve this.
     after_help = "\
 Start here:
-  agentstack                     orientation + the one next step for this directory
-  agentstack init                one command sets up everything: import, choose, apply, verify
-  agentstack status              where this project stands, on one screen
-  agentstack yes                 review and activate the files you dropped in
+  agentstack                     where this project stands, and the one next step
+  agentstack init                Setup — find the CLIs you have and bring them together
+  agentstack status              Status — is it ready, and if not, the one thing that fixes it
+  agentstack yes                 review and activate what you dropped in
+  agentstack undo                Undo — take back a recent change
 
-Words: a CLI (a.k.a. harness) is the agent tool you run; an adapter compiles
-its native config; [targets] in the manifest lists which CLIs commands act on.
+Four ideas cover the whole product: Setup (what you have) · Toolset (what this
+task needs) · Status (is it ready) · Undo (how to take it back).
 
-Every command, grouped by task: agentstack --help --all"
+Every command, grouped by task — and what the pieces are called underneath:
+  agentstack --help --all"
 )]
 pub struct Cli {
     /// Project or manifest directory (prefers .agentstack/agentstack.toml).
@@ -74,8 +83,7 @@ pub struct Cli {
 #[derive(Subcommand, Debug)]
 pub enum Command {
     // ── Everyday: the core loop most projects ever need (shown in --help) ─
-    /// Set up this project: detect the CLIs you have and import them into one
-    /// manifest.
+    /// Setup: find the CLIs you have and bring their setups together.
     ///
     /// At a terminal this is the guided first run: it detects your CLIs,
     /// imports their configs, lifts inline tokens to `${REF}` placeholders,
@@ -85,15 +93,14 @@ pub enum Command {
     /// manifest, naming `apply --write` as the next step.
     Init(InitArgs),
 
-    /// Where this project stands, on one screen: detected CLIs, manifest,
-    /// trust, secrets, and the one next step.
+    /// Status: where this project stands, on one screen, and the one next step.
     ///
     /// The same orientation bare `agentstack` prints — reachable by name so
     /// muscle memory (`git status`, `docker status`, …) and scripts land
     /// somewhere useful. Deep verification stays in `agentstack doctor`.
     Status(StatusArgs),
 
-    /// Add a server or skill to the manifest.
+    /// Add a server or skill to this project's setup.
     Add(AddArgs),
 
     /// Create or update a manifest entry in place (idempotent `add`).
@@ -107,7 +114,7 @@ pub enum Command {
     /// Search the capability catalog (and mark what's already added).
     Search(SearchArgs),
 
-    /// Render the manifest into each target's native config.
+    /// Write this setup into each CLI's own config.
     ///
     /// Shows the diff first. In a terminal, asks before writing; pass `--write`
     /// to apply directly.
@@ -120,7 +127,7 @@ pub enum Command {
     #[command(hide = true)]
     Instructions(InstructionsArgs),
 
-    /// Verify everything is wired up: adapters, secrets, drift, skills, per-CLI details.
+    /// Check the setup in depth: what is wired up, what is missing, what changed.
     Doctor(DoctorArgs),
 
     // ── Capabilities & library ───────────────────────────────────────────
@@ -167,7 +174,7 @@ pub enum Command {
     #[command(subcommand)]
     Toolset(ToolsetCmd),
 
-    /// Activate a toolset: render its servers + materialize its skills.
+    /// Toolset: switch to one — its servers and skills go live in your CLIs.
     Use(UseArgs),
 
     /// Review and activate the files you dropped into this project — one step.
@@ -270,7 +277,18 @@ Examples:
   agentstack restore claude-code --write")]
     Restore(RestoreArgs),
 
-    /// Keep a hand-edit: pull drifted native config back into the manifest.
+    /// Take it back: pick a point from your recent changes and revert to it.
+    ///
+    /// The same recorded changes `restore` works with, asked the other way
+    /// round — newest first, pick one. The revert is itself recorded, so
+    /// going one step too far is recoverable.
+    #[command(after_help = "\
+Examples:
+  agentstack undo                    what changed recently
+  agentstack undo --to 2 --write     back to before change 2")]
+    Undo(UndoArgs),
+
+    /// Keep a hand-edit: pull a change you made in a CLI back into this setup.
     ///
     /// Imports hand-added servers and hand-edited fields from target configs
     /// so the manifest stays the source of truth.
@@ -2134,6 +2152,25 @@ pub enum SessionCmd {
 }
 
 #[derive(Args, Debug)]
+pub struct UndoArgs {
+    /// Revert to before change <n> from the timeline — everything newer comes
+    /// off with it, because that is what "back to that point" means. Omit to
+    /// be asked (or, with no terminal, just to see the list).
+    #[arg(long, value_name = "N")]
+    pub to: Option<usize>,
+
+    /// Do it (else preview which files would move).
+    #[arg(long)]
+    pub write: bool,
+
+    /// Machine-readable timeline. Read-only — there is no JSON path that
+    /// performs a revert, so a UI has to go through the same explicit
+    /// `--write` a person does.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Args, Debug)]
 pub struct RestoreArgs {
     /// What to undo: a recorded change id (unique prefix; `restore` with no
     /// argument lists them) or an adapter id for its single-slot config
@@ -2766,11 +2803,18 @@ pub fn full_command_inventory() -> String {
         "agentstack — every command, including the ones the default --help groups away.\n\
          Run `agentstack <command> --help` for flags and details.\n\
          \n\
+         Words, for when you want them: a CLI (a.k.a. harness) is the agent tool you\n\
+         run; an adapter compiles its native config; the manifest is the one file that\n\
+         declares your setup, and [targets] in it lists which CLIs commands act on;\n\
+         the lock pins the exact content you reviewed. None of these are needed to\n\
+         use the four ideas — they are here because this is the full map.\n\
+         \n\
          The map, grouped by task:\n\
          \n  \
          Set up      init · status · adapters · settings · self · completions\n  \
          Edit        add · set · search · remove · install · lib · toolset · adopt · export · import\n  \
-         Render      apply · use · yes · instructions · lock · session · diff · restore · uninstall\n  \
+         Render      apply · use · yes · instructions · lock · session · diff · uninstall\n  \
+         Undo        undo · restore\n  \
          Protect     trust · explain · secret · guard · sign · verify\n  \
          Run         run · kill · shim · workflow · gateway · mcp · try\n  \
          Inspect     doctor · report · optimize · proxy\n\

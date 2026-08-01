@@ -41,6 +41,7 @@ pub mod shim;
 pub mod stats;
 pub mod trust;
 pub mod try_skill;
+pub mod undo;
 pub mod uninstall;
 pub mod unrender;
 pub mod upgrade;

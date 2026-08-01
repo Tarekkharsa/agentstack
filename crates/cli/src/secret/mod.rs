@@ -127,6 +127,15 @@ pub struct ScopedResolver<'a> {
     inner: &'a dyn Resolver,
     ruleset: &'a agentstack_policy::CompiledRuleset,
     server: &'a str,
+    /// The tracked run this resolution belongs to, when there is one. `None`
+    /// at render time, where the refusal still reaches the machine-global
+    /// audit log but has no run to be filed under.
+    run: Option<String>,
+    /// Ref names already recorded as refused for this server. `substitute`
+    /// walks a server's URL, headers, args, and env, so the same denied ref
+    /// can be looked up several times in one construction; without this the
+    /// log would imply several distinct refusals where there was one.
+    recorded: std::sync::Mutex<std::collections::HashSet<String>>,
 }
 
 impl<'a> ScopedResolver<'a> {
@@ -139,7 +148,16 @@ impl<'a> ScopedResolver<'a> {
             inner,
             ruleset,
             server,
+            run: None,
+            recorded: std::sync::Mutex::new(std::collections::HashSet::new()),
         }
+    }
+
+    /// Attribute refusals to a tracked run, so `agentstack report run <id>`
+    /// shows them beside the rest of that run's story.
+    pub fn in_run(mut self, run: Option<String>) -> Self {
+        self.run = run;
+        self
     }
 }
 
@@ -150,8 +168,47 @@ impl Resolver for ScopedResolver<'_> {
 
     fn lookup(&self, name: &str) -> Lookup {
         if let Err(rule) = self.ruleset.secret_decision(self.server, name) {
+            let rule = rule.to_string();
+            // Recorded HERE, at the decision, not at the call sites that
+            // display the result. Scope refusal is decided in exactly one
+            // place; putting the evidence anywhere else would make "a
+            // refusal leaves a trace" a fact about the call sites we happened
+            // to remember, rather than a property of refusing.
+            //
+            // First refusal of this ref for this server only — see `recorded`.
+            let first = self
+                .recorded
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(name.to_string());
+            if first {
+                let denial = crate::seatbelt::Denial {
+                    family: crate::seatbelt::Family::Secret,
+                    subject: self.server,
+                    attempted: &format!("read ${{{name}}}"),
+                    why: &rule,
+                    next_step:
+                        "widen that server's [policy.secrets] if it should have it, or use a ref the rule covers",
+                };
+                // `record`, not `refuse`: the sentence belongs to whichever
+                // surface consumes the `Denied` below (render prints it beside
+                // the affected value, the gateway fails the call with it), and
+                // printing it twice would be noise. The evidence is what was
+                // missing.
+                crate::seatbelt::record(&denial, None, self.run.as_deref());
+                crate::seatbelt::record_secret_denied(
+                    self.run.as_deref(),
+                    self.server,
+                    name,
+                    &rule,
+                );
+            }
+            // Unchanged: still fail-closed, still `Denied`. The ref did not
+            // reach any backing store — not even to learn whether it exists.
             return Lookup::Denied(format!(
-                "server '{}' may not resolve ${{{name}}} — {rule}",
+                "blocked: server '{}' may not read ${{{name}}} — {rule}\n  \
+                 nothing was read · widen that server's [policy.secrets] if it should have it, \
+                 or use a ref the rule covers",
                 self.server
             ));
         }

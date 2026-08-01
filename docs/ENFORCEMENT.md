@@ -356,10 +356,41 @@ Docker container behind the egress proxy.
 
 ### Audit / recording
 
-- **host — unsupported.** Native host-mode runs never call `calllog::record`
-  because the harness talks to upstream MCP servers directly, bypassing AgentStack
-  entirely. Audit happens only if the harness is separately configured to route
-  via the gateway (`agentstack mcp`). (`crates/cli/src/runs.rs`)
+**Recorded is not prevented.** This whole section describes what is *written
+down*, which is a different claim from what is *stopped*. An event proves a
+check ran and what it decided; it never upgrades the cell that decided it. The
+matrix rows above are the enforcement claim, and a family whose row says
+`cooperative` or `coarse` keeps saying that no matter how completely its
+decisions are logged. The two are set side by side deliberately, because
+"we have a log of it" is the most tempting way to sound stronger than you are.
+
+Which is which, per denial family:
+
+| Denial family | Enforcement claim | Recorded? | Where |
+|---|---|---|---|
+| Gateway tool block | **enforced** (gateway/sandbox/lockdown) | yes | `calls.jsonl` + run `events.jsonl` (`ToolCall`, `outcome: denied`) |
+| Egress refusal — sandbox proxy | **enforced** under `--lockdown`, `coarse`/proxied under plain `--sandbox` | yes | run `events.jsonl` (`Egress`, `allowed: false`) |
+| Egress refusal — host path | **coarse** — a write-time check on the declared host, not a wire-level fence | yes, **new in Phase 3** | `calls.jsonl` (`tool: egress`) + run `events.jsonl` (`Egress`) when inside a run |
+| Secret-scope refusal | **enforced** — the ref reaches no backing store | yes, **new in Phase 3** | `calls.jsonl` (`tool: secret`) + run `events.jsonl` (`SecretDenied`) |
+| Filesystem guard | **cooperative** — the harness chose to ask | yes | `calls.jsonl` (`server: host-guard`, `run: None`) |
+
+The two rows marked *new in Phase 3* were previously refusals that happened,
+printed once, and left nothing behind. Adding their events changed **only**
+what is written: both were already fail-closed refusals, both still are, and
+neither row's enforcement claim moved as a result. The host-path egress row in
+particular stays `coarse` — recording a write-time decision does not make it a
+runtime fence, and reading this table as though it did is the exact error the
+paragraph above exists to prevent.
+
+- **host — unsupported for MCP tool calls.** Native host-mode runs never call
+  `calllog::record` for tool traffic because the harness talks to upstream MCP
+  servers directly, bypassing AgentStack entirely. Audit of *calls* happens only
+  if the harness is separately configured to route via the gateway (`agentstack
+  mcp`). Since Phase 3 the host path does record its own **refusals** — the
+  host-path egress check and secret-scope denials above — which is why this cell
+  is `unsupported` for the dimension (what the agent did) while denials are
+  nonetheless retrievable (what agentstack refused). (`crates/cli/src/runs.rs`,
+  `crates/cli/src/seatbelt.rs`)
 - **gateway — enforced.** `Gateway::try_call` logs every outcome (denied / ok /
   error) via `calllog::record` to `~/.agentstack/audit/calls.jsonl`. Only an
   argument *digest* is stored, never raw values or resolved secrets, and upstream
