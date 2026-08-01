@@ -340,9 +340,13 @@ More: [trust a cloned repo](howto/trust-a-repo.md) and
 
 ## I want to undo something
 
-Every write agentstack makes is recorded before it lands.
+Every write agentstack makes is recorded before it lands. `agentstack undo`
+(v0.18.0+) is the interactive front door — your recent changes newest-first,
+pick a point and revert; `restore` is the same record as a script-friendly
+command:
 
 ```bash
+agentstack undo                     # timeline: pick a point, revert to it
 agentstack restore                  # list every undoable recorded write
 agentstack restore --last --write   # undo the most recent
 agentstack restore 18c634a4 --write # undo one by its id prefix

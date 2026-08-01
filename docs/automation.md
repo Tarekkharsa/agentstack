@@ -77,6 +77,8 @@ named exception noted in its row.
 | `agentstack doctor --json` | `status-v1` | `state`, `next_action`, `sections`, `errors`, `warnings`, `trust`, `protection` |
 | `agentstack doctor --json` | `doctor-advisories-v1` | top-level `advisories` count; section lines may carry `level: "advisory"` |
 | `agentstack doctor --json` | `doctor-mode-v1` | top-level `mode` (`static` / `clean-at-rest` / `zero-files`) and `activation` (`locked` / `never_activated`) — the same derived readings `status` prints, so no prose-matching |
+| `agentstack doctor --json` | `doctor-cli-coverage-v1` | per-CLI coverage — which detected CLIs the current delivery mode actually configures |
+| `agentstack status --json` / `doctor --json` | `status-honesty-v1` | `state` never reports ready over unverified coverage — gate on this name before trusting `state: "ready"` |
 | `agentstack doctor --probe --json` | `doctor-probe-v1` | top-level `probe` object. **This one spawns**: it starts each stdio server, speaks the MCP `initialize` handshake, and stops it again |
 | `agentstack use --list --json` | `profiles-v1` | `path`, `trust`, `profiles[]` with readiness |
 | `agentstack use --list --json` | `sessions-v1` | per-entry `active`, plus the top-level `session` object |
@@ -84,12 +86,14 @@ named exception noted in its row.
 | `agentstack diff --json` | `diff-ownership-v1` | per-target `managed`, `hand_edited`, `foreign_untracked` |
 | `agentstack diff --json` | `diff-existence-v1` | per-target `existed_before` — splits "never rendered here / file absent" from "the manifest moved ahead of a rendered file" |
 | `agentstack restore --json` | `restore-last` | `entries` (newest first) and `adapter_backups` |
+| `agentstack undo --json` | `json-reads-v1` | `entries[]` (newest first) — the same recorded writes `restore --json` lists, keyed for timeline display |
 | `agentstack workflow list --json` | `workflow-observe-v1` | `workflows[]` with per-entry trust and lock state |
 | `agentstack workflow list --json` | `workflow-serial-roles-v1` | per-entry `serial_roles` |
 | `agentstack workflow runs --json` | `workflow-observe-v1` | `runs[]` from the machine-global runs directory |
 | `agentstack init --plan` | `init-plan` | the detection plan, with `plan_digest` |
 | `agentstack trust --preview` | `trust-preview` | the full reviewed surface, with `surface_digest` |
 | `agentstack trust --preview` | `trust-server-blockers-v1` | known server/executable blockers, each with a `fix` of `agentstack lock` or `edit-manifest` |
+| `agentstack trust --preview` | `trust-review-card-v1` | the per-item review card a graphical client renders — the first-time surface and, on a re-gate, the changed-lines diff |
 | `agentstack library-index` | `profiles-edit-v1` | the central-library catalog (skills + servers) |
 
 ## Consent-bound actions
@@ -106,6 +110,11 @@ the digest back to apply.
 | `agentstack add-server-to-profile` | `profiles-edit-v1` | re-locks and re-renders |
 | `agentstack use-profile` | `profiles-edit-v1` | re-locks and re-renders |
 | `agentstack create-profile` | `toolset-create-v2` | writes the manifest entry and re-locks, and renders **nothing** — naming a toolset is not activating it |
+| `agentstack edit-profile` | `profiles-edit-batch-v1` | one preview + one digest over a batch of membership edits |
+| `agentstack toolset rename` | `toolset-rename-v1` | renames the toolset everywhere it appears; memberships kept |
+| `agentstack toolset delete` | `toolset-delete-v1` | deletes the toolset; the servers and skills in it stay declared |
+| `agentstack set-mode` | `set-mode-v1` | switches the project's delivery mode behind the same preview → digest → apply shape |
+| the managed-`.gitignore` prompt on `apply` / `use --write` | `gitignore-opt-out-v1` | records a durable per-project opt-out from the managed block |
 | `agentstack remove-from-library` | `library-remove-v1` | machine-wide, not project; recoverable from `lib/.trash` |
 | `agentstack remove-capability` | `manifest-remove-v1` | removes a project definition and memberships, then re-locks and re-renders; library untouched |
 | `agentstack restore --last --write` | `restore-last` | undoes the newest recorded write |

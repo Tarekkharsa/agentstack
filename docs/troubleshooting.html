@@ -375,8 +375,9 @@ agentstack trust .  # then review and approve the pinned surface</code></pre>
 <pre class="block"><code>agentstack trust --revoke</code></pre>
 <p>More: <a href="howto/trust-a-repo.html">trust a cloned repo</a> and <a href="enforcement.html#what-trusted-does-and-does-not-mean">what "trusted" does and does not mean</a>.</p>
 <h2 id="i-want-to-undo-something">I want to undo something<a class="hlink" href="#i-want-to-undo-something" aria-label="Link to this section">#</a></h2>
-<p>Every write agentstack makes is recorded before it lands.</p>
-<pre class="block"><code>agentstack restore                  # list every undoable recorded write
+<p>Every write agentstack makes is recorded before it lands. <code>agentstack undo</code> (v0.18.0+) is the interactive front door — your recent changes newest-first, pick a point and revert; <code>restore</code> is the same record as a script-friendly command:</p>
+<pre class="block"><code>agentstack undo                     # timeline: pick a point, revert to it
+agentstack restore                  # list every undoable recorded write
 agentstack restore --last --write   # undo the most recent
 agentstack restore 18c634a4 --write # undo one by its id prefix</code></pre>
 <p>The ledger looks like this:</p>

@@ -296,6 +296,8 @@ $ echo $?
 <tr><td><code>agentstack doctor --json</code></td><td><code>status-v1</code></td><td><code>state</code>, <code>next_action</code>, <code>sections</code>, <code>errors</code>, <code>warnings</code>, <code>trust</code>, <code>protection</code></td></tr>
 <tr><td><code>agentstack doctor --json</code></td><td><code>doctor-advisories-v1</code></td><td>top-level <code>advisories</code> count; section lines may carry <code>level: "advisory"</code></td></tr>
 <tr><td><code>agentstack doctor --json</code></td><td><code>doctor-mode-v1</code></td><td>top-level <code>mode</code> (<code>static</code> / <code>clean-at-rest</code> / <code>zero-files</code>) and <code>activation</code> (<code>locked</code> / <code>never_activated</code>) — the same derived readings <code>status</code> prints, so no prose-matching</td></tr>
+<tr><td><code>agentstack doctor --json</code></td><td><code>doctor-cli-coverage-v1</code></td><td>per-CLI coverage — which detected CLIs the current delivery mode actually configures</td></tr>
+<tr><td><code>agentstack status --json</code> / <code>doctor --json</code></td><td><code>status-honesty-v1</code></td><td><code>state</code> never reports ready over unverified coverage — gate on this name before trusting <code>state: "ready"</code></td></tr>
 <tr><td><code>agentstack doctor --probe --json</code></td><td><code>doctor-probe-v1</code></td><td>top-level <code>probe</code> object. <strong>This one spawns</strong>: it starts each stdio server, speaks the MCP <code>initialize</code> handshake, and stops it again</td></tr>
 <tr><td><code>agentstack use --list --json</code></td><td><code>profiles-v1</code></td><td><code>path</code>, <code>trust</code>, <code>profiles[]</code> with readiness</td></tr>
 <tr><td><code>agentstack use --list --json</code></td><td><code>sessions-v1</code></td><td>per-entry <code>active</code>, plus the top-level <code>session</code> object</td></tr>
@@ -303,12 +305,14 @@ $ echo $?
 <tr><td><code>agentstack diff --json</code></td><td><code>diff-ownership-v1</code></td><td>per-target <code>managed</code>, <code>hand_edited</code>, <code>foreign_untracked</code></td></tr>
 <tr><td><code>agentstack diff --json</code></td><td><code>diff-existence-v1</code></td><td>per-target <code>existed_before</code> — splits "never rendered here / file absent" from "the manifest moved ahead of a rendered file"</td></tr>
 <tr><td><code>agentstack restore --json</code></td><td><code>restore-last</code></td><td><code>entries</code> (newest first) and <code>adapter_backups</code></td></tr>
+<tr><td><code>agentstack undo --json</code></td><td><code>json-reads-v1</code></td><td><code>entries[]</code> (newest first) — the same recorded writes <code>restore --json</code> lists, keyed for timeline display</td></tr>
 <tr><td><code>agentstack workflow list --json</code></td><td><code>workflow-observe-v1</code></td><td><code>workflows[]</code> with per-entry trust and lock state</td></tr>
 <tr><td><code>agentstack workflow list --json</code></td><td><code>workflow-serial-roles-v1</code></td><td>per-entry <code>serial_roles</code></td></tr>
 <tr><td><code>agentstack workflow runs --json</code></td><td><code>workflow-observe-v1</code></td><td><code>runs[]</code> from the machine-global runs directory</td></tr>
 <tr><td><code>agentstack init --plan</code></td><td><code>init-plan</code></td><td>the detection plan, with <code>plan_digest</code></td></tr>
 <tr><td><code>agentstack trust --preview</code></td><td><code>trust-preview</code></td><td>the full reviewed surface, with <code>surface_digest</code></td></tr>
 <tr><td><code>agentstack trust --preview</code></td><td><code>trust-server-blockers-v1</code></td><td>known server/executable blockers, each with a <code>fix</code> of <code>agentstack lock</code> or <code>edit-manifest</code></td></tr>
+<tr><td><code>agentstack trust --preview</code></td><td><code>trust-review-card-v1</code></td><td>the per-item review card a graphical client renders — the first-time surface and, on a re-gate, the changed-lines diff</td></tr>
 <tr><td><code>agentstack library-index</code></td><td><code>profiles-edit-v1</code></td><td>the central-library catalog (skills + servers)</td></tr>
 </tbody></table></div>
 <h2 id="consent-bound-actions">Consent-bound actions<a class="hlink" href="#consent-bound-actions" aria-label="Link to this section">#</a></h2>
@@ -321,6 +325,11 @@ $ echo $?
 <tr><td><code>agentstack add-server-to-profile</code></td><td><code>profiles-edit-v1</code></td><td>re-locks and re-renders</td></tr>
 <tr><td><code>agentstack use-profile</code></td><td><code>profiles-edit-v1</code></td><td>re-locks and re-renders</td></tr>
 <tr><td><code>agentstack create-profile</code></td><td><code>toolset-create-v2</code></td><td>writes the manifest entry and re-locks, and renders <strong>nothing</strong> — naming a toolset is not activating it</td></tr>
+<tr><td><code>agentstack edit-profile</code></td><td><code>profiles-edit-batch-v1</code></td><td>one preview + one digest over a batch of membership edits</td></tr>
+<tr><td><code>agentstack toolset rename</code></td><td><code>toolset-rename-v1</code></td><td>renames the toolset everywhere it appears; memberships kept</td></tr>
+<tr><td><code>agentstack toolset delete</code></td><td><code>toolset-delete-v1</code></td><td>deletes the toolset; the servers and skills in it stay declared</td></tr>
+<tr><td><code>agentstack set-mode</code></td><td><code>set-mode-v1</code></td><td>switches the project's delivery mode behind the same preview → digest → apply shape</td></tr>
+<tr><td>the managed-<code>.gitignore</code> prompt on <code>apply</code> / <code>use --write</code></td><td><code>gitignore-opt-out-v1</code></td><td>records a durable per-project opt-out from the managed block</td></tr>
 <tr><td><code>agentstack remove-from-library</code></td><td><code>library-remove-v1</code></td><td>machine-wide, not project; recoverable from <code>lib/.trash</code></td></tr>
 <tr><td><code>agentstack remove-capability</code></td><td><code>manifest-remove-v1</code></td><td>removes a project definition and memberships, then re-locks and re-renders; library untouched</td></tr>
 <tr><td><code>agentstack restore --last --write</code></td><td><code>restore-last</code></td><td>undoes the newest recorded write</td></tr>
