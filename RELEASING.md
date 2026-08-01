@@ -42,6 +42,47 @@ provenance attestations for them. The workflow verifies the draft by its exact
 release ID and seven-asset count; a green run therefore means the draft still
 exists. Review the draft, then publish it.
 
+### Release candidates (`vX.Y.Z-rc.N`)
+
+An RC is published so a specific audience can install a specific build —
+today, the §1.6 activation study — **without becoming what everyone else
+gets.** The workflow does not know about RCs: it hardcodes `prerelease=false`
+when it creates the draft, so an RC that is simply "reviewed and published"
+becomes the latest release and `install.sh`'s bare `| sh` starts serving it.
+Two deviations from the steps above, both mandatory:
+
+1. **Mark the draft as a pre-release before publishing it.** GitHub's
+   `releases/latest` endpoint — which `install.sh` uses — ignores drafts and
+   pre-releases, so this is the whole of what keeps ordinary installs on the
+   last stable version.
+
+   ```sh
+   gh release edit "$TAG" --prerelease
+   ```
+
+   Do this while it is still a draft. Publishing first and flagging it after
+   leaves a window in which the RC is the latest release.
+
+2. **Do not publish the formula to the Homebrew tap.** The tap has one
+   `Formula/agentstack.rb` and no stable/prerelease channel, so pushing an
+   RC's formula makes `brew install Tarekkharsa/tap/agentstack` serve the RC
+   to everyone. Skip the tap step entirely for an RC; the tap advances only on
+   a final release.
+
+Participants install an RC with the installer's version pin, which runs the
+same checksum verification as any other install:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh \
+  | AGENTSTACK_VERSION=vX.Y.Z-rc.N sh
+```
+
+One consequence worth knowing before any re-run: the preflight's
+already-published check compares `[tag, draft, prerelease, assets]` against
+`[tag, false, false, 7]`. Once an RC is flagged as a pre-release that check no
+longer recognizes it as published, so a re-dispatch will try to rebuild it.
+Do not re-dispatch a published RC.
+
 If the tag exists but its draft was lost, rebuild that exact tag through the
 manual recovery input. This still creates a draft and never publishes:
 

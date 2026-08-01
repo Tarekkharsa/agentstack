@@ -1365,8 +1365,14 @@ pub struct UpArgs {
     #[arg(long)]
     pub targets: Vec<String>,
 
+    // Spelled `--toolset` on the visible surface with `--profile` kept as an
+    // alias — the same split `apply` and `use` make. The rationale lives in a
+    // plain comment, not a doc comment: clap renders `///` as the flag's long
+    // help, so explaining the word "profile" here would itself put "profile"
+    // on the visible surface, which is what the rule forbids. (That is how
+    // this failed the first time.)
     /// Materialize this toolset rather than the active one.
-    #[arg(long)]
+    #[arg(long = "toolset", alias = "profile", value_name = "NAME")]
     pub profile: Option<String>,
 
     /// Do not maintain the managed `.gitignore` block.

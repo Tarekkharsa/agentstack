@@ -4,16 +4,192 @@ User-facing changes per release. The [GitHub Releases
 page](https://github.com/Tarekkharsa/agentstack/releases) carries the built
 binaries, checksums, and provenance attestations for each entry.
 
-## Unreleased
+## v0.18.0-rc.1 — 2026-08-01
 
-**The yes gets a card — and stops omitting two capability kinds.** The trust
-review now opens with two to five plain lines saying what the project will run
-on your machine, what it will contact, what secrets it can read, and whether
-the content is pinned to the bytes you are reading. The full line-by-line
-review follows it unchanged: the card summarizes the review, it never replaces
-it. Same gate, same digest, same single grant path — this is presentation.
+**A release candidate, published for the activation study.** This is not the
+latest release: `install.sh` and `brew install` keep serving v0.17.1 until
+v0.18.0 is final, and v0.18.0 is not final until the study passes. If you were
+sent here to try something, you were given a version-pinned install command;
+if you arrived by accident, you probably want v0.17.1 instead.
+
+**What it is.** Everything since v0.17.1 is one journey, built in four passes,
+and this is the first release that carries all of it:
+
+- **Drop a file and it counts.** Put a skill or an instruction fragment in
+  `.agentstack/`, and the tools notice. For content you demonstrably wrote
+  yourself, `agentstack yes` takes it from a file on disk to working in every
+  CLI you use, behind one review and one confirmation.
+- **One yes, with everything disclosed.** The review opens with two to five
+  plain lines: what will run, what it will contact, what secrets it can read,
+  whether the bytes are pinned. Nothing a project declares is missing from it.
+- **Change it and you see the diff.** When approved content changes, the
+  re-review shows what moved and offers three answers: accept the new bytes,
+  keep the ones you already approved, or block the item and carry on without
+  it.
+- **Refusals explain themselves and leave evidence.** Every block says what
+  was stopped, why, and the one safe thing to do about it — and is recorded,
+  so you can look it up afterwards instead of needing to have been watching.
+- **Undo is a first-class verb.** `agentstack undo` lists recent changes
+  newest-first; pick a point and go back. The undo is itself recorded, so it
+  too can be undone.
+- **`agentstack up`** sets up a new machine from a setup that already exists.
+- **`agentstack share` / `agentstack receive`** move a setup between people.
+  Sharing signs; receiving reviews.
+- **`agentstack add from`** takes capabilities from outside ecosystems through
+  the same staged review as everything else.
+
+### Drop a file, then one yes
+
+- **Undeclared content in `.agentstack/skills/` and `.agentstack/instructions/`
+  is noticed.** `status`, `doctor`, `use`, `lock`, and `adopt` all see a file
+  you dropped and offer to adopt it, with a preview, instead of ignoring it
+  because no manifest entry names it.
+- **`agentstack yes` is new.** It performs declare → lock → trust → render
+  behind one review and one confirmation, through the same functions and the
+  same gate the explicit four-command sequence uses. Declining leaves the
+  project byte-identical: nothing recorded, nothing materialized.
+- **`agentstack adopt --to-library`** adopts into the shared central library
+  rather than only this project.
+- **Whether content is "your own work" is decided by evidence, not assumption.**
+  Inside a git work tree, tracking decides. Outside one, the clock is the last
+  recorded trust grant. Content that fails this check does not get the
+  compressed path — it takes the full explicit review.
+
+Four defects found by adversarial review before this shipped, listed because
+each was a real way to be misled: a `git checkout` rewriting mtimes could
+promote pulled content to "your own work"; a symlinked `SKILL.md` was
+followed; a dropped file sharing a name with a pinned git or library
+declaration could replace it behind a preview that called it an addition; and
+an adopted skill joined no toolset, so adopting alone did not make it usable.
+
+### The yes gets a card — and stops omitting two capability kinds
+
+The trust review now opens with two to five plain lines saying what the
+project will run on your machine, what it will contact, what secrets it can
+read, and whether the content is pinned to the bytes you are reading. The full
+line-by-line review follows it unchanged: the card summarizes the review, it
+never replaces it. Same gate, same digest, same single grant path — this is
+presentation.
+
+- **Changed content gets a diff and three answers.** When bytes you already
+  approved have moved, the re-review shows the difference and offers accept,
+  keep-the-approved-bytes, or block. A blocked item is excluded at delivery
+  and says so in a standing status line, rather than silently reappearing.
+- **The bytes you approved are kept.** Approving content deposits it in a
+  content-addressed store as part of the act of pinning, so "keep what I
+  approved" has something real to keep.
+- **Content you have approved before is recognized.** A short line says so and
+  the card's body shortens. It is machine-local, keyed by content digest, and
+  changes only what the card says — never the outcome, never the gate. A
+  machine-level "always allow this anywhere" is deliberately not built.
+
+### Setup, Toolset, Status, Undo
+
+- **`agentstack doctor` always ends with exactly one recommended command.** In
+  the JSON, `next_action` is no longer nullable — `state` already answers
+  whether anything is wrong, so this key is free to answer "what now?"
+- **Green means verified.** A check that examined nothing now says so in words
+  instead of reporting a pass. A report cannot claim a pass over an empty set.
+- **Every refusal is one plain sentence.** What was stopped, why, and the safe
+  next step, with a per-family clause naming what did not happen ("nothing
+  ran", "nothing was sent", "nothing was read", "nothing was written"). Two
+  families that recorded nothing now do: host-path egress, and secret-scope
+  refusals.
+- **`agentstack undo` is new** — the interactive face of `restore`. Recent
+  changes newest-first, pick a point, revert to it. It adds no new destructive
+  machinery, and it records the pre-undo bytes, so the one action that changes
+  your files is now itself in the ledger and itself undoable.
+- **First contact speaks in ideas, not mechanisms.** Default `--help` and
+  `status` name Setup, Toolset, Status, and Undo; the glossary of manifests,
+  locks, digests, and gateways moved to `--help --all`, which opens by
+  defining itself. Nothing was renamed.
+- **`agentstack explain` covers every declared kind.** It covered three of
+  seven and told the other three they did not exist, while the review card
+  listed all seven — so `explain` disagreed with the surface you had already
+  said yes to. `status` now counts every declared kind too (it counted two of
+  seven), and `[settings.*]` gained the `doctor` section it never had.
+
+### Anywhere: a new machine, sharing, and outside ecosystems
+
+- **`agentstack up` is new.** One command on a machine that has a checkout and
+  nothing else: it finds the CLIs you have, verifies the environment against
+  `agentstack.lock`, renders each CLI's config, and names what is left — which
+  on a new machine is this machine's secrets. `init` is for a setup that does
+  not exist yet; `up` is for one that does.
+- **`agentstack share` and `agentstack receive` are new.** Sharing signs: a
+  bundle is signed as part of sharing rather than through a separate step
+  nobody performs. Receiving reviews: the bundle is staged inert, carded, and
+  activates only if you say yes. A valid signature from a publisher you have
+  chosen to recognize changes what the card says — it settles whose key it is
+  — and changes nothing else. **No signature, from anybody, replaces the yes.**
+  An unsigned bundle and an invalid signature are both named on the card, and
+  the full review stands in both cases.
+- **`agentstack add from` reads outside ecosystems.** It accepts a URL or path
+  to an eve-format skill package, an MCP connection definition, or a registry
+  listing, and puts every byte through the same funnel: fetched, bounded,
+  quarantined, carded, and only then — on your yes — added. Credentials found
+  in a fetched connection become `${REF}` placeholders on the way in and are
+  never written down. A registry listing only ever lists; nothing installs
+  from reading a catalog. AgentStack hosts no registry or marketplace of its
+  own — this consumes ecosystems, it does not create one.
+- **Licence and origin travel with imported content.** `[[skill]]` lock
+  entries gained `license` and `origin`, and `LICENSE`/`NOTICE` text is carried
+  with the files rather than summarized into a tag. The review card shows it
+  ("Apache-2.0, from …"), and a source that declared no licence is stated as
+  such. This records what a source declared and verifies none of it.
+- **The content-pinning refusal now leaves evidence.** When delivered bytes do
+  not match what you reviewed, the server is dropped — that was already true
+  and unchanged. What is new is that it now says so in the standard one-line
+  form and records the refusal, so the block that matters most is one you can
+  look up afterwards.
+
+### What this release does not do
+
+Stated plainly, because each is a reasonable thing to assume and none of it is
+true:
+
+- **Zero-files ("dynamic") delivery is not the default,** and this release
+  does not change that. It remains opt-in.
+- **Hooks and extensions keep the full consent ceremony.** They are executable
+  capability kinds; no compressed path covers them, and `agentstack yes` does
+  not touch them.
+- **Servers are not adopted from a dropped file.** They still require a
+  declaration.
+- **A signature is not a review, and recognition is not consent.** Verifying a
+  signature proves bytes came from a key unchanged. It says nothing about
+  whether the content is safe, nothing about who the key really belongs to,
+  and it never shortens the gate.
+- **Quarantine is not a sandbox.** Staged content is inert because nothing is
+  arranged to read it, not because something confines it.
+- **Attribution is recorded, not verified.** A source claiming `Apache-2.0`
+  gets `Apache-2.0` written down.
+- **An unresolved `${REF}` holds back that CLI's whole config,** not just the
+  server that needs the secret. This is the documented fail-closed rule;
+  relaxing it is separate, reviewed work.
 
 ### Fixed
+
+- **`doctor` reported `state: "ready"` for a project nothing had activated.**
+  Zero errors and zero warnings was true; "ready" was not, because an
+  untrusted, never-activated project has nothing live in it. `state` keeps its
+  `status-v1` meaning — a panel already rendering "Ready" from it does not
+  silently change meaning under its users — and a new `readiness` field
+  answers the honest question, behind a new feature name `status-honesty-v1`.
+  It takes one of `ready`, `needs_attention`, `untrusted`, `drifted`,
+  `never_activated`, `unknown`, or `needs_setup`. External panels should
+  render `readiness` and treat everything except `ready` as not-live. The
+  dashboard snapshot also gained a singular `nextAction` beside its plural
+  array, matching the one-decision shape `doctor` and `status` now use.
+
+- **`doctor` printed a green "resolved from env" for a secret no server could
+  read.** If `[policy.secrets]` refuses a reference for every server that uses
+  it, the reference resolves and nothing can read it. The Secrets section said
+  it was fine while the Policy section raised an error about the same thing.
+  It now says which, and why.
+
+- **A refused secret was told to do work that could not help.** A policy
+  refusal was given the advice for a missing value — "set it with `agentstack
+  secret set`" — which does not address a rule that refuses it.
 
 - **The machine-readable trust surface omitted hooks and settings too.**
   `agentstack trust --preview` is what an external UI reads to show you a

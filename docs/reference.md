@@ -1538,21 +1538,26 @@ subcommand carries a trailing `*` (e.g. `guard`'s `check*`). Reach for it when
 you need the exact verb, flag, or subcommand.
 
 <!-- agentstack:generated commands -->
-- **`init`** — Set up this project: detect the CLIs you have and import them into one manifest — flags `--global/--force/--dry-run/--plan/--secrets/--no-keychain/--yes/--consented-plan`
-- **`status`** — Where this project stands, on one screen: detected CLIs, manifest, trust, secrets, and the one next step — flags `--json`
-- **`add`** — Add a server or skill to the manifest — subcommands `from/server/skill`
+- **`init`** — Setup: find the CLIs you have and bring their setups together — flags `--global/--force/--dry-run/--plan/--secrets/--no-keychain/--yes/--consented-plan`
+- **`up`** — Set this machine up from a setup that already exists: one command — flags `--targets/--toolset/--no-gitignore`
+- **`status`** — Status: where this project stands, on one screen, and the one next step — flags `--json`
+- **`add`** — Add a server or skill to this project's setup — subcommands `from/server/skill`
 - **`set`** _(hidden)_ — Create or update a manifest entry in place (idempotent `add`) — subcommands `server`
 - **`search`** — Search the capability catalog (and mark what's already added) — flags `--all/--json`
-- **`apply`** — Render the manifest into each target's native config — flags `--target/--toolset/--dry-run/--write/--scope/--allow-unresolved/--prune-foreign/--no-gitignore/--verbose`
+- **`apply`** — Write this setup into each CLI's own config — flags `--target/--toolset/--dry-run/--write/--scope/--allow-unresolved/--prune-foreign/--no-gitignore/--verbose`
 - **`instructions`** _(hidden)_ — Compile [instructions.*] into each CLI's CLAUDE.md / AGENTS.md — flags `--target/--scope/--write`
-- **`doctor`** — Verify everything is wired up: adapters, secrets, drift, skills, per-CLI details — flags `--ci/--live/--probe/--fix/--deep/--all/--json`
+- **`doctor`** — Check the setup in depth: what is wired up, what is missing, what changed — flags `--ci/--live/--probe/--fix/--deep/--all/--json`
 - **`remove`** _(hidden)_ — Remove a server or skill from the manifest (and lockfile) — flags `--write`
 - **`install`** _(hidden)_ — Fetch skill sources into the store and write the lockfile — flags `--locked/--allow-flagged`
+- **`share`** — Share this setup as a signed bundle others can review — flags `--out`
+- **`receive`** — Review a shared bundle, then decide — flags `--yes`
+- **`publisher`** _(hidden)_ — Your publishing key, and the publishers you recognize — subcommands `show/trust`
 - **`lock`** _(hidden)_ — Resolve each toolset's skill + server refs and pin `agentstack.lock` — flags `--profile/--update/--upgrade/--all/--with-instructions/--yes/--write`
 - **`try`** _(hidden)_ — Try a skill without installing anything: stage, scan, and emit a wrapper prompt on stdout for piping into any agent CLI — flags `--skill/--rev/--subpath/--allow-flagged`
 - **`lib`** _(hidden)_ — Manage the central capability library — subcommands `new/add/add-server/add-extension/add-hook/list/remove/remove-server/remove-extension/remove-hook/trash/sync/pack-init`
 - **`toolset`** — Work with toolsets: name one that bundles what you already have — subcommands `create/rename/delete/list`
-- **`use`** — Activate a toolset: render its servers + materialize its skills — flags `--target/--scope/--write/--allow-unresolved/--prune-foreign/--no-gitignore/--list/--json`
+- **`use`** — Toolset: switch to one — its servers and skills go live in your CLIs — flags `--target/--scope/--write/--allow-unresolved/--prune-foreign/--no-gitignore/--list/--json`
+- **`yes`** — Review and activate the files you dropped into this project — one step — flags `--yes`
 - **`session`** _(hidden)_ — Use a toolset temporarily: load it for now, then put every file back — subcommands `start/end/list/freeze`
 - **`run`** — Launch an agent CLI as a tracked run — flags `--locked/--prompt/--toolset/--scope/--keep/--sandbox/--lockdown/--plan`
 - **`kill`** _(hidden)_ — Kill a tracked run by id (and revert its toolset if it owned one) — flags `--force`
@@ -1565,7 +1570,8 @@ you need the exact verb, flag, or subcommand.
 - **`gateway`** _(hidden)_ — The zero-files gateway: register it once per CLI (`connect`) and every trusted repo brings its own servers through `agentstack mcp --auto-project` with no per-project files — subcommands `connect/disconnect`
 - **`trust`** — Review and approve this project's declared capabilities — required before anything activates them — flags `--list/--revoke/--yes/--consented-digest/--preview`
 - **`restore`** — Undo a recorded write: revert what apply/use/session changed — flags `--last/--list/--scope/--write/--json`
-- **`adopt`** — Keep a hand-edit: pull drifted native config back into the manifest — flags `--target/--scope/--write/--no-keychain`
+- **`undo`** — Take it back: pick a point from your recent changes and revert to it — flags `--to/--write/--json`
+- **`adopt`** — Keep a hand-edit: pull a change you made in a CLI back into this setup — flags `--target/--scope/--write/--no-keychain/--to-library`
 - **`mcp`** _(hidden)_ — Run agentstack as an MCP server over stdio (for an agent to call) — flags `--auto-project/--transparent`
 - **`diff`** _(hidden)_ — Show drift between the manifest and the on-disk configs — flags `--target/--profile/--scope/--json`
 - **`explain`** _(hidden)_ — Explain a server, skill, or instruction before you rely on it — flags `--json`
