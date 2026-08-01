@@ -311,7 +311,7 @@ details[open]>summary::before{content:"▾ "}
   <aside class="rail">
     <div class="rail-top">
       <div class="brandrow"><span class="mark"></span><h1 class="title">The AgentStack panel</h1></div>
-      <span class="sub">Every question a user might arrive with, answered by the panel and the command side by side. The panel is live — do the step and the state really changes. Start anywhere, or press → to walk every frame. The graphical panel is an optional companion app that isn't publicly downloadable yet — every action it shows maps to a CLI command that ships today. These frames were captured against v0.16.0; the CLI has since gained yes, undo, up, share, and receive — the walkthrough predates them and will be re-captured.</span>
+      <span class="sub">Every question a user might arrive with, answered by the panel and the command side by side. The panel is live — do the step and the state really changes. Start anywhere, or press → to walk every frame. The graphical panel is an optional companion app that isn't publicly downloadable yet — every action it shows maps to a CLI command that ships today. Frames are captured against v0.18.0-rc.2.</span>
       <div class="modes">
         <button data-mode="guided" aria-pressed="true">Guided</button>
         <button data-mode="sheet" aria-pressed="false">All frames</button>
@@ -333,8 +333,9 @@ details[open]>summary::before{content:"▾ "}
 "use strict";
 /* ══════════════════════════════════════════════════════════════════════
    Sources. Panel copy is transcribed from the shipped panel components;
-   terminal output is captured from ./target/release/agentstack (0.16.0);
-   write commands that could not be run are labelled "reconstructed".
+   terminal output is captured from ./target/release/agentstack
+   (0.18.0-rc.2) — read commands on the live machine, write ceremonies in a
+   disposable sandbox HOME; the few not exercised are labelled "reconstructed".
    Guarantees quote the product's own claims; each ✕ is a limit the code
    or docs state explicitly, not an inference.
    ════════════════════════════════════════════════════════════════════ */
@@ -498,7 +499,7 @@ function viewGlance(s){
     </div>`,'',s,{bare:true});
   if(s.incompatible) return shell(`<div class="col g6" style="padding:2px 5px 10px">
       <p class="t">Update the panel to continue</p>
-      <p class="d">This project's <code>agentstack</code> CLI (v0.17.0) speaks a newer data format (schema 4) than this panel build understands (schema 3). Update the panel app to read this AgentStack CLI — until then, the panel's actions are disabled to avoid acting on data it can't fully read.</p>
+      <p class="d">This project's <code>agentstack</code> CLI (v0.19.0) speaks a newer data format (schema 4) than this panel build understands (schema 3). Update the panel app to read this AgentStack CLI — until then, the panel's actions are disabled to avoid acting on data it can't fully read.</p>
     </div>`,'',s,{bare:true});
   if(s.doctorNull) return shell(`<div class="col g8" style="padding:2px 5px 10px">
       <p class="t">Couldn't read the status</p>
@@ -567,7 +568,7 @@ function viewManage(s){
   return `<div class="dlg">
     <div class="dlg-top"><span class="mark sm"></span><span class="dlg-title">Manage AgentStack</span><button class="x" data-act="close">✕</button></div>
     <div class="tabs">${TABS.map(([id,l])=>`<button data-act="manage:${id}" aria-selected="${t===id}">${l}${id==='activity'&&s.activeRun?' <span class="badge a">run live</span>':''}</button>`).join('')}
-      <span style="margin-left:auto;padding-right:10px" class="srcline">v0.16.0</span></div>
+      <span style="margin-left:auto;padding-right:10px" class="srcline">v0.18.0-rc.2</span></div>
     <div class="frame ${t==='toolsets'?'split':''}">${body}</div></div>`;
 }
 function tabSetup(s){
@@ -983,14 +984,15 @@ function viewBlueprint(){
 /* ══ TERMINAL CONTENT ═══════════════════════════════════════════════ */
 const CLI = {
  status:{cmd:'agentstack status', cwd:'~/Documents/GitHub/agentstack',
-  out:`<b>agentstack</b> 0.16.0 — one portable manifest, every agent CLI
+  out:`<b>agentstack</b> 0.18.0-rc.2 — one portable manifest, every agent CLI
 
-  <b>CLIs    </b>  8 detected: Claude Code · Claude Desktop · Codex CLI · GitHub Copilot CLI · Gemini CLI · OpenCode · Pi · VS Code
-  <b>Manifest</b>  .agentstack/agentstack.toml — 0 server(s) → 8 detected CLI(s), no [targets] pinned
+  <b>CLIs    </b>  8 of 13 supported detected here: Claude Code · Claude Desktop · Codex CLI · GitHub Copilot CLI · Gemini CLI · OpenCode · Pi · VS Code
+  <b>Setup   </b>  .agentstack/agentstack.toml — 2 servers · 3 skills → 8 detected CLIs, no CLIs pinned
   <b>Toolsets</b>  rust
   <b>Status  </b>  locked · untrusted
             <span class="dm">its servers are inert — the gateway serves control-plane tools only until you review it</span>
   <b>Mode    </b>  static <span class="dm">— config files on disk, kept out of git</span>
+  <b>Secrets </b>  <span class="er">✗</span> GITHUB_TOKEN not set   <span class="dm">fix: agentstack secret set GITHUB_TOKEN</span>
 
   <b>Next:</b>  <span class="ok">agentstack trust .</span>   <span class="dm">review it to unlock its servers</span>
   <span class="dm">All commands: agentstack --help</span>
@@ -998,82 +1000,114 @@ const CLI = {
  doctor:{cmd:'agentstack doctor', cwd:'~/Documents/GitHub/agentstack',
   out:`<b>Adapters &amp; CLIs</b>
   <span class="ok">✓</span> Claude Code    installed · ~/.claude.json parses
-  <span class="wr">⚠</span> Claude Desktop config present but binary not on PATH
+  <span class="dm">·</span> Claude Desktop config present but binary not on PATH
   <span class="ok">✓</span> Codex CLI      installed · ~/.codex/config.toml parses
   <span class="ok">✓</span> Gemini CLI     installed · ~/.gemini/settings.json parses
-  <span class="wr">⚠</span> VS Code        config present but binary not on PATH
+  <span class="dm">·</span> VS Code        config present but binary not on PATH
 <b>Zero-files gateway</b>
   <span class="ok">✓</span> Claude Code    gateway registered (agentstack mcp)
-  <span class="ok">✓</span> not trusted for auto mode — untrusted repos get control-plane tools only ↳ agentstack trust
+  <span class="ok">✓</span> this project is trusted for auto mode
 <b>Drift</b>
-  <span class="dm">· Claude Code    no longer matches what agentstack last wrote ↳ review: agentstack diff --scope global</span>
-  <span class="dm">· Claude Code    would REMOVE agentstack, gha-search, tldraw, miro, figma, gumlet ↳ keep them: agentstack adopt --scope global</span>
+  <span class="wr">⚠</span> Claude Code    no longer matches what agentstack last wrote ↳ review: agentstack diff --scope global · adopt the on-disk version: agentstack adopt --scope global
+  <span class="wr">⚠</span> Claude Code    would REMOVE gha-search, tldraw, miro, figma, gumlet ↳ keep them: agentstack adopt --scope global · prune them: agentstack apply --write --scope global
+<b>Quirks</b>
+  <span class="ok">✓</span> no unsupported syntax for any target
 <b>Skills</b>
   <span class="ok">✓</span> rust-best-practices  present · SKILL.md ok
+<b>Content scan</b>
+  <span class="dm">–</span> not scanned (reads every skill body) ↳ agentstack doctor --deep — always on in --ci
 <b>Reproducibility</b>
   <span class="ok">✓</span> rust-best-practices  library · matches lock
-<span class="dm">· 5 section(s) for features this project doesn't use are hidden — <b>agentstack doctor --all</b> shows everything.</span>
+<b>Machine policy</b>
+  <span class="ok">✓</span> restrictive — a rename-proof "*" rule (or a filesystem scope) constrains every server
+<span class="dm">· 6 sections for features this project doesn't use are hidden — <b>agentstack doctor --all</b> shows everything.</span>
 
-0 error(s), 3 warning(s).
-  start with: <b>agentstack guard install</b>`},
- trust:{cmd:'agentstack trust .', cwd:'~/GitHub/checkout', recon:true,
+0 errors, 2 warnings, 3 notes.
+  needs attention: fix the findings above first
+  next: review: agentstack diff --scope global · adopt the on-disk version: agentstack adopt --scope global   <span class="dm">the finding to start with</span>`},
+ trust:{cmd:'agentstack trust .', cwd:'~/GitHub/checkout',
   out:`Reviewing /Users/tarek.k/GitHub/checkout — approving this lets its capabilities activate.
 
-This project declares — review what auto-mode may run/contact:
-  github    npx -y @modelcontextprotocol/server-github
-            → api.github.com   ${'$'}{GITHUB_TOKEN}
-  figma     contacts mcp.figma.com
+This project will:
+  run 1 command on your machine — github
+  be able to read 2 secrets — GITHUB_TOKEN, FIGMA_PAT
+  add 2 files to every agent's context
+  …using exactly the content shown below, pinned to these bytes.
 
+This project declares — review what auto-mode may run/contact:
+  ▶ github: runs \`npx -y @modelcontextprotocol/server-github\`
+  ▶ figma: contacts mcp.figma.com
+  secrets referenced: GITHUB_TOKEN, FIGMA_PAT
   skills loadable over MCP:
   · rust-best-practices          [git, pinned]
   · rust-async-patterns          [git, pinned]
+  machine policy ceiling: ~/.agentstack/agentstack.toml — the repo can only narrow it, never loosen it
 
-Grant trust for this project? [y/N]`},
+<span class="ok">✓</span> trusted at sha256:3f9a…c0.
+Editing the manifest or lockfile invalidates this — re-run \`agentstack trust\` after reviewing changes.
+Pinned skill/server content that drifts is blocked at use time until re-locked.
+Withdraw anytime with \`agentstack trust --revoke\`.
+
+<span class="dm"># no closing y/N: typing the command at a terminal is the consent — the
+# review prints first, and declining is Ctrl-C before it, --revoke after</span>`},
  trustAfter:{cmd:'agentstack status', cwd:'~/GitHub/checkout',
   out:`  <b>Status  </b>  locked · <span class="ok">trusted</span>
-            <span class="dm">pinned at sha256:3f9a…c0 — editing the manifest or lockfile re-gates it</span>`},
+  <b>Mode    </b>  clean-at-rest <span class="dm">— active only while you work, then restored</span>
+
+<span class="dm"># pinned at sha256:3f9a…c0 — editing the manifest or lockfile re-gates it</span>`},
  diff:{cmd:'agentstack diff', cwd:'~/Documents/GitHub/agentstack',
   out:`
-Claude Code (.mcp.json)
+Claude Code (/Users/tarek.k/Documents/GitHub/agentstack/.mcp.json)
   <span class="ok">✓</span> in sync
 
-Codex CLI (.codex/config.toml)
+Codex CLI (/Users/tarek.k/Documents/GitHub/agentstack/.codex/config.toml)
   <span class="ok">✓</span> in sync
 
-Gemini CLI (.gemini/settings.json)
+Gemini CLI (/Users/tarek.k/Documents/GitHub/agentstack/.gemini/settings.json)
   <span class="ok">✓</span> in sync
 
-OpenCode (opencode.json)
+OpenCode (/Users/tarek.k/Documents/GitHub/agentstack/opencode.json)
   <span class="ok">✓</span> in sync
 
-VS Code (.vscode/mcp.json)
+VS Code (/Users/tarek.k/Documents/GitHub/agentstack/.vscode/mcp.json)
   <span class="ok">✓</span> in sync
 
 <span class="ok">✓</span> all targets in sync with the manifest.`},
- adopt:{cmd:'agentstack adopt --write', cwd:'~/Documents/GitHub/agentstack', recon:true,
-  out:`Adopting drift from Claude Code (global, ~/.claude.json)…
-  + gha-search    (stdio) — pulled into [servers.gha-search]
-  + figma         (http)  — pulled into [servers.figma]
-  + tldraw, miro, chrome-devtools, node_repl — pulled in
+ adopt:{cmd:'agentstack adopt --scope global --write', cwd:'~/Documents/GitHub/agentstack', recon:true,
+  out:`<span class="ok">✓</span> adopted 6 servers.
+  <span class="dm">next: \`agentstack lock\` to pin it, then \`agentstack trust .\` to review it</span>
 
-Wrote .agentstack/agentstack.toml
-
-Re-lock to pin the adopted entries: agentstack lock
-undo: agentstack restore --last --write`},
+<span class="dm"># gha-search, figma, tldraw, miro, chrome-devtools, node_repl — pulled into
+# [servers.*] in .agentstack/agentstack.toml; the hand-edit is now the manifest's truth</span>`},
  toolset:{cmd:'agentstack toolset list', cwd:'~/Documents/GitHub/agentstack',
-  out:`Declared toolsets (project trust: untrusted):
-  rust  —  3 skill(s), 0 server(s)  [pinned]`},
- use:{cmd:'agentstack session start backend', cwd:'~/Documents/GitHub/agentstack', recon:true,
-  out:`session started · backend
-  4 adapter configs snapshotted
+  out:`Declared toolsets (project trust: trusted):
+  rust  —  3 skills, 0 servers  [pinned]`},
+ use:{cmd:'agentstack session start backend', cwd:'~/Documents/GitHub/agentstack',
+  out:`  ↩ temporary: \`agentstack session end\` (or \`agentstack restore --last --write\`) puts every file back.
+Activating toolset 'backend' (scope: project) — 0 servers, 1 skill
+  ↩ undo: \`agentstack restore --last --write\`
+
+Claude Code
+  <span class="ok">✓</span> 1 skill → .claude/skills
+
+Codex CLI
+  <span class="ok">✓</span> servers → .codex/config.toml
+  <span class="ok">✓</span> 1 skill → .agents/skills
+
+<span class="ok">✓</span> activated 'backend' on 2 targets — wrote 2.
+<span class="ok">✓</span> session 'backend' started (this project)
+    Claude Code · servers → .mcp.json
+    Codex CLI · servers → .codex/config.toml
+  End it with \`agentstack session end\` — every file above goes back exactly.
 
 <span class="dm"># and when you're done:</span>
 <span class="ps">$</span> <b>agentstack session end</b>
-session ended · configs restored from the snapshot
+<span class="ok">✓</span> session 'backend' ended — your tools are back to before
+    restored .mcp.json  (Claude Code · servers)
+    restored .codex/config.toml  (Codex CLI · servers)
 
 <span class="dm"># the permanent form instead:</span>
-<span class="ps">$</span> <b>agentstack use backend --write</b>
-rendered backend → 4 adapters`},
+<span class="ps">$</span> <b>agentstack use backend --write</b>`},
  session:{cmd:'agentstack session list', cwd:'~/Documents/GitHub/agentstack',
   out:`No active sessions.
 
@@ -1081,13 +1115,13 @@ rendered backend → 4 adapters`},
   start   Start a session: load a toolset for now
   end     End the active session here (or everywhere with --all), reverting it
   list    List active sessions
-  freeze  Freeze the active session's resolved set into a new toolset, so CI can replay it deterministically`},
+  freeze  Freeze the active session's resolved set (toolset servers + the skills actually loaded) into a new toolset, so CI can replay it deterministically`},
  lib:{cmd:'agentstack lib list', cwd:'~/Documents/GitHub/agentstack',
   out:`<b>Skills</b>
-  rust-async-patterns  Master Rust async programming with Tokio, async traits, erro… git    rev c4b82b0ad771
-  rust-best-practices  Guide for writing idiomatic Rust code based on Apollo GraphQ… git    rev 3466193ed52d
-  rust-mcp-server-generator Generate a complete Rust MCP server project…            git    rev 329f2dcdaf02
-  rust-testing         Rust testing patterns including unit tests, integration test… git    rev 6a9f075cd97c
+  rust-async-patterns  Master Rust async programming with Tokio, async traits, erro… git    rev c4b82b0ad771 git:https://github.com/wshobson/agents@c4b82b0…#plugins/systems-programming/skills/rust-async-patterns
+  rust-best-practices  Guide for writing idiomatic Rust code based on Apollo GraphQ… git    rev 3466193ed52d git:https://github.com/apollographql/skills@3466193…#skills/rust-best-practices
+  rust-mcp-server-generator Generate a complete Rust Model Context Protocol server proje… git    rev 329f2dcdaf02 git:https://github.com/github/awesome-copilot@329f2dc…#skills/rust-mcp-server-generator
+  rust-testing         Rust testing patterns including unit tests, integration test… git    rev 6a9f075cd97c git:https://github.com/affaan-m/everything-claude-code@6a9f075…#skills/rust-testing
 
 <b>Servers</b>
   (none)
@@ -1108,7 +1142,10 @@ rendered backend → 4 adapters`},
   "servers": [],
   "empties_toolset": false,
   "action": "edit-profile",
-  "consent_digest": "sha256:1b8a6d67…a08e4"
+  "consent_digest": "sha256:b428c87f…2111d8",
+  "note": "Review, then apply with --yes --consented sha256:b428c87f…2111d8. Applying re-locks and re-renders the toolset; an unresolved ${REF} secret blocks the render (set it with \`agentstack secret set\`, then re-apply).",
+  "schema_version": 1,
+  "features": [ … ]
 }
 
 <span class="dm">Every add and every removal in one write, under one digest, then one re-lock
@@ -1129,16 +1166,17 @@ undo: agentstack restore --last --write`},
   out:`Manifest references no secrets.
 
 <span class="dm"># in a project that does, an unresolved ref fails closed:</span>
-<span class="wr">manifest updated, nothing rendered</span>
-<span class="wr">  ${'$'}{GITHUB_TOKEN} does not resolve on this machine</span>
-  no adapter config written · no placeholder written
+<span class="er">✗</span> unresolved secret ${'$'}{GITHUB_TOKEN} ↳ agentstack secret set GITHUB_TOKEN
+<span class="er">✗</span> not written — unresolved secrets; set them or pass --allow-unresolved
+  <span class="dm">no adapter config written · no placeholder written</span>
 
 next: agentstack secret set GITHUB_TOKEN`},
- libremove:{cmd:'agentstack remove-from-library rust-testing --write', cwd:'~/Documents/GitHub/agentstack', recon:true,
-  out:`Removed skill 'rust-testing' from the central library.
-Moved to the library trash.
+ libremove:{cmd:'agentstack remove-from-library --kind skill --name rust-testing --yes --consented sha256:…', cwd:'~/Documents/GitHub/agentstack', recon:true,
+  out:`removed skill 'rust-testing' from the central library — restore with \`agentstack lib trash --restore rust-testing --write\`
 
-Put it back: agentstack lib trash --restore rust-testing --write`},
+<span class="dm"># without --yes, the same command emits the preview the panel's confirm renders:
+# what moves to the trash, whether this project references the name, and which
+# toolsets do — under the digest that --consented must echo back</span>`},
  guard:{cmd:'agentstack guard status', cwd:'~/Documents/GitHub/agentstack',
   out:`guard: disabled (run <b>agentstack guard install</b>)
   machine policy: unconfigured
@@ -1173,52 +1211,131 @@ Put it back: agentstack lib trash --restore rust-testing --write`},
   <span class="dm">○ junie — only a static action allowlist; no per-call hook</span>
   <span class="dm">○ kiro — hooks nest inside per-agent config files; not wired yet</span>
 
-guard wired into 7 CLI(s).
-Seeded [guard] + [policy.filesystem] deny defaults in ~/.agentstack/agentstack.toml
+<span class="ok">✓</span> guard wired into 7 CLIs. Blocks: destructive commands, reads/writes of
+[policy.filesystem] deny paths, writes outside the workspace/[guard] allow_roots.
+This is cooperative (accident) protection — for hostile code use \`agentstack run --sandbox\`.
+  deny list (10): .env, .env.local, .env.*.local, .env.production, .env.development, id_rsa, id_ed25519, id_ecdsa, *.pem, .netrc
+  rules are TOML in ~/.agentstack/agentstack.toml; a project's .agentstack/agentstack.toml can ADD deny entries, never remove.
 
-guard: enabled
 undo: agentstack guard uninstall`},
  guardtest:{cmd:'agentstack guard test rm -rf /', cwd:'~/Documents/GitHub/agentstack',
   out:`<span class="er">DENY</span>  rm -rf /
-  rm of / — refusing to delete a root (built-in rule; deny/allow lists: ~/.agentstack/agentstack.toml)
-  <span class="dm">this was agentstack's guard — how it works: https://tarekkharsa.github.io/agentstack/start.html#s-guard</span>`},
- restore:{cmd:'agentstack restore', cwd:'~/Documents/GitHub/agentstack',
-  out:`Recorded changes (newest first):
+  rm of / — refusing to delete a root (built-in rule; deny/allow lists: ~/.agentstack/agentstack.toml)`},
+ restore:{cmd:'agentstack undo', cwd:'~/Documents/GitHub/agentstack',
+  out:`recent changes (newest first)
+  1  just now     yes                                          2 files · pdf-review
+  2  3h ago       use 'backend'                                5 files · Claude Code, Codex CLI, Gemini CLI, OpenCode, VS Code
+  3  4h ago       apply                                        8 files · Claude Code, Codex CLI, Gemini CLI, OpenCode, VS Code
+  4  4h ago       init                                         3 files · Claude Code, Claude Desktop, Codex CLI, Gemini CLI
 
-  18c67c14  3h ago   global   apply       1 file · Codex CLI
-  18c67c10  3h ago   project  apply       8 files · Claude Code, Codex CLI, Gemini CLI, OpenCode, VS Code
-  18c677df  4h ago   project  init        3 files · Claude Code, Claude Desktop, Codex CLI, Gemini CLI
-  18c67617  5h ago   workflow-declare workflow declare 'repo-audit' 3 files · repo-audit
+  pick a point: agentstack undo --to &lt;n&gt; --write
 
-Undo one with: agentstack restore &lt;id&gt; --write (or --last for the newest)
+<span class="dm"># reverting to a point previews first:</span>
+<span class="ps">$</span> <b>agentstack undo --to 2</b>
+would revert 2 change(s), back to before use 'backend'.
+  .agentstack/agentstack.toml
+  .agentstack/agentstack.lock
+  .mcp.json
+  .codex/config.toml
 
-Adapter config backups (content before our last write):
-  Claude Code    global ~/.claude.json
-  Codex CLI      global ~/.codex/config.toml`},
+  agentstack undo --to 2 --write   <span class="dm">do it — the revert is recorded, so this is itself undoable</span>
+
+<span class="dm"># the script-friendly primitive underneath, one write at a time by id:
+# agentstack restore &lt;id&gt; --write</span>`},
  setup:{cmd:'agentstack init', cwd:'~/Projects/acme-checkout', recon:true,
-  out:`Scanning for agent CLIs…
-  Detected CLIs: Claude Code · Codex CLI · Gemini CLI
+  out:`AgentStack setup
 
-agentstack.toml (preview — nothing written)
+Setup will:
+  1. detect the agent CLIs on this machine
+  2. import their existing configs
+  3. lift any inline tokens to ${'$'}{REF} placeholders
+  4. write one agentstack manifest
 
-version = 1
+🔍  Found 3 coding tools and their native configs:
+      Claude Code   ~/.claude.json
+      Codex CLI     ~/.codex/config.toml
+      Gemini CLI    binary on PATH — no config files found
+📥  Importing 2 MCP servers from those configs:
+      github   runs npx -y @modelcontextprotocol/server-github
+      tldraw   runs npx -y tldraw-mcp
+🔐  Found 1 plaintext token in your live CLI configs — replaced with secure references here:
+      ${'$'}{GITHUB_TOKEN}   server 'github' (env GITHUB_TOKEN)
+      The manifest stays commit-safe; real values resolve locally at apply time.
+📦  Files agentstack will manage:
+      .agentstack/agentstack.toml   the manifest — written by this import
+      .mcp.json                     Claude Code · MCP servers (this project)
+      Native files are written by the next \`agentstack apply --write\`, not now.
 
-[profiles.default]
-servers = ["github"]
-
-Would write .agentstack/agentstack.toml
-Would create .agentstack/instructions/
-
-Found 1 inline token while importing (~/.codex/config.toml): GH_PAT
+Import this into one manifest now? Only the manifest and any lifted token
+values are written — your CLIs' own configs stay untouched until the later
+apply confirm. [y/N] y
 
 Where should these token values live?
 
-  1) .env file next to the manifest, in plain text. agentstack keeps this file
-     out of git and its guard blocks agents from reading it.
-  2) OS keychain (service \`agentstack\`). Nothing secret sits in a file.
-  3) skip — write only the ${REF} placeholder; you provide the value later.
+  1) Project .env  (default) — Your tokens are written to .env next to the
+     manifest, in plain text. agentstack keeps this file out of git and its
+     guard blocks agents from reading it. Edit it with any editor.
+  2) macOS keychain — Your tokens are migrated into the system keychain
+     (service \`agentstack\`). Nothing secret sits in a file.
+  3) Skip / decide later — Only ${'$'}{REF} placeholders are written. Nothing runs
+     until you provide values — \`agentstack doctor\` lists what's missing.`},
+ yes:{cmd:'agentstack yes', cwd:'~/Projects/acme-checkout',
+  out:`→ 1 dropped file ready to go live in this project:
 
-Proceed with this plan? [y/N]`},
+  + skill pdf-review (./skills/pdf-review)
+      Review PDFs for layout and accessibility issues.
+      your own work — untracked in git
+
+This declares them in the manifest and pins their bytes, then shows you the full review below. Undo the declaration and pin with \`agentstack restore --last --write\`; \`agentstack use --write\` then reconciles what each CLI holds.
+  <span class="ok">✓</span> pinned 1 skill + 2 servers
+
+This will write:
+
+Claude Code
+  → 2 servers to write
+  → 1 skill to symlink into .claude/skills
+
+Codex CLI
+  → 2 servers to write
+  → 1 skill to symlink into .agents/skills
+
+→ .gitignore: would add a managed block so generated artifacts stay out of git
+
+Reviewing /Users/tarek.k/Projects/acme-checkout — approving this lets its capabilities activate.
+
+This project will:
+  run 2 commands on your machine — github, tldraw
+  be able to read 1 secret — GITHUB_TOKEN
+  add 1 file to every agent's context
+  …using exactly the content shown below, pinned to these bytes.
+
+This project declares — review what auto-mode may run/contact:
+  ▶ github: runs \`npx -y @modelcontextprotocol/server-github\`
+  ▶ tldraw: runs \`npx -y tldraw-mcp\`
+  secrets referenced: GITHUB_TOKEN
+  skills loadable over MCP:
+  · pdf-review   [inline, pinned]
+  machine policy ceiling: ~/.agentstack/agentstack.toml — the repo can only narrow it, never loosen it
+
+Make this live? [y/N] y
+
+<span class="ok">✓</span> trusted at sha256:edf8…40ad.
+
+Claude Code
+  <span class="ok">✓</span> servers → .mcp.json
+  <span class="ok">✓</span> 1 skill → .claude/skills
+
+Codex CLI
+  <span class="ok">✓</span> servers → .codex/config.toml
+  <span class="ok">✓</span> 1 skill → .agents/skills
+
+<span class="ok">✓</span> activated 'default' on 2 targets — wrote 2.
+  undo: agentstack restore --last --write
+
+<span class="ok">✓</span> live. Undo the declaration and pin: \`agentstack restore --last --write\`
+
+<span class="dm"># the one-step path applies only to content you demonstrably wrote here —
+# anything that arrived with a clone takes the full staged review that trust owns</span>`},
  notinstalled:{cmd:'agentstack --version', cwd:'~/Projects/acme-checkout',
   out:`<span class="er">zsh: command not found: agentstack</span>
 
@@ -1227,9 +1344,30 @@ agentstack not found
 
 <span class="dm"># if it is a shell function or off PATH, point the panel at the binary in its settings</span>`},
  runs:{cmd:'agentstack report calls --since 7', cwd:'~/Documents/GitHub/agentstack', recon:true,
-  out:`github__search_issues   ok       412
-github__create_pr       denied     3   policy.network
-fs__write_file          errored    1   ENOENT
+  out:`Call activity
+  416 calls over 7d
+  ok 412   error 1   denied 3
+
+  top servers
+    github                      416 calls  (4 error/denied)
+
+  top tools
+    github__search_issues       412
+    github__create_pr             3
+    fs__write_file                1
+
+Library dead weight
+  skills never activated:
+    - rust-testing
+
+  Prune with \`agentstack lib remove &lt;name&gt;\` (or drop it from a toolset).
+
+tool                      ok    err  denied  last
+github__search_issues    412      0       0  2h ago
+github__create_pr          0      0       3  1d ago
+fs__write_file             0      1       0  3d ago
+
+Log: ~/.agentstack/audit/calls.jsonl <span class="dm">(argument digests only — never values)</span>
 
 <span class="dm"># report --help</span>
   run    Show a sandboxed run's flight-recorder report (lifecycle, egress decisions, tool calls)
@@ -1238,8 +1376,9 @@ fs__write_file          errored    1   ENOENT
   calls  Report brokered call activity and library-wide dead weight
   wire   Rank what's been observed on the wire by the \`proxy\` relay`},
  workflow:{cmd:'agentstack workflow list', cwd:'~/Documents/GitHub/agentstack', recon:true,
-  out:`nightly-review   trusted   locked     ≤6 agents
-repo-audit       inert     drifted    ≤4 agents
+  out:`NAME                     TRUSTED  LOCK           AGENTS   WALL(s)    ROLES
+nightly-review           true     locked         6        900        reader,writer,verifier
+repo-audit               false    drifted        4        600        reader
 
 <span class="ps">$</span> <b>agentstack workflow runs</b>
 w-9f2c  nightly-review  running      4/6 agents · 02:41 · pinned sha256:9f2c…e1
@@ -1249,35 +1388,55 @@ w-77b2  release-notes   failed       2 steps · 0:21
 <span class="dm"># workflow --help</span>
   run · report · list · runs · explain · declare`},
  protection:{cmd:'agentstack run claude-code --locked', cwd:'~/Documents/GitHub/agentstack', recon:true,
-  out:`posture: LOCKED (host process)
-  content pinned to lockfile digests
-  flight recorder on: lifecycle, egress, tool calls, secret refs
+  out:`posture: HOST / PROTECTED
+  ℹ protected host run: content trust, strict lock verification, and policy
+    admission are enforced BEFORE launch, and decisions are recorded. Not
+    kernel isolation: the harness runs as you, on the host. Use
+    --sandbox/--lockdown for runtime containment.
 
 <span class="ps">$</span> <b>agentstack run claude-code --sandbox --lockdown</b>
-posture: SANDBOX+LOCKDOWN
+posture: LOCKDOWN / ENFORCED · NO DIRECT ROUTE
   <span class="ok">kernel-enforced confinement (container)</span>
-  <span class="ok">only route out is the audited proxy</span>
+  <span class="ok">only route out is the audited egress proxy</span>
 
 <span class="ps">$</span> <b>agentstack report run w-9f2c</b>
 full flight recorder + posture label`},
- share:{cmd:'agentstack lock --write', cwd:'~/Documents/GitHub/agentstack', recon:true,
-  out:`Resolving toolset 'rust'…
-  <span class="ok">✓</span> rust-best-practices          git:apollographql/skills@3466193 → pinned
-  <span class="ok">✓</span> rust-async-patterns          git:wshobson/agents@c4b82b0 → pinned
+ share:{cmd:'agentstack share rust-setup', cwd:'~/Documents/GitHub/agentstack',
+  out:`signing as  76b6-67ac-0e0b-1022 <span class="ok">✓</span>
+bundle      rust-setup.astack (manifest + lock + 3 pinned files)
 
-Wrote agentstack.lock
+receivers will review before anything activates — that's the point
 
-<span class="ps">$</span> <b>agentstack sign</b>
-signed — publish the printed public key so a teammate can verify
+<span class="dm"># on the teammate's machine, the other side:</span>
+<span class="ps">$</span> <b>agentstack receive rust-setup.astack</b>
+Review — a shared bundle
+  signed by 76b6-67ac-0e0b-1022 — a publisher you have not recognized before. If you know whose key this is: agentstack publisher trust 76b667ac… --label &lt;name&gt;
 
-<span class="dm"># on their machine, they review the same bytes themselves:</span>
-<span class="ps">$</span> <b>agentstack trust .</b>`},
+  Adds 3 skill files
+  The bundle's manifest and lockfile are used to verify these files, not merged — servers, toolsets, and policy do not cross over
+
+  staged at ./quarantine/499a336b96106f0e · nothing is active
+
+<span class="ok">✓</span> 3 files into this project.
+
+<span class="dm"># a fresh clone of the repo needs no bundle — one command sets the machine up:</span>
+<span class="ps">$</span> <b>agentstack up</b>
+found harnesses     Claude Code · Codex CLI · Gemini CLI
+<span class="ok">✓</span> lockfile up to date.
+your environment    1 toolset · 3 skills · 2 servers · 3 skill sources verified against lock
+secrets             1 need this machine's vault:
+                    ${'$'}{GITHUB_TOKEN} → agentstack secret set GITHUB_TOKEN
+                    until they are set, each CLI's server config is held back whole — even servers that need no secret; nothing is written with a missing credential (fail closed); instructions and settings still render
+
+next: agentstack secret set GITHUB_TOKEN`},
  explain:{cmd:'agentstack explain rust-best-practices', cwd:'~/Documents/GitHub/agentstack',
   out:`
 rust-best-practices  (skill · git)
 
   Source        central library (\`agentstack lib\`)
+  Description   Guide for writing idiomatic Rust code based on Apollo GraphQL's best practices handbook. …
   Installed     yes — available locally
+  Resolves      central library
   Model         library reference by name — resolved fresh from the central library on every lock
   Provenance    git:https://github.com/apollographql/skills@3466193ed52d…#skills/rust-best-practices
   Lock          matches lock
@@ -1289,7 +1448,7 @@ rust-best-practices  (skill · git)
                 • instructions only — a skill is text, it runs no code and makes no network calls
                 • comes from the central library — inspect it with \`agentstack lib list\``},
  search:{cmd:'agentstack search rust', cwd:'~/Documents/GitHub/agentstack',
-  out:`3 of 4 result(s) for 'rust', most relevant first:
+  out:`5 of 9 results for 'rust', most relevant first:
 
 your library
   rust-async-patterns Master Rust async programming with Tokio, async traits, error handling… [skill]
@@ -1300,66 +1459,95 @@ your library
     source: git:https://github.com/apollographql/skills
     ↳ agentstack add from rust-best-practices
 
-1 more — agentstack search 'rust' --all`},
+MCP registry
+  agent-trust-receipt Read-only Remote MCP for externally grounded AI agent trust receipts.
+    ai.ai-akari/agent-trust-receipt
+    trust: <span class="ok">✓</span> verified namespace
+    ↳ agentstack add from ai.ai-akari/agent-trust-receipt
+
+4 more — agentstack search 'rust' --all`},
  help:{cmd:'agentstack --help', cwd:'~/Documents/GitHub/agentstack',
-  out:`Manage MCP servers + skills across Claude Code, Codex, and more, from a single portable .agentstack/agentstack.toml.
+  out:`Set up your MCP servers and skills once, and use them across Claude Code, Codex, and every other coding CLI you have — switchable by task, and reversible.
 
 Commands:
-  init     Set up this project: detect the CLIs you have and import them into one manifest
-  status   Where this project stands, on one screen: detected CLIs, manifest, trust, secrets, and the one next step
-  add      Add a server or skill to the manifest
+  init     Setup: find the CLIs you have and bring their setups together
+  up       Set this machine up from a setup that already exists: one command
+  status   Status: where this project stands, on one screen, and the one next step
+  add      Add a server or skill to this project's setup
   search   Search the capability catalog (and mark what's already added)
-  apply    Render the manifest into each target's native config
-  doctor   Verify everything is wired up: adapters, secrets, drift, skills, per-CLI details
+  apply    Write this setup into each CLI's own config
+  doctor   Check the setup in depth: what is wired up, what is missing, what changed
+  share    Share this setup as a signed bundle others can review
+  receive  Review a shared bundle, then decide
   toolset  Work with toolsets: name one that bundles what you already have
-  use      Activate a toolset: render its servers + materialize its skills
+  use      Toolset: switch to one — its servers and skills go live in your CLIs
+  yes      Review and activate the files you dropped into this project — one step
   run      Launch an agent CLI as a tracked run
   trust    Review and approve this project's declared capabilities — required before anything activates them
+  restore  Undo a recorded write: revert what apply/use/session changed
+  undo     Take it back: pick a point from your recent changes and revert to it
+  adopt    Keep a hand-edit: pull a change you made in a CLI back into this setup
 
 Start here:
-  agentstack                     orientation + the one next step for this directory
-  agentstack init                one command sets up everything: import, choose, apply, verify
-  agentstack status              where this project stands, on one screen
+  agentstack                     where this project stands, and the one next step
+  agentstack init                Setup — find the CLIs you have and bring them together
+  agentstack status              Status — is it ready, and if not, the one thing that fixes it
+  agentstack yes                 review and activate what you dropped in
+  agentstack undo                Undo — take back a recent change
+
+Four ideas cover the whole product: Setup (what you have) · Toolset (what this
+task needs) · Status (is it ready) · Undo (how to take it back).
 
 Every command, grouped by task: agentstack --help --all`},
  helpall:{cmd:'agentstack --help --all', cwd:'~/Documents/GitHub/agentstack',
   out:`agentstack — every command, including the ones the default --help groups away.
+Run \`agentstack &lt;command&gt; --help\` for flags and details.
 
 The map, grouped by task:
 
-  Set up      init · status · adapters · settings · self · completions
+  Set up      init · up · status · adapters · settings · self · completions
   Edit        add · set · search · remove · install · lib · toolset · adopt · export · import
-  Render      apply · use · instructions · lock · session · diff · restore · uninstall
+  Share       share · receive · publisher
+  Render      apply · use · yes · instructions · lock · session · diff · uninstall
+  Undo        undo · restore
   Protect     trust · explain · secret · guard · sign · verify
   Run         run · kill · shim · workflow · gateway · mcp · try
   Inspect     doctor · report · optimize · proxy
 
-Integration contract — the fixed actions the graphical panel invokes.
+Integration contract (t3code) — fixed actions a graphical panel invokes.
 Not part of the everyday surface; each is digest-bound and previews before it writes.
 
   add-skill-to-profile   Add a skill to a toolset and activate it (panel action; digest-bound)
   add-server-to-profile  Add a server to a toolset and activate it (panel action; digest-bound)
   create-profile         Fixed-argv alias of \`agentstack toolset create\` (panel action)
+  set-gitignore          Record whether this project manages its .gitignore block (panel action; digest-bound)
+  set-mode               Switch this project's delivery mode (panel action; digest-bound)
+  edit-profile           Change one toolset's membership as a batch (panel action; digest-bound)
+  rename-profile         Fixed-argv alias of \`agentstack toolset rename\` (panel action)
+  delete-profile         Fixed-argv alias of \`agentstack toolset delete\` (panel action)
   use-profile            Activate an existing toolset (panel action; digest-bound)
   library-index          The central-library catalog (skills + servers) for the panel browser
-  remove-from-library    Remove a skill or server from the central library (panel action; digest-bound)`},
+  remove-from-library    Remove a skill or server from the central library (panel action; digest-bound)
+  remove-capability      Remove a skill or server from this project's manifest (panel action; digest-bound)`},
  mcp:{cmd:'agentstack mcp --help', cwd:'~/Documents/GitHub/agentstack',
   out:`Run agentstack as an MCP server over stdio (for an agent to call)
 
 Options:
       --auto-project        Discover the active project per session instead of pinning to the launch cwd.
                             Auto-discovered projects are trust-gated: an untrusted manifest exposes
-                            control-plane tools only.
+                            control-plane tools only. This is the flag \`agentstack gateway connect\` registers.
       --transparent         Advertise the proxied upstream tools in \`tools/list\` (policy-filtered,
-                            namespaced &lt;server&gt;__&lt;tool&gt;). Default is compact mode.`},
+                            namespaced &lt;server&gt;__&lt;tool&gt;). Default is compact mode: upstream tools are
+                            reached via \`tools_search\`/code mode, keeping the agent's tool context small.`},
  shim:{cmd:'agentstack shim make codex', cwd:'~/Documents/GitHub/agentstack', recon:true,
-  out:`Wrote ~/.agentstack/shims/codex
+  out:`Shim written: ~/.agentstack/shims/codex
+  wraps: /opt/homebrew/bin/codex
 
-Point the supervisor's binary-path setting at:
-  ~/.agentstack/shims/codex
+Point the supervisor's binary path at the shim — e.g. in t3code:
+  Settings → Providers → &lt;instance&gt; → Binary path → ~/.agentstack/shims/codex
 
-Each session it launches now mints a run id (AGENTSTACK_RUN_ID) and its own
-events.jsonl before exec'ing the real codex binary.`},
+Each session it starts then records per-run evidence; inspect with
+\`agentstack report runs\` / \`agentstack report run &lt;id&gt;\`.`},
  degraded:{cmd:'agentstack doctor', cwd:'~/Documents/GitHub/agentstack',
   out:`<span class="dm"># the panel negotiates per-contract, from the status envelope's feature list:</span>
   sessions        <span class="ok">✓</span>  session start/end offered
@@ -1387,7 +1575,7 @@ const SCEN = [
    contract:'no contracts negotiated — the status probe never answered',
    open:'The only way out is a code block. The host app already has its own settings and update paths; neither is wired to a button here.'}]},
 
-{id:'first-setup', group:'Getting started', name:'Set up a project, first time', tag:'2 STEPS', tone:'g',
+{id:'first-setup', group:'Getting started', name:'Set up a project, first time', tag:'3 STEPS', tone:'g',
  summary:'Import the coding tools already on this machine into one manifest every CLI renders from. The plan screen carries the digest, so there is no second confirm restating it.',
  steps:[
   {name:'Not set up', component:'NeedsSetup', ui:'popover', cli:'status', setup:s=>{s.setupState='needs_setup'},
@@ -1404,7 +1592,16 @@ const SCEN = [
          Y('The write is recorded, so it can be undone from the Setup tab.'),
          N('Setup does not write your CLIs’ native configs — that happens when you apply the setup to them.')],
    contract:'gated on plan_digest — absent, and setup from the panel is disabled',
-   advance:s=>!!s.setupAct}]},
+   advance:s=>!!s.setupAct},
+  {name:'Drop a file, say yes', component:'— CLI-first', ui:'popover', cli:'yes', fresh:true,
+   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.activeToolset='rust'},
+   how:[H('The funnel is CLI-first','Write a skill folder under <code>.agentstack/skills/</code> and run <code>agentstack yes</code>: noticed, pinned, reviewed on one card, live in every CLI — one confirmation. The panel has no button for this; its job is to reflect the result.'),
+        H('The short path has a boundary','Only content you demonstrably wrote here — untracked in git, or newer than the last review. Anything that arrived with a clone takes the full staged review that trust owns.','rgba(52,211,153,.5)')],
+   gtee:[Y('Until you answer, the dropped file is inert — nothing resolves, pins, renders, or reads it.'),
+         Y('The undo is named in the preview, before anything is written.'),
+         N('The panel does not yet surface the “dropped files waiting” state — status carries it, the glance does not.')],
+   contract:'CLI-only — no panel action; the glance reflects the resulting state',
+   open:'<code>agentstack status</code> prints a “Dropped · 1 file here, not in this setup” line the moment a file lands. The glance reads the same status envelope and could show the same fact — today you learn it from the terminal.'}]},
 
 {id:'ready', group:'Everyday', name:'Ready — the 9-in-10 state', tag:'GLANCE', tone:'g',
  summary:'One region: the toolset you are working under. The version number, trust pill, healthy-facts line, collapsed checkup, undo row and four nav links all left this surface — every one of them is a Manage click away.',
@@ -1497,12 +1694,13 @@ const SCEN = [
    open:'The confirm renders in a <b>drawer pinned to the bottom of the tab</b>, not beside the row. The code comment calls it “anchored under the thing it is about”, which is true of the tab and not of the row: in a 600px frame with the library scrolled, the row you clicked can be off-screen while you read a destructive confirm about it.'}]},
 
 {id:'undo', group:'Everyday', name:'Undo something', tag:'LEDGER', tone:'b',
- summary:'Every write is recorded before it lands. The panel offers the newest entry that touches this project — never a blind --last, which could revert a write from another repo.',
+ summary:'Every write is recorded before it lands. The panel offers the newest entry that touches this project, and <code>agentstack undo</code> shows the same record as a timeline — pick a point, revert to it, and the revert is itself recorded.',
  steps:[{name:'Undo last change', component:'UndoAffordance', ui:'manage:setup', cli:'restore',
    setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='setup';s.undo={phase:'ready'}},
-   how:[H('Scoped to this project','The ledger is machine-global, so the panel filters it. Offering --last from a project-scoped UI could revert something from a different repo entirely.'),
+   how:[H('Scoped to this project','The ledger is machine-global; the panel filters it, and the undo timeline is project-scoped the same way. A blind restore --last could revert a write from a different repo — neither surface offers it.'),
         H('Two clicks, never one','Reveal names the change; a second click arms it; a third runs it. The change is described before it is offered.','rgba(91,124,250,.5)')],
    gtee:[Y('Each verb reverses exactly one agentstack change — nothing here deletes your data.'),
+         Y('Going one step too far is recoverable — the revert is recorded like any other write.'),
          N('Side effects are not undone: a file a server deleted is not brought back.')],
    contract:'gated on canRestore — otherwise “Undo isn’t available on this agentstack CLI”'}]},
 
@@ -1578,14 +1776,22 @@ const SCEN = [
 
 {id:'protection', group:'Trust & safety', name:'Stronger modes, and sharing', tag:'READ-ONLY', tone:'n',
  summary:'Each layer says what it covers and what it costs — including where it stops. Sharing shares the tab and stays read-only on purpose.',
- steps:[{name:'Protection tab', component:'ProtectionPanel + SharePanel', ui:'manage:protection', cli:'protection',
+ steps:[
+  {name:'Protection tab', component:'ProtectionPanel', ui:'manage:protection', cli:'protection',
    setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='protection'},
-   how:[H('The labels are the integrity','“not kernel isolation”, “needs Docker”, “covers agent tool calls — not a sandbox”. This is the product refusing to oversell itself.','rgba(52,211,153,.5)'),
-        H('Sharing has no buttons','Sign, verify, lib sync and export need a key or a passphrase that must never enter a browser payload, so the panel shows the commands and stops there.','rgba(91,124,250,.5)')],
+   how:[H('The labels are the integrity','“not kernel isolation”, “needs Docker”, “covers agent tool calls — not a sandbox”. This is the product refusing to oversell itself.','rgba(52,211,153,.5)')],
    gtee:[Y('Under --sandbox --lockdown, network egress can only leave through the audited proxy.'),
-         Y('Only ' + REF + ' names travel when you share — values stay on each machine.'),
          N('A locked run does not confine a server that is already running: it pins content and records evidence.')],
-   contract:'read-only · every verb here belongs to the CLI'}]},
+   contract:'read-only · every verb here belongs to the CLI'},
+  {name:'Share it', component:'SharePanel', ui:'manage:protection', cli:'share',
+   setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='protection'},
+   how:[H('Sharing has no buttons','Sign, verify, lib sync and export need a key or a passphrase that must never enter a browser payload, so the panel shows the commands and stops there.','rgba(91,124,250,.5)'),
+        H('Sharing is signing','<code>agentstack share</code> bundles manifest, lock and pinned content and signs as part of sharing — an opt-in signature is one nobody opts into. The receiver reviews before anything activates; a recognized publisher shortens the card, never skips it.','rgba(52,211,153,.5)'),
+        H('A checkout is already a bundle','A teammate who clones the repo skips the file entirely: <code>agentstack up</code> detects their CLIs, verifies against the lock, renders, and names what is left — on a new machine, this machine’s secrets, held back whole until they resolve.')],
+   gtee:[Y('Only ' + REF + ' names travel when you share — values stay on each machine.'),
+         Y('A received bundle is staged inert and carded first, like every other intake path.'),
+         N('agentstack shares configuration, not trust in referenced code — the receiver still reviews.')],
+   contract:'read-only · share, receive and up belong to the CLI'}]},
 
 {id:'workflow', group:'Workflows', name:'Approve a blueprint, then watch it run', tag:'3 STEPS', tone:'g',
  summary:'The model proposes a shape, you approve it in the thread, the pinned bytes still get the normal trust review, and the live run is one click from the panel. The old Workflows nav row is gone — a live strip and a tab badge replaced it.',
@@ -1689,7 +1895,8 @@ const GUIDE = {
  'not-installed':[["Nothing here resolves it — read what the panel offers instead. **Check again** just re-polls.", 'recheck', "Re-checked, and still nothing: this state has no in-panel way out."]],
  'first-setup':[
    ["Click **Review setup** to see the plan.", 'open:setup', "The plan opened. Still nothing written — this is a preview."],
-   ["Pick where token values live, then **Set up this project**.", 'setup:apply', "The manifest was written. Your CLIs' own configs are still untouched."]],
+   ["Pick where token values live, then **Set up this project**.", 'setup:apply', "The manifest was written. Your CLIs' own configs are still untouched."],
+   ["Nothing to press — the funnel is the terminal's. The glance just shows the toolset the yes made live.", null, null]],
  'ready':[
    ["Nothing needs you — that is the whole glance. Click **Switch** to see the same toolset one tab over.", 'manage:toolsets', "Same toolset, same instant, different answer: the rail offers **Stop**, the glance did not."],
    ["`rust` is active but holds no session. Press **Stop** on it.", 'stop', "Nothing happened — there was no session to end. The rail offered a verb the state does not support."]],
@@ -1714,7 +1921,9 @@ const GUIDE = {
    ["Click **Enable guard** — this one confirms inline instead of opening a dialog.", 'concern', "The confirm appeared, naming its own undo."],
    ["**Run enable guard** writes the hook into every detected CLI.", 'act:run', "Guard on. The glance has no concern left — that was the last one."]],
  'denial':[["Nothing to click: the second button is disabled on purpose.", null, null]],
- 'protection':[["Read down the rows — each states its cost and where it stops.", null, null]],
+ 'protection':[
+   ["Read down the rows — each states its cost and where it stops.", null, null],
+   ["Nothing to press here either — the commands are the surface. The transcript shows both sides of the handoff.", null, null]],
  'workflow':[
    ["Approving sends a plain-text reply; it runs nothing.", null, null],
    ["Click **View agents →** on the live strip.", 'open:monitor', "The monitor opened — one click, no Workflows nav row."],
@@ -1751,7 +1960,8 @@ const HUMAN = {
    "AgentStack isn't on this machine, so nothing is watching your agents right now. The panel says so instead of quietly disappearing."]},
  'first-setup':{q:"How do I get started in this project?", plains:[
    "Your coding tools each keep their own setup. AgentStack can fold them into one — and shows you the plan before it writes anything.",
-   "One screen, one decision: where your tokens live. Everything else is a list you can open if you want it."]},
+   "One screen, one decision: where your tokens live. Everything else is a list you can open if you want it.",
+   "Wrote a skill yourself? Drop the folder in and say yes once — it goes live in every CLI, and the way back is named before anything is written."]},
  'ready':{q:"What is my agent working with right now?", plains:[
    "The name of the bundle of tools your agent has, and how to change it. That is the whole first page when nothing needs you.",
    "The same toolset, one tab over — and the rail offers a verb the state cannot honour. That is the bug this frame is here to show."]},
@@ -1767,7 +1977,7 @@ const HUMAN = {
    "This is your machine-wide library, not this project — so the button says so before you press it.",
    "When a toolset still uses it, the confirm says which one, and what will be left behind."]},
  'undo':{q:"How do I undo what AgentStack just did?", plains:[
-   "Everything it writes is recorded first. It offers the most recent change in this project — not a guess, and not somebody else's."]},
+   "Everything it writes is recorded first. The panel offers the most recent change in this project; the terminal shows the whole timeline and reverts to the point you pick."]},
  'trust':{q:"I cloned a repo — is it safe to open an agent here?", plains:[
    "A cloned repo can ask for tools of its own. Until you look at them, none of them run, connect, or see your tokens.",
    "This is the full list of what it wants, before you say yes.",
@@ -1781,7 +1991,8 @@ const HUMAN = {
  'denial':{q:"Why did my agent's command get blocked?", plains:[
    "It tried something destructive outside this project. You see what, which rule caught it, and what to do instead — with no damage done."]},
  'protection':{q:"How do I run something riskier more safely?", plains:[
-   "Four levels, each honest about where it stops. “Not kernel isolation” means exactly that."]},
+   "Four levels, each honest about where it stops. “Not kernel isolation” means exactly that.",
+   "Hand your setup to a teammate as one signed file — or let them clone the repo and run one command. Tokens never travel; each machine supplies its own."]},
  'workflow':{q:"How do I run and watch a multi-agent job?", plains:[
    "The model proposes the shape of the run and you approve it in the chat. That click executes nothing.",
    "Once it starts, one line tells you it is live and offers the way in.",
@@ -1970,7 +2181,7 @@ function renderGuided(){
       title="Drag to resize · double-click to reset · ← → when focused"></div>`:''}
     ${showCli?`<div class="clicol">
       <div class="colhead"><span class="k">THE SAME THING IN THE CLI</span>
-        <span class="c">${c.recon?'<span class="badge a" title="A write command — not executed during the review; output read from the source instead.">reconstructed</span>':'<span class="badge g" title="Captured from ./target/release/agentstack 0.16.0">captured</span>'}</span></div>
+        <span class="c">${c.recon?'<span class="badge a" title="A write command — not executed during the review; output read from the source instead.">reconstructed</span>':'<span class="badge g" title="Captured from ./target/release/agentstack 0.18.0-rc.2">captured</span>'}</span></div>
       <div class="cliscroll" tabindex="0" role="region" aria-label="Command transcript">
         <div class="term-wrap">
           <div class="term-top"><i style="background:#F87171"></i><i style="background:#FBBF24"></i><i style="background:#34D399"></i>
