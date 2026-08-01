@@ -65,6 +65,7 @@ fn run() -> Result<()> {
         Command::Add(args) => commands::add::run(args, dir),
         Command::Set(args) => commands::add::run_set(args, dir),
         Command::Install(args) => commands::install::run(args, dir),
+        Command::Up(args) => commands::up::run(args, dir),
         Command::Lock(args) => commands::lock::dispatch(args, dir),
         Command::Try(args) => commands::try_skill::run(args),
         Command::Remove(args) => commands::remove::run(args, dir),

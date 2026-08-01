@@ -93,6 +93,15 @@ pub enum Command {
     /// manifest, naming `apply --write` as the next step.
     Init(InitArgs),
 
+    /// Set this machine up from a setup that already exists: one command.
+    ///
+    /// For a fresh machine holding a checkout. Finds the CLIs you have,
+    /// verifies the environment against `agentstack.lock`, renders each CLI's
+    /// config, and names what is left — which on a new machine is this
+    /// machine's secrets. `init` is for a setup that does not exist yet; this
+    /// is for one that does.
+    Up(UpArgs),
+
     /// Status: where this project stands, on one screen, and the one next step.
     ///
     /// The same orientation bare `agentstack` prints — reachable by name so
@@ -1290,6 +1299,21 @@ pub struct InstallArgs {
     /// (hidden Unicode). Findings still print as warnings.
     #[arg(long)]
     pub allow_flagged: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct UpArgs {
+    /// Only render these CLIs (default: every detected one).
+    #[arg(long)]
+    pub targets: Vec<String>,
+
+    /// Materialize this toolset rather than the active one.
+    #[arg(long)]
+    pub profile: Option<String>,
+
+    /// Do not maintain the managed `.gitignore` block.
+    #[arg(long)]
+    pub no_gitignore: bool,
 }
 
 #[derive(Args, Debug)]

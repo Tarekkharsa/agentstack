@@ -33,10 +33,16 @@ fn status_parses_and_help_maps_every_command() {
     assert_eq!(
         visible,
         [
-            "init", "status", "add", "search", "apply", "doctor", "toolset", "use", "yes", "run",
-            "trust", "restore", "undo", "adopt"
+            "init", "up", "status", "add", "search", "apply", "doctor", "toolset", "use", "yes",
+            "run", "trust", "restore", "undo", "adopt"
         ],
         "the visible list is the beginner loop, in task order — `workflow` stays \
+         reachable but out of it until the repeated-use gate closes. `up` is \
+         visible, and sits next to `init`, because the two are the same moment \
+         asked from opposite directions: `init` is for a setup that does not \
+         exist yet, `up` is for one that does and a machine that has not caught \
+         up. A user on a fresh laptop who cannot find `up` runs `init` instead \
+         and starts inventing a second setup beside the one they already have. \
          reachable but out of it until the repeated-use gate closes. `undo` is \
          visible because Undo is one of the four ideas and the one a person \
          reaches for while something is already wrong — it must be findable \
