@@ -168,8 +168,24 @@ pub(crate) fn next_step(
     trust_relevant: bool,
     no_toolsets: bool,
     unimported_native: bool,
+    undeclared_drops: bool,
 ) -> (&'static str, &'static str) {
     use crate::trust::TrustState;
+    // A dropped-but-undeclared file outranks everything except a pending
+    // re-review: the drop is the newest thing the user did, and `agentstack
+    // yes` is the one verb built for it. Until this branch existed, `yes` was
+    // orphaned — every detection surface routed drops to `adopt` or `trust .`
+    // and the funnel was unreachable without reading the docs. Routing here
+    // skips no review: `yes` holds clone-supplied content and collisions on
+    // its preview and names the explicit path for them. It does NOT outrank
+    // `TrustState::Changed` — content the user already approved has drifted,
+    // and that re-review keeps the headline; the drop is offered next.
+    if undeclared_drops && trust != TrustState::Changed {
+        return (
+            "agentstack yes",
+            "dropped files are waiting — review them and take them live",
+        );
+    }
     match trust {
         TrustState::Untrusted if trust_relevant => {
             ("agentstack trust .", "review it to unlock its servers")
@@ -634,9 +650,13 @@ fn print_intake_line(items: &[crate::intake::Item]) {
         super::count(items.len(), "file"),
         names.dimmed()
     );
+    // `yes` is the funnel built for exactly this moment. It is also the safe
+    // router for content that may NOT take the short path: clone-supplied
+    // drops and collisions are held on its preview with the reason and the
+    // explicit-path commands, so naming `yes` here never skips a review.
     println!(
         "            {}",
-        "`agentstack adopt` reviews and adds them".dimmed()
+        "`agentstack yes` reviews them and takes them live".dimmed()
     );
 }
 
@@ -756,6 +776,11 @@ fn collect(manifest_dir: Option<&Path>, with_secrets: bool) -> Result<Orientatio
     let unimported = native.iter().any(|n| !n.unimported.is_empty());
     let any_detected = !detected_clis.is_empty();
 
+    // Scanned before the next step is chosen: a dropped file changes what the
+    // one next action is (`agentstack yes`), so the routing has to know.
+    let intake = crate::intake::scan(&ctx.dir, &project_root, m).items;
+    let undeclared_drops = !intake.is_empty();
+
     let fallback = next_step(
         trust,
         rendered,
@@ -763,6 +788,7 @@ fn collect(manifest_dir: Option<&Path>, with_secrets: bool) -> Result<Orientatio
         trust_relevant,
         m.profiles.is_empty(),
         unimported,
+        undeclared_drops,
     );
     let profile = if m.profiles.len() == 1 {
         m.profiles
@@ -773,14 +799,18 @@ fn collect(manifest_dir: Option<&Path>, with_secrets: bool) -> Result<Orientatio
     } else {
         "<toolset>"
     };
+    // A waiting drop also outranks the clean-at-rest session rhythm: starting
+    // a session materializes only what is declared, so it would deliver
+    // everything EXCEPT the file the user just dropped.
     let next = clean_at_rest_next_step(mode, trust, locked, active_session.is_some(), profile)
+        .filter(|_| !undeclared_drops)
         .unwrap_or_else(|| (fallback.0.to_string(), fallback.1));
 
     Ok(Orientation {
         catalog_size: ctx.registry.ids().count(),
         detected_clis,
         native,
-        intake: crate::intake::scan(&ctx.dir, &project_root, m).items,
+        intake,
         manifest_path,
         manifest: ManifestState::Loaded(Box::new(ProjectFacts {
             servers: m.servers.len(),
@@ -1061,15 +1091,33 @@ mod tests {
         // Trust-relevant (bridge registered / gate-dependent mode): untrusted
         // and stale both send the human to `trust .`, whatever is rendered.
         assert_eq!(
-            next_step(TrustState::Untrusted, false, true, true, false, false).0,
+            next_step(
+                TrustState::Untrusted,
+                false,
+                true,
+                true,
+                false,
+                false,
+                false
+            )
+            .0,
             "agentstack trust ."
         );
         assert_eq!(
-            next_step(TrustState::Untrusted, true, false, true, false, false).0,
+            next_step(
+                TrustState::Untrusted,
+                true,
+                false,
+                true,
+                false,
+                false,
+                false
+            )
+            .0,
             "agentstack trust ."
         );
         assert_eq!(
-            next_step(TrustState::Changed, true, true, true, false, false).0,
+            next_step(TrustState::Changed, true, true, true, false, false, false).0,
             "agentstack trust ."
         );
 
@@ -1078,11 +1126,29 @@ mod tests {
         // Declared but unrendered → `apply --write`; rendered (or empty) →
         // `doctor`. This is the fix for the never-converging trust nag.
         assert_eq!(
-            next_step(TrustState::Untrusted, false, true, false, false, false).0,
+            next_step(
+                TrustState::Untrusted,
+                false,
+                true,
+                false,
+                false,
+                false,
+                false
+            )
+            .0,
             "agentstack apply --write"
         );
         assert_eq!(
-            next_step(TrustState::Untrusted, true, false, false, false, false).0,
+            next_step(
+                TrustState::Untrusted,
+                true,
+                false,
+                false,
+                false,
+                false,
+                false
+            )
+            .0,
             "agentstack doctor"
         );
 
@@ -1091,25 +1157,34 @@ mod tests {
         // changed, `status` is already reporting it, and sending them to
         // `doctor` first made the cue cost two commands instead of one.
         assert_eq!(
-            next_step(TrustState::Changed, true, true, false, false, false).0,
+            next_step(TrustState::Changed, true, true, false, false, false, false).0,
             "agentstack trust ."
         );
         assert_eq!(
-            next_step(TrustState::Changed, false, false, false, false, false).0,
+            next_step(
+                TrustState::Changed,
+                false,
+                false,
+                false,
+                false,
+                false,
+                false
+            )
+            .0,
             "agentstack trust ."
         );
 
         // The wiring is done and nothing is grouped yet → the next rung is
         // Switch, named as a runnable command. `doctor` here was a dead end: a
         // user who ran it clean was offered it again (pilot Run A).
-        let (cmd, _) = next_step(TrustState::Trusted, true, true, false, true, false);
+        let (cmd, _) = next_step(TrustState::Trusted, true, true, false, true, false, false);
         assert_eq!(cmd, "agentstack toolset create <name> --server <server>");
 
         // Servers configured here that the manifest doesn't cover outrank both
         // — rendering a manifest that omits half the setup is not the step
         // that helps.
         assert_eq!(
-            next_step(TrustState::Trusted, false, true, false, false, true).0,
+            next_step(TrustState::Trusted, false, true, false, false, true, false).0,
             "agentstack adopt"
         );
 
@@ -1117,18 +1192,90 @@ mod tests {
         // ladder applies either way.
         for relevant in [true, false] {
             assert_eq!(
-                next_step(TrustState::Trusted, false, true, relevant, false, false).0,
+                next_step(
+                    TrustState::Trusted,
+                    false,
+                    true,
+                    relevant,
+                    false,
+                    false,
+                    false
+                )
+                .0,
                 "agentstack apply --write"
             );
             assert_eq!(
-                next_step(TrustState::Trusted, true, false, relevant, false, false).0,
+                next_step(
+                    TrustState::Trusted,
+                    true,
+                    false,
+                    relevant,
+                    false,
+                    false,
+                    false
+                )
+                .0,
                 "agentstack doctor"
             );
             assert_eq!(
-                next_step(TrustState::Trusted, false, false, relevant, false, false).0,
+                next_step(
+                    TrustState::Trusted,
+                    false,
+                    false,
+                    relevant,
+                    false,
+                    false,
+                    false
+                )
+                .0,
                 "agentstack doctor"
             );
         }
+    }
+
+    /// F9 witness (FINDINGS.md, rc.1 review): a dropped-but-undeclared file
+    /// must route the one next action to `agentstack yes` — the funnel's
+    /// activation verb — not to `adopt` or `trust .`. Before this, `yes`
+    /// appeared on no detection surface at all: a participant who dropped a
+    /// file was told to `trust .` a project with zero servers, and the funnel
+    /// the study exists to measure was unreachable. The one state that still
+    /// outranks a drop is trust-stale: content the user already approved has
+    /// changed, and that re-review keeps the headline.
+    #[test]
+    fn a_waiting_drop_routes_to_yes() {
+        use crate::trust::TrustState;
+        // Every non-stale combination of the other signals: the drop wins —
+        // including over unimported native servers and the trust unlock.
+        for trust in [TrustState::Trusted, TrustState::Untrusted] {
+            for rendered in [true, false] {
+                for has_capabilities in [true, false] {
+                    for trust_relevant in [true, false] {
+                        for unimported in [true, false] {
+                            let (cmd, _) = next_step(
+                                trust,
+                                rendered,
+                                has_capabilities,
+                                trust_relevant,
+                                false,
+                                unimported,
+                                true,
+                            );
+                            assert_eq!(
+                                cmd, "agentstack yes",
+                                "a waiting drop must route to the funnel \
+                                 (trust={trust:?} rendered={rendered} caps={has_capabilities} \
+                                 relevant={trust_relevant} unimported={unimported})"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        // Trust-stale keeps the headline; the drop is offered after re-review.
+        assert_eq!(
+            next_step(TrustState::Changed, true, true, false, false, false, true).0,
+            "agentstack trust ."
+        );
     }
 
     /// F02 regression: the recommended next step must never be a command that
@@ -1148,20 +1295,23 @@ mod tests {
             for rendered in [true, false] {
                 for has_capabilities in [true, false] {
                     for trust_relevant in [true, false] {
-                        let (cmd, why) = next_step(
-                            trust,
-                            rendered,
-                            has_capabilities,
-                            trust_relevant,
-                            false,
-                            false,
-                        );
-                        assert!(
-                            !cmd.contains("init"),
-                            "a loaded manifest must never be sent back to init \
-                             (trust={trust:?} rendered={rendered} caps={has_capabilities} \
-                             relevant={trust_relevant}) → {cmd} / {why}"
-                        );
+                        for drops in [true, false] {
+                            let (cmd, why) = next_step(
+                                trust,
+                                rendered,
+                                has_capabilities,
+                                trust_relevant,
+                                false,
+                                false,
+                                drops,
+                            );
+                            assert!(
+                                !cmd.contains("init"),
+                                "a loaded manifest must never be sent back to init \
+                                 (trust={trust:?} rendered={rendered} caps={has_capabilities} \
+                                 relevant={trust_relevant} drops={drops}) → {cmd} / {why}"
+                            );
+                        }
                     }
                 }
             }
@@ -1171,7 +1321,16 @@ mod tests {
         // holding capabilities that are already on disk is set up — verify it,
         // don't re-import it.
         assert_eq!(
-            next_step(TrustState::Untrusted, true, true, false, false, false).0,
+            next_step(
+                TrustState::Untrusted,
+                true,
+                true,
+                false,
+                false,
+                false,
+                false
+            )
+            .0,
             "agentstack doctor"
         );
     }

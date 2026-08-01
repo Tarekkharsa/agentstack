@@ -623,7 +623,7 @@ pub fn notice(found: &Found) -> Option<String> {
         names.join(", ")
     };
     Some(format!(
-        "{} not in your setup yet ({listed}) — `agentstack adopt` to review and add",
+        "{} not in your setup yet ({listed}) — `agentstack yes` to review and take live",
         super::commands::count(items.len(), "dropped file"),
     ))
 }

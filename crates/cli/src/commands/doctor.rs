@@ -1027,7 +1027,7 @@ fn run_checks(
         report.line(
             Level::Advisory,
             format!(
-                "{} '{}' is in {} but not in this setup — inert until adopted ↳ agentstack adopt",
+                "{} '{}' is in {} but not in this setup — inert until you take it live ↳ agentstack yes",
                 item.kind.noun(),
                 item.name,
                 item.rel_path,

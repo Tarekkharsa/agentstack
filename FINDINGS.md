@@ -102,6 +102,16 @@ separate item.
 - **Fix shape:** consult standing decisions at every load/grant seam (MCP catalog, MCP load, locked exec), not just `use`; add witnesses on each path.
 
 ## F9 — `agentstack yes` is orphaned from every surface that detects a dropped file (study-validity blocker)
+- **Status: ✅ FIXED** 2026-08-01 (`fix/f9-yes-reachability`). All four detection
+  surfaces now route drops to `agentstack yes`: `next_step` (new
+  `undeclared_drops` input, outranking everything except a `Changed` re-review
+  and the clean-at-rest session rhythm), the orientation `Dropped` pointer,
+  doctor's per-item advisory, and the `use`/`lock` in-passing notice
+  (`intake::notice`). The JSON `next_action` inherits it. Witnesses tamper the
+  field that moved — the recommended *command*: unit
+  (`a_waiting_drop_routes_to_yes`, all signal combinations) + end-to-end
+  against the real binary (`a_drop_routes_status_and_doctor_to_yes` in
+  `intake_funnel.rs`, asserting the `Next:` headline and each pointer).
 - **Confidence:** HIGH (UX, verified live) — **not a security bug, but the single most important item for study validity.**
 - **Rule:** the study measures whether five strangers reach the funnel; it must be reachable.
 - **Location:** `yes` appears outside its own module only at `cli.rs:55`. Detection surfaces route elsewhere: `overview.rs:639` → `agentstack adopt`; `doctor.rs:1030` → `↳ agentstack adopt`; `next_step` can never return `agentstack yes`; the one-next-action after a drop is `agentstack trust .` "to unlock its servers" on a project with **0 servers**.

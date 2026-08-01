@@ -520,3 +520,72 @@ fn adopt_declares_the_dropped_file_and_nothing_more() {
         "declared content is not offered again"
     );
 }
+
+/// F9 witness (FINDINGS.md, rc.1 review) — `agentstack yes` is reachable from
+/// every surface that detects a drop.
+///
+/// The funnel existed but was orphaned: after a drop, `status` pointed at
+/// `trust .` ("to unlock its servers", on a project with zero servers) and the
+/// intake lines pointed at `adopt` — a participant following the product's own
+/// advice could never find the verb the study measures. This tampers with the
+/// field that actually moved (the recommended COMMAND, not the detection),
+/// asserting each surface names `agentstack yes` and that the one-next-action
+/// headline is no longer the dead end it was verified to be live.
+#[test]
+fn a_drop_routes_status_and_doctor_to_yes() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    isolate_home(tmp.path());
+    let proj = project(tmp.path());
+    drop_skill(
+        &proj,
+        "dropped",
+        "---\ndescription: Waiting\n---\n# Dropped\n",
+    );
+
+    let run = |args: &[&str]| -> String {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_agentstack"))
+            .args(args)
+            .current_dir(&proj)
+            .env_clear()
+            .env("HOME", std::env::var("HOME").unwrap())
+            .env("AGENTSTACK_HOME", std::env::var("AGENTSTACK_HOME").unwrap())
+            .env("PATH", "/usr/bin:/bin")
+            .output()
+            .unwrap();
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        )
+    };
+
+    // `status`: both the intake line's pointer and the Next headline.
+    let status = run(&["status"]);
+    let next = status
+        .lines()
+        .find(|l| l.contains("Next:"))
+        .unwrap_or_else(|| panic!("status prints a Next line:\n{status}"));
+    assert!(
+        next.contains("agentstack yes"),
+        "the one next action after a drop is the funnel, got:\n{next}\n\nfull output:\n{status}"
+    );
+    assert!(
+        status.contains("`agentstack yes` reviews them and takes them live"),
+        "the Dropped line names the funnel:\n{status}"
+    );
+
+    // `doctor`: the per-item advisory's command slot.
+    let doctor = run(&["doctor"]);
+    assert!(
+        doctor.contains("\u{21b3} agentstack yes"),
+        "doctor's dropped-file advisory routes to the funnel:\n{doctor}"
+    );
+
+    // `lock`: the in-passing notice (the renderer `use` shares).
+    let lock = run(&["lock"]);
+    assert!(
+        lock.contains("`agentstack yes` to review and take live"),
+        "the lock/use notice routes to the funnel:\n{lock}"
+    );
+}
