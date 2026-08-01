@@ -1639,6 +1639,8 @@ mod tests {
             git: None,
             rev: None,
             checksum: Sha256Hex::of(b"beef"),
+            license: None,
+            origin: None,
         });
         lock.save(proj.path()).unwrap();
 

@@ -1712,6 +1712,8 @@ mod tests {
             git: None,
             rev: None,
             checksum: Sha256Hex::parse(&resolved.checksum).unwrap(),
+            license: None,
+            origin: None,
         });
 
         let report = skill_lock_status(
@@ -1745,6 +1747,8 @@ mod tests {
             git: None,
             rev: None,
             checksum: Sha256Hex::of(b"staledigest"),
+            license: None,
+            origin: None,
         });
         lib_home
             .child("skills/sql-review/SKILL.md")

@@ -828,6 +828,8 @@ mod tests {
                     git: None,
                     rev: None,
                     checksum: pin,
+                    license: None,
+                    origin: None,
                 }],
                 servers: Vec::new(),
                 instructions: Vec::new(),

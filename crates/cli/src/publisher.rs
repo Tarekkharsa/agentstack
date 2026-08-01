@@ -289,7 +289,7 @@ mod tests {
         let (key, sig) = agentstack_trust::sign::sign(&[2u8; 32], b"bytes");
         // Verified but unrecognized: correct signature, unknown publisher.
         let p = Provenance::Verified {
-            key,
+            key: key.clone(),
             known: None,
         };
         assert!(

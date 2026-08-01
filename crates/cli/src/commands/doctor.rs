@@ -4358,6 +4358,16 @@ mod tests {
     /// still means something and survives.
     #[test]
     fn tidy_path_folds_and_abbreviates() {
+        // The `$HOME` leg below reads a process-global that other tests in this
+        // binary mutate, so it has to hold the same lock they do. Without it
+        // this passes or fails on scheduling: it was green for as long as
+        // nothing happened to run beside it, and adding unrelated tests
+        // elsewhere in the crate was enough to make it flake. A test whose
+        // result depends on how many other tests exist is not testing what it
+        // claims to.
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         assert_eq!(
             tidy_path(Path::new("/srv/proj/../home/.claude.json")),
             "/srv/home/.claude.json"
