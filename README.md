@@ -145,12 +145,12 @@ governance only when you need them:
 
 | Step | You run | You get |
 | --- | --- | --- |
-| [1 — Unify](https://tarekkharsa.github.io/agentstack/start.html) | `agentstack init` → `apply` | one manifest rendered correctly for every CLI |
-| 2 — Switch | toolsets · `session start/end` | task-specific toolsets without permanent config pollution |
-| [3 — Diagnose](https://tarekkharsa.github.io/agentstack/start.html#s-verify) | `agentstack doctor` · `diff` | drift explained before anything changes |
-| [4 — Recover](https://tarekkharsa.github.io/agentstack/howto/undo.html) | `adopt` · `apply` · `restore` · `uninstall` | keep intentional edits, reconcile output, undo one change — or take all of it back off |
-| [5 — Share](https://tarekkharsa.github.io/agentstack/howto/team-setup.html) | manifest · lock · library | reproducible setups across projects, machines, and teammates |
-| [6 — Govern](https://tarekkharsa.github.io/agentstack/howto/trust-a-repo.html) | trust · policy · lockdown | reviewed activation and stronger enforced execution when needed |
+| [1 — Unify](https://tarekkharsa.github.io/agentstack/start.html) | `agentstack init` → `apply` | import once, render everywhere |
+| 2 — Switch | toolsets · `session start/end` | toolsets and temporary sessions |
+| [3 — Diagnose](https://tarekkharsa.github.io/agentstack/start.html#s-verify) | `agentstack doctor` · `diff` | doctor and diff explain drift |
+| [4 — Recover](https://tarekkharsa.github.io/agentstack/howto/undo.html) | `adopt` · `apply` · `restore` · `uninstall` | keep an edit, or undo the write |
+| [5 — Share](https://tarekkharsa.github.io/agentstack/howto/team-setup.html) | manifest · lock · library | locked, secret-free setups |
+| [6 — Govern](https://tarekkharsa.github.io/agentstack/howto/trust-a-repo.html) | trust · policy · lockdown | trust, policy, confined runs |
 
 ## Documentation
 

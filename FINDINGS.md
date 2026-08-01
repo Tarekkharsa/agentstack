@@ -241,41 +241,97 @@ separate item.
 # CONFORMANCE / LEDGER — the map lagging the territory (doc fixes, not code)
 
 ## F23 — Two phase gates in STRATEGY.md still demand tester evidence that never existed
+- **Status: ✅ FIXED** 2026-08-01 — both remaining gates amended in place with
+  strikethrough in the 9ddb0ca style (Phase 2→3 loses the comprehension metric,
+  Phase 3→4 loses "testers describe a blocked action"), and the Phase 0→1 gate
+  now carries an explicit statement that the 2026-07-31 amendment is **blanket**
+  over every inter-phase gate; `TODO.md`'s verbatim restatement of the Phase-3
+  gate was amended to match.
 - **Confidence:** HIGH (CONF D1)
 - The 9ddb0ca amendment rewrote the Phase 0→1 and 1→2 gates in place (with strikethrough) but left Phase 2→3 (`STRATEGY.md:308-310`) and Phase 3→4 (`:342-344`) requiring "testers describe a blocked action correctly" — no tester ran, yet Phase 3 and 4 are marked complete. `TODO.md:208-210` restates the Phase-3 gate verbatim.
 - **Fix shape:** amend the two remaining gates the same way the first two were, or state once that the blanket 2026-07-31 amendment covers all inter-phase gates.
 
 ## F24 — Phase 4 "trigger discipline" contradiction
+- **Status: ✅ FIXED** 2026-08-01 — `STRATEGY.md`'s "Trigger discipline" bullet
+  now strikes "starts on *user demand*" and records that the maintainer's
+  finish-v2 directive was the actual trigger, pointing at the existing argument
+  in `TODO.md`'s Phase 4 block; that block now points back, so the two agree.
 - **Confidence:** HIGH (CONF D2)
 - `STRATEGY.md:369-373` still says external intake "starts on user demand"; it shipped (de5c37d) with zero external users. The deviation is argued only at `TODO.md:347-353`.
 - **Fix shape:** update the operative doc to record that the maintainer's finish-v2 directive is the trigger, or mark the sentence amended.
 
 ## F25 — `trust-review-card-v1` means two different payloads in two active docs
+- **Status: ✅ FIXED** 2026-08-01 (doc only; `ui_contract.rs` untouched) — the
+  shipped meaning wins: `docs/design/consent-card.md` §Panel no longer proposes
+  the name for its unbuilt structured `ConsentCard` payload, carries a naming
+  correction quoting what the binary actually advertises, renames the unbuilt
+  payload to the working name `trust-card-diff-v1` (not `-v2`, which would
+  falsely imply a migration path), and the doc's Status block now names
+  `ui_contract.rs` as the single source of truth for feature strings.
 - **Confidence:** HIGH (CONF D6) — the one deviation with an external consumer (the fork) on the other end.
 - `docs/design/consent-card.md:322-330` (Status: Active) reserves the name for an unbuilt structured `ConsentCard` payload; `ui_contract.rs:32-36` ships it meaning something narrower (`trust --preview` extra fields). A fork built from the design doc would target a payload that does not exist.
 - **Fix shape:** pick one meaning; version the other (`trust-review-card-v2` or a distinct name); reconcile the design doc's Status.
 
 ## F26 — §9.3 entry resurrects a discharged blocker
+- **Status: ✅ FIXED** 2026-08-01 — the stale precondition is struck. There is
+  no second §9.3 re-run: the loader landed (`b05fd26`) and §9.3 was discharged
+  2026-07-23 with zero blocking findings. The entry now names what is actually
+  open on that track — the five codex promotion findings (a)–(e) from the
+  2026-07-29 cross-model pass and the remaining recurring-task occasions, both
+  already listed under "Experimental workflows".
 - **Confidence:** HIGH (CONF D3)
 - `TODO.md:436` (added today, a5fca35) says the §9.3 re-run "is still blocked on the import-denying module loader", but `TODO.md:586,592,933` record that loader landed (b05fd26) and the §9.3 review was discharged 2026-07-23.
 - **Fix shape:** strike the stale precondition, or, if a second distinct re-run exists, write its actual precondition.
 
 ## F27 — Two panel workstream halves dropped without a deferral entry
+- **Status: ✅ FIXED** 2026-08-01 — `TODO.md`'s fork ledger (Phase 4 block,
+  carried-forward item 3) is now a two-part list: the two rendering contracts it
+  already covered, plus the two dropped halves by name — **panel-open as an
+  intake touchpoint** and **the panel speaking the four ideas** — each stating
+  that it is unbuilt and why it does not gate §1.6. Both `STRATEGY.md` sites
+  (Phase 1 intake detection, Phase 3 vocabulary completion) now strike the panel
+  and point at the ledger.
 - **Confidence:** HIGH (CONF D4)
 - `STRATEGY.md:237` ("panel open" as an intake touchpoint) and `:325` ("panel speaks the four ideas") are neither built nor in any deferral list. `panel_open`/`PanelOpen` appears nowhere in `crates/cli/src`. The fork ledger (`TODO.md:429-434`) covers only the two rendering contracts.
 - **Fix shape:** add both to the fork/deferral ledger by name.
 
 ## F28 — Ledger inconsistencies in TODO.md (checked vs unchecked, dual-status sections)
+- **Status: ✅ FIXED** 2026-08-01 — four reconciliations. (a) P0.2 checked off,
+  matching its own body. (b) P3.7/P3.8: **the Phase-4 `[x]` marks are the
+  truth** — `readiness`/`status-honesty-v1` and `RunEvent::PinRejected` are
+  present in the shipped code, so the two standing sections became closed
+  records pointing at the Phase 4 entries, with F11 named as a *new* finding
+  against the shipped `readiness` (a missing coverage term) rather than a
+  reopening of P3.7. (c) `STRATEGY.md` now names the shipped touchpoint set
+  `{status, doctor, use, lock, adopt}` and moves panel-open to the deferral
+  ledger (F27). (d) "recognition" split into **content-digest recognition**
+  (P2.C — shortens the trust card's body) and **publisher-key recognition**
+  (Phase 4 share — changes the receive card's words, does not shrink it), with
+  the distinction stated at all four sites so the two claims stop reading as a
+  contradiction.
 - **Confidence:** HIGH (CONF D8/D9/D5/D10)
 - P0.2 unchecked (`TODO.md:80`) while its body + `:64-69` + the amended gate say it shipped. P3.7/P3.8 stand as open sections (`:297-338`) while the Phase 4 block marks them `[x]` (`:355-374`). Intake touchpoint set drift: shipped `{status,doctor,use,lock,adopt}` vs strategy `{doctor,use,lock,panel open}`. "Recognition" names two mechanisms with opposite "card shrinks / does not shrink" claims (`:174-176` vs `:411-412`).
 - **Fix shape:** reconcile each to one state; disambiguate "recognition" (content-digest vs publisher-key) with distinct nouns.
 
 ## F29 — Six-rung ladder is byte-identical in README only; cross-surface consistency is broken again
+- **Status: ✅ FIXED** 2026-08-01 — one gloss set across all four surfaces
+  (*import once, render everywhere · toolsets and temporary sessions · doctor
+  and diff explain drift · keep an edit, or undo the write · locked,
+  secret-free setups · trust, policy, confined runs*), taken from the pair that
+  already agreed (`docs/start.html`, `docs/tutorial/index.html`) and applied to
+  `README.md`'s ladder table and `docs/index.html`'s "Climb in six steps" cards.
+  The stale `Unify · Verify · Guard · Trust · Scale · Confine` teaser box in the
+  tutorial's lesson 1 is **deleted** — it was fully redundant with the canonical
+  ladder in lesson 2. Those three pages are hand-authored HTML with no `.md`
+  twin (the builder does not emit them); `make-docs-pages.py` was re-run and
+  `check-docs-site.py` passes.
 - **Confidence:** HIGH (UX vs CONF, reconciled)
 - CONF is right that `README.md:148-153` rungs are byte-identical across the arc (fb4cc8c's narrow claim holds). UX is right that the *glosses* differ across `README.md`, `docs/index.html:185-205`, `docs/start.html:263-269`, and worse, `docs/tutorial/index.html:163-168` still shows the **old** ladder `Unify · Verify · Guard · Trust · Scale · Confine` two sections from the canonical one — the five-ladders regression `[[one-ladder-onboarding]]` fixed once already.
 - **Fix shape:** re-run the one-ladder pass across all four surfaces; delete the stale tutorial ladder. This is a docs-site source edit → regenerate with `python3 tools/make-docs-pages.py` and verify with `check-docs-site.py`.
 
 ## F30 — Wording drift: `STRATEGY.md:8` "Current as of 0.17.x" vs `Cargo.toml` 0.18.0-rc.1
+- **Status: ✅ FIXED** 2026-08-01 — `STRATEGY.md`'s header now reads "Current as
+  of: AgentStack 0.18.0-rc.1", matching `crates/cli/Cargo.toml`.
 - **Confidence:** LOW (CONF D11, known/benign) — fix opportunistically.
 
 ---
@@ -318,7 +374,8 @@ Verified sound and witnessed; keep these intact while fixing the above.
 3. **Enforcement universality:** F7, F8 — the two single-path/decision breaches (invariant-6 class → line-by-line review).
 4. **Phase-4 intake hardening:** F1, F2, F3, F14, F16, F17, F13, F15, F18 — the "from anywhere" surface, treated as one hostile-input pass with the type-level lens from the top of this doc.
 5. **Honest surfaces:** F10, F11, F12, F19, F20, F21, F22.
-6. **Doc/ledger reconciliation:** F23–F30 (no code; fastest, do alongside).
+6. ~~**Doc/ledger reconciliation:** F23–F30 (no code; fastest, do alongside).~~
+   **Done 2026-08-01** — all eight fixed, doc-only, no `.rs` file touched.
 7. **Nits:** opportunistic.
 
 Re-cut `v0.18.0-rc.2` only after the BLOCKING set (F1–F11) is fixed and each carries a witness that tampers with the field that actually moved.

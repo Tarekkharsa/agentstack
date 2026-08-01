@@ -77,7 +77,7 @@ release gate.
   observation only — the F19 constraint applies unchanged. (2026-07-31:
   additions-only in `docs/design/activation-study.md` §5 + new §9; protocol
   and pass condition byte-identical.)
-- [ ] **P0.2 — trust-store mutation recording.** Grants, re-grants, and
+- [x] **P0.2 — trust-store mutation recording.** Grants, re-grants, and
   revocations become recorder events (the planned mitigation already named in
   `docs/ENFORCEMENT.md`). Adds events, never gates. Touches the trust seam:
   supervised, line-by-line review per `CLAUDE.md`. (2026-07-31: merged to
@@ -171,9 +171,14 @@ of identical content is cheaper without being weaker. Contract:
   behind one commit point; blocked exclusion at delivery with a standing status
   line; the collision refusal upgraded to the informed card; instruction
   deposits and their diff card; regrant event parity.
-- [x] **P2.C — recognition.** Machine-local approvals index keyed by content
-  digest. Shortens the card's body and nothing else — witnessed
-  outcome-invariant, event-invariant, and content-free.
+- [x] **P2.C — content-digest recognition.** Machine-local approvals index
+  keyed by content digest. Shortens the card's body and nothing else —
+  witnessed outcome-invariant, event-invariant, and content-free. **Distinct
+  mechanism from *publisher-key recognition* in Phase 4's share flow**, which
+  does *not* shrink the card; the two were one word for a while and the claims
+  read as contradictory. Content-digest recognition = "I have approved these
+  exact bytes before" → fewer lines. Publisher-key recognition = "this bundle
+  is signed by a key I know" → different words about provenance, same length.
 - [x] **P2.D — the panel contract.** `trust-review-card-v1` ships; the preview
   gained hooks, settings, policy, and the machine ceiling, and
   `ui_contract.rs`'s false "full reviewed surface" claim is now true.
@@ -205,9 +210,12 @@ of identical content is cheaper without being weaker. Contract:
   fires and an unpinned surface is trusted. Silent, and the most dangerous
   shape in this area.
 
-**Gate to Phase 3:** review-comprehension metric improves against baseline, and
-zero instances — counted over recorded grant events — of a user saying yes to
-something the card did not surface. Phase 3 starts in a fresh session.
+**Gate to Phase 3:** ~~review-comprehension metric improves against baseline,
+and~~ zero instances — counted over recorded grant events — of a user saying
+yes to something the card did not surface. Phase 3 starts in a fresh session.
+(Amended 2026-08-01 to match `STRATEGY.md`: the comprehension metric needs
+testers, has no baseline yet, and moved to the v0.18.0 release gate — the §1.6
+activation study. The countable half is what held before Phase 3 started.)
 
 ### Strategy v2 — Phase 3 (Four ideas) — COMPLETE 2026-08-01
 
@@ -294,7 +302,20 @@ tamper-tested. No release cut: Phase 4 and the §1.6 study remain ahead.
   them** (`session.rs:460`). The undo timeline inherits both. Its lane is the
   ledger, not the timeline.
 
-### P3.7 — status contract honesty (opened by Phase 3, not fixed by it)
+### P3.7 — status contract honesty — CLOSED 2026-08-01 by Phase 4
+
+> **Record, not open work.** Opened by Phase 3, fixed in the Phase 4 block
+> below (`- [x] P3.7`) as the versioned revision this section asked for:
+> `readiness` ships beside an untouched `state` under `status-honesty-v1`,
+> `snapshot` gained a singular `nextAction`, and the vacuous ✓ over a refused
+> `${REF}` became a warning. The problem statement below is kept because it is
+> the argument for the shape of the fix, not a second queue entry.
+>
+> **Residual, tracked elsewhere:** the v0.18.0-rc.1 review's F11 found
+> `readiness` has no *coverage* term — it never consults `self.sections`, so a
+> manifest reduced to `version = 1` with a leftover lockfile still reports
+> `ready`, and the verdict is JSON-only. That is a new finding against the
+> shipped contract, queued in `FINDINGS.md`, not a reopening of P3.7.
 
 `doctor` reports `state: "ready"` for an untrusted, never-activated project:
 zero errors and zero warnings is true, and "ready" is not — nothing it declares
@@ -318,7 +339,13 @@ status surface say only what the evidence supports?
 place: a panel that renders "Ready" from today's field would silently change
 meaning under its users, which is the failure this item exists to remove.
 
-### P3.8 — the silent pin-verification skip
+### P3.8 — the silent pin-verification skip — CLOSED 2026-08-01 by Phase 4
+
+> **Record, not open work.** Fixed in the Phase 4 block below (`- [x] P3.8`):
+> the refusal has the seatbelt one-liner and `RunEvent::PinRejected`, additive
+> and never gating, added as the fifth denial family (`Family::Pin`), reviewed
+> line by line. The problem statement below is kept as the argument for that
+> shape.
 
 `gateway.rs:766` drops a server when pin/lock verification fails, with a bare
 `eprintln!` and no recorded event. It is fail-closed and correct; it is also
@@ -350,7 +377,9 @@ That sentence predates the 2026-07-31 amendment under which Phases 1–4 build i
 order on maintainer acceptance; the maintainer's directive to finish v2 is the
 demand. Competitive-watch tripwire 3 (eve's registry becoming de-facto
 distribution) remains a *strategy revisit*, not a build trigger, and is
-untouched by this.
+untouched by this. (2026-08-01: `STRATEGY.md`'s "Trigger discipline" bullet
+now carries the same amendment, so the operative doc and this block agree
+instead of contradicting each other.)
 
 - [x] **P3.7 — status contract honesty.** `state` said `ready` over an
   untrusted, never-activated project. Fixed as a versioned contract revision,
@@ -407,9 +436,11 @@ untouched by this.
   rationale in hand, answering the consent question it encodes: can a user tell
   a partial render from a complete one? `up`'s copy describes what actually
   happens, not the nicer version.
-- **The card body does not shrink on recognition.** Only the provenance
-  question is settled. The wording says exactly that, after a first draft
-  claimed a saving it had not made.
+- **The receive card body does not shrink on publisher-key recognition.** Only
+  the provenance question is settled. The wording says exactly that, after a
+  first draft claimed a saving it had not made. **This is not the P2.C claim
+  and does not contradict it** — P2.C is *content-digest* recognition, a
+  different mechanism, which does shrink the trust card's body.
 
 **Carried forward by name — v2's build arc is complete, so this is the whole
 of what it leaves behind.** Nothing here gates the §1.6 study.
@@ -426,17 +457,42 @@ of what it leaves behind.** Nothing here gates the §1.6 study.
    (where the yes lives in zero-files mode), the `ENFORCEMENT.md` lease column
    (which does not exist, and is **not** a documentation task that can be
    closed on its own), and first-run friction (unmeasurable until §1.6 runs).
-3. **The t3code fork migration set — now TWO contracts waiting.** (The §1.6
-   study is CLI-only partly because of this — see the v0.18.0-rc.1 block.)
-   `trust-review-card-v1` (from Phase 2) and `status-honesty-v1` (from P3.7).
-   The fork renders neither. The second matters more: the fork's "Ready" chip
-   reads `state`, which is exactly the mislabel P3.7 exists to fix, and it
-   keeps reading it until the fork migrates to `readiness`.
+3. **The t3code fork ledger — two contracts waiting and two panel
+   workstream halves deferred.** (The §1.6 study is CLI-only partly because of
+   this — see the v0.18.0-rc.1 block.) The fork was never opened during the v2
+   arc, so everything below is unbuilt, by omission rather than by decision;
+   named here so none of it is rediscovered as a bug.
+
+   *Rendering contracts the fork must migrate to:*
+   - `trust-review-card-v1` (from Phase 2). The fork does not render it.
+   - `status-honesty-v1` (from P3.7). This one matters more: the fork's "Ready"
+     chip reads `state`, which is exactly the mislabel P3.7 exists to fix, and
+     it keeps reading it until the fork migrates to `readiness`.
+
+   *Panel workstream halves deferred, added 2026-08-01 (they were dropped
+   silently — `STRATEGY.md` promised both and neither appears in any ledger):*
+   - **Panel-open as an intake touchpoint** (`STRATEGY.md`, Phase 1, "Intake
+     detection"). The shipped touchpoint set is `status`, `doctor`, `use`,
+     `lock`, `adopt`; no `panel_open`/`PanelOpen` exists anywhere in
+     `crates/cli/src`. A drop is invisible to a user who only opens the panel.
+   - **The panel speaking the four ideas** (`STRATEGY.md`, Phase 3,
+     "Vocabulary completion"). The CLI's first-contact surfaces were brought to
+     the four ideas; the panel's were not touched, so mechanism nouns still
+     reach a first-contact panel user.
+
+   Both are fork-repo work and neither gates the §1.6 study, which is CLI-only.
 4. **Two pre-v2 items still open on their own tracks:** F20 (settings pinning)
-   and the §9.3 workflows re-run, which is still blocked on the
-   import-denying module loader. Neither gates the study. Whether either gates
-   v0.18.0 is a maintainer call at release time, not a decision this block
-   makes.
+   and the workflow promotion findings. ~~the §9.3 workflows re-run, which is
+   still blocked on the import-denying module loader~~ — **corrected
+   2026-08-01: that blocker was discharged.** The `IdleModuleLoader` landed
+   (`b05fd26`, witness `dynamic_import_of_real_on_disk_module_is_refused`) and
+   the §9.3 script-boundary review was discharged 2026-07-23 with zero blocking
+   findings; there is no second §9.3 re-run. What is actually open on that
+   track is the promotion queue under "Experimental workflows" below — the five
+   codex findings (a)–(e) from the 2026-07-29 cross-model pass, plus the
+   remaining recurring-task occasions. Neither item gates the study. Whether
+   either gates v0.18.0 is a maintainer call at release time, not a decision
+   this block makes.
 
 **Non-goals held, none touched:** the dynamic default still ships STATIC and
 precondition #2 (the `ENFORCEMENT.md` lease column) remains unbuilt and is not
