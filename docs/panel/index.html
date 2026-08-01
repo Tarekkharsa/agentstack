@@ -311,7 +311,7 @@ details[open]>summary::before{content:"▾ "}
   <aside class="rail">
     <div class="rail-top">
       <div class="brandrow"><span class="mark"></span><h1 class="title">The AgentStack panel</h1></div>
-      <span class="sub">Every question a user might arrive with, answered by the panel and the command side by side. The panel is live — do the step and the state really changes. Start anywhere, or press → to walk every frame. The graphical panel is an optional companion app that isn't publicly downloadable yet — every action it shows maps to a CLI command that ships today. Frames are captured against v0.18.0-rc.2.</span>
+      <span class="sub">Every question a user might arrive with, answered by the panel and the command side by side. The panel is live — do the step and the state really changes. Start anywhere, or press → to walk every frame. The graphical panel is an optional companion app that isn't publicly downloadable yet — every action it shows maps to a CLI command that ships today. Terminal transcripts are captured from agentstack 0.18.0-rc.2 — write ceremonies are labelled “reconstructed”; the panel screens are re-created from the panel’s source, not screenshots.</span>
       <div class="modes">
         <button data-mode="guided" aria-pressed="true">Guided</button>
         <button data-mode="sheet" aria-pressed="false">All frames</button>
@@ -600,14 +600,18 @@ function tabSetup(s){
 function undoView(s){
   const u=s.undo;
   if(!s.canRestore) return `<p class="xs dimt">Undo isn't available on this agentstack CLI — update it to revert managed changes.</p>`;
-  if(u.phase==='idle')    return `<div>${btn('Undo last change…','undo:reveal')}</div>`;
+  if(u.phase==='idle')    return `<div>${btn('Undo a change…','undo:reveal')}</div>`;
   if(u.phase==='loading') return `<p class="xs dimt">Checking recent changes…</p>`;
-  if(u.phase==='empty')   return `<p class="xs dimt">Nothing to undo — no recorded change touches this project.</p>`;
-  const line=`Undo <b style="color:var(--text)">apply · 8 files · Claude Code, Codex CLI, Gemini CLI</b> · 3h ago`;
-  if(u.phase==='ready')   return `<div class="col g6"><span class="xs">${line}</span><div><button class="link warnt" data-act="undo:ask">Undo this change</button></div></div>`;
-  if(u.phase==='confirm') return `<div class="col g6"><span class="xs">${line}</span>
-      <div class="row g8">${btn('Undo this change','undo:run','warn')}${btn('Cancel','undo:cancel','ghost')}</div></div>`;
-  return `<div class="box good"><span class="xs"><b class="goodt">Undone</b> — <span class="mono">restored 8 file(s) from 18c67c10</span></span></div>`;
+  if(u.phase==='empty')   return `<p class="xs dimt">Nothing to undo — no change has been recorded yet.</p>`;
+  if(u.phase==='done')    return `<div class="box good"><span class="xs"><b class="goodt">Undone</b> — <span class="mono">restored 8 file(s) from 18c67c10</span></span></div>`;
+  const arm=u.phase==='confirm';
+  return `<div class="col g6"><span class="xs" style="color:var(--text);font-weight:600">Recorded changes</span>
+    <div class="row g8"><span class="xs" style="flex:1;min-width:0"><b style="color:var(--text)">apply</b> · 8 files · Claude Code, Codex CLI, Gemini CLI · <span class="dimt">3h ago</span></span>${arm
+      ?`<span class="row g8">${btn('Revert this change','undo:run','warn')}${btn('Cancel','undo:cancel','ghost')}</span>`
+      :`<button class="link warnt" data-act="undo:ask">Revert</button>`}</div>
+    <div class="row g8" style="opacity:.7"><span class="xs" style="flex:1;min-width:0"><b style="color:var(--text)">edit-profile</b> · backend +rust-testing · <span class="dimt">yesterday · already undone</span></span></div>
+    <div class="row g8" style="opacity:.7"><span class="xs" style="flex:1;min-width:0"><b style="color:var(--text)">use --write</b> · ~/GitHub/other-repo · <span class="dimt">2d ago · elsewhere on this machine</span></span></div>
+    <span class="xs dimt">Only this project's changes can be reverted from here — <code>agentstack restore</code> in a terminal serves the rest.</span></div>`;
 }
 function tabToolsets(s){
   return `${railView(s)}${s.canEditToolsets?libraryView(s):
@@ -843,26 +847,32 @@ function tabActivity(s){
 /* ══ CONSENT DIALOGS ════════════════════════════════════════════════ */
 function viewTrust(s){
   const st=s.trust;
-  const line=st==='trusted'?'This repo is trusted at its current bytes. Editing the manifest or lockfile re-gates it.'
-    :st==='drifted'?'This repo was trusted, but its manifest or lockfile changed since — re-review and re-trust.'
-    :'This repo is inert until trusted. Review what auto-mode may run and contact, then consent.';
+  const line=st==='trusted'?'This project is approved at its current bytes. Editing the manifest or lockfile re-opens the review.'
+    :st==='drifted'?'You approved this project before, but its content changed since — review the new bytes and say yes again.'
+    :'This project is inert until you review it. Look over what it would be allowed to run and contact, then give your yes.';
+  const summary='2 servers · 1 runs a command · 1 reaches the network · 3 skills · 1 instruction · 2 secrets';
   return `<div class="dlg read">
     <div class="dlg-top"><span class="mark sm"></span><span class="dlg-title">Review this project</span>
-      <span class="badge ${st==='trusted'?'g':'a'}">${st==='trusted'?'Trusted':'Inert — review pending'}</span>
+      <span class="badge ${st==='trusted'?'g':'a'}">${st==='trusted'?'Approved':'Inert — review pending'}</span>
       <button class="x" data-act="close">✕</button></div>
     <div style="padding:12px 17px 16px;border-top:1px solid var(--line-soft)" class="col g10">
       <span class="d">${esc(line)}</span>
-      <div class="col g6"><span class="xs" style="color:var(--text);font-weight:600">Servers (2)</span>
-        <span class="xs mono">github <span class="dimt">runs</span> npx -y @modelcontextprotocol/server-github</span>
-        <span class="xs mono">figma <span class="dimt">contacts</span> mcp.figma.com</span>
-        <span class="xs">Secrets: <span class="mono">${esc(ref('GITHUB_TOKEN'))}, ${esc(ref('FIGMA_PAT'))}</span></span></div>
+      <div class="col g6"><span class="xs" style="color:var(--text);font-weight:600">Run a command on this machine (1)</span>
+        <span class="xs dimt">Each one starts the program named below, with your user's access.</span>
+        <span class="xs mono">github <span class="dimt">runs</span> npx -y @modelcontextprotocol/server-github</span></div>
+      <div class="col g6"><span class="xs" style="color:var(--text);font-weight:600">Reach a host over the network (1)</span>
+        <span class="xs dimt">Each one can send and receive data from the address below.</span>
+        <span class="xs mono">figma <span class="dimt">contacts</span> mcp.figma.com</span></div>
       <div class="col g6"><span class="xs" style="color:var(--text);font-weight:600">Skills (3)</span>
         <div class="row g6" style="flex-wrap:wrap">${['rust-best-practices','rust-async-patterns','rust-mcp-server-generator'].map(n=>`<span class="badge">${n}</span>`).join('')}</div>
         <span class="xs" style="color:var(--text);font-weight:600">Instructions (1)</span>
-        <div class="row g6"><span class="badge">CLAUDE.md · managed region</span></div></div>
+        <div class="row g6"><span class="badge">CLAUDE.md · managed region</span></div>
+        <span class="xs">Secrets: <span class="mono">${esc(ref('GITHUB_TOKEN'))}, ${esc(ref('FIGMA_PAT'))}</span></span></div>
+      ${st!=='trusted'?`<span class="xs dimt">Your yes covers this whole list — there is no per-item opt-out, because approval is granted over one digest of the entire surface. To leave something out, remove it from the project's manifest and review again.</span>`:''}
       <span class="srcline">Full line-by-line review: <code>agentstack trust &lt;path&gt;</code> in a terminal.</span>
       ${s.trustAct?`<div class="box ${s.trustAct.ok?'good':'bad'}"><span class="xs"><b class="${s.trustAct.ok?'goodt':'badt'}">${s.trustAct.ok?'Done':"Couldn't complete"}</b> — <span class="mono">${esc(s.trustAct.message)}</span></span></div>`:''}
-      <div class="row g8">${st==='trusted'?btn('Revoke trust','trust:revoke','dgr lg'):btn('Trust this repo','trust:grant','ok lg')}${btn('Close','close','ghost lg')}</div>
+      <div class="hr row g8"><span class="xs dimt" style="flex:1;min-width:0">${st==='trusted'?'Approved':'You would be approving'}: ${summary}</span>
+        ${st==='trusted'?btn('Withdraw approval','trust:revoke','dgr lg'):btn('Approve this project','trust:grant','ok lg')}${btn('Close','close','ghost lg')}</div>
     </div></div>`;
 }
 function viewDrift(s){
@@ -1593,7 +1603,7 @@ const SCEN = [
          N('Setup does not write your CLIs’ native configs — that happens when you apply the setup to them.')],
    contract:'gated on plan_digest — absent, and setup from the panel is disabled',
    advance:s=>!!s.setupAct},
-  {name:'Drop a file, say yes', component:'— CLI-first', ui:'popover', cli:'yes', fresh:true,
+  {name:'Drop a file, say yes — in the terminal', component:'— CLI-first', ui:'popover', cli:'yes', fresh:true,
    setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.activeToolset='rust'},
    how:[H('The funnel is CLI-first','Write a skill folder under <code>.agentstack/skills/</code> and run <code>agentstack yes</code>: noticed, pinned, reviewed on one card, live in every CLI — one confirmation. The panel has no button for this; its job is to reflect the result.'),
         H('The short path has a boundary','Only content you demonstrably wrote here — untracked in git, or newer than the last review. Anything that arrived with a clone takes the full staged review that trust owns.','rgba(52,211,153,.5)')],
@@ -1694,11 +1704,11 @@ const SCEN = [
    open:'The confirm renders in a <b>drawer pinned to the bottom of the tab</b>, not beside the row. The code comment calls it “anchored under the thing it is about”, which is true of the tab and not of the row: in a 600px frame with the library scrolled, the row you clicked can be off-screen while you read a destructive confirm about it.'}]},
 
 {id:'undo', group:'Everyday', name:'Undo something', tag:'LEDGER', tone:'b',
- summary:'Every write is recorded before it lands. The panel offers the newest entry that touches this project, and <code>agentstack undo</code> shows the same record as a timeline — pick a point, revert to it, and the revert is itself recorded.',
- steps:[{name:'Undo last change', component:'UndoAffordance', ui:'manage:setup', cli:'restore',
+ summary:'Every write is recorded before it lands. The panel lists the recorded changes newest first — every entry visible, but only this project’s can be reverted from here — and the agentstack undo timeline in the terminal serves every point; the revert is itself recorded.',
+ steps:[{name:'Undo a change', component:'UndoAffordance', ui:'manage:setup', cli:'restore',
    setup:s=>{s.trust='trusted';s.drift=false;s.guard=true;s.manage='setup';s.undo={phase:'ready'}},
-   how:[H('Scoped to this project','The ledger is machine-global; the panel filters it, and the undo timeline is project-scoped the same way. A blind restore --last could revert a write from a different repo — neither surface offers it.'),
-        H('Two clicks, never one','Reveal names the change; a second click arms it; a third runs it. The change is described before it is offered.','rgba(91,124,250,.5)')],
+   how:[H('Scoped to this project','The ledger is machine-global; the panel shows all of it, newest first, and offers Revert only on entries whose files live under this project and that aren’t already undone. A blind restore --last could revert a write from a different repo — neither surface offers it.'),
+        H('Two clicks, never one','Reveal lists the record; Revert arms one specific entry; a third click runs it. The change is described before it is offered.','rgba(91,124,250,.5)')],
    gtee:[Y('Each verb reverses exactly one agentstack change — nothing here deletes your data.'),
          Y('Going one step too far is recoverable — the revert is recorded like any other write.'),
          N('Side effects are not undone: a file a server deleted is not brought back.')],
@@ -1720,11 +1730,11 @@ const SCEN = [
          N('Trusting does not review the scripts a server points at — read those the way you would read a .envrc.')],
    contract:'gated on surface_digest + the trust-consent contract; missing either disables granting from here',
    advance:s=>s.trust==='trusted',
-   open:'Consent is all-or-nothing and the list is unbounded — twenty servers is a wall with the grant button past the fold. Group by risk, pin the verdict bar, and consider per-item opt-out.'},
+   open:'Twenty declared servers is still a long read even banded by risk. Per-item opt-out stays deliberately absent — approval is one digest, one yes — so the only trim is editing the manifest and reviewing again.'},
   {name:'Trusted', component:'TrustReviewPanel · granted', ui:'dialog', cli:'trustAfter',
    setup:s=>{s.trust='trusted';s.dialog='trust';s.trustAct={ok:true,message:'trusted /Users/tarek.k/GitHub/checkout at sha256:3f9a…c0'}},
    how:[H('The result stays on screen','A persistent Done banner, not a toast that clears itself before you have read it — and the consequence line above it rewrites to the trusted wording.','rgba(52,211,153,.5)')],
-   gtee:[Y('Revoke is offered in the same place, styled destructively, so granting is reversible from the panel.')],
+   gtee:[Y('Withdraw approval is offered in the same place, styled destructively, so granting is reversible from the panel.')],
    contract:'trust-consent · revoke uses the same path'}]},
 
 {id:'drift', group:'Trust & safety', name:'Someone hand-edited a config', tag:'2 STEPS', tone:'g',
@@ -1909,11 +1919,11 @@ const GUIDE = {
  'remove':[
    ["Nothing here uses `rust-testing`, so the confirm is two plain sentences. Press **Remove** — or **Cancel**.", 'flow:confirm', "Moved to the library trash. Now the same button on an item this project does use."],
    ["`rust-best-practices` is in the `rust` toolset — read the warning the preview added.", 'flow:confirm', "Removed. The `rust` toolset still names it, and will fail to activate until it is re-added or restored."]],
- 'undo':[["**Undo this change** arms it; a second click runs it.", 'undo:ask', "Armed. Nothing is reverted until you confirm — that is the second click."]],
+ 'undo':[["**Revert** arms one specific entry; **Revert this change** runs it.", 'undo:ask', "Armed. Nothing is reverted until you confirm — that is the second click."]],
  'trust':[
    ["Click **Review this project** — the repo is inert until you do.", 'concern', "The review opened. Nothing has been granted yet."],
-   ["Read what it would run and contact, then **Trust this repo**.", 'trust:grant', "Trusted, pinned to these exact bytes. Editing any of them re-gates it."],
-   ["**Revoke trust** is offered in the same place — granting is reversible.", 'trust:revoke', "Revoked — the repo is inert again, and the glance concern is back."]],
+   ["Read what it would run and contact, then **Approve this project**.", 'trust:grant', "Approved, pinned to these exact bytes. Editing any of them re-opens the review."],
+   ["**Withdraw approval** is offered in the same place — granting is reversible.", 'trust:revoke', "Withdrawn — the repo is inert again, and the glance concern is back."]],
  'drift':[
    ["Click **Review** — the panel won't pick a side for you.", 'concern', "The diff opened, with both outcomes stated."],
    ["**Keep edits** adopts the hand-edit; **Re-render** overwrites it.", 'drift:adopt', "Adopted into the manifest. The concern cleared and the footer went healthy."]],
@@ -1977,7 +1987,7 @@ const HUMAN = {
    "This is your machine-wide library, not this project — so the button says so before you press it.",
    "When a toolset still uses it, the confirm says which one, and what will be left behind."]},
  'undo':{q:"How do I undo what AgentStack just did?", plains:[
-   "Everything it writes is recorded first. The panel offers the most recent change in this project; the terminal shows the whole timeline and reverts to the point you pick."]},
+   "Everything it writes is recorded first. The panel lists the recorded changes and reverts the one you pick; the terminal timeline reaches any point."]},
  'trust':{q:"I cloned a repo — is it safe to open an agent here?", plains:[
    "A cloned repo can ask for tools of its own. Until you look at them, none of them run, connect, or see your tokens.",
    "This is the full list of what it wants, before you say yes.",
