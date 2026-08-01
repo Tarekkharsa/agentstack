@@ -2012,7 +2012,41 @@ fn list_loadable_with_lease(
     };
 
     let mut entries = Vec::new();
+    // F8: the catalog honors standing answers too. Advertising a blocked
+    // skill as loadable would be a promise `skill_load` now refuses; and a
+    // keep-pinned skill's description must come from the APPROVED bytes —
+    // the live frontmatter is part of the change the human declined.
+    let decision_base = crate::manifest::project_root_of(&ctx.dir);
+    let decisions = crate::trust::decisions_for(&decision_base);
     for name in loadable_skill_names(m, &libctx.library, profile) {
+        match decisions
+            .iter()
+            .find(|d| d.kind == "skill" && d.name == name)
+            .map(|d| &d.answer)
+        {
+            Some(crate::trust::Decision::Blocked) => continue,
+            Some(crate::trust::Decision::KeepPinned { pin }) => {
+                let hex = pin.rsplit(':').next().unwrap_or(pin).to_string();
+                let snap = crate::store::Store::default_store()
+                    .root()
+                    .join("content")
+                    .join(&hex);
+                let desc = if crate::store::verified_snapshot(&snap, &hex) {
+                    read_skill_md(&snap).0.unwrap_or_default()
+                } else {
+                    "(approved copy unavailable — review with `agentstack trust`)".to_string()
+                };
+                entries.push(json!({
+                    "name": name,
+                    "description": desc,
+                    "kind": "skill",
+                    "origin": "approved-copy",
+                    "loaded": loaded.contains(&name),
+                }));
+                continue;
+            }
+            None => {}
+        }
         // PathOnly: this catalog only reads SKILL.md descriptions — digesting
         // every skill body here would turn a cheap list into a full-library
         // read+hash pass.
@@ -2200,6 +2234,60 @@ fn load_capability_with_lease(
                 "'{name}' is not loadable in toolset '{profile}' — add it to the toolset to allow it"
             );
         }
+    }
+
+    // F8: a standing re-gate answer holds on THIS load path exactly as it
+    // does in `use` delivery. The MCP loader was the bypass: it checked the
+    // lock but never the decisions, so a blocked skill whose live bytes were
+    // restored to the approved ones (drift check passes — but the human's
+    // refusal is not a drift check) sailed straight into agent context.
+    let decision_base = crate::manifest::project_root_of(&ctx.dir);
+    match crate::trust::decision_for(&decision_base, "skill", name) {
+        Some(crate::trust::Decision::Blocked) => anyhow::bail!(
+            "refusing to load '{name}': you blocked this skill when its content changed — \
+             revisit with `agentstack trust`"
+        ),
+        Some(crate::trust::Decision::KeepPinned { pin }) => {
+            // Serve the APPROVED bytes from the verified store snapshot —
+            // never the live project copy, which holds the change the human
+            // declined. Same verification and same fail-closed posture as
+            // keep-pinned delivery in `use`.
+            let hex = pin.rsplit(':').next().unwrap_or(&pin).to_string();
+            let snap = crate::store::Store::default_store()
+                .root()
+                .join("content")
+                .join(&hex);
+            if !crate::store::verified_snapshot(&snap, &hex) {
+                anyhow::bail!(
+                    "refusing to load '{name}': you chose to keep the approved version, but \
+                     its stored copy is missing or failed verification — revisit with \
+                     `agentstack trust`"
+                );
+            }
+            let (_, body) = read_skill_md(&snap);
+            let instructions = body.with_context(|| format!("skill '{name}' has no SKILL.md"))?;
+            let newly = if lease.is_some() {
+                record_lease_load(lease_store, name, reason)?
+            } else if session.is_some() {
+                crate::session::record_load(&ctx.dir, name, reason)?
+            } else {
+                false
+            };
+            return Ok(serde_json::to_string_pretty(&json!({
+                "loaded": name,
+                "origin": "approved-copy",
+                "instructions": instructions,
+                "sticky": lease.is_some() || session.is_some(),
+                "newly_loaded": newly,
+                "fenced": profile.is_some(),
+                "lease": lease.as_ref().map(|l| l.profile.clone()),
+                "warning": format!(
+                    "'{name}' is served at the version you approved — the project copy has \
+                     changed; review with `agentstack trust`"
+                ),
+            }))?);
+        }
+        None => {}
     }
 
     // Inline-first, then the central library — same order as `use`. NoFetch
@@ -3298,6 +3386,105 @@ mod tests {
             v["warning"].as_str().unwrap().contains("not pinned"),
             "unpinned library content serves but nudges toward a pin: {v}"
         );
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    /// F8 WITNESS (FINDINGS.md): a standing Block holds on the MCP load path.
+    /// The tamper is the bypass the finding names: the live bytes MATCH the
+    /// lock — every drift check passes — and only the human's refusal stands
+    /// between the skill and agent context. The loader used to check the lock
+    /// and never the decisions.
+    #[test]
+    fn a_standing_block_holds_on_the_mcp_load_path() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let (_home, proj) = pinned_inline_project();
+        crate::trust::trust_unreviewed(proj.path()).unwrap();
+        assert!(crate::trust::set_decision(
+            proj.path(),
+            "skill",
+            "helper",
+            Some(crate::trust::Decision::Blocked)
+        )
+        .unwrap());
+
+        let args = json!({ "name": "helper", "reason": "test" });
+        let err = load_capability(&args, Some(proj.path()), None)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("blocked"), "{err}");
+        assert!(err.contains("agentstack trust"), "{err}");
+
+        // And the catalog no longer advertises a load it would refuse.
+        let listing = list_loadable(Some(proj.path()), None).unwrap();
+        assert!(
+            !listing.contains("\"helper\""),
+            "a blocked skill is still advertised as loadable: {listing}"
+        );
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    /// F8 WITNESS: keep-pinned on the MCP load path serves the APPROVED
+    /// bytes from the verified store copy — never the live project file —
+    /// and fails closed when the store copy is tampered with.
+    #[test]
+    fn keep_pinned_serves_the_approved_copy_on_the_mcp_load_path() {
+        use assert_fs::prelude::*;
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let (_home, proj) = pinned_inline_project();
+        let helper = proj.path().join("skills/helper");
+        let checksum = agentstack_core::digest::dir_digest(&helper)
+            .unwrap()
+            .hex()
+            .to_string();
+        let store = crate::store::Store::default_store();
+        store.snapshot_content(&helper, &checksum).unwrap();
+        crate::trust::trust_unreviewed(proj.path()).unwrap();
+        assert!(crate::trust::set_decision(
+            proj.path(),
+            "skill",
+            "helper",
+            Some(crate::trust::Decision::KeepPinned {
+                pin: checksum.clone()
+            })
+        )
+        .unwrap());
+
+        // The live copy drifts to the declined content.
+        proj.child("skills/helper/SKILL.md")
+            .write_str("---\ndescription: helps\n---\n# helper EVIL v2\n")
+            .unwrap();
+
+        let args = json!({ "name": "helper", "reason": "test" });
+        let out = load_capability(&args, Some(proj.path()), None).unwrap();
+        let v: Value = serde_json::from_str(&out).unwrap();
+        assert_eq!(v["origin"], "approved-copy");
+        let body = v["instructions"].as_str().unwrap();
+        assert!(
+            body.contains("helper v1") && !body.contains("EVIL"),
+            "keep-pinned served the declined live bytes: {body}"
+        );
+
+        // Tamper the snapshot under the approved digest name → fail closed,
+        // never fall back to the live file.
+        std::fs::write(
+            store
+                .root()
+                .join("content")
+                .join(&checksum)
+                .join("SKILL.md"),
+            "EVIL SNAPSHOT",
+        )
+        .unwrap();
+        let err = load_capability(&args, Some(proj.path()), None)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("failed verification"), "{err}");
 
         std::env::remove_var("AGENTSTACK_HOME");
     }

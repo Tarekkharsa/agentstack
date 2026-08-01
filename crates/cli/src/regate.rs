@@ -298,14 +298,55 @@ mod tests {
     use super::*;
     use assert_fs::prelude::*;
 
-    fn store_with(digest: &str, files: &[(&str, &str)]) -> assert_fs::TempDir {
+    /// A store root holding one snapshot deposited under its REAL tree
+    /// digest. `diff_against_pin` verifies snapshots against their names
+    /// (F4), so a fixture under an invented name reads as absent — exactly
+    /// as a tampered production snapshot does.
+    fn store_with(files: &[(&str, &str)]) -> (assert_fs::TempDir, String) {
         let root = assert_fs::TempDir::new().unwrap();
+        let staging = root.child("staging");
         for (name, body) in files {
-            root.child(format!("content/{digest}/{name}"))
-                .write_str(body)
-                .unwrap();
+            staging.child(name).write_str(body).unwrap();
         }
-        root
+        let digest = crate::store::dir_digest(staging.path())
+            .unwrap()
+            .hex()
+            .to_string();
+        std::fs::create_dir_all(root.path().join("content")).unwrap();
+        std::fs::rename(staging.path(), root.path().join("content").join(&digest)).unwrap();
+        (root, digest)
+    }
+
+    /// F4 WITNESS: a snapshot that no longer hashes to its own name is not
+    /// shown as "the approved version" — the diff degrades to the honest
+    /// no-snapshot message instead of attributing tampered bytes to the last
+    /// consent. (Before the fix, a bare `is_dir()` rendered whatever was
+    /// there.)
+    #[test]
+    fn a_tampered_snapshot_is_never_presented_as_approved() {
+        let (store, pin) = store_with(&[(
+            "SKILL.md",
+            "# approved
+",
+        )]);
+        std::fs::write(
+            store.path().join("content").join(&pin).join("SKILL.md"),
+            "# EVIL
+",
+        )
+        .unwrap();
+        let live = assert_fs::TempDir::new().unwrap();
+        live.child("SKILL.md")
+            .write_str(
+                "# live
+",
+            )
+            .unwrap();
+        assert_eq!(
+            diff_against_pin(store.path(), &pin, live.path()),
+            PinDiff::NoSnapshot,
+            "a tampered snapshot was rendered as the approved bytes"
+        );
     }
 
     #[test]
@@ -323,11 +364,11 @@ mod tests {
 
     #[test]
     fn identical_content_reads_as_unchanged() {
-        let store = store_with("abc", &[("SKILL.md", "# hi\nbody\n")]);
+        let (store, pin) = store_with(&[("SKILL.md", "# hi\nbody\n")]);
         let live = assert_fs::TempDir::new().unwrap();
         live.child("SKILL.md").write_str("# hi\nbody\n").unwrap();
         assert_eq!(
-            diff_against_pin(store.path(), "abc", live.path()),
+            diff_against_pin(store.path(), &pin, live.path()),
             PinDiff::Unchanged
         );
     }
@@ -335,12 +376,12 @@ mod tests {
     // The acceptance target: the actual changed lines, not "digest mismatch".
     #[test]
     fn a_small_edit_shows_the_real_changed_lines() {
-        let store = store_with("abc", &[("SKILL.md", "# hi\nkeep\nold line\n")]);
+        let (store, pin) = store_with(&[("SKILL.md", "# hi\nkeep\nold line\n")]);
         let live = assert_fs::TempDir::new().unwrap();
         live.child("SKILL.md")
             .write_str("# hi\nkeep\nnew line\n")
             .unwrap();
-        let d = diff_against_pin(store.path(), "abc", live.path());
+        let d = diff_against_pin(store.path(), &pin, live.path());
         assert_eq!(headline(&d).as_deref(), Some("changed 2 lines"));
         let rendered = render_lines(&d, DIFF_LINE_CAP).join("\n");
         assert!(rendered.contains("SKILL.md"), "{rendered}");
@@ -354,11 +395,11 @@ mod tests {
 
     #[test]
     fn added_and_removed_files_are_named() {
-        let store = store_with("abc", &[("SKILL.md", "same\n"), ("gone.md", "bye\n")]);
+        let (store, pin) = store_with(&[("SKILL.md", "same\n"), ("gone.md", "bye\n")]);
         let live = assert_fs::TempDir::new().unwrap();
         live.child("SKILL.md").write_str("same\n").unwrap();
         live.child("extra.md").write_str("hello\n").unwrap();
-        let d = diff_against_pin(store.path(), "abc", live.path());
+        let d = diff_against_pin(store.path(), &pin, live.path());
         let rendered = render_lines(&d, DIFF_LINE_CAP).join("\n");
         assert!(rendered.contains("+ extra.md (new file)"), "{rendered}");
         assert!(rendered.contains("- gone.md (deleted)"), "{rendered}");
@@ -370,11 +411,11 @@ mod tests {
     fn a_large_rewrite_names_files_and_counts_instead_of_flooding() {
         let old: String = (0..200).map(|i| format!("old {i}\n")).collect();
         let new: String = (0..200).map(|i| format!("new {i}\n")).collect();
-        let store = store_with("abc", &[("SKILL.md", &old)]);
+        let (store, pin) = store_with(&[("SKILL.md", &old)]);
         let live = assert_fs::TempDir::new().unwrap();
         live.child("SKILL.md").write_str(&new).unwrap();
 
-        let d = diff_against_pin(store.path(), "abc", live.path());
+        let d = diff_against_pin(store.path(), &pin, live.path());
         let lines = render_lines(&d, DIFF_LINE_CAP);
         assert!(
             lines.len() < 10,
@@ -395,11 +436,11 @@ mod tests {
     // appears in.
     #[test]
     fn hostile_paths_are_sanitized_in_both_render_modes() {
-        let store = store_with("abc", &[("SKILL.md", "a\n")]);
+        let (store, pin) = store_with(&[("SKILL.md", "a\n")]);
         let live = assert_fs::TempDir::new().unwrap();
         live.child("SKILL.md").write_str("a\n").unwrap();
         live.child("evil\u{1b}[2Kname.md").write_str("x\n").unwrap();
-        let d = diff_against_pin(store.path(), "abc", live.path());
+        let d = diff_against_pin(store.path(), &pin, live.path());
         let rendered = render_lines(&d, DIFF_LINE_CAP).join("\n");
         assert!(
             !rendered.contains('\u{1b}'),
@@ -415,12 +456,12 @@ mod tests {
     fn symlinks_are_skipped_never_followed() {
         let secret = assert_fs::TempDir::new().unwrap();
         secret.child("id_rsa").write_str("PRIVATE KEY\n").unwrap();
-        let store = store_with("abc", &[("SKILL.md", "a\n")]);
+        let (store, pin) = store_with(&[("SKILL.md", "a\n")]);
         let live = assert_fs::TempDir::new().unwrap();
         live.child("SKILL.md").write_str("a\n").unwrap();
         std::os::unix::fs::symlink(secret.child("id_rsa").path(), live.child("leak.md").path())
             .unwrap();
-        let d = diff_against_pin(store.path(), "abc", live.path());
+        let d = diff_against_pin(store.path(), &pin, live.path());
         let rendered = render_lines(&d, DIFF_LINE_CAP).join("\n");
         assert!(!rendered.contains("PRIVATE KEY"), "{rendered}");
         assert!(!rendered.contains("leak.md"), "{rendered}");

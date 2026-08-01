@@ -304,6 +304,34 @@ fn resolve_inputs(ctx: &Context, profile: Option<&str>) -> Result<LockedInputs> 
         })
         .collect();
 
+    // F8: a standing refusal holds on the locked path too. Strict
+    // verification asserts pins match, but a blocked item whose live bytes
+    // were restored to the approved ones passes every drift check — the
+    // human's refusal is not a drift check. Locked runs are the strictest
+    // path in the product, so a blocked item refuses the run loudly rather
+    // than being silently excluded from the grant. (Keep-pinned needs no
+    // arm here: drifted keep-pinned content already fails strict
+    // verification, and matching content IS the approved bytes.)
+    let decision_base = crate::manifest::project_root_of(&ctx.dir);
+    for d in crate::trust::decisions_for(&decision_base) {
+        if !matches!(d.answer, crate::trust::Decision::Blocked) {
+            continue;
+        }
+        let held = match d.kind.as_str() {
+            "skill" => skill_statuses.iter().any(|(n, _)| *n == d.name),
+            "instruction" => instruction_statuses.iter().any(|(n, _)| *n == d.name),
+            _ => false,
+        };
+        if held {
+            anyhow::bail!(
+                "refusing the locked run: {} '{}' is blocked by your standing decision — \
+                 remove it from the surface or revisit with `agentstack trust`",
+                d.kind,
+                d.name
+            );
+        }
+    }
+
     // The profile fence (contract §2.1): resolved ONCE here with the fence
     // applied, so verification, admission, the grant, and the bridge handoff
     // all see the identical subset. An absent/renamed profile is a hard error

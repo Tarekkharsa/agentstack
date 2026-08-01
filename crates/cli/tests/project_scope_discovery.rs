@@ -181,3 +181,63 @@ fn doctor_is_quiet_once_the_manifest_covers_the_configs() {
         "nothing uncovered → hidden from the default report: {section}"
     );
 }
+
+/// F7 witness (FINDINGS.md, rc.1 review): `init --yes` over a repo-supplied
+/// project config imports it but never self-trusts it. The tampered field is
+/// the one that moved — the GRANT, not the import: the `.mcp.json` stdio
+/// command lines arrived with the clone, and a documented promptless command
+/// must not bless them without the ordinary review. The import still works
+/// (witness (b) above); the project simply meets `agentstack trust .`.
+#[test]
+fn init_over_repo_supplied_config_imports_but_never_self_trusts() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let proj = project_scope_only_fixture(tmp.path());
+
+    init::run(&init_args(), Some(&proj)).unwrap();
+
+    // Imported — the convenience is intact…
+    let loaded = agentstack::manifest::load_from_dir(&proj.join(".agentstack")).unwrap();
+    assert!(loaded.manifest.servers.contains_key("filesystem"));
+    // …but NOT granted: repo-supplied bytes take the gated review.
+    assert_eq!(
+        agentstack::trust::check(&proj),
+        agentstack::trust::TrustState::Untrusted,
+        "init --yes self-trusted a manifest holding repo-supplied server commands"
+    );
+}
+
+/// The H1 boundary from the other side: an import built purely from the
+/// user's own machine-global configs still records trust, so a newcomer's
+/// first run does not end at the trust gate in their own repo. This is the
+/// counter-witness that keeps the F7 fix from quietly widening into "init
+/// never grants".
+#[test]
+fn init_over_machine_global_config_still_grants() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
+    fs::write(
+        home.join(".claude.json"),
+        r#"{"mcpServers":{"filesystem":{"command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","./"]}}}"#,
+    )
+    .unwrap();
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+
+    init::run(&init_args(), Some(&proj)).unwrap();
+
+    let loaded = agentstack::manifest::load_from_dir(&proj.join(".agentstack")).unwrap();
+    assert!(
+        loaded.manifest.servers.contains_key("filesystem"),
+        "the machine-global server was imported"
+    );
+    assert_eq!(
+        agentstack::trust::check(&proj),
+        agentstack::trust::TrustState::Trusted,
+        "an import from the user's own machine configuration lost its H1 grant"
+    );
+}

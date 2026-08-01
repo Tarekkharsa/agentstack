@@ -502,6 +502,14 @@ struct DetectedImport {
     /// as `(cli display name, skip)` — surfaced in the plan and the write
     /// output so a lossy import is explained, never silent.
     skipped: Vec<(String, crate::adapter::SkippedImport)>,
+    /// Whether any server in the merged set came from a PROJECT-scope config
+    /// file (a `.mcp.json` in the repo, not the user's machine files). Those
+    /// bytes arrive with a clone — repo-supplied, hostile-input class — so
+    /// the post-import convenience grant must not cover them (F7): they take
+    /// the ordinary `agentstack trust .` review instead. Conflicts don't
+    /// count: a project copy that lost the merge contributed nothing to the
+    /// manifest being granted.
+    project_sourced: bool,
     /// The native files a follow-up `apply --write` (at the default scope for
     /// this manifest) would manage — derived from the same detection, so the
     /// plan and the terminal review state identical destinations.
@@ -533,6 +541,7 @@ fn detect_import(dir: &Path) -> Result<DetectedImport> {
     let mut settings: IndexMap<String, serde_json::Value> = IndexMap::new();
     let mut conflict_counts: IndexMap<String, usize> = IndexMap::new();
     let mut skipped: Vec<(String, crate::adapter::SkippedImport)> = Vec::new();
+    let mut project_sourced = false;
     // Which scopes this import reads. A project manifest imports what is
     // configured in the project too — before this, `init` asked the machine-scope
     // `detected()` and then read only global files, so a repo whose whole setup
@@ -586,8 +595,16 @@ fn detect_import(dir: &Path) -> Result<DetectedImport> {
             let (imported, skips) = extract_servers_with_skips(desc, &value);
             skipped.extend(skips.into_iter().map(|s| (desc.display.clone(), s)));
             contributed |= !imported.is_empty();
+            let offered = imported.len();
+            let mut collided = 0usize;
             for c in merge_servers(&mut servers, imported) {
+                collided += 1;
                 *conflict_counts.entry(c).or_insert(0usize) += 1;
+            }
+            // A project-scope server that actually LANDED makes the merged
+            // manifest partly repo-supplied — see `project_sourced`.
+            if scope == crate::scope::Scope::Project && offered > collided {
+                project_sourced = true;
             }
         }
         if let Some(value) = desc.read_settings_value(dir)? {
@@ -649,6 +666,7 @@ fn detect_import(dir: &Path) -> Result<DetectedImport> {
         conflict_counts,
         lifted,
         skipped,
+        project_sourced,
         destinations,
     })
 }
@@ -1071,6 +1089,7 @@ fn run_impl(
         conflict_counts,
         lifted,
         skipped,
+        project_sourced,
         destinations,
     } = det;
     let detected_ids: Vec<String> = detected.iter().map(|c| c.id.clone()).collect();
@@ -1482,26 +1501,40 @@ version = 1
     // H1: a consented import also records trust for the manifest it just wrote,
     // so a newcomer never meets the trust gate as an error in their own repo.
     //
-    // Why this is not a hole. `detect_import` reads ONLY machine-global CLI
-    // configs (`~/.claude.json`, `~/.codex/config.toml`, …) — never a
-    // repo-supplied project file — and it imports servers and settings only: no
-    // skills, workflows, extensions, or instructions. `init` also refuses
-    // outright when a manifest already exists. So the manifest here is built
-    // from the user's own machine configuration, and the import review they
-    // just consented to IS its whole surface. The gate still fires for exactly
-    // the case it exists for: a cloned repo carrying a manifest we did not
-    // write.
+    // Why this is not a hole — and where its boundary is (F7). The grant
+    // covers ONLY a manifest built from the user's own machine-global CLI
+    // configs (`~/.claude.json`, `~/.codex/config.toml`, …), importing servers
+    // and settings only: no skills, workflows, extensions, or instructions.
+    // Since project-scope discovery landed (v0.17.1), `detect_import` ALSO
+    // reads a repo's own `.mcp.json` — bytes that arrive with a clone. When
+    // any of those landed in the manifest (`det.project_sourced`), this grant
+    // is withheld and the project meets the ordinary `agentstack trust .`
+    // review: a documented `init --yes` in automation must never promptlessly
+    // bless a stdio command line the repository authored (invariant 6 — one
+    // gated grant path over repo content, no shortcut around it). `init` also
+    // refuses outright when a manifest already exists.
     //
     // Best-effort by construction: a failure to record trust must not undo a
     // good import. The cost of not granting is one `agentstack trust` prompt.
     //
-    // Deliberately silent. Stage 1.4's witness (`ordinary_journey_vocab`) holds
-    // the ordinary journey to no trust vocabulary at all until the user reaches
-    // for it, and a "Trusted:" line in the success summary teaches the concept
-    // to precisely the newcomer who has not met the gate — the disclosure rule
-    // inverted. The state stays discoverable where it becomes relevant:
-    // `doctor` reports it, and `agentstack trust --revoke` withdraws it.
-    let _trusted = grant_trust_for_import(&base, &toml_text, &manifest);
+    // Deliberately silent when it grants. Stage 1.4's witness
+    // (`ordinary_journey_vocab`) holds the ordinary journey to no trust
+    // vocabulary at all until the user reaches for it. The withheld case is
+    // the one moment the boundary IS relevant, so it says so once, with the
+    // exact next command — progressive disclosure rule 3, not a violation of
+    // the vocabulary witness (whose journey has no project-scope config).
+    let trusted = if project_sourced {
+        false
+    } else {
+        grant_trust_for_import(&base, &toml_text, &manifest)
+    };
+    if project_sourced {
+        println!(
+            "  {} servers from this repo's own config were imported — review what they run: `agentstack trust .`",
+            "·".dimmed()
+        );
+    }
+    let _ = trusted;
 
     if let Some(notice) = secret_notice {
         println!("{notice}");
@@ -1860,6 +1893,7 @@ mod tests {
                 }],
                 contributing: vec!["Claude Code".into()],
                 servers,
+                project_sourced: false,
                 settings: IndexMap::new(),
                 conflict_counts: IndexMap::new(),
                 lifted: Vec::new(),

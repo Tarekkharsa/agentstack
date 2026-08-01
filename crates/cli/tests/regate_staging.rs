@@ -1032,3 +1032,75 @@ fn use_write_never_repins_a_decided_skill() {
         "use --write re-pinned a decided skill to the declined live bytes"
     );
 }
+
+/// F8 WITNESS: the standing refusal holds on the LOCKED run path. The tamper
+/// is the finding's bypass: after blocking, the live bytes are restored to
+/// exactly the approved ones — every drift check passes, strict verification
+/// would pass — and only the human's standing refusal stands. Locked
+/// execution used to construct its grant without ever reading decisions.
+#[test]
+fn a_standing_block_refuses_a_locked_run() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    isolate_home(tmp.path());
+    let proj = trusted_project(tmp.path());
+
+    skill(
+        &proj,
+        "gamma",
+        "---\ndescription: g\n---\n# Gamma\nCHANGED\n",
+    );
+    agentstack::commands::trust::grant_with_answers(
+        &proj,
+        false,
+        None,
+        true,
+        Some(&ReGateProbe {
+            answers: vec![("gamma".to_string(), Answer::Block)],
+            confirm: true,
+        }),
+    )
+    .unwrap();
+    // Restore the approved bytes: drift checks now pass everywhere.
+    skill(&proj, "gamma", "---\ndescription: g\n---\n# Gamma\nfirst\n");
+    assert_eq!(
+        agentstack::trust::check(&proj),
+        agentstack::trust::TrustState::Trusted,
+        "fixture: the project reads trusted, so only the decision can refuse"
+    );
+
+    // A stub harness binary, so the PATH probe (which runs before the
+    // locked verification) passes and the refusal under test is reachable.
+    // If the run ever got past verification, the stub would run and exit 0 —
+    // the assertions below would then fail loudly.
+    let stub_bin = tmp.path().join("stubbin");
+    fs::create_dir_all(&stub_bin).unwrap();
+    fs::write(stub_bin.join("claude"), "#!/bin/sh\nexit 0\n").unwrap();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(stub_bin.join("claude"), fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let out_raw = std::process::Command::new(env!("CARGO_BIN_EXE_agentstack"))
+        .args(["run", "claude-code", "--locked"])
+        .current_dir(&proj)
+        .env_clear()
+        .env("HOME", std::env::var("HOME").unwrap())
+        .env("AGENTSTACK_HOME", std::env::var("AGENTSTACK_HOME").unwrap())
+        .env("PATH", format!("{}:/usr/bin:/bin", stub_bin.display()))
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    let out = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out_raw.stdout),
+        String::from_utf8_lossy(&out_raw.stderr)
+    );
+    assert!(
+        !out_raw.status.success(),
+        "a locked run proceeded over a standing block:\n{out}"
+    );
+    assert!(
+        out.contains("blocked by your standing decision"),
+        "the refusal does not name the standing decision:\n{out}"
+    );
+}

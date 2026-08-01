@@ -124,6 +124,17 @@ separate item.
 - **Fix shape:** route instruction answers through `pin_instruction` + `patched.instructions`; make the compiler honor keep-pinned/block for instructions; add instruction cases to `regate_staging.rs`.
 
 ## F7 — `init` is a second, non-content-bound grant path over repo config
+- **Status: ✅ FIXED** 2026-08-01 (`fix/universality-f7-f8`). `detect_import`
+  now tracks whether any server that LANDED in the merged manifest came from
+  a project-scope config (`project_sourced`; merge-losing conflicts don't
+  count), and the H1 convenience grant is withheld whenever it did — the
+  import still happens, the project meets the ordinary `agentstack trust .`
+  review, and init says so with the exact next command. The H1 comment now
+  states the boundary instead of the stale "reads ONLY machine-global"
+  claim. Witnesses in `project_scope_discovery.rs`: the tamper is the grant
+  itself (`init_over_repo_supplied_config_imports_but_never_self_trusts`),
+  plus the counter-witness that machine-global imports keep the H1 grant
+  (`init_over_machine_global_config_still_grants`).
 - **Confidence:** HIGH (CODEX #2)
 - **Invariant:** 6 (single grant/authority path) — the review-event class the repo treats as line-by-line.
 - **Location:** `crates/cli/src/commands/init.rs:311` (`init --yes` promptless), `:556` (imports project config), `:1624` (calls `trust::trust_reviewed` directly). The claim at `init.rs:1485` that only global config is read is contradicted by `:556`.
@@ -131,6 +142,20 @@ separate item.
 - **Fix shape:** `init` must not grant trust over project-supplied config without the funnel/digest; either route project imports through the same gated grant as everything else, or restrict `init` to genuinely global config and make that true in code. Reconcile with the known study-watch note (`init` importing only global-scope configs) — the fix must not silently widen it.
 
 ## F8 — Standing Block / KeepPinned decisions are enforced only on `use`
+- **Status: ✅ FIXED** 2026-08-01 (`fix/universality-f7-f8`). Standing
+  decisions are now consulted at every load/grant seam: the MCP loader
+  refuses blocked skills and serves keep-pinned ones from the verified store
+  copy (fail closed on tamper, `origin: "approved-copy"`, drift warning
+  attached); the MCP catalog stops advertising blocked skills and describes
+  keep-pinned ones from the approved bytes; locked runs refuse loudly on a
+  blocked item (keep-pinned needs no arm there — drift already fails strict
+  verification). Together with the F6 compiler enforcement and the F4
+  record-lock skip, every load path now honors the answers. Witnesses tamper
+  the bypass the finding names — live bytes restored to approved so every
+  drift check passes: `a_standing_block_holds_on_the_mcp_load_path`,
+  `keep_pinned_serves_the_approved_copy_on_the_mcp_load_path` (both in
+  `mcp_server.rs`), `a_standing_block_refuses_a_locked_run`
+  (`regate_staging.rs`).
 - **Confidence:** HIGH (CODEX #3)
 - **Invariant:** a refusal must hold on every load path, not one.
 - **Location:** only `use_profile.rs:557` consults decisions. Bypassed by: MCP catalog reading live frontmatter (`mcp_server.rs:2015`), MCP load checking the lock but not decisions (`mcp_server.rs:2211`), locked execution constructing grants without them (`locked.rs:568`).
