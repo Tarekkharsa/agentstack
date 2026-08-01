@@ -77,8 +77,21 @@ docs — participants must arrive cold; the task script hands them the URL.
 
 - Participant's own machine, their real CLI configs. No sandbox, no demo repo.
 - They pick a real project of theirs (or an empty directory — their choice).
-- Confirm the released binary they'll install carries the current journey:
-  `agentstack --version` ≥ 0.17.1.
+- **The install command participants run** — send them this exact line, not
+  the README's. The study tests the completed v2 journey, which the latest
+  published release does not carry; this pins the release candidate that does.
+  It is checksum-verified by the same installer path as any other install:
+
+  ```sh
+  curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh \
+    | AGENTSTACK_VERSION=v0.18.0-rc.1 sh
+  ```
+
+- Confirm the binary they end up with carries the current journey:
+  `agentstack --version` ≥ 0.18.0-rc.1. A bare `| sh` installs the latest
+  *stable* release instead, which is a different and older journey — if their
+  version reads 0.17.x, they used the wrong line and the session should
+  restart from the install.
 - Start a timer at the moment they run the install command; note wall-clock
   timestamps at each milestone below.
 
@@ -108,6 +121,14 @@ they *find* the commands is the study.
 
 ## 5. Observation protocol
 
+- **This study observes the CLI only.** The t3code panel is not shown, not
+  installed, and not mentioned. Reason, recorded once so it is not
+  relitigated: the panel renders `status-v1` and does not yet render the
+  contracts this release added, so its "Ready" chip would contradict the CLI on
+  exactly the case `readiness` was introduced to fix — a participant would be
+  studying a disagreement between two surfaces rather than the journey. The
+  fork's migration is post-study work. If a participant raises the panel
+  themselves, use the scripted line in Appendix B3 and return to the task.
 - **No command coaching.** Never name a command, flag, or file. If asked,
   answer "what would you try?" and record the question verbatim.
 - **Intervention = failure.** If they are hard-stuck for 5+ minutes and you
@@ -126,25 +147,48 @@ they *find* the commands is the study.
 
 ### v2 observation prompts (Phase 0 — observe, never coach)
 
-Two more things to watch for while running the protocol above. They add
-observation only: no new tasks, no changes to the task script, no coaching, and
-no new gate. The two gate questions stay exactly two — the follow-up below is
-asked after them and feeds no gate metric. Nothing recorded here changes the §7
-pass condition.
+Four things to watch for while running the protocol above. They add observation
+only: no new tasks, no changes to the task script, no coaching, and no new
+gate. The two gate questions stay exactly two — the one question below is asked
+after them and feeds no gate metric. Nothing recorded here changes the §7 pass
+condition.
 
-1. **The drop-a-file reach.** Watch for the moment the tester behaves as if
-   placing a file is enough — writing, pasting, or copying a skill,
-   instruction, or config file into the project and expecting it to be live —
-   and then stalls because it is not. Record the exact moment (timestamp and
-   what they had just done), the exact path of the file they created or edited,
-   and what they said, verbatim. Do not tell them whether it works. If they
-   never reach for it, write "not observed"; never steer them toward it.
-2. **What their yes granted.** After the two questions above, ask once: "Earlier
+These were written when the moments they describe were predictions. They now
+exist in the binary the participant is running, so each has been rewritten to
+ask whether the thing **works and is findable**, rather than whether the user
+gropes for something absent. Only prompt 2 has a question you speak aloud; the
+rest are silent observation.
+
+1. **The drop-a-file path.** This now exists: a file placed in
+   `.agentstack/skills/` or `.agentstack/instructions/` is noticed, and
+   `agentstack yes` takes it live. So the question is no longer whether they
+   reach for it and stall — it is whether they find it **unaided**. Record: did
+   they place a file at all (timestamp, exact path, what they said, verbatim);
+   if they did, what they tried next, in their own words, before anything
+   worked; and whether they arrived at `yes` themselves, arrived at the longer
+   explicit path, or arrived nowhere. Do not tell them the path exists. If they
+   never place a file, write "not observed" — that is a finding about
+   discoverability, not a failed session.
+2. **What their yes granted.** After the two gate questions, ask once: "Earlier
    you approved this project — in your own words, what did that approve?" Write
    the answer down verbatim, word for word, then stop: no correcting, no
-   confirming, no filling in gaps, no second attempt. It is scored later against
-   what the review actually showed (§9, review comprehension). If no review
-   appeared in their session, write "no review shown".
+   confirming, no filling in gaps, no second attempt. There is now a review card
+   that states this in two to five plain lines, so the answer is scorable
+   against something specific (§9, review comprehension) rather than against a
+   wall of detail. If no review appeared in their session, write "no review
+   shown".
+3. **The re-gate, if they meet one.** If approved content changes during the
+   session, they are shown a diff and three answers: accept, keep the approved
+   version, block. Record whether they understood the choice **without asking
+   you** — and if they asked, the exact words of the question. Do not explain
+   the three answers. If no re-gate occurs, write "not observed"; do not
+   engineer one.
+4. **Getting back, if they want to.** `agentstack undo` now exists. If they
+   express any wish to reverse something — including a muttered one — record
+   what they reached for first (undo, restore, `git checkout`, ctrl-Z, asking
+   you), whether it worked, and how long it took. Do not suggest undo. If
+   nothing goes wrong and they never want to reverse anything, write "not
+   observed" and leave §9's recovery-time row blank.
 
 ## 6. Metrics sheet (one per participant)
 
@@ -211,12 +255,25 @@ found deterministically by the §8.1 pilot and fixed in v0.17.1.
 
 ### 8.1 Isolated pilot run (2026-07-31) — kit rehearsal, not a participant
 
+> **HISTORICAL — captured on v0.17.0, replayed on v0.17.1. Participants run
+> v0.18.0-rc.1.** Everything in this section is evidence that specific
+> blockers were found and fixed. **It is not a description of what a
+> participant will see.** Read it to know what was already caught, so a
+> familiar-looking stall can be recognized as either "the old one, back" (a
+> regression worth reporting loudly) or something new. Do not read it as a
+> script for the RC's behaviour.
+>
+> Where the RC differs by design: the whole v2 journey below the import —
+> drop-a-file, one yes with a review card, the re-gate diff, `undo` — did not
+> exist in either binary captured here, so no transcript in this section shows
+> it and nothing here predicts how it will go.
+
 A second dry run, in a throwaway HOME with the **public v0.17.0 installed by
 the published one-line installer**, rehearsing the §4 journey twice to check the
 kit is runnable and to see what a stall looks like. Not one of the five, and no
 product code was changed in response.
 
-*Run A — servers in global CLI config (Claude Code + Codex, 3 servers, 1
+*Run A (captured on v0.17.0) — servers in global CLI config (Claude Code + Codex, 3 servers, 1
 plaintext token).* The whole journey completed: import wizard → apply → verify →
 toolset create → switch → undo. `doctor` ended 0 errors. The wizard previewed
 every file before writing, lifted the token to `${GITHUB_TOKEN}`, and each step
@@ -236,7 +293,7 @@ named its own undo. Two things to watch in real sessions:
   **Fixed in v0.17.1:** trust-stale now names `agentstack trust .` on the Next
   line directly, so the cue is one hop. The re-gate itself is unchanged.
 
-*Run B — the same servers, but configured only in project-scope files*
+*Run B (captured on v0.17.0) — the same servers, but configured only in project-scope files*
 (`.mcp.json` and `.codex/config.toml` in the working directory, nothing in the
 user's home). This is the shape §8 flagged to watch, and it fails harder than
 "import misses some servers":
@@ -278,8 +335,8 @@ same isolated HOME:
   are stated as two different facts.
 - The toolset task proceeds; the dead-end does not occur.
 
-**Observers: do not expect this stall.** Participants install the latest
-release. If a project-scope participant stalls anyway, that is a *new* finding
+**Observers: do not expect this stall.** Participants install v0.18.0-rc.1,
+which carries this fix and everything after it. If a project-scope participant stalls anyway, that is a *new* finding
 and belongs on the stall log as one — do not attribute it to this entry. Do not
 screen participants out for having a project-scope setup — see Appendix B2.
 
@@ -382,12 +439,15 @@ Where their servers live today (tick what you SEE, do not ask them to change it)
 
 --- §9 BASELINE METRICS (record, do not score in the room) ---
  1. TTLC — time to live capability
-      only if they authored something of their own; otherwise NOT OBSERVED
-      [ ] not observed
-      content saved / entry added at  __:__
+      There is now a real funnel to time: file dropped -> live in two CLIs.
+      Clock starts when the FILE IS SAVED, not when they start thinking.
+      [ ] not observed (they authored nothing of their own)
+      file saved / entry added at     __:__   path: ________________
+      route they took:  [ ] agentstack yes   [ ] explicit (adopt/lock/trust/use)
+                        [ ] never got there
       seen working in CLI #1 at       __:__   (which CLI: __________)
       seen working in CLI #2 at       __:__   (which CLI: __________)
-      TTLC = ______
+      TTLC = ______        unaided?  [ ] yes  [ ] asked  [ ] told
 
  2. Concepts-before-value — mechanism nouns they READ on screen or on a doc
       page BEFORE the clean-verify milestone above. Tick only what they were
@@ -399,11 +459,20 @@ Where their servers live today (tick what you SEE, do not ask them to change it)
       [ ] correct  [ ] partial  [ ] wrong  [ ] no review shown
 
  4. Recovery time — only if something actually went wrong on its own
+      `agentstack undo` now exists, so this measures whether they FIND it,
+      not whether a way back exists. Never suggest it.
       [ ] no recovery occurred
       first signal something was wrong  __:__
       what triggered it: ______________________________________________
+      what they reached for FIRST: [ ] undo  [ ] restore  [ ] git
+                                   [ ] ctrl-Z  [ ] asked you  [ ] other ____
       they call it working again at     __:__
       recovery = ______
+
+ 5. The re-gate, if one occurred (prompt V3) — not scored, recorded
+      [ ] not observed
+      understood accept / keep / block unaided?   [ ] yes  [ ] asked
+      if they asked, their exact words: _______________________________
 
 --- THE TWO GATE QUESTIONS (ask verbatim, after the tasks) ---
  Q1 "In one sentence, what is this tool?"
@@ -535,8 +604,10 @@ never select for it.
 - Print one Appendix A sheet. Have a pen and a clock with a seconds hand or a
   phone timer.
 - Confirm the version they will get is current: the study needs
-  `agentstack --version` ≥ 0.17.1. Check what the public installer serves
-  today, on your own machine, not theirs.
+  `agentstack --version` ≥ 0.18.0-rc.1. Run §3's pinned install line on your
+  own machine, not theirs, and check the version it produces. Do not check
+  what the bare public installer serves — it serves the latest stable release
+  on purpose, and that is not the build this study is about.
 - Have §3's consent points and §4's task script in front of you as text you can
   read off. You will read both aloud.
 - Decide nothing else. You are not preparing a demo.
@@ -594,6 +665,15 @@ never select for it.
 - Any reassurance that implies what should happen next: "that looks right",
   "nearly there", "that's the one". Neutral acknowledgement only.
 - Any explanation of an error message. Their reading of it *is* the data.
+- Anything about the graphical panel. If they ask — "isn't there a UI?", "can
+  I see this in an app?" — say exactly this, once, and move on:
+
+  > "There is a graphical companion, but it's not part of today. Today is the
+  > command line."
+
+  Do not say whether it is good, finished, available, or coming. If they press,
+  repeat the same sentence rather than improvising a second one, and record
+  that they asked.
 
 **Right after the call (5 minutes, alone, before the next thing).**
 
