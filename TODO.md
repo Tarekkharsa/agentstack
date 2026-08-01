@@ -4,7 +4,7 @@
 >
 > **Strategy:** [`STRATEGY.md`](STRATEGY.md)
 >
-> **Updated:** 2026-07-29
+> **Updated:** 2026-08-01
 >
 > **Rule:** finish the current stage gate before starting a later product stage
 
@@ -66,8 +66,8 @@ The adopted [`STRATEGY.md`](STRATEGY.md) (v2, 2026-07-31) opened with Phase 0
 amendment in `STRATEGY.md`, Phases 1–4 now build in order on maintainer
 acceptance; the activation study is the **v0.18.0 release gate** — the
 release does not publish until the study passes against the completed v2
-journey. Phases 1 and 2 are complete (blocks below); **next is Phase 3, the
-four ideas**, which starts in a fresh session.
+journey. Phases 1, 2, and 3 are complete (blocks below); **next is Phase 4,
+Anywhere** — gated on the §1.6 study, which remains the v0.18.0 release gate.
 
 - [x] **P0.1 — study instrumentation.** Add the v2 observation prompts to the
   §1.6 protocol (where does a tester reach for "drop a file" and stall; can
@@ -207,6 +207,134 @@ of identical content is cheaper without being weaker. Contract:
 **Gate to Phase 3:** review-comprehension metric improves against baseline, and
 zero instances — counted over recorded grant events — of a user saying yes to
 something the card did not surface. Phase 3 starts in a fresh session.
+
+### Strategy v2 — Phase 3 (Four ideas) — COMPLETE 2026-08-01
+
+The visible product is Setup, Toolset, Status, Undo, plus the yes — and the
+seatbelt explains itself. Merged to main as `phase3/four-ideas`; every witness
+tamper-tested. No release cut: Phase 4 and the §1.6 study remain ahead.
+
+- [x] **P3.1 — status as one next action, and green that means verified.**
+  `doctor` ends with exactly one recommended command, always; `next_action` in
+  the JSON is no longer nullable, because `state` already answers "is anything
+  wrong?". The inherited false-ready bug is fixed the honest way: a check that
+  examined nothing says so in words at a new `Level::Unchecked`, rather than
+  reporting a green pass. Six sibling emptiness branches moved with it. The
+  class guard — no green line anywhere may claim a pass over nothing examined —
+  is what makes it a property rather than a fact about one check.
+- [x] **P3.2 — seatbelt legibility.** All four denial families produce one
+  plain sentence (what, why, safe next step) with a per-family reassurance
+  clause. The two families that recorded nothing — host-path egress and
+  secret-scope — now do, following P0.2 exactly: additive, identity-shaped,
+  best-effort, never gating. One recorder addition, `RunEvent::SecretDenied`.
+  `docs/ENFORCEMENT.md` gained the per-family honesty table in the same change:
+  recorded is not prevented, and the host-path egress row stays `coarse`.
+  The invariant is structural — `seatbelt::refuse` returns `()`, so composing a
+  denial cannot hand a call site permission. Fixed while capturing transcripts:
+  a policy refusal was being given the missing-value's advice ("set it with
+  `agentstack secret set`"), which is work that cannot help.
+- [x] **P3.3 — the undo timeline.** `agentstack undo` is the interactive face
+  of `restore`: recent changes newest-first, pick a point, revert to it. No new
+  destructive machinery (a witness asserts it contains no filesystem call);
+  nothing unrecorded is ever offered. `history::undo_recorded` captures the
+  pre-undo bytes so the revert is an ordinary ledger row — before this, the one
+  action that changed the user's files was the one action the ledger did not
+  contain.
+- [x] **P3.4 — vocabulary completion.** Default `--help` and `status` speak the
+  four ideas; the mechanism glossary moved to `--help --all`, which now opens
+  by defining it. Nothing was renamed — `cli_surface` and `t3code_parity` are
+  green unmodified except the deliberate `undo` addition below, and
+  `git diff main -- README.md` is empty, so the six-rung ladder is
+  byte-identical. The witness asserts both directions: no mechanism noun on
+  first contact, AND all four ideas named (a help screen that said nothing
+  would pass a subtraction-only check).
+- [x] **P3.5 — kind convergence.** `explain` covered 3 of 7 kinds and told the
+  other three they did not exist, while the review card listed all seven —
+  `explain` disagreed with the surface the user had already said yes on. Now
+  every in-scope kind answers the same four questions in the same order, with
+  empty rows stated rather than omitted. Hooks and extensions share the
+  presentation shape and keep the full ceremony; the "what it asks" row is
+  where they visibly differ. `status` counts every declared kind (was 2 of 7);
+  `[settings.*]` gained the `doctor` section it never had. Presentation only —
+  a witness asserts the seven-kind manifest shape is untouched. Structural lint
+  baseline shrank 10 → 9; no entry added.
+- [x] **P3.6 — dynamic-default preconditions assessed, not flipped.** All three
+  unmet, as expected. (1) Open question #1 (where the yes lives in zero-files
+  mode) is still open and still self-declares as the blocker. (2) The
+  `ENFORCEMENT.md` lease column does not exist — the matrix is still four
+  columns. (3) First-run friction is unmeasurable until §1.6 runs. The flip
+  stays off; Phase 4 inherits this assessment unchanged.
+
+**Deferred by name, so none of it is rediscovered as a bug:**
+
+- **The server and skill explain lenses are not on the shared row shape.** They
+  predate it and are the trust lens the consent card composes from, so
+  converging them is its own change. Tracked by
+  `servers_and_skills_are_not_yet_on_the_shared_row_shape`, a
+  **failing-when-fixed** test: it passes today and fails the day someone adds
+  the rows, which is exactly when the follow-up needs attention.
+- **Authoring paths for the executable kinds.** `add` covers 2 of 7 kinds and
+  extensions have none at all (`add.rs` bails outright). Adding one is a
+  consent-surface change: hooks and extensions keep the full ceremony, so any
+  attempt gets a line-by-line review of the gate, not just the authoring code.
+  No schema change was required for Phase 3's presentation work, so this is a
+  scope decision rather than the "stop and report" trigger firing.
+- **`undo` was added to the visible command surface deliberately.** Undo is one
+  of the four ideas and the one a person reaches for while something is already
+  wrong — it must be findable without knowing that `restore` is its other name.
+  `cli_surface`'s visible list and the full map's new `Undo` group both record
+  the reasoning.
+- **The locked-run fifth denial family** (`locked.rs:191,217`, `GateDecision`)
+  is real and out of Phase 3's stated four. It is the only denial recording
+  that is fail-closed rather than best-effort, which is a property worth
+  keeping in mind before anyone "unifies" it with the seatbelt seam. Its lane
+  is the locked-run work, not the seatbelt.
+- **The history ledger caps at 40 entries and `session end` silently consumes
+  them** (`session.rs:460`). The undo timeline inherits both. Its lane is the
+  ledger, not the timeline.
+
+### P3.7 — status contract honesty (opened by Phase 3, not fixed by it)
+
+`doctor` reports `state: "ready"` for an untrusted, never-activated project:
+zero errors and zero warnings is true, and "ready" is not — nothing it declares
+is active. This is the false-ready family again, this time inside a declared
+contract with panel consumers, which is why Phase 3 left it alone. **It is the
+same bug the E2E's F1 Ready-mislabel finding saw from the fork side.**
+
+Three symptoms, one item, because they are one question — does a machine-readable
+status surface say only what the evidence supports?
+
+- `state: "ready"` over an untrusted / never-activated project (`doctor.rs`
+  `Report::state`).
+- `snapshot.rs:804` emits a plural `nextActions` array where `status` and
+  `doctor` both now emit exactly one — a list where a decision belongs.
+- `doctor` prints `✓ <REF> resolved from env` for a ref that every server's
+  `[policy.secrets]` refuses. Technically true, misleading in context, and the
+  same shape as the vacuous green P3.1 removed.
+
+**Do it as a contract revision, versioned** the way `trust-review-card-v1` was
+— a new version consumers opt into. Do **not** mutate `status-v1` semantics in
+place: a panel that renders "Ready" from today's field would silently change
+meaning under its users, which is the failure this item exists to remove.
+
+### P3.8 — the silent pin-verification skip
+
+`gateway.rs:766` drops a server when pin/lock verification fails, with a bare
+`eprintln!` and no recorded event. It is fail-closed and correct; it is also
+**the most security-relevant unrecorded refusal in the product** — the content-
+pinning refusal, the one that fires when delivered bytes do not match what was
+reviewed, and the one a user most needs to be able to look up afterwards.
+
+Phase 3 recorded the other two host-path silences and deliberately did not
+touch this one, because it sits on the verification path rather than beside it.
+
+- Give it the seatbelt one-liner (what / why / safe next step) and a recorded
+  event, using the **same additive, identity-shaped, best-effort, never-gating
+  pattern** P3.2 used — never a gating change, and never a path where an
+  unrecordable refusal becomes an allow.
+- **Its own review**, line by line, because the diff touches verification.
+- The existing `seatbelt::refuse` seam already returns `()`, so the "legible
+  denial is still a denial" invariant is inherited rather than re-argued.
 
 ## Open review findings — what two product reviews left standing
 
