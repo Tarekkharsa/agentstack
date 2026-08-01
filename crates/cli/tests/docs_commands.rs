@@ -1133,6 +1133,8 @@ const PROFILE_IDENTIFIERS: &[&str] = &[
     "create-profile",
     "use-profile",
     "edit-profile",
+    "rename-profile",
+    "delete-profile",
     "add-skill-to-profile",
     "add-server-to-profile",
     "_create_profile",
