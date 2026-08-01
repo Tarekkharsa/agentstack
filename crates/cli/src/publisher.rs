@@ -182,6 +182,14 @@ pub enum Provenance {
 }
 
 impl Provenance {
+    /// Whether the signature actually holds — the only state a HEADLESS
+    /// accept may lean on (F13). Unsigned and invalid are both false:
+    /// "missing" and "broken" differ on the card, but neither is something
+    /// an unattended `--yes` can vouch for.
+    pub fn verifies(&self) -> bool {
+        matches!(self, Provenance::Verified { .. })
+    }
+
     /// The one line a review card leads with, in the reader's terms.
     ///
     /// Mirrors [`crate::recognition::line`] on purpose, including its most

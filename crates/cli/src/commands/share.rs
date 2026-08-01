@@ -209,6 +209,11 @@ pub fn run_share(args: &ShareArgs, manifest_dir: Option<&Path>) -> Result<()> {
 /// rather than dropped quietly — a bundle that silently lost a file would give
 /// the receiver a card describing content that is not what they will get.
 fn collect_entries(dir: &Path) -> Result<Vec<Entry>> {
+    // Attribution travels when the sender's lock recorded it (F18): the
+    // schema and carry-forward already exist, and the receive card renders
+    // exactly these fields — hard-coding `None` here was one of the dead
+    // segments of that wire.
+    let lock = crate::lock::Lock::load(dir).unwrap_or_default();
     let mut out = Vec::new();
     for (kind, sub) in [("skill", "skills"), ("instruction", "instructions")] {
         let root = dir.join(sub);
@@ -229,13 +234,17 @@ fn collect_entries(dir: &Path) -> Result<Vec<Entry>> {
                 )
             })?;
             let name = rel.split('/').next().unwrap_or(&rel).to_string();
+            let (license, origin) = lock
+                .get(&name)
+                .map(|e| (e.license.clone(), e.origin.clone()))
+                .unwrap_or((None, None));
             out.push(Entry {
                 name,
                 kind: kind.to_string(),
                 path: rel,
                 body,
-                license: None,
-                origin: None,
+                license,
+                origin,
                 notice: None,
             });
         }
@@ -311,7 +320,16 @@ pub fn run_receive(args: &ReceiveArgs, manifest_dir: Option<&Path>) -> Result<()
     );
 
     // ── the yes ──────────────────────────────────────────────────────────
-    if !confirmed(args)? {
+    let decision = confirmed(args, &provenance);
+    let accepted = match decision {
+        Ok(v) => v,
+        Err(e) => {
+            // A refusal must leave nothing staged, exactly like a decline.
+            crate::quarantine::discard(&staged)?;
+            return Err(e);
+        }
+    };
+    if !accepted {
         // Fetched-then-declined leaves nothing, anywhere. Same property Phase 1
         // witnessed for a declined drop: the project is byte-identical and the
         // staged bytes are gone.
@@ -371,12 +389,30 @@ fn read_bounded(path: &Path) -> Result<ShareBundle> {
         if e.body.len() > MAX_ENTRY_BYTES {
             bail!(
                 "'{}' is over the {MAX_ENTRY_BYTES}-byte per-file limit",
-                e.name
+                crate::text::sanitize_line(&e.name)
             );
         }
         if e.name.len() > MAX_NAME_LEN || e.path.len() > MAX_NAME_LEN * 4 {
             bail!("a bundle entry has an unreasonably long name or path");
         }
+        // Attribution fields render on the card and travel into records, so
+        // they are bounded like every other field (F14). `kind` is bounded by
+        // being an allow-list (F1): it becomes a path segment in quarantine,
+        // which is the same hole `check_relative` closes for `path`.
+        if e.license.as_deref().is_some_and(|l| l.len() > MAX_NAME_LEN)
+            || e.origin
+                .as_deref()
+                .is_some_and(|o| o.len() > MAX_NAME_LEN * 4)
+            || e.notice
+                .as_deref()
+                .is_some_and(|n| n.len() > MAX_ENTRY_BYTES)
+        {
+            bail!(
+                "'{}' carries an unreasonably long license/origin/notice field",
+                crate::text::sanitize_line(&e.name)
+            );
+        }
+        crate::quarantine::check_kind(&e.kind)?;
         crate::quarantine::check_relative(&e.path)?;
     }
     Ok(bundle)
@@ -414,7 +450,15 @@ fn attribution_line(bundle: &ShareBundle) -> Option<String> {
     let mut seen: Vec<String> = Vec::new();
     for e in &bundle.entries {
         if let (Some(lic), Some(origin)) = (&e.license, &e.origin) {
-            let s = format!("{lic}, from {origin}");
+            // Attacker-supplied text on the consent card: sanitized at the
+            // render site with the same ECMA-48 state machine the trust and
+            // eve cards use (F14) — an `origin` full of cursor moves could
+            // otherwise redraw the SIGNATURE DOES NOT MATCH line away.
+            let s = format!(
+                "{}, from {}",
+                crate::text::sanitize_line(lic),
+                crate::text::sanitize_line(origin)
+            );
             if !seen.contains(&s) {
                 seen.push(s);
             }
@@ -426,8 +470,20 @@ fn attribution_line(bundle: &ShareBundle) -> Option<String> {
     Some(format!("Licensed: {}", seen.join(" · ")))
 }
 
-fn confirmed(args: &ReceiveArgs) -> Result<bool> {
+fn confirmed(args: &ReceiveArgs, provenance: &Provenance) -> Result<bool> {
     if args.yes {
+        // F13: `--yes` acknowledges a review nobody is present to perform, so
+        // it leans entirely on the signature — and it used to lean on nothing:
+        // a tampered or unsigned bundle was accepted identically to a verified
+        // one. Headless acceptance now requires a signature that VERIFIES.
+        // Interactively, a human who has read the loud card may still decide;
+        // headlessly there is no one to have read it.
+        if !provenance.verifies() {
+            bail!(
+                "refusing --yes: {} — a headless accept leans entirely on the                  signature, and this one does not hold. Review it interactively instead.",
+                provenance.card_line()
+            );
+        }
         return Ok(true);
     }
     if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {

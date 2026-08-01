@@ -74,6 +74,23 @@ pub fn check_relative(path: &str) -> Result<()> {
     Ok(())
 }
 
+/// The only two kinds `adopt` reads — and therefore the only two a bundle may
+/// declare (F1). `kind` becomes a PATH SEGMENT in [`stage`], so an
+/// unvalidated value was the same traversal hole `check_relative` closes for
+/// `path`, one field over: `kind: "../../.."` plus `path: ".zshrc"` landed
+/// bytes in the user's home before any card printed. Allow-list, not a path
+/// check: there is no legitimate third value, so anything else is refused
+/// outright rather than merely contained.
+pub fn check_kind(kind: &str) -> Result<()> {
+    if kind == "skill" || kind == "instruction" {
+        return Ok(());
+    }
+    bail!(
+        "a bundle entry declares kind '{}' — only 'skill' and 'instruction' exist, refusing",
+        crate::text::sanitize_line(kind)
+    )
+}
+
 /// Where a project's staged intake lives.
 pub fn root(dir: &Path) -> PathBuf {
     dir.join("quarantine")
@@ -89,10 +106,18 @@ pub fn stage(dir: &Path, entries: &[crate::commands::share::Entry]) -> Result<Pa
     if staged.exists() {
         std::fs::remove_dir_all(&staged).ok();
     }
+    std::fs::create_dir_all(&staged).with_context(|| format!("creating {}", staged.display()))?;
+    // Canonical root for the physical backstop below: `Path::starts_with` is
+    // component-wise and does not resolve `..` or links, so the lexical check
+    // alone verifies spelling, not destination.
+    let staged_real = staged
+        .canonicalize()
+        .with_context(|| format!("resolving {}", staged.display()))?;
     for entry in entries {
         // Checked again here, deliberately. The caller checks too; this is the
         // call that makes "staged content cannot escape" true of the module
         // rather than true of one caller's diligence.
+        check_kind(&entry.kind)?;
         check_relative(&entry.path)?;
         let dest = staged.join(&entry.kind).join(&entry.path);
         // Belt and braces: after joining, the result must still be inside the
@@ -104,6 +129,17 @@ pub fn stage(dir: &Path, entries: &[crate::commands::share::Entry]) -> Result<Pa
         if let Some(parent) = dest.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("creating {}", parent.display()))?;
+            // The physical backstop: after creation, the parent must RESOLVE
+            // inside the staging root, not merely spell like it.
+            let parent_real = parent
+                .canonicalize()
+                .with_context(|| format!("resolving {}", parent.display()))?;
+            if !parent_real.starts_with(&staged_real) {
+                bail!(
+                    "'{}' resolves outside quarantine — refusing",
+                    crate::text::sanitize_line(&entry.path)
+                );
+            }
         }
         std::fs::write(&dest, &entry.body)
             .with_context(|| format!("staging {}", dest.display()))?;
@@ -141,21 +177,68 @@ pub fn discard(staged: &Path) -> Result<()> {
 /// received content and authored content are the same thing, reviewed by the
 /// same card and pinned by the same lock.
 pub fn adopt(staged: &Path, dir: &Path) -> Result<usize> {
+    let mut copied: Vec<PathBuf> = Vec::new();
+    let out = adopt_inner(staged, dir, &mut copied);
+    match out {
+        Ok(moved) => {
+            discard(staged)?;
+            Ok(moved)
+        }
+        Err(e) => {
+            // A partial adopt is worse than a refused one: files already
+            // copied would sit in the intake directories as though they had
+            // been accepted, while the error reads as "nothing happened".
+            // Undo the copies, then discard the staging dir — the module's
+            // stated invariant is that nothing survives a path that did not
+            // end in a completed yes.
+            for p in copied.iter().rev() {
+                std::fs::remove_file(p).ok();
+            }
+            discard(staged).ok();
+            Err(e.context("nothing was adopted — the partial copies were removed"))
+        }
+    }
+}
+
+fn adopt_inner(staged: &Path, dir: &Path, copied: &mut Vec<PathBuf>) -> Result<usize> {
     let mut moved = 0;
     for (kind, sub) in [("skill", "skills"), ("instruction", "instructions")] {
         let from = staged.join(kind);
         if !from.exists() {
             continue;
         }
+        let base = dir.join(sub);
+        // F16: never adopt THROUGH a link. A repo shipping
+        // `.agentstack/skills` as a symlink at `~/.claude/` would otherwise
+        // receive every "adopted" byte at the link's target — the lexical
+        // `starts_with` below cannot see that, because it checks how the
+        // path is spelled, not where it resolves.
+        if base
+            .symlink_metadata()
+            .map(|m| m.file_type().is_symlink())
+            .unwrap_or(false)
+        {
+            bail!(
+                "{} is a symlink — refusing to adopt through it",
+                base.display()
+            );
+        }
+        std::fs::create_dir_all(&base).with_context(|| format!("creating {}", base.display()))?;
+        let base_real = base
+            .canonicalize()
+            .with_context(|| format!("resolving {}", base.display()))?;
         for path in files_under(&from) {
             let rel = path.strip_prefix(&from).unwrap_or(&path);
             let rel_str = rel.to_string_lossy().to_string();
             check_relative(&rel_str)?;
-            let dest = dir.join(sub).join(rel);
-            if !dest.starts_with(dir.join(sub)) {
+            let dest = base.join(rel);
+            if !dest.starts_with(&base) {
                 bail!("'{rel_str}' would land outside the project — refusing");
             }
-            if dest.exists() {
+            // `symlink_metadata`, not `exists()`: the latter FOLLOWS a link,
+            // so a dangling symlink at the destination read as "nothing
+            // there" and the copy wrote through it.
+            if dest.symlink_metadata().is_ok() {
                 // Never overwrite. A received file that silently replaced an
                 // authored one would be the collision case Phase 2 built the
                 // diff card for, arriving through a door that has no card.
@@ -167,12 +250,28 @@ pub fn adopt(staged: &Path, dir: &Path) -> Result<usize> {
             }
             if let Some(parent) = dest.parent() {
                 std::fs::create_dir_all(parent)?;
+                // Physical containment, same backstop staging applies: the
+                // created parent must RESOLVE under the destination root.
+                let parent_real = parent
+                    .canonicalize()
+                    .with_context(|| format!("resolving {}", parent.display()))?;
+                if !parent_real.starts_with(&base_real) {
+                    bail!("'{rel_str}' resolves outside the project — refusing");
+                }
             }
             std::fs::copy(&path, &dest).with_context(|| format!("adopting {}", dest.display()))?;
+            copied.push(dest);
+            // F3: what adopt lands is RECEIVED content — record its digest in
+            // the machine-local ledger so the intake scanner can never label
+            // these exact bytes "your own work". Best-effort: a failed ledger
+            // append must not fail an adopt, it only costs the label its
+            // extra precision (the content still takes the full review).
+            if let Ok(bytes) = std::fs::read(&path) {
+                crate::intake::record_received(&bytes);
+            }
             moved += 1;
         }
     }
-    discard(staged)?;
     Ok(moved)
 }
 
@@ -239,5 +338,41 @@ mod tests {
     #[test]
     fn a_nul_byte_is_refused() {
         assert!(check_relative("ok.md\0../../etc/passwd").is_err());
+    }
+
+    /// F1 choke point: `kind` is an allow-list, because it becomes a path
+    /// segment in `stage`. The two real kinds pass; everything else — a
+    /// traversal, an unknown word — is refused.
+    #[test]
+    fn only_the_two_real_kinds_are_accepted() {
+        assert!(check_kind("skill").is_ok());
+        assert!(check_kind("instruction").is_ok());
+        for hostile in ["../../../..", "server", "..", "skills", "", "skill/.."] {
+            assert!(check_kind(hostile).is_err(), "{hostile:?} must be refused");
+        }
+    }
+
+    /// F1 end to end: a hostile `kind` cannot walk out of the staging
+    /// directory even with an innocuous `path`. `stage` refuses, and nothing
+    /// lands at the escape target.
+    #[test]
+    fn a_traversing_kind_cannot_escape_staging() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let dir = tmp.path().join("proj/.agentstack");
+        std::fs::create_dir_all(&dir).unwrap();
+        let entries = vec![crate::commands::share::Entry {
+            name: "x".into(),
+            kind: "../../../../..".into(),
+            path: "pwned.md".into(),
+            body: "x".into(),
+            license: None,
+            origin: None,
+            notice: None,
+        }];
+        assert!(stage(&dir, &entries).is_err(), "a traversing kind staged");
+        assert!(
+            !tmp.path().join("pwned.md").exists(),
+            "a byte escaped staging via kind"
+        );
     }
 }

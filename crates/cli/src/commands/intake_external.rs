@@ -56,7 +56,15 @@ pub fn claims(id: &str) -> bool {
 }
 
 /// The whole funnel for one external source.
-pub fn run(id: &str, dir: &Path, assume_yes: bool) -> Result<()> {
+pub fn run(id: &str, dir: &Path) -> Result<()> {
+    run_answered(id, dir, None)
+}
+
+/// [`run`] with the card's answer supplied instead of read from stdin — the
+/// same injected-probe shape `yes` and the trust grant use, and for the same
+/// reason: the accept path must be witnessable without weakening the gate.
+/// Production always passes `None`.
+pub fn run_answered(id: &str, dir: &Path, answer: Option<bool>) -> Result<()> {
     // ── fetch ────────────────────────────────────────────────────────────
     let fetched = fetch(id)?;
 
@@ -97,7 +105,7 @@ pub fn run(id: &str, dir: &Path, assume_yes: bool) -> Result<()> {
             );
             Ok(())
         }
-        Parsed::Skill(entries) => stage_review_and_decide(entries, dir, id, assume_yes),
+        Parsed::Skill(entries) => stage_review_and_decide(entries, dir, id, answer),
         Parsed::Connection(c) => {
             // A server is a DECLARATION, not content: there are no bytes to
             // quarantine, and it activates through the manifest plus the trust
@@ -186,15 +194,29 @@ fn fetch_url(url: &str) -> Result<Fetched> {
         }
     }
     let body = read_bounded(resp)?;
-    let name = url
+    // The real last segment, kept as the FILE NAME too (F2): hard-coding
+    // "SKILL.md" here meant the shape dispatch downstream could never see
+    // ".json", so an object-shaped connection document — live credentials
+    // and all — fell through to the skill parser and was staged verbatim.
+    let segment = url
+        .split(['?', '#'])
+        .next()
+        .unwrap_or(url)
         .rsplit('/')
         .find(|s| !s.is_empty())
         .unwrap_or("imported")
+        .to_string();
+    let file_name = if segment.contains('.') {
+        segment.clone()
+    } else {
+        "SKILL.md".to_string()
+    };
+    let name = segment
         .trim_end_matches(".md")
         .trim_end_matches(".json")
         .to_string();
     Ok(Fetched {
-        files: vec![("SKILL.md".to_string(), body)],
+        files: vec![(file_name, body)],
         name,
     })
 }
@@ -225,6 +247,18 @@ fn fetch_path(path: &Path) -> Result<Fetched> {
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "imported".to_string());
     if path.is_file() {
+        // Same ceiling the network half enforces (F17): "local" does not mean
+        // "not hostile", and a huge file would otherwise be read whole before
+        // any parser bound applied.
+        let meta =
+            std::fs::metadata(path).with_context(|| format!("reading {}", path.display()))?;
+        if meta.len() > MAX_FETCH_BYTES {
+            bail!(
+                "{} is {} bytes, over the {MAX_FETCH_BYTES}-byte limit — nothing was read",
+                path.display(),
+                meta.len()
+            );
+        }
         let body =
             std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
         let file_name = path
@@ -240,11 +274,20 @@ fn fetch_path(path: &Path) -> Result<Fetched> {
         });
     }
     let mut files = Vec::new();
-    collect(path, path, &mut files)?;
+    let mut total: usize = 0;
+    collect(path, path, &mut files, &mut total)?;
     Ok(Fetched { files, name })
 }
 
-fn collect(root: &Path, dir: &Path, out: &mut Vec<(String, String)>) -> Result<()> {
+/// Walk a local package, bounded BEFORE reading (F17): the parser's own
+/// `eve` caps run after the whole tree is already in memory, which is a
+/// report on how much memory the tree took, not a bound on it.
+fn collect(
+    root: &Path,
+    dir: &Path,
+    out: &mut Vec<(String, String)>,
+    total: &mut usize,
+) -> Result<()> {
     for e in std::fs::read_dir(dir)
         .with_context(|| format!("reading {}", dir.display()))?
         .flatten()
@@ -256,8 +299,26 @@ fn collect(root: &Path, dir: &Path, out: &mut Vec<(String, String)>) -> Result<(
             continue;
         }
         if p.is_dir() {
-            collect(root, &p, out)?;
-        } else if let Ok(body) = std::fs::read_to_string(&p) {
+            collect(root, &p, out, total)?;
+            continue;
+        }
+        if out.len() >= crate::eve::MAX_FILES {
+            bail!(
+                "this package holds more than {} files — nothing was staged",
+                crate::eve::MAX_FILES
+            );
+        }
+        let Ok(meta) = p.symlink_metadata() else {
+            continue;
+        };
+        if *total + meta.len() as usize > crate::eve::MAX_TOTAL_BYTES {
+            bail!(
+                "this package is over the {}-byte total limit — nothing was staged",
+                crate::eve::MAX_TOTAL_BYTES
+            );
+        }
+        if let Ok(body) = std::fs::read_to_string(&p) {
+            *total += body.len();
             let rel = p
                 .strip_prefix(root)
                 .unwrap_or(&p)
@@ -277,7 +338,14 @@ fn interpret(f: &Fetched, origin: &str) -> Result<Parsed> {
     let single = f.files.first();
     if let Some((path, body)) = single {
         let trimmed = body.trim_start();
-        if f.files.len() == 1 && (path.ends_with(".json") || trimmed.starts_with('[')) {
+        // Content shape counts alongside the extension (F2): a URL serving
+        // object-shaped JSON is a connection or registry document whatever
+        // its path spells, and letting it fall through to the skill parser
+        // staged live credentials as a "SKILL.md". A real SKILL.md never
+        // begins with '{' or '[' — frontmatter starts with '-'.
+        if f.files.len() == 1
+            && (path.ends_with(".json") || trimmed.starts_with('[') || trimmed.starts_with('{'))
+        {
             // JSON: a registry or a connection. Try registry first — it is the
             // shape with an unambiguous container — then a connection.
             if let Ok(items) = crate::eve::parse_registry(body, origin) {
@@ -303,7 +371,7 @@ fn stage_review_and_decide(
     entries: Vec<Entry>,
     dir: &Path,
     origin: &str,
-    assume_yes: bool,
+    answer: Option<bool>,
 ) -> Result<()> {
     let staged = crate::quarantine::stage(dir, &entries)?;
 
@@ -339,7 +407,7 @@ fn stage_review_and_decide(
         format!("staged at {} · nothing is active", staged.display()).dimmed()
     );
 
-    if !decided(assume_yes)? {
+    if !decided(answer)? {
         crate::quarantine::discard(&staged)?;
         crate::outln!(
             "\n{} nothing was added; the staged copy is gone.",
@@ -385,15 +453,20 @@ fn attribution(entries: &[Entry]) -> Option<String> {
     Some(line)
 }
 
-fn decided(assume_yes: bool) -> Result<bool> {
-    if assume_yes {
-        return Ok(true);
+fn decided(answer: Option<bool>) -> Result<bool> {
+    if let Some(a) = answer {
+        return Ok(a);
     }
+    // F15: no headless accept, full stop. External supply is unsigned by
+    // nature, and `--write` was doubling as consent — a flag CI passes
+    // routinely, with no digest binding anything to a reviewed card. (The
+    // old refusal also pointed at a `--yes` this command has never had.)
+    // The card is a review; headlessly there is nobody to have read it.
     if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
         crate::outln!(
-            "\n{} not a terminal — nothing was added. Re-run with {} to accept.",
-            "·".dimmed(),
-            "--yes".bold()
+            "\n{} not a terminal — nothing was added. Run this in a terminal to review \
+             and accept.",
+            "·".dimmed()
         );
         return Ok(false);
     }

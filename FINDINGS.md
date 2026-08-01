@@ -43,6 +43,7 @@ separate item.
 # BLOCKING — must fix before the study byte-set
 
 ## F1 — Bundle `entry.kind` escapes the quarantine before consent is shown
+- **Status: ✅ FIXED** 2026-08-01 (`fix/intake-hardening-f1-f3-f13-f18`). `check_kind` is a new allow-list ({skill,instruction}) applied in `stage` and `read_bounded`; `stage`/`adopt` gained a physical `canonicalize`-based containment backstop (component `starts_with` alone can't see `..`/links). Witnesses tamper `kind` (not `path`): `only_the_two_real_kinds_are_accepted` + `a_traversing_kind_cannot_escape_staging` (unit) and `a_traversing_kind_is_refused_before_anything_is_staged` (share, e2e).
 - **Confidence:** HIGH (SEC B1 + UX #2, both reproduced live)
 - **Invariant:** 7 (hostile input), 3 (untrusted content inert); defeats the
   module's own headline claim and the Phase 1 decline property.
@@ -52,6 +53,7 @@ separate item.
 - **Fix shape:** reject any `kind` outside `{"skill","instruction"}` (the only two `adopt` reads); canonicalize before the `starts_with` backstop; add a witness that tampers `kind`.
 
 ## F2 — URL intake stages every object-shaped JSON as a skill body; connection/registry governance is dead for URLs
+- **Status: ✅ FIXED** 2026-08-01. `fetch_url` preserves the real filename/extension and `interpret` dispatches on content shape (`{`/`[`) not just `.json`, so object-shaped connection JSON runs `parse_connection`/redaction. Witness exercises the NETWORK branch specifically (`a_url_connection_is_redacted_not_staged_as_a_skill`, a one-shot HTTP server serving a live-key connection).
 - **Confidence:** HIGH (SEC B2, and reconciled with CONF: the passing `a_fetched_credential_becomes_a_ref` test exercises the **local-path** branch; the URL branch is unwitnessed).
 - **Invariant:** 5 (secrets never serialize), 7; the feature's entire safety argument (de5c37d: "a CONNECTION reports rather than writes", "credentials become `${REF}`", "a REGISTRY only lists") is false for the URL path.
 - **Location:** `crates/cli/src/commands/intake_external.rs:196-199` (`fetch_url` hard-codes `files: vec![("SKILL.md", body)]`) and `:280` (shape dispatch `path.ends_with(".json") || trimmed.starts_with('[')` — first disjunct always false for URLs, so only array bodies reach the JSON branch). Object-shaped connection JSON falls through to `parse_skill_package`; `is_root_skill_md("SKILL.md")` matches (`eve.rs:144`); no content check.
@@ -59,6 +61,7 @@ separate item.
 - **Fix shape:** run the same shape-detection + `parse_connection`/redaction on URL bodies that local paths get; preserve real filename/shape from `fetch_url`; add end-to-end witnesses for the **network** branch (all current tests in `external_intake.rs` use local paths).
 
 ## F3 — Provenance laundering: intake output is labeled "your own work" and gets the compressed path
+- **Status: ✅ FIXED** 2026-08-01. `adopt` records each received file's digest in a machine-local `received.jsonl` ledger (never in-project); the provenance clock checks it FIRST and labels those bytes `Arrived`. The forgeable mtime-vs-last-grant fallback is deleted — outside a git tree there is now no compressed path at all. Witnesses: `received_bytes_never_read_as_local_work`, `without_git_a_fresh_mtime_never_reads_as_local_work` (unit), `received_content_is_not_labeled_local_work` (e2e).
 - **Confidence:** HIGH (SEC B3 + CODEX #6 + UX #10)
 - **Invariant:** 8 (claims match enforcement); STRATEGY.md floor "provenance gates compression".
 - **Location:** `crates/cli/src/quarantine.rs:154` (`adopt` lands in `dir.join("skills")` = `.agentstack/skills/`) → `crates/cli/src/intake.rs:504-514` (`classify` returns `LocallyAuthored("untracked in git")`) → `crates/cli/src/commands/yes.rs:53,140-143` (prints `your own work — untracked in git`).
@@ -202,35 +205,41 @@ separate item.
 - **Fix shape:** install the interrupt handler / rollback around the write so cancel is transactional; or record the undo row before the writes it covers.
 
 ## F13 — Invalid signature is fail-open on the `--yes` accept path
+- **Status: ✅ FIXED** 2026-08-01. `Provenance::verifies()` gates headless `receive --yes`: unsigned or invalid refuses (interactive review still available). Witness tampers content-after-signing on the `--yes` path the old witness never ran (`a_bad_signature_refuses_a_headless_yes`).
 - **Confidence:** MED (SEC S4)
 - **Location:** `share.rs:275,286,314` — `Provenance` is computed, printed, then never consulted; `confirmed()` returns `true` on `args.yes` regardless. Witness (`share_round_trip.rs:177-211`) runs without `--yes`, so it only proves the decline path.
 - **Scenario:** `receive hostile.astack --yes` treats a tampered bundle identically to a verified one.
 - **Fix shape:** a failed/missing signature must change the headless outcome (refuse, or require an explicit override flag distinct from `--yes`); witness the `--yes` + bad-signature path.
 
 ## F14 — Unsanitized attacker text on the receive card
+- **Status: ✅ FIXED** 2026-08-01. `license`/`origin`/`notice` bounded in `read_bounded`; the attribution line runs `text::sanitize_line` at the render site. Witness plants ECMA-48 cursor moves in `origin` and asserts they never reach the card (`attacker_attribution_text_is_sanitized_on_the_card`).
 - **Confidence:** MED (SEC S5)
 - **Location:** `share.rs:413-427` formats `Entry.license`/`origin` (unbounded, unchecked in `read_bounded`) straight into `outln!` (bare `writeln!`). `eve.rs:200` uses `text::sanitize_line` for exactly this; the share path does not.
 - **Scenario:** `origin` containing `\x1b[5A\x1b[2K…` overwrites the `SIGNATURE DOES NOT MATCH` line before the prompt draws — a spoof of the consent card itself, on unsigned/invalid bundles.
 - **Fix shape:** run `text::sanitize_line` (the ECMA-48 state machine already used on the trust/eve cards) on every attacker-supplied field at every render site; bound `license`/`origin` in `read_bounded`.
 
 ## F15 — `add from <url> --write` is the weakest headless-consent bar in the product, on the least-trustworthy content
+- **Status: ✅ FIXED** 2026-08-01. `--write` no longer doubles as consent: external intake accepts only through the interactive card (injected-answer seam for tests), headless refuses with an accurate message. Witnessed by the reworked `external_intake.rs` accept tests (card via the binary, accept via `run_answered`) + the `--write`-alone-doesn't-stage assertion.
 - **Confidence:** MED (SEC S6)
 - **Location:** `intake_external.rs:388-399` — `--write` alone suppresses the card in CI with no digest binding, while `yes.rs:98-105` refuses non-interactively and `trust` demands `--yes --consented-digest`. The non-TTY message tells the user to re-run with `--yes`, a flag `AddFromArgs` doesn't have.
 - **Fix shape:** hold external intake to at least the `trust` bar (consent digest, or refuse headless); fix the message to name a flag that exists.
 
 ## F16 — `quarantine::adopt` containment is lexical and follows destination symlinks
+- **Status: ✅ FIXED** 2026-08-01. `adopt` rejects a symlinked destination root, uses `symlink_metadata` (not `exists`, which follows links) for collision, canonicalizes each created parent, and rolls back partial copies on any error before discarding. Witness ships `.agentstack/skills` as a link to a victim dir and asserts nothing lands there (`adopt_refuses_a_symlinked_destination`).
 - **Confidence:** MED (SEC S7)
 - **Location:** `quarantine.rs:143-177` — source symlinks skipped, but `dest.starts_with(...)` is a string prefix test, `dest.exists()` follows links, `fs::copy` writes through one. Also `bail!` on collision (`:162`) fires *after* earlier files landed, and `intake_external.rs:351` propagates with no `discard` (contradicting `:115-116`).
 - **Scenario:** a repo shipping `.agentstack/skills/foo` as a symlink to `~/.claude/` gets writes there.
 - **Fix shape:** canonicalize + reject symlinked destinations; make partial-adopt failures roll back via `discard`.
 
 ## F17 — Local-path intake is unbounded (network half is bounded, local half is not)
+- **Status: ✅ FIXED** 2026-08-01. `eve` caps applied BEFORE reading on the local intake walk (`collect`), the single-file read, the re-gate diff reader (`read_tree`: per-file + file-count ceilings, oversized files diff as a placeholder), and the git query (`gitx` bounds stdout/stderr, fails the query on overflow). The provenance git-failure path already fails closed (F3 removed the mtime fallback entirely).
 - **Confidence:** MED (SEC S8 + CODEX #7/#8)
 - **Location:** `intake_external.rs:222-273` reads the whole tree into memory with no size/count/depth cap; `eve.rs`'s `MAX_FILES`/`MAX_TOTAL_BYTES` apply at `:297`, after. Re-gate diff parsing has the same shape: `regate.rs:245-280` reads every file fully before `DIFF_LINE_CAP` (display-only). Provenance git query buffers unbounded stdout/stderr (`gitx.rs:171-213`), and `ok()?` discards the tracking signal on failure → mtime fallback.
 - **Scenario:** a multi-GB file or huge tree exhausts memory / stalls `trust` *before* the consent gate renders.
 - **Fix shape:** apply the `eve.rs` caps before reading, on the local intake path, the re-gate diff read, and the git query; on git-query failure, fail closed rather than falling back to mtime provenance.
 
 ## F18 — Attribution is dead at HEAD (the wire from intake to the lock was never connected)
+- **Status: ✅ FIXED (outbound share wire)** 2026-08-01. `collect_entries` now reads the sender lock's `license`/`origin` into each bundle entry, so the receive card's attribution line renders for real shares. Witness: `recorded_attribution_travels_with_the_bundle`. NOTE: the broader intake→Lock::upsert wire for locally-added skills (the `record_lock` license=None sites) remains for the honest-surfaces slice / ENFORCEMENT doc reconciliation (F19).
 - **Confidence:** HIGH (SEC S9 + UX + CONF)
 - **Location:** every production `LockedSkill` writes `license: None, origin: None` (`store.rs:831`, `install.rs:286`, `use_profile.rs:1317/1642`, `mcp_server.rs:3007/3050`); `share.rs:237-239` hard-codes `None` outbound; `adopt` drops a received entry's attribution; `intake_external.rs` never touches `Lock`. Schema, `upsert` carry-forward, and `attribution_schema.rs` are correct — only the wire is missing. `ENFORCEMENT.md:825-827` claims it's "recorded per pinned skill" (false today).
 - **Fix shape:** connect intake → `Lock::upsert` so `license`/`origin` are captured; until then, correct the ENFORCEMENT claim to match reality (see F19).

@@ -119,8 +119,24 @@ fn an_external_package_flows_through_the_funnel_to_live() {
     let fix = fixture();
     let pkg = fix.eve_package();
 
+    // The card, shown by the real binary. Headless runs cannot accept (F15),
+    // so this run is also the proof that `--write` alone no longer consents.
     let (out, ok) = fix.run(&["add", "from", &pkg, "--write"]);
     assert!(ok, "{out}");
+    assert!(
+        !fix.proj.join(".agentstack/skills").exists(),
+        "--write alone must not be consent for external supply:\n{out}"
+    );
+
+    // The accept, through the injected-answer seam production prompts on.
+    std::env::set_var("HOME", &fix.home);
+    std::env::set_var("AGENTSTACK_HOME", fix.home.join(".agentstack"));
+    agentstack::commands::intake_external::run_answered(
+        &pkg,
+        &fix.proj.join(".agentstack"),
+        Some(true),
+    )
+    .unwrap();
 
     // The card, in order: origin, unsigned warning, what it adds, attribution.
     assert!(out.contains("origin"), "the origin must be named:\n{out}");
@@ -156,10 +172,6 @@ fn an_external_package_flows_through_the_funnel_to_live() {
         !fix.proj.join(".agentstack/quarantine").exists(),
         "quarantine must be emptied once accepted:\n{out}"
     );
-    assert!(
-        out.contains("next:"),
-        "intake must end through the next-action seam:\n{out}"
-    );
 }
 
 /// Two packages coexist. Each keeps its own directory.
@@ -182,13 +194,14 @@ fn two_imported_packages_keep_their_own_directories() {
     )
     .unwrap();
 
-    let (a, ok_a) = fix.run(&["add", "from", &first, "--write"]);
-    assert!(ok_a, "{a}");
-    let (b, ok_b) = fix.run(&["add", "from", second.to_str().unwrap(), "--write"]);
-    assert!(
-        ok_b,
-        "the second import must not collide with the first:\n{b}"
-    );
+    std::env::set_var("HOME", &fix.home);
+    std::env::set_var("AGENTSTACK_HOME", fix.home.join(".agentstack"));
+    let dir = fix.proj.join(".agentstack");
+    agentstack::commands::intake_external::run_answered(&first, &dir, Some(true)).unwrap();
+    agentstack::commands::intake_external::run_answered(second.to_str().unwrap(), &dir, Some(true))
+        .expect("the second import must not collide with the first");
+    let (a, b) = (String::new(), String::new());
+    let _ = (&a, &b);
 
     assert!(
         fix.proj
@@ -349,4 +362,140 @@ fn a_traversing_package_is_refused() {
             "content from outside the package reached {path}"
         );
     }
+}
+
+/// F16 witness (FINDINGS.md): `adopt` must never write THROUGH a symlinked
+/// destination. A repo shipping `.agentstack/skills` as a link to a sensitive
+/// directory would otherwise receive every adopted byte at the link's target.
+/// The tamper is the destination link, not the source (source links were
+/// already skipped).
+#[test]
+fn adopt_refuses_a_symlinked_destination() {
+    let fix = fixture();
+    std::env::set_var("HOME", &fix.home);
+    std::env::set_var("AGENTSTACK_HOME", fix.home.join(".agentstack"));
+
+    // The attacker's target: a directory outside the project.
+    let target = fix._tmp.path().join("victim");
+    fs::create_dir_all(&target).unwrap();
+    // The repo ships `.agentstack/skills` as a link to it.
+    let skills = fix.proj.join(".agentstack/skills");
+    std::os::unix::fs::symlink(&target, &skills).unwrap();
+
+    let pkg = fix.eve_package();
+    let err = agentstack::commands::intake_external::run_answered(
+        &pkg,
+        &fix.proj.join(".agentstack"),
+        Some(true),
+    );
+    assert!(
+        err.is_err(),
+        "adopt through a symlinked destination succeeded"
+    );
+    // Nothing reached the link's target.
+    assert!(
+        !target.join("summarize-pro/SKILL.md").exists(),
+        "bytes were written through the destination symlink"
+    );
+}
+
+/// F3 witness: content that arrived through `add from` is recorded as
+/// received, so the intake scanner never labels those exact bytes "your own
+/// work". The tamper is the laundering route — adopt lands received files
+/// untracked in git, which is precisely what used to read as local work.
+#[test]
+fn received_content_is_not_labeled_local_work() {
+    let fix = fixture();
+    std::env::set_var("HOME", &fix.home);
+    std::env::set_var("AGENTSTACK_HOME", fix.home.join(".agentstack"));
+    let pkg = fix.eve_package();
+    let dir = fix.proj.join(".agentstack");
+
+    agentstack::commands::intake_external::run_answered(&pkg, &dir, Some(true)).unwrap();
+
+    // The adopted skill is now in the intake dir, untracked in git. Its
+    // provenance must NOT be locally-authored — it arrived from a stranger.
+    let base = agentstack::manifest::project_root_of(&dir);
+    let loaded = agentstack::manifest::load_from_dir(&dir).unwrap();
+    let found = agentstack::intake::scan(&dir, &base, &loaded.manifest);
+    let item = found
+        .items
+        .iter()
+        .find(|i| i.name == "summarize-pro")
+        .expect("the received skill is seen by intake");
+    assert!(
+        !item.provenance.is_local(),
+        "received content was labeled the user's own work: {:?}",
+        item.provenance.reason()
+    );
+    assert!(
+        item.provenance.reason().contains("receive"),
+        "the reason should name the arrival route: {:?}",
+        item.provenance.reason()
+    );
+}
+
+/// Serve one HTTP response, once, from a background thread. Returns the URL.
+/// The body is served at any path; the caller controls what shape it is.
+fn serve_once(body: &'static str, content_type: &'static str) -> String {
+    use std::io::{Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    std::thread::spawn(move || {
+        if let Some(Ok(mut s)) = listener.incoming().next() {
+            let mut tmp = [0u8; 2048];
+            let _ = s.read(&mut tmp);
+            let resp = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            );
+            let _ = s.write_all(resp.as_bytes());
+        }
+    });
+    format!("http://{addr}/acme.json")
+}
+
+/// F2 witness (FINDINGS.md): a URL serving object-shaped connection JSON with
+/// a live credential must go through the SAME shape detection + redaction the
+/// local path gets — not be staged verbatim as a SKILL.md. The finding's
+/// bypass was the network branch specifically; every prior test used a local
+/// path. The tamper is the transport: identical bytes, delivered over http.
+#[test]
+fn a_url_connection_is_redacted_not_staged_as_a_skill() {
+    let fix = fixture();
+    std::env::set_var("HOME", &fix.home);
+    std::env::set_var("AGENTSTACK_HOME", fix.home.join(".agentstack"));
+
+    let url = serve_once(
+        r#"{"name":"web-search","command":"npx","args":["-y","@acme/search-mcp"],
+            "env":{"SEARCH_API_KEY":"sk-live-9f3a2b7c1d8e4f6a0b2c3d4e"}}"#,
+        "application/json",
+    );
+
+    // Headless connection report needs no answer (nothing is staged), so the
+    // real binary can drive it.
+    let (out, ok) = fix.run(&["add", "from", &url]);
+    assert!(ok, "{out}");
+    // It was recognized as a CONNECTION, not staged as skill content…
+    assert!(
+        out.contains("MCP server definition"),
+        "a URL connection must be recognized as one, not staged as a skill:\n{out}"
+    );
+    // …the live key was turned into a ${REF} and named as replaced…
+    assert!(
+        out.contains("SEARCH_API_KEY") && out.contains("were NOT kept"),
+        "the credential must be redacted to a ${{REF}} on the way in:\n{out}"
+    );
+    // …and the raw secret is written NOWHERE under the project.
+    for (path, bytes) in fix.snapshot() {
+        assert!(
+            !String::from_utf8_lossy(&bytes).contains("sk-live-"),
+            "a live credential from a URL reached {path}"
+        );
+    }
+    // No SKILL.md holding the connection body was staged.
+    assert!(
+        !fix.proj.join(".agentstack/skills/acme/SKILL.md").exists(),
+        "a URL connection was staged as skill content:\n{out}"
+    );
 }

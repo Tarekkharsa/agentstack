@@ -244,6 +244,22 @@ fn plural_lines(n: usize) -> String {
 /// escape the directory entirely. Unreadable or non-UTF-8 files are skipped
 /// too; a binary blob has no line diff, and this must never fail the review.
 fn read_tree(root: &Path) -> Vec<(String, String)> {
+    // Read ceilings (F17): dropped content controls its own size, and this
+    // reader used to pull every byte into memory before the display cap
+    // applied — DIFF_LINE_CAP bounded what was SHOWN, not what was read.
+    // An oversized file yields the same placeholder on both sides, so an
+    // unchanged huge file diffs as unchanged and a changed one reads as
+    // "review it directly" — bounded and honest, never flooding or lying.
+    const MAX_TREE_FILES: usize = 500;
+    const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
+    const TOO_LARGE: &str = "(too large to diff here — review this file directly)\n";
+    let bounded_read = |path: &Path| -> Option<String> {
+        let meta = path.symlink_metadata().ok()?;
+        if meta.len() > MAX_FILE_BYTES {
+            return Some(TOO_LARGE.to_string());
+        }
+        std::fs::read_to_string(path).ok()
+    };
     // An instruction fragment is a single FILE, while its snapshot is a
     // directory holding that file under its own name (see
     // `Store::deposit_file`). Reading a lone file as a one-entry tree keyed by
@@ -254,14 +270,14 @@ fn read_tree(root: &Path) -> Vec<(String, String)> {
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| "fragment".to_string());
-        return match std::fs::read_to_string(root) {
-            Ok(text) => vec![(name, text)],
-            Err(_) => Vec::new(),
+        return match bounded_read(root) {
+            Some(text) => vec![(name, text)],
+            None => Vec::new(),
         };
     }
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
-    while let Some(dir) = stack.pop() {
+    'walk: while let Some(dir) = stack.pop() {
         let Ok(entries) = std::fs::read_dir(&dir) else {
             continue;
         };
@@ -276,7 +292,10 @@ fn read_tree(root: &Path) -> Vec<(String, String)> {
             if meta.is_dir() {
                 stack.push(path);
             } else if meta.is_file() {
-                if let Ok(text) = std::fs::read_to_string(&path) {
+                if out.len() >= MAX_TREE_FILES {
+                    break 'walk;
+                }
+                if let Some(text) = bounded_read(&path) {
                     if let Some(rel) = rel_path(root, &path) {
                         out.push((rel, text));
                     }

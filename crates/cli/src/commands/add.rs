@@ -50,7 +50,9 @@ fn add_from(a: &AddFromArgs, manifest_dir: Option<&Path>) -> Result<()> {
     // ids and git refs still reach their own paths below.
     if crate::commands::intake_external::claims(&a.id) {
         let dir = crate::manifest::resolve_manifest_dir(&ctx.dir);
-        return crate::commands::intake_external::run(&a.id, &dir, a.write);
+        // `--write` is a write flag, not consent (F15): external intake's
+        // accept is the interactive card, and headless runs refuse.
+        return crate::commands::intake_external::run(&a.id, &dir);
     }
 
     // `git:<url>[@<tag>][#subdir]` — a versioned pack from any git host.

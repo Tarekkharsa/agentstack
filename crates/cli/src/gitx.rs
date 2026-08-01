@@ -168,11 +168,18 @@ fn run_impl(
     crate::sys::spawn_in_new_process_group(&mut cmd);
     let mut child = cmd.spawn().context("running git (is it installed?)")?;
 
+    // Bounded (F17): a hostile repository controls how much a git query can
+    // print (`ls-files` over a tree with millions of paths), and an unbounded
+    // read_to_end made that the caller's memory bill. Far above any
+    // legitimate output; overflow reads as a failed query, which every
+    // caller already treats as "signal unavailable" — fail closed.
+    const MAX_GIT_OUTPUT: u64 = 8 * 1024 * 1024;
     let drain = |pipe: Option<Box<dyn std::io::Read + Send>>| {
         std::thread::spawn(move || {
             let mut buf = Vec::new();
             if let Some(mut p) = pipe {
-                let _ = p.read_to_end(&mut buf);
+                let mut limited = std::io::Read::take(&mut p, MAX_GIT_OUTPUT + 1);
+                let _ = std::io::Read::read_to_end(&mut limited, &mut buf);
             }
             buf
         })
@@ -209,8 +216,17 @@ fn run_impl(
         std::thread::sleep(POLL);
     };
 
-    let stdout = String::from_utf8_lossy(&out_thread.join().unwrap_or_default()).into_owned();
-    let stderr = String::from_utf8_lossy(&err_thread.join().unwrap_or_default()).into_owned();
+    let out_buf = out_thread.join().unwrap_or_default();
+    let err_buf = err_thread.join().unwrap_or_default();
+    if out_buf.len() as u64 > MAX_GIT_OUTPUT || err_buf.len() as u64 > MAX_GIT_OUTPUT {
+        bail!(
+            "git {} produced more than {MAX_GIT_OUTPUT} bytes of output — treating the \
+             query as failed rather than reading it all",
+            args.join(" ")
+        );
+    }
+    let stdout = String::from_utf8_lossy(&out_buf).into_owned();
+    let stderr = String::from_utf8_lossy(&err_buf).into_owned();
     Ok(GitOutput {
         success: status.success(),
         stdout,

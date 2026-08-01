@@ -23,9 +23,6 @@
 //! are executable kinds and are excluded from the funnel entirely.
 
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
-
-use agentstack_recorder::TrustAction;
 
 use crate::manifest::Manifest;
 
@@ -465,25 +462,26 @@ fn read_head(path: &Path, max: usize) -> Option<String> {
     Some(String::from_utf8_lossy(&buf).into_owned())
 }
 
-/// The provenance clock: git tracking plus this project's last recorded trust
-/// grant (the P0.2 trust-mutation events).
+/// The provenance clock: what arrived through governed intake, plus git
+/// tracking. (The mtime-vs-last-grant fallback is gone — see `classify`.)
 struct ProvenanceClock {
     /// Every path git tracks under the intake directories, canonicalized.
-    /// `None` when `base` is not a git work tree at all — there, "untracked"
-    /// carries no information and only the grant timestamp is consulted.
+    /// `None` when `base` is not a git work tree at all.
     ///
     /// Collected in ONE git spawn rather than one per item: `status` is on this
     /// path and is required to feel instant.
     tracked: Option<Vec<PathBuf>>,
-    /// Unix seconds of the most recent grant or regrant for this project.
-    last_grant: Option<u64>,
+    /// Digests of content that arrived through `receive` / `add from` on this
+    /// machine (F3). Checked FIRST: received bytes are usually untracked in
+    /// git — that is precisely how they laundered into "your own work".
+    received: std::collections::HashSet<String>,
 }
 
 impl ProvenanceClock {
     fn for_project(base: &Path) -> Self {
         Self {
             tracked: tracked_under_intake(base),
-            last_grant: last_grant_ts(base),
+            received: received_digests(),
         }
     }
 
@@ -502,6 +500,13 @@ impl ProvenanceClock {
     /// so it takes the full staged review — the conservative reading the
     /// strategy asks for.
     fn classify(&self, _base: &Path, path: &Path) -> Provenance {
+        // Received content first (F3): bytes that arrived through `receive` /
+        // `add from` are a stranger's work whatever git says about them —
+        // adopt lands them untracked, which is exactly how they used to earn
+        // the "your own work" label and the compressed path.
+        if !self.received.is_empty() && subtree_has_received(path, &self.received) {
+            return Provenance::Arrived("arrived through receive/add from");
+        }
         if let Some(tracked) = &self.tracked {
             // A skill is a directory: it counts as tracked if git knows about
             // anything inside it, so adding one new file to a committed skill
@@ -513,13 +518,13 @@ impl ProvenanceClock {
                 Provenance::LocallyAuthored("untracked in git")
             };
         }
-        match (self.last_grant, mtime_secs(path)) {
-            (Some(grant), Some(m)) if m > grant => {
-                Provenance::LocallyAuthored("changed after this project's last review")
-            }
-            (Some(_), _) => Provenance::Arrived("committed, and unchanged since the last review"),
-            (None, _) => Provenance::Arrived("this project has no review history yet"),
-        }
+        // Outside a git work tree there is no authorship signal a hostile
+        // process cannot forge. The old fallback promoted anything whose
+        // mtime postdated the last grant — and `touch` is free to any process
+        // with filesystem access (F3), while a failed git query silently
+        // landed here too (F17). No signal means no compression: the content
+        // still flows, it just takes the full staged review.
+        Provenance::Arrived("no git history to attest who authored this")
     }
 }
 
@@ -561,51 +566,82 @@ fn tracked_under_intake(base: &Path) -> Option<Vec<PathBuf>> {
     )
 }
 
-/// Newest mtime in a subtree (or of a single file), in unix seconds. A skill is
-/// a directory, and editing one file inside it is authoring the skill.
-fn mtime_secs(path: &Path) -> Option<u64> {
-    fn walk(path: &Path, depth: usize, budget: &mut usize) -> Option<u64> {
-        if *budget == 0 {
-            return None;
-        }
-        *budget -= 1;
-        let meta = std::fs::symlink_metadata(path).ok()?;
-        let own = meta
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-            .map(|d| d.as_secs());
-        if !meta.is_dir() || depth == 0 {
-            return own;
-        }
-        let mut newest = own;
-        for e in std::fs::read_dir(path).ok()?.flatten() {
-            if let Some(t) = walk(&e.path(), depth - 1, budget) {
-                newest = Some(newest.map_or(t, |n: u64| n.max(t)));
-            }
-        }
-        newest
-    }
-    // Bounded like every other read of dropped content: a deep or wide tree
-    // stops contributing rather than turning a status call into a full walk.
-    let mut budget = MAX_ENTRIES;
-    walk(path, 8, &mut budget)
+/// The machine-local ledger of content digests that arrived through
+/// governed intake (`receive` / `add from`) — the F3 wire. Lives under
+/// `AGENTSTACK_HOME`, never inside a project: repository content is hostile
+/// input, and a ledger a clone could ship would let a repo relabel things.
+/// (A repo APPENDING to it could only downgrade labels toward the full
+/// review — the safe direction — but it cannot, because it never leaves the
+/// user's home.) Digest-keyed so a rename cannot launder received bytes.
+fn received_path() -> PathBuf {
+    crate::util::paths::agentstack_home().join("received.jsonl")
 }
 
-/// The most recent grant or regrant recorded for this project, in unix seconds.
-///
-/// Reads the P0.2 trust-mutation log. `Repin` is deliberately excluded: it
-/// re-pins a digest without a human in the loop, so it is not a review the
-/// provenance clock may date content against. The log is oldest-first, so the
-/// last match is the newest.
-fn last_grant_ts(base: &Path) -> Option<u64> {
-    let key = agentstack_trust::key_for(base);
-    agentstack_recorder::read_trust_all()
-        .into_iter()
-        .rfind(|e| {
-            e.project == key && matches!(e.action, TrustAction::Grant | TrustAction::Regrant)
-        })
-        .map(|e| e.ts)
+/// Append one received file's digest. Best-effort by design: a failed append
+/// must never fail an adopt — it only costs the label its extra precision,
+/// and the content still takes the full review by every other rule.
+pub fn record_received(bytes: &[u8]) {
+    use std::io::Write;
+    let path = received_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let line = format!(
+        "{{\"sha256\":\"{}\"}}\n",
+        agentstack_core::digest::sha256_hex(bytes)
+    );
+    let _ = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .and_then(|mut f| f.write_all(line.as_bytes()));
+}
+
+/// Every digest the ledger holds. Malformed lines are skipped — the ledger is
+/// our own machine-local file, but parsing it defensively costs nothing.
+fn received_digests() -> std::collections::HashSet<String> {
+    let Ok(text) = std::fs::read_to_string(received_path()) else {
+        return Default::default();
+    };
+    text.lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .filter_map(|v| v.get("sha256").and_then(|s| s.as_str()).map(str::to_string))
+        .collect()
+}
+
+/// Does any regular file under `path` (or `path` itself) hash to a received
+/// digest? Bounded like every other read of dropped content, symlinks never
+/// followed.
+fn subtree_has_received(path: &Path, received: &std::collections::HashSet<String>) -> bool {
+    fn walk(path: &Path, received: &std::collections::HashSet<String>, budget: &mut usize) -> bool {
+        if *budget == 0 {
+            return false;
+        }
+        *budget -= 1;
+        let Ok(meta) = path.symlink_metadata() else {
+            return false;
+        };
+        if meta.file_type().is_symlink() {
+            return false;
+        }
+        if meta.is_file() {
+            return std::fs::read(path)
+                .map(|b| received.contains(&agentstack_core::digest::sha256_hex(&b)))
+                .unwrap_or(false);
+        }
+        if meta.is_dir() {
+            if let Ok(rd) = std::fs::read_dir(path) {
+                for e in rd.flatten() {
+                    if walk(&e.path(), received, budget) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+    let mut budget = MAX_ENTRIES;
+    walk(path, received, &mut budget)
 }
 
 /// The one-line notice a command shows when intake content is waiting. `None`
@@ -659,7 +695,6 @@ pub fn print_notice(dir: &Path, base: &Path, manifest: &Manifest) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::SystemTime;
 
     fn manifest_with(text: &str) -> Manifest {
         toml::from_str(&format!("version = 1\n{text}")).expect("test manifest parses")
@@ -706,49 +741,64 @@ mod tests {
     /// Here the difference is the grant clock — one file predates the
     /// project's only recorded review, the other postdates it — with git out
     /// of the picture so the timestamp is the sole discriminator.
+    /// F3 witness: outside a git work tree there is NO compressed path — the
+    /// old mtime-vs-last-grant fallback promoted anything a hostile process
+    /// could `touch`. The tamper here is the timestamp itself: a fresh mtime
+    /// (the forgeable signal) must no longer buy the "your own work" label.
     #[test]
-    fn same_directory_two_provenances_two_paths() {
+    fn without_git_a_fresh_mtime_never_reads_as_local_work() {
         let tmp = assert_fs::TempDir::new().unwrap();
         let dir = tmp.path();
-        drop_skill(dir, "old", "# Old\n");
-        drop_skill(dir, "new", "# New\n");
-
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
-        set_mtime(&dir.join("skills/old"), now - 10_000);
-        set_mtime(&dir.join("skills/old/SKILL.md"), now - 10_000);
+        drop_skill(dir, "fresh", "# Fresh\n");
 
         let clock = ProvenanceClock {
             tracked: None,
-            last_grant: Some(now - 5_000),
+            received: Default::default(),
         };
-        let old = clock.classify(dir, &dir.join("skills/old"));
-        let new = clock.classify(dir, &dir.join("skills/new"));
+        let p = clock.classify(dir, &dir.join("skills/fresh"));
+        assert!(
+            !p.is_local(),
+            "a forgeable mtime bought the compressed path: {p:?}"
+        );
+        assert_eq!(p.reason(), "no git history to attest who authored this");
+    }
 
+    /// F3 witness: bytes recorded as received are a stranger's work whatever
+    /// git would say — the tamper is the laundering route itself (adopt lands
+    /// received files untracked, which used to read as "your own work").
+    #[test]
+    fn received_bytes_never_read_as_local_work() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let dir = tmp.path();
+        drop_skill(dir, "gift", "# From a stranger\n");
+
+        let mut received = std::collections::HashSet::new();
+        received.insert(agentstack_core::digest::sha256_hex(b"# From a stranger\n"));
+        // `tracked: Some(vec![])` = a git work tree that tracks nothing here,
+        // i.e. the exact state in which the file would read "untracked in
+        // git" and take the compressed path.
+        let clock = ProvenanceClock {
+            tracked: Some(Vec::new()),
+            received,
+        };
+        let p = clock.classify(dir, &dir.join("skills/gift"));
         assert!(
-            !old.is_local(),
-            "content older than the last review is not local work"
+            !p.is_local(),
+            "received bytes laundered to local work: {p:?}"
         );
-        assert!(
-            new.is_local(),
-            "content written since the last review is local work"
-        );
-        assert_ne!(old, new, "the two must take different paths");
+        assert_eq!(p.reason(), "arrived through receive/add from");
     }
 
     #[test]
-    fn no_review_history_means_full_review() {
+    fn no_git_means_full_review() {
         let tmp = assert_fs::TempDir::new().unwrap();
         drop_skill(tmp.path(), "fresh", "# Fresh\n");
         let clock = ProvenanceClock {
             tracked: None,
-            last_grant: None,
+            received: Default::default(),
         };
         let p = clock.classify(tmp.path(), &tmp.path().join("skills/fresh"));
         assert!(!p.is_local());
-        assert_eq!(p.reason(), "this project has no review history yet");
     }
 
     /// Hostile input: an unusable name never becomes a manifest key, a symlink
@@ -790,13 +840,4 @@ mod tests {
         );
     }
 
-    fn set_mtime(path: &Path, secs: u64) {
-        let t = std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs);
-        let f = std::fs::File::options()
-            .write(true)
-            .open(path)
-            .or_else(|_| std::fs::File::open(path))
-            .unwrap();
-        f.set_modified(t).unwrap();
-    }
 }
