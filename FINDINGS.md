@@ -67,6 +67,21 @@ separate item.
 - **Fix shape:** provenance must prove authorship, not "git didn't deliver this / mtime is newer". Options to decide in the fix: gate the "your own work" label on a positive signal (created in this session under observation, or a content hash the tool itself deposited), and never let `adopt`/intake output qualify for the compressed authorship label. At minimum, content that arrived via `receive`/`add from` must be tagged clone-supplied through to the card.
 
 ## F4 — Keep-pinned serves an unverified, symlink-followable snapshot
+- **Status: ✅ FIXED** 2026-08-01 (`fix/consent-edges-f4-f5-f6`). Keep-pinned
+  delivery now serves a snapshot only if `store::verified_snapshot` re-proves
+  it (re-hash to its digest name + symlink rejection), failing closed to
+  exclusion with its own honest line; `snapshot_content` verifies what landed
+  after the copy and removes/refuses on mismatch (the mixed-bytes window);
+  the re-gate diff reader (`diff_against_pin`) verifies under both pin
+  families before presenting bytes as "approved". Bonus hazard closed:
+  `record_lock`/`record_instruction_pins` no longer re-pin items under a
+  standing decision (the absorb path that would quietly erase a decline).
+  Witnesses tamper the snapshot content itself: edited bytes + a symlink at
+  key material (`keep_pinned_delivery_refuses_a_tampered_snapshot`),
+  mislabeled deposit (`snapshot_content_refuses_bytes_that_do_not_hash_to_the_name`),
+  both families (`verified_content_rejects_tampering_under_either_family`),
+  and the absorb path (`use_write_never_repins_a_decided_skill`,
+  re-lock assertion inside `an_instruction_keep_pinned_compiles_the_approved_bytes`).
 - **Confidence:** HIGH (SEC S1 + CODEX #5 + UX #7)
 - **Invariant:** 4 (no cache on a verification path); the one path whose purpose is "the approved bytes are what agents load" (60c250a).
 - **Location:** `crates/cli/src/commands/use_profile.rs:573-590` selects `store/content/<hex>` on `snapshot.is_dir()` alone — no `verified_snapshot` re-hash (contrast `store.rs:245-251`, which literally documents this bug), no `reject_symlinks` (contrast every other content read in `store.rs`); `:618` excludes keep-pinned from the fail-closed drift gate. `materialize`/`copy_dir_all` (`render/skills.rs:217`) hands symlinks to `fs::copy` → copies the target's bytes. Newly-copied snapshot returned unverified after rename at `store.rs:261-273`.
@@ -74,6 +89,15 @@ separate item.
 - **Fix shape:** re-hash the snapshot against its digest-name on read (reuse `verified_snapshot`); reject symlinks on the keep-pinned delivery path as everywhere else; bring keep-pinned under the same drift gate.
 
 ## F5 — TOCTOU: re-gate `accept` approves bytes different from those displayed
+- **Status: ✅ FIXED** 2026-08-01 (`fix/consent-edges-f4-f5-f6`).
+  `PendingAnswer` now captures the live content's digest at staging time,
+  hashed BEFORE the diff renders; the commit point re-hashes and refuses
+  through one gate (`refuse_undisplayed`) unless fresh == displayed — for
+  both pin families, before the lock is saved or the grant recorded, so a
+  refusal leaves everything untouched. A `None` displayed digest also
+  refuses (fail closed). Witness tampers the field that moved — the live
+  bytes after display (`accept_refuses_bytes_that_were_not_displayed`);
+  the happy path is covered by the existing accept-repins e2e witnesses.
 - **Confidence:** HIGH (SEC S2 + CODEX #1)
 - **Invariant:** 4 (pinned byte changes re-gate), exact-byte consent.
 - **Location:** diff read at `crates/cli/src/commands/trust.rs:1011`; commit point independently re-reads at `trust.rs:1511` and writes that checksum to the lock. `PendingAnswer` (`trust.rs:1607-1620`) captures no digest at diff time. The comment at `trust.rs:1535-1539` reasons correctly about exactly this hazard for lock/manifest, while the skill-body path does the disk re-read it warns against.
@@ -81,6 +105,18 @@ separate item.
 - **Fix shape:** capture the displayed content's digest in `PendingAnswer` at diff time; at commit, verify the live bytes still match that digest or re-gate; bind the grant to the reviewed digest, not a fresh read.
 
 ## F6 — Instruction re-gate cannot correctly implement any answer
+- **Status: ✅ FIXED** 2026-08-01 (`fix/consent-edges-f4-f5-f6`). The commit
+  point branches by kind: instruction accepts pin via `pin_instruction` and
+  patch `patched.instructions` (no more `dir_digest`-on-a-file error after
+  consent). The compiler (`plan_instructions`) now reads standing decisions:
+  blocked fragments are excluded (and scrubbed from an already-compiled
+  region), keep-pinned fragments compile from the verified store copy —
+  never the live file — failing closed to exclusion; every compile surface
+  (`instructions`, `apply`) prints the exclusions, and the write drift gates
+  exempt decided fragments exactly as `use` does for skills. Witnesses in
+  `regate_staging.rs`: `an_instruction_regate_accept_repins_and_stays_trusted`,
+  `an_instruction_keep_pinned_compiles_the_approved_bytes`,
+  `a_blocked_instruction_never_reaches_the_managed_region`.
 - **Confidence:** HIGH (SEC S3 + CODEX #4 + UX)
 - **Invariant:** claims match enforcement; the headline consent moment errors on first use for instructions.
 - **Location:** instruction drift stages a **file** path (`trust.rs:1119`; `render/instructions.rs:148-155`), but `Accept` runs it through `dir_digest(live)` (`trust.rs:1509-1523`) and a **skills-only** lock update (`trust.rs:1521`, `patched.skills`) instead of `pin_instruction`/`patched.instructions`. `KeepPinned`/`Block` are ignored by the compiler, which reads the live file (`render/instructions.rs:62`). Zero instruction coverage in `regate_staging.rs`.

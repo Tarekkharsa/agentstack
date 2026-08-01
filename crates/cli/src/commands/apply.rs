@@ -211,10 +211,15 @@ fn render(
     // user's own machine content, never pinned.
     if will_write && !manifest.instructions.is_empty() {
         let lock = crate::lock::Lock::load(&ctx.dir)?;
+        // Fragments under a standing re-gate answer are exempt, exactly as in
+        // `instructions --write`: keep-pinned is drifted by definition and is
+        // compiled from the approved store copy, blocked is not compiled at
+        // all — the question was answered at the consent gate.
+        let decided = super::use_profile::decided_names(&ctx.dir, "instruction");
         let statuses: Vec<_> = manifest
             .instructions
             .iter()
-            .filter(|(_, i)| !i.from_user_layer)
+            .filter(|(n, i)| !i.from_user_layer && !decided.contains(*n))
             .map(|(n, i)| {
                 let status = crate::resolve::instruction_lock_status(n, i, &ctx.dir, &lock);
                 (n.clone(), status)
@@ -661,11 +666,22 @@ fn render(
                 // with none of its own compiles to an empty string there — writing
                 // that would strip a committed managed region from the repo.
                 if let Some(ip) = plan_instructions(manifest, desc, scope, &ctx.dir)
-                    .filter(|ip| !ip.fragments.is_empty() || !ip.missing.is_empty())
+                    // An excluded-only plan still compiles (to a region without
+                    // the refused fragment): skipping it would leave a blocked
+                    // fragment's bytes sitting in the managed region, which is
+                    // the refusal not holding.
+                    .filter(|ip| {
+                        !ip.fragments.is_empty()
+                            || !ip.missing.is_empty()
+                            || !ip.excluded.is_empty()
+                    })
                 {
                     for m in &ip.missing {
                         crate::outln!("  {} instruction fragment '{m}' source missing", "✗".red());
                         error_count += 1;
+                    }
+                    for (name, why) in &ip.excluded {
+                        crate::outln!("  {} instruction fragment '{name}' {why}", "⊘".dimmed());
                     }
                     // A missing source already dropped its content from the
                     // compile — writing now would delete previously compiled

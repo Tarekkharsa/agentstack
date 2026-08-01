@@ -269,6 +269,20 @@ impl Store {
             if !verified_snapshot(&dest, digest_hex) {
                 bail!("could not place the content snapshot at {}", dest.display());
             }
+            return Ok(dest);
+        }
+        // F4: verify what actually landed. `digest_hex` was computed from a
+        // read of `src` that happened BEFORE the copy above — if the source
+        // tree changed in between, the copy holds mixed bytes that would now
+        // sit under an approved digest name and read as approved forever.
+        // Content-addressing is only real if the address is re-proven at the
+        // moment the name is claimed.
+        if !verified_snapshot(&dest, digest_hex) {
+            remove_any(&dest);
+            bail!(
+                "content changed while it was being snapshotted — {} does not hash to {digest_hex}",
+                src.display()
+            );
         }
         Ok(dest)
     }
@@ -691,14 +705,58 @@ pub fn contained_content_dir(clone_root: &Path, subpath: Option<&str>) -> Result
 
 /// Whether `dest` is a real directory (not a symlink) whose content digest
 /// equals `digest_hex` — the only condition under which a cached snapshot is
-/// trusted without rebuilding.
-fn verified_snapshot(dest: &Path, digest_hex: &str) -> bool {
+/// trusted without rebuilding, and (F4) the only condition under which
+/// keep-pinned delivery may serve it: the store directory is writable, so
+/// "the approved bytes are what agents load" holds only if the read re-proves
+/// it. `pub(crate)` for exactly those read-side callers; the write side stays
+/// in this module.
+pub(crate) fn verified_snapshot(dest: &Path, digest_hex: &str) -> bool {
     match dest.symlink_metadata() {
         Ok(m) if m.file_type().is_dir() => {
             crate::scan::reject_symlinks(dest).is_ok()
                 && dir_digest(dest)
                     .map(|d| d.hex() == digest_hex)
                     .unwrap_or(false)
+        }
+        _ => false,
+    }
+}
+
+/// [`verified_snapshot`] for readers that cannot know which pin family a hex
+/// digest belongs to. Skill pins are tree digests (`dir_digest`); instruction
+/// pins are a plain SHA-256 over one file's bytes, deposited as
+/// `content/<hex>/<file name>`. A snapshot verifies if it matches its name
+/// under EITHER family; symlinks anywhere disqualify under both. Used by the
+/// re-gate diff reader (F4/F19): a diff rendered from a tampered snapshot
+/// would present bytes the user never approved as "the approved version",
+/// which corrupts the consent surface itself — the honest degrade is
+/// `NoSnapshot`.
+pub(crate) fn verified_content(dest: &Path, digest_hex: &str) -> bool {
+    if verified_snapshot(dest, digest_hex) {
+        return true;
+    }
+    // Instruction family: exactly one regular file whose raw bytes hash to
+    // the digest. (`verified_snapshot` above already rejected symlinks — but
+    // it only ran its hash check on the tree family, so re-check the shape
+    // here from scratch rather than assuming its partial pass.)
+    match dest.symlink_metadata() {
+        Ok(m) if m.file_type().is_dir() => {
+            if crate::scan::reject_symlinks(dest).is_err() {
+                return false;
+            }
+            let Ok(entries) = fs::read_dir(dest) else {
+                return false;
+            };
+            let files: Vec<_> = entries.flatten().collect();
+            let [only] = files.as_slice() else {
+                return false;
+            };
+            if !only.file_type().map(|t| t.is_file()).unwrap_or(false) {
+                return false;
+            }
+            fs::read(only.path())
+                .map(|b| Sha256Hex::of(&b).hex() == digest_hex)
+                .unwrap_or(false)
         }
         _ => false,
     }
@@ -758,6 +816,80 @@ pub use agentstack_core::digest::{collect_files, dir_digest};
 mod tests {
     use super::*;
     use assert_fs::prelude::*;
+
+    /// F4 WITNESS (FINDINGS.md): the address must be re-proven at the moment
+    /// the name is claimed. `digest_hex` is computed from a read that happens
+    /// BEFORE the copy — a source that changed in between (simulated here by
+    /// passing a digest the bytes never hashed to) must not land under the
+    /// approved name, and must not leave a mislabeled snapshot behind.
+    #[test]
+    fn snapshot_content_refuses_bytes_that_do_not_hash_to_the_name() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        tmp.child("src/SKILL.md").write_str("# real\n").unwrap();
+        let store = Store::with_root(tmp.child("store").path().to_path_buf());
+        let wrong = "a".repeat(64);
+
+        let err = store.snapshot_content(&tmp.path().join("src"), &wrong);
+        assert!(err.is_err(), "mislabeled bytes were snapshotted");
+        assert!(
+            !tmp.child("store")
+                .path()
+                .join("content")
+                .join(&wrong)
+                .exists(),
+            "a failed snapshot left mislabeled bytes under the approved name"
+        );
+
+        // The honest digest still snapshots.
+        let right = dir_digest(&tmp.path().join("src"))
+            .unwrap()
+            .hex()
+            .to_string();
+        let dest = store
+            .snapshot_content(&tmp.path().join("src"), &right)
+            .unwrap();
+        assert!(verified_snapshot(&dest, &right));
+    }
+
+    /// F4 WITNESS: `verified_content` accepts both pin families only while
+    /// the bytes still hash to the name, and rejects the tampered forms the
+    /// bare `is_dir()` read used to serve: edited bytes, and a symlink body.
+    #[test]
+    fn verified_content_rejects_tampering_under_either_family() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+
+        // Skill family: a tree under its dir_digest.
+        tmp.child("tree/SKILL.md").write_str("# t\n").unwrap();
+        let tree = tmp.path().join("tree");
+        let tree_hex = dir_digest(&tree).unwrap().hex().to_string();
+        assert!(verified_content(&tree, &tree_hex));
+
+        // Instruction family: one file under its raw sha256.
+        let frag_hex = Sha256Hex::of(b"be kind\n").hex().to_string();
+        tmp.child(format!("frag-{frag_hex}/house.md"))
+            .write_str("be kind\n")
+            .unwrap();
+        let frag = tmp.path().join(format!("frag-{frag_hex}"));
+        assert!(verified_content(&frag, &frag_hex));
+
+        // Tamper the tree: edited bytes no longer verify.
+        tmp.child("tree/SKILL.md").write_str("# EVIL\n").unwrap();
+        assert!(
+            !verified_content(&tree, &tree_hex),
+            "edited snapshot bytes still verified"
+        );
+
+        // Tamper the fragment: a symlink body never verifies, even when its
+        // target's bytes would hash correctly — following it reads outside
+        // the store.
+        fs::remove_file(frag.join("house.md")).unwrap();
+        tmp.child("outside.md").write_str("be kind\n").unwrap();
+        std::os::unix::fs::symlink(tmp.path().join("outside.md"), frag.join("house.md")).unwrap();
+        assert!(
+            !verified_content(&frag, &frag_hex),
+            "a symlinked snapshot body verified"
+        );
+    }
 
     #[test]
     fn resolves_path_source() {

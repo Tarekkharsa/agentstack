@@ -736,3 +736,299 @@ fn an_unanswered_item_still_blocks_the_grant() {
         "a decision was recorded on a path that refused"
     );
 }
+
+// ---------------------------------------------------------------------------
+// F6 (FINDINGS.md): the instruction re-gate must correctly implement all
+// three answers. Before the fix, `accept` fed the fragment FILE to
+// `dir_digest` and errored out AFTER the user consented (patching the
+// skills table it isn't in), and keep-pinned/block were recorded but the
+// compiler never read them — it kept compiling the live file.
+// ---------------------------------------------------------------------------
+
+/// A trusted project whose consent surface includes an instruction fragment.
+fn trusted_project_with_instruction(root: &Path) -> PathBuf {
+    let proj = root.join("proj");
+    fs::create_dir_all(proj.join(".agentstack/instructions")).unwrap();
+    skill(&proj, "alpha", "---\ndescription: a\n---\n# Alpha\nfirst\n");
+    fs::write(
+        proj.join(".agentstack/instructions/house.md"),
+        "House rule one.\n",
+    )
+    .unwrap();
+    fs::write(
+        proj.join(".agentstack/agentstack.toml"),
+        "version = 1\n\n\
+         [targets]\ndefault = [\"claude-code\"]\n\n\
+         [skills.alpha]\npath = \"./skills/alpha\"\n\n\
+         [instructions.house]\npath = \"./instructions/house.md\"\n",
+    )
+    .unwrap();
+    agentstack::commands::lock::run(&Default::default(), Some(&proj)).unwrap();
+    let digest = agentstack::trust::digest_for(&proj).unwrap();
+    agentstack::commands::trust::grant_with_answers(&proj, true, Some(&digest), false, None)
+        .unwrap();
+    proj
+}
+
+/// The in-process compile, project scope, one capable target.
+fn compile_instructions(proj: &Path) {
+    agentstack::commands::instructions::run(
+        &agentstack::cli::InstructionsArgs {
+            targets: vec!["claude-code".into()],
+            scope: Some(agentstack::scope::Scope::Project),
+            write: true,
+        },
+        Some(proj),
+    )
+    .unwrap();
+}
+
+/// F6 accept: succeeds (it used to error after consent), re-pins the
+/// INSTRUCTION lock table to the new bytes, and leaves the project trusted
+/// with no standing decision.
+#[test]
+fn an_instruction_regate_accept_repins_and_stays_trusted() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    isolate_home(tmp.path());
+    let proj = trusted_project_with_instruction(tmp.path());
+    let dir = proj.join(".agentstack");
+
+    fs::write(dir.join("instructions/house.md"), "House rule CHANGED.\n").unwrap();
+    agentstack::commands::trust::grant_with_answers(
+        &proj,
+        false,
+        None,
+        true,
+        Some(&ReGateProbe {
+            answers: vec![("house".to_string(), Answer::Accept)],
+            confirm: true,
+        }),
+    )
+    .expect("accepting an instruction re-gate must succeed, not error after consent");
+
+    let lock = agentstack::lock::Lock::load(&dir).unwrap();
+    let entry = lock
+        .get_instruction("house")
+        .expect("instruction pin survived");
+    assert_eq!(
+        entry.checksum.hex(),
+        agentstack_core::digest::sha256_hex(b"House rule CHANGED.\n"),
+        "accept did not move the INSTRUCTION pin to the accepted bytes"
+    );
+    assert_eq!(
+        agentstack::trust::check(&proj),
+        agentstack::trust::TrustState::Trusted,
+        "accepting left the project untrusted"
+    );
+    assert!(
+        agentstack::trust::decision_for(&proj, "instruction", "house").is_none(),
+        "accept must clear any standing decision"
+    );
+}
+
+/// F6 keep-pinned: the compiler delivers the APPROVED bytes from the content
+/// store — never the live file, which holds exactly the change the human
+/// declined — and neither `use`-style pin recording nor a plain
+/// `agentstack lock` absorbs the declined bytes into the lock.
+#[test]
+fn an_instruction_keep_pinned_compiles_the_approved_bytes() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    isolate_home(tmp.path());
+    let proj = trusted_project_with_instruction(tmp.path());
+    let dir = proj.join(".agentstack");
+    let lock_before = fs::read(agentstack::lock::Lock::path(&dir)).unwrap();
+
+    fs::write(dir.join("instructions/house.md"), "House rule CHANGED.\n").unwrap();
+    agentstack::commands::trust::grant_with_answers(
+        &proj,
+        false,
+        None,
+        true,
+        Some(&ReGateProbe {
+            answers: vec![("house".to_string(), Answer::KeepPinned)],
+            confirm: true,
+        }),
+    )
+    .unwrap();
+
+    compile_instructions(&proj);
+    let compiled = fs::read_to_string(proj.join("CLAUDE.md")).unwrap();
+    assert!(
+        compiled.contains("House rule one.") && !compiled.contains("CHANGED"),
+        "keep-pinned compiled the declined content:\n{compiled}"
+    );
+
+    // A later re-lock must not absorb the declined bytes either: the pin an
+    // answered item keeps is the one the answer named.
+    agentstack::commands::lock::run(&Default::default(), Some(&proj)).unwrap();
+    assert_eq!(
+        fs::read(agentstack::lock::Lock::path(&dir)).unwrap(),
+        lock_before,
+        "a plain re-lock moved a decided instruction pin to the declined bytes"
+    );
+}
+
+/// F6 block: the fragment reaches no managed region — neither the approved
+/// bytes nor the live edit — and stays out until the human revisits.
+#[test]
+fn a_blocked_instruction_never_reaches_the_managed_region() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    isolate_home(tmp.path());
+    let proj = trusted_project_with_instruction(tmp.path());
+    let dir = proj.join(".agentstack");
+
+    // Compile once while trusted so the region already holds the fragment —
+    // blocking must then REMOVE it, not merely skip adding it.
+    compile_instructions(&proj);
+    assert!(fs::read_to_string(proj.join("CLAUDE.md"))
+        .unwrap()
+        .contains("House rule one."));
+
+    fs::write(dir.join("instructions/house.md"), "House rule CHANGED.\n").unwrap();
+    agentstack::commands::trust::grant_with_answers(
+        &proj,
+        false,
+        None,
+        true,
+        Some(&ReGateProbe {
+            answers: vec![("house".to_string(), Answer::Block)],
+            confirm: true,
+        }),
+    )
+    .unwrap();
+
+    compile_instructions(&proj);
+    let compiled = fs::read_to_string(proj.join("CLAUDE.md")).unwrap();
+    assert!(
+        !compiled.contains("House rule"),
+        "a blocked instruction still reaches the managed region:\n{compiled}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// F4 (FINDINGS.md): keep-pinned delivery serves the approved bytes only if
+// they still ARE the approved bytes. The store directory is writable; a bare
+// `is_dir()` check let anything planted under the approved digest name ride
+// into every harness as though the user had approved it.
+// ---------------------------------------------------------------------------
+
+/// Tampering with the field that actually moves: the SNAPSHOT CONTENT under
+/// the approved digest name — first edited bytes, then a symlink at a
+/// sensitive file. Both must fail closed (no delivery), never deliver the
+/// planted bytes, and say why.
+#[test]
+fn keep_pinned_delivery_refuses_a_tampered_snapshot() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    isolate_home(tmp.path());
+    let proj = trusted_project(tmp.path());
+
+    skill(&proj, "beta", "---\ndescription: b\n---\n# Beta\nCHANGED\n");
+    agentstack::commands::trust::grant_with_answers(
+        &proj,
+        false,
+        None,
+        true,
+        Some(&ReGateProbe {
+            answers: vec![("beta".to_string(), Answer::KeepPinned)],
+            confirm: true,
+        }),
+    )
+    .unwrap();
+    let Some(agentstack::trust::Decision::KeepPinned { pin }) =
+        agentstack::trust::decision_for(&proj, "skill", "beta")
+    else {
+        panic!("keep-pinned decision missing");
+    };
+    let hex = pin.rsplit(':').next().unwrap().to_string();
+    let snapshot = PathBuf::from(std::env::var("AGENTSTACK_HOME").unwrap())
+        .join("store/content")
+        .join(&hex);
+    assert!(snapshot.is_dir(), "fixture: approved snapshot exists");
+
+    // Phase 1: edit the snapshot in place under the approved name.
+    fs::write(
+        snapshot.join("SKILL.md"),
+        "---\ndescription: b\n---\n# Beta\nEVIL PAYLOAD\n",
+    )
+    .unwrap();
+    let (out, ok) = cli(&proj, &["use", "--write"]);
+    assert!(ok, "use --write failed outright:\n{out}");
+    let delivered = ["\u{2e}claude/skills", ".agents/skills", ".pi/skills"]
+        .iter()
+        .map(|d| proj.join(d))
+        .find(|d| d.is_dir())
+        .expect("something was materialized");
+    assert!(
+        !delivered.join("beta").exists(),
+        "a tampered snapshot was delivered under the approved name:\n{out}"
+    );
+    assert!(
+        out.contains("failed verification") || out.contains("missing or failed"),
+        "the exclusion does not say the approved copy failed verification:\n{out}"
+    );
+
+    // Phase 2: replace the snapshot's body with a symlink at a secret.
+    let secret = tmp.path().join("secret-key");
+    fs::write(&secret, "PRIVATE KEY MATERIAL\n").unwrap();
+    fs::remove_file(snapshot.join("SKILL.md")).unwrap();
+    std::os::unix::fs::symlink(&secret, snapshot.join("SKILL.md")).unwrap();
+    let (out2, ok2) = cli(&proj, &["use", "--write"]);
+    assert!(ok2, "use --write failed outright:\n{out2}");
+    assert!(
+        !delivered.join("beta").exists(),
+        "a symlinked snapshot was delivered:\n{out2}"
+    );
+    // The secret's bytes must not have been copied anywhere under the project.
+    for (path, bytes) in tree(&proj) {
+        assert!(
+            !bytes.windows(20).any(|w| w == b"PRIVATE KEY MATERIAL"),
+            "secret bytes escaped into the project at {path}"
+        );
+    }
+}
+
+/// The absorb hazard: `use --write` after a keep-pinned answer must leave the
+/// decided skill's lock pin exactly where the answer left it. Re-pinning the
+/// live checksum here would make the next review read "matches" — the decline
+/// quietly gone with no consent moment.
+#[test]
+fn use_write_never_repins_a_decided_skill() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    isolate_home(tmp.path());
+    let proj = trusted_project(tmp.path());
+    let dir = proj.join(".agentstack");
+
+    skill(&proj, "beta", "---\ndescription: b\n---\n# Beta\nCHANGED\n");
+    agentstack::commands::trust::grant_with_answers(
+        &proj,
+        false,
+        None,
+        true,
+        Some(&ReGateProbe {
+            answers: vec![("beta".to_string(), Answer::KeepPinned)],
+            confirm: true,
+        }),
+    )
+    .unwrap();
+    let Some(agentstack::trust::Decision::KeepPinned { pin }) =
+        agentstack::trust::decision_for(&proj, "skill", "beta")
+    else {
+        panic!("keep-pinned decision missing");
+    };
+
+    let (out, ok) = cli(&proj, &["use", "--write"]);
+    assert!(ok, "use --write failed:\n{out}");
+
+    let lock = agentstack::lock::Lock::load(&dir).unwrap();
+    let entry = lock.get("beta").expect("beta pin survived");
+    assert_eq!(
+        entry.checksum.hex(),
+        pin.rsplit(':').next().unwrap(),
+        "use --write re-pinned a decided skill to the declined live bytes"
+    );
+}

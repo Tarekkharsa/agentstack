@@ -22,6 +22,12 @@ pub struct InstrPlan {
     pub fragments: Vec<String>,
     /// Fragment names whose source file is missing.
     pub missing: Vec<String>,
+    /// Fragments excluded by a standing re-gate answer, with the reason shown
+    /// to the user. A blocked fragment is refused outright; a keep-pinned
+    /// fragment whose approved bytes cannot be verified in the content store
+    /// fails closed to the same exclusion rather than compiling the live file
+    /// — which holds exactly the change the human declined.
+    pub excluded: Vec<(String, String)>,
 }
 
 impl InstrPlan {
@@ -49,15 +55,60 @@ pub fn plan_instructions(
     let spec = desc.instructions.as_ref()?;
     let path = spec.path_for(scope, project_dir)?;
 
+    // Standing re-gate answers reshape the compile exactly as they reshape
+    // skill delivery in `use` (F6): until this, a blocked or keep-pinned
+    // instruction was a recorded decision the compiler never read — it kept
+    // compiling the live file, which for keep-pinned is the very change the
+    // human declined. Machine-layer fragments never carry decisions (they are
+    // filtered out of the trust walk), so an empty decision list is the
+    // common, zero-cost case.
+    let base = crate::manifest::project_root_of(project_dir);
+    let decisions = crate::trust::decisions_for(&base);
+    let store = crate::store::Store::default_store();
+
     let mut blocks: Vec<String> = Vec::new();
     let mut fragments: Vec<String> = Vec::new();
     let mut missing: Vec<String> = Vec::new();
+    let mut excluded: Vec<(String, String)> = Vec::new();
 
     for (name, instr) in &manifest.instructions {
         // One predicate gates the compile (adapter match + personal fragments
         // stay out of a repo's project file) — see [`Instruction::compiles_at`].
         if !instr.compiles_at(&desc.id, scope) {
             continue;
+        }
+        match decisions
+            .iter()
+            .find(|d| d.kind == "instruction" && d.name == *name)
+            .map(|d| &d.answer)
+        {
+            Some(crate::trust::Decision::Blocked) => {
+                excluded.push((
+                    name.clone(),
+                    "blocked by a standing decision — revisit with `agentstack trust`".into(),
+                ));
+                continue;
+            }
+            Some(crate::trust::Decision::KeepPinned { pin }) => {
+                // Deliver the APPROVED bytes from the content store, verified
+                // against the pin they were approved under — never the live
+                // file. Missing or unverifiable approved bytes fail closed to
+                // exclusion, the same posture keep-pinned skills take.
+                match approved_fragment(&store, pin) {
+                    Some(text) => {
+                        blocks.push(text.trim_end_matches('\n').to_string());
+                        fragments.push(name.clone());
+                    }
+                    None => excluded.push((
+                        name.clone(),
+                        "its approved copy is missing or failed verification — excluded until \
+                         you review the live content with `agentstack trust`"
+                            .into(),
+                    )),
+                }
+                continue;
+            }
+            None => {}
         }
         let src = fragment_source(project_dir, &instr.path);
         match fs::read_to_string(&src) {
@@ -79,7 +130,43 @@ pub fn plan_instructions(
         proposed,
         fragments,
         missing,
+        excluded,
     })
+}
+
+/// The approved bytes a keep-pinned instruction compiles from: the content
+/// store's deposit for `pin`, accepted only if it still hashes to the pin.
+/// `None` is the fail-closed answer for a missing, tampered, or malformed
+/// deposit — the caller excludes the fragment rather than falling back to the
+/// live file.
+fn approved_fragment(store: &crate::store::Store, pin: &str) -> Option<String> {
+    let hex = pin.rsplit(':').next().unwrap_or(pin);
+    let dest = store.root().join("content").join(hex);
+    // Shape check by hand rather than through the two-family
+    // `store::verified_content`: an instruction pin is exactly "one regular
+    // file whose raw bytes hash to the pin", and checking precisely that
+    // leaves no room for a same-hex object of the other family to slip
+    // through as a fragment.
+    if !dest
+        .symlink_metadata()
+        .map(|m| m.file_type().is_dir())
+        .unwrap_or(false)
+        || crate::scan::reject_symlinks(&dest).is_err()
+    {
+        return None;
+    }
+    let entries: Vec<_> = fs::read_dir(&dest).ok()?.flatten().collect();
+    let [only] = entries.as_slice() else {
+        return None;
+    };
+    if !only.file_type().map(|t| t.is_file()).unwrap_or(false) {
+        return None;
+    }
+    let bytes = fs::read(only.path()).ok()?;
+    if agentstack_core::digest::sha256_hex(&bytes) != hex {
+        return None;
+    }
+    String::from_utf8(bytes).ok()
 }
 
 /// Resolved targets that CANNOT receive instructions (no adapter instruction

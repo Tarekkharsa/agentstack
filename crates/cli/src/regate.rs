@@ -74,7 +74,14 @@ pub enum PinDiff {
 pub fn diff_against_pin(store_root: &Path, pin: &str, live: &Path) -> PinDiff {
     let hex = pin.rsplit(':').next().unwrap_or(pin);
     let approved = store_root.join("content").join(hex);
-    if !approved.is_dir() {
+    // The snapshot must still hash to its own name before it may be shown as
+    // "the approved version" (F4): the store directory is writable, and a
+    // tampered or truncated snapshot rendered here would put words in the
+    // last consent's mouth — the diff card would attribute bytes to the user
+    // that they never approved. Verification covers both pin families (skill
+    // trees and single-file instruction deposits); failure degrades to the
+    // same honest message a never-captured snapshot gets.
+    if !crate::store::verified_content(&approved, hex) {
         return PinDiff::NoSnapshot;
     }
     let before = read_tree(&approved);

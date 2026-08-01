@@ -270,6 +270,11 @@ pub(crate) fn record_instruction_pins(
 ) -> Result<usize> {
     let mut lock = Lock::load(dir)?;
     let before = lock.clone();
+    // Same rule as `record_lock` for skills: a fragment under a standing
+    // re-gate answer keeps the pin the answer named. Re-pinning it here would
+    // absorb the declined live bytes into the lock with no consent moment.
+    // It stays in `declared`, so strict pruning keeps its existing pin.
+    let decided = super::use_profile::decided_names(dir, "instruction");
     let mut declared: Vec<String> = Vec::new();
     let mut pinned = 0usize;
     for (name, instr) in &manifest.instructions {
@@ -277,6 +282,9 @@ pub(crate) fn record_instruction_pins(
             continue;
         }
         declared.push(name.clone());
+        if decided.contains(name) {
+            continue;
+        }
         let src = crate::render::instructions::fragment_source(dir, &instr.path);
         // The pin comes from `Store::pin_instruction`, which deposits the bytes
         // it hashes into the content store as part of producing the checksum —

@@ -558,6 +558,7 @@ pub fn activate(
     let store_root = crate::store::Store::default_store().root().to_path_buf();
     let mut blocked_names: Vec<String> = Vec::new();
     let mut pinned_copies: Vec<String> = Vec::new();
+    let mut unverified_pins: Vec<String> = Vec::new();
     let active_skills: Vec<(String, PathBuf)> = resolved_skills
         .iter()
         .filter_map(|r| {
@@ -573,13 +574,22 @@ pub fn activate(
                 Some(crate::trust::Decision::KeepPinned { pin }) => {
                     let hex = pin.rsplit(':').next().unwrap_or(pin);
                     let snapshot = store_root.join("content").join(hex);
-                    if snapshot.is_dir() {
+                    // The snapshot must still hash to the approved digest and
+                    // hold no symlinks before it is delivered (F4). A bare
+                    // `is_dir()` here was the one read on the one path whose
+                    // entire purpose is "the approved bytes are what agents
+                    // load": the store dir is writable, so a planted symlink
+                    // or edited file under this name would be copied into
+                    // every harness as though the user had approved it.
+                    if crate::store::verified_snapshot(&snapshot, hex) {
                         pinned_copies.push(r.name.clone());
                         Some((r.name.clone(), snapshot))
                     } else {
-                        // The approved bytes are gone. Fail closed rather than
-                        // silently falling back to the live path, which is the
-                        // content the human declined.
+                        // The approved bytes are gone or no longer verify.
+                        // Fail closed rather than silently falling back to
+                        // the live path, which is the content the human
+                        // declined.
+                        unverified_pins.push(r.name.clone());
                         blocked_names.push(r.name.clone());
                         None
                     }
@@ -594,6 +604,18 @@ pub fn activate(
             "⊘".dimmed(),
             super::count(blocked_names.len(), "skill"),
             blocked_names.join(", ")
+        );
+    }
+    if !args.quiet && !unverified_pins.is_empty() {
+        // Named separately from the plain exclusions: the user asked to keep
+        // approved bytes that this machine can no longer produce, and "excluded
+        // by a standing decision" alone would hide that the store copy is the
+        // thing that failed.
+        println!(
+            "  {} the approved copy of {} is missing or failed verification — excluded until \
+             you review the live content with `agentstack trust`",
+            "⊘".dimmed(),
+            unverified_pins.join(", ")
         );
     }
 
@@ -1064,6 +1086,9 @@ pub fn activate(
             // checkout resolves the same content (and `doctor`/`explain` can
             // flag drift). Server locks store the definition digest only — never
             // a resolved secret value.
+            //
+            // (Skills under a standing re-gate decision are skipped inside
+            // `record_lock` itself — see the comment there.)
             record_lock(
                 &ctx.dir,
                 resolved_skills,
@@ -1243,7 +1268,20 @@ pub(crate) fn record_lock(
 ) -> Result<()> {
     let mut lock = Lock::load(dir)?;
     let before = lock.clone();
+    // A skill under a standing re-gate answer keeps the pin the answer named
+    // — it is never re-pinned here. A keep-pinned item's live checksum is
+    // precisely the change the human declined, and upserting it would move
+    // the lock to the declined bytes with no consent moment: the next review
+    // would read "matches" and the decline would be quietly gone. Enforced at
+    // this choke point (not per call site) so `use`, `lock`, and every future
+    // caller inherit it; the only path that may move a decided pin is the
+    // trust commit point, where accepting IS the consent — and accepting
+    // clears the decision first.
+    let decided = decided_names(dir, "skill");
     for r in skills {
+        if decided.contains(&r.name) {
+            continue;
+        }
         lock.upsert(locked_from_resolved(r, manifest, library));
     }
     for r in servers {
@@ -1269,6 +1307,17 @@ pub(crate) fn record_lock(
         return Ok(());
     }
     lock.save(dir)
+}
+
+/// Names of one kind's items with a standing re-gate answer for this
+/// project. The lock-recording paths use it to leave answered pins alone.
+pub(crate) fn decided_names(dir: &Path, kind: &str) -> std::collections::HashSet<String> {
+    let base = crate::manifest::project_root_of(dir);
+    crate::trust::decisions_for(&base)
+        .into_iter()
+        .filter(|d| d.kind == kind)
+        .map(|d| d.name)
+        .collect()
 }
 
 /// Build a lockfile entry from a resolved skill, recovering the source locator

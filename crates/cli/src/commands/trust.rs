@@ -1006,6 +1006,14 @@ pub(crate) fn grant_probed(
                     let pin = prior_pin_for(&prior_items, "skill", name)
                         .or_else(|| lock.get(name).map(|e| e.checksum.hex().to_string()));
                     let live = live_skill_dir(name, m, &library, &dir, &lib_home, &store);
+                    // F5: hash the live tree NOW, before the diff below reads
+                    // it — this digest is what `accept` is allowed to pin. A
+                    // change that lands after this line makes the commit
+                    // point refuse rather than pin un-displayed bytes.
+                    let displayed = live
+                        .as_ref()
+                        .and_then(|l| crate::store::dir_digest(l).ok())
+                        .map(|d| d.hex().to_string());
                     let pin_diff = match (&pin, &live) {
                         (Some(pin), Some(live)) => {
                             crate::regate::diff_against_pin(store.root(), pin, live)
@@ -1041,6 +1049,7 @@ pub(crate) fn grant_probed(
                             blocker_ix: blockers.len() - 1,
                             approved_pin: pin.clone(),
                             live: live.clone(),
+                            displayed: displayed.clone(),
                             headline: headline.clone(),
                         });
                     }
@@ -1117,6 +1126,11 @@ pub(crate) fn grant_probed(
                             .map(|e| e.checksum.hex().to_string())
                     });
                     let live = crate::render::instructions::fragment_source(&dir, &instr.path);
+                    // F5, instruction flavor: one read, hashed before the
+                    // diff renders — the digest `accept` is allowed to pin.
+                    let displayed = std::fs::read(&live)
+                        .ok()
+                        .map(|b| agentstack_core::digest::sha256_hex(&b));
                     // Same path-derived singleton the skills walk uses; that
                     // binding is scoped to its own block.
                     let store = crate::store::Store::default_store();
@@ -1142,6 +1156,7 @@ pub(crate) fn grant_probed(
                             blocker_ix: blockers.len() - 1,
                             approved_pin: pin.clone(),
                             live: Some(live),
+                            displayed,
                             headline: headline.clone(),
                         });
                     }
@@ -1508,19 +1523,50 @@ pub(crate) fn grant_probed(
         let store = crate::store::Store::default_store();
         for p in &accepted {
             let Some(live) = &p.live else { continue };
-            let checksum = crate::store::dir_digest(live)?.hex().to_string();
-            // Through `Store::pin`, so the newly approved bytes land in the
-            // content store and the NEXT re-gate can still show a diff.
-            let pinned = store.pin(&crate::store::Resolved {
-                path: live.clone(),
-                rev: None,
-                checksum: checksum.clone(),
-                fetched: false,
-                source_kind: "path",
-            })?;
-            if let Some(entry) = patched.skills.iter_mut().find(|s| s.name == p.name) {
-                entry.checksum = pinned;
-            }
+            // Each kind pins through its own act (`pin` for skill trees,
+            // `pin_instruction` for fragment files — see `Store` for why the
+            // two digest families never collapse into one function), and both
+            // pass the F5 gate: the digest being pinned must be the digest
+            // captured when the diff was displayed. This runs before
+            // `patched.save` and before the grant, so a refusal leaves the
+            // lock, the trust store, and the decisions exactly as they were.
+            let checksum = match p.kind {
+                "instruction" => {
+                    // One read inside `pin_instruction`: the bytes deposited
+                    // ARE the bytes hashed, so the returned digest names
+                    // exactly what would be pinned.
+                    let pinned = store.pin_instruction(live)?;
+                    refuse_undisplayed(&p.name, p.displayed.as_deref(), pinned.hex())?;
+                    // Instructions patch their own lock table. Routing this
+                    // through `patched.skills` was F6: `accept` on an
+                    // instruction re-gate errored out after consent (a file
+                    // fed to `dir_digest`), and could never have recorded the
+                    // answer anywhere the compiler reads.
+                    if let Some(entry) = patched.instructions.iter_mut().find(|i| i.name == p.name)
+                    {
+                        entry.checksum = pinned.clone();
+                    }
+                    pinned.hex().to_string()
+                }
+                _ => {
+                    let checksum = crate::store::dir_digest(live)?.hex().to_string();
+                    refuse_undisplayed(&p.name, p.displayed.as_deref(), &checksum)?;
+                    // Through `Store::pin`, so the newly approved bytes land in
+                    // the content store and the NEXT re-gate can still show a
+                    // diff.
+                    let pinned = store.pin(&crate::store::Resolved {
+                        path: live.clone(),
+                        rev: None,
+                        checksum: checksum.clone(),
+                        fetched: false,
+                        source_kind: "path",
+                    })?;
+                    if let Some(entry) = patched.skills.iter_mut().find(|s| s.name == p.name) {
+                        entry.checksum = pinned;
+                    }
+                    checksum
+                }
+            };
             // The recorded surface must carry the pin the human just approved,
             // or the next re-gate would diff against the superseded one.
             if let Some(item) = diff
@@ -1614,9 +1660,37 @@ struct PendingAnswer {
     /// The pin whose bytes the human previously approved — what `keep pinned`
     /// keeps, and what the shown diff was taken against.
     approved_pin: Option<String>,
-    /// The live content directory, re-pinned on `accept`.
+    /// The live content directory (skill) or fragment file (instruction),
+    /// re-pinned on `accept`.
     live: Option<PathBuf>,
+    /// The digest of the live bytes AT THE MOMENT this question was staged —
+    /// captured before the diff renders, so it names the content the human is
+    /// about to judge. The commit point refuses to pin anything else (F5):
+    /// between the render and the closing confirmation there is a human-scale
+    /// window in which the live content can change, and without this field
+    /// `accept` would hash whatever is on disk *then* — granting bytes nobody
+    /// displayed. `None` (the bytes could not be hashed at staging time)
+    /// makes accept refuse, which is the fail-closed direction.
+    displayed: Option<String>,
     headline: String,
+}
+
+/// The F5 refusal, factored out so the binding is witnessable on its own:
+/// `accept` commits the displayed digest or nothing. `fresh` is the digest of
+/// the bytes the commit point is about to pin; anything other than an exact
+/// match with what was staged at display time refuses — including a staging
+/// failure (`displayed == None`), because "I could not hash what you looked
+/// at" is not a license to pin something else.
+fn refuse_undisplayed(name: &str, displayed: Option<&str>, fresh: &str) -> Result<()> {
+    if displayed == Some(fresh) {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "'{}' changed while you were reviewing — the content on disk no longer matches \
+         the diff you were shown. Nothing was granted or changed; re-run `agentstack trust` \
+         to review the current bytes.",
+        crate::text::sanitize_line(name)
+    )
 }
 
 /// What the human said about one staged question. Distinct from
@@ -2097,6 +2171,31 @@ fn list() -> Result<()> {
 mod tests {
     use super::*;
     use assert_fs::prelude::*;
+
+    // F5 WITNESS (FINDINGS.md): accept commits the displayed digest or
+    // nothing. The tamper here is the field that actually moves — the live
+    // bytes AFTER the diff was rendered, inside the human-scale window before
+    // the closing yes. `refuse_undisplayed` is the one gate every accepted
+    // item passes at the commit point, for both pin families.
+    #[test]
+    fn accept_refuses_bytes_that_were_not_displayed() {
+        // The reviewed bytes: displayed == fresh → pin proceeds.
+        assert!(refuse_undisplayed("alpha", Some("abc123"), "abc123").is_ok());
+
+        // Swapped after display: fresh digest differs → refuse, and say the
+        // content moved rather than granting it.
+        let err = refuse_undisplayed("alpha", Some("abc123"), "d0d0d0")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("changed while you were reviewing"), "{err}");
+        assert!(err.contains("Nothing was granted"), "{err}");
+        assert!(err.contains("agentstack trust"), "{err}");
+
+        // Never displayed at all (the walk could not hash it): also refuse —
+        // "I couldn't hash what you looked at" is not a license to pin
+        // whatever is on disk now.
+        assert!(refuse_undisplayed("alpha", None, "abc123").is_err());
+    }
 
     // CONSENT WITNESS (Phase 2, the card): the summary must count the whole
     // EXECUTABLE surface, not just servers. Hooks and extensions run commands

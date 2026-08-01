@@ -27,10 +27,18 @@ pub fn run(args: &InstructionsArgs, manifest_dir: Option<&Path>) -> Result<()> {
     // per-target blocked-write handling; machine-layer fragments are exempt.
     if args.write {
         let lock = crate::lock::Lock::load(&ctx.dir)?;
+        // Fragments under a standing re-gate answer are exempt from the drift
+        // gate, exactly like keep-pinned/blocked skills in `use --write`: a
+        // keep-pinned fragment is drifted BY DEFINITION — that is what the
+        // human was asked — and it is not compiled from the drifted file
+        // anyway (the plan reads the approved store copy); a blocked one is
+        // not compiled at all. Re-blocking here would make an answered
+        // question unanswerable.
+        let decided = super::use_profile::decided_names(&ctx.dir, "instruction");
         let statuses: Vec<_> = manifest
             .instructions
             .iter()
-            .filter(|(_, i)| !i.from_user_layer)
+            .filter(|(n, i)| !i.from_user_layer && !decided.contains(*n))
             .map(|(n, i)| {
                 let status = crate::resolve::instruction_lock_status(n, i, &ctx.dir, &lock);
                 (n.clone(), status)
@@ -85,7 +93,10 @@ pub fn run(args: &InstructionsArgs, manifest_dir: Option<&Path>) -> Result<()> {
         for m in &plan.missing {
             println!("  {} fragment '{m}' source missing", "✗".red());
         }
-        if plan.fragments.is_empty() {
+        for (name, why) in &plan.excluded {
+            println!("  {} fragment '{name}' {why}", "⊘".dimmed());
+        }
+        if plan.fragments.is_empty() && plan.excluded.is_empty() {
             println!("  no fragments target this harness");
             continue;
         }
