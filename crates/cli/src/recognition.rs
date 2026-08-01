@@ -52,6 +52,19 @@ impl Index {
         serde_json::from_str(&text).unwrap_or_default()
     }
 
+    /// The index only if there IS one — absent, unreadable, or corrupt reads
+    /// as `None`.
+    ///
+    /// [`Index::load`] flattens all three into an empty index, which is right
+    /// for the terminal card (no index, no line) and wrong for a machine
+    /// payload: a reader cannot tell "approved nowhere else" from "this
+    /// machine has nothing to ask", and only one of those is a fact. Callers
+    /// that must report the difference use this and emit `null`.
+    pub fn load_existing() -> Option<Index> {
+        let text = std::fs::read_to_string(path()).ok()?;
+        serde_json::from_str(&text).ok()
+    }
+
     /// How many projects OTHER than `project_key` have approved `digest`.
     pub fn others(&self, digest: &str, project_key: &str) -> usize {
         self.approved

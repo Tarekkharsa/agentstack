@@ -929,7 +929,11 @@ Summarize with `agentstack report calls [--since <days>] [--json]`; add
 `--tail <n>` to also list the last n individual calls (`--project <path>`
 scopes everything to one project root). With `--json`, `--tail` adds an
 `events` array of raw records — the stable feed external UIs consume; the
-default JSON shape is unchanged without it. Best-effort local
+default JSON shape is unchanged without it. Add `--include-loads` to interleave
+on-demand skill loads into that same `--json` events feed, each row tagged with
+a `kind` of `"call"` or `"skill_load"`; off by default, so without it the feed
+is unchanged. A load is never a call — it never enters the call counts.
+Best-effort local
 **diagnostics** (logging can never fail a call; size-rotated at ~5 MB × 2), not
 tamper-evident — input to `report calls`/`optimize`, not forensic evidence.
 

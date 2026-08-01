@@ -24,8 +24,9 @@
 
 use std::fs;
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
@@ -152,25 +153,31 @@ pub fn digest_args(args: &Value) -> String {
     hex[..12].to_string()
 }
 
-/// Append one record. Best-effort: any failure is swallowed — a call-log
-/// hiccup must never fail the tool call it describes.
-pub fn record(rec: &CallRecord) {
-    let path = log_path();
+/// Append one already-serialized JSON line to a machine-global audit stream,
+/// creating the 0700 directory and the 0600 file as needed. Best-effort: every
+/// failure is swallowed — a logging hiccup must never fail the thing it
+/// describes. `rotate` opts into the size-capped current → `.1` rotation
+/// (`trust.jsonl` deliberately keeps its full history and passes `false`).
+///
+/// Takes the line by value so the newline can be appended into the SAME buffer
+/// and issued as one `write_all`: `writeln!` emits the payload and the `\n` as
+/// separate `write()` syscalls, which two `O_APPEND` writers can interleave
+/// into a torn, unparseable record. A single write of a newline-terminated
+/// buffer under `O_APPEND` is atomic on local filesystems.
+fn append_audit_line(path: &Path, mut line: String, rotate: bool) {
     let Some(dir) = path.parent() else { return };
     if fs::create_dir_all(dir).is_err() {
         return;
     }
     agentstack_core::util::restrict(dir, true);
-    // Size-capped rotation: current → .1 (previous generation dropped).
-    if fs::metadata(&path)
-        .map(|m| m.len() > MAX_BYTES)
-        .unwrap_or(false)
+    if rotate
+        && fs::metadata(path)
+            .map(|m| m.len() > MAX_BYTES)
+            .unwrap_or(false)
     {
-        let _ = fs::rename(&path, path.with_extension("jsonl.1"));
+        let _ = fs::rename(path, path.with_extension("jsonl.1"));
     }
-    let Ok(line) = serde_json::to_string(rec) else {
-        return;
-    };
+    line.push('\n');
     let mut opts = fs::OpenOptions::new();
     opts.create(true).append(true);
     #[cfg(unix)]
@@ -178,16 +185,25 @@ pub fn record(rec: &CallRecord) {
         use std::os::unix::fs::OpenOptionsExt;
         opts.mode(0o600);
     }
-    if let Ok(mut f) = opts.open(&path) {
+    if let Ok(mut f) = opts.open(path) {
         // mode() applies only at creation — tighten a log that predates the
         // 0600 default (or survived a mode-preserving restore) too.
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
+            let _ = fs::set_permissions(path, fs::Permissions::from_mode(0o600));
         }
-        let _ = writeln!(f, "{line}");
+        let _ = f.write_all(line.as_bytes());
     }
+}
+
+/// Append one record. Best-effort: any failure is swallowed — a call-log
+/// hiccup must never fail the tool call it describes.
+pub fn record(rec: &CallRecord) {
+    let Ok(line) = serde_json::to_string(rec) else {
+        return;
+    };
+    append_audit_line(&log_path(), line, true);
 }
 
 /// Read the log, newest last. Unparseable lines are skipped (a torn write
@@ -206,10 +222,18 @@ pub fn read_all() -> Vec<CallRecord> {
 /// Malformed lines and a leading fragment caused by a backward seek are
 /// skipped.
 pub fn read_tail(n: usize) -> Vec<CallRecord> {
+    read_tail_of(&log_path(), n)
+}
+
+/// The tail reader every JSONL stream in this module shares. Generic over the
+/// record type rather than duplicated per stream: the chunked backward walk is
+/// the only subtle code here, and a second copy would be a second place to get
+/// the fragment handling wrong.
+fn read_tail_of<T: DeserializeOwned>(path: &Path, n: usize) -> Vec<T> {
     if n == 0 {
         return Vec::new();
     }
-    let Ok(mut file) = fs::File::open(log_path()) else {
+    let Ok(mut file) = fs::File::open(path) else {
         return Vec::new();
     };
     let Ok(mut start) = file.seek(SeekFrom::End(0)) else {
@@ -312,34 +336,13 @@ pub fn trust_log_path() -> PathBuf {
 /// Callers append AFTER their store write succeeds, so an event always
 /// describes a mutation that actually happened.
 pub fn record_trust(ev: &TrustMutation) {
-    let path = trust_log_path();
-    let Some(dir) = path.parent() else { return };
-    if fs::create_dir_all(dir).is_err() {
-        return;
-    }
-    agentstack_core::util::restrict(dir, true);
-    let Ok(mut line) = serde_json::to_string(ev) else {
+    let Ok(line) = serde_json::to_string(ev) else {
         return;
     };
-    // Single-buffer O_APPEND write, same torn-line discipline as
-    // `RunLog::append`: the trust store's own lock serializes today's writers,
-    // but this file must stay whole even if a future caller appends without it.
-    line.push('\n');
-    let mut opts = fs::OpenOptions::new();
-    opts.create(true).append(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        opts.mode(0o600);
-    }
-    if let Ok(mut f) = opts.open(&path) {
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = fs::set_permissions(&path, fs::Permissions::from_mode(0o600));
-        }
-        let _ = f.write_all(line.as_bytes());
-    }
+    // `rotate = false`: see the section note — the Phase 1 gate counts consent
+    // incidents over the FULL history, so rotating old grants away would
+    // corrupt the metric.
+    append_audit_line(&trust_log_path(), line, false);
 }
 
 /// Read the full trust-mutation history, oldest first. Unparseable lines are
@@ -351,6 +354,128 @@ pub fn read_trust_all() -> Vec<TrustMutation> {
     text.lines()
         .filter_map(|l| serde_json::from_str(l).ok())
         .collect()
+}
+
+// ────────────────────────── on-demand skill-load stream ───────────────────────
+//
+// `agentstack_load` (the MCP loader) puts a skill's body into an agent's
+// context on demand. That is activity a reviewer wants to see, and it is **not
+// a call**: it opens no upstream connection, carries no arguments to digest and
+// no outcome, and folding it into `calls.jsonl` would corrupt every count
+// computed over that file. So it gets its own machine-global stream,
+// `~/.agentstack/audit/loads.jsonl`, with the call log's discipline: 0600/0700,
+// best-effort, size-capped rotation.
+//
+// What's recorded: timestamp, the skill NAME, the agent-supplied reason, the
+// project the load was served from, and the run id when the harness was
+// launched by `agentstack run`. What's never recorded: the skill BODY — the
+// thing that was actually loaded. Identity only, like every stream here.
+//
+// Only SUCCESSFUL loads appear: a refusal (untrusted project, toolset fence,
+// standing block, drifted bytes) fails the MCP call before any recording, so
+// this stream contains no denials by construction. Recording is evidence, not
+// enforcement — nothing reads this stream to make a decision.
+
+/// Byte caps for the two agent-supplied strings on a [`LoadRecord`]. Nothing
+/// upstream bounds either one — the MCP caller writes both — so the stream
+/// bounds them itself (invariant 7: hostile input is bounded at the seam).
+const LOAD_NAME_CAP: usize = 200;
+const LOAD_REASON_CAP: usize = 500;
+
+/// Strip control characters and truncate to `cap` bytes on a char boundary.
+/// Control characters go because these strings are rendered in reports and
+/// read by other tools; the truncation walks back to the last boundary because
+/// `String::truncate` panics mid-codepoint.
+fn bounded(s: &str, cap: usize) -> String {
+    let mut out: String = s.chars().filter(|c| !c.is_control()).collect();
+    if out.len() > cap {
+        let mut end = cap;
+        while end > 0 && !out.is_char_boundary(end) {
+            end -= 1;
+        }
+        out.truncate(end);
+    }
+    out
+}
+
+/// One line in `audit/loads.jsonl`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LoadRecord {
+    pub ts: u64,
+    pub name: String,
+    pub reason: String,
+    /// The project root the load was served from — the same value and format
+    /// [`CallRecord::project`] carries, so one comparison filters both streams
+    /// by project. `None` when the load had no resolvable manifest directory
+    /// (the embedded manual serves without one).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
+    /// The run this load is attributed to (`AGENTSTACK_RUN_ID`), when set.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run: Option<String>,
+}
+
+impl LoadRecord {
+    /// Build a bounded record. Callers use this rather than a struct literal so
+    /// the bounded `name`/`reason` can be reused for the run-log mirror —
+    /// both sinks then carry byte-identical strings.
+    pub fn new(
+        ts: u64,
+        name: &str,
+        reason: &str,
+        project: Option<String>,
+        run: Option<String>,
+    ) -> LoadRecord {
+        LoadRecord {
+            ts,
+            name: bounded(name, LOAD_NAME_CAP),
+            reason: bounded(reason, LOAD_REASON_CAP),
+            project,
+            run,
+        }
+    }
+}
+
+pub fn loads_log_path() -> PathBuf {
+    paths::agentstack_home().join("audit").join("loads.jsonl")
+}
+
+/// Append one skill load. Best-effort: any failure is swallowed — a recording
+/// hiccup must never fail the load it describes.
+///
+/// Re-bounds `name`/`reason` even though [`LoadRecord::new`] already did: this
+/// function is the choke point every write to the stream passes through, and a
+/// struct literal built elsewhere must not be able to put an unbounded string
+/// on disk. `bounded` is idempotent, so the extra pass changes nothing.
+pub fn record_skill_load(rec: &LoadRecord) {
+    let bounded_rec = LoadRecord::new(
+        rec.ts,
+        &rec.name,
+        &rec.reason,
+        rec.project.clone(),
+        rec.run.clone(),
+    );
+    let Ok(line) = serde_json::to_string(&bounded_rec) else {
+        return;
+    };
+    append_audit_line(&loads_log_path(), line, true);
+}
+
+/// Read the load stream, oldest first. Unparseable lines are skipped (a torn
+/// write must not brick the log).
+pub fn read_loads_all() -> Vec<LoadRecord> {
+    let Ok(text) = fs::read_to_string(loads_log_path()) else {
+        return Vec::new();
+    };
+    text.lines()
+        .filter_map(|l| serde_json::from_str(l).ok())
+        .collect()
+}
+
+/// The load stream's tail, newest last — the [`read_tail`] reader over
+/// `loads.jsonl`.
+pub fn read_loads_tail(n: usize) -> Vec<LoadRecord> {
+    read_tail_of(&loads_log_path(), n)
 }
 
 // ─────────────────────────── run-scoped flight recorder ───────────────────────
@@ -513,6 +638,34 @@ pub enum RunEvent {
         /// control-character-stripped by the caller before it arrives here:
         /// its inputs include lockfile- and manifest-derived fragments, which
         /// are repository content and therefore hostile input (invariant 7).
+        reason: String,
+    },
+    /// A skill body entered this run's agent context on demand
+    /// (`agentstack_load`) — the run-scoped mirror of one `loads.jsonl` line.
+    ///
+    /// Its own variant for the same reason [`RunEvent::PinRejected`] is one: a
+    /// load is not a call. Filing it under [`RunEvent::ToolCall`] would corrupt
+    /// this run's tool-call count — the number a reviewer reads as "actions the
+    /// agent took through the gateway" — and a load has no server, no
+    /// arguments to digest, and no outcome to record.
+    ///
+    /// Only SUCCESSFUL loads appear. A refused load fails the MCP call itself
+    /// before any recording, so there are no denials here by construction. If
+    /// denied-load evidence is ever wanted it must be a NEW variant, never an
+    /// outcome field on this one — for the reason spelled out on
+    /// [`RunEvent::SecretDenied`]: this variant means "the agent read this
+    /// skill", and that reading has to stay true.
+    ///
+    /// Identity only: the skill NAME and the agent-supplied reason, both
+    /// bounded and control-character-stripped by [`LoadRecord::new`] at the
+    /// record site. The skill BODY is never an event.
+    ///
+    /// The wire tag is `skill_load` (the event), not the variant's own
+    /// snake_case — renamed explicitly so the row names what happened.
+    #[serde(rename = "skill_load")]
+    SkillLoaded {
+        ts: u64,
+        name: String,
         reason: String,
     },
     /// The sandbox container exited. `code` is absent when it was killed by a
@@ -1097,6 +1250,93 @@ mod tests {
         });
     }
 
+    /// A skill load is its own event kind: it round-trips, and its wire tag is
+    /// the literal `skill_load` (not the variant's snake_case) — the tag the
+    /// report reader and every external consumer match on.
+    #[test]
+    fn skill_load_event_round_trips_under_its_own_wire_tag() {
+        with_home(|| {
+            let log = RunLog::create("r-loads").expect("safe id");
+            let ev = RunEvent::SkillLoaded {
+                ts: 20,
+                name: "rust-review".into(),
+                reason: "reviewing a Rust diff".into(),
+            };
+            log.append(&ev);
+            assert_eq!(RunLog::read("r-loads"), vec![ev]);
+            let raw = fs::read_to_string(log.path()).unwrap();
+            assert!(raw.contains("\"event\":\"skill_load\""), "{raw}");
+            assert!(!raw.contains("skill_loaded"), "{raw}");
+            // A load is never a tool call: nothing about the row can be read as
+            // one, so a tool-call count over this log is unaffected.
+            assert!(!raw.contains("tool_call"), "{raw}");
+        });
+    }
+
+    /// The loads stream round-trips through both readers, and bounds its two
+    /// agent-supplied strings at the record site: control characters are
+    /// stripped and over-long text is cut on a char boundary.
+    #[test]
+    fn load_records_round_trip_and_are_bounded_at_the_record_site() {
+        with_home(|| {
+            let rec = LoadRecord::new(
+                7,
+                "rust-review",
+                "reviewing a diff",
+                Some("/tmp/proj".into()),
+                Some("r-1".into()),
+            );
+            record_skill_load(&rec);
+            assert_eq!(read_loads_all(), vec![rec.clone()]);
+            assert_eq!(read_loads_tail(1), vec![rec]);
+
+            // Hostile input: control characters (including a newline that would
+            // otherwise be read as a row boundary) and a multi-byte string far
+            // over the cap.
+            let long = "é".repeat(LOAD_REASON_CAP);
+            record_skill_load(&LoadRecord::new(
+                8,
+                "na\u{7}me\nwith\rcontrols",
+                &long,
+                None,
+                None,
+            ));
+            let all = read_loads_all();
+            assert_eq!(all.len(), 2, "one line per load: {all:?}");
+            let hostile = &all[1];
+            assert_eq!(hostile.name, "namewithcontrols");
+            assert!(
+                hostile.reason.len() <= LOAD_REASON_CAP,
+                "reason bounded: {}",
+                hostile.reason.len()
+            );
+            assert!(
+                hostile.reason.chars().all(|c| c == 'é'),
+                "truncated on a char boundary, not mid-codepoint"
+            );
+            // The bound is the stream's, not the constructor's: a struct
+            // literal that skipped `LoadRecord::new` is bounded too.
+            record_skill_load(&LoadRecord {
+                ts: 9,
+                name: "x\u{1}y".into(),
+                reason: long.clone(),
+                project: None,
+                run: None,
+            });
+            let literal = read_loads_all().pop().unwrap();
+            assert_eq!(literal.name, "xy");
+            assert!(literal.reason.len() <= LOAD_REASON_CAP);
+            // Absent project/run leave no keys on the wire (same shape rule as
+            // `CallRecord`).
+            let raw = fs::read_to_string(loads_log_path()).unwrap();
+            let last = raw.lines().last().unwrap();
+            assert!(
+                !last.contains("project") && !last.contains("\"run\""),
+                "{last}"
+            );
+        });
+    }
+
     #[test]
     fn call_outcome_wire_form_is_the_legacy_lowercase_string() {
         // The typed CallOutcome must serialize to exactly the strings the log
@@ -1141,6 +1381,23 @@ mod tests {
                 events[3],
                 RunEvent::SandboxExited { code: Some(0), .. }
             ));
+
+            // The other direction: a log written by THIS binary carries rows an
+            // older one predates. A `skill_load` row parses here…
+            let log = RunLog::create("r-mixed").unwrap();
+            fs::write(
+                log.path(),
+                "{\"event\":\"sandbox_started\",\"ts\":1,\"image\":\"img\",\"workspace\":\"/w\"}\n\
+                 {\"event\":\"skill_load\",\"ts\":2,\"name\":\"rust-review\",\"reason\":\"why\"}\n",
+            )
+            .unwrap();
+            let events = RunLog::read("r-mixed");
+            assert_eq!(events.len(), 2);
+            assert!(matches!(events[1], RunEvent::SkillLoaded { .. }));
+            // …and an older binary drops exactly that row and keeps the rest:
+            // `RunLog::read`'s `filter_map(ok)` skips a variant it doesn't know
+            // rather than failing the whole log. Adding variants is additive in
+            // both directions, and a dropped row can only lose evidence.
         });
     }
 

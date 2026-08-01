@@ -2123,6 +2123,43 @@ fn record_lease_load(store: &LeaseStore, name: &str, reason: &str) -> Result<boo
     Ok(true)
 }
 
+/// Record one SUCCESSFUL on-demand load: always the machine-global
+/// `loads.jsonl` stream, plus this run's flight recorder when the harness was
+/// launched by `agentstack run` (`AGENTSTACK_RUN_ID`). Independent of lease or
+/// session presence — the stores answer "what is loaded", this answers "what
+/// happened", so there is deliberately no dedup: one event per successful load
+/// call.
+///
+/// Best-effort in both directions and returning `()`: a recording hiccup must
+/// never fail the load it describes, the same stance as every other recording
+/// site. Refusals never reach here — they bail out of `load_capability_*`
+/// before any success path.
+fn record_load_activity(name: &str, reason: &str, project: Option<String>) {
+    let run = std::env::var(crate::calllog::RUN_ID_ENV)
+        .ok()
+        .filter(|id| !id.is_empty());
+    // `LoadRecord::new` bounds and strips the two agent-supplied strings once;
+    // the run-log mirror below reuses those bounded values rather than the raw
+    // arguments, so both sinks carry byte-identical text.
+    let rec = crate::calllog::LoadRecord::new(
+        crate::calllog::now_epoch(),
+        name,
+        reason,
+        project,
+        run.clone(),
+    );
+    crate::calllog::record_skill_load(&rec);
+    if let Some(run_id) = run {
+        if let Some(log) = crate::calllog::RunLog::create(&run_id) {
+            log.append(&crate::calllog::RunEvent::SkillLoaded {
+                ts: rec.ts,
+                name: rec.name.clone(),
+                reason: rec.reason.clone(),
+            });
+        }
+    }
+}
+
 #[cfg(test)]
 fn load_capability(args: &Value, dir: Option<&Path>, trust_note: Option<&str>) -> Result<String> {
     load_capability_with_lease(args, dir, trust_note, &new_lease_store())
@@ -2195,6 +2232,13 @@ fn load_capability_with_lease(
                     _ => (false, false, false),
                 }
             };
+            // The embedded manual serves with or without a manifest, so the
+            // project is whatever context resolved — `None` is honest here.
+            record_load_activity(
+                name,
+                reason,
+                ctx.as_ref().ok().map(|c| c.dir.display().to_string()),
+            );
             return Ok(serde_json::to_string_pretty(&json!({
                 "loaded": name,
                 "origin": "builtin",
@@ -2273,6 +2317,7 @@ fn load_capability_with_lease(
             } else {
                 false
             };
+            record_load_activity(name, reason, Some(ctx.dir.display().to_string()));
             return Ok(serde_json::to_string_pretty(&json!({
                 "loaded": name,
                 "origin": "approved-copy",
@@ -2345,6 +2390,8 @@ fn load_capability_with_lease(
     } else {
         false
     };
+
+    record_load_activity(name, reason, Some(ctx.dir.display().to_string()));
 
     let mut out = json!({
         "loaded": name,
@@ -3341,6 +3388,73 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("not pinned"), "{err}");
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    /// A successful on-demand load is activity: it lands in the machine-global
+    /// `loads.jsonl`, and — only when the harness was launched by `agentstack
+    /// run` — is mirrored into that run's `events.jsonl` as a `skill_load`.
+    /// A refusal records nothing, and neither stream ever grows a CALL.
+    #[test]
+    fn successful_load_is_recorded_globally_and_mirrored_into_the_run_log() {
+        use assert_fs::prelude::*;
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let (_home, proj) = pinned_inline_project();
+        std::env::set_var(crate::calllog::RUN_ID_ENV, "r-load");
+
+        let args = json!({ "name": "helper", "reason": "test" });
+        load_capability(&args, Some(proj.path()), None).unwrap();
+
+        let loads = crate::calllog::read_loads_all();
+        assert_eq!(loads.len(), 1, "one line per successful load: {loads:?}");
+        assert_eq!(loads[0].name, "helper");
+        assert_eq!(loads[0].reason, "test");
+        assert_eq!(loads[0].run.as_deref(), Some("r-load"));
+        // The project is recorded exactly as the calls stream records it, so
+        // `report calls --project` filters both with one comparison.
+        let dir = crate::commands::load(Some(proj.path())).unwrap().dir;
+        assert_eq!(
+            loads[0].project.as_deref(),
+            Some(dir.display().to_string().as_str())
+        );
+
+        let events = crate::calllog::RunLog::read("r-load");
+        assert_eq!(events.len(), 1, "{events:?}");
+        assert!(
+            matches!(&events[0], crate::calllog::RunEvent::SkillLoaded { name, reason, .. }
+                if name == "helper" && reason == "test"),
+            "{events:?}"
+        );
+
+        // Outside a run only the global stream grows — the mirror is a no-op.
+        std::env::remove_var(crate::calllog::RUN_ID_ENV);
+        let again = json!({ "name": "helper", "reason": "second look" });
+        load_capability(&again, Some(proj.path()), None).unwrap();
+        let loads = crate::calllog::read_loads_all();
+        assert_eq!(loads.len(), 2, "no dedup: an event per load call");
+        assert!(loads[1].run.is_none());
+        assert_eq!(
+            crate::calllog::RunLog::read("r-load").len(),
+            1,
+            "no mirror without a run id"
+        );
+
+        // A refused load is never recorded: the MCP call fails first.
+        proj.child("skills/helper/SKILL.md")
+            .write_str("---\ndescription: helps\n---\n# helper EVIL\n")
+            .unwrap();
+        assert!(load_capability(&args, Some(proj.path()), None).is_err());
+        assert_eq!(
+            crate::calllog::read_loads_all().len(),
+            2,
+            "a refusal leaves no evidence of a load that did not happen"
+        );
+
+        // And a load is never a call: the call log stays empty throughout.
+        assert!(crate::calllog::read_all().is_empty());
 
         std::env::remove_var("AGENTSTACK_HOME");
     }

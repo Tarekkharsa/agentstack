@@ -514,6 +514,24 @@ pub fn report_text(run_id: &str) -> String {
         }
     }
 
+    // Skills this run loaded on demand. Its own section, never folded into
+    // "Tool calls": a load is not a call, and the count above is what a
+    // reviewer reads as the run's gateway actions. Identity only — the name
+    // and the reason the agent gave, never the skill body.
+    let loads: Vec<(&str, &str)> = events
+        .iter()
+        .filter_map(|e| match e {
+            RunEvent::SkillLoaded { name, reason, .. } => Some((name.as_str(), reason.as_str())),
+            _ => None,
+        })
+        .collect();
+    if !loads.is_empty() {
+        o.push_str(&format!("  {}\n", "Skills loaded".bold()));
+        for (name, reason) in loads {
+            o.push_str(&format!("    loaded skill {name} — {reason}\n"));
+        }
+    }
+
     // Secret refs this run resolved — NAMES only, never values. New event kind;
     // omitted cleanly for runs recorded before the gateway emitted it.
     let secrets = secret_refs(&events);
@@ -894,6 +912,57 @@ mod tests {
             assert_eq!(v["events"][1]["event"], "tool_call");
             assert_eq!(v["events"][3]["event"], "secret_access");
             assert_eq!(v["events"][3]["ref"], "FIGMA_TOKEN");
+        });
+    }
+
+    /// An on-demand skill load renders in its own section and rides the JSON
+    /// events array under its `skill_load` tag — and, having no `CallRecord`
+    /// analog, it leaves the run's call accounting exactly as it was.
+    #[test]
+    fn renders_skill_loads_without_touching_call_accounting() {
+        with_home(|| {
+            let log = RunLog::create("r-skills").unwrap();
+            log.append(&RunEvent::ToolCall {
+                ts: 1,
+                execution_id: None,
+                server: "figma".into(),
+                tool: "get_file".into(),
+                outcome: agentstack_recorder::CallOutcome::Ok,
+                args_digest: "abc".into(),
+                detail: None,
+                ms: 9,
+            });
+            log.append(&RunEvent::SkillLoaded {
+                ts: 2,
+                name: "rust-review".into(),
+                reason: "reviewing a Rust diff".into(),
+            });
+
+            let text = report_text("r-skills");
+            assert!(text.contains("Skills loaded"), "{text}");
+            assert!(
+                text.contains("loaded skill rust-review — reviewing a Rust diff"),
+                "{text}"
+            );
+            // The load is NOT listed as a tool call: the tool-call section and
+            // the wall-time count both still see exactly one call.
+            assert!(text.contains("1 tool call,"), "{text}");
+            assert!(!text.contains("rust-review__"), "{text}");
+
+            let v: serde_json::Value =
+                serde_json::from_str(&report_json("r-skills").unwrap()).unwrap();
+            assert_eq!(v["events"][1]["event"], "skill_load");
+            assert_eq!(v["events"][1]["name"], "rust-review");
+            // No audit-log analog exists for a load, so the de-duped `calls`
+            // fallback is unaffected by it.
+            assert_eq!(v["calls"].as_array().unwrap().len(), 0, "{v}");
+            let tool_events = v["events"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|e| e["event"] == "tool_call")
+                .count();
+            assert_eq!(tool_events, 1, "{v}");
         });
     }
 

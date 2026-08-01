@@ -113,6 +113,330 @@ impl ReviewDiff {
     }
 }
 
+// ---- Identity strings, shared by both walks --------------------------------
+//
+// `grant_probed` records these through `diff.mark(...)`; `preview_value`
+// recomputes them for the machine-readable card (`trust-card-diff-v1`). They
+// must agree BYTE FOR BYTE: the preview decides "added / changed / unchanged"
+// by comparing its own string against the one the grant persisted, so a second
+// construction site would make every re-review lie the day one of the two is
+// edited. Hence one small pure function per kind, with no display formatting of
+// its own — the mark call sites stay exactly where they are (the `:review`
+// structure check anchors on them).
+
+/// What the review records for a server whose reference does not resolve. The
+/// error text is display only: two different failures are the same fact here,
+/// and folding the message into the identity would read as `~ changed` every
+/// time the wording moved.
+const UNRESOLVABLE_SERVER_IDENTITY: &str = "unresolvable";
+
+/// Instruction fragments are keyed by name and have no finer identity to
+/// record, so they only ever read as added or removed. Their PIN, recorded
+/// separately, is what carries their bytes into a re-gate.
+const INSTRUCTION_IDENTITY: &str = "";
+
+/// A stdio server's identity is the command line it runs — the thing the trust
+/// gate exists for. Not the pin or origin annotation: pin drift is a hard
+/// blocker of its own.
+fn server_stdio_identity(server: &crate::manifest::Server) -> String {
+    format!(
+        "{} {}",
+        server.command.as_deref().unwrap_or("?"),
+        server.args.join(" ")
+    )
+}
+
+/// An http server's identity is the URL it contacts.
+///
+/// Borrowed from `server` rather than cloned so a caller prints exactly the
+/// string it marks; the returned `&str` lives as long as the borrow of the
+/// server it came from, which outlasts every use in both walks.
+fn server_http_identity(server: &crate::manifest::Server) -> &str {
+    server.url.as_deref().unwrap_or("?")
+}
+
+/// Secrets are ONE aggregate item whose identity is the whole referenced set
+/// (sorted by `referenced_secrets`), so adding or dropping any reference flips
+/// the line to `~ changed`.
+fn secrets_identity(refs: &[String]) -> String {
+    refs.join(", ")
+}
+
+/// A repository-local executable is identified by the path label the review
+/// shows; byte drift is caught by its verdict, not by the diff.
+fn executable_identity(label: &str) -> &str {
+    label
+}
+
+/// An extension's identity is where it installs, so a retarget reads as
+/// `~ changed`.
+fn extension_identity(ext: &crate::manifest::Extension) -> &str {
+    &ext.target
+}
+
+/// A workflow's identity is its sorted role set — the authority it requests —
+/// so a roles widening reads as `~ changed` even with unchanged bytes.
+fn workflow_identity(wf: &crate::manifest::Workflow) -> String {
+    wf.roles_sorted_unique().join(", ")
+}
+
+/// A skill has no command or URL; its identity is where its body comes from,
+/// so a source flip reads as `~ changed`. `None` is what the grant walk records
+/// when the resolver could not locate the source at all.
+fn skill_identity(origin: Option<crate::resolve::SkillOrigin>) -> &'static str {
+    match origin {
+        Some(crate::resolve::SkillOrigin::Inline) => "inline",
+        Some(crate::resolve::SkillOrigin::Library) => "library",
+        None => "?",
+    }
+}
+
+/// The " matching <m>" fragment both the hook's identity and its review line
+/// carry — one construction so they can never describe different scopes.
+fn hook_matcher_suffix(hook: &crate::manifest::Hook) -> String {
+    match &hook.matcher {
+        Some(mt) if !mt.is_empty() => format!(" matching {mt}"),
+        _ => String::new(),
+    }
+}
+
+/// The ", timeout <n>s" fragment; see [`hook_matcher_suffix`].
+fn hook_timeout_suffix(hook: &crate::manifest::Hook) -> String {
+    match hook.timeout {
+        Some(t) => format!(", timeout {t}s"),
+        None => String::new(),
+    }
+}
+
+/// The command line a hook runs, args included.
+fn hook_invocation(hook: &crate::manifest::Hook) -> String {
+    let args = if hook.args.is_empty() {
+        String::new()
+    } else {
+        format!(" {}", hook.args.join(" "))
+    };
+    format!("{}{args}", hook.command)
+}
+
+/// A hook's identity is the WHOLE invocation (event, matcher, command line,
+/// timeout, targets): changing any of them must read as `~ changed` rather than
+/// hide behind a stable name. `targets` stays raw here — two manifests that
+/// differ only in wildcard-vs-explicit are different consents.
+fn hook_identity(hook: &crate::manifest::Hook) -> String {
+    format!(
+        "{}{} runs {}{} → {}",
+        hook.event,
+        hook_matcher_suffix(hook),
+        hook_invocation(hook),
+        hook_timeout_suffix(hook),
+        hook.targets.join(", ")
+    )
+}
+
+/// A settings block's identity is its canonical (key-sorted) JSON, so any value
+/// change reads as `~ changed` while a re-ordering of the same keys does not.
+fn settings_identity(value: &serde_json::Value) -> String {
+    canonical_json(value)
+}
+
+/// The requested policy is ONE aggregate item; any change to the requested set
+/// flips it.
+fn policy_identity(p: &crate::manifest::Policy) -> String {
+    policy_requested_lines(p).join("\n")
+}
+
+/// What the preview says instead of a library server's live command line when
+/// that definition no longer matches its lock pin. Shared by the `servers`
+/// entry and the card item so the redaction cannot drift into two wordings.
+const REDACTED_LIBRARY_SERVER: &str =
+    "library definition does not match the lockfile pin — run `agentstack lock`, review the change, and re-run the preview";
+
+/// One row of the structured consent card (`trust-card-diff-v1`) before it
+/// becomes JSON.
+struct CardItem<'a> {
+    /// `kind` and `name` are borrowed for as long as the item is being built —
+    /// `push` copies what it needs into JSON immediately, so nothing outlives
+    /// the manifest or lockfile they came from.
+    kind: &'a str,
+    name: &'a str,
+    /// The identity the GRANT walk records for this item — what the change
+    /// marker is computed from. RAW, exactly like `ReviewDiff::mark`'s
+    /// argument: two different hostile values must never collide after
+    /// sanitizing.
+    identity: String,
+    /// What the payload may DISCLOSE, when that is not the identity. Set only
+    /// where the preview redacts (a drifted library server): the marker is
+    /// still computed from the live identity, because saying that something
+    /// changed discloses nothing, while emitting the bytes the consent digest
+    /// does not cover would.
+    shown: Option<&'a str>,
+    /// Command lines this item runs; hosts it contacts; secret references it
+    /// may read. Empty for the kinds that do none of those.
+    runs: Vec<String>,
+    contacts: Vec<String>,
+    may_read: Vec<String>,
+    /// The pin the CURRENT lockfile records, for the kinds whose bytes live
+    /// outside the manifest.
+    pin: Option<String>,
+    /// Whether this kind carries a pin-to-pin diff at all (skills and
+    /// instructions do; everything else emits `null`).
+    pinned_kind: bool,
+}
+
+impl<'a> CardItem<'a> {
+    fn new(kind: &'a str, name: &'a str, identity: impl Into<String>) -> Self {
+        CardItem {
+            kind,
+            name,
+            identity: identity.into(),
+            shown: None,
+            runs: Vec::new(),
+            contacts: Vec::new(),
+            may_read: Vec::new(),
+            pin: None,
+            pinned_kind: false,
+        }
+    }
+}
+
+/// Accumulates the preview's own read-only walk of the reviewed surface.
+///
+/// It is the mirror of [`ReviewDiff`], not a replacement for it: the grant walk
+/// stays authoritative and stays where it is, and this recomputes the same
+/// identities so a panel can render the same card. Everything it reads is a
+/// pure read — the consent snapshot, the trust store, the content store, the
+/// recognition index — because `trust --preview` may not write.
+struct CardWalk {
+    /// The surface the last consent recorded; empty when there is none, which
+    /// is what makes every item read `added`.
+    prior: Vec<SurfaceItem>,
+    seen: HashSet<(String, String)>,
+    items: Vec<serde_json::Value>,
+    /// `None` when this machine has no readable recognition index. The
+    /// per-item count is then `null` rather than a fabricated zero — the
+    /// difference between "approved nowhere else" and "nothing to ask".
+    index: Option<crate::recognition::Index>,
+    project_key: String,
+    store_root: PathBuf,
+}
+
+impl CardWalk {
+    fn new(base: &Path, prior: Vec<SurfaceItem>) -> Self {
+        CardWalk {
+            prior,
+            seen: HashSet::new(),
+            items: Vec::new(),
+            index: crate::recognition::Index::load_existing(),
+            project_key: trust::key_for(base),
+            store_root: crate::store::Store::default_store().root().to_path_buf(),
+        }
+    }
+
+    /// Record one item, computing its marker exactly as
+    /// [`ReviewDiff::mark_pinned`] does: same key, same raw comparison, same
+    /// three answers. Sanitizing happens HERE rather than at the call sites so
+    /// a new kind cannot forget it.
+    fn push(&mut self, item: CardItem) {
+        let prior = self
+            .prior
+            .iter()
+            .find(|p| p.kind == item.kind && p.name == item.name);
+        let change = match prior {
+            None => "added",
+            Some(p) if p.identity != item.identity => "changed",
+            Some(_) => "unchanged",
+        };
+        let prior_pin = prior.and_then(|p| p.pin.clone());
+        // Pin-to-pin, never pin-to-live: locating live bytes reaches git
+        // worktree materialization, and this command must not write. See
+        // `regate::diff_between_pins`.
+        let diff = if item.pinned_kind {
+            let computed = match (&prior_pin, &item.pin) {
+                (Some(before), Some(after)) => {
+                    crate::regate::diff_between_pins(&self.store_root, before, after)
+                }
+                _ => crate::regate::PinDiff::NoSnapshot,
+            };
+            crate::regate::pin_diff_json(&computed, crate::regate::DIFF_LINE_CAP)
+        } else {
+            serde_json::Value::Null
+        };
+        // Display information only. Nothing downstream may treat this as an
+        // input to a decision — the per-project yes is unchanged by it.
+        let recognized = match (&self.index, &item.pin) {
+            (Some(index), Some(pin)) => index.others(pin, &self.project_key).into(),
+            _ => serde_json::Value::Null,
+        };
+        let clean = |values: &[String]| -> Vec<String> {
+            values
+                .iter()
+                .map(|v| crate::text::sanitize_line(v))
+                .collect()
+        };
+        self.seen
+            .insert((item.kind.to_string(), item.name.to_string()));
+        self.items.push(serde_json::json!({
+            "kind": item.kind,
+            "name": crate::text::sanitize_line(item.name),
+            "change": change,
+            "identity": crate::text::sanitize_line(item.shown.unwrap_or(&item.identity)),
+            "runs": clean(&item.runs),
+            "contacts": clean(&item.contacts),
+            "may_read": clean(&item.may_read),
+            "pin": item.pin,
+            "prior_pin": prior_pin,
+            "recognized_other_projects": recognized,
+            "diff": diff,
+        }));
+    }
+
+    /// Prior items this walk never saw — removed since the last consent. The
+    /// mirror of [`ReviewDiff::removed`].
+    fn removed(&self) -> Vec<serde_json::Value> {
+        self.prior
+            .iter()
+            .filter(|it| !self.seen.contains(&(it.kind.clone(), it.name.clone())))
+            .map(|it| {
+                serde_json::json!({
+                    "kind": crate::text::sanitize_line(&it.kind),
+                    "name": crate::text::sanitize_line(&it.name),
+                    "identity": crate::text::sanitize_line(&it.identity),
+                })
+            })
+            .collect()
+    }
+}
+
+/// The skill origin the preview can name WITHOUT resolving anything: inline
+/// wins over the central library, the same precedence activation applies.
+///
+/// The grant walk gets this from the resolver, which also reaches git worktree
+/// materialization — writes a read-only command must not make. The two agree
+/// for every skill whose source is locatable. They diverge in exactly one case,
+/// deliberately: a git-sourced skill with no local checkout resolves to
+/// "offline" in the grant walk, which records `?`, while this still names the
+/// declared origin — so that item can read `changed` in the preview until the
+/// next grant re-records it. Display-only, and the alternative is a preview
+/// that clones repositories.
+fn preview_skill_origin(
+    m: &crate::manifest::Manifest,
+    library: &crate::library::Library,
+    name: &str,
+) -> Option<crate::resolve::SkillOrigin> {
+    if let Some(skill) = m.skills.get(name) {
+        // P19: an empty inline block shadowing a library skill is a resolve
+        // ERROR, which the grant walk records as `?`. Mirror the refusal
+        // rather than claiming an origin the authoritative walk will not name.
+        if skill.path.is_none() && skill.git.is_none() && library.get(name).is_some() {
+            return None;
+        }
+        return Some(crate::resolve::SkillOrigin::Inline);
+    }
+    library
+        .get(name)
+        .map(|_| crate::resolve::SkillOrigin::Library)
+}
+
 pub fn run(args: &TrustArgs) -> Result<()> {
     if args.list {
         return list();
@@ -169,10 +493,18 @@ pub fn preview_value(base: &Path) -> Result<serde_json::Value> {
         trust::TrustState::Changed => "drifted",
         trust::TrustState::Untrusted => "untrusted",
     };
-    let re_trust = !matches!(
-        trust::prior_surface(base),
-        trust::PriorSurface::NeverTrusted
-    );
+    let prior = trust::prior_surface(base);
+    let re_trust = !matches!(prior, trust::PriorSurface::NeverTrusted);
+    // `trust-card-diff-v1`: the same walk the review card renders, recomputed
+    // read-only. A prior surface with no items (never trusted, or an older
+    // entry that recorded none) leaves `prior_recorded` false and every item
+    // reading `added` — the honest answer when there is nothing to compare to.
+    let prior_items: Vec<SurfaceItem> = match prior {
+        trust::PriorSurface::Recorded(items) => items,
+        _ => Vec::new(),
+    };
+    let prior_recorded = !prior_items.is_empty();
+    let mut card = CardWalk::new(base, prior_items);
 
     // The gateway's actual runtime surface — library refs resolve exactly as
     // they will at gateway time. Display strings are sanitized (hostile input).
@@ -180,71 +512,84 @@ pub fn preview_value(base: &Path) -> Result<serde_json::Value> {
     let lib_home = crate::util::paths::lib_home();
     let effective_servers = crate::resolve::effective_runtime_servers(m, &library, &lib_home, None);
     let mut server_blockers: Vec<serde_json::Value> = Vec::new();
-    let servers: Vec<serde_json::Value> = effective_servers
-            .iter()
-            .map(|(name, resolved)| match resolved {
-                Ok(r) => {
-                    // A library-backed definition resolves from the LIVE
-                    // central library, but the digest binds only the lock
-                    // pin. Displaying a definition that doesn't match the
-                    // pin would show the consenting human content the digest
-                    // does not cover (an external UI would then bind consent
-                    // to bytes nobody is granting) — so an unpinned or
-                    // drifted library server renders as unverified instead
-                    // of leaking the live definition into the surface.
-                    let pinned_ok = match r.origin {
-                        crate::resolve::ServerOrigin::Inline => true,
-                        crate::resolve::ServerOrigin::Library => lock
-                            .get_server(name)
-                            .is_some_and(|entry| entry.checksum.hex() == r.checksum),
-                    };
-                    if !pinned_ok {
-                        server_blockers.push(serde_json::json!({
-                            "name": crate::text::sanitize_line(name),
-                            "reason": "library definition does not match the lockfile pin",
-                            "fix": "agentstack lock",
-                        }));
-                        return serde_json::json!({
-                            "name": crate::text::sanitize_line(name),
-                            "kind": "unverified",
-                            "target": "library definition does not match the lockfile pin — run `agentstack lock`, review the change, and re-run the preview",
-                        });
+    let mut servers: Vec<serde_json::Value> = Vec::new();
+    for (name, resolved) in &effective_servers {
+        match resolved {
+            Ok(r) => {
+                // A library-backed definition resolves from the LIVE central
+                // library, but the digest binds only the lock pin. Displaying
+                // a definition that doesn't match the pin would show the
+                // consenting human content the digest does not cover (an
+                // external UI would then bind consent to bytes nobody is
+                // granting) — so an unpinned or drifted library server renders
+                // as unverified instead of leaking the live definition into
+                // the surface.
+                let pinned_ok = match r.origin {
+                    crate::resolve::ServerOrigin::Inline => true,
+                    crate::resolve::ServerOrigin::Library => lock
+                        .get_server(name)
+                        .is_some_and(|entry| entry.checksum.hex() == r.checksum),
+                };
+                // Computed BEFORE the redaction check, and kept out of the
+                // payload when redacting: the card still needs to say whether
+                // this changed, and "something changed" discloses nothing.
+                let identity = match r.server.server_type {
+                    crate::manifest::ServerType::Stdio => server_stdio_identity(&r.server),
+                    crate::manifest::ServerType::Http => {
+                        server_http_identity(&r.server).to_string()
                     }
-                    let (kind, target) = match r.server.server_type {
-                        crate::manifest::ServerType::Stdio => (
-                            "stdio",
-                            format!(
-                                "{} {}",
-                                r.server.command.as_deref().unwrap_or("?"),
-                                r.server.args.join(" ")
-                            )
-                            .trim()
-                            .to_string(),
-                        ),
-                        crate::manifest::ServerType::Http => {
-                            ("http", r.server.url.clone().unwrap_or_default())
-                        }
-                    };
-                    serde_json::json!({
-                        "name": crate::text::sanitize_line(name),
-                        "kind": kind,
-                        "target": crate::text::sanitize_line(&target),
-                    })
-                }
-                Err(e) => {
+                };
+                if !pinned_ok {
                     server_blockers.push(serde_json::json!({
                         "name": crate::text::sanitize_line(name),
-                        "reason": crate::text::sanitize_line(&e.to_string()),
-                        "fix": "edit-manifest",
+                        "reason": "library definition does not match the lockfile pin",
+                        "fix": "agentstack lock",
                     }));
-                    serde_json::json!({
+                    servers.push(serde_json::json!({
                         "name": crate::text::sanitize_line(name),
-                        "kind": "unresolvable",
-                        "target": crate::text::sanitize_line(&e.to_string()),
-                    })
+                        "kind": "unverified",
+                        "target": REDACTED_LIBRARY_SERVER,
+                    }));
+                    // No `runs` / `contacts` either: those ARE the redacted
+                    // bytes, one field further down.
+                    let mut item = CardItem::new("server", name, identity);
+                    item.shown = Some(REDACTED_LIBRARY_SERVER);
+                    card.push(item);
+                    continue;
                 }
-            })
-            .collect();
+                let (kind, target) = match r.server.server_type {
+                    crate::manifest::ServerType::Stdio => ("stdio", identity.trim().to_string()),
+                    crate::manifest::ServerType::Http => {
+                        ("http", r.server.url.clone().unwrap_or_default())
+                    }
+                };
+                servers.push(serde_json::json!({
+                    "name": crate::text::sanitize_line(name),
+                    "kind": kind,
+                    "target": crate::text::sanitize_line(&target),
+                }));
+                let mut item = CardItem::new("server", name, identity);
+                match r.server.server_type {
+                    crate::manifest::ServerType::Stdio => item.runs.push(target),
+                    crate::manifest::ServerType::Http => item.contacts.push(target),
+                }
+                card.push(item);
+            }
+            Err(e) => {
+                server_blockers.push(serde_json::json!({
+                    "name": crate::text::sanitize_line(name),
+                    "reason": crate::text::sanitize_line(&e.to_string()),
+                    "fix": "edit-manifest",
+                }));
+                servers.push(serde_json::json!({
+                    "name": crate::text::sanitize_line(name),
+                    "kind": "unresolvable",
+                    "target": crate::text::sanitize_line(&e.to_string()),
+                }));
+                card.push(CardItem::new("server", name, UNRESOLVABLE_SERVER_IDENTITY));
+            }
+        }
+    }
 
     // The trust grant also verifies repository-local executable content. Carry
     // server-specific failures in the machine preview so an external consent
@@ -260,9 +605,26 @@ pub fn preview_value(base: &Path) -> Result<serde_json::Value> {
                 .map(|resolved| (name.clone(), resolved.server.clone()))
         })
         .collect();
-    for (name, status) in
-        crate::executable::executable_lock_statuses(&dir, &executable_servers, &lock)
-    {
+    // Card order mirrors the grant walk's (servers, secrets, executables, …),
+    // so a panel rendering `review.items` in order shows the same sequence the
+    // terminal does.
+    let secrets: Vec<String> = m.referenced_secrets();
+    if !secrets.is_empty() {
+        let mut item = CardItem::new("secrets", "", secrets_identity(&secrets));
+        item.may_read = secrets.clone();
+        card.push(item);
+    }
+
+    let exec_statuses =
+        crate::executable::executable_lock_statuses(&dir, &executable_servers, &lock);
+    for (label, _) in &exec_statuses {
+        card.push(CardItem::new(
+            "executable",
+            label,
+            executable_identity(label),
+        ));
+    }
+    for (name, status) in exec_statuses {
         match crate::verify::executable_verdict(&status) {
             crate::verify::Verdict::Ok => {}
             crate::verify::Verdict::Unpinned => {
@@ -281,8 +643,6 @@ pub fn preview_value(base: &Path) -> Result<serde_json::Value> {
             }
         }
     }
-
-    let secrets: Vec<String> = m.referenced_secrets();
 
     // The COMPLETE reviewed surface, by name — not just counts. What an
     // external consent screen renders must be the same item list the
@@ -339,16 +699,11 @@ pub fn preview_value(base: &Path) -> Result<serde_json::Value> {
         .hooks
         .iter()
         .map(|(name, h)| {
-            let args = if h.args.is_empty() {
-                String::new()
-            } else {
-                format!(" {}", h.args.join(" "))
-            };
             serde_json::json!({
                 "name": crate::text::sanitize_line(name),
                 "event": crate::text::sanitize_line(&h.event),
                 "matcher": h.matcher.as_deref().map(crate::text::sanitize_line),
-                "runs": crate::text::sanitize_line(&format!("{}{args}", h.command)),
+                "runs": crate::text::sanitize_line(&hook_invocation(h)),
                 "targets": h.targets.iter().map(|t| crate::text::sanitize_line(t)).collect::<Vec<_>>(),
                 "executable": true,
             })
@@ -373,6 +728,49 @@ pub fn preview_value(base: &Path) -> Result<serde_json::Value> {
         .iter()
         .map(|l| crate::text::sanitize_line(l))
         .collect();
+
+    // The rest of the card, in the grant walk's order. Everything here is a
+    // manifest or lockfile read: no resolver, no store worktree, no network —
+    // which is what keeps `trust --preview` read-only while still recomputing
+    // the identities the grant persists.
+    for (name, ext) in &m.extensions {
+        card.push(CardItem::new("extension", name, extension_identity(ext)));
+    }
+    for (name, wf) in &m.workflows {
+        card.push(CardItem::new("workflow", name, workflow_identity(wf)));
+    }
+    for name in review_skill_names(m) {
+        let mut item = CardItem::new(
+            "skill",
+            &name,
+            skill_identity(preview_skill_origin(m, &library, &name)),
+        );
+        item.pin = lock.get(&name).map(|e| e.checksum.hex().to_string());
+        item.pinned_kind = true;
+        card.push(item);
+    }
+    for (name, _) in m.instructions.iter().filter(|(_, i)| !i.from_user_layer) {
+        let mut item = CardItem::new("instruction", name, INSTRUCTION_IDENTITY);
+        item.pin = lock
+            .get_instruction(name)
+            .map(|e| e.checksum.hex().to_string());
+        item.pinned_kind = true;
+        card.push(item);
+    }
+    for (name, hook) in &m.hooks {
+        let mut item = CardItem::new("hook", name, hook_identity(hook));
+        // A hook runs a command at the user's permission, so it belongs in
+        // `runs` beside the stdio servers — the same reasoning the terminal
+        // card's executable count applies.
+        item.runs.push(hook_invocation(hook));
+        card.push(item);
+    }
+    for (adapter, value) in &m.settings {
+        card.push(CardItem::new("settings", adapter, settings_identity(value)));
+    }
+    if !policy_requested_lines(&m.policy).is_empty() {
+        card.push(CardItem::new("policy", "", policy_identity(&m.policy)));
+    }
 
     // §7.2: `surface_digest` (computed above, from the same snapshot the
     // display was parsed from) is exactly what a later grant must present as
@@ -404,6 +802,16 @@ pub fn preview_value(base: &Path) -> Result<serde_json::Value> {
             "instructions": instructions.len(),
             "hooks": hooks.len(),
             "settings": settings.len(),
+        },
+        // `trust-card-diff-v1`. Always present from this binary on: the inner
+        // fields degrade (a missing snapshot, a missing index, a project that
+        // was never trusted), the key does not disappear, so a panel gates on
+        // the feature name once instead of sniffing per project.
+        "review": {
+            "re_review": re_trust,
+            "prior_recorded": prior_recorded,
+            "items": card.items,
+            "removed": card.removed(),
         },
     });
     Ok(crate::ui_contract::envelope(out))
@@ -680,7 +1088,7 @@ pub(crate) fn grant_probed(
         let r = match resolved {
             Ok(r) => r,
             Err(e) => {
-                let mk = diff.mark("server", name, "unresolvable");
+                let mk = diff.mark("server", name, UNRESOLVABLE_SERVER_IDENTITY);
                 say!(
                     "{mk}{} {disp}: unresolvable ({})",
                     "✗".red(),
@@ -718,17 +1126,16 @@ pub(crate) fn grant_probed(
             // is the command line (what actually runs), not the pin/origin
             // annotation — pin drift is already a hard blocker below.
             ServerType::Stdio => {
-                let command = r.server.command.as_deref().unwrap_or("?");
-                let args = r.server.args.join(" ");
-                let mk = diff.mark("server", name, &format!("{command} {args}"));
+                let command_line = server_stdio_identity(&r.server);
+                let mk = diff.mark("server", name, &command_line);
                 say!(
                     "{mk}{} {disp}: runs `{}`{origin}",
                     "▶".yellow(),
-                    crate::text::sanitize_line(&format!("{command} {args}"))
+                    crate::text::sanitize_line(&command_line)
                 );
             }
             ServerType::Http => {
-                let url = r.server.url.as_deref().unwrap_or("?");
+                let url = server_http_identity(&r.server);
                 let mk = diff.mark("server", name, url);
                 say!(
                     "{mk}{} {disp}: contacts {}{origin}",
@@ -743,7 +1150,7 @@ pub(crate) fn grant_probed(
         // Secrets are one aggregate line; its identity is the (sorted, from
         // `referenced_secrets`) set, so adding or dropping any ref flips the
         // whole line to `~ changed`.
-        let joined = refs.join(", ");
+        let joined = secrets_identity(&refs);
         let mk = diff.mark("secrets", "", &joined);
         say!(
             "{mk}secrets referenced: {}",
@@ -768,7 +1175,7 @@ pub(crate) fn grant_probed(
             let disp = crate::text::sanitize_line(label);
             // An executable is identified by its path (the label the review
             // shows); byte drift is caught by the verdict below, not the diff.
-            let mk = diff.mark("executable", label, label);
+            let mk = diff.mark("executable", label, executable_identity(label));
             match crate::verify::executable_verdict(status) {
                 crate::verify::Verdict::Ok => say!("{mk}· {disp}   [pinned]"),
                 crate::verify::Verdict::Unpinned => {
@@ -804,7 +1211,7 @@ pub(crate) fn grant_probed(
             let dest = format!("→ {}", crate::text::sanitize_line(&ext.target));
             // The extension's identity for the diff is its target (where it
             // installs); a retarget shows as `~ changed`.
-            let mk = diff.mark("extension", name, &ext.target);
+            let mk = diff.mark("extension", name, extension_identity(ext));
             // Read-only review: never fetch a git source here. An un-cached git
             // extension surfaces as offline, exactly like a skill.
             let report = crate::resolve::extension_lock_status(
@@ -899,7 +1306,7 @@ pub(crate) fn grant_probed(
             use crate::resolve::WorkflowLockStatus;
             let disp = crate::text::sanitize_line(name);
             let roles = wf.roles_sorted_unique();
-            let roles_joined = roles.join(", ");
+            let roles_joined = workflow_identity(wf);
             let dest = format!(
                 "→ roles: {}",
                 if roles.is_empty() {
@@ -1005,11 +1412,7 @@ pub(crate) fn grant_probed(
                 crate::resolve::ResolveMode::NoFetch,
             );
             use crate::resolve::{SkillLockStatus, SkillOrigin};
-            let origin_word = match report.origin {
-                Some(SkillOrigin::Inline) => "inline",
-                Some(SkillOrigin::Library) => "library",
-                None => "?",
-            };
+            let origin_word = skill_identity(report.origin);
             // A skill has no command/url; its diff identity is where its body
             // comes from (inline vs library), so a source flip shows `~ changed`.
             // The PIN — the lock checksum of the bytes being consented to — is
@@ -1139,7 +1542,7 @@ pub(crate) fn grant_probed(
             let mk = diff.mark_pinned(
                 "instruction",
                 name,
-                "",
+                INSTRUCTION_IDENTITY,
                 lock.get_instruction(name)
                     .map(|e| e.checksum.hex().to_string()),
             );
@@ -1224,36 +1627,21 @@ pub(crate) fn grant_probed(
         );
         for (name, hook) in &m.hooks {
             let disp = crate::text::sanitize_line(name);
-            let args = if hook.args.is_empty() {
-                String::new()
-            } else {
-                format!(" {}", hook.args.join(" "))
-            };
-            let invocation = format!("{}{args}", hook.command);
-            let matcher = match &hook.matcher {
-                Some(mt) if !mt.is_empty() => format!(" matching {mt}"),
-                _ => String::new(),
-            };
-            let timeout = match hook.timeout {
-                Some(t) => format!(", timeout {t}s"),
-                None => String::new(),
-            };
+            let invocation = hook_invocation(hook);
+            let matcher = hook_matcher_suffix(hook);
+            let timeout = hook_timeout_suffix(hook);
             // `targets` defaults to the wildcard `["*"]`, which is manifest
             // syntax, not something a consent screen may make the reader
             // decode — a bare `[*]` is the widest possible scope rendered as
             // the least alarming glyph. Say what it means. The diff identity
             // keeps the RAW targets: two manifests that differ only in
             // wildcard-vs-explicit must still read as `~ changed`.
-            let raw_targets = hook.targets.join(", ");
             let targets_disp = if hook.targets.iter().any(|t| t == "*") {
                 "every hook-capable CLI".to_string()
             } else {
-                raw_targets.clone()
+                hook.targets.join(", ")
             };
-            let identity = format!(
-                "{}{matcher} runs {invocation}{timeout} → {raw_targets}",
-                hook.event
-            );
+            let identity = hook_identity(hook);
             let mk = diff.mark("hook", name, &identity);
             say!(
                 "{mk}{} {disp}: on {} runs `{}`{}   [in {}]",
@@ -1278,7 +1666,7 @@ pub(crate) fn grant_probed(
             let disp = crate::text::sanitize_line(adapter);
             // Canonical, key-sorted rendering: two objects that differ only in
             // key order are the same consent, and must not read as changed.
-            let identity = canonical_json(value);
+            let identity = settings_identity(value);
             let keys = match value.as_object() {
                 Some(o) => {
                     let mut k: Vec<&str> = o.keys().map(|s| s.as_str()).collect();
@@ -2084,7 +2472,7 @@ fn review_policy(p: &crate::manifest::Policy, diff: &mut ReviewDiff, body: &mut 
     if !lines.is_empty() {
         // One aggregate item: any change to the requested set flips the header
         // line to `~ changed`.
-        let mk = diff.mark("policy", "", &lines.join("\n"));
+        let mk = diff.mark("policy", "", &policy_identity(p));
         body.push(format!(
             "{mk}policy requested by this project (can only narrow the machine layer):"
         ));
@@ -2460,5 +2848,71 @@ mod tests {
             assert!(diff.removed().is_empty());
             assert_eq!(diff.current, vec![item("server", "anything", "whatever")]);
         }
+    }
+
+    // `trust-card-diff-v1`: the preview's marker and the review's marker are
+    // two implementations of ONE rule, so drive both over the same prior
+    // surface and assert they answer identically — including which prior items
+    // read as removed. The integration witness proves the two walks build the
+    // same identity STRINGS; this proves they classify them the same way.
+    //
+    // `CardWalk` is built by hand rather than through `new`, which would read
+    // this machine's recognition index and make a unit test depend on global
+    // state it does not care about.
+    #[test]
+    fn the_previews_change_marker_agrees_with_the_reviews_marker() {
+        let prior = vec![
+            item("server", "safe", "node safe.js"),
+            item("server", "gone", "node gone.js"),
+            item("skill", "greet", "library"),
+        ];
+        let now = [
+            ("skill", "greet", "library"),
+            ("server", "safe", "node safe.js --new"),
+            ("server", "evil", "sh -c pwn"),
+        ];
+
+        let mut review = ReviewDiff::new(PriorSurface::Recorded(prior.clone()));
+        let review_marks: Vec<&str> = now
+            .iter()
+            .map(|(kind, name, identity)| review.mark(kind, name, identity))
+            .collect();
+
+        let mut card = CardWalk {
+            prior: prior.clone(),
+            seen: HashSet::new(),
+            items: Vec::new(),
+            index: None,
+            project_key: "/project".to_string(),
+            store_root: PathBuf::from("/nonexistent"),
+        };
+        for (kind, name, identity) in now {
+            card.push(CardItem::new(kind, name, identity));
+        }
+        let card_marks: Vec<&str> = card
+            .items
+            .iter()
+            .map(|i| i["change"].as_str().unwrap())
+            .collect();
+
+        assert_eq!(review_marks, ["  ", "~ ", "+ "]);
+        assert_eq!(card_marks, ["unchanged", "changed", "added"]);
+        assert_eq!(
+            review.removed().iter().map(|i| &i.name).collect::<Vec<_>>(),
+            ["gone"]
+        );
+        assert_eq!(
+            card.removed()
+                .iter()
+                .map(|i| i["name"].as_str().unwrap().to_string())
+                .collect::<Vec<_>>(),
+            ["gone"]
+        );
+        // Nothing pinned, so nothing claims a diff or a recognition count.
+        assert!(card.items.iter().all(|i| i["diff"].is_null()));
+        assert!(card
+            .items
+            .iter()
+            .all(|i| i["recognized_other_projects"].is_null()));
     }
 }

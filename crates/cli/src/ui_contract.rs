@@ -57,6 +57,68 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   Consequently a UI must not present this payload as "everything the
 ///   reviewer will see". It is the machine-readable surface; `agentstack
 ///   trust` remains authoritative.
+/// - `trust-card-diff-v1`: `trust --preview` additionally carries `review` —
+///   the consent card itself, structured. Until now the card was print-only
+///   inside the grant path, so its per-item facts reached the terminal and
+///   nothing else. `review.items[]` gives each reviewed item its `kind`,
+///   `name`, what it `runs`, what it `contacts`, what it `may_read`, its `pin`
+///   and the `prior_pin` the last consent recorded, how many other projects on
+///   this machine already approved that content, and a `change` marker
+///   (`added` / `changed` / `unchanged`) computed from the SAME identity
+///   strings the grant walk persists — plus `review.removed`, the items the
+///   last consented surface carried and this one does not. On a re-review an
+///   item whose bytes moved carries a capped changed-lines `diff`.
+///
+///   Four divergences, each deliberate:
+///
+///   1. **A drifted library server stays redacted**, inherited from
+///      `trust-review-card-v1`: its item names the same "does not match the
+///      lockfile pin" text instead of the live command line, and contributes
+///      nothing to `runs` / `contacts`. It still reads `changed`, because
+///      saying that something moved discloses nothing while emitting the bytes
+///      the digest does not cover would.
+///   2. **The diff is prior-consented-pin → currently-locked-pin, not
+///      pin-to-live.** The consent digest covers the LOCK bytes, so that delta
+///      is the one this payload can bind to; resolving live bytes would reach
+///      git worktree materialization, which a read-only command must not do.
+///      The terminal review stays authoritative over live bytes and diffs
+///      pin-to-live there. A consequence worth stating: `change` keys on
+///      identity only, so a skill whose BYTES moved still reads `unchanged`
+///      while its `diff.status` reads `changed` — the pin is deliberately not
+///      part of the diff key (see `SurfaceItem::pin`), and the diff object is
+///      where the byte story lives.
+///   3. **`recognized_other_projects` is machine-local display information**,
+///      never an input to any decision. `null` means this machine has no
+///      readable recognition index — which is not the same as zero.
+///   4. **No per-item accept / keep-pinned / block affordance.** Those three
+///      answers exist only in the interactive terminal review, where the
+///      single closing yes commits them. A panel may render what changed; it
+///      may not collect the answer.
+///
+///   A separate name rather than a revision of `trust-review-card-v1` because
+///   the field sets are not versions of one another: that one carries the
+///   KINDS the preview omitted, this one carries the CARD. Recorded as the
+///   naming correction in `docs/design/consent-card.md` §Panel.
+/// - `activity-skill-load-v1`: a successful on-demand skill load over MCP
+///   (`agentstack_load`) is recorded as first-class activity. Each one appends
+///   to the machine-global `~/.agentstack/audit/loads.jsonl`
+///   (`{ts, name, reason, project?, run?}`) and, when the load happens inside a
+///   run, mirrors a `{"event":"skill_load", …}` line into that run's
+///   `events.jsonl`. `report calls --json --include-loads` interleaves the two
+///   streams into one activity feed ordered by timestamp, with a `kind`
+///   discriminant (`"call"` / `"skill_load"`) on every row.
+///
+///   The flag is the contract. WITHOUT it the feed is byte-identical to
+///   before, loads on disk or not, so an older consumer's strict decoder never
+///   meets a row shape it predates; asking for the flag is how a caller says
+///   it understands the new shape. A load is NOT a call and never enters the
+///   ok/error/denied tallies — its own stream, its own event variant, its own
+///   counts.
+///
+///   Recording is evidence, not enforcement: a refused load never reaches the
+///   recorder at all (the MCP call itself fails first), so absence from this
+///   stream means "did not happen", not "was allowed". Nothing reads it to
+///   make a decision.
 /// - `status-v1`: `doctor --json` carries `state` + `next_action`.
 /// - `status-honesty-v1`: `doctor --json` carries `readiness`, and
 ///   `snapshot --json` carries a singular `nextAction`. Both are ADDITIVE:
@@ -267,6 +329,8 @@ pub const FEATURES: &[&str] = &[
     "manifest-remove-v1",
     "trust-server-blockers-v1",
     "trust-review-card-v1",
+    "trust-card-diff-v1",
+    "activity-skill-load-v1",
     "workflow-observe-v1",
     "workflow-serial-roles-v1",
     "doctor-advisories-v1",
@@ -341,6 +405,9 @@ mod tests {
             "doctor-advisories-v1",
             "doctor-mode-v1",
             "diff-existence-v1",
+            "trust-review-card-v1",
+            "trust-card-diff-v1",
+            "activity-skill-load-v1",
         ] {
             assert!(
                 features.contains(&shipped),

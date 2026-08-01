@@ -72,7 +72,7 @@ pub enum PinDiff {
 /// `pin` is the bare hex digest the lockfile recorded. Everything about this is
 /// read-only: it never writes, never fetches, and never repairs the store.
 pub fn diff_against_pin(store_root: &Path, pin: &str, live: &Path) -> PinDiff {
-    let hex = pin.rsplit(':').next().unwrap_or(pin);
+    let hex = bare_hex(pin);
     let approved = store_root.join("content").join(hex);
     // The snapshot must still hash to its own name before it may be shown as
     // "the approved version" (F4): the store directory is writable, and a
@@ -84,8 +84,53 @@ pub fn diff_against_pin(store_root: &Path, pin: &str, live: &Path) -> PinDiff {
     if !crate::store::verified_content(&approved, hex) {
         return PinDiff::NoSnapshot;
     }
-    let before = read_tree(&approved);
-    let after = read_tree(live);
+    tree_diff(&approved, live)
+}
+
+/// Compare the bytes TWO pins cover, reading both sides out of the content
+/// store.
+///
+/// This is the machine-readable card's diff, and it is deliberately
+/// pin-to-pin where [`diff_against_pin`] is pin-to-live. `trust --preview` may
+/// not write, and locating a skill's live bytes reaches git worktree
+/// materialization — so the honest delta it *can* compute is
+/// "what the last consent pinned" → "what the lockfile pins now", which is
+/// exactly what the consent digest covers (the digest is taken over the lock
+/// bytes). The terminal review stays authoritative over live bytes.
+///
+/// Both sides are re-verified against their own names before either is shown
+/// (F4), so a tampered store degrades to [`PinDiff::NoSnapshot`] rather than
+/// attributing bytes to a consent that never saw them.
+pub fn diff_between_pins(store_root: &Path, prior_pin: &str, current_pin: &str) -> PinDiff {
+    let prior_hex = bare_hex(prior_pin);
+    let current_hex = bare_hex(current_pin);
+    if prior_hex == current_hex {
+        // Equal pins are equal content by construction, so this needs no
+        // snapshot to be true — and a clean project's preview then touches the
+        // content store not at all.
+        return PinDiff::Unchanged;
+    }
+    let before = store_root.join("content").join(prior_hex);
+    let after = store_root.join("content").join(current_hex);
+    if !crate::store::verified_content(&before, prior_hex)
+        || !crate::store::verified_content(&after, current_hex)
+    {
+        return PinDiff::NoSnapshot;
+    }
+    tree_diff(&before, &after)
+}
+
+/// The lockfile records bare hex; `trust` spells the same digest with a
+/// `sha256:` prefix. Accept either at every read site.
+fn bare_hex(pin: &str) -> &str {
+    pin.rsplit(':').next().unwrap_or(pin)
+}
+
+/// The per-file comparison shared by both entry points above. Takes directories
+/// (or, for the instruction pin family, single files — see [`read_tree`]).
+fn tree_diff(before_root: &Path, after_root: &Path) -> PinDiff {
+    let before = read_tree(before_root);
+    let after = read_tree(after_root);
 
     let paths: BTreeSet<&String> = before
         .iter()
@@ -149,14 +194,7 @@ pub fn render_lines(diff: &PinDiff, cap: usize) -> Vec<String> {
         PinDiff::Changed(c) => c,
     };
 
-    let total: usize = changes
-        .iter()
-        .map(|c| match c {
-            FileChange::Modified { added, removed, .. } => added + removed,
-            // An added or removed file is one line of summary either way.
-            _ => 1,
-        })
-        .sum();
+    let total = changed_line_total(changes);
 
     let mut out = Vec::new();
     if total > cap {
@@ -192,6 +230,76 @@ pub fn render_lines(diff: &PinDiff, cap: usize) -> Vec<String> {
         }
     }
     out
+}
+
+/// What the cap counts: changed lines for a modified file, one summary line for
+/// a file that appeared or disappeared. Shared by the terminal renderer and the
+/// JSON one so a card and a panel cap at the same place — a diff that is "too
+/// large to show" in one and inlined in the other would be two answers to one
+/// question.
+fn changed_line_total(changes: &[FileChange]) -> usize {
+    changes
+        .iter()
+        .map(|c| match c {
+            FileChange::Modified { added, removed, .. } => added + removed,
+            _ => 1,
+        })
+        .sum()
+}
+
+/// The machine-readable form of a diff, for the structured consent card.
+///
+/// Mirrors [`render_lines`]'s decisions rather than restating them: the same
+/// cap, the same counts, the same sanitization. Over the cap, `lines` is `null`
+/// and `capped` is true — the counts stay exact, because the cap hides detail
+/// and never scale. Every path and every line is sanitized: repository content
+/// is hostile input and this string ends up in someone else's renderer.
+pub fn pin_diff_json(diff: &PinDiff, cap: usize) -> serde_json::Value {
+    let (status, changes): (&str, &[FileChange]) = match diff {
+        PinDiff::NoSnapshot => ("no_snapshot", &[]),
+        PinDiff::Unchanged => ("unchanged", &[]),
+        PinDiff::Changed(changes) => ("changed", changes.as_slice()),
+    };
+    let capped = changed_line_total(changes) > cap;
+    let files: Vec<serde_json::Value> = changes
+        .iter()
+        .map(|c| {
+            // An added or removed file has no body to show on either side, so
+            // its counts are zero and its lines are absent — the fact worth
+            // reporting is that the file appeared or disappeared.
+            let (change, added, removed, body) = match c {
+                FileChange::Added(_) => ("added", 0, 0, None),
+                FileChange::Removed(_) => ("removed", 0, 0, None),
+                FileChange::Modified {
+                    added,
+                    removed,
+                    body,
+                    ..
+                } => ("modified", *added, *removed, Some(body)),
+            };
+            let lines = match body {
+                Some(body) if !capped => serde_json::Value::Array(
+                    body.lines()
+                        .map(|l| serde_json::Value::String(crate::text::sanitize_line(l)))
+                        .collect(),
+                ),
+                _ => serde_json::Value::Null,
+            };
+            serde_json::json!({
+                "path": crate::text::sanitize_line(c.path()),
+                "change": change,
+                "added": added,
+                "removed": removed,
+                "lines": lines,
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "status": status,
+        "headline": headline(diff),
+        "files": files,
+        "capped": capped,
+    })
 }
 
 /// A one-line headline for a changed item, for the card's summary altitude:
@@ -465,6 +573,102 @@ mod tests {
             !rendered.contains('\u{1b}'),
             "escape survived: {rendered:?}"
         );
+    }
+
+    // ---- pin-to-pin (the machine-readable card) ------------------------
+
+    /// Deposit a second snapshot into an EXISTING store root, so two pins can
+    /// be compared against each other the way a re-lock leaves them.
+    fn deposit(root: &Path, files: &[(&str, &str)]) -> String {
+        let staging = root.join("staging-2");
+        std::fs::create_dir_all(&staging).unwrap();
+        for (name, body) in files {
+            std::fs::write(staging.join(name), body).unwrap();
+        }
+        let digest = crate::store::dir_digest(&staging)
+            .unwrap()
+            .hex()
+            .to_string();
+        std::fs::rename(&staging, root.join("content").join(&digest)).unwrap();
+        digest
+    }
+
+    // Equal pins are equal content by construction — and saying so must not
+    // require either snapshot to still be on disk.
+    #[test]
+    fn identical_pins_are_unchanged_without_reading_the_store() {
+        let empty = assert_fs::TempDir::new().unwrap();
+        assert_eq!(
+            diff_between_pins(empty.path(), "sha256:abc", "abc"),
+            PinDiff::Unchanged,
+            "the sha256: prefix and the bare hex name the same content"
+        );
+    }
+
+    #[test]
+    fn a_moved_pin_shows_the_lines_between_the_two_snapshots() {
+        let (store, prior) = store_with(&[("SKILL.md", "# hi\nkeep\nold line\n")]);
+        let current = deposit(store.path(), &[("SKILL.md", "# hi\nkeep\nnew line\n")]);
+        let d = diff_between_pins(store.path(), &prior, &current);
+        assert_eq!(headline(&d).as_deref(), Some("changed 2 lines"));
+        let json = pin_diff_json(&d, DIFF_LINE_CAP);
+        assert_eq!(json["status"], "changed");
+        assert_eq!(json["capped"], false);
+        assert_eq!(json["files"][0]["path"], "SKILL.md");
+        assert_eq!(json["files"][0]["change"], "modified");
+        assert_eq!(json["files"][0]["added"], 1);
+        assert_eq!(json["files"][0]["removed"], 1);
+        let lines = json["files"][0]["lines"].as_array().unwrap().len();
+        assert!(lines > 0, "under the cap the real lines are carried");
+    }
+
+    // Either side missing degrades to the same honest answer a never-captured
+    // snapshot gets — the preview never invents a diff.
+    #[test]
+    fn a_pin_with_no_snapshot_degrades_instead_of_guessing() {
+        let (store, prior) = store_with(&[("SKILL.md", "a\n")]);
+        let d = diff_between_pins(store.path(), &prior, &"f".repeat(64));
+        assert_eq!(d, PinDiff::NoSnapshot);
+        let json = pin_diff_json(&d, DIFF_LINE_CAP);
+        assert_eq!(json["status"], "no_snapshot");
+        assert!(json["headline"].is_null());
+        assert_eq!(json["files"].as_array().unwrap().len(), 0);
+    }
+
+    // F4, both sides: a tampered snapshot on EITHER end is never rendered as
+    // approved content — the same refusal `diff_against_pin` makes.
+    #[test]
+    fn a_tampered_snapshot_on_either_side_degrades() {
+        let (store, prior) = store_with(&[("SKILL.md", "# approved\n")]);
+        let current = deposit(store.path(), &[("SKILL.md", "# next\n")]);
+        std::fs::write(
+            store.path().join("content").join(&current).join("SKILL.md"),
+            "# EVIL\n",
+        )
+        .unwrap();
+        assert_eq!(
+            diff_between_pins(store.path(), &prior, &current),
+            PinDiff::NoSnapshot,
+            "a tampered snapshot was rendered as pinned content"
+        );
+    }
+
+    // The cap hides detail, never scale: over it the lines go away and the
+    // counts stay exact.
+    #[test]
+    fn an_oversized_rewrite_drops_lines_and_keeps_counts() {
+        let old: String = (0..200).map(|i| format!("old {i}\n")).collect();
+        let new: String = (0..200).map(|i| format!("new {i}\n")).collect();
+        let (store, prior) = store_with(&[("SKILL.md", &old)]);
+        let current = deposit(store.path(), &[("SKILL.md", &new)]);
+        let json = pin_diff_json(
+            &diff_between_pins(store.path(), &prior, &current),
+            DIFF_LINE_CAP,
+        );
+        assert_eq!(json["capped"], true);
+        assert!(json["files"][0]["lines"].is_null());
+        assert_eq!(json["files"][0]["added"], 200);
+        assert_eq!(json["files"][0]["removed"], 200);
     }
 
     // A symlink is excluded from the digest that produced the pin, so it must

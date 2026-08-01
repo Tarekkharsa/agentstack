@@ -2655,6 +2655,14 @@ pub struct AnalyzeArgs {
     #[arg(long, value_name = "N")]
     pub tail: Option<usize>,
 
+    /// Also interleave on-demand skill loads into the `--json` events feed,
+    /// each row tagged with a `kind` ("call" / "skill_load"). Off by default:
+    /// without it the feed is byte-identical to before, so a consumer that
+    /// predates load rows never meets a shape it can't decode. Loads are
+    /// activity, never calls — they are absent from every count and table.
+    #[arg(long)]
+    pub include_loads: bool,
+
     /// Only count calls recorded for this project root.
     #[arg(long, value_name = "PATH")]
     pub project: Option<PathBuf>,

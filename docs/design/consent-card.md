@@ -331,13 +331,43 @@ unpinned surface is trusted. Any future decomposition must key blockers by
 
 The panel consumes structured JSON from `preview_value()` through
 `ui_contract::envelope`, so re-labelling existing fields flows through with no
-panel work. **`ConsentCard` content has no machine-readable form today** — it
-is print-only inside `grant_gated`, so the funnel's and the diff card's lines
-reach the terminal and nothing else. Emitting them structurally (a `diff`
-object mirroring `ReviewDiff`, behind a new feature name — a new name, never a
-revision of `trust-preview`, so an older binary is not misrepresented) is
-CLI-side work; the panel cannot pick it up until the CLI emits it. Recorded
-here as the t3code follow-up.
+panel work. The card's content had no machine-readable form — it was
+print-only inside `grant_gated`, so the funnel's and the diff card's lines
+reached the terminal and nothing else.
+
+**Shipped 2026-08-01 as `trust-card-diff-v1`** (the working name below, made
+final in `ui_contract.rs`, which stays the single source of truth). Emitting it
+structurally did NOT merge the two renderers — the three properties above still
+hold — so `trust --preview` gained a `review` object computed by its own
+read-only walk, alongside the existing fields:
+
+- `review.items[]` — one row per reviewed item, carrying what it runs, what it
+  contacts, what it may read, its pin and the prior consent's pin, a
+  machine-local recognition count, and a `change` marker (`added` / `changed` /
+  `unchanged`) mirroring `ReviewDiff`; `review.removed[]` mirrors
+  `ReviewDiff::removed`.
+- **Identity parity is the property that makes this safe.** Both walks now
+  build every kind's identity string through one shared function in
+  `trust.rs`, and an integration witness grants a maximal fixture and asserts
+  the following preview reads every item `unchanged`. Two constructions of the
+  same string is how a re-review starts lying about content nobody touched.
+- **The diff is pin-to-pin, not pin-to-live** — prior-consented pin →
+  currently-locked pin, which is what the consent digest covers. That is
+  divergence #3 alongside the two under `trust-review-card-v1`, and it is also
+  what keeps the payload free of live-tree resolution and worktree
+  materialization (property 2 above). The terminal review stays authoritative
+  over live bytes.
+- Consequently `change` keys on identity only, exactly as `mark_pinned` does:
+  a skill whose bytes moved reads `unchanged` with `diff.status: "changed"`.
+  The pin is deliberately not part of the diff key (see `SurfaceItem.pin`).
+- Every degrade is the documented one: no prior surface → everything `added`;
+  no snapshot, or one that no longer hashes to its own name → `no_snapshot`
+  plus both pin identities; no recognition index → `null`, which a reader must
+  not confuse with zero.
+- **No per-item accept / keep-pinned / block affordance is exposed.** Those
+  answers exist only in the interactive review, where the single closing yes
+  commits them; a panel may render what changed and must not collect the
+  answer.
 
 > **Naming correction, 2026-08-01. `trust-review-card-v1` is taken.** An
 > earlier draft of this paragraph proposed that name for the unbuilt structured
@@ -357,3 +387,8 @@ here as the t3code follow-up.
 > `diff` object), and a `-v2` would falsely imply a migration path off `-v1`.
 > The final name is fixed when the payload ships, in `ui_contract.rs`, which
 > stays the single source of truth for every advertised feature string.
+>
+> **Resolved, 2026-08-01:** the payload shipped under exactly that name. One
+> amendment to the sentence above: it carries the card's *facts* per item, not
+> its rendered lines — a renderer's own words are not a contract, and a panel
+> needs the fields, not the sentences.

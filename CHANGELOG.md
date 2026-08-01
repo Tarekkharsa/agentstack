@@ -4,6 +4,34 @@ User-facing changes per release. The [GitHub Releases
 page](https://github.com/Tarekkharsa/agentstack/releases) carries the built
 binaries, checksums, and provenance attestations for each entry.
 
+## Unreleased
+
+- **The review card has a machine-readable form** (`trust-card-diff-v1`).
+  `agentstack trust --preview` now carries a `review` object beside the fields
+  it already emitted: every reviewed item with what it runs, what it contacts,
+  what secrets it may read, the bytes it is pinned to and the bytes your last
+  yes covered, whether it is `added` / `changed` / `unchanged` since then, and
+  what the last consented surface carried that this one no longer does. When a
+  pinned item's bytes moved, the item carries the changed lines — capped
+  exactly like the terminal card, so a large rewrite reports files and counts
+  instead of flooding. A graphical companion can finally show the card the
+  terminal shows.
+
+  Read-only stays read-only: this resolves nothing, fetches nothing, and
+  writes nothing, so the diff it shows is the one the consent digest covers
+  (what you approved → what the lockfile pins now). `agentstack trust` remains
+  the authoritative review over the live bytes, and the accept / keep-pinned /
+  block answers are still asked only there.
+
+- **On-demand skill loads are recorded activity** (`activity-skill-load-v1`).
+  When an agent loads a skill over MCP, the load is appended to
+  `~/.agentstack/audit/loads.jsonl` and, inside a run, mirrored into that
+  run's events. `agentstack report calls --json --include-loads` interleaves
+  loads with calls in one feed, each row labelled with its `kind`. Without the
+  flag the output is byte-identical to before, so existing consumers are
+  untouched. A load is not a call: it never enters the ok/error/denied tallies,
+  and a refused load is not recorded at all — the call itself fails first.
+
 ## v0.18.0-rc.2 — 2026-08-01
 
 **The study byte-set.** rc.1's five-lane review produced a blocker queue

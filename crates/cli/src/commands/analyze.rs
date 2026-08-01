@@ -11,6 +11,13 @@
 //! consume (each entry is a raw [`CallRecord`]: argument digests only, never
 //! values). The array is only present when `--tail` is asked for, so the
 //! default JSON shape existing consumers parse is unchanged.
+//!
+//! `--include-loads` widens that feed to on-demand skill loads (`loads.jsonl`),
+//! interleaved by timestamp and tagged with a `kind` discriminant on EVERY row.
+//! It is opt-in for exactly that reason: without it the feed is byte-identical
+//! to before, so a consumer whose decoder predates load rows never meets a row
+//! shape it doesn't know. A load is never a call — it is absent from
+//! `calls_summary`, from the human tables, and from every count here.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -19,7 +26,7 @@ use anyhow::Result;
 use owo_colors::OwoColorize;
 use serde_json::{json, Value};
 
-use crate::calllog::{self, CallRecord};
+use crate::calllog::{self, CallRecord, LoadRecord};
 use crate::cli::AnalyzeArgs;
 use crate::footprint::{fmt_tokens, Footprints};
 use crate::library::Library;
@@ -35,10 +42,7 @@ pub fn run(args: &AnalyzeArgs) -> Result<()> {
         let want = crate::util::paths::expand_tilde(&project.display().to_string());
         calls.retain(|e| project_matches(e, &want));
     }
-    let mut report = collect_with(&calls);
-    if let Some(n) = args.tail {
-        report["events"] = tail_events(&calls, n);
-    }
+    let report = build_report(args, &calls);
     if args.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
@@ -51,10 +55,41 @@ pub fn run(args: &AnalyzeArgs) -> Result<()> {
     Ok(())
 }
 
+/// The JSON report for already-filtered calls. Separated from [`run`] so the
+/// regression witness can compare two reports byte for byte.
+fn build_report(args: &AnalyzeArgs, calls: &[CallRecord]) -> Value {
+    let mut report = collect_with(calls);
+    if args.include_loads {
+        // Loads never touch `collect_with` — they are activity, not calls, and
+        // every summary above counts calls. `--tail` still bounds the feed;
+        // without it the whole (filtered) activity history is emitted, exactly
+        // as `--tail` with an unreachable N would.
+        let mut loads = calllog::read_loads_all();
+        if let Some(days) = args.since {
+            let cutoff = calllog::now_epoch().saturating_sub(days * 86_400);
+            loads.retain(|l| l.ts >= cutoff);
+        }
+        if let Some(project) = &args.project {
+            let want = crate::util::paths::expand_tilde(&project.display().to_string());
+            loads.retain(|l| path_matches(l.project.as_deref(), &want));
+        }
+        report["events"] = merged_events(calls, &loads, args.tail.unwrap_or(usize::MAX));
+    } else if let Some(n) = args.tail {
+        report["events"] = tail_events(calls, n);
+    }
+    report
+}
+
 /// Component-wise path comparison, so `~/proj`, `/Users/x/proj`, and a
-/// trailing-slash variant all name the same recorded project root.
+/// trailing-slash variant all name the same recorded project root. Shared by
+/// both streams: a load records `project` in the same format a call does, so
+/// `--project` must filter them identically.
+fn path_matches(recorded: Option<&str>, want: &Path) -> bool {
+    recorded.is_some_and(|p| Path::new(p) == want)
+}
+
 fn project_matches(rec: &CallRecord, want: &Path) -> bool {
-    rec.project.as_deref().is_some_and(|p| Path::new(p) == want)
+    path_matches(rec.project.as_deref(), want)
 }
 
 /// The last `n` calls (input is already in append/chronological order),
@@ -62,6 +97,46 @@ fn project_matches(rec: &CallRecord, want: &Path) -> bool {
 fn tail_events(calls: &[CallRecord], n: usize) -> Value {
     let start = calls.len().saturating_sub(n);
     serde_json::to_value(&calls[start..]).unwrap_or_else(|_| json!([]))
+}
+
+/// The `--include-loads` feed: calls and skill loads in one timestamp-ordered
+/// array, every row carrying a `kind`. Call rows are the same records
+/// `tail_events` emits with `kind: "call"` added; load rows are identity only
+/// (name + agent-supplied reason), never the skill body.
+///
+/// `n` bounds the MERGED list, not either stream, so `--tail 10` means the ten
+/// most recent activities of any kind.
+fn merged_events(calls: &[CallRecord], loads: &[LoadRecord], n: usize) -> Value {
+    let mut rows: Vec<(u64, Value)> = Vec::with_capacity(calls.len() + loads.len());
+    for c in calls {
+        let Ok(Value::Object(mut row)) = serde_json::to_value(c) else {
+            continue;
+        };
+        row.insert("kind".into(), json!("call"));
+        rows.push((c.ts, Value::Object(row)));
+    }
+    for l in loads {
+        let mut row = json!({
+            "kind": "skill_load",
+            "ts": l.ts,
+            "name": l.name,
+            "reason": l.reason,
+        });
+        // Optional fields follow the record's own wire form: present only when
+        // recorded, exactly as a call row omits an absent run/project.
+        if let Some(run) = &l.run {
+            row["run"] = json!(run);
+        }
+        if let Some(project) = &l.project {
+            row["project"] = json!(project);
+        }
+        rows.push((l.ts, row));
+    }
+    // `sort_by_key` is stable, and calls were pushed first — so on an equal
+    // timestamp a call sorts before a load, deterministically.
+    rows.sort_by_key(|(ts, _)| *ts);
+    let start = rows.len().saturating_sub(n);
+    Value::Array(rows[start..].iter().map(|(_, row)| row.clone()).collect())
 }
 
 fn print_recent_calls(calls: &[CallRecord], n: usize) {
@@ -418,6 +493,160 @@ mod tests {
         assert_eq!(s["by_server"][0]["server"], "figma");
         assert_eq!(s["by_server"][0]["calls"], 2);
         assert_eq!(s["by_server"][0]["errors"], 1);
+    }
+
+    fn with_home<T>(f: impl FnOnce() -> T) -> T {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+        let out = f();
+        std::env::remove_var("AGENTSTACK_HOME");
+        out
+    }
+
+    fn analyze_args(tail: Option<usize>, include_loads: bool) -> AnalyzeArgs {
+        AnalyzeArgs {
+            json: true,
+            since: None,
+            tail,
+            include_loads,
+            project: None,
+        }
+    }
+
+    fn load(ts: u64, name: &str, project: Option<&str>, run: Option<&str>) -> LoadRecord {
+        LoadRecord::new(
+            ts,
+            name,
+            "because the task needs it",
+            project.map(str::to_owned),
+            run.map(str::to_owned),
+        )
+    }
+
+    /// The regression witness for the flag's whole reason to exist: with loads
+    /// sitting in `loads.jsonl`, the report WITHOUT `--include-loads` is byte
+    /// for byte the report produced when the stream is empty. An older
+    /// consumer's strict decoder never meets a row shape it predates.
+    #[test]
+    fn loads_on_disk_never_change_the_default_feed() {
+        with_home(|| {
+            let calls = vec![rec("figma", "figma__get", "ok", 10)];
+            let args = analyze_args(Some(10), false);
+            let empty_stream = serde_json::to_string_pretty(&build_report(&args, &calls)).unwrap();
+
+            for l in [
+                load(5, "rust-review", None, None),
+                load(11, "docs", None, None),
+            ] {
+                calllog::record_skill_load(&l);
+            }
+            assert_eq!(calllog::read_loads_all().len(), 2, "loads are on disk");
+
+            let with_stream = serde_json::to_string_pretty(&build_report(&args, &calls)).unwrap();
+            assert_eq!(with_stream, empty_stream, "default feed is byte-identical");
+            assert!(!with_stream.contains("skill_load"), "{with_stream}");
+            assert!(!with_stream.contains("kind"), "{with_stream}");
+
+            // Asking for them changes the feed and nothing else: the counts
+            // above the feed are identical either way.
+            let opted_in = build_report(&analyze_args(Some(10), true), &calls);
+            let plain: Value = serde_json::from_str(&with_stream).unwrap();
+            assert_eq!(opted_in["calls"], plain["calls"], "counts untouched");
+            assert_eq!(opted_in["dead_weight"], plain["dead_weight"]);
+            let events = opted_in["events"].as_array().unwrap();
+            assert_eq!(events.len(), 3, "{events:?}");
+            assert_eq!(events[0]["kind"], "skill_load");
+            assert_eq!(events[0]["name"], "rust-review");
+            assert_eq!(events[1]["kind"], "call");
+            assert_eq!(events[2]["kind"], "skill_load");
+            // Identity only: a load row never carries a body or a call's shape.
+            assert!(events[0].get("args_digest").is_none());
+            assert!(events[0].get("outcome").is_none());
+        });
+    }
+
+    /// Merge order (ts ascending, calls first on a tie), `--tail` applied to
+    /// the merged list, and `--project` filtering loads the same way it
+    /// filters calls.
+    #[test]
+    fn merged_feed_orders_by_timestamp_and_filters_like_calls() {
+        let mut c1 = rec("figma", "figma__get", "ok", 20);
+        c1.project = Some("/tmp/proj-a".into());
+        let mut c2 = rec("github", "github__list", "ok", 40);
+        c2.project = Some("/tmp/proj-a".into());
+        let calls = vec![c1, c2];
+        let loads = vec![
+            load(20, "same-ts", Some("/tmp/proj-a"), None),
+            load(30, "middle", Some("/tmp/proj-a"), Some("r-1")),
+        ];
+
+        let merged = merged_events(&calls, &loads, usize::MAX);
+        let rows = merged.as_array().unwrap();
+        let order: Vec<(&str, u64)> = rows
+            .iter()
+            .map(|r| (r["kind"].as_str().unwrap(), r["ts"].as_u64().unwrap()))
+            .collect();
+        assert_eq!(
+            order,
+            vec![
+                ("call", 20),
+                ("skill_load", 20),
+                ("skill_load", 30),
+                ("call", 40)
+            ],
+            "ts ascending, and a call before a load on an equal ts"
+        );
+        assert_eq!(rows[2]["run"], "r-1", "run attribution rides along");
+        // `run` is omitted, not null, when the load carried no attribution.
+        let merged = merged_events(&[], &loads[..1], usize::MAX);
+        assert!(merged[0].get("run").is_none(), "{merged}");
+
+        // --tail bounds the MERGED list: the two most recent activities.
+        let merged = merged_events(&calls, &loads, 2);
+        let rows = merged.as_array().unwrap();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0]["kind"], "skill_load");
+        assert_eq!(rows[1]["ts"], 40);
+
+        // --project filters loads with the same comparison calls use.
+        let want = std::path::PathBuf::from("/tmp/proj-b");
+        assert!(!path_matches(loads[0].project.as_deref(), &want));
+        let want = std::path::PathBuf::from("/tmp/proj-a");
+        assert!(path_matches(loads[0].project.as_deref(), &want));
+        assert!(
+            !path_matches(None, &want),
+            "an unattributed load is dropped"
+        );
+    }
+
+    /// Counting discipline: a load is never a call. Whatever is in
+    /// `loads.jsonl`, the summary totals are computed over calls alone.
+    #[test]
+    fn loads_never_enter_the_call_summary() {
+        with_home(|| {
+            for i in 0..5 {
+                calllog::record_skill_load(&load(i, "noisy", None, None));
+            }
+            let calls = vec![
+                rec("figma", "figma__get", "ok", 0),
+                rec("figma", "figma__get", "error", 86_400),
+                rec("github", "github__list", "denied", 0),
+            ];
+            let s = calls_summary(&calls);
+            assert_eq!(s["total"], 3, "loads must not inflate the total");
+            assert_eq!(s["ok"], 1);
+            assert_eq!(s["error"], 1);
+            assert_eq!(s["denied"], 1);
+            // …and no load leaks into the per-server/per-tool breakdowns.
+            let text = serde_json::to_string(&s).unwrap();
+            assert!(
+                !text.contains("noisy") && !text.contains("skill_load"),
+                "{text}"
+            );
+        });
     }
 
     #[test]
