@@ -426,7 +426,8 @@ of what it leaves behind.** Nothing here gates the §1.6 study.
    (where the yes lives in zero-files mode), the `ENFORCEMENT.md` lease column
    (which does not exist, and is **not** a documentation task that can be
    closed on its own), and first-run friction (unmeasurable until §1.6 runs).
-3. **The t3code fork migration set — now TWO contracts waiting.**
+3. **The t3code fork migration set — now TWO contracts waiting.** (The §1.6
+   study is CLI-only partly because of this — see the v0.18.0-rc.1 block.)
    `trust-review-card-v1` (from Phase 2) and `status-honesty-v1` (from P3.7).
    The fork renders neither. The second matters more: the fork's "Ready" chip
    reads `state`, which is exactly the mislabel P3.7 exists to fix, and it
@@ -450,6 +451,48 @@ where `install --locked` had examined nothing, which is P3.1's bug wearing new
 clothes. Neither instance was caught by review or by writing the tests — both
 were caught by capturing a transcript from the real binary. That is why
 transcript capture is a hard-stop requirement and stays one.
+
+### v0.18.0-rc.1 — the study's instrument (2026-08-01)
+
+The release candidate exists and the kit points at it. **Recruiting is the
+only open action.**
+
+Why an RC at all: the kit handed participants `install.sh`, which serves the
+latest stable release — a build with none of Phases 1-4 — while the
+amendment requires the study to run against the completed v2 journey and
+v0.18.0 not to publish until the study passes. That is circular; an RC is the
+standard resolution. It is published as a GitHub **pre-release**, so
+`install.sh` and `brew install` keep serving v0.17.1 to everyone else.
+
+Participants get one pinned line (no installer change was needed —
+`AGENTSTACK_VERSION` already existed and runs the same checksum check):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh \
+  | AGENTSTACK_VERSION=v0.18.0-rc.1 sh
+```
+
+Two procedure gaps are now documented in `RELEASING.md`: the release
+workflow hardcodes `prerelease=false`, so an RC draft must be flagged before
+publishing or it becomes latest; and the Homebrew tap has one formula and no
+channels, so the tap step is skipped entirely for an RC.
+
+**Decided this session, recorded so neither is relitigated:**
+
+1. **The study is CLI-only.** The panel is not shown. It renders `status-v1`
+   and not this release's contracts, so its "Ready" chip would contradict the
+   CLI on exactly the case `readiness` fixes. The observer's line is scripted
+   in Appendix B3. This is a further reason the fork migration is post-study
+   work — see the fork item in the Phase 4 block, which now has two contracts
+   waiting.
+2. **`agentstack yes` records an undoable row.** Found by replaying the
+   journey against the RC binary: it promised an undo and recorded nothing,
+   so on a skills-only project the ledger was empty. Fixed through the
+   existing history seam, with the message narrowed to what the row actually
+   puts back. Scoped product-code exception, granted and reviewed.
+
+**v0.18.0 FINAL does not exist until the study passes.** The RC is the
+study's instrument and nothing else.
 
 ## Open review findings — what two product reviews left standing
 
