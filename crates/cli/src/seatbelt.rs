@@ -117,14 +117,6 @@ impl Family {
 /// one.
 pub const AUDIT_TOOLS: &[&str] = &["tool", "egress", "secret", "filesystem", "pin"];
 
-/// Whether a call record is a seatbelt enforcement denial rather than a
-/// brokered call. Both live in `calls.jsonl`; only the latter is a signal
-/// about whether a server is used.
-pub fn is_enforcement_record(rec: &agentstack_recorder::CallRecord) -> bool {
-    matches!(rec.outcome, agentstack_recorder::CallOutcome::Denied)
-        && AUDIT_TOOLS.contains(&rec.tool.as_str())
-}
-
 /// Bound a refusal reason before it is printed or recorded.
 ///
 /// Every other family's `why` is policy text this machine authored, which is
@@ -285,45 +277,6 @@ fn now_epoch() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// F20 witness: a seatbelt enforcement denial is recognizable as one, so
-    /// `optimize` can exclude it from brokered-call counts. The tamper is the
-    /// exact shape the seatbelt writes — a `Denied` record whose `tool` is a
-    /// family tag — which used to be counted as a gateway call to the subject.
-    #[test]
-    fn an_enforcement_denial_is_distinguishable_from_a_brokered_call() {
-        let mk = |tool: &str, outcome: agentstack_recorder::CallOutcome| {
-            agentstack_recorder::CallRecord {
-                ts: 0,
-                run: None,
-                pid: 1,
-                project: None,
-                server: "web-search".into(),
-                tool: tool.into(),
-                args_digest: String::new(),
-                outcome,
-                detail: None,
-                ms: 0,
-            }
-        };
-        // Every seatbelt family tag, denied → recognized as enforcement.
-        for tag in AUDIT_TOOLS {
-            assert!(
-                is_enforcement_record(&mk(tag, agentstack_recorder::CallOutcome::Denied)),
-                "'{tag}' denial must read as enforcement"
-            );
-        }
-        // A real brokered tool call is NOT enforcement, whatever its outcome —
-        // even a denied one, because its tool name is not a family tag.
-        assert!(!is_enforcement_record(&mk(
-            "search_web",
-            agentstack_recorder::CallOutcome::Denied
-        )));
-        assert!(!is_enforcement_record(&mk(
-            "egress",
-            agentstack_recorder::CallOutcome::Ok
-        )));
-    }
 
     /// The sentence carries all three parts, in the order a reader needs them.
     #[test]

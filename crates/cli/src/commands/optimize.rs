@@ -114,7 +114,7 @@ impl Signals {
         // tool firewall" — a denial that never happened as a call, counted as
         // one. They are dropped here so every downstream count (`analyze`,
         // the report header, the per-server stats) sees only real calls.
-        calls.retain(|c| !crate::seatbelt::is_enforcement_record(c));
+        calls.retain(|c| !is_enforcement_record(c));
         if let Some(days) = since {
             let cutoff = now.saturating_sub(days * 86_400);
             calls.retain(|c| c.ts >= cutoff);
@@ -710,10 +710,63 @@ fn apply_safe(ctx: &super::Context, recs: &[Recommendation]) -> Result<()> {
     Ok(())
 }
 
+/// Whether a call record is a seatbelt enforcement denial rather than a
+/// brokered call. Both live in `calls.jsonl`; only the latter is a signal
+/// about whether a server is used.
+///
+/// Lives here, with its only consumer, rather than in `seatbelt.rs`: the
+/// denial seam exports no decision-returning functions — a structural
+/// invariant witnessed by `the_denial_seam_cannot_grant_permission` — so a
+/// classifier *about* its records belongs to the reader, not the seam. The
+/// family list itself stays single-sourced in `seatbelt::AUDIT_TOOLS`.
+fn is_enforcement_record(rec: &agentstack_recorder::CallRecord) -> bool {
+    matches!(rec.outcome, agentstack_recorder::CallOutcome::Denied)
+        && crate::seatbelt::AUDIT_TOOLS.contains(&rec.tool.as_str())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::footprint::ServerFootprint;
+
+    /// F20 witness: a seatbelt enforcement denial is recognizable as one, so
+    /// `optimize` can exclude it from brokered-call counts. The tamper is the
+    /// exact shape the seatbelt writes — a `Denied` record whose `tool` is a
+    /// family tag — which used to be counted as a gateway call to the subject.
+    #[test]
+    fn an_enforcement_denial_is_distinguishable_from_a_brokered_call() {
+        let mk = |tool: &str, outcome: agentstack_recorder::CallOutcome| {
+            agentstack_recorder::CallRecord {
+                ts: 0,
+                run: None,
+                pid: 1,
+                project: None,
+                server: "web-search".into(),
+                tool: tool.into(),
+                args_digest: String::new(),
+                outcome,
+                detail: None,
+                ms: 0,
+            }
+        };
+        // Every seatbelt family tag, denied → recognized as enforcement.
+        for tag in crate::seatbelt::AUDIT_TOOLS {
+            assert!(
+                is_enforcement_record(&mk(tag, agentstack_recorder::CallOutcome::Denied)),
+                "'{tag}' denial must read as enforcement"
+            );
+        }
+        // A real brokered tool call is NOT enforcement, whatever its outcome —
+        // even a denied one, because its tool name is not a family tag.
+        assert!(!is_enforcement_record(&mk(
+            "search_web",
+            agentstack_recorder::CallOutcome::Denied
+        )));
+        assert!(!is_enforcement_record(&mk(
+            "egress",
+            agentstack_recorder::CallOutcome::Ok
+        )));
+    }
 
     fn manifest(toml_str: &str) -> Manifest {
         toml::from_str(toml_str).unwrap()
