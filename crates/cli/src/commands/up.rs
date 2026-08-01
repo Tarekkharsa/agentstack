@@ -153,13 +153,24 @@ pub fn run(args: &UpArgs, manifest_dir: Option<&Path>) -> Result<()> {
                 "→".dimmed()
             );
         }
-        // Said once, plainly, at the moment it is true. A server missing its
-        // secret is not broken and is not running: it is paused, and it stays
-        // paused rather than starting without the credential.
+        // Describes the SHIPPED rule, not the nicer one.
+        //
+        // `render` blocks a whole target while any `${REF}` in the selection is
+        // unresolved — a documented fail-closed boundary, not an oversight. The
+        // obvious copy here ("servers using those secrets stay paused") would
+        // describe per-server pausing, which is a real and reasonable behaviour
+        // that this product does not currently have: a ref-less server in the
+        // same project is held back too. Writing the nicer sentence would leave
+        // a user waiting for three of four CLIs to work while none of them do.
+        //
+        // Relaxing the rule to per-server is tracked as its own reviewed item;
+        // until then this line says what actually happens.
         crate::outln!(
             "{:<20}{}",
             "",
-            "servers using those secrets stay paused until set (fail closed)".dimmed()
+            "until they are set, each CLI's config is held back whole — nothing is \
+             written with a missing credential (fail closed)"
+                .dimmed()
         );
     }
 

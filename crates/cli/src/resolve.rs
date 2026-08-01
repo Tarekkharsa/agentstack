@@ -1745,8 +1745,6 @@ mod tests {
             git: None,
             rev: None,
             checksum: Sha256Hex::of(b"staledigest"),
-            license: None,
-            origin: None,
         });
         lib_home
             .child("skills/sql-review/SKILL.md")

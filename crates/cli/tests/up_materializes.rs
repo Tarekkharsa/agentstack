@@ -157,9 +157,21 @@ fn an_unresolved_ref_is_named_with_its_command_and_its_consequence() {
         "the exact repair command must be given, not the verb alone:\n{out}"
     );
     assert!(
-        out.contains("paused") && out.contains("fail closed"),
-        "the consequence must be stated: the server is paused, not broken, and \
-         not quietly started without its credential:\n{out}"
+        out.contains("fail closed"),
+        "the fail-closed consequence must be stated:\n{out}"
+    );
+    // And stated as it ACTUALLY behaves. The whole target is held back, not
+    // just the servers with missing refs — `up` must not describe the
+    // per-server pausing the product does not do, however much nicer it reads.
+    assert!(
+        out.contains("held back whole"),
+        "the copy must describe the shipped whole-target rule, not the relaxed \
+         behaviour the vision transcript implies:\n{out}"
+    );
+    assert!(
+        !out.contains("stay paused"),
+        "per-server pausing language would over-promise against the documented \
+         fail-closed rule:\n{out}"
     );
     // The resolvable server must NOT be dragged down with it: a ref-less server
     // has nothing to wait for.
@@ -183,11 +195,26 @@ fn an_unresolved_ref_is_named_with_its_command_and_its_consequence() {
 /// machine that is the difference between "three of four servers work while you
 /// find your API key" and "nothing works".
 ///
-/// `up` does not fix it, because it cannot: fixing it means changing which
-/// servers `render` writes, which is a change to the writing path, and `up`'s
-/// whole design constraint is that it composes and owns no writing path of its
-/// own. It belongs to `apply`'s lane, with the consent question ("is a
-/// partially-rendered config a thing the user agreed to?") answered first.
+/// `up` does not fix it, and neither should a passing change. Two reasons, the
+/// second stronger than the first:
+///
+/// 1. It means changing which servers `render` writes — a writing-path change,
+///    and `up`'s design constraint is that it composes and owns no writing path.
+/// 2. **The whole-target block is a documented fail-closed rule**, not an
+///    oversight: writes stay blocked while any `${REF}` in the selection is
+///    unresolved (`docs/ARCHITECTURE.md`, render path). Per-server rendering is
+///    therefore a deliberate RELAXATION of a fail-closed boundary.
+///
+/// **The bar for flipping this**, so whoever does knows it up front: a
+/// line-by-line review with the original rule's rationale in front of the
+/// reviewer, answering the consent question it encodes — is a
+/// partially-rendered config a thing the user agreed to, and can they tell a
+/// partial render from a complete one? Not a mid-phase edit, and not something
+/// to infer permission for from this test going red.
+///
+/// Note that the vision's Moment 9 transcript implies the relaxed behaviour.
+/// The vision bends; the shipped rule does not, until reviewed. `up`'s copy
+/// describes what actually happens.
 #[test]
 fn a_refless_server_is_still_blocked_by_another_servers_missing_ref() {
     let (_tmp, home, proj) = fresh();

@@ -288,7 +288,10 @@ mod tests {
     fn no_provenance_state_shortens_the_card_without_recognition() {
         let (key, sig) = agentstack_trust::sign::sign(&[2u8; 32], b"bytes");
         // Verified but unrecognized: correct signature, unknown publisher.
-        let p = Provenance::Verified { key, known: None };
+        let p = Provenance::Verified {
+            key,
+            known: None,
+        };
         assert!(
             !p.shortens_the_card(),
             "a valid signature from a stranger is still a stranger"

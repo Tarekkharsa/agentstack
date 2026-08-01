@@ -939,7 +939,8 @@ mod tests {
             !d.contains('\u{1b}') && !d.contains('\u{202e}') && !d.contains('\n'),
             "hostile chars survived in {d:?}"
         );
-        assert!(d.contains("safetext"), "{d:?}");
+        // The readable text survives, on one line, with the escapes gone.
+        assert_eq!(d, "safe texthere second line", "{d:?}");
         assert_eq!(items[0].license.as_deref(), Some("MIT"));
         assert_eq!(items[0].origin, "reg.test");
         // Non-http(s) fetch targets are dropped, not shown as clickable.
