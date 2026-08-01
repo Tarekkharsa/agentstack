@@ -136,6 +136,23 @@ and lockfile that trust is pinned to. Change any of those bytes — a `git pull`
 re-lock — and the project drops back to untrusted until you re-trust it. More:
 [ENFORCEMENT.md — what trusted does and does not mean](ENFORCEMENT.md#what-trusted-does-and-does-not-mean).
 
+**The yes** — the consent moment itself, and the one thing never automated. For
+files you drop into `.agentstack/skills/` or `.agentstack/instructions/`,
+`agentstack yes` is the whole ceremony in one step: notice, pin, review, render.
+
+**Review card** — what a yes shows you before it means anything: what the
+content adds, what it would run, contact, or read, and — on a re-gate — what
+changed since you last approved it, as a real diff rather than a digest.
+
+**Provenance** — the check that decides which review you get. Content you
+demonstrably wrote here (untracked in git, or newer than the last review) may
+take the one-step path; anything that arrived with a clone always takes the
+full staged review. Selection is by evidence, never by politeness.
+
+**Undo timeline** — `agentstack undo`: every recorded write, newest first; pick
+a point and revert to it. The revert is itself recorded, so it can be undone
+too. `restore` is the same record as a script-friendly, one-write primitive.
+
 ## Drift
 
 **Drift** — a mismatch between the manifest and what is actually on disk, either

@@ -8,6 +8,14 @@ For a team that wants every member's agent CLIs configured the same way.
 Prerequisite: a working [manifest](../concepts.md) in `.agentstack/` (run
 `agentstack init`, then `agentstack apply --write`, once).
 
+Two ways to hand a setup over: **commit it** (this page — the repo itself
+carries the manifest and lock, and each clone reviews before anything
+activates), or **bundle it** — `agentstack share <name>` produces a signed
+`.astack` bundle (signing is part of sharing, not a flag) that a teammate
+reviews with `agentstack receive <path>`: staged inert and carded first, and a
+publisher they recognize shortens the card, never skips it. Use the bundle
+when there is no shared repo to commit to.
+
 ```bash
 # You, once: commit the manifest and its lockfile
 git add .agentstack/          # manifest + agentstack.lock

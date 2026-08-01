@@ -230,6 +230,51 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
       <p style="font-size:0.9rem;color:var(--color-neutral-700);margin:var(--space-3) 0 0"><code>.agentstack/agentstack.toml</code> records your whole setup — the <a href="concepts.html">manifest</a>. Every CLI-specific file AgentStack writes is rendered from it, and can be regenerated or taken back off at any time. Mostly the system writes it for you — and when you write a skill of your own you don't open it at all: drop the folder under <code>.agentstack/skills/</code>, run <code>agentstack yes</code>, review once, and it is live in every CLI. It holds <code>${GITHUB_TOKEN}</code>-style placeholders, never the token values.</p>
       <p style="font-size:0.9rem;color:var(--color-neutral-700);margin:var(--space-3) 0 0">That is the run replayed at the top of this page. Reproduce it fenced with <a href="https://github.com/Tarekkharsa/agentstack/blob/main/examples/first-value-demo/run-demo.sh"><code>examples/first-value-demo/run-demo.sh</code></a> — it asserts every step, so the recording stays accurate.</p>
     </div>
+
+    <div class="card elev-md" id="everyday" style="margin-top:calc(var(--space-8) * 1.5);border-radius:var(--radius-md)">
+      <div style="margin-bottom:var(--space-4)">
+        <div class="card-kicker">the everyday loop · one deliberate yes</div>
+        <div class="card-title">What using it feels like</div>
+        <p style="font-size:0.92rem;color:var(--color-neutral-700);margin:var(--space-2) 0 0;max-width:70ch">Four moments, shown as the shipped binary actually prints them. Everything is automated except the one thing that never is: your yes.</p>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:var(--space-4)">
+        <div>
+          <div style="background:var(--term-bg);border-radius:var(--radius-md);padding:14px 18px;font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;font-size:0.78rem;line-height:1.8;overflow-x:auto"><div style="white-space:pre"><span style="color:var(--term-warn)">$</span> <span style="color:var(--term-text)">agentstack yes</span>
+<span style="color:var(--term-text)">→ 1 dropped file ready to go live in this project:</span>
+<span style="color:var(--term-ok)">  +</span> <span style="color:var(--term-text)">skill summarize</span> <span style="color:var(--term-muted)">(./skills/summarize)</span>
+<span style="color:var(--term-muted)">      your own work — untracked in git</span>
+<span style="color:var(--term-ok)">  ✓ pinned 1 skill</span>
+<span style="color:var(--term-text)">This will write:</span>
+<span style="color:var(--term-text)">Claude Code</span>
+<span style="color:var(--term-text)">  → 1 skill to symlink into .claude/skills</span>
+<span style="color:var(--term-text)">Codex CLI</span>
+<span style="color:var(--term-text)">  → 1 skill to symlink into .agents/skills</span>
+<span style="color:var(--term-muted)">  …</span></div></div>
+          <p style="font-size:0.85rem;color:var(--color-neutral-700);margin:var(--space-2) 0 0"><b>Write a skill: drop the folder, say yes.</b> No manifest edit — it is pinned, recorded, and live in every CLI. The one-step review is only for work that is provably yours; anything that arrived with a clone gets the full staged review.</p>
+        </div>
+        <div>
+          <div style="background:var(--term-bg);border-radius:var(--radius-md);padding:14px 18px;font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;font-size:0.78rem;line-height:1.8;overflow-x:auto"><div style="white-space:pre"><span style="color:var(--term-warn)">$</span> <span style="color:var(--term-text)">agentstack undo</span>
+<span style="color:var(--term-text)">recent changes (newest first)</span>
+<span style="color:var(--term-text)">  1  </span><span style="color:var(--term-muted)">just now  </span><span style="color:var(--term-text)">init</span><span style="color:var(--term-muted)">  1 file · Claude Code, Codex CLI, Gemini CLI, …</span>
+<span style="color:var(--term-text)">  pick a point: </span><span style="color:var(--term-ok)">agentstack undo --to &lt;n&gt; --write</span></div></div>
+          <p style="font-size:0.85rem;color:var(--color-neutral-700);margin:var(--space-2) 0 0"><b>Take it back, from a timeline.</b> Every write is recorded before it lands; pick a point and revert to it. The revert is recorded too — going one step too far is recoverable.</p>
+        </div>
+        <div>
+          <div style="background:var(--term-bg);border-radius:var(--radius-md);padding:14px 18px;font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;font-size:0.78rem;line-height:1.8;overflow-x:auto"><div style="white-space:pre"><span style="color:var(--term-bad)">blocked:</span> <span style="color:var(--term-text)">web-search tried to reach api.evil.example</span>
+<span style="color:var(--term-text)">— not in this project's allowed hosts ([policy.egress])</span>
+<span style="color:var(--term-muted)">  nothing was sent · add the host to [policy.egress] if you meant to allow it</span></div></div>
+          <p style="font-size:0.85rem;color:var(--color-neutral-700);margin:var(--space-2) 0 0"><b>The seatbelt speaks plainly.</b> A denial says what was stopped, why, that nothing happened, and the one safe next step — backed by a recorded event, on the <a href="enforcement.html">paths where enforcement really runs</a>.</p>
+        </div>
+        <div>
+          <div style="background:var(--term-bg);border-radius:var(--radius-md);padding:14px 18px;font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;font-size:0.78rem;line-height:1.8;overflow-x:auto"><div style="white-space:pre"><span style="color:var(--term-warn)">$</span> <span style="color:var(--term-text)">agentstack share backend</span>
+<span style="color:var(--term-muted)">  # signed as part of sharing — signing is not a flag</span>
+<span style="color:var(--term-warn)">$</span> <span style="color:var(--term-text)">agentstack receive team.astack</span>
+<span style="color:var(--term-muted)">  # staged inert and carded first; a recognized publisher</span>
+<span style="color:var(--term-muted)">  # makes the card shorter — never optional</span></div></div>
+          <p style="font-size:0.85rem;color:var(--color-neutral-700);margin:var(--space-2) 0 0"><b>Sharing is signing; receiving is reviewing.</b> A bundle carries the manifest, lock, and pinned content. Nothing a teammate receives activates without their own yes.</p>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div style="border-top:1px solid var(--color-neutral-200);margin-top:var(--space-8)">

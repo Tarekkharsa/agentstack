@@ -467,7 +467,8 @@ pre.cmd .c { color: var(--term-muted); }
             an undo. Without <code>--write</code> it is a dry run that names each
             file it would revert.
           </p>
-          <pre class="cmd">agentstack restore --last            <span class="c"># dry run: what undoing would touch</span>
+          <pre class="cmd">agentstack undo                      <span class="c"># the timeline: recent changes, pick a point, revert</span>
+agentstack restore --last            <span class="c"># dry run: what undoing the last write would touch</span>
 agentstack restore --last --write    <span class="c"># actually undo it</span></pre>
           <p class="expect">You should see</p>
           <div class="term">
@@ -495,7 +496,7 @@ agentstack restore --last --write    <span class="c"># actually undo it</span></
       </div>
 
       <div class="track" id="track-switch">
-        <p class="eyebrow">Rung 2 · Switch · step 6</p>
+        <p class="eyebrow">Rung 2 · Switch · steps 6–7</p>
         <h2>Switch by task, not by editing five config files</h2>
         <p class="muted">~2 minutes · the reason this becomes a daily tool rather than a one-time import.</p>
       </div>
@@ -532,6 +533,42 @@ agentstack session end             <span class="c"># put every file back</span><
             <a href="howto/name-a-toolset.html">name a toolset</a>.
           </p>
         </li>
+        <li id="s-write-skill">
+          <h2>Write a skill of your own — drop it, say yes</h2>
+          <p class="muted">
+            Authoring needs no manifest edit. Drop a folder with a
+            <code>SKILL.md</code> under <code>.agentstack/skills/</code>; the next
+            command notices it, and <code>agentstack yes</code> reviews it on one
+            card and takes it live in every CLI — the manifest and lock update
+            themselves, and the undo is named before anything is written.
+          </p>
+          <pre class="cmd">mkdir -p .agentstack/skills/summarize          <span class="c"># your skill, your files</span>
+$EDITOR .agentstack/skills/summarize/SKILL.md  <span class="c"># a description line + the instructions</span>
+agentstack yes                                 <span class="c"># review once, live everywhere</span></pre>
+          <p class="expect">You should see</p>
+          <div class="term">
+            <div class="term-head" aria-hidden="true"><i class="r"></i><i class="y"></i><i class="g"></i><b>one review, every CLI</b></div>
+            <pre><code><span class="p">$</span> agentstack yes
+→ 1 dropped file ready to go live in this project:
+<span class="ok">  +</span> skill summarize <span class="c">(./skills/summarize)</span>
+<span class="c">      Summarize long docs into notes</span>
+<span class="c">      your own work — untracked in git</span>
+<span class="ok">  ✓ pinned 1 skill</span>
+This will write:
+Claude Code
+<span class="ok">  ✓</span><span class="c"> servers up to date</span>
+  → 1 skill to symlink into .claude/skills
+Codex CLI
+<span class="ok">  ✓</span><span class="c"> servers up to date</span>
+  → 1 skill to symlink into .agents/skills</code></pre>
+          </div>
+          <p class="small muted">
+            The one-step review applies only to content you wrote here — that
+            "untracked in git" line is the check being shown, not decoration.
+            Anything that arrived with a clone takes the full staged review
+            instead: <a href="howto/add-a-skill.html">add a skill</a>.
+          </p>
+        </li>
       </ol>
 
       <section id="s-deeper" class="track">
@@ -564,7 +601,7 @@ agentstack session end             <span class="c"># put every file back</span><
       </section>
 
       <div class="track" id="track-b">
-        <p class="eyebrow">Rung 6 · Govern · steps 7–13</p>
+        <p class="eyebrow">Rung 6 · Govern · steps 8–14</p>
         <h2>Govern work you didn't write</h2>
         <p class="muted">~10 minutes · Docker only for the confined run near the end.</p>
         <p class="muted">Rungs 1–5 leave every CLI unified, switchable, diagnosable and shareable. This rung is what you add when an agent can do damage by accident, or when a repo you cloned declares MCP servers you have never read. Step&nbsp;7 alone is worth doing on any machine.</p>
