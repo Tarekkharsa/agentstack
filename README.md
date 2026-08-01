@@ -34,12 +34,16 @@ your-project/
 └── .gitignore            # one managed line, so that .env is never committed
 ```
 
-`.agentstack/agentstack.toml` is the one file you edit from now on. It is called
+`.agentstack/agentstack.toml` records your whole setup. It is called
 the **[manifest](https://tarekkharsa.github.io/agentstack/concepts.html)**, and
 every CLI-specific file AgentStack writes — `.mcp.json`, `.claude/skills/`, the
 compiled `AGENTS.md` — is rendered from it and can be regenerated, or taken back
-off, at any time. It holds `${GITHUB_TOKEN}`-style placeholders, never the token
-values.
+off, at any time. Mostly the system writes it for you: `init` and `add` fill it
+in, and when you write a skill of your own you don't open it at all — drop the
+folder under `.agentstack/skills/` and run `agentstack yes`; one review, and it
+is pinned, recorded in the manifest and lock, and live in every CLI
+([how-to](https://tarekkharsa.github.io/agentstack/howto/add-a-skill.html)). It
+holds `${GITHUB_TOKEN}`-style placeholders, never the token values.
 
 That same directory arriving in a repository you *cloned* behaves differently: it
 stays inert until you review it — no server spawns, no skill enters an agent's
@@ -66,7 +70,8 @@ Here is the whole loop, condensed from a real run of the current binary:
    stated once and do not count against readiness; a first Codex project also
    warns until you open Codex there once and accept its trust prompt.
 5. **Undo** — `agentstack restore --last --write`, twice: every file
-   byte-identical to where it started.
+   byte-identical to where it started. (`agentstack undo` shows the same
+   recorded changes as a timeline and reverts to the point you pick.)
 
 Reproduce it yourself, fenced (an isolated temp `HOME` — it never touches your
 real configs, and it asserts every step, so it doubles as the witness that this

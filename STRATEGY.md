@@ -5,7 +5,7 @@
 > [`docs/archive/STRATEGY-2026-07-v1.md`](docs/archive/STRATEGY-2026-07-v1.md));
 > revised same day after independent adversarial review.
 >
-> **Current as of:** AgentStack 0.18.0-rc.1
+> **Current as of:** AgentStack 0.18.0-rc.2
 >
 > **Relationship to the other documents:** [`TODO.md`](TODO.md) remains the
 > only ordered work queue. *New product-capability work* enters it only through

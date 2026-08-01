@@ -22,7 +22,9 @@ implementation internals — live in
   - [Where lifted secrets go (`init`)](#where-lifted-secrets-go-init)
   - [Unresolved secrets block writes](#unresolved-secrets-block-writes)
   - [Does it actually run? `doctor --live` and `doctor --probe`](#does-it-actually-run-doctor---live-and-doctor---probe)
-  - [One undo verb: `restore`](#one-undo-verb-restore)
+  - [Drop a file, say yes (`agentstack yes`)](#drop-a-file-say-yes-agentstack-yes)
+  - [Undo: `undo` and `restore`](#undo-undo-and-restore)
+  - [Sharing is signing: `share` and `receive`](#sharing-is-signing-share-and-receive)
   - [The whole way out: `uninstall`](#the-whole-way-out-uninstall)
   - [`doctor` shows what you use](#doctor-shows-what-you-use)
 - [Drift: adopt or apply?](#drift-adopt-or-apply)
@@ -85,7 +87,7 @@ implementation internals — live in
 
 ## Part I — The everyday loop
 
-This part is everything `agentstack --help` shows by default: the nine everyday commands — `init`, `status`, `add`, `search`, `apply`, `doctor`, `use`, `run`, `trust` — and the machinery directly behind them. Read only what is here and you can reach a working setup: one manifest rendered into every CLI's native config, credentials kept out of that config, hand-edits caught, and a toolset activated. The power surface in Part II is entirely opt-in — nothing in the everyday loop requires it.
+This part is everything `agentstack --help` shows by default: the everyday commands — from `init`, `status`, and `add` through `apply`, `use`, `yes`, and `undo`, to `share` and `receive` — and the machinery directly behind them. Read only what is here and you can reach a working setup: one manifest rendered into every CLI's native config, credentials kept out of that config, hand-edits caught, and a toolset activated. The power surface in Part II is entirely opt-in — nothing in the everyday loop requires it.
 
 ## Secrets and trust
 
@@ -193,22 +195,50 @@ the bare-launcher advisory warns about. Pin the launcher and the two agree.
 (`ran`, `skipped_reason`, and per-server `status` of `ok` / `failed` /
 `not_probeable`); gate on the `doctor-probe-v1` feature name.
 
-### One undo verb: `restore`
+### Drop a file, say yes (`agentstack yes`)
 
-`restore` is the single undo verb for agentstack's recorded **writes** — servers,
-settings, hooks, instructions, even the owned-server manifest refresh. Full
-walkthrough and the table of the five actions undone by their own verb:
-[undo anything](howto/undo.md).
+Writing a skill of your own needs no manifest edit: drop the folder under
+`.agentstack/skills/` and run `agentstack yes`. The files are noticed at the
+next command touchpoint, pinned, and reviewed on one card; one yes records
+them in the manifest and lock and renders them to every CLI, with the undo
+named in the preview before anything is written. The one-step path applies
+only to content you demonstrably wrote here (untracked in git, or newer than
+the last review) — anything that arrived with a clone takes the full staged
+review that `trust` owns, and declining leaves the staged bytes untouched and
+inert. Walkthrough: [add a skill](howto/add-a-skill.md); exact boundaries:
+[ENFORCEMENT](ENFORCEMENT.md#intake-detection-dropped-files).
+
+### Undo: `undo` and `restore`
+
+Two faces of one record. Every recorded **write** — servers, settings, hooks,
+instructions, even the owned-server manifest refresh — can be taken back.
+`agentstack undo` lists your recent changes newest-first and reverts to the
+point you pick; the revert is itself recorded, so going one step too far is
+recoverable. `restore` works the same record as the script-friendly
+primitive, one write at a time by id. Full walkthrough and the table of the
+five actions undone by their own verb: [undo anything](howto/undo.md).
 
 ```text
-agentstack restore                 # list the recorded changes
+agentstack undo                    # timeline: pick a point, revert to it
+agentstack restore                 # list the recorded changes (ids)
 agentstack restore <id> --write    # revert one (unique id prefix)
 agentstack restore --last --write  # revert the most recent
 agentstack restore <adapter>       # single-slot config restore (fallback)
 ```
 
-Reverted files show up as pending again; `agentstack restore` lists the same
-recorded writes and the identifier needed to roll each one back.
+Reverted files show up as pending again; both verbs read the same recorded
+writes and either can roll each one back.
+
+### Sharing is signing: `share` and `receive`
+
+`agentstack share <name>` bundles this setup — manifest, lock, and pinned
+content — and signs it as part of sharing (signing is not a flag: an opt-in
+signature is one nobody opts into). `agentstack receive <path>` is the other
+side: the bundle is staged inert and carded first, exactly like every other
+intake path — a signature from a publisher you recognize makes the card
+shorter, never optional. `agentstack publisher` manages your publishing key
+and the publishers you recognize; `sign`/`verify` remain the scriptable
+primitives on the lockfile itself.
 
 ### The whole way out: `uninstall`
 
@@ -1530,9 +1560,9 @@ The generated command tree and the one-glance census, unchanged. Everything abov
 
 The full command surface, generated from the CLI's own command tree by
 `agentstack self docs --write` (CI fails if this list goes stale). Bare
-`agentstack --help` deliberately shows only the **10 everyday commands** —
-`init`, `status`, `add`, `search`, `apply`, `doctor`, `toolset`, `use`, `run`,
-`trust`. The other 37
+`agentstack --help` deliberately shows only the **everyday commands** —
+`init`, `up`, `status`, `add`, `search`, `apply`, `doctor`, `share`, `receive`,
+`toolset`, `use`, `yes`, `run`, `trust`, `restore`, `undo`, `adopt`. The rest
 are hidden from `--help` as progressive disclosure but are **fully supported**,
 each with its own `--help`; **hidden does not mean deprecated or unsupported**.
 `agentstack --help --all` prints the entire tree, and each line below marks the

@@ -8,20 +8,24 @@ For anyone who wants to reverse something agentstack did. Prerequisite: none —
 these work in any project agentstack has touched.
 
 ```bash
-agentstack restore                 # list every undoable recorded write
+agentstack undo                    # your recent changes, newest first — pick one, revert to it
+agentstack restore                 # the same record as a list of ids (script-friendly)
 agentstack restore --last --write  # undo the most recent write
 agentstack restore a1b2 --write    # undo one write by its id prefix
 agentstack restore claude-code     # fallback: restore one adapter's config from its backup
 ```
 
-`restore` is the single undo verb for **writes**. Every write agentstack makes —
-servers, settings, hooks, instructions, even the owned-server manifest refresh —
-is recorded before it lands, and `restore` reverts one; `restore <adapter>` is a
-fallback that restores one adapter's config from its single-slot backup.
-Reverted files simply show up as pending again; `restore` lists the recorded
-writes and the identifier needed to roll each one back (see [see what your
-agents did](see-what-happened.md)). Five other actions are undone
-by their own verb, because they are not file writes:
+Undo has two faces over one record. Every write agentstack makes — servers,
+settings, hooks, instructions, even the owned-server manifest refresh — is
+recorded before it lands. `agentstack undo` shows those recorded changes as a
+timeline, newest first: pick a point and it reverts to there, and the revert
+is itself recorded, so going one step too far is recoverable. `restore` works
+the same record one write at a time — the script-friendly primitive underneath
+(`restore <adapter>` is a fallback that restores one adapter's config from its
+single-slot backup). Reverted files simply show up as pending again; `restore`
+lists the recorded writes and the identifier needed to roll each one back (see
+[see what your agents did](see-what-happened.md)). Five other actions are
+undone by their own verb, because they are not file writes:
 
 | To undo… | Run | What it reverts |
 | --- | --- | --- |
@@ -78,5 +82,5 @@ you installed it), and touch a capability's own installed files outside the
 regions agentstack renders.
 
 - [Concepts](../concepts.md) — trust, gateway, guard, session, drift
-- [Reference: one undo verb (`restore`)](../reference.md#one-undo-verb-restore)
+- [Reference: undo — `undo` and `restore`](../reference.md#undo-undo-and-restore)
 - [Reference: drift — adopt or apply?](../reference.md#drift-adopt-or-apply)

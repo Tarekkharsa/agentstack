@@ -372,10 +372,16 @@ pre.cmd .c { color: var(--term-muted); }
 │   └── .env              <span class="c"># token values lifted out of your configs (only when init found any)</span>
 └── .gitignore            <span class="c"># one managed line, so that .env is never committed</span></pre>
           <p class="muted">
-            <code>.agentstack/agentstack.toml</code> is the one file you edit from
-            now on. It is called the <a href="concepts.html">manifest</a>, and every
+            <code>.agentstack/agentstack.toml</code> records your whole setup. It
+            is called the <a href="concepts.html">manifest</a>, and every
             CLI-specific file agentstack writes is rendered from it — that is the
-            next step. It holds <code>${GITHUB_TOKEN}</code>-style placeholders,
+            next step. Mostly the system writes it for you: <code>init</code> just
+            did, <code>add</code> does, and when you later write a skill of your
+            own you won't open it either — drop the folder under
+            <code>.agentstack/skills/</code> and run <code>agentstack yes</code>;
+            one review and it is live in every CLI
+            (<a href="howto/add-a-skill.html">how-to</a>). It holds
+            <code>${GITHUB_TOKEN}</code>-style placeholders,
             never the token values themselves: those went to the gitignored
             <code>.env</code> you just chose.
           </p>
