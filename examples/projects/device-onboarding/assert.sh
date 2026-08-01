@@ -20,6 +20,10 @@
 #   C. Environment quirks: paths with spaces and unicode (incl. lock → trust
 #      → locked --plan), legacy root-manifest layout, non-git projects, an
 #      AGENTSTACK_HOME containing spaces (incl. guard denial through it).
+#   E. `up` on a new machine: a checkout that already carries a manifest and a
+#      lockfile lands somewhere fresh — one `agentstack up` renders the native
+#      configs, and the secrets this machine does not have are NAMED (with the
+#      command that stores each one) instead of silently skipped.
 #
 # This example's first round found four gaps; all four are now fixed and
 # asserted here (see FINDINGS.md "Device-onboarding round"): the default-scope
@@ -272,6 +276,43 @@ python3 -c "import json; d=json.load(open('.mcp.json')); d['mcpServers']['docs']
 grep -q "docs-eu.example" .agentstack/agentstack.toml && ok "adopt pulled the hand-edited url into the manifest" || bad "adopt ignored the hand-edit"
 "$AS" apply --scope project --write >/dev/null 2>&1
 grep -q "docs-eu.example" .mcp.json && ok "the hand-edit survives the next apply (not reverted)" || bad "next apply reverted the adopted edit"
+
+# ═══ E. `up` on a new machine ════════════════════════════════════════════════
+
+hdr "E1) a checkout carrying manifest + lock lands on a fresh machine"
+device "checkout"
+echo '{}' > "$H/.claude.json"
+mkdir -p .agentstack
+printf 'version = 1\n[servers.docs]\ntype = "http"\nurl = "https://docs.example/mcp"\n[targets]\ndefault = ["claude-code"]\n' \
+  > .agentstack/agentstack.toml
+"$AS" lock >/dev/null 2>&1
+[ -f .agentstack/agentstack.lock ] && ok "the checkout carries a lockfile" || bad "nothing to land with — lock never written"
+OUT=$("$AS" up 2>&1) && ok "up exits 0 on a machine that has never seen this project" || bad "up failed: $OUT"
+grep -q "Claude Code" <<<"$OUT" && ok "up names the harnesses this machine actually has" || bad "no harness line: $OUT"
+[ -f .mcp.json ] && ok "up rendered the native config" || bad "up rendered no config at all"
+grep -q "docs.example" .mcp.json 2>/dev/null && ok "the rendered config carries the manifest's server" || bad "rendered config lacks the server"
+
+hdr "E2) up NAMES a secret this machine does not have (never a silent skip)"
+device "checkout"
+echo '{}' > "$H/.claude.json"
+mkdir -p .agentstack/skills/sql-review
+printf 'version = 1\n[servers.docs]\ntype = "http"\nurl = "https://docs.example/mcp"\n[servers.api]\ntype = "http"\nurl = "https://api.example/mcp"\nheaders = { Authorization = "Bearer ${DEVICE_UP_TOKEN}" }\n[skills.sql-review]\npath = "./skills/sql-review"\n[targets]\ndefault = ["claude-code"]\n' \
+  > .agentstack/agentstack.toml
+printf -- '---\nname: sql-review\ndescription: Review SQL migrations before they ship.\n---\nCheck every migration for missing indexes.\n' \
+  > .agentstack/skills/sql-review/SKILL.md
+"$AS" lock >/dev/null 2>&1
+OUT=$("$AS" up 2>&1)
+grep -q 'DEVICE_UP_TOKEN' <<<"$OUT" && ok "up names the ref this machine cannot resolve" || bad "unresolvable ref went unmentioned: $OUT"
+grep -q 'agentstack secret set DEVICE_UP_TOKEN' <<<"$OUT" && ok "...alongside the exact command that stores it" || bad "no per-ref store command: $OUT"
+grep -q 'held back whole' <<<"$OUT" && ok "...and says the config is held back whole (fail closed)" || bad "fail-closed rule unstated: $OUT"
+grep -q 'api.example' .mcp.json 2>/dev/null && bad "A SERVER WAS WRITTEN WITH AN UNRESOLVED CREDENTIAL" || ok "nothing rendered while the credential was missing"
+grep -q 'DEVICE_UP_TOKEN' .agentstack/agentstack.toml && ok "the manifest still holds only the \${REF}" || bad "manifest lost the placeholder"
+# Naming it is only useful if acting on it finishes the job: resolve and re-run.
+OUT=$(env DEVICE_UP_TOKEN=fake-value "$AS" up 2>&1)
+grep -q 'api.example' .mcp.json 2>/dev/null && ok "the same up renders both servers once the ref resolves" || bad "resolved up still wrote nothing"
+grep -q 'fake-value' .mcp.json && ok "the resolved value reached the native config" || bad "resolved value missing from the render"
+grep -q 'fake-value' .agentstack/agentstack.toml && bad "SECRET VALUE IN THE MANIFEST" || ok "the value never entered the manifest"
+grep -q 'verified against lock' <<<"$OUT" && ok "up verified the pinned skill source against the lock" || bad "no lock verification claim: $OUT"
 
 cd /
 printf '\n\033[1mSummary:\033[0m %d passed, %d failed\n' "$PASS" "$FAIL"

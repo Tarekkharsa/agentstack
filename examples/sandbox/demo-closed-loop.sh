@@ -125,7 +125,7 @@ for l in sys.stdin:
 EOF
 
 line "6. Receipts: every brokered call is audited — digests, never values"
-as audit --calls
+as report calls
 
 line "7. What does the server cost? Context-cost lens, measured live"
 as report usage --live
@@ -135,7 +135,7 @@ sed -i '' 's/unbounded scans/unbounded scans and lock contention/' \
   "$packrepo/skills/sql-review/SKILL.md" 2>/dev/null || \
   sed -i 's/unbounded scans/unbounded scans and lock contention/' "$packrepo/skills/sql-review/SKILL.md"
 git_q add . && git_q commit -m "v1.1.0" && git_q tag v1.1.0
-as upgrade acme --yes --write
+as lock --upgrade acme --yes --write
 
 line "9. Done — one manifest: every CLI, a firewall, receipts, versioned upgrades"
 grep -E 'source|version' .agentstack/agentstack.toml | grep acme-pack || true
