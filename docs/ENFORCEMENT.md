@@ -373,11 +373,28 @@ Which is which, per denial family:
 | Egress refusal — host path | **coarse** — a write-time check on the declared host, not a wire-level fence | yes, **new in Phase 3** | `calls.jsonl` (`tool: egress`) + run `events.jsonl` (`Egress`) when inside a run |
 | Secret-scope refusal | **enforced** — the ref reaches no backing store | yes, **new in Phase 3** | `calls.jsonl` (`tool: secret`) + run `events.jsonl` (`SecretDenied`) |
 | Filesystem guard | **cooperative** — the harness chose to ask | yes | `calls.jsonl` (`server: host-guard`, `run: None`) |
+| Content-pin refusal | **enforced** — the server is dropped before it is spawned or dialled | yes, **new in Phase 4** | `calls.jsonl` (`tool: pin`) + run `events.jsonl` (`PinRejected`) |
+
+The content-pin row is the fifth family, added in Phase 4. It differs from the
+other four in what refused: nothing the user *authored* denied anything here,
+the delivered bytes simply are not the bytes they reviewed — which is why it
+has its own family and its own next step (review what changed, or re-pin
+deliberately), rather than borrowing the tool block's. It only ever fires for
+a project that is already trusted: an unreviewed bundle is refused whole,
+earlier, and never reaches per-server verification.
+
+One honesty note specific to it: its refusal text is composed from lockfile and
+manifest fragments, which are repository content and therefore hostile input
+(invariant 7). It is control-character-stripped and length-bounded before it is
+printed or recorded, so the reason in the log is deliberately lossy — a denial
+the reader can trust to be a denial is worth more than a complete one.
 
 The two rows marked *new in Phase 3* were previously refusals that happened,
 printed once, and left nothing behind. Adding their events changed **only**
 what is written: both were already fail-closed refusals, both still are, and
-neither row's enforcement claim moved as a result. The host-path egress row in
+neither row's enforcement claim moved as a result. The same is true of the
+Phase 4 row: `Gateway::build` drops exactly the servers it dropped before, and
+`refuse` still returns `()`. The host-path egress row in
 particular stays `coarse` — recording a write-time decision does not make it a
 runtime fence, and reading this table as though it did is the exact error the
 paragraph above exists to prevent.

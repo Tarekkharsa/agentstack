@@ -485,6 +485,36 @@ pub enum RunEvent {
         /// this machine's own configuration, never upstream-authored.
         rule: String,
     },
+    /// The gateway refused to serve a server because its declared bytes did
+    /// not verify against the lockfile pin — the content-pinning refusal, the
+    /// one that fires when what would be delivered is not what was reviewed.
+    ///
+    /// A separate variant for the same reason [`RunEvent::SecretDenied`] is
+    /// one: no existing variant means "a server was withheld". Filing it under
+    /// [`RunEvent::ToolCall`] would corrupt a run's tool-call count, and there
+    /// is no generic denial variant to overload — nor should there be, since a
+    /// reviewer counting pin refusals is asking a different question from one
+    /// counting anything else.
+    ///
+    /// Identity-shaped: the server NAME and the reason it failed to verify.
+    /// Never the server's command line, environment, or the bytes themselves —
+    /// the whole point of this refusal is that those bytes are unreviewed, and
+    /// copying unreviewed content into the evidence log would put it in front
+    /// of exactly the reader the gate exists to protect.
+    ///
+    /// Best-effort and never gating: like every event here it is appended
+    /// through [`RunLog::append`], which returns `()`. The refusal has already
+    /// happened by the time this is written, and a recorder failure can only
+    /// lose the evidence — never restore the server.
+    PinRejected {
+        ts: u64,
+        server: String,
+        /// Why verification failed, in the words the user sees. Bounded and
+        /// control-character-stripped by the caller before it arrives here:
+        /// its inputs include lockfile- and manifest-derived fragments, which
+        /// are repository content and therefore hostile input (invariant 7).
+        reason: String,
+    },
     /// The sandbox container exited. `code` is absent when it was killed by a
     /// signal (e.g. teardown).
     SandboxExited {

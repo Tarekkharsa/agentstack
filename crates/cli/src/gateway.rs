@@ -780,7 +780,37 @@ impl Gateway {
                 let s = match resolved {
                     Ok(rs) => rs.server,
                     Err(reason) => {
-                        eprintln!("gateway: skipping '{name}': {reason}");
+                        // P3.8. The refusal itself is unchanged — the `continue`
+                        // below is the same fail-closed drop it always was, and
+                        // nothing above this line decides anything differently.
+                        // What was missing was that the most security-relevant
+                        // refusal in the product said its piece in a bare
+                        // `eprintln!` and left no trace: the one that fires when
+                        // delivered bytes are not the bytes the user reviewed is
+                        // exactly the one they most need to look up afterwards.
+                        //
+                        // Both inputs are bounded first (invariant 7): `reason`
+                        // is composed from lockfile/manifest fragments and
+                        // `name` is a manifest-authored key, so both are
+                        // repository content.
+                        let reason = crate::seatbelt::bounded_reason(&reason);
+                        let subject = crate::seatbelt::bounded_reason(&name);
+                        crate::seatbelt::refuse(
+                            &crate::seatbelt::Denial {
+                                family: crate::seatbelt::Family::Pin,
+                                subject: &subject,
+                                attempted: "be served by the gateway",
+                                why: &reason,
+                                next_step: "run `agentstack trust .` to review what changed, \
+                                            or `agentstack lock` if you meant to update the pin",
+                            },
+                            project.clone(),
+                            run_id.as_deref(),
+                        );
+                        crate::seatbelt::record_pin_rejected(run_id.as_deref(), &subject, &reason);
+                        // Unchanged, and load-bearing: `refuse` returns `()`,
+                        // so composing the denial granted nothing. The drop is
+                        // still ours to perform.
                         continue;
                     }
                 };

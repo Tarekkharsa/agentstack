@@ -540,7 +540,20 @@ fn policy_firewall_hides_denied_tools_and_refuses_calls() {
         .expect("routed")
         .expect_err("must be denied");
     let msg = err.to_string();
-    assert!(msg.contains("refused") && msg.contains("!echo"), "{msg}");
+    // Assert the denial's SUBSTANCE, not one word of its phrasing: the rule is
+    // named, and the reader is told nothing ran. This previously matched the
+    // literal "refused" and went stale the moment P3.2 gave every family the
+    // same sentence ("denied by …  · nothing ran"), which is a wording change,
+    // not an enforcement one — the call was still refused the whole time.
+    assert!(msg.contains("!echo"), "the rule must be named: {msg}");
+    assert!(
+        msg.contains("[policy.tools]"),
+        "the dimension must be named: {msg}"
+    );
+    assert!(
+        msg.contains("nothing ran"),
+        "the reassurance clause must survive: {msg}"
+    );
 
     // The denial is audited — digest only, never the argument value.
     let log = std::fs::read_to_string(agentstack::calllog::log_path()).unwrap();

@@ -1,8 +1,10 @@
 //! The seatbelt: one shape for every enforcement denial the user meets.
 //!
-//! Strategy v2 Phase 3, "seatbelt legibility". Four families can refuse an
+//! Strategy v2 Phase 3, "seatbelt legibility". Five families can refuse an
 //! action — a gateway tool block, an egress refusal, a secret-scope refusal,
-//! and the filesystem guard. Before this module each wrote its own sentence,
+//! the filesystem guard, and (added in Phase 4) the content-pinning refusal
+//! that withholds a server whose bytes no longer match what was reviewed.
+//! Before this module each wrote its own sentence,
 //! and half of them said only *what* was stopped, leaving the user to work out
 //! why and what to do instead. A denial that a person cannot act on is the
 //! moment security stops feeling like a seatbelt and starts feeling like a
@@ -56,6 +58,19 @@ pub enum Family {
     /// The filesystem guard refused a write or a destructive command
     /// (cooperative — the harness chose to ask).
     Filesystem,
+    /// A server was withheld because its declared bytes did not verify against
+    /// the lockfile pin — the content-pinning refusal.
+    ///
+    /// The fifth family, added in Phase 4. It is not a policy dimension like
+    /// the other four: nothing the user *authored* refused here, the delivered
+    /// content simply is not what they reviewed. That is why it gets its own
+    /// family rather than borrowing [`Family::Tool`] — the reader needs to know
+    /// the answer is "this changed", not "you disallowed this", because the two
+    /// have completely different next steps.
+    ///
+    /// Unlike the two cooperative families, this one is genuine prevention:
+    /// the server is dropped before it is ever spawned or dialled.
+    Pin,
 }
 
 impl Family {
@@ -67,6 +82,9 @@ impl Family {
             Family::Egress => "nothing was sent",
             Family::Secret => "nothing was read",
             Family::Filesystem => "nothing was written",
+            // The server never started, so no tool of its ever ran. Same
+            // clause as `Tool`, and correct for the same reason.
+            Family::Pin => "nothing ran",
         }
     }
 
@@ -78,8 +96,37 @@ impl Family {
             Family::Egress => "egress",
             Family::Secret => "secret",
             Family::Filesystem => "filesystem",
+            Family::Pin => "pin",
         }
     }
+}
+
+/// Bound a refusal reason before it is printed or recorded.
+///
+/// Every other family's `why` is policy text this machine authored, which is
+/// what makes it safe to pass through untouched. The pin refusal's reason is
+/// the exception: it is composed from lockfile and manifest fragments, which
+/// are repository content and therefore hostile input (invariant 7). An
+/// attacker-authored server name full of ANSI escapes could otherwise rewrite
+/// the terminal around the denial — turning the one sentence that says
+/// "this was stopped" into whatever they liked.
+///
+/// So: control characters (which includes escape, CR, and LF) become spaces,
+/// and the result is truncated. Deliberately lossy — a denial the reader can
+/// trust to be a denial is worth more than a complete one.
+pub fn bounded_reason(raw: &str) -> String {
+    const MAX: usize = 200;
+    let mut out: String = raw
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .take(MAX)
+        .collect();
+    // `take` counts chars, so this only fires when the input really was
+    // longer — and says so, rather than silently presenting a prefix as whole.
+    if raw.chars().count() > MAX {
+        out.push('…');
+    }
+    out
 }
 
 /// One refusal, in the three parts a reader needs.
@@ -185,6 +232,25 @@ pub fn record_secret_denied(run: Option<&str>, server: &str, reference: &str, ru
     });
 }
 
+/// The run-scoped mirror for a content-pinning refusal: a server the gateway
+/// withheld because its bytes did not verify against the lockfile pin.
+///
+/// `reason` must already have been through [`bounded_reason`] — it is passed
+/// bounded rather than bounded here so the identical string is what the user
+/// read on their terminal and what a reviewer finds in the log. Evidence that
+/// differs from what was shown is worse than no evidence.
+pub fn record_pin_rejected(run: Option<&str>, server: &str, reason: &str) {
+    let Some(run) = run else { return };
+    let Some(log) = RunLog::create(run) else {
+        return;
+    };
+    log.append(&RunEvent::PinRejected {
+        ts: now_epoch(),
+        server: server.to_string(),
+        reason: reason.to_string(),
+    });
+}
+
 fn now_epoch() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -223,8 +289,52 @@ mod tests {
             (Family::Egress, "nothing was sent"),
             (Family::Secret, "nothing was read"),
             (Family::Filesystem, "nothing was written"),
+            (Family::Pin, "nothing ran"),
         ] {
             assert_eq!(family.nothing_clause(), clause);
         }
+    }
+
+    /// A refusal reason built from repository content cannot rewrite the
+    /// terminal around the sentence that says it was refused. Invariant 7 at
+    /// the one call site whose `why` is not machine-authored policy text.
+    #[test]
+    fn a_hostile_reason_cannot_escape_the_denial_sentence() {
+        let hostile = "drifted\u{1b}[2J\u{1b}[H\nallowed: server started fine";
+        let safe = bounded_reason(hostile);
+        assert!(
+            !safe.contains('\u{1b}') && !safe.contains('\n') && !safe.contains('\r'),
+            "control characters must not survive: {safe:?}"
+        );
+        // Bounded, so a reason cannot scroll the denial off the screen.
+        let long = "x".repeat(5_000);
+        let bounded = bounded_reason(&long);
+        assert!(
+            bounded.chars().count() <= 201,
+            "{}",
+            bounded.chars().count()
+        );
+        assert!(
+            bounded.ends_with('…'),
+            "truncation must be visible, not silent"
+        );
+    }
+
+    /// The pinning refusal must read as "this changed", not "you disallowed
+    /// this" — the two have different next steps, which is why it is its own
+    /// family rather than borrowing `Tool`.
+    #[test]
+    fn the_pin_denial_points_at_review_not_at_policy() {
+        let d = Denial {
+            family: Family::Pin,
+            subject: "web-search",
+            attempted: "be served by the gateway",
+            why: "library definition drifted from agentstack.lock",
+            next_step: "run `agentstack trust .` to review what changed",
+        };
+        let s = d.sentence();
+        assert!(s.contains("nothing ran"), "{s}");
+        assert!(s.contains("agentstack.lock"), "{s}");
+        assert!(s.contains("trust"), "{s}");
     }
 }
