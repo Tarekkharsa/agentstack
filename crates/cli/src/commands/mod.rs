@@ -37,6 +37,7 @@ pub mod self_update;
 pub mod session;
 pub mod settings;
 pub mod setup;
+pub mod share;
 pub mod shim;
 pub mod stats;
 pub mod trust;

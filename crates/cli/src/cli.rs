@@ -148,6 +148,23 @@ pub enum Command {
     #[command(hide = true)]
     Install(InstallArgs),
 
+    /// Share this setup as a signed bundle others can review.
+    ///
+    /// Signing is not a flag: a bundle is signed as part of sharing, because
+    /// an opt-in signature is one nobody opts into. Receivers review before
+    /// anything activates.
+    Share(ShareArgs),
+
+    /// Review a shared bundle, then decide.
+    ///
+    /// The bundle is staged inert and carded first. A signature from a
+    /// publisher you recognize makes the card shorter — never optional.
+    Receive(ReceiveArgs),
+
+    /// Your publishing key, and the publishers you recognize.
+    #[command(hide = true)]
+    Publisher(PublisherArgs),
+
     /// Resolve each toolset's skill + server refs and pin `agentstack.lock`.
     ///
     /// Library-aware resolution; no configs rendered, no skills
@@ -1299,6 +1316,47 @@ pub struct InstallArgs {
     /// (hidden Unicode). Findings still print as warnings.
     #[arg(long)]
     pub allow_flagged: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct ShareArgs {
+    /// Name for the bundle (used for the filename by default).
+    pub name: String,
+
+    /// Write the bundle here instead of `<name>.astack`.
+    #[arg(long)]
+    pub out: Option<std::path::PathBuf>,
+}
+
+#[derive(Args, Debug)]
+pub struct ReceiveArgs {
+    /// The `.astack` bundle to review.
+    pub path: std::path::PathBuf,
+
+    /// Accept without the interactive prompt. The review still prints — this
+    /// answers it, it does not skip it.
+    #[arg(long)]
+    pub yes: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct PublisherArgs {
+    #[command(subcommand)]
+    pub cmd: Option<PublisherCmd>,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum PublisherCmd {
+    /// Show your publishing key and the publishers you recognize.
+    Show {},
+    /// Recognize a publisher's key, so their bundles say so on the card.
+    Trust {
+        /// Their full public key (64 hex characters).
+        key: String,
+        /// What to call them locally.
+        #[arg(long)]
+        label: String,
+    },
 }
 
 #[derive(Args, Debug)]
@@ -2835,8 +2893,9 @@ pub fn full_command_inventory() -> String {
          \n\
          The map, grouped by task:\n\
          \n  \
-         Set up      init · status · adapters · settings · self · completions\n  \
+         Set up      init · up · status · adapters · settings · self · completions\n  \
          Edit        add · set · search · remove · install · lib · toolset · adopt · export · import\n  \
+         Share       share · receive · publisher\n  \
          Render      apply · use · yes · instructions · lock · session · diff · uninstall\n  \
          Undo        undo · restore\n  \
          Protect     trust · explain · secret · guard · sign · verify\n  \
