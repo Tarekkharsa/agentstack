@@ -170,3 +170,57 @@ the MCP serve path for already-pinned skills, and this is an intake gate. Debt,
 named in the design doc rather than hidden: a package instruction member is
 pinned and reported but compiles into no file yet; that wiring is delivery-side
 and is folded into W5's runtime half.
+
+### W5 (runtime half) — boundary, laziness, and package members that actually reach something
+
+Shipped: package instruction members now compile into the managed region from
+their **pinned** bytes through the existing `plan_instructions` + `merge_md`
+path, on the rendered lane only, and — following W3's precedent — `lock` never
+creates an instruction file and never adds a region to a file that had none;
+when a member changed but no target carries a region it says so plainly and
+names `agentstack instructions --write`. `agentstack_load`/`list_loadable` now
+read descriptions from the pinned store snapshot instead of live library
+frontmatter, closing the seam W3 recorded as a debt (and making the listing
+cheaper, since pinned skills skip resolution entirely). Package-carried
+**server** members — previously pinned and reported but never served — now join
+the gateway's upstream set as the same `FrozenServer` shape everything else
+uses, fenced to a toolset that selects the package, resolved from the lock's
+pinned definition rather than the package's current `pack.toml`, with a new
+`Store::pin_server_definition` supplying the deposit that family was missing
+entirely (it had a digest and no bytes).
+
+Lazy start was **verified, not built**: gateway construction spawns no stdio
+child and opens no socket, and `try_call` reaches one slot directly rather than
+through `namespaced_tools()`, so a tool call starts exactly the server that owns
+the tool.
+
+Witnesses: `package_layer` (15 total) — the boundary is discoverable with no
+body entering context; a listed description comes from pinned bytes; an
+instruction member renders only into an existing managed region; a
+package-carried server is exposed only under a toolset that selects it,
+resolved from the lock rather than the mutated package, not started until one
+of its tools is called, and fails closed with a visible reason when its pinned
+definition cannot be verified.
+
+Judgment calls and limits, all deliberate: **transparent mode's tool listing
+defeats lazy start** — that path plus `tools_search`, `tools_bindings` and
+code-mode execution enumerate every upstream, which necessarily starts every
+stdio child and dials every HTTP endpoint. You cannot enumerate a server's
+tools without asking it; the only fix is a persisted per-server tool-list cache
+keyed by definition digest, which is new on-disk state on the delivery path and
+a new capability lane, so it was witnessed and documented rather than built.
+**This is a direct input to W4:** if the flip makes transparent mode the
+default, lazy start is defeated for everyone and the honest surfaces must say
+so. Package servers reach the live host gateway but **not** `run --sandbox` /
+`--lockdown`, because the grant handoff artifact would need a new binding kind
+— authority construction, deliberately not built. Package members carry no
+standing re-gate answers (`Blocked`/`KeepPinned`); not a content-binding hole,
+since every member digest is in the lock and the lock is in the trust digest,
+but a consent granularity that does not exist. A package server whose name is
+already claimed is refused rather than shadowed, and an unfenced gateway serves
+no package servers at all (unfenced is already maximal, so unioning them in
+would make package membership a widening mechanism). **Flagged first for
+review:** a package member's `ResolvedServer` carries `ServerOrigin::Inline`
+rather than a new variant — carried but never consulted on this path, with
+`provenance` naming the true source — chosen over rippling a third variant
+through six display and lockfile-schema sites.

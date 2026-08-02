@@ -178,6 +178,120 @@ A reader of either surface can always answer "which of these came from the
 package, and which did this project change?" without diffing against the
 package itself.
 
+## The boundary at runtime: names and descriptions, never bodies
+
+Selecting a package makes its **boundary** available, not its contents.
+`agentstack_list_loadable` lists each member skill by name, one-line
+description, `origin = "package"`, and the member's provenance string — read
+from the lock and from the pinned bytes in the content store, never from the
+library. A member's **body** enters agent context only when `agentstack_load`
+is called for that one member, and only after the store snapshot is re-verified
+against the digest the lock pins; a missing or tampered snapshot refuses and
+names `agentstack lock`. There is no path from the loader back to the package
+body in the library.
+
+Two consequences worth stating, because both are the point:
+
+- **A package's instruction members are not loadable.** The loadable index is
+  skill-only; an instruction is rendered-lane and reaches a file, not a
+  context window.
+- **Twenty members cost twenty lines, not twenty bodies.** Eagerly injecting
+  the bodies because a package was selected would recreate the context bloat
+  this lane exists to remove, under a new name
+  ([`automatic-delivery.md`](automatic-delivery.md) §"Boundary, not bodies").
+
+Server members are **lazy on the same principle**: a stdio child is spawned,
+and an HTTP upstream is dialled, on the first message that needs one — not when
+a toolset is selected and not when the served server set is read. The one path
+that contacts every upstream at once is *aggregated tool discovery*
+(transparent mode's `tools/list`, `tools_search`, code-mode bindings), because
+enumerating tools nobody has cached means asking each server for them. The
+default compact surface never does it.
+
+## A package's server member, served
+
+A `[[package.member]]` of kind `server` **is** a gateway upstream, on exactly
+the same terms as a manifest-declared one. It joins the served set at one
+place — the point in `Gateway::build` where the manifest/library resolution has
+just finished — as the same `FrozenServer` entry that resolution produces, so
+there is one upstream set, one transport path and one dispatch path
+(`CLAUDE.md` invariant 6). Nothing downstream distinguishes it: the compiled
+tool firewall folds over its name with all the others, its `${REF}`s resolve at
+the one secret-resolution site, and a call to it passes the trust-at-dispatch
+gate that fronts every tool call.
+
+Four properties, each load-bearing:
+
+- **The toolset is the whole admission decision.** A package's server is
+  reachable under a toolset that selected the package, and nowhere else — the
+  same fence, computed the same way, that decides which skill members are
+  loadable. A fence naming a toolset that is gone still fences to *nothing*
+  rather than widening to everything. And the **unfenced** gateway contributes
+  no package servers at all: unfenced already means every server the manifest
+  declares anywhere, so unioning every package's server on top would make
+  package membership a way to widen the surface rather than something a toolset
+  selects.
+- **The definition comes from the lock and the content store.** The member's
+  pinned checksum addresses a deposit of the exact definition bytes it covers,
+  re-verified against that digest at read time. The package's current
+  `pack.toml` is never opened at serving time — it is precisely the mutable
+  thing the pin exists to stop reading, and a serving path that re-read it
+  would run a command nobody reviewed. This is
+  [`pinned-serving-and-library-drift.md`](pinned-serving-and-library-drift.md)
+  §"The rendered lane" applied to the one pin family that previously had a
+  digest but no deposit.
+- **Unverifiable fails closed, and says so.** A member whose definition is
+  absent from the store, no longer hashes to its pin, or no longer parses is
+  not served, and the refusal takes the existing seatbelt path a drifted
+  library pin takes: it names the capability, the reason and `agentstack lock`,
+  lands in the audit log, and puts the member on the gateway's skipped list. A
+  name the project already serves from its manifest or the library is refused
+  the same way rather than shadowing it — two upstreams under one name have no
+  unambiguous dispatch.
+- **Lazy, like every other upstream.** Selecting the toolset builds the served
+  surface; reading which servers are proxied names them. Neither starts a stdio
+  child or dials an HTTP endpoint. Only calling one of its tools does.
+
+One boundary is deliberately not crossed: a **sandboxed or lockdown run**
+(`Gateway::from_frozen`) consumes the frozen server set its execution plan
+already classified, and that set is still built from `[servers.*]` and a
+toolset's `servers` list alone. Package-carried servers therefore reach the
+live host gateway (session, lease) and not a sandboxed run. Extending them into
+a run requires giving the run-grant artifact a binding for a package-carried
+definition — a change to authority construction, which is a decision to take
+deliberately rather than a wiring detail to add here.
+
+## The rendered-lane compile of an instruction member
+
+A package's instruction members compile into the managed instruction region
+through `render::instructions::plan_instructions` — the same compiler, the same
+`merge_md` region contract, and the same file the manifest's own
+`[instructions.*]` fragments reach. Package members compile **after** the
+project's own fragments, so a project's prose always has the last word in the
+region, and each is labelled `<package>:<member>` wherever fragments are
+reported.
+
+Four properties, each load-bearing:
+
+- **Pinned bytes, always.** The prose comes from the content store, addressed
+  by the member's digest and re-verified against it, exactly like a keep-pinned
+  fragment. A library that moves ahead rewrites nobody's `CLAUDE.md`; taking a
+  newer version means running `agentstack lock`.
+- **Still not an `[instructions.*]` entry.** Nothing is materialized into the
+  manifest, so dropping the package leaves no orphaned declaration behind.
+- **Conservative scoping, on the automatic path.** `agentstack lock` — the
+  command that re-pins members — refreshes the managed region only in a file
+  that **already carries one**. It never creates an instruction file, and never
+  adds a region to a file that had none: that is a decision a human makes by
+  running `apply` or `instructions --write`. This is W3's precedent
+  (`commands/upgrade.rs`), applied verbatim rather than re-derived.
+- **The report names the lane and the file.** `lock` prints a separate
+  `rendered lane:` line saying what was written and where — or, when no target
+  carries a region, that **no file was written**, plus the one command that
+  would render it. A member whose pinned bytes fail verification is excluded
+  and named rather than silently dropped from the region. No surface describes
+  an instruction as going live "via gateway", because it does not.
+
 ## Deferred by name: hooks and extensions
 
 A package carrying hook or extension members is **refused**, by name, with a
@@ -237,23 +351,20 @@ Against `CLAUDE.md`'s non-negotiable invariants.
 
 ## What this does not do
 
-Named so nobody reads it in. This document fixes the **schema** and the pins
-every delivery path reads; it changes nothing about what is currently served or
-written. Three consumers of these pins are the rest of W5 and are not settled
-here:
+Named so nobody reads it in. The four consumers this document originally
+deferred — the boundary without bodies, lazy server start, the rendered-lane
+compile of an instruction member, and serving a package's server member — have
+all landed and are described above. One thing remains untrue of a package, and
+it is not a gap in the pins:
 
-- the gateway exposing a package's member *boundary* — names and descriptions —
-  without loading bodies;
-- lazy server start, so a package's server connects on first tool use rather
-  than on activation;
-- the **rendered-lane compile of an instruction member**. The semantics above
-  are binding on that compile when it lands (toolset-scoped, rendered lane,
-  never an `[instructions.*]` entry), and the locked member set is the contract
-  it reads. Until then a package's instruction member is pinned and reported and
-  compiles into no file — which is the honest half-state to be in, since the
-  alternative would be writing into a user's `CLAUDE.md` from a path with no
-  witness behind it.
+- **Package members carry no standing re-gate answers.** `Blocked` and
+  `KeepPinned` decisions are keyed to manifest and library capabilities; the
+  trust walk does not enumerate package members, so a member cannot be
+  individually blocked or kept-pinned. It is not a hole in content binding —
+  every member's digest is in the lock, and the lock is in the trust digest, so
+  a member's bytes moving re-gates the whole project through the ordinary card.
+  It is a granularity the consent surface does not offer yet.
 
-Nothing in this list is a reason to read the lock as incomplete: the pins are
-exactly what the acceptance criterion asks for, and each consumer above adds a
-reader, never a second source of truth.
+It is not a reason to read the lock as incomplete: the pins are exactly what
+the acceptance criterion asks for, and every consumer above adds a reader,
+never a second source of truth.

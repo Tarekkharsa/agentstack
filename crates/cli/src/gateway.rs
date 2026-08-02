@@ -722,17 +722,6 @@ impl Gateway {
                             profile,
                         )
                     };
-                    if profile.is_some() {
-                        eprintln!(
-                            "gateway: {} — proxying only this toolset's {}",
-                            if matches!(fence, Fence::Lease(_)) {
-                                "MCP toolset lease active"
-                            } else {
-                                "session active"
-                            },
-                            crate::commands::count(raw.len(), "server")
-                        );
-                    }
                     // Library definitions are outside the trust digest, so they
                     // are integrity-checked against the lock's pinned digests
                     // before being served. Fail closed on every unverifiable
@@ -741,11 +730,12 @@ impl Gateway {
                     let lock = crate::lock::Lock::load(&ctx.dir)
                         .map_err(|e| {
                             eprintln!(
-                                "gateway: agentstack.lock is unreadable ({e:#}) — library-referenced servers will NOT be served until it is fixed"
+                                "gateway: agentstack.lock is unreadable ({e:#}) — library-referenced and package-carried servers will NOT be served until it is fixed"
                             );
                         })
                         .ok();
-                    raw.into_iter()
+                    let mut declared: Vec<crate::resolve::FrozenServer> = raw
+                        .into_iter()
                         .map(|(name, r)| {
                             let out = match r {
                                 Ok(rs) => {
@@ -756,7 +746,51 @@ impl Gateway {
                             };
                             (name, out)
                         })
-                        .collect()
+                        .collect();
+                    // W5 — a package's server member joins the SAME upstream
+                    // set, here and only here, as the same `FrozenServer`
+                    // shape. Everything downstream is therefore identical by
+                    // construction rather than by care: the compiled tool
+                    // firewall folds over `server_names` below (so policy can
+                    // only narrow these, never be widened by them), the loop
+                    // builds one `Upstream` per entry through the one transport
+                    // path, secrets resolve at that one site, and dispatch goes
+                    // through `try_call_attributed`'s trust gate like every
+                    // other upstream.
+                    //
+                    // Appended AFTER the pin verification above on purpose: a
+                    // package member is not library-referenced, and its bytes
+                    // were already re-verified against the digest the lock pins
+                    // — a stricter check than `verify_library_pin`'s, applied
+                    // to the definition itself rather than to a name.
+                    //
+                    // The fence is `profile`, the same value that decided the
+                    // declared set: `None` (unfenced, or a fence naming a
+                    // toolset that is gone) contributes nothing.
+                    if let Some(lock) = lock.as_ref() {
+                        let taken: Vec<String> = declared.iter().map(|(n, _)| n.clone()).collect();
+                        declared.extend(crate::resolve::package_runtime_servers(
+                            lock,
+                            &crate::store::Store::default_store(),
+                            profile,
+                            &taken,
+                        ));
+                    }
+                    // Reported after the package members joined, so the count a
+                    // user reads is the surface that is actually served rather
+                    // than the manifest-declared half of it.
+                    if profile.is_some() {
+                        eprintln!(
+                            "gateway: {} — proxying only this toolset's {}",
+                            if matches!(fence, Fence::Lease(_)) {
+                                "MCP toolset lease active"
+                            } else {
+                                "session active"
+                            },
+                            crate::commands::count(declared.len(), "server")
+                        );
+                    }
+                    declared
                 }
             };
             // `root` (the project root the relative server `cwd`s anchor at)

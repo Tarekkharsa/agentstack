@@ -16,7 +16,21 @@ pub fn run(args: &InstructionsArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let manifest = &ctx.loaded.manifest;
     let scope = args.scope.unwrap_or_else(|| Scope::default_for(&ctx.dir));
 
-    if manifest.instructions.is_empty() {
+    // The project's pinned package expansions: a package's instruction members
+    // compile into the same managed region (W5, rendered lane), so a project
+    // whose only house rules arrive through a package still has something to
+    // compile.
+    let pinned = crate::lock::Lock::load(&ctx.dir).unwrap_or_default();
+    let packages = crate::package::effective_members(&pinned);
+
+    if manifest.instructions.is_empty()
+        && crate::package::members_of_kind(
+            &pinned,
+            crate::lock::PackageMemberKind::Instruction,
+            None,
+        )
+        .is_empty()
+    {
         println!("Manifest defines no [instructions].");
         return Ok(());
     }
@@ -85,7 +99,7 @@ pub fn run(args: &InstructionsArgs, manifest_dir: Option<&Path>) -> Result<()> {
         let Some(desc) = ctx.registry.get(id) else {
             continue;
         };
-        let Some(plan) = plan_instructions(manifest, desc, scope, &ctx.dir) else {
+        let Some(plan) = plan_instructions(manifest, desc, scope, &ctx.dir, packages) else {
             continue;
         };
 

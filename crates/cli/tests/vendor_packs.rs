@@ -205,7 +205,7 @@ fn pack_instruction_carries_provenance_into_rendered_region() {
     let m = load(dir);
     let reg = Registry::load().unwrap();
     let claude = reg.get("claude-code").unwrap();
-    let plan = plan_instructions(&m, claude, Scope::Global, dir).unwrap();
+    let plan = plan_instructions(&m, claude, Scope::Global, dir, &[]).unwrap();
 
     assert!(plan.fragments.contains(&"linear_rules".to_string()));
     assert!(plan

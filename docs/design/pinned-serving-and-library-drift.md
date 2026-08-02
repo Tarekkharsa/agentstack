@@ -136,21 +136,30 @@ verification. Each keeps its existing message.
 
 ## Debt
 
-Two things are still true, and neither is fixed by the above.
+One of the two below is closed; the other is still true.
 
-**The description index reads live bytes.** `agentstack_list_loadable` builds its
-catalog by resolving each skill `PathOnly` and reading the `description` out of
-the live `SKILL.md` frontmatter — deliberately, because digesting every body
-would turn a cheap list into a full-library read-and-hash pass. So after a sync,
-the *one-line description* an agent sees for a pinned skill can come from the
-library's newer bytes while the *body* it loads is the pinned one. The blast
-radius is bounded (one line, capped by `INDEX_MAX_DESC_CHARS`, hostile input
-already assumed) but it is real, and it is the last place a library that moved
-ahead is visible to an agent without a re-gate. Closing it means either digesting
-at list time or serving descriptions from the store for every pinned skill; that
-is a cost decision, not a design one, and it is not made here. The keep-pinned
-case already takes the store-side answer — see `origin: "approved-copy"` in
-`list_loadable_with_lease` — so the mechanism exists.
+**The description index reads live bytes — closed 2026-08-03 (W5).** The catalog
+used to resolve each skill `PathOnly` and read the `description` out of the live
+`SKILL.md` frontmatter, so after a sync the *one-line description* an agent saw
+for a pinned skill could come from the library's newer bytes while the *body* it
+loaded was the pinned one. `list_loadable_with_lease` now takes the description
+from the **store snapshot for the skill's lock pin** whenever there is one,
+falling back to the live resolution only for an unpinned skill or a snapshot
+that holds no `SKILL.md`. That is the second of the two options weighed above —
+serving descriptions from the store — and it is the cheap one: no body is
+digested at list time, and a pinned skill skips resolution entirely, so the list
+got *cheaper* rather than dearer.
+
+The one thing that decision does **not** buy: the description line is not
+re-verified against the pin. That is deliberate and is not a weakening — it is
+exactly the trust level the live-frontmatter read already had (one bounded line
+of content assumed hostile either way), while the **body** is still re-verified
+against the pin by the load path before a byte of it reaches agent context. What
+changed is only which bytes the line comes from: the ones the project consented
+to. The listed entry carries `pinned: true` so a reader can tell which answer it
+got. Witnessed by
+`a_listed_description_comes_from_the_pinned_bytes_not_the_live_library` in
+`crates/cli/tests/package_layer.rs`.
 
 **The copy still tells two stories.** `use`, `doctor`, and `trust` describe this
 same divergence in their own words, from before the distinction existed — as

@@ -4,6 +4,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use agentstack_core::lock::{LockedPackage, PackageMemberKind};
 use anyhow::Result;
 
 use crate::adapter::{AdapterDescriptor, Registry};
@@ -46,11 +47,22 @@ impl InstrPlan {
 
 /// Build the instruction-file plan for one target in a scope, or `None` if the
 /// adapter has no instruction file for that scope.
+///
+/// `packages` are this project's **pinned** package expansions (W5). Their
+/// instruction members compile into the same managed region as the manifest's
+/// own fragments — the rendered lane, always, and never through the gateway
+/// (`docs/design/package-layer.md` §"Instruction-member semantics"). They are
+/// passed in rather than read from the lock here so each call site states what
+/// it means: `unrender` passes an empty slice because it is planning the whole
+/// region away, and every rendering caller passes
+/// [`crate::package::effective_members`]. A hidden lock read would have made
+/// `unrender` silently keep prose it was asked to remove.
 pub fn plan_instructions(
     manifest: &Manifest,
     desc: &AdapterDescriptor,
     scope: Scope,
     project_dir: &Path,
+    packages: &[LockedPackage],
 ) -> Option<InstrPlan> {
     let spec = desc.instructions.as_ref()?;
     let path = spec.path_for(scope, project_dir)?;
@@ -117,6 +129,34 @@ pub fn plan_instructions(
                 fragments.push(name.clone());
             }
             Err(_) => missing.push(name.clone()),
+        }
+    }
+
+    // W5 — package instruction members, after the project's own fragments so a
+    // project's prose always has the last word in the region.
+    //
+    // The bytes come from the content store by digest, exactly like a
+    // keep-pinned fragment, and never from the package body in the central
+    // library: that is the reproducibility rule (`automatic-delivery.md`), and
+    // it is why `lib sync` can move a package ahead without rewriting anybody's
+    // CLAUDE.md. `approved_fragment` re-verifies the deposit against the pin,
+    // so a tampered store fails closed to `missing` rather than compiling
+    // unreviewed prose into the user's daily-driver instruction file.
+    for pkg in packages {
+        for member in &pkg.members {
+            if member.kind != PackageMemberKind::Instruction {
+                continue;
+            }
+            // `<package>:<member>` — a report reader has to be able to tell a
+            // package's house rules from one this project wrote.
+            let label = format!("{}:{}", pkg.name, member.name);
+            match approved_fragment(&store, member.checksum.hex()) {
+                Some(text) => {
+                    blocks.push(text.trim_end_matches('\n').to_string());
+                    fragments.push(label);
+                }
+                None => missing.push(label),
+            }
         }
     }
 

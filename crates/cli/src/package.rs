@@ -365,7 +365,12 @@ fn pin_package_member(
                     loaded.name
                 )
             })?;
-            Sha256Hex::of(text.as_bytes())
+            // `Store::pin_server_definition` returns the same digest this line
+            // always produced (`Sha256Hex::of(text)`) and additionally deposits
+            // the bytes it covers — which is what lets the gateway serve this
+            // member from the lock and the store, without ever re-reading the
+            // package's current `pack.toml`.
+            store.pin_server_definition(&member.name, &text)
         }
         PackageMemberKind::Skill => {
             // Containment first: a member path is remote content and must stay
@@ -470,6 +475,27 @@ fn pin_replacement(
             );
             let resolved = crate::resolve::resolve_server(manifest, library, lib_home, replacement)
                 .map_err(anyhow::Error::from)?;
+            // Deposit the bytes this checksum covers, for the same reason the
+            // package arm does — a replaced member is still a served member, so
+            // runtime must be able to read its definition from the store.
+            //
+            // The two origins hash different bytes (`resolve_server`: the
+            // serialized table for an inline server, the definition FILE for a
+            // library one), so each is deposited from the source its own
+            // checksum was taken over. Deposit is content-addressed, so a text
+            // that no longer hashes to `resolved.checksum` simply lands under
+            // its own address and leaves the pin's address empty — a
+            // fail-closed miss at serve time, never a wrong definition served.
+            let definition = match resolved.origin {
+                crate::resolve::ServerOrigin::Inline => toml::to_string(&resolved.server).ok(),
+                crate::resolve::ServerOrigin::Library => std::fs::read_to_string(
+                    crate::resolve::library_server_path(lib_home, replacement),
+                )
+                .ok(),
+            };
+            if let Some(text) = definition {
+                store.pin_server_definition(&member.name, &text);
+            }
             Sha256Hex::parse(&resolved.checksum)?
         }
         PackageMemberKind::Instruction => {
@@ -517,6 +543,57 @@ pub fn effective_members(lock: &Lock) -> &[LockedPackage] {
 /// only input.
 pub fn effective_members_of<'a>(lock: &'a Lock, name: &str) -> Option<&'a LockedPackage> {
     lock.get_package(name)
+}
+
+/// Every pinned member of one kind, paired with the package that carries it,
+/// narrowed to what a toolset fence admits.
+///
+/// This is the **boundary** read: it answers "which members are in scope right
+/// now" from names, kinds and digests alone — no member body is opened here,
+/// which is what lets a package expose its boundary without loading twenty
+/// skill bodies into context (`automatic-delivery.md` §"Boundary, not bodies").
+///
+/// `profile` is the runtime fence: `Some(toolset)` keeps only packages that
+/// toolset selected (the lock records which ones did, in `toolsets`), `None`
+/// is the unfenced, development-open read. The fence is applied here rather
+/// than by each caller so the loadable index and the load path cannot disagree
+/// about what is in scope.
+pub fn members_of_kind<'a>(
+    lock: &'a Lock,
+    kind: PackageMemberKind,
+    profile: Option<&str>,
+) -> Vec<(&'a LockedPackage, &'a LockedPackageMember)> {
+    lock.packages
+        .iter()
+        .filter(|pkg| match profile {
+            Some(p) => pkg.toolsets.iter().any(|t| t == p),
+            None => true,
+        })
+        .flat_map(|pkg| {
+            pkg.members
+                .iter()
+                .filter(move |m| m.kind == kind)
+                .map(move |m| (pkg, m))
+        })
+        .collect()
+}
+
+/// One named member of one kind, under the same fence as [`members_of_kind`].
+///
+/// Member names are unique per package but not across packages; the first
+/// match in lock order wins, which is deterministic because
+/// [`Lock::upsert_package`] keeps packages sorted by name.
+///
+/// [`Lock::upsert_package`]: agentstack_core::lock::Lock::upsert_package
+pub fn member_of_kind<'a>(
+    lock: &'a Lock,
+    kind: PackageMemberKind,
+    profile: Option<&str>,
+    name: &str,
+) -> Option<(&'a LockedPackage, &'a LockedPackageMember)> {
+    members_of_kind(lock, kind, profile)
+        .into_iter()
+        .find(|(_, m)| m.name == name)
 }
 
 /// Where a library package's body lives for a `path` source — the one place

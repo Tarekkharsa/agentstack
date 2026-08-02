@@ -896,6 +896,8 @@ fn offer_house_rules_inner(ctx: &super::Context, target_ids: &[String]) -> Resul
                 desc,
                 Scope::Global,
                 &home,
+                // The machine layer: no project lock, so no package members.
+                &[],
             ) else {
                 continue;
             };

@@ -198,6 +198,11 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
         println!("{} {notice}", "⚠".yellow());
     }
 
+    // W5, the rendered lane. A package's instruction members are pinned above;
+    // this is where the pinned bytes reach a file. Deliberately BEFORE the
+    // `args.quiet` early return: quiet suppresses narration, never a write.
+    let rendered_lane = render_package_instructions(&ctx)?;
+
     let from = match &profiles {
         Some(p) => super::count(p.len(), "toolset"),
         None => "the implicit default (no toolsets declared)".to_string(),
@@ -228,6 +233,11 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
         // card says so in its own words. A second summary plus a competing
         // "Next:" is exactly the three-screens experience slice B removes.
         println!("  {} pinned {pinned_summary}", "✓".green());
+        // A file written is never suppressed, however quiet the caller asked
+        // to be — the rendered lane is a project artifact, not narration.
+        for line in &rendered_lane {
+            println!("  {line}");
+        }
         return Ok(());
     }
     println!(
@@ -235,9 +245,22 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
         "✓".green(),
         Lock::path(&ctx.dir).display()
     );
-    println!(
-        "  no configs rendered, no skills materialized — that stays `agentstack use --write`."
-    );
+    for line in &rendered_lane {
+        println!("  {line}");
+    }
+    // The claim narrows when a package carried house rules: instructions ARE
+    // rendered on that path, and one blended "nothing was rendered" sentence
+    // beside a `rendered lane:` line is exactly the dishonesty the delivery
+    // contract's copy rules forbid.
+    if rendered_lane.is_empty() {
+        println!(
+            "  no configs rendered, no skills materialized — that stays `agentstack use --write`."
+        );
+    } else {
+        println!(
+            "  no server configs rendered, no skills materialized — that stays `agentstack use --write`."
+        );
+    }
     let target_ids: Vec<String> = ctx.registry.ids().map(str::to_string).collect();
     let mode = super::overview::detect_mode(&ctx, &target_ids);
     let trust = crate::trust::check(&trust_base);
@@ -563,6 +586,103 @@ pub(crate) fn record_package_pins(
         lock.save(dir)?;
     }
     Ok(pinned)
+}
+
+/// Compile this project's **pinned** package instruction members into the
+/// managed instruction region, and describe on the rendered lane what happened.
+/// Returns the report lines (empty when the project has no package instruction
+/// member at all, which is the overwhelmingly common case).
+///
+/// Two rules, both inherited rather than invented:
+///
+/// - **Conservative scoping**, exactly as `upgrade::rerender_managed_regions`
+///   applies it (W3): only a target whose instruction file ALREADY carries the
+///   managed region is written. Locking a package must never be the reason a
+///   `CLAUDE.md` first appears in a repo, or the reason an existing one first
+///   gains an agentstack region — that is a decision a human makes by running
+///   `apply` or `instructions --write`. `manages_file` is that whole rule.
+/// - **Region merging is `render::merge_md`'s job**, reached through
+///   `plan_instructions`, so prose outside the markers survives untouched and
+///   there is exactly one implementation of the region contract.
+///
+/// The lane vocabulary is binding: this is the RENDERED lane. A package's
+/// instruction member is never described as going live "via gateway", because
+/// it does not — it goes into a file, and this says which one.
+fn render_package_instructions(ctx: &super::Context) -> Result<Vec<String>> {
+    let pinned = Lock::load(&ctx.dir).unwrap_or_default();
+    let members =
+        crate::package::members_of_kind(&pinned, crate::lock::PackageMemberKind::Instruction, None);
+    if members.is_empty() {
+        return Ok(Vec::new());
+    }
+    let manifest = &ctx.loaded.manifest;
+    let packages = crate::package::effective_members(&pinned);
+    let scope = crate::scope::Scope::default_for(&ctx.dir);
+    let target_ids = crate::render::resolve_targets(manifest, &ctx.registry, &[], &ctx.dir)?;
+
+    let mut written: Vec<String> = Vec::new();
+    let mut unverifiable: Vec<String> = Vec::new();
+    for id in &target_ids {
+        let Some(desc) = ctx.registry.get(id) else {
+            continue;
+        };
+        let Some(plan) = crate::render::instructions::plan_instructions(
+            manifest, desc, scope, &ctx.dir, packages,
+        ) else {
+            continue;
+        };
+        if !crate::render::instructions::manages_file(&plan.path) {
+            continue;
+        }
+        // A member whose pinned bytes are missing or fail verification lands in
+        // `missing`; writing then would silently delete its prose from the
+        // region. Fail closed to "not written", and say so.
+        for name in &plan.missing {
+            if !unverifiable.contains(name) {
+                unverifiable.push(name.clone());
+            }
+        }
+        if !plan.missing.is_empty() || !plan.changed() {
+            continue;
+        }
+        let display = plan
+            .path
+            .strip_prefix(&ctx.dir)
+            .unwrap_or(&plan.path)
+            .display()
+            .to_string();
+        plan.write()
+            .with_context(|| format!("rendering {}", plan.path.display()))?;
+        if !written.contains(&display) {
+            written.push(display);
+        }
+    }
+
+    let count = super::count(members.len(), "package house-rule fragment");
+    let mut lines = Vec::new();
+    if written.is_empty() {
+        // The honest negative, and the one command that would render it.
+        lines.push(format!(
+            "rendered lane: {count} pinned; no instruction file here carries agentstack's \
+             managed region, so no file was written"
+        ));
+        lines.push(
+            "  ↳ `agentstack instructions --write` renders the region into CLAUDE.md / AGENTS.md"
+                .to_string(),
+        );
+    } else {
+        lines.push(format!(
+            "rendered lane: {count} pinned; managed region updated in {}",
+            written.join(", ")
+        ));
+    }
+    if !unverifiable.is_empty() {
+        lines.push(format!(
+            "  ↳ {} could not be served from the content store — re-run `agentstack lock`",
+            unverifiable.join(", ")
+        ));
+    }
+    Ok(lines)
 }
 
 /// Resolve the named profiles' skill + server refs through the library-aware

@@ -78,11 +78,11 @@ fn machine_instructions_merge_beneath_project_loads_global_scope_only() {
     // Global scope compiles both; project scope only the project's own.
     let reg = agentstack::adapter::Registry::load().unwrap();
     let desc = reg.get("claude-code").unwrap();
-    let gp = plan_instructions(m, desc, Scope::Global, &ctx.dir).unwrap();
+    let gp = plan_instructions(m, desc, Scope::Global, &ctx.dir, &[]).unwrap();
     assert_eq!(gp.fragments, ["style", "house"]);
     assert!(gp.proposed.contains("Machine style."));
     assert!(gp.proposed.contains("Project rule."));
-    let pp = plan_instructions(m, desc, Scope::Project, &ctx.dir).unwrap();
+    let pp = plan_instructions(m, desc, Scope::Project, &ctx.dir, &[]).unwrap();
     assert_eq!(pp.fragments, ["house"]);
     assert!(
         !pp.proposed.contains("Machine style."),

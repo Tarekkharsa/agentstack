@@ -223,7 +223,10 @@ pub(crate) fn plan(
             // Managed regions in CLAUDE.md / AGENTS.md. No state gate: the
             // region is self-delimiting, so an empty manifest plans it away
             // whether or not this machine's state file remembers writing it.
-            if let Some(plan) = plan_instructions(&empty, desc, scope, &ctx.dir) {
+            // Empty manifest AND no package members: un-rendering plans the
+            // whole region away, and a package's instruction members are part
+            // of that region like any other fragment.
+            if let Some(plan) = plan_instructions(&empty, desc, scope, &ctx.dir, &[]) {
                 if plan.changed() {
                     out.removes_instructions = true;
                     out.removals.push(Removal {

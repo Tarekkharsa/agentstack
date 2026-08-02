@@ -778,7 +778,12 @@ fn managed_region_snapshot(ctx: &super::Context) -> Vec<(PathBuf, Vec<u8>)> {
 /// reimplemented here: prose outside the markers must survive untouched.
 fn rerender_managed_regions(ctx: &super::Context) -> Result<Vec<PathBuf>> {
     let manifest = &ctx.loaded.manifest;
-    if manifest.instructions.is_empty() {
+    // W5: a package's instruction members compile into the same region, so an
+    // upgrade in a project whose house rules arrive only through a package
+    // still has a region to refresh.
+    let pinned = Lock::load(&ctx.dir).unwrap_or_default();
+    let packages = crate::package::effective_members(&pinned);
+    if manifest.instructions.is_empty() && packages.iter().all(|p| p.members.is_empty()) {
         return Ok(Vec::new());
     }
     let scope = Scope::default_for(&ctx.dir);
@@ -788,7 +793,7 @@ fn rerender_managed_regions(ctx: &super::Context) -> Result<Vec<PathBuf>> {
         let Some(desc) = ctx.registry.get(id) else {
             continue;
         };
-        let Some(plan) = plan_instructions(manifest, desc, scope, &ctx.dir) else {
+        let Some(plan) = plan_instructions(manifest, desc, scope, &ctx.dir, packages) else {
             continue;
         };
         if !manages_file(&plan.path) {

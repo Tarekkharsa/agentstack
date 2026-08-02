@@ -2270,6 +2270,51 @@ fn list_loadable_with_lease(
             }
             None => {}
         }
+        // A PINNED skill's description comes from the PINNED bytes.
+        //
+        // This closes the seam `pinned-serving-and-library-drift.md` §"Debt"
+        // named: the catalog used to resolve every skill `PathOnly` and read
+        // the description out of the LIVE `SKILL.md`, so after a `lib sync`
+        // the one-line description an agent saw could come from the library's
+        // newer bytes while the body `agentstack_load` served was the pinned
+        // one. Two surfaces, one skill, two stories.
+        //
+        // The cheap half of the two options that doc weighed: read the
+        // description from the store snapshot, rather than digesting every
+        // body at list time. That means the description is not re-verified
+        // here — deliberately, and it is not a weakening: it is exactly the
+        // trust level the live-frontmatter read already had (one bounded line
+        // of content assumed hostile either way), while the BODY is still
+        // re-verified against the pin by `load_capability_with_lease` before a
+        // byte of it enters context. What changes is only which bytes the line
+        // comes from: the ones this project consented to.
+        //
+        // Origin is derived from the manifest table rather than the resolver,
+        // which is the resolver's own inline-first rule stated directly — and
+        // it lets a pinned skill skip resolution entirely.
+        if let Some(entry) = lock.get(&name) {
+            let snap = libctx
+                .store
+                .root()
+                .join("content")
+                .join(entry.checksum.hex());
+            if let (Some(desc), _) = read_skill_md(&snap) {
+                let origin = if m.skills.contains_key(&name) {
+                    "manifest"
+                } else {
+                    "library"
+                };
+                entries.push(json!({
+                    "name": name,
+                    "description": desc,
+                    "kind": "skill",
+                    "origin": origin,
+                    "pinned": true,
+                    "loaded": loaded.contains(&name),
+                }));
+                continue;
+            }
+        }
         // PathOnly: this catalog only reads SKILL.md descriptions — digesting
         // every skill body here would turn a cheap list into a full-library
         // read+hash pass.
@@ -2302,6 +2347,46 @@ fn list_loadable_with_lease(
             "kind": "skill",
             "origin": origin,
             "loaded": loaded.contains(&name),
+        }));
+    }
+    // W5 — **the package boundary, without the bodies.**
+    //
+    // Activating a package makes its capability boundary discoverable: each
+    // member skill's name and one-line description, plus where it came from.
+    // Not its contents. Nothing below reads a member's body into any response;
+    // a body enters context only when `agentstack_load` is called for that one
+    // member, one at a time, digest-verified. Eagerly injecting twenty skill
+    // bodies because a package was selected is the context bloat this whole
+    // lane exists to remove (`automatic-delivery.md` §"Boundary, not bodies").
+    //
+    // The member set comes from the LOCK — never the library, which may have
+    // moved arbitrarily far ahead — and is fenced by the same toolset that
+    // fences everything else. A member name a manifest or library skill
+    // already claimed is skipped, so the inline-first precedence that governs
+    // the load path governs this listing too.
+    for (pkg, member) in
+        crate::package::members_of_kind(&lock, crate::lock::PackageMemberKind::Skill, profile)
+    {
+        if entries.iter().any(|e| e["name"] == member.name.as_str()) {
+            continue;
+        }
+        let snap = libctx
+            .store
+            .root()
+            .join("content")
+            .join(member.checksum.hex());
+        let desc = read_skill_md(&snap)
+            .0
+            .unwrap_or_else(|| "(pinned bytes unavailable — run `agentstack lock`)".to_string());
+        entries.push(json!({
+            "name": member.name,
+            "description": desc,
+            "kind": "skill",
+            "origin": "package",
+            "package": pkg.name,
+            "provenance": member.provenance,
+            "pinned": true,
+            "loaded": loaded.contains(&member.name),
         }));
     }
     // The built-in manual rides along unless the project carries its own copy
@@ -2498,13 +2583,23 @@ fn load_capability_with_lease(
         .as_ref()
         .map(|l| l.profile.as_str())
         .or_else(|| session.as_ref().map(|s| s.profile.as_str()));
+    // Read once, used three times below (the fence, the package-member serve,
+    // and the pin verification of an ordinary skill). Loaded here rather than
+    // further down so the fence and the serve cannot disagree about what this
+    // project pinned.
+    let lock = crate::lock::Lock::load(&ctx.dir)?;
+    let declared = loadable_skill_names(m, &libctx.library, profile);
+    // W5 — a package member is admitted by the package's selection, not by
+    // being named in the toolset's `skills` list. The toolset still fences it:
+    // `member_of_kind` only returns members of packages THIS toolset selected.
+    let package_member =
+        crate::package::member_of_kind(&lock, crate::lock::PackageMemberKind::Skill, profile, name)
+            .map(|(pkg, member)| (pkg.name.clone(), member.clone()));
+
     // Fence: an MCP lease takes precedence; the native session remains the
     // backward-compatible fallback.
     if let Some(profile) = profile {
-        if !loadable_skill_names(m, &libctx.library, Some(profile))
-            .iter()
-            .any(|n| n == name)
-        {
+        if !declared.iter().any(|n| n == name) && package_member.is_none() {
             anyhow::bail!(
                 "'{name}' is not loadable in toolset '{profile}' — add it to the toolset to allow it"
             );
@@ -2566,11 +2661,59 @@ fn load_capability_with_lease(
         None => {}
     }
 
+    // W5 — serve one package member skill, on demand, from its pinned bytes.
+    //
+    // Only when no manifest or library skill claims the name: inline-first
+    // precedence is the resolver's rule, and the loadable index above applies
+    // exactly the same one, so the two surfaces cannot advertise one skill and
+    // serve another.
+    //
+    // There is no live path here at all — no resolver, no library directory,
+    // nothing that a `lib sync` could move underneath the project. The bytes
+    // come from the content-addressed store, addressed by the digest the lock
+    // pins, and `verified_snapshot` re-proves that the deposit still hashes to
+    // its own name before a byte of it is read (the store is writable, so a
+    // read that did not re-prove would be trusting the filesystem instead of
+    // the digest). A missing or tampered snapshot refuses; there is
+    // deliberately no fallback to the package body in the library, which is
+    // exactly the mutable thing the pin exists to stop reading.
+    if let Some((package, member)) = package_member.filter(|_| !declared.iter().any(|n| n == name))
+    {
+        let hex = member.checksum.hex();
+        let snap = libctx.store.root().join("content").join(hex);
+        if !crate::store::verified_snapshot(&snap, hex) {
+            anyhow::bail!(
+                "refusing to load '{name}': its pinned bytes are missing from the content store \
+                 or failed verification — run `agentstack lock` to re-pin package '{package}'"
+            );
+        }
+        let (_, body) = read_skill_md(&snap);
+        let instructions = body.with_context(|| format!("skill '{name}' has no SKILL.md"))?;
+        let newly = if lease.is_some() {
+            record_lease_load(lease_store, name, reason)?
+        } else if session.is_some() {
+            crate::session::record_load(&ctx.dir, name, reason)?
+        } else {
+            false
+        };
+        record_load_activity(name, reason, Some(ctx.dir.display().to_string()));
+        return Ok(serde_json::to_string_pretty(&json!({
+            "loaded": name,
+            "origin": "package",
+            "package": package,
+            "provenance": member.provenance,
+            "instructions": instructions,
+            "sticky": lease.is_some() || session.is_some(),
+            "newly_loaded": newly,
+            "fenced": profile.is_some(),
+            "lease": lease.as_ref().map(|l| l.profile.clone()),
+        }))?);
+    }
+
     // Inline-first, then the central library — same order as `use`. NoFetch
     // (not PathOnly): what's served must be digest-verified against its
     // agentstack.lock pin — the content the human trusted — so the body is
     // hashed even though nothing here records a lock entry.
-    let lock = crate::lock::Lock::load(&ctx.dir)?;
     let pinned_rev = lock.get(name).and_then(|entry| entry.rev.as_deref());
     let resolved = crate::resolve::resolve_skill_with_pin(
         m,

@@ -631,3 +631,836 @@ fn a_project_referencing_no_package_is_untouched() {
     lock_cmd::run(&LockArgs::default(), Some(&proj)).unwrap();
     assert_eq!(fs::read(Lock::path(&proj)).unwrap(), first);
 }
+
+// ---------------------------------------------------------------------------
+// W5 acceptance, the runtime half: the boundary is exposed without loading
+// bodies, and a server starts on first tool use rather than on activation.
+// ---------------------------------------------------------------------------
+
+/// Drive one real `agentstack mcp` process against `proj`, in eager mode, and
+/// return one parsed JSON-RPC response per request.
+///
+/// A subprocess rather than an in-process call because the loadable index and
+/// the load path are only reachable through the protocol — and because the
+/// machine-global load stream this asserts on is written by the process that
+/// actually served the load.
+fn mcp_exchange(
+    proj: &Path,
+    home: &Path,
+    requests: &[serde_json::Value],
+) -> Vec<serde_json::Value> {
+    use std::io::Write;
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_agentstack"))
+        .args(["mcp", "--manifest-dir"])
+        .arg(proj)
+        .env("HOME", home)
+        .env("AGENTSTACK_HOME", home.join(".agentstack"))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut stdin = child.stdin.take().unwrap();
+    for request in requests {
+        writeln!(stdin, "{request}").unwrap();
+    }
+    drop(stdin);
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success(), "the mcp server exited cleanly");
+    String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect()
+}
+
+/// The JSON payload an `agentstack_*` tool call answers with.
+fn tool_json(response: &serde_json::Value) -> serde_json::Value {
+    serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap()).unwrap()
+}
+
+/// Every line of the machine-global on-demand load stream — the record of what
+/// actually entered agent context.
+fn recorded_loads(home: &Path) -> Vec<serde_json::Value> {
+    let path = home.join(".agentstack/audit/loads.jsonl");
+    fs::read_to_string(path)
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect()
+}
+
+/// A package whose skill member carries a real frontmatter description, so the
+/// boundary has something to expose that is not the body.
+const BOUNDARY_PACK: &str = r#"
+name = "rust-backend"
+description = "Rust backend house rules"
+
+[[skill]]
+name = "sql-review"
+path = "skills/sql-review"
+
+[[instruction]]
+name = "house-rules"
+path = "instructions/house.md"
+"#;
+
+const SQL_REVIEW_BODY: &str = "---\nname: sql-review\ndescription: Reviews SQL migrations for locks.\n---\n\nZZBODYMARKER — the full instructions.\n";
+
+/// *The boundary is exposed without loading bodies.* Activating a toolset that
+/// selects a package makes each member skill discoverable by name and
+/// description — and nothing about any member's BODY reaches the agent until
+/// that one member is loaded on purpose.
+///
+/// The negative half is the one that matters: eagerly injecting twenty skill
+/// bodies because a package was selected would recreate, under a new name, the
+/// context bloat this whole lane exists to remove
+/// (`automatic-delivery.md` §"Boundary, not bodies").
+#[test]
+fn activating_a_package_exposes_the_boundary_without_loading_any_body() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let (proj, lib_home) = machine(&tmp);
+    let home = tmp.path().join("home");
+    install_package(
+        &lib_home,
+        "rust-backend",
+        "1.4.0",
+        BOUNDARY_PACK,
+        &[
+            ("skills/sql-review/SKILL.md", SQL_REVIEW_BODY),
+            ("instructions/house.md", "Prefer boring Rust.\n"),
+        ],
+    );
+    write_manifest(
+        &proj,
+        "version = 1\n[profiles.backend]\npackages = [\"rust-backend\"]\n",
+    );
+    lock_cmd::run(&LockArgs::default(), Some(&proj)).unwrap();
+
+    // Activate the toolset, then list. Two calls, no load.
+    let responses = mcp_exchange(
+        &proj,
+        &home,
+        &[
+            serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} }),
+            serde_json::json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "agentstack_lease_open", "arguments": { "profile": "backend" } } }),
+            serde_json::json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": { "name": "agentstack_list_loadable", "arguments": {} } }),
+        ],
+    );
+    let catalog = tool_json(&responses[2]);
+    let entries = catalog["loadable"].as_array().unwrap();
+    let member = entries
+        .iter()
+        .find(|e| e["name"] == "sql-review")
+        .expect("the package member is discoverable");
+
+    // The boundary: name, one-line description, and where it came from.
+    assert_eq!(member["description"], "Reviews SQL migrations for locks.");
+    assert_eq!(member["origin"], "package");
+    assert_eq!(member["package"], "rust-backend");
+    assert_eq!(
+        member["provenance"],
+        "package:rust-backend@1.4.0#skills/sql-review"
+    );
+    assert_eq!(member["loaded"], false);
+
+    // An INSTRUCTION member is not agent-loadable context — it is the rendered
+    // lane, and the loadable index is skill-only.
+    assert!(
+        !entries.iter().any(|e| e["name"] == "house-rules"),
+        "an instruction member never appears as loadable: {entries:?}"
+    );
+
+    // Not one byte of any member's body is in the listing…
+    let serialized = serde_json::to_string(&catalog).unwrap();
+    assert!(
+        !serialized.contains("ZZBODYMARKER"),
+        "no member body is in the boundary listing: {serialized}"
+    );
+    // …and nothing was loaded. The load stream is the record of what entered
+    // agent context, and after activating a package and listing it, it is empty.
+    assert!(
+        recorded_loads(&home).is_empty(),
+        "activation + listing loads no body"
+    );
+
+    // The body arrives only on an explicit, one-at-a-time load — served from
+    // the PINNED bytes, with the package's provenance on it.
+    let responses = mcp_exchange(
+        &proj,
+        &home,
+        &[
+            serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} }),
+            serde_json::json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "agentstack_lease_open", "arguments": { "profile": "backend" } } }),
+            serde_json::json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": { "name": "agentstack_load", "arguments": { "name": "sql-review", "reason": "reviewing a migration" } } }),
+        ],
+    );
+    let loaded = tool_json(&responses[2]);
+    assert_eq!(loaded["origin"], "package");
+    assert_eq!(loaded["package"], "rust-backend");
+    assert!(loaded["instructions"]
+        .as_str()
+        .unwrap()
+        .contains("ZZBODYMARKER"));
+    let stream = recorded_loads(&home);
+    assert_eq!(stream.len(), 1, "exactly one body, on purpose: {stream:?}");
+    assert_eq!(stream[0]["name"], "sql-review");
+}
+
+/// The honesty fix from `pinned-serving-and-library-drift.md` §"Debt": the
+/// listed one-line description comes from the bytes this project PINNED, not
+/// from whatever the central library now holds.
+///
+/// Before this, the catalog resolved every skill `PathOnly` and read the live
+/// `SKILL.md`, so after a `lib sync` an agent could read the library's newer
+/// description for a skill whose body would load at the pinned version — one
+/// skill, two stories, and the last place a library that moved ahead was
+/// visible to an agent with no re-gate behind it.
+#[test]
+fn a_listed_description_comes_from_the_pinned_bytes_not_the_live_library() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let (proj, lib_home) = machine(&tmp);
+    let home = tmp.path().join("home");
+
+    // A central-library skill, pinned by this project.
+    fs::create_dir_all(lib_home.join("skills/quokka-lint")).unwrap();
+    fs::write(
+        lib_home.join("skills/quokka-lint/SKILL.md"),
+        "---\nname: quokka-lint\ndescription: PINNEDDESC at the reviewed version.\n---\nbody\n",
+    )
+    .unwrap();
+    let mut lib = Library::load(&lib_home).unwrap();
+    lib.upsert(LibrarySkill {
+        name: "quokka-lint".into(),
+        source: "path".into(),
+        path: Some("quokka-lint".into()),
+        git: None,
+        rev: None,
+        subpath: None,
+        checksum: None,
+        version: None,
+        provenance: Some("manual".into()),
+    });
+    lib.save(&lib_home).unwrap();
+
+    write_manifest(
+        &proj,
+        "version = 1\n[profiles.p]\nskills = [\"quokka-lint\"]\n",
+    );
+    lock_cmd::run(&LockArgs::default(), Some(&proj)).unwrap();
+
+    // The library moves ahead — exactly what `lib sync` does. Per the update
+    // model this must change nothing in any project.
+    fs::write(
+        lib_home.join("skills/quokka-lint/SKILL.md"),
+        "---\nname: quokka-lint\ndescription: LIVEDESC from the library's newer bytes.\n---\nnew body\n",
+    )
+    .unwrap();
+
+    let responses = mcp_exchange(
+        &proj,
+        &home,
+        &[
+            serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} }),
+            serde_json::json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "agentstack_list_loadable", "arguments": {} } }),
+        ],
+    );
+    let catalog = tool_json(&responses[1]);
+    let entry = catalog["loadable"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["name"] == "quokka-lint")
+        .expect("the pinned skill is listed");
+
+    assert_eq!(
+        entry["description"], "PINNEDDESC at the reviewed version.",
+        "the description comes from the pin, not the live library"
+    );
+    assert_eq!(entry["pinned"], true);
+    assert_eq!(
+        entry["origin"], "library",
+        "origin still says where the reference was satisfied"
+    );
+}
+
+/// The rendered lane for a package instruction member, under W3's conservative
+/// scoping: the managed region is refreshed where one already exists, and
+/// locking a package is NEVER the reason an instruction file (or a managed
+/// region inside one) first appears in a repo.
+#[test]
+fn a_package_instruction_member_renders_into_an_existing_managed_region_only() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let (proj, lib_home) = machine(&tmp);
+    install_package(
+        &lib_home,
+        "rust-backend",
+        "1.4.0",
+        BOUNDARY_PACK,
+        &[
+            ("skills/sql-review/SKILL.md", SQL_REVIEW_BODY),
+            ("instructions/house.md", "Prefer boring Rust.\n"),
+        ],
+    );
+    write_manifest(
+        &proj,
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [profiles.backend]\npackages = [\"rust-backend\"]\n",
+    );
+
+    // No instruction file at all: locking pins the member and writes nothing.
+    lock_cmd::run(&LockArgs::default(), Some(&proj)).unwrap();
+    assert!(
+        !proj.join("CLAUDE.md").exists(),
+        "locking a package never creates an instruction file"
+    );
+
+    // A CLAUDE.md that exists but carries no managed region: still untouched.
+    let unmanaged = "# House\n\nOur own prose, written by a human.\n";
+    fs::write(proj.join("CLAUDE.md"), unmanaged).unwrap();
+    lock_cmd::run(&LockArgs::default(), Some(&proj)).unwrap();
+    assert_eq!(
+        fs::read_to_string(proj.join("CLAUDE.md")).unwrap(),
+        unmanaged,
+        "locking never adds a managed region to a file that had none"
+    );
+
+    // And the report says so, naming the command that WOULD render it.
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_agentstack"))
+        .args(["lock", "--manifest-dir"])
+        .arg(&proj)
+        .env("HOME", tmp.path().join("home"))
+        .env("AGENTSTACK_HOME", tmp.path().join("home/.agentstack"))
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    assert!(
+        text.contains("rendered lane:"),
+        "the two lanes are reported on separate lines: {text}"
+    );
+    assert!(
+        text.contains("no file was written"),
+        "the honest negative is stated: {text}"
+    );
+    assert!(
+        text.contains("agentstack instructions --write"),
+        "and the command that would render it is named: {text}"
+    );
+    assert!(
+        !text.contains("via gateway"),
+        "an instruction is never described as going live via gateway: {text}"
+    );
+
+    // Now the file carries agentstack's managed region — the human accepted one.
+    fs::write(
+        proj.join("CLAUDE.md"),
+        "# House\n\nOur own prose.\n\n<!-- agentstack:start -->\nstale\n<!-- agentstack:end -->\n\nTrailing prose.\n",
+    )
+    .unwrap();
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_agentstack"))
+        .args(["lock", "--manifest-dir"])
+        .arg(&proj)
+        .env("HOME", tmp.path().join("home"))
+        .env("AGENTSTACK_HOME", tmp.path().join("home/.agentstack"))
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    let rendered = fs::read_to_string(proj.join("CLAUDE.md")).unwrap();
+    assert!(
+        rendered.contains("Prefer boring Rust."),
+        "the member's PINNED prose is in the region: {rendered}"
+    );
+    assert!(
+        rendered.contains("Our own prose.") && rendered.contains("Trailing prose."),
+        "prose outside the markers survives untouched: {rendered}"
+    );
+    assert!(
+        text.contains("managed region updated in CLAUDE.md"),
+        "the rendered lane names what was written and where: {text}"
+    );
+
+    // The bytes rendered are the PINNED ones: the library moving ahead changes
+    // no rendered file until an explicit re-lock takes the new version.
+    fs::write(
+        lib_home.join("packages/rust-backend/instructions/house.md"),
+        "Prefer exciting Rust.\n",
+    )
+    .unwrap();
+    let plan_only = fs::read_to_string(proj.join("CLAUDE.md")).unwrap();
+    assert!(!plan_only.contains("Prefer exciting Rust."));
+}
+
+/// A minimal MCP stdio server in POSIX sh that records the fact that it ran:
+/// it touches `$SENTINEL` the moment it starts, before reading a line. So the
+/// sentinel's existence is exactly "this server was started", independent of
+/// whether anything was ever asked of it.
+#[cfg(unix)]
+const SENTINEL_FIXTURE: &str = r#"#!/bin/sh
+[ -n "$SENTINEL" ] && : > "$SENTINEL"
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"fix","version":"0"}}}\n' "$id"
+      ;;
+    *'"method":"tools/list"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"ping","description":"Ping.","inputSchema":{"type":"object"}}]}}\n' "$id"
+      ;;
+    *'"method":"tools/call"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"pong"}]}}\n' "$id"
+      ;;
+  esac
+done
+"#;
+
+/// *A server starts on first tool use, not on activation.*
+///
+/// Three phases, and the middle one is the claim: selecting a toolset — the
+/// activation a package reference rides on — must not start anything, and
+/// reading the served boundary must not either. Only calling a tool starts the
+/// server that owns it, and only that one.
+///
+/// Covered for both transports, because they fail differently: a stdio server
+/// is a child process (the sentinel file), an HTTP server is a socket (the
+/// accept count). Neither is contacted at construction.
+#[cfg(unix)]
+#[test]
+fn a_server_is_not_started_until_one_of_its_tools_is_called() {
+    use std::io::Read;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let (proj, _lib_home) = machine(&tmp);
+
+    // An HTTP "upstream" that only counts connections. Nothing MCP-shaped is
+    // needed: the question is whether the socket is ever dialled at all.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let dialled = Arc::new(AtomicUsize::new(0));
+    let seen = Arc::clone(&dialled);
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { break };
+            seen.fetch_add(1, Ordering::SeqCst);
+            // Read what arrived, then hang up: the gateway treats an empty
+            // body as "no result", which is a call failure, not a dial failure
+            // — and the dial is all this asserts on.
+            let mut buf = [0u8; 512];
+            let _ = stream.read(&mut buf);
+        }
+    });
+
+    let script = proj.join("srv.sh");
+    fs::write(&script, SENTINEL_FIXTURE).unwrap();
+    let called = proj.join("called.started");
+    let idle = proj.join("idle.started");
+    write_manifest(
+        &proj,
+        &format!(
+            "version = 1\n\
+             [servers.called]\ntype = \"stdio\"\ncommand = \"/bin/sh\"\nargs = [\"{script}\"]\n\
+             env = {{ SENTINEL = \"{called}\" }}\n\
+             [servers.idle]\ntype = \"stdio\"\ncommand = \"/bin/sh\"\nargs = [\"{script}\"]\n\
+             env = {{ SENTINEL = \"{idle}\" }}\n\
+             [servers.web]\ntype = \"http\"\nurl = \"http://127.0.0.1:{port}/mcp\"\n\
+             [profiles.backend]\nservers = [\"called\", \"idle\", \"web\"]\n",
+            script = script.display(),
+            called = called.display(),
+            idle = idle.display(),
+        ),
+    );
+
+    // 1 · ACTIVATION. Selecting the toolset builds the served surface and
+    //     starts nothing: no child, no socket.
+    let gw = agentstack::gateway::Gateway::from_manifest_lease(Some(&proj), "backend");
+    assert!(!called.exists() && !idle.exists(), "no child at activation");
+    assert_eq!(dialled.load(Ordering::SeqCst), 0, "no dial at activation");
+
+    // 2 · READING THE BOUNDARY. The served server set — which surfaces name
+    //     the toolset admits — is answered from the resolved definitions
+    //     alone, so listing WHAT is proxied still starts nothing.
+    let names: Vec<String> = gw.proxied_servers().into_iter().map(|(n, _)| n).collect();
+    assert_eq!(names, ["called", "idle", "web"]);
+    assert!(!called.exists() && !idle.exists(), "no child after listing");
+    assert_eq!(dialled.load(Ordering::SeqCst), 0, "no dial after listing");
+
+    // 3 · FIRST TOOL USE. Exactly the called server starts. Its neighbour in
+    //     the same toolset never does, and the HTTP upstream is never dialled
+    //     — laziness is per server, not per gateway.
+    let res = gw.try_call("called__ping", &serde_json::json!({}));
+    assert!(res.is_some(), "the call routed to the upstream");
+    assert!(called.exists(), "the called server started");
+    assert!(
+        !idle.exists(),
+        "a server nobody called is still not started"
+    );
+    assert_eq!(
+        dialled.load(Ordering::SeqCst),
+        0,
+        "an HTTP upstream nobody called is never dialled"
+    );
+
+    // And the HTTP transport is dialled on ITS first call, not before.
+    let _ = gw.try_call("web__anything", &serde_json::json!({}));
+    assert!(
+        dialled.load(Ordering::SeqCst) >= 1,
+        "the HTTP upstream is dialled on its first call"
+    );
+
+    // The named counter-fact, deliberately witnessed rather than left to be
+    // rediscovered: building the *aggregated tool list* — transparent mode's
+    // `tools/list`, `tools_search`, code-mode bindings — asks every upstream
+    // for its tools, which starts every one of them. That is inherent to
+    // enumerating tools nobody has cached, not a lapse in the lazy path above;
+    // the default compact surface never does it (see
+    // `mcp_server::tests::transparent_tools_list_advertises_upstream_tools`).
+    // This assertion is here so the day that changes, it changes on purpose.
+    let _ = gw.namespaced_tools();
+    assert!(
+        idle.exists(),
+        "aggregated tool discovery contacts every upstream — the one eager path"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// W5 acceptance, the last clause: *the boundary is exposed … only the selected
+// servers' tools are exposed* — for a package's server member too. A member of
+// kind `server` becomes a gateway upstream on exactly the same terms as a
+// manifest-declared one: fenced by the toolset that selected the package,
+// resolved from the lock, lazy, and behind the same policy and trust gates.
+// ---------------------------------------------------------------------------
+
+/// Write a minimal stdio MCP server in POSIX sh whose sentinel path and tool
+/// name are baked in.
+///
+/// Baked in rather than passed through `$SENTINEL` (as [`SENTINEL_FIXTURE`]
+/// does) because a package's `[server]` table can only declare `secret_env`
+/// names, which become unresolved `${REF}`s — the fixture has to be
+/// self-contained to say anything about a package-carried server.
+#[cfg(unix)]
+fn write_pinned_server(script: &Path, sentinel: &Path, tool: &str) {
+    fs::write(
+        script,
+        format!(
+            r#"#!/bin/sh
+: > '{sentinel}'
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{{"jsonrpc":"2.0","id":%s,"result":{{"protocolVersion":"2025-06-18","capabilities":{{}},"serverInfo":{{"name":"pkg","version":"0"}}}}}}\n' "$id"
+      ;;
+    *'"method":"tools/list"'*)
+      printf '{{"jsonrpc":"2.0","id":%s,"result":{{"tools":[{{"name":"{tool}","description":"Ping.","inputSchema":{{"type":"object"}}}}]}}}}\n' "$id"
+      ;;
+    *'"method":"tools/call"'*)
+      printf '{{"jsonrpc":"2.0","id":%s,"result":{{"content":[{{"type":"text","text":"{tool}-pong"}}]}}}}\n' "$id"
+      ;;
+  esac
+done
+"#,
+            sentinel = sentinel.display(),
+            tool = tool,
+        ),
+    )
+    .unwrap();
+}
+
+/// A `pack.toml` carrying one stdio server member (named after the package, as
+/// the schema requires) that runs `script`.
+#[cfg(unix)]
+fn server_pack(script: &Path) -> String {
+    format!(
+        "name = \"rust-backend\"\n\
+         description = \"Rust backend house rules\"\n\n\
+         [server]\ntype = \"stdio\"\ncommand = \"/bin/sh\"\nargs = [\"{}\"]\n",
+        script.display()
+    )
+}
+
+/// The command line a gateway upstream would actually run, per served server.
+#[cfg(unix)]
+fn served_names(gw: &agentstack::gateway::Gateway) -> Vec<String> {
+    gw.proxied_servers().into_iter().map(|(n, _)| n).collect()
+}
+
+/// *Only the selected servers' tools are exposed*, with a package's server
+/// member inside "selected". The fence is the toolset, and it is the whole of
+/// the admission decision: the package's server is reachable under the toolset
+/// that selected the package, and under nothing else.
+///
+/// The two negatives are the claim. A different toolset must not reach it —
+/// that is the ordinary fence. And an UNFENCED gateway must not reach it
+/// either: unfenced already means every manifest-declared server, so unioning
+/// every package's server on top would turn package membership into a way to
+/// widen the surface rather than something a toolset selects.
+#[cfg(unix)]
+#[test]
+fn a_package_carried_server_is_exposed_only_under_a_toolset_that_selects_it() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let (proj, lib_home) = machine(&tmp);
+
+    let script = proj.join("pkg-srv.sh");
+    let sentinel = proj.join("pkg.started");
+    write_pinned_server(&script, &sentinel, "ping");
+    install_package(
+        &lib_home,
+        "rust-backend",
+        "1.4.0",
+        &server_pack(&script),
+        &[],
+    );
+
+    // Two toolsets: one selects the package, one does not.
+    write_manifest(
+        &proj,
+        "version = 1\n\
+         [profiles.backend]\npackages = [\"rust-backend\"]\n\
+         [profiles.frontend]\n",
+    );
+    lock_cmd::run(&LockArgs::default(), Some(&proj)).unwrap();
+
+    // Under the selecting toolset: served, and its tools actually dispatch.
+    let gw = agentstack::gateway::Gateway::from_manifest_lease(Some(&proj), "backend");
+    assert_eq!(served_names(&gw), ["rust-backend"]);
+    assert!(
+        gw.skipped_servers().is_empty(),
+        "nothing was skipped: {:?}",
+        gw.skipped_servers()
+    );
+    let answer = gw
+        .try_call("rust-backend__ping", &serde_json::json!({}))
+        .expect("the package server's tool routes to an upstream")
+        .expect("and the upstream answers");
+    assert!(
+        serde_json::to_string(&answer)
+            .unwrap()
+            .contains("ping-pong"),
+        "the member server answered: {answer:?}"
+    );
+
+    // Under a toolset that does not select the package: nothing.
+    let other = agentstack::gateway::Gateway::from_manifest_lease(Some(&proj), "frontend");
+    assert!(
+        served_names(&other).is_empty(),
+        "a toolset that selects no package serves none of its servers: {:?}",
+        served_names(&other)
+    );
+    assert!(other
+        .try_call("rust-backend__ping", &serde_json::json!({}))
+        .is_none());
+
+    // Unfenced: still nothing. Package membership is selected, never unioned.
+    let unfenced = agentstack::gateway::Gateway::from_manifest(Some(&proj));
+    assert!(
+        served_names(&unfenced).is_empty(),
+        "an unfenced gateway does not union in every package's server: {:?}",
+        served_names(&unfenced)
+    );
+    assert!(unfenced
+        .try_call("rust-backend__ping", &serde_json::json!({}))
+        .is_none());
+}
+
+/// The reproducibility rule at the serving point: what is proxied is the
+/// definition the LOCK pins, never whatever the package's `pack.toml` currently
+/// says.
+///
+/// The library package is edited to point its server at a different program
+/// after locking — the shape a `lib sync` takes. Nothing re-locks, so nothing
+/// in the project may change: the pinned program runs and the library's newer
+/// one is never executed. A serving path that re-read `pack.toml` would run an
+/// arbitrary command nobody reviewed, which is the whole reason the pin exists.
+#[cfg(unix)]
+#[test]
+fn a_package_carried_server_is_resolved_from_the_lock_not_the_current_package() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let (proj, lib_home) = machine(&tmp);
+
+    let pinned = proj.join("pinned-srv.sh");
+    let pinned_ran = proj.join("pinned.started");
+    write_pinned_server(&pinned, &pinned_ran, "ping");
+
+    let newer = proj.join("newer-srv.sh");
+    let newer_ran = proj.join("newer.started");
+    write_pinned_server(&newer, &newer_ran, "ping");
+
+    install_package(
+        &lib_home,
+        "rust-backend",
+        "1.4.0",
+        &server_pack(&pinned),
+        &[],
+    );
+    write_manifest(
+        &proj,
+        "version = 1\n[profiles.backend]\npackages = [\"rust-backend\"]\n",
+    );
+    lock_cmd::run(&LockArgs::default(), Some(&proj)).unwrap();
+
+    // The library moves ahead: same package, same version, different server.
+    fs::write(
+        lib_home.join("packages/rust-backend/pack.toml"),
+        server_pack(&newer),
+    )
+    .unwrap();
+
+    let gw = agentstack::gateway::Gateway::from_manifest_lease(Some(&proj), "backend");
+    assert_eq!(served_names(&gw), ["rust-backend"]);
+    gw.try_call("rust-backend__ping", &serde_json::json!({}))
+        .expect("routed")
+        .expect("answered");
+
+    assert!(
+        pinned_ran.exists(),
+        "the PINNED server definition is what was served"
+    );
+    assert!(
+        !newer_ran.exists(),
+        "the library's newer definition is never read at serving time"
+    );
+}
+
+/// *A server starts on first tool use, not on activation* — for a package's
+/// server member too. Same sentinel technique as the manifest-server witness
+/// above, because the failure it guards against is the same one: an upstream
+/// that is dialled or spawned because a toolset was selected turns activation
+/// into execution.
+#[cfg(unix)]
+#[test]
+fn a_package_carried_server_is_not_started_until_one_of_its_tools_is_called() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let (proj, lib_home) = machine(&tmp);
+
+    let script = proj.join("pkg-srv.sh");
+    let sentinel = proj.join("pkg.started");
+    write_pinned_server(&script, &sentinel, "ping");
+    install_package(
+        &lib_home,
+        "rust-backend",
+        "1.4.0",
+        &server_pack(&script),
+        &[],
+    );
+    write_manifest(
+        &proj,
+        "version = 1\n[profiles.backend]\npackages = [\"rust-backend\"]\n",
+    );
+    lock_cmd::run(&LockArgs::default(), Some(&proj)).unwrap();
+    assert!(
+        !sentinel.exists(),
+        "locking a package never starts its server"
+    );
+
+    // 1 · ACTIVATION builds the served surface and starts nothing.
+    let gw = agentstack::gateway::Gateway::from_manifest_lease(Some(&proj), "backend");
+    assert!(!sentinel.exists(), "no child at activation");
+
+    // 2 · READING THE BOUNDARY names the server without contacting it.
+    assert_eq!(served_names(&gw), ["rust-backend"]);
+    assert!(!sentinel.exists(), "no child after listing what is proxied");
+
+    // 3 · FIRST TOOL USE, and only then.
+    gw.try_call("rust-backend__ping", &serde_json::json!({}))
+        .expect("routed")
+        .expect("answered");
+    assert!(sentinel.exists(), "the server started on its first call");
+}
+
+/// Fail closed, out loud. A pinned member whose definition bytes cannot be
+/// produced and verified is NOT served — and the user is told which capability
+/// was refused and why, through the same seatbelt refusal a drifted library pin
+/// takes. A member that silently vanished would leave a toolset quietly
+/// narrower than the lock says it is.
+#[cfg(unix)]
+#[test]
+fn a_package_carried_server_that_cannot_be_verified_fails_closed_with_a_reason() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let (proj, lib_home) = machine(&tmp);
+    let home = tmp.path().join("home");
+
+    let script = proj.join("pkg-srv.sh");
+    let sentinel = proj.join("pkg.started");
+    write_pinned_server(&script, &sentinel, "ping");
+    install_package(
+        &lib_home,
+        "rust-backend",
+        "1.4.0",
+        &server_pack(&script),
+        &[],
+    );
+    write_manifest(
+        &proj,
+        "version = 1\n[profiles.backend]\npackages = [\"rust-backend\"]\n",
+    );
+    lock_cmd::run(&LockArgs::default(), Some(&proj)).unwrap();
+
+    // Tamper with the store: the deposit under the member's pinned digest no
+    // longer holds the bytes that digest names. (Deleting it exercises the same
+    // branch — a store that was pruned, or that never received the best-effort
+    // deposit.)
+    let member_digest = Lock::load(&proj)
+        .unwrap()
+        .get_package("rust-backend")
+        .unwrap()
+        .members
+        .iter()
+        .find(|m| m.kind == PackageMemberKind::Server)
+        .unwrap()
+        .checksum
+        .hex()
+        .to_string();
+    let deposit = home.join(".agentstack/store/content").join(&member_digest);
+    assert!(deposit.is_dir(), "locking deposited the pinned definition");
+    fs::write(
+        deposit.join("rust-backend.toml"),
+        "type = \"stdio\"\ncommand = \"/bin/echo\"\n",
+    )
+    .unwrap();
+
+    let gw = agentstack::gateway::Gateway::from_manifest_lease(Some(&proj), "backend");
+    assert!(
+        served_names(&gw).is_empty(),
+        "tampered pinned bytes are never served: {:?}",
+        served_names(&gw)
+    );
+    assert!(
+        !sentinel.exists(),
+        "and nothing was started from them either"
+    );
+    // Named, not silently dropped: the refusal is on the same skipped list the
+    // executor's fail-closed check reads.
+    assert_eq!(gw.skipped_servers(), ["rust-backend"]);
+    assert!(gw
+        .try_call("rust-backend__ping", &serde_json::json!({}))
+        .is_none());
+
+    // And it left evidence a user can look up afterwards, with the reason and
+    // the next step in it — the whole point of routing this through `seatbelt`
+    // rather than a bare stderr line.
+    let audit = fs::read_to_string(home.join(".agentstack/audit/calls.jsonl")).unwrap_or_default();
+    let denial = audit
+        .lines()
+        .filter_map(|l| serde_json::from_str::<serde_json::Value>(l).ok())
+        .find(|r| r["server"] == "rust-backend" && r["outcome"] == "denied")
+        .expect("the refusal was recorded");
+    let detail = denial["detail"].as_str().unwrap_or_default();
+    assert!(
+        detail.contains("agentstack lock"),
+        "the reason names the command that fixes it: {detail}"
+    );
+    assert!(
+        detail.contains("rust-backend"),
+        "and names the package: {detail}"
+    );
+}

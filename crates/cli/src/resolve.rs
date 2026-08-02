@@ -251,6 +251,14 @@ pub enum ServerResolveError {
     Source(#[from] anyhow::Error),
 }
 
+/// Where a central-library server's definition file lives. One place spells the
+/// layout out, so a caller that needs the raw definition BYTES (rather than the
+/// parsed table) cannot disagree with [`resolve_server`] about which file it
+/// hashed.
+pub fn library_server_path(lib_home: &Path, name: &str) -> PathBuf {
+    lib_home.join("servers").join(format!("{name}.toml"))
+}
+
 /// Resolve a single server name: inline `[servers.<name>]` wins, else the central
 /// library's `[[server]]` entry (definition at `<lib_home>/servers/<name>.toml`).
 /// Returns the definition with `${REF}`s intact — no secret resolution.
@@ -275,7 +283,7 @@ pub fn resolve_server(
 
     // 2. Central library.
     if let Some(entry) = library.get_server(name) {
-        let path = lib_home.join("servers").join(format!("{name}.toml"));
+        let path = library_server_path(lib_home, name);
         let content = std::fs::read_to_string(&path)
             .map_err(|e| anyhow::anyhow!("reading {}: {e}", path.display()))?;
         let server: Server = toml::from_str(&content)
@@ -361,6 +369,113 @@ pub fn verify_library_pin(
                 .to_string(),
         ),
     }
+}
+
+/// The **package-carried** runtime servers a toolset fence admits, as the same
+/// [`FrozenServer`] entries [`effective_runtime_servers`] produces — so a
+/// package's server joins the gateway's upstream set through one shape and one
+/// dispatch path, never a parallel one (`CLAUDE.md` invariant 6).
+///
+/// Two properties do all the work here.
+///
+/// **Fenced by toolset.** A member is in scope only under a toolset that
+/// selected its package; `crate::package::members_of_kind` applies exactly the
+/// fence the loadable index applies to skill members. The unfenced read
+/// (`profile == None`) contributes **nothing**: an unfenced gateway already
+/// serves every manifest server, and unioning every package's server on top of
+/// that would turn package membership into a way to widen the surface rather
+/// than something a toolset selects. A fence naming a toolset that is gone
+/// never reaches here at all — the caller has already resolved that to "no
+/// servers", which is the rule this must not regress.
+///
+/// **Resolved from the lock and the store, never from the library.** The
+/// definition is read out of the content-addressed deposit named by the
+/// member's pinned checksum and re-verified against it
+/// ([`Store::pinned_definition`]). The package's current `pack.toml` is never
+/// opened: it is precisely the mutable thing the pin exists to stop reading
+/// (`docs/design/pinned-serving-and-library-drift.md`). Anything unresolvable
+/// or unverifiable becomes a per-member `Err` — the same fail-closed skip
+/// reason a drifted library pin produces — so the gateway refuses it out loud
+/// through the existing seatbelt path instead of the member quietly vanishing.
+///
+/// `already_served` are the names the manifest/library resolution has already
+/// claimed. Inline-first precedence is the resolver's rule everywhere else, so
+/// it holds here too; a collision is reported rather than dropped.
+///
+/// [`Store::pinned_definition`]: crate::store::Store::pinned_definition
+pub fn package_runtime_servers(
+    lock: &Lock,
+    store: &Store,
+    profile: Option<&str>,
+    already_served: &[String],
+) -> Vec<FrozenServer> {
+    let Some(profile) = profile else {
+        return Vec::new();
+    };
+    crate::package::members_of_kind(lock, crate::lock::PackageMemberKind::Server, Some(profile))
+        .into_iter()
+        .map(|(pkg, member)| {
+            let name = member.name.clone();
+            if already_served.iter().any(|n| n == &name) {
+                return (
+                    name.clone(),
+                    // Reasons stay short on purpose: the gateway bounds them to
+                    // 200 characters before they reach a terminal or the audit
+                    // log, and a diagnosis that gets truncated mid-sentence is
+                    // worse than a brief one.
+                    Err(format!(
+                        "package '{}' carries a server of this name and the project already \
+                         serves one — two upstreams under one name have no unambiguous dispatch",
+                        crate::text::sanitize_line(&pkg.name)
+                    )),
+                );
+            }
+            (name, resolve_package_server(store, pkg, member))
+        })
+        .collect()
+}
+
+/// One pinned package server member, read back from the content store.
+fn resolve_package_server(
+    store: &Store,
+    pkg: &agentstack_core::lock::LockedPackage,
+    member: &agentstack_core::lock::LockedPackageMember,
+) -> Result<ResolvedServer, String> {
+    let hex = member.checksum.hex();
+    let text = store.pinned_definition(hex).map_err(|_| {
+        format!(
+            "its pinned definition is not in the content store, or no longer verifies against \
+             the digest package '{}' pins — re-pin with `agentstack lock`",
+            crate::text::sanitize_line(&pkg.name)
+        )
+    })?;
+    // The bytes just verified against the pin; parsing them is the same
+    // round trip `resolve_server` performs on a library definition file.
+    let server: Server = toml::from_str(&text).map_err(|_| {
+        format!(
+            "its pinned definition is not a readable server table — re-pin package '{}' with \
+             `agentstack lock`",
+            crate::text::sanitize_line(&pkg.name)
+        )
+    })?;
+    Ok(ResolvedServer {
+        name: member.name.clone(),
+        // `origin` answers exactly one operational question — does this
+        // definition live OUTSIDE the project's consented bytes, and therefore
+        // need `verify_library_pin`'s extra lock check? For a package member
+        // the answer is no, for the same reason it is no for an inline table:
+        // the digest that binds it is in the lock, and the lock is inside the
+        // trust digest. (Stronger, in fact — the bytes were re-verified against
+        // that digest a few lines above, which is a check an inline table does
+        // not get.) A third variant would force an arm at six display and
+        // lock-writing sites a package member provably never reaches; the
+        // provenance string below is what tells a human where these bytes came
+        // from.
+        origin: ServerOrigin::Inline,
+        server,
+        checksum: hex.to_string(),
+        provenance: Some(member.provenance.clone()),
+    })
 }
 
 /// Resolve the profile-fenced runtime server set ONE time for a sandbox/lockdown

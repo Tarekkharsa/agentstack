@@ -1582,17 +1582,23 @@ fn run_checks(
             let Some(desc) = ctx.registry.get(id) else {
                 continue;
             };
+            // W5: package instruction members are part of what compiles, so
+            // doctor's drift/missing view has to see them too.
+            let pinned = crate::lock::Lock::load(&ctx.dir).unwrap_or_default();
+            let packages = crate::package::effective_members(&pinned);
             let global = crate::render::instructions::plan_instructions(
                 manifest,
                 desc,
                 Scope::Global,
                 &ctx.dir,
+                packages,
             );
             let project = crate::render::instructions::plan_instructions(
                 manifest,
                 desc,
                 Scope::Project,
                 &ctx.dir,
+                packages,
             );
             // Missing sources are scope-independent; the global plan sees
             // every declared fragment (project scope filters out inherited
