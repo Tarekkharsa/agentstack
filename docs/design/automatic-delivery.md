@@ -25,6 +25,15 @@
 > locally** ("Prefer gateway" removed); and the §1.6 activation study is
 > removed from the flip's preconditions — it runs when v3's bar is met and
 > no longer gates delivery.
+>
+> **Landed 2026-08-03 (W4, arc-end): the default is dynamic.** All seven
+> remaining preconditions were verified before the flip; the evidence is
+> recorded in §The preconditions for the flip. The delivery planner ships in
+> `crates/cli/src/delivery.rs`, the override as `[delivery] render_locally`
+> (per project or per harness, `agentstack delivery render-locally`), and the
+> routing is read through `agentstack delivery [--json]`
+> (`delivery-routing-v1`). Everything below this line is the decision as
+> adopted; the flip did not amend any of it.
 
 ## The decision
 
@@ -169,6 +178,18 @@ separately:
 file; the sentence must say so. This is a binding copy rule, not a suggestion —
 a single blended success line is how a user comes to believe no file was
 touched when one was.
+
+> **The example's dynamic-lane wording, settled 2026-08-03.** The literal
+> `2 skills re-pinned — live via gateway now` above is illustrative and is
+> **not** printed, conditionally or otherwise. `upgrade` performs a *pinning*
+> act; whether those exact bytes are being served is an *activation* fact that
+> depends on the bridge being registered, the project being trusted at its
+> current bytes, and a lease selecting a toolset containing the skill — none of
+> which this command touches — and a project may have Render locally set, in
+> which case the bytes go to a file. The shipped line states what is true in
+> every case: `dynamic lane: 2 skills re-pinned — the lock now names the new
+> bytes`. This is the same boundary `package-members-v1` draws: a pinned member
+> is not a running one. Routing is read through `agentstack delivery`.
 
 ## Package-aware delivery
 
@@ -417,6 +438,29 @@ at arc-end (amended 2026-08-02).
 8. ~~The §1.6 activation study, run on v0.18.0-rc.2 as pinned.~~ **Removed
    2026-08-02:** the study runs when v3's bar is met and no longer gates the
    flip.
+
+### Verified 2026-08-03 — the flip landed
+
+Each precondition, the code that satisfies it, and the witness that holds it.
+
+| # | Satisfied by | Witness |
+|---|---|---|
+| 1 | `TrustAnchor` re-verified from disk on every upstream dispatch and every `tools/list`; no generation-token cache exists at all, so nothing unauthoritative can shortcut it (`crates/cli/src/trust_anchor.rs`, `gateway.rs`) | `crates/cli/tests/trust_at_dispatch.rs` (7) — revoke, out-of-band manifest edit, and wholesale lock replacement each stop the **next** call on a live connection; control-plane tools survive |
+| 2 | `Store::pinned_content` serves skill bodies from the content-addressed snapshot, never the live library; `use`/`add` materialize from the same snapshot; `lib sync` announces through `status` and writes nothing into any project | `crates/cli/tests/lib_sync_does_not_disturb_projects.rs` (6) — a sync leaves every project byte-identical including symlink targets, and a project keeps serving its pinned bytes |
+| 3 | The unleased fence: a project declaring any toolset gets `Gateway::empty()` until a lease names one (`crates/cli/src/mcp_server.rs`, `AutoProject::activate`). Found **open** during the registry half and closed there | `crates/cli/tests/lease_registry.rs` — `no_lease_means_control_plane_tools_only_even_with_several_toolsets_declared` and `opening_a_lease_exposes_exactly_that_toolset` |
+| 4 | `crates/cli/src/lease_registry.rs` — a record is persisted per lease, and **liveness is derived at read time** from the recorded PID *and* that process's start token; never read from the file as truth. `agentstack lease status [--json]` is the authoritative read (`lease-status-v1`) | `crates/cli/tests/lease_registry.rs` — an open lease visible to another surface; a stale record never reading live, proven by a dead PID *and* by a live PID whose start time disagrees (simulated reuse) |
+| 5 | Drift in any member marks the project Changed and blocks new leases and loads at the existing choke points; a mixed-lane upgrade updates the lock **and** the rendered region or neither, inside one rollback envelope | `crates/cli/tests/upgrade_lanes.rs` (4) — the all-or-nothing transaction proven by a real failure injection, with separate lane lines and no "gateway" claim over an instruction |
+| 6 | Gateway-unavailable detection in `crates/cli/src/commands/connect.rs` (`gateway_outages` / `command_unreachable`), with one sentence stem shared by `status` and `doctor`, and no writing path anywhere on it | `crates/cli/tests/lease_registry.rs` — `an_unavailable_gateway_yields_no_tools_and_writes_no_file`, which also asserts the project tree is byte-for-byte identical afterwards |
+| 7 | **Render locally** — `[delivery] render_locally`, per project and per harness (`crates/core/src/manifest/model.rs::Delivery`), set by `agentstack delivery render-locally [--harness <id>] [--off] --write` and offered behind the wizard's "more control" path | `crates/cli/tests/delivery_planner.rs` — `render_locally_writes_files_where_the_lease_would_have_worked`, both scopes, including a per-harness entry overriding a project-wide one in each direction |
+
+**What "default" means here, precisely.** The planner
+(`crates/cli/src/delivery.rs`) routes skills and MCP servers on an MCP-capable
+harness to the dynamic lane with no override present, and the onboarding wizard's
+default answer is **Automatic** — it states the routing, offers the one bridge
+registration the live lane needs, and renders nothing. `agentstack apply` is
+unchanged and still renders everything it is asked to: it is the rendered lane's
+command, and running it is the explicit user action §Failure semantics 3 requires
+a fallback render to be. Static rendering was not removed anywhere.
 
 ## Invariant check
 

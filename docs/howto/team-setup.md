@@ -45,7 +45,9 @@ step-by-step equivalents).
 **Never committed:** secret values (they live per-machine in the OS keychain or
 a gitignored `.env`) and the rendered native artifacts — `.mcp.json`,
 `.claude/skills/`, the compiled `CLAUDE.md` — which sit behind a managed
-`.gitignore` block in the default [static delivery mode](../concepts.md).
+`.gitignore` block whenever they are written — see
+[delivery routing](../concepts.md#delivery-modes) for which capabilities are
+written at all and which are served live.
 
 **Optional provenance.** A maintainer can `agentstack sign` the lockfile — it
 writes a detached ed25519 signature and prints a public key to publish.

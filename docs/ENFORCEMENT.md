@@ -239,6 +239,25 @@ dynamic delivery lane, and the strongest column here. **--sandbox** and
 **--lockdown** are `agentstack run --sandbox [--lockdown]`: the harness runs in a
 Docker container behind the egress proxy.
 
+**Which column a capability lands in is now routed, not chosen** (delivery flip,
+2026-08-03; [`design/automatic-delivery.md`](design/automatic-delivery.md)). The
+delivery planner sends **skills and MCP servers on an MCP-capable CLI** down the
+dynamic lane by default, and **instructions, settings, hooks, extensions, and
+every capability bound for a CLI without MCP** down the rendered lane. One
+override, **Render locally** (`[delivery] render_locally`, per project or per
+harness), forces the rendered lane where the lease would have worked; nothing
+moves a capability the other way, because no channel would carry it.
+
+None of that changes what any column *enforces* — the cells below are unchanged
+by the flip, and a routing default is not an enforcement claim. What it changes
+is which column an ordinary project is in: the **lease** column is now the
+everyday one for skills and servers rather than an opt-in mode, so its honest
+limits (◇, ◆, process scope, and the transparent-mode listing cost) are limits
+most users now meet, not edge cases. Routing is also not activation: a
+capability routed to the dynamic lane is served only once the bridge is
+registered, the project is trusted at its current bytes, and a lease names a
+toolset containing it.
+
 ## Per-cell notes
 
 ### Tools

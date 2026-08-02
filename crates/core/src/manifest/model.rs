@@ -94,6 +94,79 @@ pub struct Manifest {
     /// parsed for portability but never consulted as authority for these flags.
     #[serde(default, skip_serializing_if = "ExperimentalConfig::is_empty")]
     pub experimental: ExperimentalConfig,
+
+    /// The one advanced delivery override (`docs/design/automatic-delivery.md`
+    /// §"The decision"). Absent is the default — **Automatic**, the delivery
+    /// planner routing each capability by kind and harness.
+    #[serde(default, skip_serializing_if = "Delivery::is_empty")]
+    pub delivery: Delivery,
+}
+
+/// The delivery override table: **Render locally**, and nothing else.
+///
+/// There is deliberately no "mode" here and no second knob. Delivery is
+/// otherwise *routed*, not chosen — the planner decides from the capability's
+/// kind and the harness it is going to — and adding a second override would
+/// re-create the mode-switch the contract removed.
+///
+/// The override travels with the project for the same reason `[meta] gitignore`
+/// does: "this project must have real files" is a property of the project (a
+/// corporate policy forbidding a persistent daemon, an offline machine, a
+/// compatibility test against native CLI behaviour), not of one run or one
+/// machine.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Delivery {
+    /// Project-wide: write files even where the live channel would have worked.
+    /// `None` is Automatic.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render_locally: Option<bool>,
+
+    /// Per-harness overrides, keyed by adapter id (`claude-code`, `codex`, …).
+    /// A harness entry wins over the project-wide value, in both directions —
+    /// so one CLI can be pinned to files while the rest stay automatic, and one
+    /// CLI can stay automatic inside an otherwise render-locally project.
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub harness: IndexMap<String, HarnessDelivery>,
+}
+
+/// One harness's delivery override.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct HarnessDelivery {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub render_locally: Option<bool>,
+}
+
+impl Delivery {
+    pub fn is_empty(&self) -> bool {
+        self.render_locally.is_none() && self.harness.is_empty()
+    }
+
+    /// Is **Render locally** in effect for `harness_id`?
+    ///
+    /// Most specific answer wins: the harness entry, then the project-wide
+    /// value, then Automatic. Returns `false` for "no override", which is what
+    /// makes the planner's default the routed one.
+    pub fn renders_locally(&self, harness_id: &str) -> bool {
+        self.harness
+            .get(harness_id)
+            .and_then(|h| h.render_locally)
+            .or(self.render_locally)
+            .unwrap_or(false)
+    }
+
+    /// Is the override in effect anywhere in this project? Used only by
+    /// surfaces that summarise ("this project overrides delivery"), never to
+    /// decide a lane — that always goes through [`Delivery::renders_locally`]
+    /// with a harness in hand.
+    pub fn overrides_anything(&self) -> bool {
+        self.render_locally == Some(true)
+            || self
+                .harness
+                .values()
+                .any(|h| h.render_locally == Some(true))
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]

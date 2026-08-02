@@ -289,6 +289,17 @@ pub enum Command {
     #[command(subcommand, hide = true)]
     Lease(LeaseCmd),
 
+    /// How each capability reaches each of your tools — and the one override.
+    ///
+    /// Delivery is routed, not chosen: skills and MCP servers are served live
+    /// to tools that can take them, while house rules, settings, hooks and
+    /// extensions are written into native files, as is everything for a tool
+    /// that reads files only. `agentstack delivery` shows the routing;
+    /// `agentstack delivery render-locally` is the single override — write
+    /// files even where the live channel would have worked.
+    #[command(hide = true)]
+    Delivery(DeliveryArgs),
+
     /// Review and approve this project's declared capabilities — required
     /// before anything activates them.
     ///
@@ -1172,6 +1183,48 @@ pub enum GatewayCmd {
 
     /// Remove the agentstack gateway entry from a CLI's global MCP config.
     Disconnect(DisconnectArgs),
+}
+
+/// `agentstack delivery` — show the routing, or set the one override.
+///
+/// There is deliberately no `--mode` here and no second knob: the automatic
+/// answer is the routed one, and **Render locally** is the whole escape hatch.
+#[derive(Args, Debug)]
+pub struct DeliveryArgs {
+    #[command(subcommand)]
+    pub command: Option<DeliveryCmd>,
+
+    /// Emit the routing as JSON (contract `delivery-routing-v1`).
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum DeliveryCmd {
+    /// Write files even where the live channel would have worked.
+    ///
+    /// The reasons this exists, so nobody has to re-argue them: offline
+    /// operation; deterministic native files; inspection with ordinary
+    /// filesystem tools; a corporate policy that forbids a persistent
+    /// background process; debugging without another runtime dependency; and
+    /// compatibility testing against a CLI's own behaviour.
+    ///
+    /// Records `[delivery] render_locally` in the manifest so the answer is the
+    /// same on every clone and every run. Dry-run by default.
+    RenderLocally {
+        /// Set it for one tool only (an adapter id, e.g. `claude-code`).
+        /// Omitted, it applies to the whole project.
+        #[arg(long, value_name = "ID")]
+        harness: Option<String>,
+
+        /// Remove the override instead of setting it — back to automatic.
+        #[arg(long)]
+        off: bool,
+
+        /// Actually write the manifest (default: preview only).
+        #[arg(long)]
+        write: bool,
+    },
 }
 
 /// The runtime lease registry's read surface. Read-only by design: leases are
@@ -2934,7 +2987,7 @@ pub fn full_command_inventory() -> String {
          Set up      init · up · status · adapters · settings · self · completions\n  \
          Edit        add · set · search · remove · install · lib · toolset · adopt · export · import\n  \
          Share       share · receive · publisher\n  \
-         Render      apply · use · yes · instructions · lock · session · diff · uninstall\n  \
+         Render      apply · use · yes · instructions · lock · session · diff · uninstall · delivery\n  \
          Undo        undo · restore\n  \
          Protect     trust · explain · secret · guard · sign · verify\n  \
          Run         run · kill · shim · workflow · gateway · mcp · try\n  \

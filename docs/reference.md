@@ -43,7 +43,7 @@ implementation internals — live in
   - [Rendering and merging](#rendering-and-merging)
   - [State tracking](#state-tracking)
   - [Scopes](#scopes)
-- [Delivery modes — where rendered files live](#delivery-modes--where-rendered-files-live)
+- [Delivery — routing, and where rendered files live](#delivery--routing-and-where-rendered-files-live)
   - [Owned servers (`owner = "codex"`)](#owned-servers-owner--codex)
 - [Agent-operable (`agentstack mcp`)](#agent-operable-agentstack-mcp)
   - [Transparent mode (`--transparent`)](#transparent-mode---transparent)
@@ -532,16 +532,43 @@ scope your writes actually recorded, so a deliberate `--scope` choice is
 honored, not second-guessed.
 
 <a id="where-rendered-files-live-three-modes"></a>
-## Delivery modes — where rendered files live
+## Delivery — routing, and where rendered files live
 
-You always commit the *intent* (`agentstack.toml` + `agentstack.lock`); the
-rendered artifacts — `.mcp.json`, `.claude/skills/`, the compiled
-`CLAUDE.md` / `AGENTS.md` — are a per-project choice of **static**,
-**clean-at-rest**, or **zero-files**. What each mode *is*:
-[concepts.md — delivery modes](concepts.md#delivery-modes); which to pick:
-[which mode do I need?](choose.md). The operational levers:
+You always commit the *intent* (`agentstack.toml` + `agentstack.lock`). Where
+the rendered artifacts — `.mcp.json`, `.claude/skills/`, the compiled
+`CLAUDE.md` / `AGENTS.md` — come from is **routed**, not chosen (flip,
+2026-08-03): the delivery planner sends each capability down a lane from its
+kind and the CLI it is going to. What the lanes *are*:
+[concepts.md — delivery](concepts.md#delivery-modes); the shape of the decision:
+[how capabilities reach your CLIs](choose.md).
 
-- **static** (default) — artifacts on disk, kept out of git by a managed
+| Capability kind | Lane |
+|---|---|
+| Skills · MCP servers, on a CLI with MCP | dynamic — served live, digest-verified per load |
+| House rules · settings | rendered — MCP cannot inject them |
+| Hooks · extensions | rendered, full consent ceremony always |
+| Any kind, on a CLI without MCP | rendered |
+
+- `agentstack delivery` prints the routing per CLI; `--json` is the same reading
+  for a UI (`delivery-routing-v1`), with `default`, per-harness
+  `mcp_capable` / `render_locally` / `override`, and a `routes` array carrying
+  each kind's `lane`, `why`, and `full_ceremony`.
+- **Render locally** is the one override: `[delivery] render_locally = true`, or
+  `[delivery.harness.<id>] render_locally = true` for a single CLI. Set it with
+  `agentstack delivery render-locally [--harness <id>] [--off] --write`. It
+  writes files even where the live channel would have worked — offline work,
+  deterministic native files, filesystem inspection, a rule against a persistent
+  background process, debugging without another runtime dependency, or
+  compatibility testing against a CLI's own behaviour. Clearing it removes the
+  key: automatic is the *absence* of an override, not a second stored value.
+- A gateway-served project keeps **0 project artifacts for the capabilities
+  served live** — never "0 files": the manifest, the lockfile, and any managed
+  house-rules region remain.
+
+The three older per-project modes still exist behind `agentstack set-mode` and
+the wizard's "more control" path, and are no longer how delivery is decided:
+
+- **static** — artifacts on disk, kept out of git by a managed
   `.gitignore` block; pass `--no-gitignore` to commit them instead.
 - **clean-at-rest** — `agentstack lock` pins name refs *without rendering*, so
   `git status` stays silent; a toolset arrives via
@@ -554,21 +581,27 @@ rendered artifacts — `.mcp.json`, `.claude/skills/`, the compiled
   `codemode/endpoint.json` coordinate may exist for the connection's duration —
   see [the zero-files gateway](#the-zero-files-gateway---auto-project--trust).
 
-**Recommendation:** prefer the zero-file lease path for interactive work when the
-CLI supports MCP; use static or clean-at-rest when the CLI must read native
-skill/instruction files. Add `--sandbox --lockdown` when the agent process
+**Recommendation:** none needed — the planner already routes to the live lease
+path where the CLI supports MCP and to files where it does not. Reach for
+`render locally` only when you actively need files. Add `--sandbox --lockdown` when the agent process
 itself needs isolation — a lease is a capability fence, not a sandbox. See
 [the primitives and decision table](ARCHITECTURE.md#operating-model--choose-the-boundary-you-need).
 
-Interactive `init` presents the three as an arrow-key choice **before any
-write**, and the selection **forks** the run: **static** takes the render path
-(preview → confirm → `apply --write` → activate skills → doctor);
-**clean-at-rest** renders nothing and pins the lockfile, teaching the
-`session start`/`session end` rhythm; **zero-files** renders nothing and offers
-to register the gateway (`gateway connect --all --write`), then points at
-`agentstack trust .` (which the wizard never runs for you — trust is human
-consent). Bare `agentstack` reports the project's current mode on its `Mode`
-line, derived from what is on disk.
+Interactive `init` asks **one** question before any write — automatic, or "more
+control" — and the answer **forks** the run. **Automatic** (the default, and
+what a non-interactive `init` takes on a project that has never rendered) states
+the routing per CLI, offers to register the bridge
+(`gateway connect --all --write`), points at `agentstack trust .` (which the
+wizard never runs for you — trust is human consent), and renders nothing itself:
+the rendered lane's command is the explicit `apply --write`. Behind **more
+control** sit **render locally** (record the override, then the render path:
+preview → confirm → `apply --write` → activate skills → doctor) and the three
+older modes, unchanged — **static** takes the render path; **clean-at-rest**
+renders nothing and pins the lockfile, teaching the `session start`/`session
+end` rhythm; **zero-files** renders nothing and offers the bridge. A project
+that already has rendered files keeps its render path in a scripted run: the
+files are a fact, and un-rendering stays the explicit `set-mode` act. Bare
+`agentstack` reports the project's derived mode on its `Mode` line.
 
 The managed `.gitignore` block is anchored to **outcomes, not declarations**: an
 entry exists only for a file agentstack actually wrote or still manages, so a
@@ -1649,6 +1682,8 @@ you need the exact verb, flag, or subcommand.
 - **`verify`** _(hidden)_ — Verify agentstack.lock against a published ed25519 public key and its detached signature — flags `--pubkey/--signature`
 - **`guard`** _(hidden)_ — Machine-level destructive-command guard — subcommands `check*/test/install/uninstall/status`
 - **`gateway`** _(hidden)_ — The zero-files gateway: register it once per CLI (`connect`) and every trusted repo brings its own servers through `agentstack mcp --auto-project` with no per-project files — subcommands `connect/disconnect`
+- **`lease`** _(hidden)_ — Runtime lease registry: which toolset leases are open on this machine — subcommands `status`
+- **`delivery`** _(hidden)_ — How each capability reaches each of your tools — and the one override — subcommands `render-locally` — flags `--json`
 - **`trust`** — Review and approve this project's declared capabilities — required before anything activates them — flags `--list/--revoke/--yes/--consented-digest/--preview`
 - **`restore`** — Undo a recorded write: revert what apply/use/session changed — flags `--last/--list/--scope/--write/--json`
 - **`undo`** — Take it back: pick a point from your recent changes and revert to it — flags `--to/--write/--json`

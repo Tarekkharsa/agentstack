@@ -188,13 +188,19 @@ fn configure(
         return Ok(());
     }
 
-    // P28: the delivery mode is chosen BEFORE any further write and forks the
-    // rest of the run. static renders into every CLI (the original path);
-    // clean-at-rest pins the lock and teaches the session rhythm without
-    // rendering; zero-files offers the gateway and points at trust.
-    let current_mode = super::overview::detect_mode(&ctx, &target_ids);
-    let mode = match choose_delivery_mode(current_mode)? {
-        Some(m) => m,
+    // W4 (the flip, 2026-08-03): delivery is **Automatic** by default — the
+    // planner routes each capability by kind and harness, and the wizard states
+    // what it decided instead of asking. The one override, Render locally,
+    // lives behind "more control", and so do the older per-project modes, which
+    // the shipped `agentstack set-mode` still switches unchanged.
+    //
+    // A project that has ALREADY rendered keeps its rendered path: files on
+    // disk are a fact, and a fork that quietly stopped maintaining them would
+    // leave stale capabilities behind a screen claiming everything is served
+    // live. Un-rendering stays the explicit act it has always been.
+    let already_rendered = super::overview::has_rendered_artifacts(&ctx, &target_ids);
+    let choice = match choose_delivery(already_rendered)? {
+        Some(c) => c,
         None => {
             // Esc/q is an explicit cancellation. Ctrl-C interrupts the terminal
             // read and is handled by `run`'s scoped SIGINT guard instead.
@@ -206,16 +212,32 @@ fn configure(
     if interactive {
         // A one-line plan of exactly what this fork will do next, straight from
         // the same pure mapping the test pins.
-        println!("  {} {}", "→".cyan(), fork_plan(mode).join(" · ").dimmed());
+        println!(
+            "  {} {}",
+            "→".cyan(),
+            fork_plan(choice).join(" · ").dimmed()
+        );
     }
 
-    let proceeded = match mode {
-        super::overview::Mode::Static => run_static(args, scope, manifest_dir)?,
-        super::overview::Mode::CleanAtRest => {
+    let proceeded = match choice {
+        DeliveryChoice::Automatic => {
+            run_automatic(&ctx, &target_ids, manifest_dir)?;
+            true
+        }
+        // Render locally is recorded first, so the render that follows is the
+        // project's standing answer rather than a one-off.
+        DeliveryChoice::RenderLocally => {
+            record_render_locally(manifest_dir)?;
+            run_static(args, scope, manifest_dir)?
+        }
+        DeliveryChoice::Legacy(super::overview::Mode::Static) => {
+            run_static(args, scope, manifest_dir)?
+        }
+        DeliveryChoice::Legacy(super::overview::Mode::CleanAtRest) => {
             run_clean_at_rest(&ctx, manifest_dir)?;
             true
         }
-        super::overview::Mode::ZeroFiles => {
+        DeliveryChoice::Legacy(super::overview::Mode::ZeroFiles) => {
             run_zero_files(&ctx, manifest_dir)?;
             true
         }
@@ -549,10 +571,14 @@ fn run_zero_files(ctx: &super::Context, manifest_dir: Option<&Path>) -> Result<(
     let _ = manifest_dir; // the ctx already carries the resolved dir
 
     println!("\n{}", "Zero-files".bold());
+    // Honesty rule: never a bare "nothing is written". The project keeps its
+    // manifest and lock, and any house-rules region stays in its file.
     println!(
-        "  {} nothing is written to disk; your CLIs fetch servers and skills\n\
-         \x20   live from agentstack — each repo stays inert until you review it.",
-        "·".dimmed()
+        "  {} no generated files are written; your CLIs fetch servers and skills\n\
+         \x20   live from agentstack — each repo stays inert until you review it.\n\
+         \x20   {}",
+        "·".dimmed(),
+        crate::delivery::ZERO_ARTIFACTS
     );
 
     // cmds[0] = "agentstack trust .", cmds[1] = "agentstack set-mode zero-files"
@@ -989,58 +1015,263 @@ fn mode_switch_plan(
     }
 }
 
-/// P28: present the three delivery modes as an arrow-key choice (dialoguer),
-/// help text and all, BEFORE any write — the selection forks the rest of the
-/// run. The current mode is preselected. Non-interactive shells never prompt
-/// and keep the current mode, so CI/pipes stay on the render path they had.
-fn choose_delivery_mode(current: super::overview::Mode) -> Result<Option<super::overview::Mode>> {
+/// What the wizard does about delivery. **Not** a mode: `Automatic` is the
+/// default and the only thing most projects ever see, `RenderLocally` is the
+/// one override the contract keeps, and `Legacy` is the older per-project
+/// delivery modes — reachable behind "more control" and switched by the
+/// shipped `agentstack set-mode` exactly as before.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum DeliveryChoice {
+    Automatic,
+    RenderLocally,
+    Legacy(super::overview::Mode),
+}
+
+/// Present delivery as one recommended answer plus a door, BEFORE any write.
+///
+/// The flip is here: **Automatic is preselected, and it is what a
+/// non-interactive shell gets** on a project that has not already rendered.
+/// Before this, a wizard with no terminal kept whatever mode was derived, which
+/// on a fresh project meant "static" — the old default — so a scripted setup
+/// rendered everything however the planner routed it.
+///
+/// A project with files on disk keeps its rendered path: the files are already
+/// there, and the honest way to remove them is the explicit `set-mode`
+/// un-render, not a wizard quietly abandoning them.
+fn choose_delivery(already_rendered: bool) -> Result<Option<DeliveryChoice>> {
     use super::overview::Mode;
-    let modes = [Mode::Static, Mode::CleanAtRest, Mode::ZeroFiles];
 
     if !crate::util::confirm::is_interactive() {
-        return Ok(Some(current));
+        return Ok(Some(if already_rendered {
+            DeliveryChoice::Legacy(Mode::Static)
+        } else {
+            DeliveryChoice::Automatic
+        }));
     }
 
-    // The full P4 help prints once above the selector; the menu items carry the
-    // terse one-line consequence so the arrow-key list stays scannable.
-    println!("\n{}", "Delivery mode".bold());
+    println!("\n{}", "Delivery".bold());
     println!(
-        "  {} how capabilities reach your CLIs — you can switch later.",
+        "  {} how capabilities reach your CLIs. The recommended answer is automatic: \
+         agentstack routes each one for you and says what it decided.",
         "·".dimmed()
     );
-    for m in &modes {
-        let marker = if *m == current { "  (current)" } else { "" };
-        println!("\n  {}{}", m.label().bold(), marker.dimmed());
-        println!("    {}", m.help().dimmed());
-    }
     println!();
 
-    let default_idx = modes.iter().position(|m| *m == current).unwrap_or(0);
-    let items: Vec<String> = modes
-        .iter()
-        .map(|m| format!("{} — {}", m.label(), m.short()))
-        .collect();
+    let top = [
+        "automatic — agentstack routes each capability (recommended)".to_string(),
+        "more control…".to_string(),
+    ];
     // `interact_opt` distinguishes an explicit Esc/q cancellation from a real
     // terminal error. Ctrl-C is converted into an interrupted read by the
     // wizard's scoped SIGINT guard and handled by `run`.
     let idx = dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
-        .with_prompt("Pick a delivery mode")
-        .items(&items)
-        .default(default_idx)
+        .with_prompt("Delivery")
+        .items(&top)
+        .default(0)
         .interact_opt()?;
-    Ok(idx.map(|selected| modes[selected]))
+    match idx {
+        None => return Ok(None),
+        Some(0) => return Ok(Some(DeliveryChoice::Automatic)),
+        Some(_) => {}
+    }
+
+    // "More control": the one delivery override first, then the older
+    // per-project modes. They are listed after it and never above it, because
+    // they are no longer the product's answer — but the wizard keeps offering
+    // them rather than stranding a project that already uses one.
+    println!("\n  {}", "render locally".bold());
+    println!(
+        "    {}",
+        "Write files even where the live channel would have worked — for offline work, \
+         deterministic native files, inspection with ordinary filesystem tools, a rule \
+         against a persistent background process, debugging without another runtime \
+         dependency, or testing a CLI's own behaviour."
+            .dimmed()
+    );
+    let modes = [Mode::Static, Mode::CleanAtRest, Mode::ZeroFiles];
+    for m in &modes {
+        println!("\n  {}", m.label().bold());
+        println!("    {}", m.help().dimmed());
+    }
+    println!();
+
+    let mut items = vec!["render locally — write files anyway".to_string()];
+    items.extend(
+        modes
+            .iter()
+            .map(|m| format!("{} — {}", m.label(), m.short())),
+    );
+    let idx = dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
+        .with_prompt("Pick one")
+        .items(&items)
+        .default(0)
+        .interact_opt()?;
+    Ok(idx.map(|selected| match selected {
+        0 => DeliveryChoice::RenderLocally,
+        other => DeliveryChoice::Legacy(modes[other - 1]),
+    }))
 }
 
-/// The ordered steps each delivery-mode fork runs, as plain labels. Pure, so
-/// "which steps run per mode" is unit-testable without a live wizard; it also
-/// backs the one-line plan the wizard prints once a mode is chosen.
-fn fork_plan(mode: super::overview::Mode) -> &'static [&'static str] {
+/// The ordered steps each fork runs, as plain labels. Pure, so "which steps run
+/// per choice" is unit-testable without a live wizard; it also backs the
+/// one-line plan the wizard prints once the choice is made.
+fn fork_plan(choice: DeliveryChoice) -> &'static [&'static str] {
     use super::overview::Mode;
-    match mode {
-        Mode::Static => &["preview", "confirm", "install", "apply", "skills", "doctor"],
-        Mode::CleanAtRest => &["lock", "session-rhythm", "switch-pointer", "doctor"],
-        Mode::ZeroFiles => &["gateway-offer", "trust-pointer", "switch-pointer"],
+    match choice {
+        DeliveryChoice::Automatic => &["routing", "bridge-offer", "trust-pointer", "doctor"],
+        // Render locally is the render path plus the durable setting that makes
+        // it this project's standing answer rather than a one-off.
+        DeliveryChoice::RenderLocally => &[
+            "record-override",
+            "preview",
+            "confirm",
+            "install",
+            "apply",
+            "skills",
+            "doctor",
+        ],
+        DeliveryChoice::Legacy(Mode::Static) => {
+            &["preview", "confirm", "install", "apply", "skills", "doctor"]
+        }
+        DeliveryChoice::Legacy(Mode::CleanAtRest) => {
+            &["lock", "session-rhythm", "switch-pointer", "doctor"]
+        }
+        DeliveryChoice::Legacy(Mode::ZeroFiles) => {
+            &["gateway-offer", "trust-pointer", "switch-pointer"]
+        }
     }
+}
+
+/// Record the durable **Render locally** override the user just picked.
+///
+/// Goes through the one editor that owns this key
+/// ([`super::delivery::set_render_locally`]) so the wizard cannot write a shape
+/// the `delivery` command would not recognise, and captures the file for undo
+/// like every other wizard write.
+fn record_render_locally(manifest_dir: Option<&Path>) -> Result<()> {
+    let ctx = super::load(manifest_dir)?;
+    let path = ctx.loaded.manifest_path.clone();
+    let original =
+        fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    let updated = super::delivery::set_render_locally(&original, None, true)?;
+    if updated == original {
+        return Ok(());
+    }
+    let backup = crate::history::capture(&path, "agentstack.toml · render locally");
+    crate::util::atomic::write(&path, &updated)
+        .with_context(|| format!("writing {}", path.display()))?;
+    let _ = crate::history::record("project", "setup (render locally)", vec![], vec![backup]);
+    println!(
+        "  {} recorded {} — this project writes files even where the live channel would work.",
+        "✓".green(),
+        "[delivery] render_locally = true".bold()
+    );
+    Ok(())
+}
+
+/// The **Automatic** fork — the default after the flip (W4, 2026-08-03).
+///
+/// It states the routing rather than asking for it, offers the one registration
+/// the live lane needs, and points at the review. It deliberately renders
+/// nothing itself: the rendered lane's command is `apply --write`, an explicit
+/// act, and a wizard that ran it here would put a native copy of every server on
+/// disk one line under a screen saying they are served live.
+fn run_automatic(
+    ctx: &super::Context,
+    target_ids: &[String],
+    manifest_dir: Option<&Path>,
+) -> Result<()> {
+    let plan =
+        crate::delivery::Plan::build(&ctx.loaded.manifest.delivery, &ctx.registry, target_ids);
+
+    println!("\n{}", "Delivery".bold());
+    if plan.harnesses.is_empty() {
+        println!(
+            "  {} no CLIs targeted yet — nothing to route.",
+            "·".dimmed()
+        );
+    }
+    let width = plan
+        .harnesses
+        .iter()
+        .map(|h| h.display.len())
+        .max()
+        .unwrap_or(0);
+    for h in &plan.harnesses {
+        println!("  {:width$}   {}", h.display, h.sentence());
+    }
+    // The two binding honesty rules, each on its own line.
+    if plan.has_dynamic_lane() {
+        println!("  {} {}", "·".dimmed(), crate::delivery::ZERO_ARTIFACTS);
+    }
+    if let Some(line) = crate::delivery::rendered_lane_line(&plan) {
+        println!("  {} {line}", "·".dimmed());
+        println!(
+            "  {} write them with {}",
+            "·".dimmed(),
+            "agentstack apply --write".bold()
+        );
+    }
+
+    // The live lane needs the bridge registered once per CLI. That is a
+    // machine-wide write, so it is always a confirm and never happens without a
+    // terminal — a scripted setup gets the command printed instead.
+    if plan.has_dynamic_lane() {
+        offer_bridge()?;
+        println!(
+            "\n  {} then review this repo once, so its capabilities can be served:",
+            "·".dimmed()
+        );
+        println!("    {}", "agentstack trust .".bold());
+    }
+
+    println!("\n{}", "Doctor".bold());
+    super::doctor::run(
+        &DoctorArgs {
+            ci: false,
+            live: false,
+            probe: false,
+            fix: false,
+            deep: false,
+            all: false,
+            json: false,
+            skip_drift: false,
+        },
+        manifest_dir,
+    )
+}
+
+/// Offer to register the agentstack bridge in the installed harnesses — the one
+/// thing the live lane needs that a project cannot provide for itself. Shared by
+/// the automatic fork and the legacy zero-files fork, so there is one copy of
+/// this offer and one failure message.
+fn offer_bridge() -> Result<()> {
+    const CONNECT_LATER: &str = "agentstack gateway connect --all --write";
+    let register = crate::util::confirm::is_interactive()
+        && crate::util::confirm::confirm(
+            "\n  Register the agentstack bridge in your installed CLIs now?",
+        )?;
+    if !register {
+        println!("  {} register it later with:", "·".dimmed());
+        println!("    {}", CONNECT_LATER.bold());
+        return Ok(());
+    }
+    // A failure here (no MCP-capable harness, say) must not sink the whole
+    // setup — surface it with the manual command, like the house-rules offer.
+    if let Err(err) = super::connect::run_connect(&ConnectArgs {
+        harnesses: Vec::new(),
+        all: true,
+        transparent: false,
+        write: true,
+        command: None,
+    }) {
+        println!(
+            "  {} bridge registration failed ({err:#}) — register it later with:",
+            "⚠".yellow()
+        );
+        println!("    {}", CONNECT_LATER.bold());
+    }
+    Ok(())
 }
 
 /// The files written since `history_before` was snapshotted, deduped by path
@@ -1509,8 +1740,9 @@ fn resolve_missing_secrets(ctx: &super::Context, missing: Vec<String>) -> Result
 mod tests {
     use super::super::overview::Mode;
     use super::{
-        cli_config_touched, clis_updated, fork_plan, is_cli_config_path, mode_switch_plan,
-        render_change_summary, render_setup_facts, render_stop_summary, should_offer_guard,
+        choose_delivery, cli_config_touched, clis_updated, fork_plan, is_cli_config_path,
+        mode_switch_plan, render_change_summary, render_setup_facts, render_stop_summary,
+        should_offer_guard, DeliveryChoice,
     };
 
     // TASK 3: the guard offer is gated — shown only when the shell is
@@ -1531,35 +1763,79 @@ mod tests {
         );
     }
 
-    // P28: the delivery-mode choice is a real fork — each mode runs a distinct,
-    // fixed sequence of steps. Only static renders (preview → confirm → apply);
-    // the other two never render, so neither runs an `apply` step.
+    // W4: the delivery choice is a real fork — each answer runs a distinct,
+    // fixed sequence of steps. Automatic (the default after the flip) states
+    // the routing and offers the bridge; it never renders. Render locally is
+    // the render path plus the durable override that records the decision.
     #[test]
-    fn fork_plan_maps_each_mode_to_its_step_sequence() {
+    fn fork_plan_maps_each_choice_to_its_step_sequence() {
         assert_eq!(
-            fork_plan(Mode::Static),
+            fork_plan(DeliveryChoice::Automatic),
+            &["routing", "bridge-offer", "trust-pointer", "doctor"]
+        );
+        assert_eq!(
+            fork_plan(DeliveryChoice::RenderLocally),
+            &[
+                "record-override",
+                "preview",
+                "confirm",
+                "install",
+                "apply",
+                "skills",
+                "doctor"
+            ]
+        );
+        assert_eq!(
+            fork_plan(DeliveryChoice::Legacy(Mode::Static)),
             &["preview", "confirm", "install", "apply", "skills", "doctor"]
         );
         assert_eq!(
-            fork_plan(Mode::CleanAtRest),
+            fork_plan(DeliveryChoice::Legacy(Mode::CleanAtRest)),
             &["lock", "session-rhythm", "switch-pointer", "doctor"]
         );
         assert_eq!(
-            fork_plan(Mode::ZeroFiles),
+            fork_plan(DeliveryChoice::Legacy(Mode::ZeroFiles)),
             &["gateway-offer", "trust-pointer", "switch-pointer"]
         );
 
-        // The two no-render forks must never render into a CLI config.
-        assert!(!fork_plan(Mode::CleanAtRest).contains(&"apply"));
-        assert!(!fork_plan(Mode::CleanAtRest).contains(&"install"));
-        assert!(!fork_plan(Mode::ZeroFiles).contains(&"apply"));
-        // zero-files never renders and never locks — it points at trust instead.
-        assert!(fork_plan(Mode::ZeroFiles).contains(&"trust-pointer"));
-        // Both no-render forks point at the un-render switch: without it, a
-        // project with rendered files keeps deriving "static" whatever was
-        // chosen — the exact display lie set-mode exists to remove.
-        assert!(fork_plan(Mode::CleanAtRest).contains(&"switch-pointer"));
-        assert!(fork_plan(Mode::ZeroFiles).contains(&"switch-pointer"));
+        // The no-render forks must never render into a CLI config. Automatic
+        // joins them: after the flip the default fork writes no native files at
+        // all, because skills and MCP servers are served live and the rendered
+        // lane's command is the explicit `apply --write`.
+        for no_render in [
+            DeliveryChoice::Automatic,
+            DeliveryChoice::Legacy(Mode::CleanAtRest),
+            DeliveryChoice::Legacy(Mode::ZeroFiles),
+        ] {
+            assert!(!fork_plan(no_render).contains(&"apply"), "{no_render:?}");
+        }
+        assert!(!fork_plan(DeliveryChoice::Legacy(Mode::CleanAtRest)).contains(&"install"));
+        // Automatic and zero-files both point at the review rather than
+        // granting it.
+        assert!(fork_plan(DeliveryChoice::Automatic).contains(&"trust-pointer"));
+        assert!(fork_plan(DeliveryChoice::Legacy(Mode::ZeroFiles)).contains(&"trust-pointer"));
+        // Both legacy no-render forks point at the un-render switch: without
+        // it, a project with rendered files keeps deriving "static" whatever
+        // was chosen — the exact display lie set-mode exists to remove.
+        assert!(fork_plan(DeliveryChoice::Legacy(Mode::CleanAtRest)).contains(&"switch-pointer"));
+        assert!(fork_plan(DeliveryChoice::Legacy(Mode::ZeroFiles)).contains(&"switch-pointer"));
+    }
+
+    /// The flip itself, at the wizard: a scripted run on a project that has
+    /// never rendered gets **Automatic**, not the old static render path. A
+    /// project that already has files on disk keeps them — the files are a
+    /// fact, and abandoning them silently would leave stale capabilities behind
+    /// a screen claiming everything is served live.
+    #[test]
+    fn a_scripted_setup_defaults_to_automatic_unless_the_project_already_rendered() {
+        assert_eq!(
+            choose_delivery(false).unwrap(),
+            Some(DeliveryChoice::Automatic)
+        );
+        assert_eq!(
+            choose_delivery(true).unwrap(),
+            Some(DeliveryChoice::Legacy(Mode::Static))
+        );
     }
 
     // P4: choosing a non-default mode prints a command sequence, never runs it.

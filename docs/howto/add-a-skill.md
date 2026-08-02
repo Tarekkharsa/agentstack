@@ -70,11 +70,13 @@ Every source is content-scanned (hidden-unicode / prompt-injection) before
 anything is offered, and a dry run fetches into transient staging — the
 [manifest](../concepts.md), [lockfile](../concepts.md), and content store
 stay untouched until `--write`. The write records the exact commit and
-content checksum in the lockfile, and — in the static delivery mode, when
-the active toolset is unambiguous — materializes the skill into your CLIs'
-skills directories immediately. Other modes get the honest next step
-printed: `session start` for clean-at-rest; `agentstack trust .` for
-[zero-files](trust-a-repo.md), because the manifest edit re-gates trust.
+content checksum in the lockfile, and — where the skill is
+[routed to the rendered lane](../concepts.md#delivery-modes) and the active
+toolset is unambiguous — materializes it into your CLIs' skills directories
+immediately. Where it is served live instead, the honest next step is printed:
+`agentstack trust .`, because the manifest edit re-gates trust
+([trust a repo](trust-a-repo.md)); a clean-at-rest project gets
+`session start`.
 
 **Limits.** Adding a skill never runs it, and a scan finding that blocks is
 a decision for you, not a flag to reach for reflexively

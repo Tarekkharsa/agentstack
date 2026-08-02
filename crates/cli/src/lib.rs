@@ -20,6 +20,7 @@ pub mod catalog;
 pub mod cli;
 pub mod codemode;
 pub mod commands;
+pub mod delivery;
 pub mod discover;
 pub mod eve;
 pub mod executable;

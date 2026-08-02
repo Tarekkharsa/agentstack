@@ -21,7 +21,7 @@ use crate::adapter::{extract_servers_with_skips, extract_settings, Registry};
 use crate::cli::{InitArgs, SecretStore};
 use crate::discover::{lift_secrets, merge_servers, Lifted};
 use crate::manifest::load::MANIFEST_FILE;
-use crate::manifest::model::{Manifest, Meta, Server, Targets};
+use crate::manifest::model::{Delivery, Manifest, Meta, Server, Targets};
 use crate::secret::{env_file, keychain};
 
 /// Store lifted secret values, collecting the references whose store write
@@ -1309,6 +1309,12 @@ version = 1
         render_managed_files(&manifest_path, &destinations, &project_root)
     );
 
+    // W4: the delivery planner's routing, stated per tool in plain language,
+    // in the same pre-write review. A fresh manifest carries no override, so
+    // this is the Automatic answer — skills and MCP servers served live to the
+    // tools that can take them, everything else written into files.
+    print!("{}", render_delivery_routing(&target_defaults));
+
     // Counts for the closing summary — `servers`/`settings` move into the
     // manifest below.
     let server_count = servers.len();
@@ -1337,6 +1343,10 @@ version = 1
         policy: Default::default(),
         guard: Default::default(),
         experimental: Default::default(),
+        // Absent = Automatic: the delivery planner routes each capability by
+        // kind and harness. `init` never writes an override — the escape hatch
+        // is something a person asks for.
+        delivery: Default::default(),
     };
     let toml_text = toml::to_string_pretty(&manifest).context("serializing manifest to TOML")?;
 
@@ -1572,6 +1582,7 @@ version = 1
                     .iter()
                     .flat_map(|c| c.configs.iter())
                     .all(|p| p.starts_with(&project_root)),
+                &delivery_summary_lines(&target_defaults),
             )
         );
     }
@@ -1662,6 +1673,10 @@ fn grant_trust_for_import(base: &Path, manifest_bytes: &str, manifest: &Manifest
 /// unit-testable without touching real CLI configs. One block, five facts:
 /// manifest path, source CLIs, imported counts, secrets still needing values,
 /// and the next commands (`apply --write`, then `doctor`).
+// Every parameter here is one display fact the summary states, and the function
+// is pure so those facts stay testable. A struct would name the same eight
+// values once more for a single call site.
+#[allow(clippy::too_many_arguments)]
 fn render_import_summary(
     manifest_path: &str,
     sources: &[String],
@@ -1675,6 +1690,10 @@ fn render_import_summary(
     // `--scope global` would send the user to write machine-wide files they
     // never asked about.
     sources_are_project_scope: bool,
+    // The delivery planner's per-tool routing, already rendered as
+    // "<tool> — <what goes live> · <what is written>" lines. Empty when no tool
+    // could be described, which is the only honest way to say nothing here.
+    delivery_lines: &[String],
 ) -> String {
     let mut out = String::new();
     out.push_str("\nImport complete.\n");
@@ -1734,8 +1753,26 @@ fn render_import_summary(
              \x20            manages them from this manifest, so there is no second copy.\n",
         );
     }
+    // W4: the routing, per tool, before the next-step list — so "apply --write"
+    // is read as the command for the rendered lane rather than as the command
+    // for everything. Skills and MCP servers reach an MCP-capable tool live;
+    // saying nothing here would let `apply --write` keep implying otherwise.
+    if !delivery_lines.is_empty() {
+        out.push_str("  Delivery:  ");
+        for (i, line) in delivery_lines.iter().enumerate() {
+            if i > 0 {
+                out.push_str("             ");
+            }
+            out.push_str(line);
+            out.push('\n');
+        }
+        out.push_str(
+            "             agentstack delivery   (the routing per tool, and how to write \
+             files instead)\n",
+        );
+    }
     out.push_str("  Undo:      agentstack restore --last --write\n");
-    out.push_str("  Next:      agentstack apply --write   (render this setup into your CLIs)\n");
+    out.push_str("  Next:      agentstack apply --write   (write the files your tools read)\n");
     out.push_str("             agentstack doctor          (check the result)\n");
     // Toolsets are deliberately NOT offered here (review finding H3). Import is
     // the moment a user has just learned what the manifest is; a first-time user
@@ -1863,9 +1900,83 @@ fn render_managed_files(
     out
 }
 
+/// The delivery planner's answer for a fresh project, one line per tool
+/// (W4, `docs/design/automatic-delivery.md` §"The decision").
+///
+/// Two things make this honest rather than decorative:
+///
+/// - it says *served live* and *written to files* per tool, so a project in
+///   both lanes at once — the normal case — reads as being in both;
+/// - it never claims "0 files". The `rendered lane:` line names what really
+///   gets written and where, and the live-lane note names what stays behind in
+///   the project even when nothing is rendered for a tool.
+///
+/// A fresh manifest carries no `[delivery]` override, so this is Automatic by
+/// construction; the override is something a person asks for later.
+fn delivery_summary_lines(target_ids: &[String]) -> Vec<String> {
+    let Ok(registry) = Registry::load() else {
+        return Vec::new();
+    };
+    let plan = crate::delivery::Plan::build(&Delivery::default(), &registry, target_ids);
+    super::delivery::summary_lines(&plan)
+}
+
+fn render_delivery_routing(target_ids: &[String]) -> String {
+    let Ok(registry) = Registry::load() else {
+        // The routing is a statement, not a gate: a registry we cannot load is
+        // a reason to say nothing, never a reason to guess.
+        return String::new();
+    };
+    let plan = crate::delivery::Plan::build(&Delivery::default(), &registry, target_ids);
+    if plan.harnesses.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    out.push_str("🚚  How each tool gets them:\n");
+    let width = plan
+        .harnesses
+        .iter()
+        .map(|h| h.display.len())
+        .max()
+        .unwrap_or(0);
+    for h in &plan.harnesses {
+        out.push_str(&format!("      {:width$}   {}\n", h.display, h.sentence()));
+    }
+    if plan.has_dynamic_lane() {
+        out.push_str(&format!("      {}\n", crate::delivery::ZERO_ARTIFACTS));
+    }
+    if let Some(line) = crate::delivery::rendered_lane_line(&plan) {
+        out.push_str(&format!("      {line}\n"));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// W4: the routing screen states both lanes per tool, names what is really
+    /// written, and never degrades into a "0 files" claim.
+    #[test]
+    fn delivery_routing_states_both_lanes_and_never_claims_zero_files() {
+        let text = render_delivery_routing(&["claude-code".to_string()]);
+        assert!(text.contains("Claude Code"), "{text}");
+        assert!(text.contains("served live"), "{text}");
+        assert!(text.contains("rendered lane:"), "{text}");
+        assert!(text.contains("0 project artifacts"), "{text}");
+        assert!(!text.contains("0 files"), "{text}");
+        // An instruction is never described as going live. Each harness row
+        // keeps its lanes in separate clauses, so the live clause can be read
+        // on its own — and it must never name a file-only kind.
+        for line in text.lines().filter(|l| l.contains("served live")) {
+            let live_clause = line.split(" · ").find(|c| c.contains("served live"));
+            let live_clause = live_clause.unwrap_or(line);
+            assert!(!live_clause.contains("house rules"), "{live_clause}");
+            assert!(!live_clause.contains("settings"), "{live_clause}");
+            assert!(!live_clause.contains("hooks"), "{live_clause}");
+        }
+    }
 
     /// Consent-fidelity witness (independent review, 2026-07-23): the plan
     /// digest must cover the FULL import the write performs, not the display
@@ -2027,6 +2138,10 @@ mod tests {
             &["GITHUB_TOKEN".to_string()],
             &["Gemini CLI".to_string(), "OpenCode".to_string()],
             false,
+            &[
+                "Claude Code — skills + MCP servers served live · house rules written to files"
+                    .to_string(),
+            ],
         );
         assert!(out.contains("Manifest:  /tmp/proj/.agentstack/agentstack.toml"));
         assert!(out.contains("From:      Claude Code · Codex CLI"));
@@ -2036,6 +2151,24 @@ mod tests {
         assert!(out.contains("agentstack restore --last --write"));
         assert!(out.contains("agentstack apply --write"));
         assert!(out.contains("agentstack doctor"));
+
+        // W4: the routing is stated before the next-step list, so `apply
+        // --write` reads as the rendered lane's command rather than as the
+        // command for everything. A summary with no routing lines prints no
+        // Delivery block at all — never an empty one.
+        assert!(out.contains("Delivery:  Claude Code — skills + MCP servers served live"));
+        assert!(out.contains("agentstack delivery"));
+        assert!(!render_import_summary(
+            "/m",
+            &["Claude Code".to_string()],
+            1,
+            0,
+            &[],
+            &[],
+            false,
+            &[]
+        )
+        .contains("Delivery:"));
 
         // F09: import copies, it does not move — say so, and name the command
         // that brings the originals under the same manifest.
@@ -2058,28 +2191,60 @@ mod tests {
         assert!(out.contains("agentstack apply --target <id> --write"));
 
         // Nothing left out → no "also seen" line at all, not an empty one.
-        let all_contributed =
-            render_import_summary("/m", &["Claude Code".to_string()], 2, 0, &[], &[], false);
+        let all_contributed = render_import_summary(
+            "/m",
+            &["Claude Code".to_string()],
+            2,
+            0,
+            &[],
+            &[],
+            false,
+            &[],
+        );
         assert!(!all_contributed.contains("Also seen:"));
 
         // Nothing pending → no secrets section at all, not an empty one.
-        let clean =
-            render_import_summary("/m", &["Claude Code".to_string()], 1, 0, &[], &[], false);
+        let clean = render_import_summary(
+            "/m",
+            &["Claude Code".to_string()],
+            1,
+            0,
+            &[],
+            &[],
+            false,
+            &[],
+        );
         assert!(!clean.contains("Secrets:"));
         assert!(!clean.contains("settings from"));
         assert!(clean.contains("agentstack doctor"));
         assert!(!clean.contains("create-profile"));
 
         // No servers at all → nothing was copied, so no duplication note.
-        let empty =
-            render_import_summary("/m", &["Claude Code".to_string()], 0, 1, &[], &[], false);
+        let empty = render_import_summary(
+            "/m",
+            &["Claude Code".to_string()],
+            0,
+            1,
+            &[],
+            &[],
+            false,
+            &[],
+        );
         assert!(!empty.contains("the CLI configs above are unchanged"));
         assert!(!empty.contains("create-profile"));
 
         // Server count and whether a name was available used to gate the
         // toolset offer; now no input produces one.
-        let unnamed =
-            render_import_summary("/m", &["Claude Code".to_string()], 4, 0, &[], &[], false);
+        let unnamed = render_import_summary(
+            "/m",
+            &["Claude Code".to_string()],
+            4,
+            0,
+            &[],
+            &[],
+            false,
+            &[],
+        );
         assert!(!unnamed.contains("create-profile"));
     }
 

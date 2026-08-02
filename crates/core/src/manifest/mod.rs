@@ -15,7 +15,8 @@ pub use load::{
 };
 pub use model::{
     egress_match, egress_pattern_is_malformed, glob_match, glob_to_match, host_from_url,
-    normalize_host, Dimension, ExperimentalConfig, ExperimentalExecuteLimits, Extension, FsPolicy,
-    GuardConfig, Hook, Instruction, Manifest, PackInstall, PackageOverride, PatternMatch, Policy,
-    Profile, RuleDenial, Server, ServerType, Skill, SkillSource, Workflow, WorkflowPolicy,
+    normalize_host, Delivery, Dimension, ExperimentalConfig, ExperimentalExecuteLimits, Extension,
+    FsPolicy, GuardConfig, HarnessDelivery, Hook, Instruction, Manifest, PackInstall,
+    PackageOverride, PatternMatch, Policy, Profile, RuleDenial, Server, ServerType, Skill,
+    SkillSource, Workflow, WorkflowPolicy,
 };

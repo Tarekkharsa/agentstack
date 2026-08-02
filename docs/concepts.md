@@ -29,8 +29,10 @@ your-project/
 
 Commit the first group; it is the portable part. The second group is written by
 `agentstack apply` in one shape per CLI, and how much of it exists at rest is
-your [delivery mode](#delivery-modes) — the default writes real files, the other
-two write none. Machine-wide counterparts of the same idea live in
+decided by [delivery routing](#delivery-modes) — skills and MCP servers reach an
+MCP-capable CLI live, so nothing generated lands here for them, while house
+rules, settings, hooks and extensions are real files. Machine-wide counterparts
+of the same idea live in
 `~/.agentstack/`; everything above is what one repository carries.
 
 The rest of this page names each piece, in the order the pieces are used.
@@ -44,17 +46,17 @@ flowchart LR
   lockfile --> trust["trust (consent digest)"]
   trust --> policy["policy: machine ∩ project"]
   policy --> run["gateway / runs"]
-  modes["delivery modes: static · clean-at-rest · zero-files"] --> run
+  modes["delivery: routed per kind + CLI · render-locally override"] --> run
   run --> audit["audit log + flight recorder"]
 -->
 
-![How the pieces relate: the central library feeds the manifest; manifest → lockfile → trust → policy (machine ∩ project) → gateway/runs → audit log; the delivery modes decide how it reaches a run](concepts-flow.svg)
+![How the pieces relate: the central library feeds the manifest; manifest → lockfile → trust → policy (machine ∩ project) → gateway/runs → audit log; delivery routing decides how it reaches a run](concepts-flow.svg)
 
 Read it left to right: you write a **manifest**, the **lockfile** pins it, you
 **trust** the result, **policy** narrows what may run, and the **gateway** (or a
 **run**) carries it to your tools — every call landing in the **audit** log. The
-**central library** feeds shared capabilities into the manifest; the **delivery
-mode** decides how it all reaches the agent.
+**central library** feeds shared capabilities into the manifest; **delivery
+routing** decides how each capability reaches the agent.
 
 ## The manifest and the lockfile
 
@@ -218,25 +220,58 @@ project's on every brokered call. The effective policy is the intersection
 (machine ∩ project), so a repo can only narrow a machine rule, never loosen it;
 a machine refusal names its layer in the error and the audit log.
 
-## Delivery modes
+<a id="delivery-modes"></a>
+## Delivery: routed, not chosen
 
-The **delivery mode** decides where a project's rendered files live. You always
-commit the intent (manifest plus lockfile); the rendered artifacts — `.mcp.json`,
-`.claude/skills/`, the compiled `CLAUDE.md` / `AGENTS.md` — are the choice:
+Since 2026-08-03 delivery is a **routing decision AgentStack makes**, from two
+facts: what kind a capability is, and which CLI it is going to. You always
+commit the intent (manifest plus lockfile); where the bytes then go is the
+routing:
 
-- **static** (the default) — rendered files sit on disk, kept out of git by a
+| Capability kind | Lane |
+|---|---|
+| Skills · MCP servers, on a CLI with MCP | **dynamic** — served live, on demand, digest-verified per load |
+| House rules (`CLAUDE.md` / `AGENTS.md` region) · settings | **rendered** — MCP cannot inject these |
+| Hooks · extensions | **rendered**, with the full consent ceremony every time (they run code) |
+| Any kind, on a CLI without MCP | **rendered** — that CLI has no live channel |
+
+A project is normally in both lanes at once. `agentstack delivery` shows the
+routing per CLI; `agentstack delivery --json` is the same reading for a UI
+(`delivery-routing-v1`).
+
+**The one override — render locally.** `[delivery] render_locally = true` in the
+manifest, per project or per harness (`[delivery.harness.<id>]`), set with
+`agentstack delivery render-locally [--harness <id>] --write`. It writes files
+even where the live channel would have worked — for offline work, deterministic
+native files, inspection with ordinary filesystem tools, a rule against a
+persistent background process, debugging without another runtime dependency, or
+compatibility testing against a CLI's own behaviour. It only ever moves a
+capability *towards* files; nothing moves an instruction or a hook the other
+way, because no channel would carry it.
+
+A gateway-served project keeps **0 project artifacts for the capabilities served
+live** — never "0 files": the manifest, the lockfile, and any managed
+house-rules region are still there.
+
+### The older delivery modes
+
+The three per-project modes below predate the routing and are still switchable
+with `agentstack set-mode`, but they are no longer how delivery is decided:
+
+- **static** — rendered files sit on disk, kept out of git by a
   managed `.gitignore` block. Works however you launch your tools, since the
   capabilities are real files the CLI reads directly.
 - **clean-at-rest** — nothing generated persists between sessions. A toolset is
   injected when a session or run starts and reverted on exit; `agentstack lock`
   pins the manifest's name refs *without rendering anything*, so `git status`
   stays silent.
-- **zero-files** — no per-project files at all. The gateway is registered once
-  per CLI, and every trusted repo serves its own stack live over it; a
+- **zero-files** — no *generated* per-project files. The gateway is registered
+  once per CLI, and every trusted repo serves its own stack live over it; a
   [lease](#lease-session-or-locked-run-fence) can fence one connection to a
-  toolset without rendering native files.
+  toolset without rendering native files. The repo still carries its manifest,
+  its lockfile, and any managed house-rules region.
 
-Not sure which you need? See [which mode do I need?](choose.md). More:
+Not sure which you need? See [how capabilities reach your CLIs](choose.md). More:
 [reference.md — where rendered files live](reference.md#where-rendered-files-live-three-modes).
 
 ## Lease, session, or locked-run fence

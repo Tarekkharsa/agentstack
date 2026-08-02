@@ -406,6 +406,28 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   all — leases are opened and closed by the MCP connection that owns them,
 ///   never from a panel. Its own name for the usual reason: a binary predating
 ///   it has no such command and refuses the call outright.
+/// - `delivery-routing-v1`: `delivery --json` emits the delivery planner's
+///   answer — `default` (always `"automatic"`), and one `harnesses` row per
+///   targeted CLI with `id`, `display`, `mcp_capable`, `render_locally`,
+///   `override` (`none` / `project` / `harness`), a plain-language `summary`,
+///   and a `routes` array giving each capability `kind` its `lane`
+///   (`dynamic` / `rendered`), the `why`, and `full_ceremony`.
+///
+///   **What it promises.** This is the routing, not a mode. There is exactly
+///   one user setting behind it — **Render locally** — and it can only move a
+///   capability towards files; nothing makes an instruction, a hook, or a
+///   file-only CLI's capability go live, because no channel would carry it. A
+///   panel may therefore render `lane` as a fact about where the bytes go, and
+///   `override` as the scope a person actually set.
+///
+///   **What it does not promise.** It is **not an activation reading**: a
+///   `dynamic` lane says where a capability is routed, not that a lease is
+///   open, that the bridge is registered, or that the project is trusted —
+///   `lease-status-v1`, `doctor-cli-coverage-v1` and the trust surfaces answer
+///   those, each with its own limits. And `full_ceremony` is a statement about
+///   hooks and extensions being executable kinds, never a claim that a
+///   ceremony has happened. Its own name for the usual reason: a binary
+///   predating it has no such command.
 pub const FEATURES: &[&str] = &[
     "init-plan",
     "apply-setup",
@@ -443,6 +465,7 @@ pub const FEATURES: &[&str] = &[
     "update-offer-v1",
     "package-members-v1",
     "lease-status-v1",
+    "delivery-routing-v1",
 ];
 
 /// Wrap a response body in the envelope. The two envelope keys are injected

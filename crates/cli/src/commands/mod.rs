@@ -8,6 +8,7 @@ pub mod apply;
 pub mod bundle;
 pub mod completions;
 pub mod connect;
+pub mod delivery;
 pub mod diff;
 pub mod doctor;
 pub mod explain;

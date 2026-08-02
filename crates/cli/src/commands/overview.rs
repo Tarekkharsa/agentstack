@@ -40,7 +40,13 @@ impl Mode {
         match self {
             Mode::Static => "config files on disk, kept out of git",
             Mode::CleanAtRest => "active only while you work, then restored",
-            Mode::ZeroFiles => "nothing on disk — served live to your CLIs after review",
+            // Honesty rule (design §"Honesty rules"): never a bare "nothing on
+            // disk". The project still holds its manifest and lock, and any
+            // house-rules region stays in its file — what this mode removes is
+            // the GENERATED artifacts.
+            Mode::ZeroFiles => {
+                "no generated files — capabilities served live to your CLIs after review"
+            }
         }
     }
 
@@ -52,7 +58,7 @@ impl Mode {
         match self {
             Mode::Static => "Config files stay on disk, kept out of git. Works with every CLI, zero moving parts. This is what you have now.",
             Mode::CleanAtRest => "Use a toolset temporarily: `agentstack session start` activates it and `session end` puts every file back exactly as it was. Nothing stays in your repo between sessions.",
-            Mode::ZeroFiles => "Nothing is ever written; your CLIs fetch servers and skills live from agentstack, and each repo stays inert until you review it once. Best when you work across many repos.",
+            Mode::ZeroFiles => "No generated files are written; your CLIs fetch servers and skills live from agentstack, and each repo stays inert until you review it once. The repo still keeps its agentstack manifest and lock, and any house-rules region stays in its file. Best when you work across many repos.",
         }
     }
 }
@@ -421,6 +427,15 @@ pub(crate) struct ProjectFacts {
     /// not-registered, and the difference is the whole outage: the harness gets
     /// no tools, and AgentStack writes nothing in the gateway's place.
     gateway_outages: Vec<crate::commands::connect::GatewayOutage>,
+    /// The delivery planner's routing, one plain-language line per CLI (W4).
+    /// The planner runs silently; this is where `status` names what it did.
+    delivery: Vec<String>,
+    /// The `rendered lane:` line, present only when something is actually
+    /// written — an empty lane line is its own small lie.
+    delivery_rendered_lane: Option<String>,
+    /// Whether anything is routed to the live lane, which is the only condition
+    /// under which the zero-artifacts sentence is true here.
+    delivery_has_live: bool,
     rendered: bool,
     /// `None` when the caller did not ask for the secrets reading — bare
     /// `agentstack` never does, and asking is not free (it consults every
@@ -1049,6 +1064,18 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
         None => next,
     };
 
+    // W4: the delivery planner's routing for this project — computed once here
+    // so the screen and the JSON body cannot disagree about it.
+    //
+    // Scoped to the manifest's OWN targets, not the whole registry. The mode
+    // and gateway readings above deliberately span every adapter (a rendered
+    // file or a registered bridge is a fact wherever it is); routing is the
+    // opposite question — where THIS project's capabilities go — and answering
+    // it for eleven CLIs the project never named would bury the two it did.
+    let delivery_targets = crate::render::resolve_targets(m, &ctx.registry, &[], &ctx.dir)
+        .unwrap_or_else(|_| m.targets.default.clone());
+    let delivery_plan = crate::delivery::Plan::build(&m.delivery, &ctx.registry, &delivery_targets);
+
     Ok(Orientation {
         catalog_size: ctx.registry.ids().count(),
         detected_clis,
@@ -1073,6 +1100,9 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
             mode,
             gateway_connected: gateway,
             gateway_outages: crate::commands::connect::gateway_outages(&ctx.registry, &target_ids),
+            delivery: crate::commands::delivery::summary_lines(&delivery_plan),
+            delivery_rendered_lane: crate::delivery::rendered_lane_line(&delivery_plan),
+            delivery_has_live: delivery_plan.has_dynamic_lane(),
             rendered,
             secrets: if deep_reads { secret_facts(&ctx) } else { None },
             updates: if deep_reads {
@@ -1251,6 +1281,24 @@ fn print_orientation(o: &Orientation, status: bool) {
                 f.mode.label(),
                 format!("— {}", f.mode.short()).dimmed()
             );
+
+            // W4: the planner routes silently, so this is where a person finds
+            // out what it decided — per CLI, both lanes, in plain language.
+            // The two binding honesty rules follow it on their own lines: never
+            // a bare "0 files", and a separate `rendered lane:` naming what is
+            // really written.
+            for (i, line) in f.delivery.iter().enumerate() {
+                let label = if i == 0 { "Delivery" } else { "        " };
+                println!("  {}  {}", label.bold(), line);
+            }
+            if !f.delivery.is_empty() {
+                if f.delivery_has_live {
+                    println!("            {}", crate::delivery::ZERO_ARTIFACTS.dimmed());
+                }
+                if let Some(lane) = &f.delivery_rendered_lane {
+                    println!("            {}", lane.dimmed());
+                }
+            }
 
             // W4 precondition 6 — the gateway is registered somewhere and
             // cannot run. Not dimmed: nothing this project declares reaches
@@ -1676,6 +1724,9 @@ mod tests {
                 mode: Mode::CleanAtRest,
                 gateway_connected: false,
                 gateway_outages: Vec::new(),
+                delivery: Vec::new(),
+                delivery_rendered_lane: None,
+                delivery_has_live: false,
                 rendered: false,
                 secrets,
                 needs_your_yes: None,

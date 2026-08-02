@@ -276,3 +276,122 @@ maintainer prefers it fail closed. Honest qualification recorded in
 ENFORCEMENT.md rather than left as a superlative: the lease column is strongest
 on tools and audit and on the fence, **not** on isolation, where its egress and
 filesystem rows are identical to the gateway column.
+
+### W4 (planner, override, and the flip) — delivery is routed, and dynamic is the default
+
+**The flip landed.** All seven remaining preconditions were verified first, each
+against a witness that already existed or was written here: (1) `TrustAnchor`
+re-verified from disk on every dispatch with no cache at all —
+`trust_at_dispatch` (7); (2) pinned-byte serving and an announce-only sync —
+`lib_sync_does_not_disturb_projects` (6); (3) the unleased fence, found open in
+the registry half and closed there — `lease_registry`'s two fencing witnesses;
+(4) the registry with liveness derived at read time from PID plus start token —
+`lease_registry`'s stale/reuse witness; (5) mixed-lane atomicity proven by a
+real failure injection — `upgrade_lanes` (4); (6) gateway-unavailable detection
+with no writing path — `lease_registry`'s outage witness; (7) Render locally,
+built here and witnessed in `delivery_planner`.
+
+Shipped: `crates/cli/src/delivery.rs`, a pure planner over exactly two inputs
+(capability kind, harness) plus the project's `[delivery]` table — it takes the
+override table rather than the manifest so it cannot reach anything else. The
+matrix is the contract's: skills and MCP servers dynamic on an MCP-capable
+harness, instructions and settings rendered because MCP cannot inject them,
+hooks and extensions rendered with the full ceremony always, and everything
+rendered on a harness with no MCP. The three physical facts are tested *before*
+the override, deliberately: Render locally can only move a capability towards
+files, and testing it first would suggest a symmetry that does not exist. The
+override is `[delivery] render_locally` per project and `[delivery.harness.<id>]`
+per harness (most specific wins, in both directions), edited through `toml_edit`
+like every other manifest edit, and cleared by *removing* the key — automatic is
+the absence of an override, not a second stored value. `agentstack delivery
+[--json]` is the read (`delivery-routing-v1`); `agentstack delivery
+render-locally [--harness <id>] [--off] --write` is the write.
+
+The flip itself is in two places. The planner's default lane, and the onboarding
+fork: the wizard's delivery question became **automatic (recommended)** plus
+"more control…", and a *scripted* setup on a project that has never rendered now
+takes automatic where it used to keep the derived static mode. The automatic
+fork states the routing, offers the one bridge registration the live lane needs,
+points at the review, and **renders nothing** — the rendered lane's command is
+the explicit `apply --write`. `init` states the routing per harness in its
+pre-write review and again above its next-step list, in plain language that
+stays inside `ordinary_journey_vocab`'s ban list.
+
+Judgment calls, all deliberate. **`apply` was not made lane-aware.** It is the
+rendered lane's command, running it is the explicit user action §Failure
+semantics 3 requires a fallback render to be, and making the one command whose
+job is static rendering skip kinds would be removing static rendering — which
+the contract forbids in the same paragraph that defines the lanes. The flip is
+therefore a change to what happens *automatically*, not to what happens when a
+user asks for files. **The older per-project modes were not deleted**: they left
+the wizard's front door and live behind "more control" and the shipped
+`set-mode`, because deleting a working switch is not what "gone as a user-facing
+concept" asks for. **A project that has already rendered keeps its render path**
+in a scripted run — the files are a fact, and un-rendering stays the explicit
+`set-mode` act rather than something a wizard does by omission. **The contract's
+example line `2 skills re-pinned — live via gateway now` stays unprinted**,
+revisited as W3 asked: the reason is no longer "static is the default" but that
+`upgrade` performs a pinning act and cannot establish an activation one — the
+bridge, the trust state, and the lease are all outside it, and Render locally
+could send the same bytes to a file. Same boundary `package-members-v1` draws.
+
+Honesty fixes that came with it: `Mode::ZeroFiles`'s "nothing on disk" and the
+zero-files fork's "nothing is written to disk" were both bare-zero claims the
+rules forbid; they now say *no generated files* and carry the sanctioned
+sentence, which names the manifest, the lock, and any house-rules region.
+`status` gained a `Delivery` block naming both lanes per CLI with the
+zero-artifacts sentence and a separate `rendered lane:` line under it.
+
+Tension named rather than guessed through: the shipped `set-mode` /
+`doctor-mode-v1` vocabulary still calls `clean-at-rest` and `zero-files`
+delivery *modes*, which the contract says are gone as user-facing concepts. The
+routing and the modes are now two axes describing the same system, and the
+product will read as two mechanisms until one of them is retired — a decision
+larger than this workstream, and one with a `set-mode-v1` contract behind it.
+
+### W4 (planner and the flip) — the arc lands
+
+Shipped: a pure delivery planner (`crates/cli/src/delivery.rs`) taking two
+inputs — capability kind and harness — plus the project's `[delivery]` table,
+so it cannot reach anything else. Skills and servers route dynamic on
+MCP-capable harnesses; instructions, settings, hooks and extensions route
+rendered; every kind routes rendered on a non-MCP harness. `init` states the
+routing per harness in plain language before it writes, and `status` shows both
+lanes with the zero-artifacts sentence and a separate `rendered lane:` line.
+The single override is `[delivery] render_locally` per project and
+`[delivery.harness.<id>]` per harness, most specific winning in both
+directions, reachable from the wizard's "more control" path and from
+`agentstack delivery render-locally`; automatic is the *absence* of an
+override, never a stored `false`. **The default flipped**, with all seven
+remaining preconditions verified and witnessed rather than assumed — and
+precondition 3 held only because the registry half found the unleased fence
+open and closed it.
+
+Witnesses: `delivery_planner` (5) — each kind routed to its lane including the
+non-MCP harness case, a project in both lanes at once as the normal case, the
+override writing files where the lease would have worked in both scopes and
+both directions, the flipped default itself, and the honesty rules asserted
+against real command output.
+
+Judgment calls: `apply` was deliberately **not** made lane-aware — it is the
+rendered lane's command, and running it is exactly the explicit user action the
+contract requires a fallback render to be, so the flip changes what happens
+automatically, not what happens when a user asks for files. The older delivery
+modes were not deleted; they left the wizard's front door and remain behind
+"more control" and the shipped `set-mode`, because deleting a working switch is
+more than "gone as a user-facing concept" asks for. A project that has already
+rendered keeps its render path in a scripted setup, since the files are a fact
+and un-rendering stays an explicit act. The "live via gateway now" line stays
+unprinted even post-flip, for a stronger reason than before: `upgrade` performs
+a pinning act and cannot establish an activation one — bridge registration,
+trust state and the lease are all outside it — so even a conditional print
+would be a liveness claim from a pinning path.
+
+**Tension recorded for the maintainer, not resolved here:** `set-mode` and
+`doctor-mode-v1` still call clean-at-rest and zero-files delivery *modes*, so
+`status` now shows `Mode static` directly above a `Delivery … served live`
+block. Routing and modes are two axes over one system, and the product will
+read as two mechanisms until one is retired. STRATEGY.md does say those
+concepts disappear as user-facing ones, but retiring them means retiring a
+shipped `set-mode-v1` ui-contract feature that a panel may depend on — a
+maintainer call, not a build-loop one.

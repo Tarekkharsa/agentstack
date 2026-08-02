@@ -923,11 +923,24 @@ fn print_result_report(
 
 /// The dynamic-lane result line, or `None` when the lane had no members.
 ///
-/// Deliberately NOT the contract's literal "live via gateway now": whether
-/// these bytes are served over the gateway depends on the project's delivery
-/// mode, and today's default still renders statically. Invariant 8 ("claims
-/// match enforcement") outranks the example's wording, so the line states the
-/// thing that is true in every mode — the lock now names the new bytes.
+/// Deliberately NOT the contract's literal "live via gateway now" — **revisited
+/// at the flip (W4, 2026-08-03) and kept**.
+///
+/// The reason has changed, and it is stronger than the one W3 recorded. It is
+/// no longer "the default is static": dynamic *is* the default now. It is that
+/// `upgrade` performs a **pinning** act and cannot establish an **activation**
+/// one. Whether these exact bytes are being served depends on three facts this
+/// command never touches — the bridge being registered in some harness, the
+/// project being trusted at its current bytes, and a lease selecting a toolset
+/// that contains the skill — plus one it could read but must not decide from
+/// alone: a project may have Render locally set, in which case the bytes go to
+/// files. A line printed unconditionally would be false on all four counts, and
+/// a line printed conditionally would still be claiming liveness from a
+/// pinning path. This is the same boundary `package-members-v1` draws: a pinned
+/// member is not a running one.
+///
+/// So the line states what is true in every case — the lock now names the new
+/// bytes — and `agentstack delivery` is where routing is read.
 fn dynamic_lane_result(d: &PackDiff, out: &LaneOutcome) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
     if out.skills_repinned > 0 {
