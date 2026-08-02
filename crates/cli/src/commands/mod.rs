@@ -47,6 +47,7 @@ pub mod undo;
 pub mod uninstall;
 pub mod unrender;
 pub mod up;
+pub mod updates;
 pub mod upgrade;
 pub mod use_profile;
 pub mod verify_cmd;

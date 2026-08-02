@@ -7,6 +7,7 @@ authorizes work — that belongs to `STRATEGY.md` and `TODO.md`.
 | Document | Answers | Status |
 |---|---|---|
 | [`automatic-delivery.md`](automatic-delivery.md) | How each capability reaches a harness: the dynamic (gateway lease) versus rendered lane routing, where the yes lives on the lease path, and what must hold before dynamic becomes the default | Active contract; adopted 2026-08-02 |
+| [`pinned-serving-and-library-drift.md`](pinned-serving-and-library-drift.md) | Why a central library moving ahead of a project's pin is an update available rather than project drift, what the load path serves instead, and the scope fence around that exemption | Active contract; adopted 2026-08-02 |
 | [`activation-study.md`](activation-study.md) | The activation-study kit — the instrument for the bar-met moment (promoted from the archive 2026-08-02). | Ready to run; RC pin re-cut when it runs |
 
 Everything written before the 2026-08-02 reset lives in

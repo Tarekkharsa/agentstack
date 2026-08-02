@@ -2592,7 +2592,53 @@ fn load_capability_with_lease(
     let status =
         crate::resolve::classify_skill(name, &resolved.checksum, resolved.rev.as_deref(), &lock);
     let mut warning: Option<String> = None;
+    let mut note: Option<String> = None;
+
+    // A LIBRARY skill whose live bytes have moved ahead of this project's pin
+    // is an UPDATE AVAILABLE, not project drift — the one narrow exemption
+    // from the fail-closed rule below, decided in
+    // `docs/design/pinned-serving-and-library-drift.md`. The project's
+    // composition is what its manifest declares and its lock pins; a library
+    // moving ahead changes neither, so per the delivery contract "`lib sync`
+    // announces; it never re-gates and never interrupts". Blocking here would
+    // make the library's state interrupt a project that never read it.
+    //
+    // Three conditions, all required, each one a way this could otherwise
+    // widen:
+    //
+    // - CHECKSUM drift only. Every other `Block` reason — rev drift, an
+    //   uncached git source, a broken ref — is untouched: none of them means
+    //   "the library has a newer version", they mean the pin cannot be
+    //   verified at all.
+    // - LIBRARY origin only. An inline skill's bytes are the project's own
+    //   content; those changing IS project drift and must keep refusing.
+    //   `resolved.origin` is decided by the resolver (inline block wins over
+    //   the library index), not inferred here.
+    // - The pinned snapshot is ALREADY in the store and still hashes to its
+    //   own name. Nothing unreviewed becomes reachable, because what gets
+    //   served is that snapshot and nothing else — and `has_pinned_content`
+    //   asks without repairing, which matters precisely here: the live
+    //   directory is the thing that no longer matches the pin, so it is not a
+    //   source anything may be repaired from. A store miss keeps the refusal.
+    let library_moved_ahead = matches!(
+        status,
+        crate::resolve::SkillLockStatus::ChecksumDrift { .. }
+    ) && matches!(resolved.origin, crate::resolve::SkillOrigin::Library)
+        && lock
+            .get(name)
+            .is_some_and(|entry| libctx.store.has_pinned_content(entry.checksum.hex()));
+
     match crate::verify::skill_verdict(&status) {
+        // Keep-pinned is the resting state, so this offers rather than warns:
+        // the project is not broken, stale, or in need of repair. It serves
+        // the bytes the human approved and names the one command that takes
+        // the newer ones.
+        crate::verify::Verdict::Block(_) if library_moved_ahead => {
+            note = Some(format!(
+                "a newer version of '{name}' is available in your central library — \
+                 this project is serving the version it pinned; run `agentstack lock` to take it"
+            ));
+        }
         crate::verify::Verdict::Block(why) => {
             anyhow::bail!(
                 "refusing to load '{name}': {why} — review the change, then run `agentstack lock` to accept it"
@@ -2611,7 +2657,44 @@ fn load_capability_with_lease(
         crate::verify::Verdict::Ok => {}
     }
 
-    let (_, body) = read_skill_md(&resolved.path);
+    // The reproducibility rule (docs/design/automatic-delivery.md): what is
+    // SERVED is resolved from the lock and read from the content-addressed
+    // store by digest, never from the mutable current state of the library.
+    // `resolved.path` is a live directory — for a central-library skill it is
+    // exactly the directory `lib sync` rewrites — so reading it here would
+    // reopen the window between the digest above and the read below, and would
+    // make a project's served bytes depend on library state it never consented
+    // to.
+    //
+    // Repairing an absent snapshot from `resolved.path` is not a weakening:
+    // reaching this line means `skill_verdict` returned `Ok`, i.e. the lock
+    // carries a pin and the live bytes hash to it, so what gets deposited IS
+    // the pinned, reviewed content. It self-heals a store that never received
+    // `Store::pin`'s best-effort deposit (or that was pruned) instead of
+    // refusing a load the human already said yes to. Everything else — a
+    // snapshot that fails verification, a repair that cannot be placed — fails
+    // closed below; there is no path back to serving live bytes.
+    //
+    // The one other way to reach here is `library_moved_ahead`, where the live
+    // bytes do NOT match the pin — and there the repair branch is unreachable
+    // by construction: that path is only taken when the snapshot is already
+    // present and verified.
+    let body_dir = match lock.get(name) {
+        Some(entry) => libctx
+            .store
+            .pinned_content(entry.checksum.hex(), &resolved.path)
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "refusing to load '{name}': its approved bytes could not be served from the \
+                     content store ({e}) — run `agentstack lock` to re-pin and review it"
+                )
+            })?,
+        // No pin: the unpinned library-skill path warned about above. There is
+        // no digest to serve by, so the resolved body is what there is — this
+        // path's policy is unchanged.
+        None => resolved.path.clone(),
+    };
+    let (_, body) = read_skill_md(&body_dir);
     let instructions = body.with_context(|| format!("skill '{name}' has no SKILL.md"))?;
 
     let newly = if lease.is_some() {
@@ -2638,6 +2721,13 @@ fn load_capability_with_lease(
     });
     if let Some(w) = warning {
         out["warning"] = json!(w);
+    }
+    // Deliberately NOT the `warning` slot: nothing is wrong with a project
+    // whose library moved ahead, and a warning-shaped sentence would teach the
+    // agent (and the human reading over its shoulder) that keep-pinned is a
+    // degraded state rather than the resting one.
+    if let Some(n) = note {
+        out["note"] = json!(n);
     }
     Ok(serde_json::to_string_pretty(&out)?)
 }

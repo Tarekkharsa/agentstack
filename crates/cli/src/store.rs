@@ -287,6 +287,64 @@ impl Store {
         Ok(dest)
     }
 
+    /// **The serving act.** The directory a pinned capability's bytes must be
+    /// READ from: the content-addressed snapshot named by `digest_hex` — never
+    /// the mutable directory `verified_live` was resolved from. This is the
+    /// reproducibility rule of `docs/design/automatic-delivery.md`: runtime
+    /// resolves from the project lock and serves the pinned bytes from the
+    /// store by digest, so a central library can move arbitrarily far ahead
+    /// without changing what any project serves.
+    ///
+    /// `verified_live` is used for one thing only — REPAIRING a snapshot that
+    /// is absent — and that is not a hole in the rule. Callers reach here only
+    /// after proving those live bytes hash to `digest_hex`, so the deposit
+    /// stores the pinned-and-reviewed bytes and nothing else; and
+    /// [`snapshot_content`] re-proves the address at the moment it is claimed,
+    /// so a source that moved in between fails the deposit instead of landing
+    /// under an approved name. The repair exists because [`pin`]'s deposit is
+    /// best-effort by design: a store that never received it, or that was
+    /// pruned, must self-heal rather than refuse a load the user consented to.
+    ///
+    /// Present-but-unverifiable is deliberately NOT repaired. Something
+    /// already occupies this address and does not hash to it — a tampered,
+    /// truncated, or symlinked store — which is a signal, not a gap to fill,
+    /// so it errors and the caller turns that into a refusal naming the
+    /// capability.
+    ///
+    /// [`pin`]: Store::pin
+    /// [`snapshot_content`]: Store::snapshot_content
+    pub fn pinned_content(&self, digest_hex: &str, verified_live: &Path) -> Result<PathBuf> {
+        let dest = self.root.join("content").join(digest_hex);
+        // `symlink_metadata`, not `exists()`: a symlink at the address counts
+        // as occupied and must refuse rather than be followed or replaced.
+        if dest.symlink_metadata().is_ok() {
+            if verified_snapshot(&dest, digest_hex) {
+                return Ok(dest);
+            }
+            bail!(
+                "the stored copy at {} is present but does not hash to {digest_hex}",
+                dest.display()
+            );
+        }
+        self.snapshot_content(verified_live, digest_hex)
+    }
+
+    /// Is the pinned snapshot for `digest_hex` ALREADY in the store and still
+    /// hashing to its own name? A pure question, with no repair: the answer is
+    /// what a caller needs when it holds no verified live copy to repair from
+    /// (the library-moved-ahead path in `mcp_server`, where the live directory
+    /// is exactly the thing that no longer matches the pin).
+    ///
+    /// Kept beside [`pinned_content`] rather than folded into it because the
+    /// two differ in one load-bearing way: `pinned_content` may deposit, this
+    /// only observes. A caller with nothing trustworthy to deposit must be
+    /// able to say so in the type of the call it makes.
+    ///
+    /// [`pinned_content`]: Store::pinned_content
+    pub fn has_pinned_content(&self, digest_hex: &str) -> bool {
+        verified_snapshot(&self.root.join("content").join(digest_hex), digest_hex)
+    }
+
     /// Resolve a skill to a local directory **without any network access**.
     /// Path sources resolve as usual. Git sources resolve to an immutable
     /// worktree for the pinned/declared commit *only if its clone already

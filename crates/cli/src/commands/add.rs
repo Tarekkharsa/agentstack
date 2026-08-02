@@ -1422,20 +1422,34 @@ fn preview_and_commit(
     let mut entries = Vec::new();
     for p in planned {
         let checksum = crate::store::dir_digest(&p.content_dir)?.hex().to_string();
+        // The immutable, content-addressed copy of exactly the bytes being
+        // pinned here. It is what gets MATERIALIZED below, for every source
+        // kind — invariant 4: a rendered artifact must stay bound to the digest
+        // it was gated at, and `render::skills` symlinks the artifact at its
+        // source dir, so pointing that link at a live directory (a central
+        // library a later `lib sync` moves ahead, say) would change the bytes a
+        // harness reads without changing the link, the lock, or the trust
+        // digest. The store address cannot move under it. Same rule the serving
+        // lane follows in `mcp_server::load_skill` and the rendered lane in
+        // `use_profile::activate`.
+        let snapshot = store.snapshot_content(&p.content_dir, &checksum)?;
+        // What the LOCK entry resolves from is a separate question: a git
+        // source records the snapshot (its clone churns), a path source keeps
+        // the declared directory it has always recorded.
         let source = if p.source_kind == "git" {
-            store.snapshot_content(&p.content_dir, &checksum)?
+            snapshot.clone()
         } else {
             p.content_dir.clone()
         };
         let resolved = crate::store::Resolved {
-            path: source.clone(),
+            path: source,
             rev: p.rev.clone(),
             checksum,
             fetched: true,
             source_kind: p.source_kind,
         };
         entries.push(super::install::locked_entry(&p.name, &p.entry, &resolved)?);
-        mat_sources.push((p.name.clone(), source));
+        mat_sources.push((p.name.clone(), snapshot));
     }
 
     // Now commit: the manifest atomically (source of truth), then the lock

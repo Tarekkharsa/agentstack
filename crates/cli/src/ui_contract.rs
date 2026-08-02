@@ -333,6 +333,25 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   Its own name for the usual reason: a binary predating it emits no such
 ///   key, and a UI reading the field on the strength of `status-v1` or
 ///   `json-reads-v1` would be sniffing.
+/// - `update-offer-v1`: `status --json`'s `project` gains an optional
+///   `updates` object — `packs[]` of `{name, current, available}` plus the one
+///   `fix` command that takes them. `fix` uses the SHIPPED spelling,
+///   `lock --upgrade <pack>` (or `--all` for several); a friendlier `upgrade`
+///   verb is a working name only, and copy naming a verb the binary lacks is
+///   worse than no copy. The key is INSERTED, never emitted as `null` or `[]`,
+///   so presence alone answers "is there an offer".
+///
+///   What this name explicitly does **not** promise: **absence is not
+///   currency.** The check behind it is offline by construction — `status`
+///   must not hang or fail on a network call — so it reads only the tag pinned
+///   in the `[packs.*]` ledger and the tags git has already fetched into this
+///   machine's store clone. A pack never cloned here, a clone that predates
+///   the newer tag, a machine without git, or a `catalog:` source (one version
+///   per id, so there is no version axis) all contribute nothing, and are
+///   indistinguishable from a pack that is genuinely current. Only
+///   `agentstack lock --upgrade <pack>` asks the remote. A UI must render this
+///   as an offer and must never derive an "up to date" badge from a missing
+///   `updates` key.
 pub const FEATURES: &[&str] = &[
     "init-plan",
     "apply-setup",
@@ -367,6 +386,7 @@ pub const FEATURES: &[&str] = &[
     "set-mode-v1",
     "status-honesty-v1",
     "needs-your-yes-v1",
+    "update-offer-v1",
 ];
 
 /// Wrap a response body in the envelope. The two envelope keys are injected
@@ -434,6 +454,7 @@ mod tests {
             "trust-card-diff-v1",
             "activity-skill-load-v1",
             "needs-your-yes-v1",
+            "update-offer-v1",
         ] {
             assert!(
                 features.contains(&shipped),

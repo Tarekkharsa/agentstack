@@ -68,3 +68,63 @@ verbatim, so a gateway launched with `/var/...` and a `status` run from
 should not — this is an honesty/reporting gap, not an enforcement one — and the
 real fix is canonicalizing once inside `commands::load`, a wider behaviour
 change than W1 should make unilaterally.
+
+### W3 — update semantics
+
+Shipped in three parts. **Serving:** the reproducibility rule is now real —
+`Store::pinned_content` makes the content-addressed snapshot the thing a skill
+body is read from, so the loader never reads the mutable library directory.
+An absent snapshot self-heals by depositing the live bytes (safe only because
+that line is reached solely after the pin has been proven equal, and the
+deposit re-proves the address as it lands); a present-but-unverifiable snapshot
+refuses, naming `agentstack lock`, and never falls back to live bytes. **The
+library moving ahead is an update, not drift:** for a *library-sourced* skill
+carrying a lock pin whose store snapshot verifies, divergence from the live
+library now serves the pinned bytes plus a note offering `agentstack lock`,
+instead of blocking. That decision, its two contract readings and the lines
+that settle them, the scope fence, and the invariant walk are written up in
+`docs/design/pinned-serving-and-library-drift.md`. **The rendered lane was
+leaking:** `use --write` (and `add`) materialized library skills as symlinks
+into the *live* library, so after a `lib sync` a harness read new, unreviewed
+bytes through an unchanged link with no re-gate — pre-existing, and exactly
+what W3's acceptance forbids. Both call sites now materialize against the
+pinned store snapshot, refusing outright if the store cannot produce verified
+bytes. **Offer and report:** `status` gained an optional `updates` object from
+a check that makes no network call at all (ledger tag versus already-fetched
+local git refs), so it can neither hang nor fail; upgrade reports the dynamic
+and rendered lanes on separate lines; and the mixed-lane upgrade became one
+transaction — lock re-pin, instruction pins, and the managed-region re-render
+all moved inside the rollback envelope, which now restores manifest, skill
+dirs, instruction fragments, the lockfile, and every instruction file carrying
+a managed region.
+
+Witnesses: `lib_sync_does_not_disturb_projects` (6) — a sync leaves every
+project byte identical including symlink targets, a project keeps serving its
+pinned bytes, a pinned skill is served from the store while the live library is
+mutated underneath, an inline skill that drifts still blocks, a rendered
+artifact still reads its pinned bytes after a sync, and a tampered store copy
+refuses to materialize; `upgrade_lanes` (4) — the all-or-nothing transaction
+proven by a real failure injection (an unwritable second adapter directory,
+failing after the manifest, assets, fragments, lock and the first region were
+all written, with all five artifact classes asserted byte-identical
+afterwards), separate lane lines with no "gateway" claim over an instruction,
+no instruction file created where none existed, and the update offer with its
+honest negative.
+
+Judgment calls: the moved-ahead exemption requires an *already-verified*
+snapshot (a separate `has_pinned_content`) so the repair branch stays
+unreachable there and `pinned_content`'s "caller has proven the digest"
+contract is never weakened; the store redirection is unconditional on origin,
+so an inline skill's rendered artifact also reads pinned bytes — consistent
+with the MCP lane, where a drifted inline skill already blocks, and strictly
+better than the old link that leaked ungated edits; the contract's example
+dynamic-lane line "live via gateway now" was deliberately NOT printed, because
+it is false on static projects and the default is still static until W4 —
+revisit at the flip. Debts: `agentstack_list_loadable` still reads skill
+descriptions from the live library, so an index line can be newer than the body
+that loads; `use`, `doctor`, and `trust` still describe library divergence in
+drift language that can read as breakage, and their copy needs a pass against
+this decision. Flagged for line-by-line review: upgrade now writes instruction
+pins (a digest-computation path it never touched) and reloads the manifest
+inside its transaction, so a manifest-validation change can fail an upgrade
+after the write.

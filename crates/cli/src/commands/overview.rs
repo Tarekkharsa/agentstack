@@ -424,6 +424,13 @@ pub(crate) struct ProjectFacts {
     /// Refusals recorded against this project since its last yes (W1). `None`
     /// for a trusted project and for one nothing has tried to use.
     needs_your_yes: Option<NeedsYourYes>,
+    /// Installed packs with a newer version resolvable **offline** (see
+    /// [`crate::commands::updates::available_updates`]). Empty means "nothing
+    /// to offer here", which is NOT the same as "up to date": the check never
+    /// touches the network, so a pack whose local clone is stale, absent, or
+    /// catalog-sourced is silently missing from this list. Every rendering of
+    /// it offers; none of them may claim currency.
+    updates: Vec<crate::commands::updates::PackUpdate>,
 }
 
 pub(crate) struct SessionFacts {
@@ -517,7 +524,7 @@ pub(crate) struct SecretFacts {
 /// `doctor`; status must feel instant.
 pub fn run_status(manifest_dir: Option<&Path>, json: bool) -> Result<()> {
     // `--json` changes only the rendering: the same collect, with the same
-    // `with_secrets` the named `status` screen already asks for.
+    // deep readings the named `status` screen already asks for.
     let orientation = collect(manifest_dir, true)?;
     if json {
         println!(
@@ -595,7 +602,7 @@ pub(crate) fn status_json(o: &Orientation) -> serde_json::Value {
 }
 
 fn project_json(f: &ProjectFacts) -> serde_json::Value {
-    let mut out = serde_json::json!({
+    let mut body = serde_json::json!({
         "servers": f.servers,
         "skills": f.skills,
         // Pinned targets and the fan-out count are different questions, so
@@ -638,13 +645,35 @@ fn project_json(f: &ProjectFacts) -> serde_json::Value {
     // No card payload rides along: `fix` names the command that renders the one
     // authoritative card, and that command is the only thing that renders it.
     if let Some(n) = &f.needs_your_yes {
-        out["needs_your_yes"] = serde_json::json!({
+        body["needs_your_yes"] = serde_json::json!({
             "refused": n.refused,
             "last_refused_ts": n.last_refused_ts,
             "fix": n.fix,
         });
     }
-    out
+
+    // `update-offer-v1`. Inserted, never emitted as `null` or as an empty
+    // list: presence means "there is an offer", and its ABSENCE means only
+    // "no offer was produced" — never "you are current" (the check is offline
+    // and stays silent about everything it cannot answer). Keeping the key out
+    // entirely is what stops a consumer from rendering an "up to date" badge
+    // off an empty array.
+    if !f.updates.is_empty() {
+        if let Some(map) = body.as_object_mut() {
+            map.insert(
+                "updates".into(),
+                serde_json::json!({
+                    "packs": f.updates.iter().map(|u| serde_json::json!({
+                        "name": u.name,
+                        "current": u.current,
+                        "available": u.available,
+                    })).collect::<Vec<_>>(),
+                    "fix": super::updates::fix_command(&f.updates),
+                }),
+            );
+        }
+    }
+    body
 }
 
 /// Secrets at a glance for `status`: the single most common thing broken after
@@ -665,6 +694,39 @@ fn secret_facts(ctx: &super::Context) -> Option<SecretFacts> {
         referenced: refs.len(),
         unresolved,
     })
+}
+
+/// The update **offer** (design §Update model rule 2): name that newer
+/// versions exist and the one command that takes them. Nothing is printed when
+/// there is no offer — deliberately not a green "up to date", because the
+/// check behind this is offline and cannot prove currency (see
+/// [`crate::commands::updates::available_updates`]).
+///
+/// Rule 4 shapes the second line: keep-pinned is the resting state, so this
+/// offers and then says so. It must not read as a warning, a nag, or a claim
+/// that staying put is a fault.
+fn print_updates_line(updates: &[crate::commands::updates::PackUpdate]) {
+    if updates.is_empty() {
+        return;
+    }
+    let list = updates
+        .iter()
+        .map(|u| format!("{} {} → {}", u.name, u.current, u.available))
+        .collect::<Vec<_>>()
+        .join(" · ");
+    println!(
+        "  {}  {} with a newer version: {list}",
+        "Updates ".bold(),
+        super::count(updates.len(), "pack")
+    );
+    println!(
+        "            {}",
+        format!(
+            "take it with `{}` — staying on the pinned version is a complete answer",
+            crate::commands::updates::fix_command(updates)
+        )
+        .dimmed()
+    );
 }
 
 /// One aligned line when everything resolves; one line per missing secret,
@@ -758,10 +820,13 @@ fn tidy(path: &std::path::Path) -> String {
         .to_string()
 }
 
-/// Read every fact the orientation screen states. `with_secrets` is the one
-/// knob: bare `agentstack` has never consulted the resolvers, and gathering
-/// unconditionally would make it slower for a line it does not print.
-fn collect(manifest_dir: Option<&Path>, with_secrets: bool) -> Result<Orientation> {
+/// Read every fact the orientation screen states. `deep_reads` is the one
+/// knob, and it covers the two readings only the named `status` screen asks
+/// for: the secrets resolution (bare `agentstack` has never consulted the
+/// resolvers) and the offline update check (one local git ref read per
+/// installed git pack). Gathering either unconditionally would make bare
+/// `agentstack` slower for lines it does not print.
+fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation> {
     let registry = Registry::load()?;
 
     // Walk up to the project root so `agentstack` from `src/deep` describes
@@ -937,10 +1002,11 @@ fn collect(manifest_dir: Option<&Path>, with_secrets: bool) -> Result<Orientatio
             mode,
             gateway_connected: gateway,
             rendered,
-            secrets: if with_secrets {
-                secret_facts(&ctx)
+            secrets: if deep_reads { secret_facts(&ctx) } else { None },
+            updates: if deep_reads {
+                super::updates::available_updates(m)
             } else {
-                None
+                Vec::new()
             },
             needs_your_yes: pending,
         })),
@@ -1109,6 +1175,7 @@ fn print_orientation(o: &Orientation, status: bool) {
             );
 
             if status {
+                print_updates_line(&f.updates);
                 if let Some(secrets) = &f.secrets {
                     print_secrets_line(secrets);
                 }
@@ -1523,6 +1590,7 @@ mod tests {
                 rendered: false,
                 secrets,
                 needs_your_yes: None,
+                updates: Vec::new(),
             })),
             next: ("agentstack trust .".into(), "review and re-trust"),
         }
@@ -1649,6 +1717,35 @@ mod tests {
         // "asked, everything resolves".
         let unasked = status_json(&loaded_orientation(None));
         assert_eq!(unasked["project"]["secrets"], serde_json::Value::Null);
+    }
+
+    /// `update-offer-v1`, both directions. The offer carries the three fields
+    /// and the SHIPPED command; no offer means the key is absent entirely —
+    /// not `null`, not `[]` — because absence must stay unreadable as
+    /// "current" (the check is offline and never proves currency).
+    #[test]
+    fn status_json_offers_updates_and_omits_the_key_when_there_is_none() {
+        let none = status_json(&loaded_orientation(None));
+        assert!(
+            none["project"].get("updates").is_none(),
+            "no offer must not materialize the key: {}",
+            none["project"]
+        );
+
+        let mut o = loaded_orientation(None);
+        if let ManifestState::Loaded(f) = &mut o.manifest {
+            f.updates = vec![crate::commands::updates::PackUpdate {
+                name: "acme".into(),
+                current: "v0.1.0".into(),
+                available: "v0.2.0".into(),
+            }];
+        }
+        let out = status_json(&o);
+        let updates = &out["project"]["updates"];
+        assert_eq!(updates["packs"][0]["name"], "acme");
+        assert_eq!(updates["packs"][0]["current"], "v0.1.0");
+        assert_eq!(updates["packs"][0]["available"], "v0.2.0");
+        assert_eq!(updates["fix"], "agentstack lock --upgrade acme");
     }
 
     // Stage 2.2: a live session reads as active; an abandoned one is flagged
