@@ -46,7 +46,7 @@ governed execution is constrained and recorded.**
 ## Where this starts
 
 The current implementation is a ten-crate Rust workspace. It ships the
-manifest and lock resolver, 13 CLI adapters, a central capability library,
+manifest and lock resolver, 13 CLI adapters, a capability library of linked source folders,
 content-bound trust, machine-first policy, a single-dispatch MCP gateway,
 Docker sandbox and lockdown runtimes, egress enforcement, per-run recording,
 an experimental frozen-plan executor, and a self-contained workflow engine.

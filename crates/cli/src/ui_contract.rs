@@ -428,6 +428,26 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   hooks and extensions being executable kinds, never a claim that a
 ///   ceremony has happened. Its own name for the usual reason: a binary
 ///   predating it has no such command.
+/// - `library-sources-v1`: `status --json` gains a `shadowed_names` array —
+///   one plain sentence per capability name that more than one **linked
+///   library source** holds, naming the source that wins, the count, and the
+///   `<source>:<name>` reference that pins the other copy
+///   (`docs/design/linked-library-sources.md`).
+///
+///   **What it promises.** The array is always present and is `[]` when no
+///   name is shadowed, so a panel can distinguish "checked, nothing shadowed"
+///   from an older binary that has no such key at all. The sentences are the
+///   SAME text `agentstack doctor` and `agentstack lib sources` print, so no
+///   UI has to compose its own account of a collision, and the winner named
+///   here is the one a bare reference actually resolves to.
+///
+///   **What it does not promise.** It is **not a serving reading.** Precedence
+///   decides *selection*; a locked project serves the bytes its lock pins,
+///   read from the content store, so a name shown as shadowed here may be
+///   irrelevant to everything this project currently serves. It says nothing
+///   about which sources are linked, in what order, or where they live — that
+///   is `agentstack lib sources`, deliberately not a panel surface, because
+///   the link list is personal-layer machine state and never project state.
 pub const FEATURES: &[&str] = &[
     "init-plan",
     "apply-setup",
@@ -466,6 +486,7 @@ pub const FEATURES: &[&str] = &[
     "package-members-v1",
     "lease-status-v1",
     "delivery-routing-v1",
+    "library-sources-v1",
 ];
 
 /// Wrap a response body in the envelope. The two envelope keys are injected
@@ -536,6 +557,7 @@ mod tests {
             "update-offer-v1",
             "package-members-v1",
             "lease-status-v1",
+            "library-sources-v1",
         ] {
             assert!(
                 features.contains(&shipped),

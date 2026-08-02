@@ -890,10 +890,13 @@ fn run_checks(
     // machine-wide configs belong to whichever manifest manages them, and
     // warning every project about them would be noise, not a finding.
     report.section("Unmanaged setup");
-    let unmanaged = crate::discover::native_configs(
+    // Coverage counts name references too: a library-first import leaves the
+    // definitions in a linked source and the project referencing them by name,
+    // which is managed — not uncovered.
+    let unmanaged = crate::discover::native_configs_with(
         &ctx.registry,
         &ctx.dir,
-        &manifest.servers,
+        &crate::discover::declared_server_names(manifest),
         false, // project scope only
     );
     let pending: Vec<_> = unmanaged
@@ -918,6 +921,74 @@ fn run_checks(
                     crate::text::sanitize_line(&n.unimported.join(", ")),
                 ),
             );
+        }
+    }
+
+    // Linked library sources: the order that decides every bare name, and every
+    // name one source shadows in another.
+    //
+    // Advisory, never an error: shadowing is legal and often deliberate (that
+    // is what putting a source first is FOR), so progressive disclosure says it
+    // does not get an error. What it must never get is silence — an
+    // unreported shadow is a user resolving bytes they did not mean to
+    // (docs/design/linked-library-sources.md §"Collisions are surfaced").
+    report.section("Library sources");
+    let sources = crate::sources::Sources::load_or_warn();
+    let linked = sources.linked();
+    let library = crate::library::Library::load_linked(&linked).unwrap_or_default();
+    if linked.len() < 2 && library.linked.collisions.is_empty() {
+        report.line(
+            Level::Ok,
+            format!(
+                "one library source · {}",
+                linked
+                    .first()
+                    .map(|s| s.root.display().to_string())
+                    .unwrap_or_default()
+            ),
+        );
+        report.mark_irrelevant();
+    } else {
+        report.line(
+            Level::Info,
+            format!(
+                "{:<14} {}",
+                "resolution",
+                linked
+                    .iter()
+                    .map(|s| s.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" → ")
+            ),
+        );
+        for source in &linked {
+            if !source.root.is_dir() {
+                report.line(
+                    Level::Warn,
+                    format!(
+                        "{:<14} linked folder not found: {} ↳ agentstack lib unlink {} --write",
+                        source.name,
+                        tidy_path(&source.root),
+                        source.name
+                    ),
+                );
+            }
+        }
+        for c in &library.linked.collisions {
+            report.line(
+                Level::Warn,
+                format!(
+                    "{:<14} {} also in {} — '{}' wins ↳ pin the other with {}",
+                    crate::text::sanitize_line(&c.name),
+                    c.kind.noun(),
+                    c.shadowed.join(", "),
+                    c.winner,
+                    c.qualified_shadowed(),
+                ),
+            );
+        }
+        if library.linked.collisions.is_empty() {
+            report.line(Level::Ok, "no name is shadowed across sources");
         }
     }
 

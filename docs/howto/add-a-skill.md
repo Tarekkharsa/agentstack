@@ -55,7 +55,7 @@ agentstack add skill anthropics/skills --skill pdf --write
 agentstack add skill https://github.com/o/r/tree/main/skills/pdf --write
 agentstack add skill ./my-skill --write
 
-# 2. Reusable across projects: into the central library, then name it in a toolset
+# 2. Reusable across projects: into your first linked library source, then name it in a toolset
 agentstack lib add anthropics/skills --skill pdf --write
 #   then in any manifest:  [profiles.backend]  skills = ["pdf"]
 
@@ -88,4 +88,4 @@ upstream; a vanished repo errors instead of pretending).
 
 - [Concepts](../concepts.md) — skill, toolset, library, lockfile
 - [Reference: `add skill <source>`](../reference.md#add-skill-source--install-from-any-skills-repo)
-- [Reference: the central library](../reference.md#the-central-library)
+- [Reference: the library](../reference.md#the-library-linked-source-folders)

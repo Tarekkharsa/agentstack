@@ -199,7 +199,7 @@
       </li>
       <li><a href="workflows.html">Workflows</a>
       </li>
-      <li><a href="reference.html#the-central-library">Central library</a>
+      <li><a href="reference.html#the-library-linked-source-folders">Library sources</a>
       </li>
       <li><a href="concepts.html#delivery-modes">Delivery modes</a>
       </li>
@@ -406,7 +406,7 @@ $ echo $?
 <li><code>trust</code> is three booleans, not a rendered sentence. <code>runs_code</code> is the one to filter on; for <code>kind: "extension"</code> it means in-process code at full user permission, ungoverned at runtime.</li>
 <li><code>add_command</code> is <code>null</code> when there is nothing to offer — either <code>in_manifest</code> is already true, or it is an extension, which is referenced by name in <code>[extensions.*]</code> rather than added.</li>
 <li>Descriptions ship whole. The 70-column truncation is for a terminal.</li>
-<li>This read reaches the <strong>network</strong>: it queries the official MCP Registry alongside your central library and the embedded catalog. It writes nothing.</li>
+<li>This read reaches the <strong>network</strong>: it queries the official MCP Registry alongside your linked library sources and the embedded catalog. It writes nothing.</li>
 </ul>
 <h3 id="adapters-list---json"><code>adapters list --json</code><a class="hlink" href="#adapters-list---json" aria-label="Link to this section">#</a></h3>
 <pre class="block"><code>{

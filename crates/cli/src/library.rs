@@ -1,11 +1,15 @@
-//! `~/.agentstack/lib/library.toml` — the central capability library index.
+//! `<source>/library.toml` — one linked library source's capability index.
 //!
-//! The library is the single managed home a project references capabilities from
-//! by name, instead of copying capability files into each repo (see
-//! `docs/reference.md#the-central-library`). This module is the inert foundation: it models the
-//! index and loads/saves it. It performs **no resolution** — mapping a project's
-//! `skills = ["name"]` reference to a library entry is the resolver's job, added
-//! on top of this in a later step.
+//! A library source is any folder a project references capabilities from by
+//! name, instead of copying capability files into each repo; several can be
+//! linked at once, and `~/.agentstack/lib` is the one every machine starts with
+//! (see `docs/design/linked-library-sources.md` and
+//! `docs/reference.md#the-library-linked-source-folders`). This module is the
+//! inert foundation: it models one source's index, loads/saves it, and merges
+//! the linked sources into the ordered view every consumer reads
+//! ([`Library::load_default`]). It performs **no resolution** — mapping a
+//! project's `skills = ["name"]` reference to a library entry is the resolver's
+//! job, on top of this.
 //!
 //! Skills ship in Phase 1; servers are modeled here for Phase 1b (the resolver
 //! wiring lands in a later step); declarative `[hooks.*]` land in E3d — a hook's
@@ -25,7 +29,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::manifest::Skill;
 use crate::store::Store;
-use crate::util::paths;
 
 /// Parse the one-line `description:` value from a `SKILL.md` YAML frontmatter
 /// block — the leading `---` … `---` fence. Returns `None` when there's no
@@ -127,6 +130,15 @@ pub struct Library {
     /// like a git skill or extension).
     #[serde(default, rename = "package")]
     pub packages: Vec<LibraryPackage>,
+    /// The linked sources this index was merged from, in precedence order
+    /// (`docs/design/linked-library-sources.md`). In-memory only — it is a view
+    /// over several `library.toml` files, never a field any of them carries.
+    ///
+    /// Empty for a single-file index read by [`Library::load`]; populated by
+    /// [`Library::load_linked`], which every "the machine's library" caller
+    /// reaches through [`Library::load_default`].
+    #[serde(skip)]
+    pub linked: LinkedView,
 }
 
 impl Default for Library {
@@ -138,7 +150,139 @@ impl Default for Library {
             extensions: Vec::new(),
             hooks: Vec::new(),
             packages: Vec::new(),
+            linked: LinkedView::default(),
         }
+    }
+}
+
+/// The capability kinds a linked source can hold. Used to key precedence and
+/// collision lookups uniformly, so the five kinds cannot drift apart.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Kind {
+    Skill,
+    Server,
+    Extension,
+    Hook,
+    Package,
+}
+
+impl Kind {
+    /// The word surfaces use for this kind, singular.
+    pub fn noun(self) -> &'static str {
+        match self {
+            Kind::Skill => "skill",
+            Kind::Server => "server",
+            Kind::Extension => "extension",
+            Kind::Hook => "hook",
+            Kind::Package => "package",
+        }
+    }
+}
+
+/// One linked source's own index, with its root.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SourceIndex {
+    /// The name this source is addressed by in a `<source>:<name>` reference.
+    pub name: String,
+    /// The folder holding `library.toml` and the capability taxonomy.
+    pub root: PathBuf,
+    /// This source's index, on its own. Path entries belonging to a **non-**
+    /// primary source are absolutized against `root` when the view is built,
+    /// so every consumer that already passes the primary `lib_home` resolves
+    /// them correctly without a second base parameter.
+    pub library: Library,
+}
+
+impl SourceIndex {
+    fn holds(&self, kind: Kind, name: &str) -> bool {
+        match kind {
+            Kind::Skill => self.library.skills.iter().any(|e| e.name == name),
+            Kind::Server => self.library.servers.iter().any(|e| e.name == name),
+            Kind::Extension => self.library.extensions.iter().any(|e| e.name == name),
+            Kind::Hook => self.library.hooks.iter().any(|e| e.name == name),
+            Kind::Package => self.library.packages.iter().any(|e| e.name == name),
+        }
+    }
+}
+
+/// One name held by more than one linked source: who wins, who is shadowed.
+/// Built once at merge time so no surface has to recompute it — and so no
+/// surface can show a capability the user will not actually get.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Collision {
+    pub kind: Kind,
+    pub name: String,
+    /// The source that satisfies the bare name.
+    pub winner: String,
+    /// The sources holding the same name, later in the order.
+    pub shadowed: Vec<String>,
+}
+
+impl Collision {
+    /// The reference that pins the *shadowed* copy — the one thing a user
+    /// reading a collision report actually needs.
+    pub fn qualified_shadowed(&self) -> String {
+        format!(
+            "{}{}{}",
+            self.shadowed
+                .first()
+                .map(String::as_str)
+                .unwrap_or_default(),
+            crate::sources::QUALIFIER,
+            self.name
+        )
+    }
+}
+
+/// The ordered linked sources behind a merged [`Library`], plus the collisions
+/// the merge found. Empty means "this index is one file", which is the shape
+/// every library-management command still works in.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct LinkedView {
+    pub sources: Vec<SourceIndex>,
+    pub collisions: Vec<Collision>,
+}
+
+impl LinkedView {
+    pub fn is_empty(&self) -> bool {
+        self.sources.is_empty()
+    }
+
+    /// The source a reference resolves in, and the capability's bare name.
+    ///
+    /// A qualified reference resolves **only** in the source it names — no
+    /// fall-through, or the explicit form would be weaker than the implicit
+    /// one. A bare reference takes the first source in order that holds it.
+    pub fn find<'v, 'r>(
+        &'v self,
+        kind: Kind,
+        reference: &'r str,
+    ) -> Option<(&'v SourceIndex, &'r str)> {
+        if let Some((source, name)) = crate::sources::split_reference(reference) {
+            let index = self.sources.iter().find(|s| s.name == source)?;
+            return index.holds(kind, name).then_some((index, name));
+        }
+        self.sources
+            .iter()
+            .find(|s| s.holds(kind, reference))
+            .map(|s| (s, reference))
+    }
+
+    /// Whether `source` is a linked source name at all — so an unresolved
+    /// qualified reference can say "no such source" rather than "no such
+    /// capability", which are different mistakes with different fixes.
+    pub fn has_source(&self, source: &str) -> bool {
+        self.sources.iter().any(|s| s.name == source)
+    }
+
+    /// The linked source names, in precedence order.
+    pub fn source_names(&self) -> Vec<&str> {
+        self.sources.iter().map(|s| s.name.as_str()).collect()
+    }
+
+    /// The collisions involving one name, whatever the kind.
+    pub fn collisions_for(&self, name: &str) -> Vec<&Collision> {
+        self.collisions.iter().filter(|c| c.name == name).collect()
     }
 }
 
@@ -444,10 +588,149 @@ impl Library {
         }
     }
 
-    /// Load the index from the default library home (`~/.agentstack/lib`, honoring
-    /// `AGENTSTACK_HOME`).
+    /// Load the machine's library: every linked source, merged in precedence
+    /// order (`docs/design/linked-library-sources.md`).
+    ///
+    /// On a machine that never linked a folder this is exactly
+    /// `Self::load(&paths::lib_home())` plus a one-source [`LinkedView`], so
+    /// the single-library setup is unchanged down to the bytes of every entry.
     pub fn load_default() -> Result<Self> {
-        Self::load(&paths::lib_home())
+        Self::load_linked(&crate::sources::Sources::load()?.linked())
+    }
+
+    /// Merge the ordered linked sources into one index.
+    ///
+    /// **First match wins** — `PATH` semantics. A later source holding a name
+    /// an earlier one already holds contributes nothing to the merged vectors
+    /// and is recorded as a [`Collision`] instead, so the shadowed copy is
+    /// always reportable and never silently gone.
+    ///
+    /// A source that cannot be read is reported and skipped rather than
+    /// failing the whole machine: one unreadable linked folder must not take
+    /// every other source's capabilities offline with it.
+    pub fn load_linked(sources: &[crate::sources::LinkedSource]) -> Result<Self> {
+        let mut indexes: Vec<SourceIndex> = Vec::with_capacity(sources.len());
+        // The one root whose entries may stay in their recorded relative form:
+        // `~/.agentstack/lib`, because that is the base every existing consumer
+        // passes as `lib_home`. Not "the first source" — a user who links their
+        // own folder first must not thereby make the central library's paths
+        // resolve against the wrong root.
+        let relative_root = crate::util::paths::lib_home();
+        for source in sources {
+            let mut library = match Self::load(&source.root) {
+                Ok(l) => l,
+                Err(e) => {
+                    eprintln!(
+                        "warning: library source '{}' at {} is unreadable ({e:#}); skipping it",
+                        source.name,
+                        source.root.display()
+                    );
+                    continue;
+                }
+            };
+            // Every other source is rewritten to absolute paths. Leaving
+            // `lib_home`'s own entries alone is what keeps a single-library
+            // machine byte-identical — nothing about its lock entries or
+            // rendered artifacts moves.
+            if source.root != relative_root {
+                library.absolutize_paths(&source.root);
+            }
+            indexes.push(SourceIndex {
+                name: source.name.clone(),
+                root: source.root.clone(),
+                library,
+            });
+        }
+
+        let mut merged = Library::default();
+        let mut collisions: Vec<Collision> = Vec::new();
+        for index in &indexes {
+            for entry in &index.library.skills {
+                if merged.skills.iter().any(|e| e.name == entry.name) {
+                    note_collision(&mut collisions, &indexes, Kind::Skill, &entry.name);
+                } else {
+                    merged.skills.push(entry.clone());
+                }
+            }
+            for entry in &index.library.servers {
+                if merged.servers.iter().any(|e| e.name == entry.name) {
+                    note_collision(&mut collisions, &indexes, Kind::Server, &entry.name);
+                } else {
+                    merged.servers.push(entry.clone());
+                }
+            }
+            for entry in &index.library.extensions {
+                if merged.extensions.iter().any(|e| e.name == entry.name) {
+                    note_collision(&mut collisions, &indexes, Kind::Extension, &entry.name);
+                } else {
+                    merged.extensions.push(entry.clone());
+                }
+            }
+            for entry in &index.library.hooks {
+                if merged.hooks.iter().any(|e| e.name == entry.name) {
+                    note_collision(&mut collisions, &indexes, Kind::Hook, &entry.name);
+                } else {
+                    merged.hooks.push(entry.clone());
+                }
+            }
+            for entry in &index.library.packages {
+                if merged.packages.iter().any(|e| e.name == entry.name) {
+                    note_collision(&mut collisions, &indexes, Kind::Package, &entry.name);
+                } else {
+                    merged.packages.push(entry.clone());
+                }
+            }
+        }
+        merged.linked = LinkedView {
+            sources: indexes,
+            collisions,
+        };
+        Ok(merged)
+    }
+
+    /// Rewrite this index's `path` entries to absolute paths under `root`.
+    ///
+    /// A merged view is consumed by callers that pass the *primary* library
+    /// home as the base directory. An entry from another source would resolve
+    /// against the wrong root, so its path is made root-independent here —
+    /// once, at merge time — instead of threading a per-entry base through
+    /// every resolver signature. Git-sourced entries need nothing: they resolve
+    /// through the content store, which has no notion of a library root.
+    fn absolutize_paths(&mut self, root: &Path) {
+        fn absolutize(path: &mut Option<String>, anchor: PathBuf) {
+            if let Some(p) = path {
+                let candidate = PathBuf::from(&*p);
+                if candidate.is_relative() {
+                    *p = anchor.join(candidate).to_string_lossy().into_owned();
+                }
+            }
+        }
+        for skill in &mut self.skills {
+            if skill.source == "path" {
+                absolutize(&mut skill.path, root.join("skills"));
+            }
+        }
+        for extension in &mut self.extensions {
+            if extension.source == "path" {
+                absolutize(&mut extension.path, root.join("extensions"));
+            }
+        }
+        for package in &mut self.packages {
+            if package.source == "path" {
+                absolutize(&mut package.path, root.join(PACKAGES_DIR));
+            }
+        }
+    }
+
+    /// The library root a reference's definition file lives under, for the two
+    /// kinds whose body is a bare file with no `path` field (servers and
+    /// hooks). Falls back to `lib_home`, which is what a single-source machine
+    /// and every management command already pass.
+    pub fn source_root(&self, kind: Kind, lib_home: &Path, reference: &str) -> PathBuf {
+        match self.linked.find(kind, reference) {
+            Some((index, _)) => index.root.clone(),
+            None => lib_home.to_path_buf(),
+        }
     }
 
     /// Best-effort load for surfaces that degrade to inline-only resolution
@@ -477,9 +760,20 @@ impl Library {
             .with_context(|| format!("writing {}", path.display()))
     }
 
-    /// Look up a library skill by the name a project references it by.
-    pub fn get(&self, name: &str) -> Option<&LibrarySkill> {
-        self.skills.iter().find(|s| s.name == name)
+    /// Look up a library skill by the reference a project uses — a bare name
+    /// resolved through the source order, or a `<source>:<name>` reference
+    /// that resolves only in the source it names.
+    pub fn get(&self, reference: &str) -> Option<&LibrarySkill> {
+        if let Some((index, name)) = self.linked.find(Kind::Skill, reference) {
+            return index.library.skills.iter().find(|s| s.name == name);
+        }
+        // No linked view (a single-file index read by `load`) — the flat
+        // vector is the whole library. A qualified reference finds nothing
+        // here, which is correct: there is no source list to name.
+        self.linked
+            .is_empty()
+            .then(|| self.skills.iter().find(|s| s.name == reference))
+            .flatten()
     }
 
     /// Insert or replace a skill entry, keeping entries sorted by name.
@@ -499,9 +793,16 @@ impl Library {
         self.skills.len() != before
     }
 
-    /// Look up a library server by the name a project references it by.
-    pub fn get_server(&self, name: &str) -> Option<&LibraryServer> {
-        self.servers.iter().find(|s| s.name == name)
+    /// Look up a library server by the reference a project uses. Same
+    /// precedence and qualification rules as [`Library::get`].
+    pub fn get_server(&self, reference: &str) -> Option<&LibraryServer> {
+        if let Some((index, name)) = self.linked.find(Kind::Server, reference) {
+            return index.library.servers.iter().find(|s| s.name == name);
+        }
+        self.linked
+            .is_empty()
+            .then(|| self.servers.iter().find(|s| s.name == reference))
+            .flatten()
     }
 
     /// Insert or replace a server entry, keeping entries sorted by name.
@@ -521,9 +822,16 @@ impl Library {
         self.servers.len() != before
     }
 
-    /// Look up a library extension by the name a project references it by.
-    pub fn get_extension(&self, name: &str) -> Option<&LibraryExtension> {
-        self.extensions.iter().find(|e| e.name == name)
+    /// Look up a library extension by the reference a project uses. Same
+    /// precedence and qualification rules as [`Library::get`].
+    pub fn get_extension(&self, reference: &str) -> Option<&LibraryExtension> {
+        if let Some((index, name)) = self.linked.find(Kind::Extension, reference) {
+            return index.library.extensions.iter().find(|e| e.name == name);
+        }
+        self.linked
+            .is_empty()
+            .then(|| self.extensions.iter().find(|e| e.name == reference))
+            .flatten()
     }
 
     /// Insert or replace an extension entry, keeping entries sorted by name.
@@ -543,9 +851,16 @@ impl Library {
         self.extensions.len() != before
     }
 
-    /// Look up a library hook by the name a project references it by.
-    pub fn get_hook(&self, name: &str) -> Option<&LibraryHook> {
-        self.hooks.iter().find(|h| h.name == name)
+    /// Look up a library hook by the reference a project uses. Same precedence
+    /// and qualification rules as [`Library::get`].
+    pub fn get_hook(&self, reference: &str) -> Option<&LibraryHook> {
+        if let Some((index, name)) = self.linked.find(Kind::Hook, reference) {
+            return index.library.hooks.iter().find(|h| h.name == name);
+        }
+        self.linked
+            .is_empty()
+            .then(|| self.hooks.iter().find(|h| h.name == reference))
+            .flatten()
     }
 
     /// Insert or replace a hook entry, keeping entries sorted by name.
@@ -565,9 +880,16 @@ impl Library {
         self.hooks.len() != before
     }
 
-    /// Look up a library package by the name a toolset references it by.
-    pub fn get_package(&self, name: &str) -> Option<&LibraryPackage> {
-        self.packages.iter().find(|p| p.name == name)
+    /// Look up a library package by the reference a toolset uses. Same
+    /// precedence and qualification rules as [`Library::get`].
+    pub fn get_package(&self, reference: &str) -> Option<&LibraryPackage> {
+        if let Some((index, name)) = self.linked.find(Kind::Package, reference) {
+            return index.library.packages.iter().find(|p| p.name == name);
+        }
+        self.linked
+            .is_empty()
+            .then(|| self.packages.iter().find(|p| p.name == reference))
+            .flatten()
     }
 
     /// Insert or replace a package entry, keeping entries sorted by name.
@@ -586,6 +908,31 @@ impl Library {
         self.packages.retain(|p| p.name != name);
         self.packages.len() != before
     }
+}
+
+/// Record one shadowed name, once, with every source that holds it.
+///
+/// Called when the merge meets a name a previous source already contributed.
+/// It recomputes the full winner/shadowed set from the indexes rather than
+/// accumulating it pairwise, so three sources holding one name produce one
+/// collision with two shadowed entries — not two half-truths.
+fn note_collision(out: &mut Vec<Collision>, indexes: &[SourceIndex], kind: Kind, name: &str) {
+    if out.iter().any(|c| c.kind == kind && c.name == name) {
+        return;
+    }
+    let mut holders = indexes
+        .iter()
+        .filter(|i| i.holds(kind, name))
+        .map(|i| i.name.clone());
+    let Some(winner) = holders.next() else {
+        return;
+    };
+    out.push(Collision {
+        kind,
+        name: name.to_string(),
+        winner,
+        shadowed: holders.collect(),
+    });
 }
 
 #[cfg(test)]

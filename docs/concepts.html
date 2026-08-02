@@ -199,7 +199,7 @@
       </li>
       <li><a href="workflows.html">Workflows</a>
       </li>
-      <li><a href="reference.html#the-central-library">Central library</a>
+      <li><a href="reference.html#the-library-linked-source-folders">Library sources</a>
       </li>
       <li><a href="#delivery-modes">Delivery modes</a>
       </li>
@@ -276,8 +276,8 @@
 <p>Commit the first group; it is the portable part. The second group is written by <code>agentstack apply</code> in one shape per CLI, and how much of it exists at rest is decided by <a href="#delivery-modes">delivery routing</a> — skills and MCP servers reach an MCP-capable CLI live, so nothing generated lands here for them, while house rules, settings, hooks and extensions are real files. Machine-wide counterparts of the same idea live in <code>~/.agentstack/</code>; everything above is what one repository carries.</p>
 <p>The rest of this page names each piece, in the order the pieces are used.</p>
 <h2 id="how-the-pieces-fit-together">How the pieces fit together<a class="hlink" href="#how-the-pieces-fit-together" aria-label="Link to this section">#</a></h2>
-<img src="concepts-flow.svg" alt="How the pieces relate: the central library feeds the manifest; manifest → lockfile → trust → policy (machine ∩ project) → gateway/runs → audit log; delivery routing decides how it reaches a run">
-<p>Read it left to right: you write a <strong>manifest</strong>, the <strong>lockfile</strong> pins it, you <strong>trust</strong> the result, <strong>policy</strong> narrows what may run, and the <strong>gateway</strong> (or a <strong>run</strong>) carries it to your tools — every call landing in the <strong>audit</strong> log. The <strong>central library</strong> feeds shared capabilities into the manifest; <strong>delivery routing</strong> decides how each capability reaches the agent.</p>
+<img src="concepts-flow.svg" alt="How the pieces relate: the linked library sources feed the manifest; manifest → lockfile → trust → policy (machine ∩ project) → gateway/runs → audit log; delivery routing decides how it reaches a run">
+<p>Read it left to right: you write a <strong>manifest</strong>, the <strong>lockfile</strong> pins it, you <strong>trust</strong> the result, <strong>policy</strong> narrows what may run, and the <strong>gateway</strong> (or a <strong>run</strong>) carries it to your tools — every call landing in the <strong>audit</strong> log. The <strong>library sources</strong> feed shared capabilities into the manifest; <strong>delivery routing</strong> decides how each capability reaches the agent.</p>
 <h2 id="the-manifest-and-the-lockfile">The manifest and the lockfile<a class="hlink" href="#the-manifest-and-the-lockfile" aria-label="Link to this section">#</a></h2>
 <p><strong>Manifest</strong> — one file (<code>.agentstack/agentstack.toml</code>) listing everything your tools may run: MCP servers, skills, instructions, settings, hooks, and extensions. You edit it; AgentStack renders it into each tool's own config. It holds only <code>${REF}</code> secret placeholders, never real values.</p>
 <p><strong>Lockfile</strong> — <code>agentstack.lock</code> pins the manifest's resolved contents (server definitions, skill bytes, instruction bytes) to SHA-256 digests, so the same inputs reproduce and any change is visible. It is part of what you consent to when you trust a project.</p>
@@ -346,7 +346,7 @@
 <li><strong>Central library</strong> — your own managed home (<code>~/.agentstack/lib/</code>) of skills and server definitions that projects reference by name instead of copying.</li>
 <li><strong>Bundled catalog</strong> — ready-made skills shipped inside the AgentStack binary that <code>search</code> can find and add.</li>
 <li><strong>Official MCP Registry</strong> — the public <code>registry.modelcontextprotocol.io</code> index of MCP servers; <code>search</code> queries it and <code>add from &lt;id&gt;</code> installs one.</li>
-<li><strong>Trust store</strong> — the machine-local record (under <code>~/.agentstack/</code>) of which projects you have trusted, keyed by path and consent digest. It stores no capabilities — only your approvals. More: <a href="reference.html#the-central-library">reference.md — the central library</a>, <a href="reference.html#search-across-providers">reference.md — search across providers</a>.</li>
+<li><strong>Trust store</strong> — the machine-local record (under <code>~/.agentstack/</code>) of which projects you have trusted, keyed by path and consent digest. It stores no capabilities — only your approvals. More: <a href="reference.html#the-library-linked-source-folders">reference.md — the library</a>, <a href="reference.html#search-across-providers">reference.md — search across providers</a>.</li>
 </ul>
 <p>Skills also come straight from any skills repo — <code>add skill owner/repo</code> (or a git URL, or a local dir) discovers, scans, and pins them; see <a href="howto/add-a-skill.html">add a skill</a>.</p>
 <h2 id="egress">Egress<a class="hlink" href="#egress" aria-label="Link to this section">#</a></h2>

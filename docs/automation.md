@@ -218,7 +218,7 @@ Field notes:
   name in `[extensions.*]` rather than added.
 - Descriptions ship whole. The 70-column truncation is for a terminal.
 - This read reaches the **network**: it queries the official MCP Registry
-  alongside your central library and the embedded catalog. It writes nothing.
+  alongside your linked library sources and the embedded catalog. It writes nothing.
 
 ### `adapters list --json`
 

@@ -1320,6 +1320,26 @@ version = 1
     let server_count = servers.len();
     let settings_count = settings.len();
 
+    // Library-first import (`docs/design/linked-library-sources.md` §"What
+    // `init` imports"). A server that was already configured globally in three
+    // CLIs was never this project's own content: it goes into the first linked
+    // library source, and the project references it by name. `--project-servers`
+    // keeps the old inline shape for a caller that wants it.
+    let library_import = !args.project_servers && !servers.is_empty();
+    let library_source = crate::sources::Sources::load_or_warn().primary();
+    let library_root_display = library_source.root.display().to_string();
+    let (manifest_servers, profiles) = if library_import {
+        let default_toolset = crate::manifest::Profile {
+            servers: servers.keys().cloned().collect(),
+            ..Default::default()
+        };
+        let mut profiles = IndexMap::new();
+        profiles.insert("default".to_string(), default_toolset);
+        (IndexMap::new(), profiles)
+    } else {
+        (servers.clone(), IndexMap::new())
+    };
+
     // Assemble the manifest.
     let manifest = Manifest {
         version: 1,
@@ -1327,9 +1347,9 @@ version = 1
             name: None,
             gitignore: None,
         },
-        servers,
+        servers: manifest_servers,
         skills: IndexMap::new(),
-        profiles: IndexMap::new(),
+        profiles,
         instructions: IndexMap::new(),
         settings,
         hooks: IndexMap::new(),
@@ -1353,6 +1373,15 @@ version = 1
     if args.dry_run {
         println!("\n{} (preview — nothing written)\n", MANIFEST_FILE.bold());
         println!("{toml_text}");
+        if library_import {
+            println!(
+                "Would write {} into library source '{}' ({}); the manifest above references \
+                 them by name.",
+                super::count(server_count, "server definition"),
+                library_source.name,
+                library_root_display
+            );
+        }
         if !lifted.is_empty() {
             // A preview never prompts, so resolve the store non-interactively.
             match preresolved_store.map_or_else(|| resolve_secret_store(args, false), Ok)? {
@@ -1469,9 +1498,57 @@ version = 1
             }
         }
 
+        // The imported servers land in the first linked library source, through
+        // the one library write path (`lib::add_server_def`) rather than a
+        // second importer. Each definition file is captured first, so this stays
+        // inside init's single undoable transaction: a failure here rolls the
+        // library writes back along with the manifest.
+        if library_import {
+            // Capture BEFORE any library write — a capture taken afterwards
+            // would record the new bytes and make undo a no-op.
+            backups.push(crate::history::capture(
+                &crate::library::Library::path(&library_source.root),
+                "library · index",
+            ));
+            for (name, server) in &servers {
+                let dest = crate::resolve::library_server_path(&library_source.root, name);
+                backups.push(crate::history::capture(&dest, format!("library · {name}")));
+                super::lib::add_server_def(
+                    &library_source.root,
+                    name,
+                    server,
+                    format!("init:{}", crate::text::sanitize_line(&library_source.name)),
+                    true,
+                    true,
+                )?;
+            }
+        }
+
         backups.push(crate::history::capture(&manifest_path, "manifest · import"));
         crate::util::atomic::write(&manifest_path, &toml_text)
             .with_context(|| format!("writing {}", manifest_path.display()))?;
+
+        // A manifest that references library capabilities by name needs pins
+        // before anything can serve them, and pinning is the machine's job
+        // (STRATEGY.md §"The design law": the manifest and lock are
+        // system-maintained; the one thing never automated is the yes). Without
+        // this the library-first import would end on "library server, not
+        // locked" and cost the user two extra commands for a decision they
+        // never had to make. Inline-only imports pin nothing and skip it.
+        if library_import {
+            backups.push(crate::history::capture(
+                &dir.join(agentstack_core::lock::LOCK_FILE),
+                "lockfile · import",
+            ));
+            super::lock::run(
+                &crate::cli::LockArgs {
+                    quiet: true,
+                    ..Default::default()
+                },
+                Some(&base),
+            )
+            .context("pinning the imported library servers")?;
+        }
         Ok(())
     })();
 
@@ -1537,7 +1614,7 @@ version = 1
     let trusted = if project_sourced {
         false
     } else {
-        grant_trust_for_import(&base, &toml_text, &manifest)
+        grant_trust_for_import(&base, &toml_text, &manifest, library_import)
     };
     if project_sourced {
         println!(
@@ -1583,6 +1660,8 @@ version = 1
                     .flat_map(|c| c.configs.iter())
                     .all(|p| p.starts_with(&project_root)),
                 &delivery_summary_lines(&target_defaults),
+                library_import
+                    .then_some((library_source.name.as_str(), library_root_display.as_str())),
             )
         );
     }
@@ -1610,21 +1689,42 @@ version = 1
 ///
 /// Returns whether trust was actually recorded, so the closing summary can say
 /// so honestly instead of the user discovering it later.
-fn grant_trust_for_import(base: &Path, manifest_bytes: &str, manifest: &Manifest) -> bool {
+fn grant_trust_for_import(
+    base: &Path,
+    manifest_bytes: &str,
+    manifest: &Manifest,
+    // True when this same import wrote the lockfile (the library-first path).
+    // A lock THIS run produced from the manifest it just showed is part of what
+    // was reviewed; a lock that was merely lying on disk is not, and still
+    // fails closed below.
+    wrote_lock: bool,
+) -> bool {
     let dir = crate::manifest::resolve_manifest_dir(base);
     let local = dir.join(crate::manifest::load::LOCAL_FILE);
     let lock = dir.join(agentstack_core::lock::LOCK_FILE);
-    if local.exists() || lock.exists() {
+    if local.exists() {
         return false;
     }
+    let lock_bytes = match (wrote_lock, lock.exists()) {
+        // Our own pins, read back from the file we just wrote — the same rule
+        // the manifest half follows (bind to the bytes on disk now, so a later
+        // edit reads `Changed` instead of being silently blessed).
+        (true, true) => match std::fs::read(&lock) {
+            Ok(bytes) => Some(bytes),
+            Err(_) => return false,
+        },
+        (_, true) => return false,
+        (_, false) => None,
+    };
 
     // The snapshot this grant binds to: our bytes, and the explicit absence of
-    // the other two — which is what `ConsentSnapshot::read` would observe a
-    // moment from now, so `digest_for` agrees and the project reads `Trusted`.
+    // the ones we did not write — which is what `ConsentSnapshot::read` would
+    // observe a moment from now, so `digest_for` agrees and the project reads
+    // `Trusted`.
     let snapshot = crate::trust::ConsentSnapshot {
         manifest: manifest_bytes.as_bytes().to_vec(),
         local: None,
-        lock: None,
+        lock: lock_bytes,
     };
 
     // The reviewed surface, in the same shape `trust`'s own review records, so
@@ -1694,6 +1794,9 @@ fn render_import_summary(
     // "<tool> — <what goes live> · <what is written>" lines. Empty when no tool
     // could be described, which is the only honest way to say nothing here.
     delivery_lines: &[String],
+    // Where the imported servers landed: the linked library source's name and
+    // folder, or `None` when `--project-servers` kept them inline.
+    library_dest: Option<(&str, &str)>,
 ) -> String {
     let mut out = String::new();
     out.push_str("\nImport complete.\n");
@@ -1709,6 +1812,14 @@ fn render_import_summary(
         ));
     }
     out.push_str(&format!("  Imported:  {imported}\n"));
+    // Library-first: say where the reusable half went, so nobody has to guess
+    // why the manifest lists names instead of commands.
+    if let Some((name, root)) = library_dest {
+        out.push_str(&format!(
+            "  Library:   the servers landed in '{name}' ({root}); the manifest\n\
+             \x20            references them by name, so this project stays clean\n"
+        ));
+    }
     // M4: the CLIs deliberately left out of `[targets] default`. Naming them —
     // and why — is what keeps "we only targeted two of your six tools" from
     // looking like a detection failure. There is no command that edits
@@ -2142,6 +2253,7 @@ mod tests {
                 "Claude Code — skills + MCP servers served live · house rules written to files"
                     .to_string(),
             ],
+            None,
         );
         assert!(out.contains("Manifest:  /tmp/proj/.agentstack/agentstack.toml"));
         assert!(out.contains("From:      Claude Code · Codex CLI"));
@@ -2166,7 +2278,8 @@ mod tests {
             &[],
             &[],
             false,
-            &[]
+            &[],
+            None,
         )
         .contains("Delivery:"));
 
@@ -2200,6 +2313,7 @@ mod tests {
             &[],
             false,
             &[],
+            None,
         );
         assert!(!all_contributed.contains("Also seen:"));
 
@@ -2213,6 +2327,7 @@ mod tests {
             &[],
             false,
             &[],
+            None,
         );
         assert!(!clean.contains("Secrets:"));
         assert!(!clean.contains("settings from"));
@@ -2229,6 +2344,7 @@ mod tests {
             &[],
             false,
             &[],
+            None,
         );
         assert!(!empty.contains("the CLI configs above are unchanged"));
         assert!(!empty.contains("create-profile"));
@@ -2244,6 +2360,7 @@ mod tests {
             &[],
             false,
             &[],
+            None,
         );
         assert!(!unnamed.contains("create-profile"));
     }
@@ -2315,6 +2432,7 @@ mod tests {
             plan: false,
             secrets: None,
             no_keychain: false,
+            project_servers: false,
             yes: false,
             consented_plan: None,
         };
@@ -2345,6 +2463,7 @@ mod tests {
             plan: true,
             secrets: None,
             no_keychain: false,
+            project_servers: false,
             yes: false,
             consented_plan: None,
         };
@@ -2371,6 +2490,7 @@ mod tests {
             plan: false,
             secrets: None,
             no_keychain: false,
+            project_servers: false,
             yes: false,
             consented_plan: None,
         };

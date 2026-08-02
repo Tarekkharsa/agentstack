@@ -183,10 +183,10 @@ pub enum Command {
     #[command(hide = true)]
     Try(TryArgs),
 
-    /// Manage the central capability library.
+    /// Manage your linked capability library sources.
     ///
-    /// `~/.agentstack/lib/` holds capabilities that projects reference by
-    /// name instead of copying files.
+    /// Any folder can be linked as a source, several at once; the first source
+    /// holding a name wins. `~/.agentstack/lib/` is the one you start with.
     #[command(hide = true)]
     Lib(LibArgs),
 
@@ -527,11 +527,12 @@ and requires the project to be trusted first — trust is never granted here.
     #[command(name = "use-profile", hide = true)]
     UseProfile(PanelUseProfileArgs),
 
-    /// The central-library catalog (skills + servers) for the panel browser.
+    /// The library catalog (skills + servers), merged across linked sources,
+    /// for the panel browser.
     #[command(name = "library-index", hide = true)]
     LibraryIndex,
 
-    /// Remove a skill or server from the central library (panel action;
+    /// Remove a skill or server from the library (panel action;
     /// digest-bound). Moves it to the library trash — recoverable with
     /// `agentstack lib trash --restore <id> --write`.
     #[command(name = "remove-from-library", hide = true)]
@@ -1790,6 +1791,12 @@ pub struct InitArgs {
     #[arg(long)]
     pub no_keychain: bool,
 
+    /// Write the imported MCP servers into this project's manifest as inline
+    /// `[servers.*]` entries instead of into your first linked library source.
+    /// The default is library-first: the project references them by name.
+    #[arg(long)]
+    pub project_servers: bool,
+
     /// Run the promptless import without a terminal: acknowledge that the
     /// manifest (and any lifted token values) will be written. Required when
     /// stdin is not a TTY and no other init-shaping flag is given.
@@ -2419,13 +2426,13 @@ Examples:
     AddHook(LibAddHookArgs),
     /// List the skills, servers, extensions, and hooks in the central library.
     List,
-    /// Remove a skill from the central library.
+    /// Remove a skill from the library source that holds it.
     Remove(LibRemoveArgs),
-    /// Remove a server from the central library.
+    /// Remove a server from the library source that holds it.
     RemoveServer(LibRemoveServerArgs),
-    /// Remove an extension from the central library.
+    /// Remove an extension from the library source that holds it.
     RemoveExtension(LibRemoveExtensionArgs),
-    /// Remove a hook from the central library.
+    /// Remove a hook from the library source that holds it.
     RemoveHook(LibRemoveHookArgs),
     /// List what removal put in the library trash, and restore or empty it.
     /// Every `lib remove*` moves the entry here instead of deleting it.
@@ -2442,6 +2449,59 @@ Examples:
     /// directory. Publish by pushing the repo and tagging a version (e.g.
     /// v0.1.0); install with `agentstack add from git:<host>/<repo>@<tag>`.
     PackInit(PackInitArgs),
+    /// Link a folder as a library source. Any folder works — a git clone, a
+    /// synced drive, or a plain directory.
+    #[command(after_help = "\
+Examples:
+  agentstack lib link ~/work/team-capabilities --write
+  agentstack lib link ~/scratch/skills --name scratch --first --write")]
+    Link(LibLinkArgs),
+    /// Unlink a library source. The folder itself is left alone.
+    Unlink(LibUnlinkArgs),
+    /// Show the linked library sources in precedence order, and every name one
+    /// source shadows in another.
+    Sources,
+    /// Set the precedence order of the linked library sources. Name every
+    /// linked source exactly once, first to last.
+    Reorder(LibReorderArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct LibLinkArgs {
+    /// The folder to link.
+    pub path: String,
+    /// The name this source is addressed by in a `<source>:<name>` reference.
+    /// Defaults to the folder's own name.
+    #[arg(long)]
+    pub name: Option<String>,
+    /// Link at the front of the list, so this source wins name collisions.
+    #[arg(long)]
+    pub first: bool,
+    /// A one-line note about what this source is.
+    #[arg(long)]
+    pub note: Option<String>,
+    /// Write the change (else preview).
+    #[arg(long)]
+    pub write: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct LibUnlinkArgs {
+    /// The source name to unlink.
+    pub name: String,
+    /// Write the change (else preview).
+    #[arg(long)]
+    pub write: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct LibReorderArgs {
+    /// Every linked source name, in the order you want them resolved.
+    #[arg(required = true)]
+    pub names: Vec<String>,
+    /// Write the change (else preview).
+    #[arg(long)]
+    pub write: bool,
 }
 
 #[derive(Args, Debug)]
@@ -2463,6 +2523,9 @@ pub struct LibSyncArgs {
     /// sync is blocked — secrets should be `${REF}` placeholders).
     #[arg(long)]
     pub allow_secrets: bool,
+    /// Which linked library source to sync (default: the first one).
+    #[arg(long)]
+    pub source: Option<String>,
 }
 
 #[derive(Args, Debug)]

@@ -48,6 +48,7 @@ fn restore_undoes_manifest_env_and_gitignore_from_one_init() {
             plan: false,
             secrets: Some(SecretStore::Env),
             no_keychain: false,
+            project_servers: false,
             yes: true,
             consented_plan: None,
         },
@@ -59,9 +60,16 @@ fn restore_undoes_manifest_env_and_gitignore_from_one_init() {
     // lifted value, and the .gitignore rule protecting it.
     let manifest = proj.join(".agentstack/agentstack.toml");
     assert!(manifest.exists());
-    assert!(fs::read_to_string(&manifest)
-        .unwrap()
-        .contains("${SEARCH_TOKEN}"));
+    // Library-first import: the manifest references the server by name and the
+    // `${REF}` lives in the library definition the import wrote.
+    assert!(fs::read_to_string(&manifest).unwrap().contains("search"));
+    let lib_def = tmp.path().join("home/.agentstack/lib/servers/search.toml");
+    assert!(
+        fs::read_to_string(&lib_def)
+            .unwrap()
+            .contains("${SEARCH_TOKEN}"),
+        "the lifted reference landed in the library definition"
+    );
     let env_file = proj.join(".agentstack/.env");
     let env_path = if env_file.exists() {
         env_file
@@ -93,6 +101,10 @@ fn restore_undoes_manifest_env_and_gitignore_from_one_init() {
     .unwrap();
 
     assert!(!manifest.exists(), "restore removed the imported manifest");
+    assert!(
+        !lib_def.exists(),
+        "restore also reversed the library definitions the same init wrote"
+    );
     assert!(!env_path.exists(), "restore removed the secrets .env");
     assert_eq!(
         fs::read_to_string(proj.join(".gitignore")).unwrap(),

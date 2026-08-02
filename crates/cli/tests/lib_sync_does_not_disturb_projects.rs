@@ -90,6 +90,7 @@ fn sync_args(init: bool, remote: Option<&str>) -> LibArgs {
             status: false,
             message: None,
             allow_secrets: false,
+            source: None,
         }),
     }
 }

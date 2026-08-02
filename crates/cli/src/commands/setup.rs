@@ -87,6 +87,7 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
                 // and the shell is interactive (P2); setup is interactive.
                 secrets: None,
                 no_keychain: false,
+                project_servers: false,
                 // The wizard's write gate lives inside `run_for_setup` (which
                 // never re-checks the TTY gate), so this field is irrelevant
                 // here.

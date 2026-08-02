@@ -395,3 +395,54 @@ read as two mechanisms until one is retired. STRATEGY.md does say those
 concepts disappear as user-facing ones, but retiring them means retiring a
 shipped `set-mode-v1` ui-contract feature that a panel may depend on — a
 maintainer call, not a build-loop one.
+
+## Item 3 — library inversion (branch `library-inversion`)
+
+Shipped: the library is now an ordered list of linked source folders, stored at
+`~/.agentstack/sources.toml` — machine state, never project-visible, because a
+repository able to add a source could aim resolution at a folder the user never
+linked (invariant 3). A missing file is not an empty list; it is the single
+implicit `local` source at `paths::lib_home()`, so an un-linked machine is
+byte-identical to before, and `lib link` materializes that implicit entry the
+first time a second folder is added so linking can never silently unlink the
+central library. Precedence is `PATH` semantics — first match wins — with
+`<source>:<name>` as the fully-qualified selector (`:` cannot occur in a
+capability name, so the split needs no escaping). The qualifier is a *selector,
+not an identity*: the lock key, rendered directory and gateway name are always
+the bare name. Collisions are computed once at merge time and surfaced on `lib
+sources`, `lib list`, `doctor`, `status` and `status --json` (gated on the new
+`library-sources-v1`), naming the winner and the shadowed source and offering
+the qualified pin. `lib link|unlink|sources|reorder` manage the list; a plain
+non-git folder is first-class and `lib sync` refuses honestly rather than
+implying misconfiguration. `init` now imports discovered MCP servers through
+the one library write path into the first linked source, with the project
+referencing them by name and `--project-servers` as the escape hatch.
+
+Witnesses: `linked_sources` (7) — order resolution, a shadowed name reported
+rather than hidden, a qualified reference ignoring order even after reordering,
+a plain non-git folder working end to end, init importing into a linked folder
+while the project stays clean, a single-library setup behaving exactly as
+before, and the decisive one: **reordering sources cannot change what a locked
+project serves** — the lock bytes are unchanged, the materialized body still
+reads the original source's bytes, and re-activation fails closed naming the
+drift instead of swapping.
+
+The safety argument is structural rather than defensive: the source list is
+read only during selection, and every serving path reads pinned bytes from the
+content store by locked digest, so no serving path reads `sources.toml` at all.
+
+**Flagged for line-by-line review** (reviewed here and judged sound, but it
+touches trust granting): `init` now writes `agentstack.lock`, and the import
+grant binds manifest **and** that lock. Library-first import made it necessary
+— a name reference with no pin left the ordinary journey sitting at one warning
+and cost two extra commands. The grant includes lock bytes only when this same
+run wrote them, reads them back from disk so a later edit reads `Changed`, and
+still withholds trust entirely for a lock that was merely lying on disk. Same
+`trust_reviewed` constructor, fuller snapshot, no second grant path. Debts:
+extensions and hooks get precedence and correct body roots but no qualified
+reference spelling yet, since they are declared by manifest key rather than
+selected from a reference list; `lib sources` shows "(folder not found)" for an
+unpopulated central library, which is honest but may read as a fault on a first
+run; and the pre-existing copy debt — `use`/`doctor`/`trust` describing a
+moved-ahead library as "drift" in wording that can read as breakage — is now
+slightly easier to reach, since reordering is a new route to that state.

@@ -199,7 +199,7 @@
       </li>
       <li><a href="workflows.html">Workflows</a>
       </li>
-      <li><a href="reference.html#the-central-library">Central library</a>
+      <li><a href="reference.html#the-library-linked-source-folders">Library sources</a>
       </li>
       <li><a href="concepts.html#delivery-modes">Delivery modes</a>
       </li>
@@ -282,7 +282,7 @@
 <p><strong>A note on vocabulary.</strong> User-facing docs — the README, the getting-started walkthrough, and the how-to guides — call the reviewed config file the <strong>manifest</strong>. This document keeps <strong>bundle</strong> as its strategic frame: it means the manifest, its optional local overlay, and the resolved lockfile taken together as the single unit that gets declared, pinned, trusted, and distributed. Wherever you read "bundle" below, read "the manifest and its lock as one consent unit."</p>
 <p>Core principle: <strong>nothing executes automatically until its content is trusted; governed execution is constrained and recorded.</strong></p>
 <h2 id="where-this-starts">Where this starts<a class="hlink" href="#where-this-starts" aria-label="Link to this section">#</a></h2>
-<p>The current implementation is a ten-crate Rust workspace. It ships the manifest and lock resolver, 13 CLI adapters, a central capability library, content-bound trust, machine-first policy, a single-dispatch MCP gateway, Docker sandbox and lockdown runtimes, egress enforcement, per-run recording, an experimental frozen-plan executor, and a self-contained workflow engine. This document describes the current boundaries. <a href="https://github.com/Tarekkharsa/agentstack/blob/main/STRATEGY.md"><code>../STRATEGY.md</code></a> defines the gated direction, and <a href="https://github.com/Tarekkharsa/agentstack/blob/main/TODO.md"><code>../TODO.md</code></a> names the current work.</p>
+<p>The current implementation is a ten-crate Rust workspace. It ships the manifest and lock resolver, 13 CLI adapters, a capability library of linked source folders, content-bound trust, machine-first policy, a single-dispatch MCP gateway, Docker sandbox and lockdown runtimes, egress enforcement, per-run recording, an experimental frozen-plan executor, and a self-contained workflow engine. This document describes the current boundaries. <a href="https://github.com/Tarekkharsa/agentstack/blob/main/STRATEGY.md"><code>../STRATEGY.md</code></a> defines the gated direction, and <a href="https://github.com/Tarekkharsa/agentstack/blob/main/TODO.md"><code>../TODO.md</code></a> names the current work.</p>
 <h2 id="the-flow">The flow<a class="hlink" href="#the-flow" aria-label="Link to this section">#</a></h2>
 <pre class="block"><code>manifest + library → resolve + lock → adapters → native CLI config
                             │

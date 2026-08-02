@@ -61,7 +61,7 @@ implementation internals — live in
 - [Ephemeral sessions (`agentstack session`)](#ephemeral-sessions-agentstack-session)
   - [Execution posture](#execution-posture)
   - [The Protected tier in detail (`run --locked`)](#the-protected-tier-in-detail-run---locked)
-- [The central library](#the-central-library)
+- [The library: linked source folders](#the-library-linked-source-folders)
   - [Layout and name resolution](#layout-and-name-resolution)
   - [Pinning and provenance](#pinning-and-provenance)
   - [Adding capabilities](#adding-capabilities)
@@ -377,7 +377,7 @@ agentstack add ...                        # flag-driven add of a server or skill
 
 ### Search across providers
 
-`search` queries **your central library first** (skill and library-server names,
+`search` queries **your linked library sources first** (skill and library-server names,
 labelled `[library]`), then the embedded catalog **and the official MCP
 Registry**; `add from <id>` resolves a registry/catalog server, lifts its secrets
 to `${REF}`s, and renders it to **all your CLIs at once**.
@@ -439,7 +439,7 @@ Unix only for now.
 
 ## Part II — The power surface
 
-These are the commands `agentstack --help` keeps hidden as progressive disclosure, plus the advanced delivery and enforcement modes the everyday loop only points at. Hidden is not unsupported — every command here is fully maintained and carries its own `--help`, exactly as the [All commands](#all-commands) preamble spells out. Reach in when you need a machine-wide policy ceiling, the zero-files gateway, ephemeral sessions, locked runs, the central library, or the observability tooling.
+These are the commands `agentstack --help` keeps hidden as progressive disclosure, plus the advanced delivery and enforcement modes the everyday loop only points at. Hidden is not unsupported — every command here is fully maintained and carries its own `--help`, exactly as the [All commands](#all-commands) preamble spells out. Reach in when you need a machine-wide policy ceiling, the zero-files gateway, ephemeral sessions, locked runs, the linked library sources, or the observability tooling.
 
 ## Core engine
 
@@ -1081,17 +1081,36 @@ walkthrough is [`examples/projects/locked-run/`](../examples/projects/locked-run
 and the full contract is
 the [locked-run enforcement contract](ENFORCEMENT.md#the-locked-runs-frozen-grant-run---locked).
 
-## The central library
+## The library: linked source folders
 
-One managed home — `~/.agentstack/lib/` — that projects reference **by name**
-instead of copying files between repos.
+Managed folders that projects reference **by name** instead of copying files
+between repos. Any folder on the device can be linked as a source, and several
+at once — `~/.agentstack/lib/` is simply the first one on a fresh machine.
+`agentstack lib link <path> --write` adds one, `lib unlink` removes one,
+`lib sources` shows the order, and `lib reorder` changes it. The full contract
+is [`design/linked-library-sources.md`](design/linked-library-sources.md).
+
+**Precedence is `PATH` semantics:** the first source holding a capability of
+the requested kind and name wins. A name held by more than one source is
+reported — never silently shadowed — by `lib sources`, `lib list`, `status`,
+and `doctor`, each naming the winner, the shadowed sources, and the
+`<source>:<name>` reference that pins the other copy. A project that wants to
+be explicit rather than order-dependent writes that qualified form
+(`skills = ["team:sql-review"]`); it resolves only in the source it names, and
+the capability's identity everywhere else — lock key, rendered directory,
+gateway name — stays the bare name.
+
+Reordering or relinking sources changes what the **next** `lock` selects and
+changes nothing an already-locked project serves: serving reads the bytes the
+lock pins, from the content store.
 
 ### Layout and name resolution
 
-Skill dirs (`lib/skills/`) and MCP server definitions (`lib/servers/*.toml`)
-are indexed in `library.toml`. A toolset's `skills = ["sql-review"]` /
-`servers = ["kibana"]` resolve from there; an inline `[skills.*]` /
-`[servers.*]` table always overrides the library. Provider folders are never
+Each source holds the same taxonomy: skill dirs (`skills/`) and MCP server
+definitions (`servers/*.toml`), indexed in that source's own `library.toml`.
+A toolset's `skills = ["sql-review"]` / `servers = ["kibana"]` resolve through
+the ordered sources; an inline `[skills.*]` / `[servers.*]` table always
+overrides every source. Provider folders are never
 owned — only their skills and MCP entries are managed. The runtime gateway
 resolves server name refs through the same inline-first/central-library path as
 rendering, but where rendering hard-fails a run on a broken ref, the gateway
@@ -1124,8 +1143,8 @@ agentstack lib add-server <name>                        # reusable server defini
 agentstack lib new <name>                               # scaffold a new skill
 ```
 
-`lib add ./<dir>` **copies** the source into `lib/skills/<name>` — the library
-copy is canonical from then on (source edits have no effect), provenance records
+`lib add ./<dir>` **copies** the source into `<first linked source>/skills/<name>`
+— the library copy is canonical from then on (source edits have no effect), provenance records
 the original path, and a temp-dir source gets a dangling-path warning. `lib add
 owner/repo --subpath <dir>` (any git URL, `--skill <name>` selecting from a
 multi-skill repo) installs from a repo subdirectory, staging the fetch so a dry
@@ -1199,8 +1218,9 @@ Three ways a skill or server reaches a toolset; the manifest syntax alone picks
 which:
 
 - **By-name library reference** — `skills = ["greet"]` / `servers = ["kibana"]`
-  with **no** matching `[skills.greet]` / `[servers.kibana]` table. Resolved
-  fresh from `~/.agentstack/lib` on every lock, pinned there by `checksum`
+  with **no** matching `[skills.greet]` / `[servers.kibana]` table (optionally
+  qualified as `"team:greet"`). Resolved fresh through the linked library
+  sources on every lock, pinned there by `checksum`
   (skills) or definition digest (servers); nothing is copied into the repo. The
   cross-repo default.
 - **Vendored pack copy** — installed with `add from git:<host>/<repo>`. Members
@@ -1652,7 +1672,7 @@ subcommand carries a trailing `*` (e.g. `guard`'s `check*`). Reach for it when
 you need the exact verb, flag, or subcommand.
 
 <!-- agentstack:generated commands -->
-- **`init`** — Setup: find the CLIs you have and bring their setups together — flags `--global/--force/--dry-run/--plan/--secrets/--no-keychain/--yes/--consented-plan`
+- **`init`** — Setup: find the CLIs you have and bring their setups together — flags `--global/--force/--dry-run/--plan/--secrets/--no-keychain/--project-servers/--yes/--consented-plan`
 - **`up`** — Set this machine up from a setup that already exists: one command — flags `--targets/--toolset/--no-gitignore`
 - **`status`** — Status: where this project stands, on one screen, and the one next step — flags `--json`
 - **`add`** — Add a server or skill to this project's setup — subcommands `from/server/skill`
@@ -1668,7 +1688,7 @@ you need the exact verb, flag, or subcommand.
 - **`publisher`** _(hidden)_ — Your publishing key, and the publishers you recognize — subcommands `show/trust`
 - **`lock`** _(hidden)_ — Resolve each toolset's skill + server refs and pin `agentstack.lock` — flags `--profile/--update/--upgrade/--all/--with-instructions/--yes/--write`
 - **`try`** _(hidden)_ — Try a skill without installing anything: stage, scan, and emit a wrapper prompt on stdout for piping into any agent CLI — flags `--skill/--rev/--subpath/--allow-flagged`
-- **`lib`** _(hidden)_ — Manage the central capability library — subcommands `new/add/add-server/add-extension/add-hook/list/remove/remove-server/remove-extension/remove-hook/trash/sync/pack-init`
+- **`lib`** _(hidden)_ — Manage your linked capability library sources — subcommands `new/add/add-server/add-extension/add-hook/list/remove/remove-server/remove-extension/remove-hook/trash/sync/pack-init/link/unlink/sources/reorder`
 - **`toolset`** — Work with toolsets: name one that bundles what you already have — subcommands `create/rename/delete/list`
 - **`use`** — Toolset: switch to one — its servers and skills go live in your CLIs — flags `--target/--scope/--write/--allow-unresolved/--prune-foreign/--no-gitignore/--list/--json`
 - **`yes`** — Review and activate the files you dropped into this project — one step — flags `--yes`
@@ -1710,8 +1730,8 @@ you need the exact verb, flag, or subcommand.
 - **`rename-profile`** _(hidden)_ — Fixed-argv alias of `agentstack toolset rename` (panel action) — flags `--name/--to/--preview/--yes/--consented/--allow-unresolved`
 - **`delete-profile`** _(hidden)_ — Fixed-argv alias of `agentstack toolset delete` (panel action) — flags `--name/--preview/--yes/--consented/--allow-unresolved`
 - **`use-profile`** _(hidden)_ — Activate an existing toolset (panel action; digest-bound) — flags `--profile/--preview/--yes/--consented/--allow-unresolved`
-- **`library-index`** _(hidden)_ — The central-library catalog (skills + servers) for the panel browser
-- **`remove-from-library`** _(hidden)_ — Remove a skill or server from the central library (panel action; digest-bound). Moves it to the library trash — recoverable with `agentstack lib trash --restore <id> --write` — flags `--kind/--name/--preview/--yes/--consented/--allow-unresolved`
+- **`library-index`** _(hidden)_ — The library catalog (skills + servers), merged across linked sources, for the panel browser
+- **`remove-from-library`** _(hidden)_ — Remove a skill or server from the library (panel action; digest-bound). Moves it to the library trash — recoverable with `agentstack lib trash --restore <id> --write` — flags `--kind/--name/--preview/--yes/--consented/--allow-unresolved`
 - **`remove-capability`** _(hidden)_ — Remove a skill or server from this project's manifest (panel action; digest-bound), then re-lock and re-render — flags `--kind/--name/--preview/--yes/--consented/--allow-unresolved`
 <!-- agentstack:end -->
 

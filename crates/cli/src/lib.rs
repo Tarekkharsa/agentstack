@@ -58,6 +58,7 @@ pub mod seatbelt;
 pub mod secret;
 pub mod session;
 pub mod snapshot;
+pub mod sources;
 pub mod state;
 pub mod store;
 #[allow(unsafe_code)]

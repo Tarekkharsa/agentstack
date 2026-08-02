@@ -497,10 +497,14 @@ impl Provider for LibraryProvider {
 }
 
 impl LibraryProvider {
-    /// Load a central-library hook definition (`<lib_home>/hooks/<name>.toml`).
-    /// Best-effort: an unreadable or invalid definition yields `None`.
+    /// Load a library hook definition (`<source>/hooks/<name>.toml`), from
+    /// whichever linked source satisfied the name. Best-effort: an unreadable
+    /// or invalid definition yields `None`.
     fn load_hook_def(&self, name: &str) -> Option<Hook> {
-        let path = self.lib_home.join("hooks").join(format!("{name}.toml"));
+        let root = self
+            .library
+            .source_root(crate::library::Kind::Hook, &self.lib_home, name);
+        let path = root.join("hooks").join(format!("{name}.toml"));
         let text = std::fs::read_to_string(path).ok()?;
         toml::from_str(&text).ok()
     }
@@ -512,7 +516,10 @@ impl LibraryProvider {
     /// secret names. Best-effort: an unreadable or invalid definition yields
     /// `None`, so the server is omitted rather than failing the whole search.
     fn load_server_install(&self, name: &str) -> Option<Install> {
-        let path = self.lib_home.join("servers").join(format!("{name}.toml"));
+        let root = self
+            .library
+            .source_root(crate::library::Kind::Server, &self.lib_home, name);
+        let path = root.join("servers").join(format!("{name}.toml"));
         let text = std::fs::read_to_string(path).ok()?;
         let server: Server = toml::from_str(&text).ok()?;
         Some(Install::Definition(Box::new(server)))

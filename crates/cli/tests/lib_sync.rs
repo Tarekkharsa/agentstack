@@ -31,6 +31,7 @@ fn sync(init: bool, remote: Option<&str>, status: bool) -> LibArgs {
             status,
             message: None,
             allow_secrets: false,
+            source: None,
         }),
     }
 }
@@ -338,6 +339,7 @@ fn sync_blocks_a_secret_left_in_outgoing_history() {
                 status: false,
                 message: None,
                 allow_secrets: true,
+                source: None,
             }),
         },
         None,

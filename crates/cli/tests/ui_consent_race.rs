@@ -99,6 +99,7 @@ fn init_args(yes: bool, consented_plan: Option<String>) -> InitArgs {
         // Skip keeps the witness off the real OS keychain.
         secrets: Some(agentstack::cli::SecretStore::Skip),
         no_keychain: false,
+        project_servers: false,
         yes,
         consented_plan,
     }

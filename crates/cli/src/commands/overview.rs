@@ -427,6 +427,11 @@ pub(crate) struct ProjectFacts {
     /// not-registered, and the difference is the whole outage: the harness gets
     /// no tools, and AgentStack writes nothing in the gateway's place.
     gateway_outages: Vec<crate::commands::connect::GatewayOutage>,
+    /// One line per library name that more than one linked source holds:
+    /// which source wins, which are shadowed, and the qualified reference that
+    /// pins the other copy. Empty is the common case, and the only case that
+    /// prints nothing (docs/design/linked-library-sources.md).
+    shadowed_names: Vec<String>,
     /// The delivery planner's routing, one plain-language line per CLI (W4).
     /// The planner runs silently; this is where `status` names what it did.
     delivery: Vec<String>,
@@ -548,6 +553,33 @@ pub(crate) struct SecretFacts {
 /// signals a glance wants (secrets resolving?) and the pointer to the deep
 /// check. Everything expensive (drift rendering, content scans) stays in
 /// `doctor`; status must feel instant.
+/// One sentence per shadowed library name, or nothing at all.
+///
+/// Cheap by construction — reading the linked indexes is the same work name
+/// resolution already does — and best-effort: an unreadable source list must
+/// never take the orientation screen down with it.
+fn shadowed_name_lines() -> Vec<String> {
+    let sources = crate::sources::Sources::load_or_warn();
+    let Ok(library) = crate::library::Library::load_linked(&sources.linked()) else {
+        return Vec::new();
+    };
+    library
+        .linked
+        .collisions
+        .iter()
+        .map(|c| {
+            format!(
+                "{} '{}' is in {} sources — '{}' wins; `{}` pins the other",
+                c.kind.noun(),
+                crate::text::sanitize_line(&c.name),
+                c.shadowed.len() + 1,
+                c.winner,
+                c.qualified_shadowed(),
+            )
+        })
+        .collect()
+}
+
 pub fn run_status(manifest_dir: Option<&Path>, json: bool) -> Result<()> {
     // `--json` changes only the rendering: the same collect, with the same
     // deep readings the named `status` screen already asks for.
@@ -666,6 +698,7 @@ fn project_json(f: &ProjectFacts) -> serde_json::Value {
                 "explanation": o.sentence(),
             }))
             .collect::<Vec<_>>(),
+        "shadowed_names": f.shadowed_names,
         "rendered": f.rendered,
         // Names of unresolved refs, never values (invariant 5). `null` when
         // the caller did not ask for the reading at all — distinct from an
@@ -1010,7 +1043,13 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
     // Native configs here whose servers this manifest does not declare. Cheap
     // (a handful of small files at project scope) and the answer to the pilot's
     // silent case: a manifest that covers none of what is actually configured.
-    let native = crate::discover::native_configs(&ctx.registry, &ctx.dir, &m.servers, false);
+    let native = crate::discover::native_configs_with(
+        &ctx.registry,
+        &ctx.dir,
+        // Name references count as declared — see `declared_server_names`.
+        &crate::discover::declared_server_names(m),
+        false,
+    );
     let unimported = native.iter().any(|n| !n.unimported.is_empty());
     let any_detected = !detected_clis.is_empty();
 
@@ -1100,6 +1139,7 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
             mode,
             gateway_connected: gateway,
             gateway_outages: crate::commands::connect::gateway_outages(&ctx.registry, &target_ids),
+            shadowed_names: shadowed_name_lines(),
             delivery: crate::commands::delivery::summary_lines(&delivery_plan),
             delivery_rendered_lane: crate::delivery::rendered_lane_line(&delivery_plan),
             delivery_has_live: delivery_plan.has_dynamic_lane(),
@@ -1307,6 +1347,14 @@ fn print_orientation(o: &Orientation, status: bool) {
             // action). One sentence, naming the one recovery command.
             for outage in &f.gateway_outages {
                 println!("  {}  {}", "Gateway ".bold(), outage.sentence());
+            }
+
+            // Shadowed library names. Printed only when one exists — a name
+            // resolving to a copy the user did not mean is the one thing the
+            // precedence rule must never do quietly, and silence here is what
+            // "hidden" would look like.
+            for line in &f.shadowed_names {
+                println!("  {}  {}", "Library ".bold(), line);
             }
 
             if status {
@@ -1724,6 +1772,7 @@ mod tests {
                 mode: Mode::CleanAtRest,
                 gateway_connected: false,
                 gateway_outages: Vec::new(),
+                shadowed_names: Vec::new(),
                 delivery: Vec::new(),
                 delivery_rendered_lane: None,
                 delivery_has_live: false,

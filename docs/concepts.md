@@ -41,7 +41,7 @@ The rest of this page names each piece, in the order the pieces are used.
 
 <!-- Diagram source (regenerate concepts-flow.svg by hand from this):
 flowchart LR
-  library["central library"] --> manifest["manifest"]
+  library["library sources"] --> manifest["manifest"]
   manifest --> lockfile["lockfile"]
   lockfile --> trust["trust (consent digest)"]
   trust --> policy["policy: machine ∩ project"]
@@ -50,12 +50,12 @@ flowchart LR
   run --> audit["audit log + flight recorder"]
 -->
 
-![How the pieces relate: the central library feeds the manifest; manifest → lockfile → trust → policy (machine ∩ project) → gateway/runs → audit log; delivery routing decides how it reaches a run](concepts-flow.svg)
+![How the pieces relate: the linked library sources feed the manifest; manifest → lockfile → trust → policy (machine ∩ project) → gateway/runs → audit log; delivery routing decides how it reaches a run](concepts-flow.svg)
 
 Read it left to right: you write a **manifest**, the **lockfile** pins it, you
 **trust** the result, **policy** narrows what may run, and the **gateway** (or a
 **run**) carries it to your tools — every call landing in the **audit** log. The
-**central library** feeds shared capabilities into the manifest; **delivery
+**library sources** feed shared capabilities into the manifest; **delivery
 routing** decides how each capability reaches the agent.
 
 ## The manifest and the lockfile
@@ -319,7 +319,7 @@ Four things that skim alike but do different jobs:
 - **Trust store** — the machine-local record (under `~/.agentstack/`) of which
   projects you have trusted, keyed by path and consent digest. It stores no
   capabilities — only your approvals. More:
-  [reference.md — the central library](reference.md#the-central-library),
+  [reference.md — the library](reference.md#the-library-linked-source-folders),
   [reference.md — search across providers](reference.md#search-across-providers).
 
 Skills also come straight from any skills repo — `add skill owner/repo`

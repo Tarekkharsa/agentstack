@@ -68,7 +68,7 @@ TREE = [
     ("Configure deeper", "$ agentstack use · session", [
         ("How it works", "architecture.html", "how-it-works"),
         ("Workflows", "workflows.html", "workflows"),
-        ("Central library", "reference.html#the-central-library", "library"),
+        ("Library sources", "reference.html#the-library-linked-source-folders", "library"),
         ("Delivery modes", "concepts.html#delivery-modes", "modes"),
     ], "deeper"),
     ("Protect", "$ agentstack trust · guard", [

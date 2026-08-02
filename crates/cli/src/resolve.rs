@@ -1,15 +1,23 @@
 //! Name resolution — the single seam that maps a `skills = ["name"]` or
 //! `servers = ["name"]` reference to a concrete definition (see
-//! `docs/reference.md#the-central-library`).
+//! `docs/reference.md#the-library-linked-source-folders`).
 //!
 //! Resolution order (first hit wins), for both skills and servers:
 //!
 //! 1. **Inline** — a `[skills.<name>]` / `[servers.<name>]` entry in the project
 //!    manifest. An inline definition always wins (a project that wants to override
-//!    a central item defines it inline).
-//! 2. **Central library** — a `[[skill]]` / `[[server]]` entry in
-//!    `<lib_home>/library.toml`, whose body lives under `<lib_home>/skills/` or
-//!    `<lib_home>/servers/<name>.toml`.
+//!    a library item defines it inline).
+//! 2. **The linked library sources, in order** — a `[[skill]]` / `[[server]]`
+//!    entry in a source's `library.toml`, whose body lives under that source's
+//!    `skills/` or `servers/<name>.toml`. First source holding the name wins;
+//!    `docs/design/linked-library-sources.md` is the contract.
+//!
+//! A reference may be **qualified** as `<source>:<name>`, which resolves only in
+//! the source it names and skips step 1 entirely — inline is not a source, and
+//! letting it win would make the explicit spelling weaker than the bare one.
+//! The qualifier is a selector: the resolved capability's `name` is always the
+//! bare one, so the lock key, the rendered directory and the gateway's name for
+//! it are unchanged by how a project chose to spell the reference.
 //!
 //! An unresolved name is a hard, structured error. Resolvers return the
 //! definition plus metadata (checksum/provenance) for later lock + drift steps;
@@ -137,49 +145,63 @@ pub fn resolve_skill_with_pin(
     mode: ResolveMode,
     pinned_rev: Option<&str>,
 ) -> Result<ResolvedSkill, ResolveError> {
+    // A `<source>:<name>` reference names one linked library source, so it
+    // never consults the manifest: inline entries are not a source, and letting
+    // one win would make the explicit spelling weaker than the bare one. The
+    // capability's identity is the bare name in either case — the qualifier is
+    // a selector (docs/design/linked-library-sources.md §"Being explicit").
+    let qualifier = crate::sources::split_reference(name);
+    if let Some((source, _)) = qualifier {
+        if !library.linked.has_source(source) {
+            return Err(unknown_source(library, name, source, "skill").into());
+        }
+    }
+    let bare = crate::sources::capability_name(name);
+
     // Locate the source (inline wins over the central library) and the base dir
     // its relative paths resolve against.
-    let (skill, base, origin, provenance) = if let Some(skill) = manifest.skills.get(name) {
-        // P19: an inline block with no source, when a library skill of the same
-        // name exists, is almost always someone who meant to reference the
-        // library copy but left an empty `[skills.<name>]` block behind. Teach
-        // the fix here — where both the manifest and the library are in hand —
-        // instead of letting the store surface the low-level source error.
-        // `return` diverges (type `!`), so the `if let` arm still yields the
-        // tuple on the normal path.
-        if skill.path.is_none() && skill.git.is_none() && library.get(name).is_some() {
-            return Err(ResolveError::InlineNoSourceShadowsLibrary {
+    let (skill, base, origin, provenance) =
+        if let Some(skill) = manifest.skills.get(name).filter(|_| qualifier.is_none()) {
+            // P19: an inline block with no source, when a library skill of the same
+            // name exists, is almost always someone who meant to reference the
+            // library copy but left an empty `[skills.<name>]` block behind. Teach
+            // the fix here — where both the manifest and the library are in hand —
+            // instead of letting the store surface the low-level source error.
+            // `return` diverges (type `!`), so the `if let` arm still yields the
+            // tuple on the normal path.
+            if skill.path.is_none() && skill.git.is_none() && library.get(name).is_some() {
+                return Err(ResolveError::InlineNoSourceShadowsLibrary {
+                    name: name.to_string(),
+                });
+            }
+            (
+                skill.clone(),
+                manifest_dir.to_path_buf(),
+                SkillOrigin::Inline,
+                None,
+            )
+        } else if let Some(entry) = library.get(name) {
+            let skill = Skill {
+                path: entry.path.clone(),
+                git: entry.git.clone(),
+                rev: entry.rev.clone(),
+                subpath: entry.subpath.clone(),
+            };
+            (
+                skill,
+                lib_home.join("skills"),
+                SkillOrigin::Library,
+                entry.provenance.clone(),
+            )
+        } else {
+            return Err(ResolveError::Unresolved {
                 name: name.to_string(),
             });
-        }
-        (
-            skill.clone(),
-            manifest_dir.to_path_buf(),
-            SkillOrigin::Inline,
-            None,
-        )
-    } else if let Some(entry) = library.get(name) {
-        let skill = Skill {
-            path: entry.path.clone(),
-            git: entry.git.clone(),
-            rev: entry.rev.clone(),
-            subpath: entry.subpath.clone(),
         };
-        (
-            skill,
-            lib_home.join("skills"),
-            SkillOrigin::Library,
-            entry.provenance.clone(),
-        )
-    } else {
-        return Err(ResolveError::Unresolved {
-            name: name.to_string(),
-        });
-    };
 
     let resolved = resolve_source(store, &skill, &base, mode, name, pinned_rev)?;
     Ok(ResolvedSkill {
-        name: name.to_string(),
+        name: bare.to_string(),
         origin,
         path: resolved.path,
         source_kind: resolved.source_kind,
@@ -187,6 +209,25 @@ pub fn resolve_skill_with_pin(
         checksum: resolved.checksum,
         provenance,
     })
+}
+
+/// The error for a qualified reference naming a library source that is not
+/// linked. "No such source" and "no such capability" are different mistakes
+/// with different fixes, so they get different messages — and this one lists
+/// the sources that *are* linked rather than making the user go look.
+fn unknown_source(library: &Library, reference: &str, source: &str, noun: &str) -> anyhow::Error {
+    let linked = library.linked.source_names().join(", ");
+    let linked = if linked.is_empty() {
+        "none".to_string()
+    } else {
+        linked
+    };
+    anyhow::anyhow!(
+        "{noun} '{}' names library source '{}', which is not linked — linked sources: {linked} \
+         (see `agentstack lib sources`)",
+        crate::text::sanitize_line(reference),
+        crate::text::sanitize_line(source),
+    )
 }
 
 /// Resolve a located source through the store, honoring the fetch mode. A
@@ -268,8 +309,19 @@ pub fn resolve_server(
     lib_home: &Path,
     name: &str,
 ) -> Result<ResolvedServer, ServerResolveError> {
+    // Same qualification rule as skills: `<source>:<name>` addresses one linked
+    // library source, bypasses inline entirely, and keeps the bare name as the
+    // capability's identity.
+    let qualifier = crate::sources::split_reference(name);
+    if let Some((source, _)) = qualifier {
+        if !library.linked.has_source(source) {
+            return Err(unknown_source(library, name, source, "server").into());
+        }
+    }
+    let bare = crate::sources::capability_name(name);
+
     // 1. Inline manifest server wins.
-    if let Some(server) = manifest.servers.get(name) {
+    if let Some(server) = manifest.servers.get(name).filter(|_| qualifier.is_none()) {
         let text = toml::to_string(server)
             .map_err(|e| anyhow::anyhow!("serializing inline server '{name}': {e}"))?;
         return Ok(ResolvedServer {
@@ -281,15 +333,18 @@ pub fn resolve_server(
         });
     }
 
-    // 2. Central library.
+    // 2. Linked library sources, in precedence order.
     if let Some(entry) = library.get_server(name) {
-        let path = library_server_path(lib_home, name);
+        // A server definition is a bare file with no `path` field, so the
+        // owning source's root is what decides where it lives.
+        let root = library.source_root(crate::library::Kind::Server, lib_home, name);
+        let path = library_server_path(&root, bare);
         let content = std::fs::read_to_string(&path)
             .map_err(|e| anyhow::anyhow!("reading {}: {e}", path.display()))?;
         let server: Server = toml::from_str(&content)
             .map_err(|e| anyhow::anyhow!("parsing {}: {e}", path.display()))?;
         return Ok(ResolvedServer {
-            name: name.to_string(),
+            name: bare.to_string(),
             origin: ServerOrigin::Library,
             server,
             checksum: sha256_hex(content.as_bytes()),

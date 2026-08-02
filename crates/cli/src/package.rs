@@ -126,10 +126,12 @@ pub fn load_from_library(library: &Library, lib_home: &Path, name: &str) -> Resu
             }
             s
         }
-        _ => format!("library:{name}"),
+        // The bare name, never the `<source>:<name>` reference: a qualifier is
+        // a selector, and the lock records the capability's own identity.
+        _ => format!("library:{}", crate::sources::capability_name(name)),
     };
     Ok(LoadedPackage {
-        name: name.to_string(),
+        name: crate::sources::capability_name(name).to_string(),
         version: crate::text::sanitize_line(&version),
         source: crate::text::sanitize_line(&source),
         rev: entry.rev.as_deref().map(crate::text::sanitize_line),
@@ -488,10 +490,15 @@ fn pin_replacement(
             // fail-closed miss at serve time, never a wrong definition served.
             let definition = match resolved.origin {
                 crate::resolve::ServerOrigin::Inline => toml::to_string(&resolved.server).ok(),
-                crate::resolve::ServerOrigin::Library => std::fs::read_to_string(
-                    crate::resolve::library_server_path(lib_home, replacement),
-                )
-                .ok(),
+                // The definition file lives under whichever linked source
+                // satisfied the name, which is what `source_root` answers.
+                crate::resolve::ServerOrigin::Library => {
+                    std::fs::read_to_string(crate::resolve::library_server_path(
+                        &library.source_root(crate::library::Kind::Server, lib_home, replacement),
+                        crate::sources::capability_name(replacement),
+                    ))
+                    .ok()
+                }
             };
             if let Some(text) = definition {
                 store.pin_server_definition(&member.name, &text);

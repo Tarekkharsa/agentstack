@@ -31,7 +31,7 @@ agentstack add from github --write
 # 3. Hand-added it to one CLI already: pull it back into the manifest
 agentstack adopt --write
 
-# 4. Reusable across projects: store it in the library, then name it in a toolset
+# 4. Reusable across projects: store it in a linked library source, then name it in a toolset
 agentstack lib add-server kibana --file ./kibana.toml --write
 #   then in the manifest:  [profiles.backend]  servers = ["kibana"]
 
@@ -40,8 +40,8 @@ agentstack lock
 agentstack apply --write
 ```
 
-Verbs 1–4 write only the [manifest](../concepts.md) (verb 4 also writes the
-[central library](../concepts.md)) — commit-safe, with secrets kept as
+Verbs 1–4 write only the [manifest](../concepts.md) (verb 4 also writes your
+first [linked library source](../concepts.md)) — commit-safe, with secrets kept as
 `${REF}` placeholders. Nothing reaches a CLI until `apply --write` renders it.
 Hand-edit `[servers.<name>]` in the manifest directly only when you need fields
 the flags don't cover — native per-adapter keys under `extra.<adapter>`, a
@@ -57,4 +57,4 @@ stays inert until you re-run `agentstack trust .`, because the edit changes the
 
 - [Concepts](../concepts.md) — server, toolset, library, secrets
 - [Reference: `adopt` and `add`](../reference.md#adopt-and-add)
-- [Reference: the central library](../reference.md#the-central-library)
+- [Reference: the library](../reference.md#the-library-linked-source-folders)
