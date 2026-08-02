@@ -1,9 +1,11 @@
 //! The seatbelt: one shape for every enforcement denial the user meets.
 //!
-//! Strategy v2 Phase 3, "seatbelt legibility". Five families can refuse an
+//! Strategy v2 Phase 3, "seatbelt legibility". Six families can refuse an
 //! action — a gateway tool block, an egress refusal, a secret-scope refusal,
-//! the filesystem guard, and (added in Phase 4) the content-pinning refusal
-//! that withholds a server whose bytes no longer match what was reviewed.
+//! the filesystem guard, the content-pinning refusal that withholds a server
+//! whose bytes no longer match what was reviewed (added in Phase 4), and the
+//! trust-at-dispatch refusal that stops the next call on an already-live
+//! connection once the project's consent digest stops holding (W2).
 //! Before this module each wrote its own sentence,
 //! and half of them said only *what* was stopped, leaving the user to work out
 //! why and what to do instead. A denial that a person cannot act on is the
@@ -74,6 +76,25 @@ pub enum Family {
     /// Unlike the two cooperative families, this one is genuine prevention:
     /// the server is dropped before it is ever spawned or dialled.
     Pin,
+    /// A dispatch to an already-connected upstream was refused because the
+    /// project's consent digest no longer matches the one the connection was
+    /// authorized against — trust revoked, manifest edited out of band, or the
+    /// lock swapped wholesale (W2, `docs/design/automatic-delivery.md`).
+    ///
+    /// The sixth family, and — like [`Family::Pin`] — not a policy dimension:
+    /// nothing the user authored refused here, the *yes itself* stopped
+    /// applying. It is its own family rather than [`Family::Pin`]'s because
+    /// the two answer different questions. Pin says "the delivered bytes are
+    /// not the bytes you reviewed" and fires before a server ever starts;
+    /// this says "the review no longer covers this project" and fires on a
+    /// connection that was already live and already working, which is the
+    /// surprising part the reader has to be told.
+    ///
+    /// Genuine prevention: the upstream is never dialled, and the surface it
+    /// exposed empties with it. Control-plane tools do not route through the
+    /// gateway and so stay reachable, deliberately — a user whose project just
+    /// went untrusted needs to be able to see why and fix it.
+    Trust,
 }
 
 impl Family {
@@ -88,6 +109,10 @@ impl Family {
             // The server never started, so no tool of its ever ran. Same
             // clause as `Tool`, and correct for the same reason.
             Family::Pin => "nothing ran",
+            // The upstream was live, but this call never reached it: the
+            // refusal happens before the round trip, so the same clause is
+            // the true one.
+            Family::Trust => "nothing ran",
         }
     }
 
@@ -100,6 +125,7 @@ impl Family {
             Family::Secret => "secret",
             Family::Filesystem => "filesystem",
             Family::Pin => "pin",
+            Family::Trust => "trust",
         }
     }
 }
@@ -115,7 +141,7 @@ impl Family {
 /// discipline the recorder applies with `SecretDenied` vs `SecretAccess`, one
 /// layer up: a denial that never happened as a call must not be counted as
 /// one.
-pub const AUDIT_TOOLS: &[&str] = &["tool", "egress", "secret", "filesystem", "pin"];
+pub const AUDIT_TOOLS: &[&str] = &["tool", "egress", "secret", "filesystem", "pin", "trust"];
 
 /// Bound a refusal reason before it is printed or recorded.
 ///
@@ -267,6 +293,36 @@ pub fn record_pin_rejected(run: Option<&str>, server: &str, reason: &str) {
     });
 }
 
+/// The run-scoped mirror for a trust-at-dispatch refusal: a call the gateway
+/// refused to forward because the project's consent digest stopped holding
+/// mid-connection (W2).
+///
+/// `server`, `tool`, and `reason` must already have been through
+/// [`bounded_reason`], for the same reason [`record_pin_rejected`] insists on
+/// it: the first two are manifest- and upstream-derived (hostile input,
+/// invariant 7), and passing all three pre-bounded keeps the log line and the
+/// terminal line byte-identical. Evidence that differs from what was shown is
+/// worse than no evidence.
+pub fn record_trust_refused(
+    run: Option<&str>,
+    server: &str,
+    tool: &str,
+    state: &str,
+    reason: &str,
+) {
+    let Some(run) = run else { return };
+    let Some(log) = RunLog::create(run) else {
+        return;
+    };
+    log.append(&RunEvent::TrustRefused {
+        ts: now_epoch(),
+        server: server.to_string(),
+        tool: tool.to_string(),
+        state: state.to_string(),
+        reason: reason.to_string(),
+    });
+}
+
 fn now_epoch() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -306,6 +362,7 @@ mod tests {
             (Family::Secret, "nothing was read"),
             (Family::Filesystem, "nothing was written"),
             (Family::Pin, "nothing ran"),
+            (Family::Trust, "nothing ran"),
         ] {
             assert_eq!(family.nothing_clause(), clause);
         }

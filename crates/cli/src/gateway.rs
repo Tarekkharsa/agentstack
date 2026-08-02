@@ -492,6 +492,17 @@ pub struct Gateway {
     /// by [`crate::resolve::gateway_only_hosts`], the same function and frozen
     /// definitions `run --lockdown` uses ([`Gateway::frozen`]).
     frozen: Vec<crate::resolve::FrozenServer>,
+    /// W2 — the consent digest this gateway's connection was authorized
+    /// against, re-verified from disk before every dispatch and before every
+    /// tool listing. `Some` exactly when the project was `Trusted` at build
+    /// time; `None` for a gateway that was never gated by trust in the first
+    /// place (no manifest, an explicit `--manifest-dir` eager launch, the
+    /// empty gateway).
+    ///
+    /// Deliberately not a cache or a generation counter: `git pull`, a manual
+    /// edit, and a lock swap all happen outside this process, so anything but
+    /// a recompute would be a guess. See [`crate::trust_anchor`].
+    trust_gate: Option<crate::trust_anchor::TrustAnchor>,
 }
 
 struct CallAudit<'a> {
@@ -594,31 +605,52 @@ impl Gateway {
     ) -> Gateway {
         let mut upstreams = Vec::new();
         if let Ok(ctx) = crate::commands::load(dir) {
-            if require_trust {
-                let root = crate::manifest::project_root_of(&ctx.dir);
-                let state = crate::trust::check(&root);
-                if state != agentstack_trust::TrustState::Trusted {
-                    let why = match state {
-                        agentstack_trust::TrustState::Changed => {
-                            "its content changed since it was trusted"
-                        }
-                        _ => "it has not been reviewed and trusted",
-                    };
-                    eprintln!(
-                        "gateway: refusing to serve this bundle — {why}. Nothing \
-                         is proxied, no secret resolves, no server spawns. Review \
-                         it with `agentstack trust .`"
-                    );
-                    return Gateway {
-                        upstreams,
-                        cache: std::sync::Mutex::new(Some(std::sync::Arc::new(Vec::new()))),
-                        ruleset: agentstack_policy::CompiledRuleset::default(),
-                        project: None,
-                        run_id,
-                        skipped: Vec::new(),
-                        frozen: Vec::new(),
-                    };
+            // Relative server paths (`cwd`) anchor at the project root — the
+            // dir holding `.agentstack/`, not the manifest dir itself. Also
+            // the key trust is recorded under, so it is computed once here and
+            // reused by both the hard gate below and the W2 dispatch anchor.
+            let root = crate::manifest::project_root_of(&ctx.dir);
+            // One read of the consent bytes, two decisions derived from it —
+            // the same seam `check_digest` exists for, so a build can never
+            // gate on one snapshot and anchor on another.
+            let consent_digest = crate::trust::digest_for(&root);
+            let state = crate::trust::check_digest(&root, consent_digest.as_deref());
+            // W2: the anchor exists only for a project that is trusted RIGHT
+            // NOW. Everything else gets `None`, which preserves pre-W2
+            // behaviour exactly for the consent-by-invocation eager path
+            // (`--manifest-dir` is itself the consent) and for a project with
+            // no manifest at all.
+            let trust_gate = match (state, consent_digest) {
+                (agentstack_trust::TrustState::Trusted, Some(d)) => {
+                    Some(crate::trust_anchor::TrustAnchor::new(root.clone(), d))
                 }
+                _ => None,
+            };
+            // The sandboxed-run hard gate, unchanged: anything but `Trusted`
+            // refuses to build at all. (W2's anchor is the *dispatch*-time
+            // half of the same question, and does not replace this one.)
+            if require_trust && state != agentstack_trust::TrustState::Trusted {
+                let why = match state {
+                    agentstack_trust::TrustState::Changed => {
+                        "its content changed since it was trusted"
+                    }
+                    _ => "it has not been reviewed and trusted",
+                };
+                eprintln!(
+                    "gateway: refusing to serve this bundle — {why}. Nothing \
+                     is proxied, no secret resolves, no server spawns. Review \
+                     it with `agentstack trust .`"
+                );
+                return Gateway {
+                    upstreams,
+                    cache: std::sync::Mutex::new(Some(std::sync::Arc::new(Vec::new()))),
+                    ruleset: agentstack_policy::CompiledRuleset::default(),
+                    project: None,
+                    run_id,
+                    skipped: Vec::new(),
+                    frozen: Vec::new(),
+                    trust_gate: None,
+                };
             }
             // The runtime server set as uniform [`crate::resolve::FrozenServer`]
             // entries — a resolved, library-pin-verified definition or a
@@ -727,9 +759,10 @@ impl Gateway {
                         .collect()
                 }
             };
-            // Relative server paths (`cwd`) anchor at the project root — the
-            // dir holding `.agentstack/`, not the manifest dir itself.
-            let root = crate::manifest::project_root_of(&ctx.dir);
+            // `root` (the project root the relative server `cwd`s anchor at)
+            // was bound at the top of this fn, where the trust anchor needed
+            // it too — one derivation, so the dir trust is keyed under and the
+            // dir servers run in can never diverge.
             // The firewall's rule set travels with the gateway as ONE compiled
             // artifact: (machine [policy] ∩ project [policy]) folded over the
             // runtime server names. Compiled here, consulted per call —
@@ -764,6 +797,7 @@ impl Gateway {
                             run_id,
                             skipped: Vec::new(),
                             frozen: Vec::new(),
+                            trust_gate: None,
                         };
                     }
                 },
@@ -988,6 +1022,7 @@ impl Gateway {
                 run_id,
                 skipped,
                 frozen,
+                trust_gate,
             };
         }
         Gateway {
@@ -998,6 +1033,9 @@ impl Gateway {
             run_id,
             skipped: Vec::new(),
             frozen: Vec::new(),
+            // No manifest loaded, so nothing was ever consented to and there
+            // is nothing to serve — a gate here would have nothing to guard.
+            trust_gate: None,
         }
     }
 
@@ -1014,6 +1052,7 @@ impl Gateway {
             run_id: std::env::var(crate::calllog::RUN_ID_ENV).ok(),
             skipped: Vec::new(),
             frozen: Vec::new(),
+            trust_gate: None,
         }
     }
 
@@ -1033,6 +1072,22 @@ impl Gateway {
     /// after the first call. Per-server failures are skipped (logged to stderr)
     /// so one slow/down server can't fail the whole list.
     pub fn namespaced_tools(&self) -> std::sync::Arc<Vec<Value>> {
+        // W2: the upstream capability surface EMPTIES when trust stops
+        // holding. Checked before the cache, because the cache is exactly what
+        // would otherwise keep serving a list the project is no longer
+        // authorized to expose. Control-plane tools never route through the
+        // gateway, so they are untouched by this — the user can still see why
+        // and fix it.
+        //
+        // Deliberately not recorded: a listing is not a dispatch, clients poll
+        // `tools/list` freely, and filling the audit log with one row per poll
+        // would bury the refusal that matters (the one in
+        // `try_call_attributed`). The cache is left intact rather than
+        // poisoned — re-establishing trust rebuilds the gateway anyway, and a
+        // half-invalidated cache would be a second source of truth.
+        if self.trust_violation().is_some() {
+            return std::sync::Arc::new(Vec::new());
+        }
         if let Some(cached) = self
             .cache
             .lock()
@@ -1108,6 +1163,48 @@ impl Gateway {
         let (server, tool) = name.split_once("__")?;
         let slot = self.upstreams.iter().find(|u| u.name == server)?;
         let started = Instant::now();
+        // W2 — trust is checked at dispatch, from the digest, BEFORE the
+        // policy firewall: a project whose yes no longer holds has no
+        // authorized surface for a policy question to be asked about.
+        //
+        // It sits after the `?`s on purpose. Those two lines decide whether
+        // this call is *ours*; refusing before them would have the gateway
+        // claim names it does not own and swallow control-plane tools, which
+        // is the one thing the contract says must keep working.
+        if let Some(violation) = self.trust_violation() {
+            // Both identifiers are manifest-/caller-authored — repository
+            // content, invariant 7 — so they are bounded before they reach a
+            // terminal or a log. `why` and `next_step` are machine-authored,
+            // and bounded anyway so the sentence stays scannable.
+            let subject = crate::seatbelt::bounded_reason(server);
+            let tool_name = crate::seatbelt::bounded_reason(tool);
+            let why = crate::seatbelt::bounded_reason(&violation.why);
+            let attempted = format!("call {tool_name} on an already-open connection");
+            let denial = crate::seatbelt::Denial {
+                family: crate::seatbelt::Family::Trust,
+                subject: &subject,
+                attempted: &attempted,
+                why: &why,
+                next_step: &violation.next_step,
+            };
+            // ONE record per destination, matching the pin refusal's shape:
+            // `seatbelt::record` writes the machine-global `calls.jsonl` row
+            // (`tool: trust`, outcome denied) and `record_trust_refused`
+            // mirrors the run-scoped event. `log_call` is deliberately NOT
+            // called — it would file this as a second, `ToolCall`-shaped row
+            // and corrupt the run's tool-call count.
+            crate::seatbelt::record(&denial, self.project.clone(), run_id);
+            crate::seatbelt::record_trust_refused(
+                run_id,
+                &subject,
+                &tool_name,
+                violation.state,
+                &why,
+            );
+            // The same sentence the log carries goes back to the agent's
+            // harness, which is where the human reads it.
+            return Some(Err(anyhow!("{}", denial.sentence())));
+        }
         if let Err(denial) = self.tool_allowed(server, tool) {
             // Rendered once: the audit detail and the caller-facing error both
             // carry the display form (which names the denying layer).
@@ -1169,6 +1266,31 @@ impl Gateway {
             ),
         }
         Some(result)
+    }
+
+    /// W2 — re-verify, from disk, that this connection is still authorized.
+    /// `Some(violation)` means every upstream capability is refused until the
+    /// project is re-trusted and the gateway rebuilt.
+    ///
+    /// Always recomputed (three small reads + one SHA-256), never cached: the
+    /// three mutations the contract names — revoke, out-of-band edit, lock
+    /// swap — all happen outside this process, so a cache could only ever be a
+    /// guess that nothing moved. `None` when no anchor was captured, which is
+    /// the pre-W2 path for projects trust never gated in the first place.
+    fn trust_violation(&self) -> Option<crate::trust_anchor::Violation> {
+        self.trust_gate.as_ref()?.verify().err()
+    }
+
+    /// The anchor this gateway's connection was authorized against — `None`
+    /// when trust never gated it.
+    ///
+    /// The serve loops borrow (and clone) it rather than capturing their own,
+    /// so the digest that gates a dispatch and the digest that gates a skill
+    /// load are the same one. They also compare it to the live digest to
+    /// notice a *re-trust* — new bytes, freshly consented — which is the one
+    /// trust change that calls for a rebuild rather than a refusal.
+    pub fn trust_anchor(&self) -> Option<&crate::trust_anchor::TrustAnchor> {
+        self.trust_gate.as_ref()
     }
 
     /// The effective firewall — one lookup in the compiled ruleset: a tool
@@ -1370,6 +1492,7 @@ impl Gateway {
             run_id: None,
             skipped: Vec::new(),
             frozen: Vec::new(),
+            trust_gate: None,
         }
     }
 }
@@ -1512,6 +1635,7 @@ mod tests {
             run_id: None,
             skipped: Vec::new(),
             frozen: Vec::new(),
+            trust_gate: None,
         };
         let err = gw.tool_allowed("figma", "post_comment").unwrap_err();
         assert_eq!(err.layer, agentstack_policy::Layer::Machine, "{err}");
@@ -1737,6 +1861,7 @@ mod tests {
             run_id: None,
             skipped: Vec::new(),
             frozen: Vec::new(),
+            trust_gate: None,
         };
         let req = serde_json::json!({
             "jsonrpc": "2.0", "id": 1, "method": "tools/call",

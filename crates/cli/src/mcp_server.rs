@@ -87,6 +87,14 @@ pub fn serve(
         if !gateway.is_empty() {
             eprintln!("agentstack mcp: gateway active — proxying this project's MCP servers");
         }
+        // W2 — eager mode has no `AutoProject`, so it passed `trust_note: None`
+        // for the whole life of the connection: a skill could still be loaded
+        // from a project whose trust had been revoked ten minutes earlier.
+        // Borrowed from the gateway rather than re-derived, so the digest that
+        // gates a dispatch is the digest that gates a load. `None` for a
+        // project trust never gated (an explicit `--manifest-dir` launch is
+        // itself the consent), which keeps that path exactly as it was.
+        let mut trust_anchor = gateway.trust_anchor().cloned();
 
         // Code mode (Phase 2): expose a loopback, token-gated endpoint the generated
         // client POSTs to. Best-effort and contained — None when there's nothing to
@@ -159,11 +167,14 @@ pub fn serve(
                 });
             } else {
                 let before = lease_profile(&lease);
+                // Recomputed per request, not cached: the whole point is to
+                // catch a change no command in this process made.
+                let note = trust_anchor.as_ref().and_then(|a| a.note());
                 let resp = handle_with_lease(
                     &req,
                     dir.as_deref(),
                     &gateway,
-                    None,
+                    note.as_deref(),
                     transparent,
                     &lease,
                     true,
@@ -173,14 +184,33 @@ pub fn serve(
                     if let Some(rt) = runtime.take() {
                         rt.shutdown();
                     }
-                    gateway = match after.as_deref() {
-                        Some(profile) => std::sync::Arc::new(
+                    // A lease transition rebuilds the gateway from disk. If the
+                    // anchor no longer verifies, that rebuild would produce an
+                    // UNGATED gateway (`build` only anchors a project that is
+                    // trusted right now, and this one is not) — handing back a
+                    // live upstream surface the connection just lost the right
+                    // to. So the transition fails closed instead.
+                    let violated = trust_anchor.as_ref().is_some_and(|a| a.verify().is_err());
+                    gateway = match (violated, after.as_deref()) {
+                        (true, _) => std::sync::Arc::new(crate::gateway::Gateway::empty()),
+                        (false, Some(profile)) => std::sync::Arc::new(
                             crate::gateway::Gateway::from_manifest_lease(dir.as_deref(), profile),
                         ),
-                        None => std::sync::Arc::new(crate::gateway::Gateway::from_manifest(
-                            dir.as_deref(),
-                        )),
+                        (false, None) => std::sync::Arc::new(
+                            crate::gateway::Gateway::from_manifest(dir.as_deref()),
+                        ),
                     };
+                    // Re-borrow the loop's anchor from the gateway that now
+                    // serves the connection — asymmetrically. On the clean
+                    // path the rebuild may have ANCHORED a project that had
+                    // none at launch (never trusted then, trusted now), and a
+                    // stale `None` would leave later skill loads ungated after
+                    // a revoke. On the violated path we keep the OLD anchor:
+                    // the empty gateway carries none, and that old anchor is
+                    // exactly what keeps yielding the refusal note for loads.
+                    if !violated {
+                        trust_anchor = gateway.trust_anchor().cloned();
+                    }
                     runtime = crate::codemode::endpoint::start(
                         dir.as_deref(),
                         std::sync::Arc::clone(&gateway),
@@ -554,6 +584,16 @@ struct AutoProject {
     /// one per surface. No outer mutex: the gateway is Sync with per-upstream
     /// locking.
     gateway: std::sync::Arc<crate::gateway::Gateway>,
+    /// W2 — the consent digest the live gateway was built against, copied from
+    /// its own anchor at activation. Kept so [`AutoProject::refresh_trust`] can
+    /// tell "still the same yes" from "a NEW yes, granted mid-connection":
+    /// re-trusting changes the digest, so a gateway anchored to the old one
+    /// would refuse every dispatch forever until the connection restarted.
+    anchor_digest: Option<String>,
+    /// The lease profile the live gateway was fenced to, so a rebuild forced
+    /// by a re-trust restores the SAME fence instead of silently widening the
+    /// surface back to the unleased one.
+    profile: Option<String>,
     resolved: bool,
     built: bool,
     runtime: Option<crate::codemode::endpoint::RuntimeHandle>,
@@ -569,6 +609,8 @@ impl AutoProject {
             dir: None,
             trust: None,
             gateway: std::sync::Arc::new(crate::gateway::Gateway::empty()),
+            anchor_digest: None,
+            profile: None,
             resolved: false,
             built: false,
             runtime: None,
@@ -689,19 +731,52 @@ impl AutoProject {
     /// A commit-safe control-plane edit can invalidate trust during one MCP
     /// connection; no later lease transition may reuse the earlier decision.
     fn refresh_trust(&mut self) {
+        self.refresh_trust_with(true);
+    }
+
+    /// `refresh_trust`, with the re-trust rebuild suppressed.
+    ///
+    /// `rebuild_for_lease` passes `false`: it is about to activate with the
+    /// NEW lease profile anyway, and rebuilding here first would spawn every
+    /// stdio child twice — once for the old fence, once for the new.
+    fn refresh_trust_with(&mut self, rebuild_on_retrust: bool) {
         if self.explicit.is_some() {
             return;
         }
-        if let Some(base) = &self.dir {
-            let state = crate::trust::check(base);
-            self.trust = Some(state);
-            if state != crate::trust::TrustState::Trusted {
-                if let Some(rt) = self.runtime.take() {
-                    rt.shutdown();
-                }
-                self.gateway = std::sync::Arc::new(crate::gateway::Gateway::empty());
-                self.built = true;
+        let Some(base) = self.dir.clone() else {
+            return;
+        };
+        // One read of the consent bytes, both decisions from it.
+        let digest = crate::trust::digest_for(&base);
+        let state = crate::trust::check_digest(&base, digest.as_deref());
+        self.trust = Some(state);
+        if state != crate::trust::TrustState::Trusted {
+            if let Some(rt) = self.runtime.take() {
+                rt.shutdown();
             }
+            self.gateway = std::sync::Arc::new(crate::gateway::Gateway::empty());
+            self.anchor_digest = None;
+            self.built = true;
+            return;
+        }
+        // Trusted — but is it the same yes? Two cases fail the comparison, and
+        // both need the rebuild. A NEW yes over DIFFERENT bytes leaves the live
+        // gateway anchored to the old digest, so its per-dispatch gate would
+        // refuse every call until the client reconnected. A `None` anchor while
+        // the state is Trusted means the gateway is empty but the project is
+        // trusted right now — the yes restored after a revoke (which clears the
+        // anchor above), or a first grant mid-connection. Recovery must not
+        // wait for a lease transition, so the boundary that noticed the trust
+        // is the boundary that restores the surface. (`digest` is always `Some`
+        // here: `check_digest` cannot return Trusted without one.) In the
+        // window before this fires, the stale anchor keeps refusing —
+        // fail-closed is the right side to err on.
+        if rebuild_on_retrust && self.built && self.anchor_digest.as_deref() != digest.as_deref() {
+            if let Some(rt) = self.runtime.take() {
+                rt.shutdown();
+            }
+            let profile = self.profile.clone();
+            self.activate(&base, profile.as_deref());
         }
     }
 
@@ -709,7 +784,7 @@ impl AutoProject {
     /// by `ensure_project`; an untrusted auto-project remains inert.
     fn rebuild_for_lease(&mut self, profile: Option<&str>) {
         self.ensure_project();
-        self.refresh_trust();
+        self.refresh_trust_with(false);
         let Some(base) = self.dir.clone() else {
             return;
         };
@@ -720,6 +795,7 @@ impl AutoProject {
                 rt.shutdown();
             }
             self.gateway = std::sync::Arc::new(crate::gateway::Gateway::empty());
+            self.anchor_digest = None;
             self.built = true;
             return;
         }
@@ -780,6 +856,12 @@ impl AutoProject {
             )),
             None => std::sync::Arc::new(crate::gateway::Gateway::from_manifest(Some(base))),
         };
+        // W2 — remember which consent this gateway was built against, and
+        // which fence it was built with, so `refresh_trust` can recognise a
+        // re-trust and restore the same fence. Read off the gateway's own
+        // anchor: one derivation, so the two can never disagree.
+        self.anchor_digest = self.gateway.trust_anchor().map(|a| a.digest().to_string());
+        self.profile = lease_profile.map(str::to_string);
         self.built = true;
         if !self.gateway().is_empty() {
             eprintln!(
@@ -2960,6 +3042,129 @@ mod tests {
             auto.trust_note()
                 .is_some_and(|note| note.contains("changed since")),
             "changed trust must be surfaced after a lease transition"
+        );
+        auto.shutdown();
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    /// W2, eager mode. The default serve loop has no `AutoProject`, so it
+    /// passed `trust_note: None` for the whole life of a connection and a
+    /// skill could still be loaded from a project whose trust had been
+    /// revoked. The anchor is now what supplies that note.
+    #[test]
+    fn eager_mode_refuses_skill_loads_once_the_anchor_stops_verifying() {
+        use assert_fs::prelude::*;
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+
+        let proj = assert_fs::TempDir::new().unwrap();
+        proj.child(".agentstack/agentstack.toml")
+            .write_str("version = 1\n")
+            .unwrap();
+        crate::trust::trust_unreviewed(proj.path()).unwrap();
+
+        // The anchor the eager loop captures: borrowed from the gateway, so
+        // one digest gates both dispatch and loading.
+        let anchor = crate::gateway::Gateway::from_manifest(Some(proj.path()))
+            .trust_anchor()
+            .cloned()
+            .expect("a trusted project anchors its gateway");
+        assert!(anchor.note().is_none(), "trusted → no note");
+
+        // Revoked out of band. Nothing in this process was told.
+        std::fs::remove_file(crate::trust::store_path()).unwrap();
+        let note = anchor.note().expect("a violated anchor must yield a note");
+        assert!(note.contains("agentstack trust"), "got: {note}");
+
+        let refusal = load_capability_with_lease(
+            &json!({ "name": "anything", "reason": "a task" }),
+            Some(proj.path()),
+            Some(&note),
+            &new_lease_store(),
+        )
+        .expect_err("a violated anchor must refuse the load");
+        assert!(
+            refusal.to_string().contains("agentstack trust"),
+            "got: {refusal}"
+        );
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    /// W2, auto mode. Re-trusting mid-connection consents to DIFFERENT bytes,
+    /// so a gateway still anchored to the old digest would refuse every
+    /// dispatch until the client reconnected. The refresh has to rebuild.
+    #[test]
+    fn auto_project_rebuilds_when_the_user_re_trusts_mid_connection() {
+        use assert_fs::prelude::*;
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+
+        let proj = assert_fs::TempDir::new().unwrap();
+        proj.child(".agentstack/agentstack.toml")
+            .write_str("version = 1\n[servers.x]\ntype = \"http\"\nurl = \"https://x/mcp\"\n")
+            .unwrap();
+        crate::trust::trust_unreviewed(proj.path()).unwrap();
+
+        let mut auto = AutoProject::new(None);
+        auto.roots.push(proj.path().to_path_buf());
+        auto.ensure_gateway();
+        let first = auto
+            .anchor_digest
+            .clone()
+            .expect("a trusted activation records its anchor");
+
+        // The human edits, reviews, and re-trusts — all outside this process.
+        proj.child(".agentstack/agentstack.toml")
+            .write_str("version = 1\n[servers.x]\ntype = \"http\"\nurl = \"https://y/mcp\"\n")
+            .unwrap();
+        crate::trust::trust_unreviewed(proj.path()).unwrap();
+
+        auto.refresh_trust();
+        assert_eq!(auto.trust, Some(crate::trust::TrustState::Trusted));
+        let second = auto
+            .anchor_digest
+            .clone()
+            .expect("the rebuilt gateway must carry the NEW anchor");
+        assert_ne!(
+            first, second,
+            "a re-trust must re-anchor, or every later dispatch is refused forever"
+        );
+        assert!(
+            !auto.gateway().is_empty(),
+            "the newly consented surface must be served"
+        );
+
+        // And the other direction: revoke, then restore the SAME yes. A revoke
+        // clears the anchor, so recovery cannot depend on the digest differing
+        // — nor on a lease transition happening to come along later.
+        std::fs::remove_file(crate::trust::store_path()).unwrap();
+        auto.refresh_trust();
+        assert_eq!(auto.trust, Some(crate::trust::TrustState::Untrusted));
+        assert!(auto.gateway().is_empty(), "a revoke must empty the gateway");
+        assert!(
+            auto.anchor_digest.is_none(),
+            "a revoke must clear the anchor"
+        );
+
+        crate::trust::trust_unreviewed(proj.path()).unwrap();
+        auto.refresh_trust();
+        assert_eq!(auto.trust, Some(crate::trust::TrustState::Trusted));
+        assert_eq!(
+            auto.anchor_digest.as_deref(),
+            Some(second.as_str()),
+            "re-trusting the same bytes must re-anchor at this boundary"
+        );
+        assert!(
+            !auto.gateway().is_empty(),
+            "the restored yes must restore the surface without a lease transition"
         );
         auto.shutdown();
 

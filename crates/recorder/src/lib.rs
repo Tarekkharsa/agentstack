@@ -640,6 +640,44 @@ pub enum RunEvent {
         /// are repository content and therefore hostile input (invariant 7).
         reason: String,
     },
+    /// The gateway refused to dispatch to an already-connected upstream
+    /// because the project's consent digest no longer matched the one the
+    /// connection was authorized against — trust revoked, the manifest edited
+    /// out of band, or the lock replaced wholesale (W2, "trust is checked at
+    /// dispatch, from the digest").
+    ///
+    /// Its own variant for the same reason [`RunEvent::PinRejected`] is one:
+    /// no existing variant means "a live connection stopped being authorized".
+    /// Filing it under [`RunEvent::ToolCall`] with `outcome: denied` would put
+    /// it in the same bucket as a `[policy.tools]` block — a reviewer counting
+    /// policy denials is asking a different question from one asking whether a
+    /// consent boundary moved underneath a running session, and a call that
+    /// was refused for *lack of a valid yes* is not a call the run made.
+    ///
+    /// Identity-shaped: the server and tool NAMES, a closed-set `state` tag,
+    /// and the reason in the words the user was shown. Never the arguments —
+    /// a call refused because trust no longer holds is precisely one whose
+    /// payload should not be copied anywhere.
+    ///
+    /// Best-effort and never gating, like every event here: the refusal has
+    /// already happened by the time this is written, and a recorder failure
+    /// can only lose the evidence — never restore the call.
+    TrustRefused {
+        ts: u64,
+        /// The upstream server the call was addressed to. Manifest-authored,
+        /// therefore repository content — bounded and control-character
+        /// stripped by the caller before it arrives here (invariant 7).
+        server: String,
+        /// The bare upstream tool name, bounded by the caller for the same
+        /// reason.
+        tool: String,
+        /// Which way the anchor failed: `"revoked"`, `"changed"`, or
+        /// `"unreadable"`. A closed, machine-authored set.
+        state: String,
+        /// Why, in the words the user saw. Machine-authored text; bounded by
+        /// the caller so the log line and the terminal line are identical.
+        reason: String,
+    },
     /// A skill body entered this run's agent context on demand
     /// (`agentstack_load`) — the run-scoped mirror of one `loads.jsonl` line.
     ///

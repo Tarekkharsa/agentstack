@@ -374,6 +374,26 @@ Which is which, per denial family:
 | Secret-scope refusal | **enforced** — the ref reaches no backing store | yes, **new in Phase 3** | `calls.jsonl` (`tool: secret`) + run `events.jsonl` (`SecretDenied`) |
 | Filesystem guard | **cooperative** — the harness chose to ask | yes | `calls.jsonl` (`server: host-guard`, `run: None`) |
 | Content-pin refusal | **enforced** — the server is dropped before it is spawned or dialled | yes, **new in Phase 4** | `calls.jsonl` (`tool: pin`) + run `events.jsonl` (`PinRejected`) |
+| Trust-at-dispatch refusal | **enforced** — the call is refused before the upstream is dialled | yes, **new in W2** | `calls.jsonl` (`tool: trust`) + run `events.jsonl` (`TrustRefused`) |
+
+The trust-at-dispatch row is the sixth family, added in W2 (automatic
+delivery). It fires when the project's consent digest stops matching the one a
+*live* connection was authorized against — trust revoked, the manifest edited
+out of band, or `agentstack.lock` replaced wholesale by a `git pull` or a
+branch switch. Before W2 an already-spawned server stayed proxied until the
+next lease, load, or session call happened to re-check, so a withdrawn yes left
+a working path open; now every gateway dispatch recompares the digest, and any
+uncertainty — an unreadable manifest, an inconclusive recompute — refuses.
+
+Two honesty notes specific to it. First, what it empties is the **upstream
+capability surface**: the leased servers' tools go away and `tools/list` stops
+advertising them, while agentstack's own control-plane tools stay reachable on
+the same connection, deliberately — a user whose project just went untrusted
+has to be able to diagnose and fix it, and blinding them would turn a
+fail-closed refusal into a dead end. Second, the comparison is recomputed on
+every dispatch rather than cached: `git pull`, a manual edit, and a lock swap
+all happen outside agentstack, so a cache here could only ever be a guess that
+nothing moved.
 
 The content-pin row is the fifth family, added in Phase 4. It differs from the
 other four in what refused: nothing the user *authored* denied anything here,
