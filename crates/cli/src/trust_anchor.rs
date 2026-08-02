@@ -43,6 +43,10 @@ use agentstack_trust::TrustState;
 pub struct Violation {
     /// Closed set, for the run-event log: `"revoked"`, `"changed"`,
     /// `"unreadable"`. Machine-authored — never repository content.
+    ///
+    /// The run event's own set is one wider: the lease/load refusals (W1) have
+    /// no anchor to compare against and derive their tag from the current trust
+    /// state, which adds `"untrusted"`. Only these three can come from *here*.
     pub state: &'static str,
     /// What happened, as a phrase that follows the attempted action.
     pub why: String,

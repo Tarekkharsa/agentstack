@@ -94,6 +94,12 @@ pub enum Family {
     /// exposed empties with it. Control-plane tools do not route through the
     /// gateway and so stay reachable, deliberately — a user whose project just
     /// went untrusted needs to be able to see why and fix it.
+    ///
+    /// The same family also covers the two doors *before* dispatch (W1): a
+    /// lease the gateway will not open and a skill it will not load for a
+    /// project whose yes does not hold. Same question, same answer, same one
+    /// command that fixes it — so the same family, and one `tool: "trust"` tag
+    /// a reader can filter the audit log by.
     Trust,
 }
 

@@ -1309,6 +1309,130 @@ fn tool_defs() -> Value {
     Value::Array(tools)
 }
 
+/// Why the lease path refused, in the two forms the evidence needs: the closed
+/// `state` tag the run log files it under, and the short machine-authored
+/// sentence fragment the user reads.
+///
+/// Re-derived from disk rather than threaded down from the caller's note. The
+/// note arrives as prose (composed by [`AutoProject::trust_note`] or
+/// [`crate::trust_anchor::TrustAnchor::note`]) and parsing prose back into a
+/// tag would be the kind of guess this codebase does not make. Reading the
+/// current state instead answers the question the *user* has to act on — where
+/// this project stands now — and it is the same read the fix (`agentstack
+/// trust`) will make.
+///
+/// The honest limit, stated because a reader of the log deserves it: a
+/// withdrawn yes leaves no trace in the store, so a revoke reads back as
+/// `untrusted` here, where the dispatch path (which holds the anchor the
+/// connection was authorized against) can still say `revoked`.
+fn trust_refusal_reason(root: Option<&Path>) -> (&'static str, String) {
+    let Some(root) = root else {
+        // No project to check against. Fail closed and say so, rather than
+        // implying a state was read.
+        return (
+            "unreadable",
+            "this connection has no project to check trust against (fail closed)".to_string(),
+        );
+    };
+    let digest = crate::trust::digest_for(root);
+    if digest.is_none() {
+        return (
+            "unreadable",
+            "could not read this project's manifest and lock to check trust (fail closed)"
+                .to_string(),
+        );
+    }
+    match crate::trust::check_digest(root, digest.as_deref()) {
+        crate::trust::TrustState::Untrusted => (
+            "untrusted",
+            // No second dash: the sentence already carries one, and the next
+            // step says who has to review it.
+            "this project is not trusted on this machine".to_string(),
+        ),
+        crate::trust::TrustState::Changed => (
+            "changed",
+            "this project's manifest or lockfile changed since it was trusted".to_string(),
+        ),
+        // The caller's gate said no and disk now says yes: a re-trust landed
+        // between the two reads. Rare, and still a refusal — this request was
+        // decided against the older reading. `changed` is the honest tag: the
+        // trust state moved under this connection.
+        crate::trust::TrustState::Trusted => (
+            "changed",
+            "this project's trust state changed while this request was in flight".to_string(),
+        ),
+    }
+}
+
+/// W1 — one refused lease or load, made loud and left as evidence.
+///
+/// Both refusal sites below used to `bail!` a bare sentence and record
+/// nothing, so the one moment a project stops serving was the one moment
+/// nothing could be looked up afterwards. This writes the same two-destination
+/// evidence the W2 dispatch refusal writes (`gateway.rs`): ONE `calls.jsonl`
+/// row through [`crate::seatbelt::record`] (`tool: "trust"`, outcome denied)
+/// plus the run-scoped [`agentstack_recorder::RunEvent::TrustRefused`] mirror.
+///
+/// The two slots read differently here than at dispatch, deliberately: nothing
+/// was dispatched, so `tool` carries the **control-plane verb** that was
+/// refused and `server` carries the **capability** it was refused for — the
+/// toolset for a lease, the skill for a load.
+///
+/// `attempted_phrase` names only the ATTEMPT, never the capability: the
+/// sentence template is `"{subject} tried to {attempted}"`, so it already joins
+/// the two, and a phrase that repeats the name stutters ("helper tried to load
+/// skill helper"). This follows [`crate::seatbelt::Family::Pin`]'s call site in
+/// `gateway.rs`, whose `attempted` is the bare `"be served by the gateway"`.
+/// The name is carried once, by `subject`.
+///
+/// Returns the sentence to bail with. It does not refuse anything itself: the
+/// caller still owns the `bail!`, which is the seatbelt's structural rule that
+/// explaining a denial can never be a way to acquire permission.
+fn trust_refusal(
+    dir: Option<&Path>,
+    verb: &str,
+    subject_raw: &str,
+    attempted_phrase: &str,
+) -> String {
+    // Either shape of input (project root or `.agentstack/` manifest dir)
+    // normalizes to the same pair, so the `project` this records is the string
+    // `status` matches its own reading against.
+    let root = dir.map(crate::manifest::project_root_of);
+    let manifest_dir = root.as_deref().map(crate::manifest::resolve_manifest_dir);
+    let (state, why) = trust_refusal_reason(root.as_deref());
+    let why = crate::seatbelt::bounded_reason(&why);
+    // Toolset and skill names are caller- or manifest-authored: hostile input
+    // (invariant 7), bounded before they reach a terminal or a log.
+    let subject = crate::seatbelt::bounded_reason(subject_raw);
+    // Machine-authored, and bounded anyway so every part of the sentence is
+    // held to the same length rule.
+    let attempted = crate::seatbelt::bounded_reason(attempted_phrase);
+    let where_ = root
+        .as_deref()
+        .map(|r| crate::text::sanitize_line(&r.display().to_string()))
+        .unwrap_or_else(|| ".".to_string());
+    let next_step = format!("review it and run `agentstack trust {where_}`");
+    let denial = crate::seatbelt::Denial {
+        family: crate::seatbelt::Family::Trust,
+        subject: &subject,
+        attempted: &attempted,
+        why: &why,
+        next_step: &next_step,
+    };
+    // Run attribution comes from the environment, as it does for every other
+    // record this process writes (`record_load_activity`).
+    let run = std::env::var(crate::calllog::RUN_ID_ENV)
+        .ok()
+        .filter(|id| !id.is_empty());
+    crate::seatbelt::record(
+        &denial,
+        manifest_dir.map(|d| d.display().to_string()),
+        run.as_deref(),
+    );
+    crate::seatbelt::record_trust_refused(run.as_deref(), &subject, verb, state, &why);
+    denial.sentence()
+}
+
 /// Dispatch one control-plane tool call. `trust_note` is `Some` exactly when
 /// this is auto-project mode AND the project is Untrusted/Changed (eager mode
 /// and trusted projects pass `None`) — the strict gate for anything that
@@ -1319,8 +1443,25 @@ fn lease_open(
     trust_note: Option<&str>,
     store: &LeaseStore,
 ) -> Result<String> {
-    if let Some(note) = trust_note {
-        anyhow::bail!("agentstack_lease_open is disabled for this project: {note}");
+    if trust_note.is_some() {
+        // Named before it is validated: the refusal has to say WHAT was
+        // refused, and the toolset the agent asked for is that. An absent or
+        // malformed `profile` is still refused here — the trust gate outranks
+        // argument validation, exactly as it did before.
+        let profile = args
+            .get("profile")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("<unnamed>");
+        anyhow::bail!(
+            "{}",
+            trust_refusal(
+                dir,
+                "agentstack_lease_open",
+                profile,
+                "be opened as a toolset lease"
+            )
+        );
     }
     let profile = args
         .get("profile")
@@ -2337,8 +2478,16 @@ fn load_capability_with_lease(
 
     // Untrusted means inert: in auto mode no bundle skill content enters any
     // agent context until a human reviews and trusts the project.
-    if let Some(note) = trust_note {
-        anyhow::bail!("'{name}' can't be loaded: {note}");
+    if trust_note.is_some() {
+        anyhow::bail!(
+            "{}",
+            trust_refusal(
+                Some(&ctx.dir),
+                "agentstack_load",
+                name,
+                "be loaded into agent context"
+            )
+        );
     }
 
     let m = &ctx.loaded.manifest;
@@ -3487,9 +3636,20 @@ mod tests {
         std::env::remove_var("AGENTSTACK_HOME");
     }
 
+    /// W1: the refusal is seatbelt-shaped, names the toolset it refused, and
+    /// names the one command that fixes it. (The wording moved here from a
+    /// bare `agentstack_lease_open is disabled for this project: <note>` — the
+    /// note said what was wrong but never what was *asked for*.)
     #[test]
     fn untrusted_project_cannot_open_mcp_lease() {
         use assert_fs::prelude::*;
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        // Sandboxed: this path now WRITES evidence, and a unit test must not
+        // append to the developer's real audit log.
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
         let proj = assert_fs::TempDir::new().unwrap();
         proj.child(".agentstack/agentstack.toml")
             .write_str("version = 1\n[profiles.backend]\n")
@@ -3503,8 +3663,111 @@ mod tests {
         )
         .unwrap_err()
         .to_string();
-        assert!(err.contains("not trusted"));
+        assert!(err.starts_with("blocked:"), "{err}");
+        assert!(
+            err.contains("backend"),
+            "the refusal must name WHAT was refused: {err}"
+        );
+        assert!(
+            err.contains("toolset lease"),
+            "the refusal must name which door it was refused at: {err}"
+        );
+        // The name belongs to `subject` alone: the sentence template joins the
+        // two slots, so a name in `attempted` too would read as a stutter.
+        assert_eq!(
+            err.matches("backend").count(),
+            1,
+            "the capability is named once, by the subject: {err}"
+        );
+        assert!(
+            err.contains("not trusted"),
+            "the refusal must name why: {err}"
+        );
+        assert!(
+            err.contains("agentstack trust"),
+            "the refusal must name the one command that fixes it: {err}"
+        );
         assert!(lease_snapshot(&lease).is_none());
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    /// The refused-lease/refused-load sentences say the two things W1's
+    /// acceptance asks for — what was refused, and the one command — and a
+    /// hostile toolset or skill name cannot rewrite the terminal around either.
+    /// Mirrors `trust_at_dispatch.rs`'s hostile-name case one door earlier: the
+    /// `profile` argument is agent-supplied and the skill name is manifest
+    /// content, so both are hostile input (invariant 7).
+    #[test]
+    fn a_hostile_capability_name_cannot_forge_the_lease_path_refusal() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+        let hostile = "evil\u{1b}[2J\nallowed: lease opened";
+
+        let sentence = trust_refusal(
+            None,
+            "agentstack_lease_open",
+            hostile,
+            "be opened as a toolset lease",
+        );
+        assert!(sentence.starts_with("blocked:"), "{sentence}");
+        assert!(sentence.contains("nothing ran"), "{sentence}");
+        assert!(sentence.contains("agentstack trust"), "{sentence}");
+        assert!(
+            !sentence.contains('\u{1b}'),
+            "an escape survived into the denial: {sentence:?}"
+        );
+        // The denial's own two lines, and no third one forged by the name.
+        assert_eq!(
+            sentence.lines().count(),
+            2,
+            "a newline in the name split the sentence: {sentence:?}"
+        );
+
+        // Bounded, too: a 5,000-character name cannot scroll the refusal off
+        // the screen.
+        let long = "x".repeat(5_000);
+        let sentence = trust_refusal(
+            None,
+            "agentstack_load",
+            &long,
+            "be loaded into agent context",
+        );
+        assert!(sentence.chars().count() < 1_000, "unbounded: {sentence:?}");
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    /// The tag the evidence is filed under is derived from where the project
+    /// stands NOW, and each state is named as itself — a reader filtering the
+    /// log by `state` is asking which repair this needs.
+    #[test]
+    fn the_refusal_reason_names_each_trust_state_apart() {
+        use assert_fs::prelude::*;
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+        let proj = assert_fs::TempDir::new().unwrap();
+
+        // No manifest at all: uncertainty is a refusal, never a pass.
+        assert_eq!(trust_refusal_reason(Some(proj.path())).0, "unreadable");
+        assert_eq!(trust_refusal_reason(None).0, "unreadable");
+
+        proj.child(".agentstack/agentstack.toml")
+            .write_str("version = 1\n")
+            .unwrap();
+        assert_eq!(trust_refusal_reason(Some(proj.path())).0, "untrusted");
+
+        crate::trust::trust_unreviewed(proj.path()).unwrap();
+        proj.child(".agentstack/agentstack.toml")
+            .write_str("version = 1\n# edited out of band\n")
+            .unwrap();
+        assert_eq!(trust_refusal_reason(Some(proj.path())).0, "changed");
+
+        std::env::remove_var("AGENTSTACK_HOME");
     }
 
     #[test]

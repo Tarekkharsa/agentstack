@@ -309,6 +309,30 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   the refusal at runtime — and lets it fall back to `--help`-driven
 ///   screen-scraping deliberately, on a binary that genuinely predates the
 ///   contract.
+/// - `needs-your-yes-v1`: two additions, one fact. `status --json` gains an
+///   optional `project.needs_your_yes` object — `refused`, `last_refused_ts`,
+///   `fix` — present ONLY when the project is untrusted or drifted AND calls
+///   were actually refused here since its last yes; and the two refusals that
+///   happen before any dispatch (a lease the gateway will not open, a skill it
+///   will not load) now leave the same evidence a refused dispatch does: one
+///   `calls.jsonl` row tagged `trust` and one run-scoped `trust_refused`
+///   event. Together they are what lets a panel show a *pending consent* — an
+///   untrusted project something is actually waiting on — instead of a static
+///   "untrusted" label indistinguishable from a project nobody has touched.
+///
+///   What it deliberately does NOT cover: **no card payload travels with it**.
+///   The object carries a count, a timestamp, and the command — never the
+///   reviewable surface. The card has exactly one walk
+///   (`crates/cli/src/commands/trust.rs`, shipped as `trust-review-card-v1` /
+///   `trust-card-diff-v1`), reachable through `trust --preview`, and a second
+///   construction of it on a status read is precisely the disclosure drift the
+///   single-walk rule exists to prevent. Nor does it cover any way to ANSWER
+///   the consent: there is no MCP-invocable consent path, the refusal the agent
+///   relays names a command a human runs, and gating on this name must never be
+///   read as an affordance to grant trust from a UI without one.
+///   Its own name for the usual reason: a binary predating it emits no such
+///   key, and a UI reading the field on the strength of `status-v1` or
+///   `json-reads-v1` would be sniffing.
 pub const FEATURES: &[&str] = &[
     "init-plan",
     "apply-setup",
@@ -342,6 +366,7 @@ pub const FEATURES: &[&str] = &[
     "doctor-cli-coverage-v1",
     "set-mode-v1",
     "status-honesty-v1",
+    "needs-your-yes-v1",
 ];
 
 /// Wrap a response body in the envelope. The two envelope keys are injected
@@ -408,6 +433,7 @@ mod tests {
             "trust-review-card-v1",
             "trust-card-diff-v1",
             "activity-skill-load-v1",
+            "needs-your-yes-v1",
         ] {
             assert!(
                 features.contains(&shipped),

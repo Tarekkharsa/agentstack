@@ -421,6 +421,9 @@ pub(crate) struct ProjectFacts {
     /// `agentstack` never does, and asking is not free (it consults every
     /// resolver).
     secrets: Option<SecretFacts>,
+    /// Refusals recorded against this project since its last yes (W1). `None`
+    /// for a trusted project and for one nothing has tried to use.
+    needs_your_yes: Option<NeedsYourYes>,
 }
 
 pub(crate) struct SessionFacts {
@@ -428,6 +431,77 @@ pub(crate) struct SessionFacts {
     started_unix: u64,
     age_secs: u64,
     abandoned: bool,
+}
+
+/// W1 — "needs your yes": the evidence-bearing form of an untrusted or drifted
+/// project. Present only when calls were actually refused here since the last
+/// yes, which is what separates "you have not reviewed this yet" (a state) from
+/// "something tried to work and could not" (a consequence).
+///
+/// It carries no card. The one authoritative card is rendered by the command
+/// named in [`NeedsYourYes::fix`] — `agentstack trust` — and there is
+/// deliberately no second construction of it here or anywhere a UI could reach
+/// without going through that command.
+pub(crate) struct NeedsYourYes {
+    /// How many refusals were recorded for this project since it was last
+    /// trusted (since the beginning of the log when it never was).
+    pub(crate) refused: usize,
+    /// The most recent refusal's timestamp — so a surface can say "just now"
+    /// rather than only "at some point".
+    pub(crate) last_refused_ts: u64,
+    /// The one command that answers it, naming the project explicitly so a
+    /// caller acting from another directory does not have to guess.
+    pub(crate) fix: String,
+}
+
+/// Count this project's recorded trust refusals since its last yes.
+///
+/// `None` for a trusted project — and cheaply so: the whole read is skipped,
+/// which matters because `status` must feel instant and this walks the machine
+/// audit log. A project that is untrusted or drifted has already lost the fast
+/// path in every other sense, and it is the only one that can have anything to
+/// report.
+///
+/// `manifest_dir` must be the same string form `seatbelt::record` files under
+/// (the resolved manifest dir), or the filter silently matches nothing.
+pub(crate) fn needs_your_yes(
+    manifest_dir: &Path,
+    root: &Path,
+    trust: crate::trust::TrustState,
+) -> Option<NeedsYourYes> {
+    if trust == crate::trust::TrustState::Trusted {
+        return None;
+    }
+    // Since the last yes, not since forever: refusals from before a grant
+    // describe a project state the user already answered. No entry (never
+    // trusted, or revoked) means the whole log is in scope.
+    let since = crate::trust::TrustStore::load()
+        .trusted
+        .get(&crate::trust::key_for(root))
+        .map(|entry| entry.trusted_at)
+        .unwrap_or(0);
+    let want = manifest_dir.display().to_string();
+    let refusals: Vec<u64> = crate::calllog::read_all()
+        .into_iter()
+        .filter(|rec| {
+            rec.tool == "trust"
+                && rec.outcome == crate::calllog::CallOutcome::Denied
+                && rec.ts >= since
+                && rec.project.as_deref() == Some(want.as_str())
+        })
+        .map(|rec| rec.ts)
+        .collect();
+    if refusals.is_empty() {
+        return None;
+    }
+    Some(NeedsYourYes {
+        refused: refusals.len(),
+        last_refused_ts: refusals.iter().copied().max().unwrap_or_default(),
+        fix: format!(
+            "agentstack trust {}",
+            crate::text::sanitize_line(&root.display().to_string())
+        ),
+    })
 }
 
 pub(crate) struct SecretFacts {
@@ -521,7 +595,7 @@ pub(crate) fn status_json(o: &Orientation) -> serde_json::Value {
 }
 
 fn project_json(f: &ProjectFacts) -> serde_json::Value {
-    serde_json::json!({
+    let mut out = serde_json::json!({
         "servers": f.servers,
         "skills": f.skills,
         // Pinned targets and the fan-out count are different questions, so
@@ -557,7 +631,20 @@ fn project_json(f: &ProjectFacts) -> serde_json::Value {
             "referenced": s.referenced,
             "unresolved": s.unresolved,
         })),
-    })
+    });
+    // `needs-your-yes-v1`. Inserted rather than emitted as `null`, because the
+    // question it answers is "has anything been refused here", and a project
+    // where nothing has must read exactly as it did before this field existed.
+    // No card payload rides along: `fix` names the command that renders the one
+    // authoritative card, and that command is the only thing that renders it.
+    if let Some(n) = &f.needs_your_yes {
+        out["needs_your_yes"] = serde_json::json!({
+            "refused": n.refused,
+            "last_refused_ts": n.last_refused_ts,
+            "fix": n.fix,
+        });
+    }
+    out
 }
 
 /// Secrets at a glance for `status`: the single most common thing broken after
@@ -781,6 +868,11 @@ fn collect(manifest_dir: Option<&Path>, with_secrets: bool) -> Result<Orientatio
     let intake = crate::intake::scan(&ctx.dir, &project_root, m).items;
     let undeclared_drops = !intake.is_empty();
 
+    // W1: what actually got refused here since the last yes. Computed before
+    // the next step is chosen, because evidence outranks every other routing
+    // signal — see the `pending` override below.
+    let pending = needs_your_yes(&ctx.dir, &project_root, trust);
+
     let fallback = next_step(
         trust,
         rendered,
@@ -805,6 +897,21 @@ fn collect(manifest_dir: Option<&Path>, with_secrets: bool) -> Result<Orientatio
     let next = clean_at_rest_next_step(mode, trust, locked, active_session.is_some(), profile)
         .filter(|_| !undeclared_drops)
         .unwrap_or_else(|| (fallback.0.to_string(), fallback.1));
+    // ...and a refusal outranks the drop. `next_step`'s ladder puts a waiting
+    // drop above an untrusted (not drifted) project, which is right when
+    // nothing has tried to use the project yet. Once something HAS — and been
+    // refused — the screen would otherwise print the needs-your-yes line and
+    // then recommend a different command, which is the two-surfaces-disagree
+    // failure the single-next-step rule exists to prevent. Same verb the
+    // untrusted and drifted branches already name, so nothing new is invented
+    // here; only the ordering is made explicit.
+    let next = match &pending {
+        Some(_) => (
+            "agentstack trust .".to_string(),
+            "calls were refused here — review this project and say yes",
+        ),
+        None => next,
+    };
 
     Ok(Orientation {
         catalog_size: ctx.registry.ids().count(),
@@ -835,6 +942,7 @@ fn collect(manifest_dir: Option<&Path>, with_secrets: bool) -> Result<Orientatio
             } else {
                 None
             },
+            needs_your_yes: pending,
         })),
         next,
     })
@@ -975,6 +1083,21 @@ fn print_orientation(o: &Orientation, status: bool) {
                 if let Some(note) = orientation_trust_note(f.trust) {
                     println!("            {}", note.dimmed());
                 }
+            }
+
+            // W1. The line above says what an untrusted project *means*; this
+            // one says what it already cost, so it is not dimmed — it is the
+            // louder, evidence-bearing version of the same fact, and it is
+            // shown whether or not trust is "relevant" here, because a recorded
+            // refusal is not a judgement about relevance. `agentstack trust .`
+            // is deliberately the same command the Next line prints: the JSON
+            // `fix` carries the resolved path for a caller working elsewhere,
+            // the screen keeps the phrasing the human is about to read again.
+            if let Some(pending) = &f.needs_your_yes {
+                println!(
+                    "            needs your yes: {} refused since you last said yes · review with `agentstack trust .`",
+                    super::count(pending.refused, "call")
+                );
             }
 
             // Which delivery mode this project is in — a glance, not a guess.
@@ -1399,8 +1522,44 @@ mod tests {
                 gateway_connected: false,
                 rendered: false,
                 secrets,
+                needs_your_yes: None,
             })),
             next: ("agentstack trust .".into(), "review and re-trust"),
+        }
+    }
+
+    /// `needs-your-yes-v1`, at the serializer: the key appears only when
+    /// something was actually refused, and it carries the fix — never a card.
+    /// A project with nothing refused must read byte-for-byte as it did before
+    /// the field existed, which is why absence (not `null`) is the contract.
+    #[test]
+    fn needs_your_yes_appears_only_with_evidence_and_carries_no_card() {
+        let clean = status_json(&loaded_orientation(None));
+        assert!(
+            clean["project"].get("needs_your_yes").is_none(),
+            "a project with no recorded refusal must not carry the key: {clean}"
+        );
+
+        let mut o = loaded_orientation(None);
+        if let ManifestState::Loaded(f) = &mut o.manifest {
+            f.needs_your_yes = Some(NeedsYourYes {
+                refused: 3,
+                last_refused_ts: 1_700_000_100,
+                fix: "agentstack trust /repo".to_string(),
+            });
+        }
+        let out = status_json(&o);
+        let pending = &out["project"]["needs_your_yes"];
+        assert_eq!(pending["refused"], 3);
+        assert_eq!(pending["last_refused_ts"], 1_700_000_100u64);
+        assert_eq!(pending["fix"], "agentstack trust /repo");
+        // The card stays behind `agentstack trust` — one walk, one renderer.
+        // Anything resembling a reviewable surface here would be a second one.
+        for absent in ["items", "review", "servers", "skills", "surface_digest"] {
+            assert!(
+                pending.get(absent).is_none(),
+                "status must not carry card payload ({absent}): {pending}"
+            );
         }
     }
 

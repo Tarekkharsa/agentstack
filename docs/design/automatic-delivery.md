@@ -85,7 +85,8 @@ deliberate yes. What moves is its *trigger* and its *rendering*: a refused lease
 or load becomes an event the CLI and the panel surface as a yes-card prompt
 ("Needs your yes"), using the same card as `agentstack trust` and the panel
 (`trust-review-card-v1` / `trust-card-diff-v1`, per
-[`consent-card.md`](consent-card.md)). The refusal must be *loud* — it names
+[`consent-card.md`](../archive/design/consent-card.md) (archived; cited
+normatively)). The refusal must be *loud* — it names
 what was refused and the one command that fixes it — and it must never be
 answerable in the agent's channel, because content the gate exists to govern
 can forge anything that travels in that channel.
@@ -147,8 +148,9 @@ Package-manager semantics, stated as four rules:
    The flow shows the aggregate package diff first (version → version, counts by
    member kind), then the per-member diffs, through the same review card.
 4. **Keep-pinned is the resting state.** Declining an upgrade is a complete,
-   stable answer, not a deferral — per [`consent-card.md`](consent-card.md),
-   keep-pinned keeps the approved bytes actually in use.
+   stable answer, not a deferral — per
+   [`consent-card.md`](../archive/design/consent-card.md) (archived; cited
+   normatively), keep-pinned keeps the approved bytes actually in use.
 
 ### Mixed-lane upgrades are transactional, and report per lane
 
@@ -274,8 +276,10 @@ stale-state bug this registry exists to prevent.
 ## t3code surfaces
 
 All reads over existing contracts plus the new registry. The panel gains **no
-new authority** — the boundary in [`ui-control-plane.md`](ui-control-plane.md)
-is unchanged, and no per-item consent answer is collected in the panel.
+new authority** — the boundary in
+[`ui-control-plane.md`](../archive/design/ui-control-plane.md) (archived; cited
+normatively) is unchanged, and no per-item consent answer is collected in the
+panel.
 
 - Packages installed and available, with version and update status.
 - Effective members after this project's overrides.

@@ -962,14 +962,32 @@ fn run_checks(
         crate::trust::TrustState::Changed => "drifted",
         crate::trust::TrustState::Untrusted => "untrusted",
     });
+    // W1: what this state has already cost. An advisory clause on the existing
+    // findings rather than a check of its own — the condition is the same one
+    // the trust findings already report, and a second finding would make one
+    // fact read as two problems. The `↳ fix` suffix stays exactly where it is,
+    // so `first_fix` still parses these lines and still names `agentstack
+    // trust`.
+    let pending = super::overview::needs_your_yes(&ctx.dir, &base, trust_state);
+    let refused_clause = pending
+        .as_ref()
+        .map(|p| {
+            format!(
+                " — {} already refused here",
+                super::count(p.refused, "call")
+            )
+        })
+        .unwrap_or_default();
     match trust_state {
         crate::trust::TrustState::Trusted => {
             report.line(Level::Ok, "this project is trusted for auto mode")
         }
         crate::trust::TrustState::Changed => report.line(
             Level::Warn,
-            "trusted, but the manifest or lockfile changed since it was last reviewed \
-             ↳ agentstack trust",
+            format!(
+                "trusted, but the manifest or lockfile changed since it was last reviewed{refused_clause} \
+                 ↳ agentstack trust"
+            ),
         ),
         // Untrusted is a choice, not a fault (Ok) — unless a harness actually
         // uses the bridge AND the project declares a runtime surface (inline
@@ -991,9 +1009,19 @@ fn run_checks(
                 report.line(
                     Level::Warn,
                     format!(
-                        "not trusted — {clis} the gateway, but this project's {servers} not proxied ↳ agentstack trust {}",
+                        "not trusted — {clis} the gateway, but this project's {servers} not proxied{refused_clause} ↳ agentstack trust {}",
                         base.display()
                     ),
+                );
+            } else if let Some(p) = &pending {
+                // Untrusted is normally a choice, not a fault — but not once
+                // something tried to work here and was refused. That is the
+                // one signal that turns "you have not reviewed this" into
+                // "this is costing you calls", so it earns the warning level
+                // even without a registered bridge.
+                report.line(
+                    Level::Warn,
+                    format!("not trusted for auto mode{refused_clause} ↳ {}", p.fix),
                 );
             } else {
                 report.line(
