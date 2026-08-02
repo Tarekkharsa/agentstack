@@ -239,7 +239,12 @@ impl Candidate {
 impl Install {
     /// Build a manifest [`Server`] for this install, lifting required secrets to
     /// `${REF}`s keyed off `name`.
-    fn to_server_named(&self, name: &str) -> Server {
+    ///
+    /// `pub(crate)` for the package rail ([`crate::package`]), which digests a
+    /// package's server member from exactly this definition — the same bytes
+    /// `add from` would write into `[servers.<pack>]`, so a package's server
+    /// pin and its vendored install describe the same server.
+    pub(crate) fn to_server_named(&self, name: &str) -> Server {
         match self {
             Install::Http {
                 url,

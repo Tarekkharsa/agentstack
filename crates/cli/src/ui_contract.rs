@@ -352,6 +352,31 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   `agentstack lock --upgrade <pack>` asks the remote. A UI must render this
 ///   as an offer and must never derive an "up to date" badge from a missing
 ///   `updates` key.
+/// - `package-members-v1`: `status --json`'s `project` gains an optional
+///   `packages[]` — one row per package this project **pinned**, each carrying
+///   `name`, `version`, `source`, `rev`, the `toolsets` that selected it, the
+///   `removed` member names, an `overrides` count, and `members[]` with
+///   `name` / `kind` / `lane` / `origin` / `checksum` / `provenance` per member.
+///   The key is INSERTED, never emitted as `[]`, so a project that selects no
+///   package reads exactly as it did before.
+///
+///   What the name promises: this is the **effective** member set — what this
+///   project actually took, after its `[package_overrides.*]` were applied —
+///   read from the LOCK. `origin` says `package` or `project-override` per
+///   member and `removed` names what was dropped, so a panel can render "took
+///   the package, replaced one member" without holding the package itself to
+///   diff against. `lane` is derived from the member's kind (`rendered` for an
+///   instruction, `dynamic` for a skill or server) precisely so no UI can
+///   describe an instruction member as served through the gateway.
+///
+///   What it explicitly does **not** promise. **It is not a view of the
+///   library.** These rows describe pinned bytes, so a package whose library
+///   copy has moved ahead reports the version and digests this project is
+///   pinned to — which is the reproducibility rule working, not staleness. A
+///   UI must not derive "you are on the latest" from it; `update-offer-v1` is
+///   the offer surface, with its own honest limits. **It is also not an
+///   activation reading:** a pinned package is not a running one, and nothing
+///   here says whether a lease is open or a server started.
 pub const FEATURES: &[&str] = &[
     "init-plan",
     "apply-setup",
@@ -387,6 +412,7 @@ pub const FEATURES: &[&str] = &[
     "status-honesty-v1",
     "needs-your-yes-v1",
     "update-offer-v1",
+    "package-members-v1",
 ];
 
 /// Wrap a response body in the envelope. The two envelope keys are injected
@@ -455,6 +481,7 @@ mod tests {
             "activity-skill-load-v1",
             "needs-your-yes-v1",
             "update-offer-v1",
+            "package-members-v1",
         ] {
             assert!(
                 features.contains(&shipped),

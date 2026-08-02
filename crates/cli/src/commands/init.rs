@@ -1330,6 +1330,7 @@ version = 1
         extensions: IndexMap::new(),
         workflows: IndexMap::new(),
         packs: IndexMap::new(),
+        package_overrides: IndexMap::new(),
         targets: Targets {
             default: target_defaults.clone(),
         },

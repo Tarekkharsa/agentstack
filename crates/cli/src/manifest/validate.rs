@@ -46,6 +46,11 @@ pub enum IssueKind {
     /// `UnknownSkillRef`, which means the name resolves nowhere at all.
     UnresolvableSkillRef,
     UnknownHookRef,
+    /// A `[profiles.X] packages` entry names no package in the central library
+    /// (W5). There is no inline package form — a package is always a library
+    /// composition — so an unindexed name resolves nowhere and the toolset
+    /// could never be locked.
+    UnknownPackageRef,
     MissingTransportFields,
     UnknownTargetServer,
     /// A `[servers.X] targets` entry names an adapter id that isn't registered
@@ -118,6 +123,7 @@ impl IssueKind {
                 | IssueKind::UnknownSkillRef
                 | IssueKind::UnresolvableSkillRef
                 | IssueKind::UnknownHookRef
+                | IssueKind::UnknownPackageRef
                 | IssueKind::MissingTransportFields
                 | IssueKind::UnknownTargetServer
                 | IssueKind::UnknownServerTarget
@@ -418,6 +424,26 @@ fn run<'a>(
                         "define it (agentstack add skill <source> --name {kref}) or remove '{kref}' from [profiles.{pname}] skills"
                     )),
                 ),
+            }
+        }
+        // W5 package refs. Unlike servers and skills there is no inline form:
+        // a package always comes from the central library, so a name that is
+        // not indexed there resolves nowhere. Checked only with a context —
+        // without a library there is nothing to check against, and reporting
+        // every package ref as unknown would be a false alarm, not a finding.
+        if let Some(cx) = ctx {
+            for pref in &profile.packages {
+                if cx.library.get_package(pref).is_none() {
+                    issues.push(
+                        Issue::new(
+                            IssueKind::UnknownPackageRef,
+                            format!("toolset '{pname}' references unknown package '{pref}'"),
+                        )
+                        .with_fix(format!(
+                            "install it into the central library, or remove '{pref}' from [profiles.{pname}] packages"
+                        )),
+                    );
+                }
             }
         }
     }

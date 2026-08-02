@@ -167,6 +167,20 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
         None => Some(manifest.profiles.keys().cloned().collect()),
     };
 
+    // W5: expand every package the selected toolsets reference into exact,
+    // digest-pinned members. Done BEFORE `record_lock` for the same reason
+    // resolution happens before any write — the expansion is strict, and a
+    // package that cannot be expanded must leave the lock untouched rather
+    // than half-written.
+    let packages = record_package_pins(
+        &ctx.dir,
+        manifest,
+        &library,
+        &lib_home,
+        &store,
+        profiles.as_deref().unwrap_or(&[]),
+    )?;
+
     let (skills, servers) = match &profiles {
         Some(profiles) => {
             resolve_profiles(manifest, &ctx.dir, &library, &lib_home, &store, profiles)?
@@ -198,6 +212,7 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
         (executables, "executable pin"),
         (extensions, "extension"),
         (workflows, "workflow"),
+        (packages, "package"),
     ] {
         if n > 0 {
             pinned_parts.push(super::count(n, what));
@@ -488,6 +503,61 @@ pub(crate) fn record_workflow_pins(
         pinned += 1;
     }
     lock.retain_workflow_names(&declared);
+    // Don't churn the lockfile (or the trust digest) for byte-identical pins.
+    if lock != before {
+        lock.save(dir)?;
+    }
+    Ok(pinned)
+}
+
+/// Expand each package a **selected** toolset references and pin its exact
+/// member set (W5, `docs/design/package-layer.md`). Returns how many packages
+/// pinned.
+///
+/// Two scoping rules, and they are different on purpose:
+///
+/// - **Expansion is scoped to the selected toolsets.** `lock --profile backend`
+///   re-reads and re-pins only what `backend` names, exactly as it re-resolves
+///   only that toolset's skills and servers.
+/// - **Pruning is scoped to every DECLARED toolset.** A package another toolset
+///   still selects keeps its pin untouched; a package no toolset names any
+///   more loses it. Pruning against the selected subset instead would silently
+///   drop another toolset's expansion — a member set nothing re-verifies is
+///   exactly the stale pin `retain_instruction_names` exists to prevent, and
+///   here it would also be a member set the runtime resolves from.
+///
+/// Strict like the lock command's other pins: an unknown package, a body that
+/// is not on this machine, a `pack.toml` that drifted from its index pin, a
+/// member path that escapes the package, a package carrying executable kinds,
+/// and every stale or ill-typed override are errors — and all of them happen
+/// before a single byte of the lock is rewritten.
+pub(crate) fn record_package_pins(
+    dir: &Path,
+    manifest: &Manifest,
+    library: &Library,
+    lib_home: &Path,
+    store: &crate::store::Store,
+    selected_toolsets: &[String],
+) -> Result<usize> {
+    let selections = crate::package::selected_packages(manifest, selected_toolsets);
+    let keep: Vec<String> = crate::package::all_selected_packages(manifest)
+        .into_keys()
+        .collect();
+    // Nothing selects a package and nothing is pinned: leave the lock entirely
+    // alone rather than loading and re-saving it for a no-op.
+    if selections.is_empty() && keep.is_empty() && Lock::load(dir)?.packages.is_empty() {
+        return Ok(0);
+    }
+    let expanded =
+        crate::package::expand_selected(manifest, dir, library, lib_home, store, &selections)?;
+
+    let mut lock = Lock::load(dir)?;
+    let before = lock.clone();
+    let pinned = expanded.len();
+    for entry in expanded {
+        lock.upsert_package(entry);
+    }
+    lock.retain_package_names(&keep);
     // Don't churn the lockfile (or the trust digest) for byte-identical pins.
     if lock != before {
         lock.save(dir)?;

@@ -431,6 +431,12 @@ pub(crate) struct ProjectFacts {
     /// catalog-sourced is silently missing from this list. Every rendering of
     /// it offers; none of them may claim currency.
     updates: Vec<crate::commands::updates::PackUpdate>,
+    /// The **effective member set** of every package this project pinned (W5,
+    /// `docs/design/package-layer.md`). Read from the LOCK through
+    /// [`crate::package::effective_members`] — never from the library, whose
+    /// whole purpose is to be free to move ahead. Empty for a project that
+    /// selects no package, and for one that has never been locked.
+    packages: Vec<agentstack_core::lock::LockedPackage>,
 }
 
 pub(crate) struct SessionFacts {
@@ -650,6 +656,56 @@ fn project_json(f: &ProjectFacts) -> serde_json::Value {
             "last_refused_ts": n.last_refused_ts,
             "fix": n.fix,
         });
+    }
+
+    // `package-members-v1`. The effective member set, straight from the lock.
+    // Inserted rather than emitted as an empty list, on the same reasoning as
+    // `updates` below: a project that selects no package must read exactly as
+    // it did before this field existed.
+    //
+    // Every member carries `origin`, and every package carries `removed`, so a
+    // reader can always answer "which of these came from the package, and which
+    // did this project change?" without holding the package to diff against —
+    // which is the whole W5 acceptance criterion for overrides. `lane` is
+    // derived from the kind, so an instruction member can never be rendered as
+    // something served through the gateway.
+    if !f.packages.is_empty() {
+        if let Some(map) = body.as_object_mut() {
+            map.insert(
+                "packages".into(),
+                serde_json::Value::Array(
+                    f.packages
+                        .iter()
+                        .map(|p| {
+                            serde_json::json!({
+                                "name": crate::text::sanitize_line(&p.name),
+                                "version": crate::text::sanitize_line(&p.version),
+                                "source": crate::text::sanitize_line(&p.source),
+                                "rev": p.rev.as_deref().map(crate::text::sanitize_line),
+                                "toolsets": p.toolsets.iter()
+                                    .map(|t| crate::text::sanitize_line(t))
+                                    .collect::<Vec<_>>(),
+                                "removed": p.removed.iter()
+                                    .map(|r| crate::text::sanitize_line(r))
+                                    .collect::<Vec<_>>(),
+                                "overrides": p.members.iter()
+                                    .filter(|m| m.origin
+                                        == agentstack_core::lock::PackageMemberOrigin::ProjectOverride)
+                                    .count(),
+                                "members": p.members.iter().map(|m| serde_json::json!({
+                                    "name": crate::text::sanitize_line(&m.name),
+                                    "kind": m.kind.as_str(),
+                                    "lane": m.kind.lane(),
+                                    "origin": m.origin.as_str(),
+                                    "checksum": m.checksum.hex(),
+                                    "provenance": crate::text::sanitize_line(&m.provenance),
+                                })).collect::<Vec<_>>(),
+                            })
+                        })
+                        .collect(),
+                ),
+            );
+        }
     }
 
     // `update-offer-v1`. Inserted, never emitted as `null` or as an empty
@@ -1009,6 +1065,12 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
                 Vec::new()
             },
             needs_your_yes: pending,
+            // A malformed lock is doctor's finding, not status's: degrade to
+            // "no packages" rather than turning the orientation screen into an
+            // error. `locked` above already says whether a lock exists at all.
+            packages: crate::lock::Lock::load(&ctx.dir)
+                .map(|lock| crate::package::effective_members(&lock).to_vec())
+                .unwrap_or_default(),
         })),
         next,
     })
@@ -1571,6 +1633,7 @@ mod tests {
                 settings: 0,
                 hooks: 0,
                 extensions: 0,
+                packages: Vec::new(),
                 skills: 1,
                 pinned_targets: vec!["claude-code".into()],
                 fanout_targets: 1,
@@ -1746,6 +1809,74 @@ mod tests {
         assert_eq!(updates["packs"][0]["current"], "v0.1.0");
         assert_eq!(updates["packs"][0]["available"], "v0.2.0");
         assert_eq!(updates["fix"], "agentstack lock --upgrade acme");
+    }
+
+    /// `package-members-v1`, at the serializer. A project selecting no package
+    /// must read exactly as it did before the field existed (absence, not
+    /// `[]`); a project with one must expose the EFFECTIVE set — both origins
+    /// named, the removal named, the override counted, and each member's lane
+    /// derived from its kind so an instruction can never be presented as
+    /// something the gateway serves.
+    #[test]
+    fn status_json_carries_the_effective_member_set_and_omits_the_key_when_empty() {
+        let none = status_json(&loaded_orientation(None));
+        assert!(
+            none["project"].get("packages").is_none(),
+            "no package must not materialize the key: {}",
+            none["project"]
+        );
+
+        use agentstack_core::digest::Sha256Hex;
+        use agentstack_core::lock::{
+            LockedPackage, LockedPackageMember, PackageMemberKind, PackageMemberOrigin,
+        };
+        let mut o = loaded_orientation(None);
+        if let ManifestState::Loaded(f) = &mut o.manifest {
+            f.packages = vec![LockedPackage {
+                name: "rust-backend".into(),
+                version: "1.4.0".into(),
+                source: "library:rust-backend".into(),
+                rev: None,
+                toolsets: vec!["backend".into()],
+                removed: vec!["legacy".into()],
+                members: vec![
+                    LockedPackageMember {
+                        name: "house-rules".into(),
+                        kind: PackageMemberKind::Instruction,
+                        origin: PackageMemberOrigin::Package,
+                        checksum: Sha256Hex::of(b"a"),
+                        provenance: "package:rust-backend@1.4.0#instructions/house.md".into(),
+                    },
+                    LockedPackageMember {
+                        name: "sql-review".into(),
+                        kind: PackageMemberKind::Skill,
+                        origin: PackageMemberOrigin::ProjectOverride,
+                        checksum: Sha256Hex::of(b"b"),
+                        provenance: "project:skills.house-sql-review".into(),
+                    },
+                ],
+            }];
+        }
+        let out = status_json(&o);
+        let pkg = &out["project"]["packages"][0];
+        assert_eq!(pkg["name"], "rust-backend");
+        assert_eq!(pkg["version"], "1.4.0");
+        assert_eq!(pkg["toolsets"][0], "backend");
+        assert_eq!(pkg["removed"][0], "legacy");
+        assert_eq!(pkg["overrides"], 1);
+        assert_eq!(pkg["members"][0]["kind"], "instruction");
+        assert_eq!(pkg["members"][0]["lane"], "rendered");
+        assert_eq!(pkg["members"][0]["origin"], "package");
+        assert_eq!(pkg["members"][1]["lane"], "dynamic");
+        assert_eq!(pkg["members"][1]["origin"], "project-override");
+        assert_eq!(
+            pkg["members"][1]["provenance"],
+            "project:skills.house-sql-review"
+        );
+        assert_eq!(
+            pkg["members"][1]["checksum"].as_str().map(str::len),
+            Some(64)
+        );
     }
 
     // Stage 2.2: a live session reads as active; an abandoned one is flagged

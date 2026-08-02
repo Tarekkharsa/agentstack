@@ -1011,6 +1011,7 @@ mod tests {
             let lock = crate::lock::Lock {
                 version: crate::lock::SUPPORTED_LOCK_VERSION,
                 extensions: Vec::new(),
+                packages: Vec::new(),
                 skills: vec![crate::lock::LockedSkill {
                     name: "x".into(),
                     source: crate::lock::SkillLockSource::Path,

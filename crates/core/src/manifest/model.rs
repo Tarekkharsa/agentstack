@@ -66,6 +66,15 @@ pub struct Manifest {
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub packs: IndexMap<String, PackInstall>,
 
+    /// Per-member project divergence from a selected package (W5,
+    /// `docs/design/package-layer.md`), keyed by package name. A project that
+    /// takes a package but replaces or drops one member declares it here, and
+    /// the lock then records the resulting **effective member set** with each
+    /// member's origin — so a divergence is always something a reader can see,
+    /// never something inferred by diffing against the package.
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub package_overrides: IndexMap<String, PackageOverride>,
+
     /// Where `apply` writes by default and which adapters are in play.
     #[serde(default)]
     pub targets: Targets,
@@ -771,6 +780,39 @@ pub struct PackInstall {
     pub instructions: Vec<String>,
 }
 
+/// `[package_overrides.<package>]` — one project's divergence from one package.
+///
+/// The smallest schema that expresses "take package P, but not member M" and
+/// "take package P, but use my own M instead". Both halves name *package member
+/// names*; `replace` values name a capability this project already declares
+/// (`[skills.*]` / `[servers.*]` / `[instructions.*]`) of the same kind, so an
+/// overriding member pins through the paths that already pin project
+/// capabilities rather than introducing a second declaration form.
+///
+/// Every edge fails closed at lock time — a key naming a member the package
+/// does not carry, a replacement the project does not declare, a replacement of
+/// a different kind, or an override for a package no toolset selects. A stale
+/// override that silently matches nothing is how a project comes to believe it
+/// dropped something it still has.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PackageOverride {
+    /// Package member names this project drops entirely.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub remove: Vec<String>,
+    /// Package member name → the project-declared capability that stands in for
+    /// it. Ordered so the lock (and the trust digest over it) does not churn on
+    /// map iteration order.
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
+    pub replace: IndexMap<String, String>,
+}
+
+impl PackageOverride {
+    pub fn is_empty(&self) -> bool {
+        self.remove.is_empty() && self.replace.is_empty()
+    }
+}
+
 impl Instruction {
     /// Whether this fragment applies to adapter `id`.
     pub fn applies_to(&self, id: &str) -> bool {
@@ -1108,7 +1150,7 @@ impl Workflow {
     }
 }
 
-/// A profile selects a subset of servers and skills.
+/// A profile selects a subset of servers, skills, and packages.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
 pub struct Profile {
     #[serde(default)]
@@ -1116,6 +1158,20 @@ pub struct Profile {
     /// May contain the wildcard `"*"` meaning "all skills".
     #[serde(default)]
     pub skills: Vec<String>,
+    /// Central-library packages this toolset selects by name (W5,
+    /// `docs/design/package-layer.md`). A package is a versioned composition of
+    /// members; selecting one here is a *compact reference*, which the lock
+    /// expands into the exact member set with a digest and provenance per
+    /// member. That expansion is what makes the reference as safe as vendoring
+    /// the members, so nothing may read this field as authority on its own.
+    ///
+    /// Deliberately **no `"*"` wildcard**, unlike `skills`: `"*"` there means
+    /// "the inline skills this manifest already declares", which is bounded by
+    /// the manifest. A package wildcard would mean "every composition on this
+    /// machine", which is exactly the broad surprise activation the skill
+    /// wildcard's inline-only rule exists to avoid.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub packages: Vec<String>,
     /// Which harness a workflow-role child bound to this profile launches
     /// (design doc §3: the harness is a property of the role's profile, never
     /// of the script). Consulted ONLY by the workflow drive loop, which

@@ -128,3 +128,45 @@ this decision. Flagged for line-by-line review: upgrade now writes instruction
 pins (a digest-computation path it never touched) and reloads the manifest
 inside its transaction, so a manifest-validation change can fail an upgrade
 after the write.
+
+### W5 (schema half) — the package layer
+
+Shipped: a library package is `<lib_home>/packages/<name>/pack.toml` plus
+member bodies, indexed as `[[package]]` in `library.toml` — the same artifact
+the git pack rail already parses, so its name-contract gate and content scan
+are reused rather than forked; the index checksum deliberately covers
+`pack.toml` only, because a roll-up digest would let a member's bytes move
+inside an "unchanged" package. A toolset selects packages with
+`packages = [...]`, and `agentstack lock` expands each selection into the lock
+as `[[package]]` (name, exact version, source, rev, the toolsets that pin it,
+and removals) plus `[[package.member]]` rows carrying name, kind, origin,
+checksum, and provenance. Every digest comes from an existing pinning act —
+no second pinning or digest path. Per-member overrides are expressed as
+`[package_overrides.<pkg>]` with `remove` and `replace`, and the effective
+member set is visible in both the lock (per-member `origin` plus `removed`)
+and `status --json`, gated on the new `package-members-v1`, so an override can
+never diverge silently. Instruction members are toolset-scoped, always carry
+the rendered lane on their pin so no surface can call one "live via gateway",
+and are never materialized into `[instructions.*]`, which would orphan a
+declaration when the package goes away.
+
+Witnesses: `package_layer` (7) — a selection expands to exact members with
+digests and provenance asserted field by field; runtime resolves the locked
+member set after the library has moved ahead; an override reports as an
+effective set naming both origins; a package carrying hooks or extensions is
+refused by name; an unresolvable or drifted member fails closed; and a project
+referencing no package has byte-identical manifest and lock.
+
+Judgment calls: `pack.toml` now parses `[[hook]]`/`[[extension]]` **in order to
+refuse them** — previously serde dropped them silently, so a pack declaring
+hooks installed as though it had none; this tightens the shipped git pack rail
+too, and is flagged as a deliberate fail-closed behaviour change. Expansion
+happens in `lock` only (matching how instructions, extensions and workflows
+already pin), scoped to selected toolsets, while pruning is scoped to every
+declared toolset so `lock --profile backend` cannot drop another toolset's
+expansion. A package's `pack.toml` drifting from its library index pin refuses
+rather than reading as "the library moved ahead" — that exemption is fenced to
+the MCP serve path for already-pinned skills, and this is an intake gate. Debt,
+named in the design doc rather than hidden: a package instruction member is
+pinned and reported but compiles into no file yet; that wiring is delivery-side
+and is folded into W5's runtime half.

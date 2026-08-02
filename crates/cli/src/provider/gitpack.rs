@@ -88,6 +88,18 @@ pub struct PackToml {
     pub skills: Vec<PackMemberToml>,
     #[serde(default, rename = "instruction")]
     pub instructions: Vec<PackMemberToml>,
+    /// Hook members. **Parsed only so they can be REFUSED** — v1 packages carry
+    /// servers, skills and instructions, and package-carried executable kinds
+    /// are deferred by name (`docs/design/package-layer.md`). Before this
+    /// field existed, serde silently dropped the array, so a pack declaring
+    /// hooks installed as if it had none. Seeing them and refusing is the
+    /// fail-closed reading of the same bytes.
+    #[serde(default, rename = "hook")]
+    pub hooks: Vec<PackMemberToml>,
+    /// Extension members. Present for the same reason as [`Self::hooks`], and
+    /// refused by the same gate.
+    #[serde(default, rename = "extension")]
+    pub extensions: Vec<PackMemberToml>,
     #[serde(default)]
     pub targets: Vec<String>,
 }
@@ -108,6 +120,35 @@ pub struct PackServerToml {
     pub secret_env: Vec<String>,
 }
 
+impl PackServerToml {
+    /// The transport-neutral [`Install`] this `[server]` table describes.
+    ///
+    /// Extracted from [`resolve`] rather than duplicated because the library
+    /// package rail ([`crate::package`]) needs the identical reading: one
+    /// `pack.toml` grammar must produce one server definition, or a package's
+    /// server would digest differently depending on which rail installed it.
+    pub fn to_install(&self) -> Result<Install> {
+        Ok(match self.server_type.as_str() {
+            "http" => Install::Http {
+                url: self
+                    .url
+                    .clone()
+                    .context("pack.toml [server] type=http needs url")?,
+                secret_headers: self.secret_headers.clone(),
+            },
+            "stdio" => Install::Stdio {
+                command: self
+                    .command
+                    .clone()
+                    .context("pack.toml [server] type=stdio needs command")?,
+                args: self.args.clone(),
+                secret_env: self.secret_env.clone(),
+            },
+            other => anyhow::bail!("pack.toml [server] type '{other}' is not http|stdio"),
+        })
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub struct PackMemberToml {
     pub name: String,
@@ -120,14 +161,62 @@ pub struct PackMemberToml {
 /// `[servers.<name>]` manifest keys; member names become `[skills.<name>]`
 /// keys and — for instructions — path components. All-or-nothing: one bad
 /// name rejects the whole pack, matching the atomic-install semantics.
-fn validate_pack_names(parsed: &PackToml) -> anyhow::Result<()> {
+pub fn validate_pack_names(parsed: &PackToml) -> anyhow::Result<()> {
     use anyhow::Context;
     crate::text::validate_name(&parsed.name)
         .with_context(|| format!("pack.toml name '{}'", parsed.name.escape_debug()))?;
-    for m in parsed.skills.iter().chain(parsed.instructions.iter()) {
+    // Hooks and extensions are name-gated too even though
+    // [`refuse_executable_members`] rejects the package outright: the refusal
+    // message quotes the member name, and quoting an ungated name would put
+    // unvalidated remote text in the message. Gate first, then refuse.
+    for m in parsed
+        .skills
+        .iter()
+        .chain(parsed.instructions.iter())
+        .chain(parsed.hooks.iter())
+        .chain(parsed.extensions.iter())
+    {
         crate::text::validate_name(&m.name)
             .with_context(|| format!("pack.toml member '{}'", m.name.escape_debug()))?;
     }
+    Ok(())
+}
+
+/// The v1 scope fence: a package carrying **hooks or extensions is refused by
+/// name**, whether it arrives from a git repo or from the central library.
+///
+/// This is not a "not yet" that a later patch relaxes quietly. Hooks and
+/// extensions run commands at user permission, and `CLAUDE.md`'s standing
+/// classification says the full consent ceremony always applies to them, with
+/// no compressed-consent path ever covering them. A package reference IS a
+/// compressed consent path — one name in a toolset standing for a set of
+/// members — so the two cannot meet. The fence is a permanent property of the
+/// v1 schema; lifting it means designing a ceremony, not deleting a check.
+///
+/// All-or-nothing, like [`validate_pack_names`]: one executable member refuses
+/// the whole package, matching the atomic-install semantics.
+pub fn refuse_executable_members(parsed: &PackToml) -> anyhow::Result<()> {
+    let offending: Vec<String> = parsed
+        .hooks
+        .iter()
+        .map(|m| format!("hook '{}'", m.name.escape_debug()))
+        .chain(
+            parsed
+                .extensions
+                .iter()
+                .map(|m| format!("extension '{}'", m.name.escape_debug())),
+        )
+        .collect();
+    anyhow::ensure!(
+        offending.is_empty(),
+        "package '{}' carries {} — package-carried executable kinds (hooks, extensions) are \
+         not supported in v1: they run commands at your permission and always take the full \
+         consent ceremony, which a package reference cannot compress. Declare them in this \
+         project's manifest instead (`[hooks.<name>]` / `[extensions.<name>]`), where the \
+         ceremony applies, and take the rest of the package as it is.",
+        parsed.name.escape_debug(),
+        offending.join(", ")
+    );
     Ok(())
 }
 
@@ -205,6 +294,7 @@ pub fn resolve(refr: &GitPackRef) -> Result<ResolvedGitPack> {
         .with_context(|| format!("{} has no pack.toml at {}", refr.url, pack_toml.display()))?;
     let parsed: PackToml = toml::from_str(&text).context("parsing pack.toml")?;
     validate_pack_names(&parsed)?;
+    refuse_executable_members(&parsed)?;
 
     // Content scan at fetch time — the same gate `install` applies to skills.
     // High severity (hidden Unicode) blocks; heuristics print as warnings.
@@ -230,24 +320,7 @@ pub fn resolve(refr: &GitPackRef) -> Result<ResolvedGitPack> {
 
     let server = match &parsed.server {
         None => None,
-        Some(s) => Some(match s.server_type.as_str() {
-            "http" => Install::Http {
-                url: s
-                    .url
-                    .clone()
-                    .context("pack.toml [server] type=http needs url")?,
-                secret_headers: s.secret_headers.clone(),
-            },
-            "stdio" => Install::Stdio {
-                command: s
-                    .command
-                    .clone()
-                    .context("pack.toml [server] type=stdio needs command")?,
-                args: s.args.clone(),
-                secret_env: s.secret_env.clone(),
-            },
-            other => anyhow::bail!("pack.toml [server] type '{other}' is not http|stdio"),
-        }),
+        Some(s) => Some(s.to_install()?),
     };
     let spec = PackSpec {
         server,
@@ -290,7 +363,7 @@ pub fn resolve(refr: &GitPackRef) -> Result<ResolvedGitPack> {
 }
 
 /// Resolve `rel` under `root`, refusing paths that escape it (`..`, absolute).
-fn contained(root: &Path, rel: &str, member: &str) -> Result<PathBuf> {
+pub fn contained(root: &Path, rel: &str, member: &str) -> Result<PathBuf> {
     let p = PathBuf::from(rel);
     anyhow::ensure!(
         !p.is_absolute()

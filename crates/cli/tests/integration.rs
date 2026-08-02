@@ -467,6 +467,7 @@ fn init_pipeline_roundtrips_through_valid_toml() {
         extensions: IndexMap::new(),
         workflows: IndexMap::new(),
         packs: IndexMap::new(),
+        package_overrides: IndexMap::new(),
         targets: Targets {
             default: vec!["claude-code".into()],
         },

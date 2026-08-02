@@ -40,6 +40,7 @@ pub use agentstack_core::lock;
 pub mod manifest;
 pub mod mcp;
 pub mod mcp_server;
+pub mod package;
 pub mod provider;
 pub mod proxy;
 pub mod publisher;

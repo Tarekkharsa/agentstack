@@ -120,6 +120,13 @@ pub struct Library {
     /// `<lib_home>/hooks/<name>.toml`, mirroring servers exactly.
     #[serde(default, rename = "hook")]
     pub hooks: Vec<LibraryHook>,
+    /// Versioned capability **packages** available in the central library (W5,
+    /// `docs/design/package-layer.md`), keyed by unique `name`. A `path` source
+    /// body lives under `<lib_home>/packages/<name>/` with a `pack.toml` at its
+    /// root; a `git` source is referenced (resolved through the shared store,
+    /// like a git skill or extension).
+    #[serde(default, rename = "package")]
+    pub packages: Vec<LibraryPackage>,
 }
 
 impl Default for Library {
@@ -130,7 +137,105 @@ impl Default for Library {
             servers: Vec::new(),
             extensions: Vec::new(),
             hooks: Vec::new(),
+            packages: Vec::new(),
         }
+    }
+}
+
+/// The library subdirectory holding package bodies: `<lib_home>/packages/`.
+/// One constant so the index, the resolver, and any future `lib add-package`
+/// cannot disagree about where a body lives.
+pub const PACKAGES_DIR: &str = "packages";
+
+/// The manifest file at the root of every package body, whatever its source.
+/// The same name and the same grammar the git pack rail already publishes —
+/// see [`crate::provider::gitpack::PackToml`].
+pub const PACK_FILE: &str = "pack.toml";
+
+/// One versioned capability package installed in the central library (W5).
+///
+/// **The on-disk shape, and why it is this one.** A package is a *directory
+/// body* — `<lib_home>/packages/<name>/pack.toml` plus member bodies at paths
+/// relative to that root — mirroring [`LibraryExtension`] rather than
+/// [`LibraryServer`]. Three reasons, in `docs/design/package-layer.md`
+/// §"The on-disk shape of a package in the library": it is literally the same
+/// artifact `pack.toml` already describes, so the git pack rail's parser,
+/// name-contract gate and content scan are reused rather than duplicated; the
+/// folder taxonomy already spells "has members" as a directory
+/// (`skills/<name>/`, `extensions/<name>/`) and "is one definition" as a file
+/// (`servers/<name>.toml`, `hooks/<name>.toml`); and indexing it exactly like
+/// the four kinds that came before is what "a first-class package index" means.
+///
+/// The `checksum` covers the package's `pack.toml` — its *boundary*, not its
+/// member bodies. Member bytes are digested individually at lock time, one pin
+/// each, which is the thing that makes the compact reference safe; a single
+/// roll-up digest here would let one member's bytes move inside an unchanged
+/// package digest.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LibraryPackage {
+    /// The name a toolset references this package by. Unique within the library.
+    pub name: String,
+    /// `path` or `git`.
+    pub source: String,
+    /// For `source = "path"`: location of the body, relative to
+    /// `<lib_home>/packages/` (or absolute).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    /// For `source = "git"`: the source URL.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub git: Option<String>,
+    /// Pinned git revision (git sources only).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rev: Option<String>,
+    /// For `source = "git"`: the package's directory within the repo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subpath: Option<String>,
+    /// SHA-256 of the package's `pack.toml` — the boundary digest. Optional
+    /// until the entry has been resolved and hashed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checksum: Option<Sha256Hex>,
+    /// The package's declared version. Unlike the other kinds' informational
+    /// `version`, this one is **load-bearing**: it is recorded verbatim in the
+    /// lock's package pin, so an upgrade diff has a version axis to report.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub version: Option<String>,
+    /// One-line human description, stored in the index (a package's own
+    /// description lives in `pack.toml`, which the index caches here so
+    /// `lib list` need not read every body).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Where the entry came from (e.g. `"git:<url>"`, `"manual"`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<String>,
+}
+
+impl LibraryPackage {
+    /// The directory holding this package's body, if it is locally readable
+    /// right now: path sources resolve under `<lib_home>/packages/…`; git
+    /// sources only if already cached in the shared store (no network, no
+    /// fetch, no digest). Mirrors [`LibrarySkill::body_dir`] exactly, including
+    /// its "not installed" vs "installed but unreadable" distinction.
+    pub fn body_dir(&self, lib_home: &Path) -> Option<PathBuf> {
+        let as_skill = Skill {
+            path: self.path.clone(),
+            git: self.git.clone(),
+            rev: self.rev.clone(),
+            subpath: self.subpath.clone(),
+        };
+        Some(
+            Store::default_store()
+                .resolve_path_only(&as_skill, &lib_home.join(PACKAGES_DIR), None)
+                .ok()
+                .flatten()?
+                .path,
+        )
+    }
+
+    /// One-line description for display, straight from the stored index field.
+    /// Signature mirrors [`LibrarySkill::description`] so `lib list` renders
+    /// every kind through the same row shape.
+    pub fn description(&self, _lib_home: &Path) -> Option<String> {
+        self.description.clone()
     }
 }
 
@@ -458,6 +563,28 @@ impl Library {
         let before = self.hooks.len();
         self.hooks.retain(|h| h.name != name);
         self.hooks.len() != before
+    }
+
+    /// Look up a library package by the name a toolset references it by.
+    pub fn get_package(&self, name: &str) -> Option<&LibraryPackage> {
+        self.packages.iter().find(|p| p.name == name)
+    }
+
+    /// Insert or replace a package entry, keeping entries sorted by name.
+    pub fn upsert_package(&mut self, entry: LibraryPackage) {
+        if let Some(existing) = self.packages.iter_mut().find(|p| p.name == entry.name) {
+            *existing = entry;
+        } else {
+            self.packages.push(entry);
+        }
+        self.packages.sort_by(|a, b| a.name.cmp(&b.name));
+    }
+
+    /// Remove a package entry by name. Returns whether anything was removed.
+    pub fn remove_package(&mut self, name: &str) -> bool {
+        let before = self.packages.len();
+        self.packages.retain(|p| p.name != name);
+        self.packages.len() != before
     }
 }
 
