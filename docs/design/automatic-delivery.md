@@ -18,6 +18,13 @@
 >
 > **Vocabulary:** Package · Toolset · Lease. Defined in §Package-aware delivery
 > and used consistently below.
+>
+> **Amended 2026-08-02 (STRATEGY.md v3 adoption):** dynamic becomes the
+> default when the workstreams land (arc-end) rather than behind a
+> release-sequenced flip; the advanced override set is reduced to **Render
+> locally** ("Prefer gateway" removed); and the §1.6 activation study is
+> removed from the flip's preconditions — it runs when v3's bar is met and
+> no longer gates delivery.
 
 ## The decision
 
@@ -37,10 +44,9 @@ and for harnesses that cannot take a gateway. A project can be, and normally
 will be, in both lanes at once.
 
 The user setting is **Automatic** by default; the planner runs silently and
-status names what happened. Two advanced overrides exist behind the "More
-control" path, settable per project or per harness:
+status names what happened. One advanced override exists (amended 2026-08-02)
+behind the "More control" path, settable per project or per harness:
 
-- **Prefer gateway** — route anything routable to the lease.
 - **Render locally** — write files even where the lease would work.
 
 The override exists because the reasons to want files are real, and they are
@@ -356,8 +362,8 @@ instruction.
 ### W4 — Planner, registry, and the flip — **last**
 
 The runtime lease registry and `lease-status-v1`; planner routing wired into
-`init` and onboarding (with the Automatic / Prefer gateway / Render locally
-override); the `ENFORCEMENT.md` lease column; and the default flip itself.
+`init` and onboarding (with the Automatic / Render locally override — amended
+2026-08-02); the `ENFORCEMENT.md` lease column; and the default flip itself.
 
 *Acceptance:* a lease is externally visible with honest liveness (PID plus start
 time), and a stale record never reads as live; `init` states the routing per
@@ -389,10 +395,10 @@ loading bodies; a server starts on first tool use, not on activation; and a
 per-member override is visible as an *effective member set* rather than silently
 diverging from the package.
 
-## The eight preconditions for the flip
+## The preconditions for the flip (amended 2026-08-02)
 
-The default flips only when all eight hold. The flip lands **no earlier than
-the release after v0.18.0**.
+The default flips only when all remaining seven hold; the flip lands with W4,
+at arc-end (amended 2026-08-02).
 
 1. Trust invalidation on every live dispatch — digest-authoritative, generation
    token as cache only (W2).
@@ -403,12 +409,10 @@ the release after v0.18.0**.
    state file read as truth (W4).
 5. Defined mixed-lane failure semantics, witnessed (W2/W3).
 6. Defined gateway-unavailable recovery, witnessed (W4).
-7. The advanced delivery override — Automatic / Prefer gateway / Render locally
-   (W4).
-8. **The §1.6 activation study, run on v0.18.0-rc.2 as pinned.** The kit is
-   pinned to the static-default RC; flipping before the study invalidates the
-   instrument, and the study doubles as the first-run friction measurement the
-   flip has been waiting for.
+7. The advanced delivery override — Render locally (W4; amended 2026-08-02).
+8. ~~The §1.6 activation study, run on v0.18.0-rc.2 as pinned.~~ **Removed
+   2026-08-02:** the study runs when v3's bar is met and no longer gates the
+   flip.
 
 ## Invariant check
 
