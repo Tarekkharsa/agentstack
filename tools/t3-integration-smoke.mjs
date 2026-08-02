@@ -134,9 +134,12 @@ async function clickUnique(page, name) {
 
 async function openManage(page) {
   await clickUnique(page, "AgentStack");
-  const manage = page.getByRole("button", { name: "Manage ›", exact: true });
+  // The chevron in the button's label is aria-hidden in T3's PopoverHome, so
+  // the accessible name is just "Manage" — matching on the decoration never
+  // resolves.
+  const manage = page.getByRole("button", { name: "Manage", exact: true });
   await manage.waitFor({ state: "visible" });
-  assert.equal(await manage.count(), 1, 'expected one "Manage ›" button');
+  assert.equal(await manage.count(), 1, 'expected one "Manage" button');
   await manage.click();
   await page.getByRole("dialog", { name: "Manage AgentStack" }).waitFor({ state: "visible" });
 }
