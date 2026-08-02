@@ -1,80 +1,32 @@
 # CLAUDE.md — AgentStack
 
-## Product direction
+## Where the product stands
 
-AgentStack is the **vendor-neutral environment manager for AI coding tools**.
-Its promise is:
+The maintainer deliberately reset the strategy on 2026-08-02 and is
+rebuilding the product definition through fresh discussions. Until a new
+strategy is adopted:
 
-> **Define your agent setup once. Use it across every coding CLI.**
+- [`STRATEGY.md`](STRATEGY.md) (v2, adopted 2026-07-31) is the last adopted
+  direction and the only strategy reference.
+- [`TODO.md`](TODO.md) is the only ordered work queue; it is intentionally
+  near-empty.
+- `docs/archive/` and git history hold everything older. History, never
+  direction — do not resurrect plans or roadmaps from there.
+- The only live design contract is
+  [`docs/design/automatic-delivery.md`](docs/design/automatic-delivery.md);
+  [`docs/design/README.md`](docs/design/README.md) indexes it.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and
+  [`docs/ENFORCEMENT.md`](docs/ENFORCEMENT.md) describe the shipped system
+  and remain authoritative for what the code does and enforces.
 
-Users come for portability, easy setup, named toolsets, reversible activation,
-and reliable diagnosis. Security makes those benefits dependable; it is not the
-opening lesson or a separate product.
+Do not start new capability lanes. Propose, discuss, and let the maintainer
+adopt direction explicitly.
 
-The product has two interfaces:
-
-- **The AgentStack CLI is the primary surface and the launch channel**, as well
-  as the source of authority and automation contract. It owns all validation,
-  writes, consent checks, and enforcement — and it is the thing a stranger can
-  obtain and run today, which is what makes it the surface the product is judged
-  on. Setup, toolset selection, status, and recovery must be complete and
-  legible here first.
-- **t3code is the optional graphical companion.** It calls stable read APIs and
-  a closed set of fixed actions; the frontend is never an enforcement boundary.
-  It is where some users graduate, not how they arrive. Revisit this when t3code
-  is publicly obtainable — it is a private fork with no download today, which is
-  precisely why it stopped being called the launch channel.
-
-The old embedded AgentStack dashboard was removed. Do not recreate a second UI.
-Improve t3code or the CLI/API that supports it.
-
-Read in this order:
-
-1. `STRATEGY.md` — the operative v2 strategy: north-star goal, the design law
-   ("automate everything except the yes"), and the phased gates. v1 is archived
-   under `docs/archive/`; never take direction from the archive.
-2. `TODO.md` — the only ordered work queue.
-3. `docs/ARCHITECTURE.md` — system boundaries.
-4. `docs/ENFORCEMENT.md` — exactly what each mode does and does not enforce.
-
-Design documents explain active technical contracts. They are not additional
-roadmaps. `CHANGELOG.md` is the historical record.
-`docs/design/README.md` indexes them: which document answers which question,
-and which are closed records rather than live contracts. Read it before opening
-one, not after.
-
-## Product experience rules
-
-The beginner experience exposes four ideas:
-
-- **Setup** — detect and import the tools the user already has.
-- **Toolset** — choose what the current project or task needs.
-- **Status** — say whether it is ready and give one next action.
-- **Undo** — make every material change recoverable.
-
-Use progressive disclosure:
-
-1. Show the useful outcome first.
-2. Apply safe defaults silently when no decision is needed.
-3. Explain a safety boundary only when it becomes relevant.
-4. If an action is blocked, say what happened, why it matters, and the exact
-   safe next step.
-5. Put stronger modes and internal detail behind “More protection” or an
-   equivalent advanced path.
-
-Do not require Docker, policy authoring, gateway setup, trust terminology, or
-workflow concepts to import and unify a normal local setup. Do not weaken an
-invariant to make the journey shorter. Reduce the concepts and decisions the
-user sees instead.
-
-Prefer plain user language in UI and docs:
-
-- profile → **toolset**
-- doctor → **status/check setup**
-- session → **use temporarily**
-- trust → **review this project** when the gate actually appears; strategy v2
-  names the consent moment itself **the yes**
-- policy/gateway/lockdown → **more protection**, with precise details available
+Two standing product constraints survive the reset: the AgentStack CLI is
+the primary surface and source of authority (t3code is an optional graphical
+companion calling stable read APIs and fixed actions, never an enforcement
+boundary), and the old embedded dashboard stays removed — never recreate a
+second UI.
 
 ## Existing system
 
@@ -120,7 +72,7 @@ trait, or error-handling choices in code comments or the handoff.
 8. **Claims match enforcement.** Host advisory checks are not confinement;
    recording is not prevention; allowed destinations can still exfiltrate.
 
-Strategy v2 classification: **hooks are an executable capability kind alongside
+Standing classification: **hooks are an executable capability kind alongside
 extensions** — they run commands in or around the harness at user permission,
 so the full consent ceremony always applies; no compressed-consent path may
 ever cover them.
@@ -140,8 +92,7 @@ minutes. Two hard rules bound them:
   a sibling `.md` source or of `tools/make-docs-pages.py` itself — up to
   128&nbsp;KB per page of pure noise for a model. Read and edit the `.md`,
   regenerate with `python3 tools/make-docs-pages.py`, verify with
-  `python3 tools/check-docs-site.py`. `.claude/settings.json` denies the Read
-  tool on these paths and on `target/`; for the rare structural check of
+  `python3 tools/check-docs-site.py`. For the rare structural check of
   generated output, use `grep` through Bash. `docs/theme/` is source and
   stays readable. `docs/archive/` is history — open it only when researching
   lineage, never for direction.
@@ -163,8 +114,8 @@ minutes. Two hard rules bound them:
 
 ## Working rules
 
-- Work only on the current gate in `TODO.md`; new capability lanes require user
-  evidence and an explicit strategy change.
+- The strategy is being redefined; do not start new capability lanes. Propose
+  and discuss; only maintainer-adopted direction authorizes work.
 - For non-trivial work, state a short plan, then implement unless a missing
   choice would materially change the result.
 - Move existing code when extracting a boundary. Acceptance is preservation of

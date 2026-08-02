@@ -28,14 +28,17 @@ DOCS = REPO_ROOT / "docs"
 SITEMAP_PREFIX = "https://tarekkharsa.github.io/agentstack/"
 
 # Directories whose HTML pages are allowed to be absent from the sitemap.
-SITEMAP_EXEMPT_DIRS = ("design", "spikes", "demos", "theme")
+# docs/archive/ is history, not a published page — never in the sitemap.
+SITEMAP_EXEMPT_DIRS = ("design", "archive", "demos", "theme")
 
 # docs/design/ holds design scratch, ADRs, and Figma dev-mode (<x-dc>) export
 # mockups that reference never-committed Figma export scaffolding (support.js,
 # "*.dc.html"). Those pages are not part of the deployable navigable site — not
 # in the sitemap, not linked from any real page — so the link crawl skips them.
 # Every real site page (index/start/docs/howto/reference/…) is still crawled.
-CRAWL_EXEMPT_DIRS = ("design",)
+# docs/archive/ is likewise off the navigable site: archived records keep
+# their original internal links, which may point at since-moved files.
+CRAWL_EXEMPT_DIRS = ("design", "archive")
 
 
 # --------------------------------------------------------------------------

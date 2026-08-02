@@ -1,9 +1,15 @@
 # AgentStack product strategy (v2)
 
 > **Status:** operative product strategy — adopted 2026-07-31 by maintainer
-> decision, superseding v1 (archived at
-> [`docs/archive/STRATEGY-2026-07-v1.md`](docs/archive/STRATEGY-2026-07-v1.md));
-> revised same day after independent adversarial review.
+> decision, superseding v1 (STRATEGY-2026-07-v1; removed 2026-08-02, see git
+> history); revised same day after independent adversarial review.
+>
+> **2026-08-02 reset note:** the repository was cleaned around this document.
+> `TODO.md` was emptied, and all prior design records and review findings
+> moved to `docs/archive/`. This file and
+> `docs/design/automatic-delivery.md` are the only surviving direction
+> documents while a fresh product definition is discussed; internal links
+> below to archived documents now point into `docs/archive/`.
 >
 > **Current as of:** AgentStack 0.18.0-rc.2
 >
@@ -18,7 +24,7 @@
 > **Numbering note:** the Phases here (Phase 0–4, always written with their
 > names) and `TODO.md`'s Stages 0–4 are **unrelated numberings**. "The
 > activation study" below means `TODO.md` Stage 1 §1.6, designed in
-> [`docs/design/activation-study.md`](docs/design/activation-study.md).
+> [`docs/archive/design/activation-study.md`](docs/archive/design/activation-study.md).
 >
 > **Origin:** the vercel/eve source-level teardown (2026-07-31, § Competitive
 > watch below) and the maintainer's mandate that follows from it: eve's
@@ -180,7 +186,7 @@ build waits for its gate.
 > Phases 1–4 build now, in order, on maintainer acceptance and the invariant
 > checks below; the study runs once, against the completed v2 journey, and
 > **v0.18.0 does not publish until it passes** (its pass condition and the
-> three-blocker rule unchanged, per `docs/design/activation-study.md`). The
+> three-blocker rule unchanged, per `docs/archive/design/activation-study.md`). The
 > trade is explicit: pre-build falsification is exchanged for post-build
 > validation, accepted because the maintainer is currently the only
 > stakeholder and bears the rework risk knowingly. Everything in "What never
@@ -516,7 +522,7 @@ one needs to read two documents for direction:
 - Each phase's build work enters `TODO.md` through its gate, as ordinary
   gated lanes; this file is the map, never the queue.
 - A visual companion —
-  [`docs/design/strategy-v2-vision.html`](docs/design/strategy-v2-vision.html)
+  [`docs/archive/design/strategy-v2-vision.html`](docs/archive/design/strategy-v2-vision.html)
   — shows the end state as CLI mockups, panel wireframes, the full command
   surface, and the feature inventory. It illustrates; it never overrides.
   This document wins on any divergence, and command names shown there are

@@ -84,11 +84,16 @@ docs — participants must arrive cold; the task script hands them the URL.
 
   ```sh
   curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh \
-    | AGENTSTACK_VERSION=v0.18.0-rc.1 sh
+    | AGENTSTACK_VERSION=v0.18.0-rc.2 sh
   ```
 
+  > **Recorded change (2026-08-02):** the instrument was re-cut and published
+  > as v0.18.0-rc.2 before any participant ran; the pinned install line and the
+  > version floor were updated to match. Protocol and pass condition are
+  > byte-identical.
+
 - Confirm the binary they end up with carries the current journey:
-  `agentstack --version` ≥ 0.18.0-rc.1. A bare `| sh` installs the latest
+  `agentstack --version` ≥ 0.18.0-rc.2. A bare `| sh` installs the latest
   *stable* release instead, which is a different and older journey — if their
   version reads 0.17.x, they used the wrong line and the session should
   restart from the install.
@@ -335,7 +340,7 @@ same isolated HOME:
   are stated as two different facts.
 - The toolset task proceeds; the dead-end does not occur.
 
-**Observers: do not expect this stall.** Participants install v0.18.0-rc.1,
+**Observers: do not expect this stall.** Participants install v0.18.0-rc.2,
 which carries this fix and everything after it. If a project-scope participant stalls anyway, that is a *new* finding
 and belongs on the stall log as one — do not attribute it to this entry. Do not
 screen participants out for having a project-scope setup — see Appendix B2.
@@ -604,7 +609,7 @@ never select for it.
 - Print one Appendix A sheet. Have a pen and a clock with a seconds hand or a
   phone timer.
 - Confirm the version they will get is current: the study needs
-  `agentstack --version` ≥ 0.18.0-rc.1. Run §3's pinned install line on your
+  `agentstack --version` ≥ 0.18.0-rc.2. Run §3's pinned install line on your
   own machine, not theirs, and check the version it produces. Do not check
   what the bare public installer serves — it serves the latest stable release
   on purpose, and that is not the build this study is about.

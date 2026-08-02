@@ -528,8 +528,8 @@ it with the runtime and recorder. That is why it "never reads or interprets
 policy" — it structurally cannot.
 
 The experimental execution boundary is specified in the
-[`tools_execute` threat model](design/tools-execute-threat-model.md) and
-[runtime/ownership ADR](design/adr-tools-execute-runtime.md). Its user-visible
+[`tools_execute` threat model](archive/design/tools-execute-threat-model.md) and
+[runtime/ownership ADR](archive/design/adr-tools-execute-runtime.md). Its user-visible
 claims are intentionally narrower than this architecture description and live
 in [`ENFORCEMENT.md`](ENFORCEMENT.md#experimental-tools_execute).
 

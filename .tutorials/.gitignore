@@ -1,8 +1,0 @@
-# Session credential from pairing — never commit.
-auth.json
-# Intermediate Playwright captures; videos/ holds the deliverable.
-raw/
-# Throwaway probe/debug screenshots.
-*.png
-# Rendered videos — regenerate with rec/ (see README); kept out of git history.
-videos/

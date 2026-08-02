@@ -76,7 +76,7 @@ bookends above as the reference.
 ## Honest scope
 
 Written before the engine existed, against the approved design (§3, §12
-of `docs/design/workflows-capability.md`), then adapted to the shipped
+of `docs/archive/design/workflows-capability.md`), then adapted to the shipped
 v1-C surface at Stage C: `meta.roles` added (required by the engine as
 the script-internal consistency set; the manifest roles stay the
 authority). The script uses no `budget` — that object is Stage D, and

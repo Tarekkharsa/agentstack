@@ -11,7 +11,7 @@ target, gateway, posture, trust, …) are defined once in
 
 Deeper rationale and field notes — edge cases, crate-level caveats, and
 implementation internals — live in
-[reference field notes](design/reference-field-notes.md).
+[reference field notes](archive/design/reference-field-notes.md).
 
 **Contents**
 
@@ -706,7 +706,7 @@ The gate is visible in-session: `tools_search` and
 trust <dir>` command when the project is untrusted or changed. agentstack's own
 manual (the bundled `using-agentstack` skill) is always loadable here, even
 untrusted — see
-[field notes](design/reference-field-notes.md#zero-files-gateway-always-on-manual).
+[field notes](archive/design/reference-field-notes.md#zero-files-gateway-always-on-manual).
 
 Honest limits: MCP servers, secrets, the tool firewall, the call audit log, and
 skills-over-MCP create no per-project native artifacts. Native skill folders and
@@ -746,7 +746,7 @@ separate processes — read `agentstack_lease_status` from the same connection;
 opening a different valid toolset replaces the current lease. See
 [`examples/mcp-profile-lease`](../examples/mcp-profile-lease/) for a runnable
 lifecycle, and
-[field notes](design/reference-field-notes.md#lease-survival-across-a-mid-connection-change)
+[field notes](archive/design/reference-field-notes.md#lease-survival-across-a-mid-connection-change)
 for lease survival across a mid-connection manifest change.
 
 ### Compact proxied surface + code mode
@@ -821,9 +821,9 @@ peer the egress sidecar) with **no host fallback** — missing trust, the sandbo
 build feature, Docker, the pinned image, the sidecar, relay auth, recording, or
 teardown returns a stable non-sensitive error. Full isolation accounting is
 [ENFORCEMENT.md](ENFORCEMENT.md#experimental-tools_execute). This surface remains
-experimental (see [field notes](design/reference-field-notes.md#tools_execute-review-status));
+experimental (see [field notes](archive/design/reference-field-notes.md#tools_execute-review-status));
 cancellation kills the
-[whole process tree](design/reference-field-notes.md#tools_execute-cancellation).
+[whole process tree](archive/design/reference-field-notes.md#tools_execute-cancellation).
 
 ### Governance (`[policy]`)
 
@@ -1207,7 +1207,7 @@ agentstack remove <name>      # drop a capability from manifest + lock
 Toolset-aware: skills a toolset references by name (library-resolved, no inline
 `[skills.*]`) keep their lock pins through the reconcile pass — pin or refresh
 with `agentstack lock`. Content digests always hash current bytes; see
-[field notes](design/reference-field-notes.md#orphaned-digest-cache) for the
+[field notes](archive/design/reference-field-notes.md#orphaned-digest-cache) for the
 harmless orphaned `digest-cache.json` older versions may leave.
 
 ### Git-hosted versioned packs
@@ -1246,7 +1246,7 @@ git remotes (`git@…`, `ssh://`, `file://`, `*.git`), or a spelled local path
 `--skill`/`--rev` (a flag disagreeing with its alias is an error);
 credential-bearing URLs are rejected — use a git credential helper. Discovery
 scans the ecosystem's conventional locations (see
-[field notes](design/reference-field-notes.md#add-skill-discovery-and-staging)).
+[field notes](archive/design/reference-field-notes.md#add-skill-discovery-and-staging)).
 
 Everything runs preview-first: the dry run fetches into transient staging
 (`~/.agentstack/stage/…`, removed on exit) and never touches the manifest, lock,
@@ -1435,7 +1435,7 @@ log into a ranked, per-capability table — `tools` (typical per-turn count),
 `avg tokens/turn`, `calls`, and a loaded-vs-called `hint` (`keep` / `drop / lazy`
 / `watch`) — over the same servers and toolsets agentstack manages, closing the
 loop with the static `footprint` / `report usage` / `doctor` lenses. Bucketing
-and SSE internals: [field notes](design/reference-field-notes.md#wire-proxy-internals).
+and SSE internals: [field notes](archive/design/reference-field-notes.md#wire-proxy-internals).
 
 ### `export` / `import`
 

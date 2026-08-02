@@ -166,7 +166,7 @@ enforced bound on total spawns is `max_agents`, refused per call.
 ## Where it stands
 
 The full technical contract and security rationale live in the
-[workflows capability design doc](design/workflows-capability.md). The
+[workflows capability design doc](archive/design/workflows-capability.md). The
 manifest kind, pinning, trust review, the engine, `workflow run` /
 `workflow report`, negotiated ceilings, and journal-replay resume all ship,
 and the interpreter boundary has been independently security-reviewed and
@@ -180,7 +180,7 @@ orchestration.
 
 Scaling work — how the drive loop behaves at width, and what it costs — is
 tracked separately in the
-[workflow scaling plan](design/workflow-scaling.md), which also records two
+[workflow scaling plan](archive/design/workflow-scaling.md), which also records two
 things it deliberately did **not** build: automatic retry and straggler
 speculation (nothing in the current model can prove a role is side-effect
 free, and a claim the enforcement cannot back does not ship), and distributed
