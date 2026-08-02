@@ -181,8 +181,10 @@ fn workflow_identity(wf: &crate::manifest::Workflow) -> String {
 }
 
 /// A skill has no command or URL; its identity is where its body comes from,
-/// so a source flip reads as `~ changed`. `None` is what the grant walk records
-/// when the resolver could not locate the source at all.
+/// so a source flip reads as `~ changed`. `None` means the declaration itself
+/// names no locatable source — an empty inline block shadowing a library skill
+/// (P19) — which both walks record as `?`. A resolver failure is NOT a `None`
+/// input: identity is declared, never resolved. See [`declared_skill_origin`].
 fn skill_identity(origin: Option<crate::resolve::SkillOrigin>) -> &'static str {
     match origin {
         Some(crate::resolve::SkillOrigin::Inline) => "inline",
@@ -407,18 +409,18 @@ impl CardWalk {
     }
 }
 
-/// The skill origin the preview can name WITHOUT resolving anything: inline
-/// wins over the central library, the same precedence activation applies.
+/// The skill origin named WITHOUT resolving anything: inline wins over the
+/// central library, the same precedence activation applies.
 ///
-/// The grant walk gets this from the resolver, which also reaches git worktree
-/// materialization — writes a read-only command must not make. The two agree
-/// for every skill whose source is locatable. They diverge in exactly one case,
-/// deliberately: a git-sourced skill with no local checkout resolves to
-/// "offline" in the grant walk, which records `?`, while this still names the
-/// declared origin — so that item can read `changed` in the preview until the
-/// next grant re-records it. Display-only, and the alternative is a preview
-/// that clones repositories.
-fn preview_skill_origin(
+/// This is the single authority for skill diff identity — the grant walk and
+/// the read-only preview both call it, so they cannot diverge. Identity answers
+/// "where does this body come from by declaration", never "did the resolver
+/// succeed": whether the source could actually be reached is carried by the
+/// verdict line (`offline — pin unverified`, `broken ref`, …) and by the pin,
+/// never by the recorded identity. Deriving it from the resolver instead made a
+/// freshly granted, uncached git-sourced library skill record `?` and then read
+/// `changed` in the very next preview, forever offline.
+fn declared_skill_origin(
     m: &crate::manifest::Manifest,
     library: &crate::library::Library,
     name: &str,
@@ -743,7 +745,7 @@ pub fn preview_value(base: &Path) -> Result<serde_json::Value> {
         let mut item = CardItem::new(
             "skill",
             &name,
-            skill_identity(preview_skill_origin(m, &library, &name)),
+            skill_identity(declared_skill_origin(m, &library, &name)),
         );
         item.pin = lock.get(&name).map(|e| e.checksum.hex().to_string());
         item.pinned_kind = true;
@@ -1412,7 +1414,12 @@ pub(crate) fn grant_probed(
                 crate::resolve::ResolveMode::NoFetch,
             );
             use crate::resolve::{SkillLockStatus, SkillOrigin};
-            let origin_word = skill_identity(report.origin);
+            // Identity is DECLARED, not resolved — same function the preview
+            // uses, so the two walks cannot disagree. `report.status` still
+            // carries whether the source was reachable; recording the resolver's
+            // failure as identity `?` made every grant read `changed` next
+            // preview for a skill that is merely uncached.
+            let origin_word = skill_identity(declared_skill_origin(m, &library, name));
             // A skill has no command/url; its diff identity is where its body
             // comes from (inline vs library), so a source flip shows `~ changed`.
             // The PIN — the lock checksum of the bytes being consented to — is

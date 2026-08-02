@@ -474,6 +474,96 @@ fn a_drifted_library_server_stays_redacted_and_still_reads_changed() {
     );
 }
 
+/// Declare a git-sourced LIBRARY skill that was never cloned, reference it from
+/// the fixture's profile so the review walks it, and pin it by hand — `lock`
+/// itself would try to clone, which is precisely the situation being witnessed:
+/// the pin exists, the checkout does not.
+fn install_uncached_git_library_skill(home: &Path, proj: &Path, name: &str) {
+    let lib = home.join(".agentstack/lib");
+    let text = fs::read_to_string(lib.join("library.toml")).unwrap();
+    fs::write(
+        lib.join("library.toml"),
+        format!(
+            "{text}\n[[skill]]\nname = \"{name}\"\nsource = \"git\"\n\
+             git = \"https://example.invalid/{name}.git\"\n\
+             rev = \"{REMOTE_REV}\"\n"
+        ),
+    )
+    .unwrap();
+    let manifest = proj.join(".agentstack/agentstack.toml");
+    let text = fs::read_to_string(&manifest).unwrap();
+    fs::write(
+        &manifest,
+        text.replace(
+            "skills = [\"summarize\"]",
+            &format!("skills = [\"summarize\", \"{name}\"]"),
+        ),
+    )
+    .unwrap();
+    let lockfile = proj.join(".agentstack/agentstack.lock");
+    let text = fs::read_to_string(&lockfile).unwrap();
+    fs::write(
+        &lockfile,
+        format!(
+            "{text}\n[[skill]]\nname = \"{name}\"\nsource = \"git\"\n\
+             git = \"https://example.invalid/{name}.git\"\nrev = \"{REMOTE_REV}\"\n\
+             checksum = \"{}\"\n",
+            "a".repeat(64)
+        ),
+    )
+    .unwrap();
+}
+
+const REMOTE_REV: &str = "1111111111111111111111111111111111111111";
+
+/// IDENTITY IS DECLARED, NOT RESOLVED. A git-sourced library skill with no
+/// local checkout cannot be resolved offline — and the resolver's failure must
+/// not become the item's identity. It once did: the grant walk recorded `?` for
+/// anything the resolver could not reach, while the preview named the declared
+/// origin, so the very next preview after a successful grant called a freshly
+/// consented project `changed` — and offline it could never converge.
+#[test]
+fn an_unresolvable_library_skill_keeps_its_declared_identity() {
+    let bin = env!("CARGO_BIN_EXE_agentstack");
+    let tmp = tempfile::tempdir().unwrap();
+    let (home, proj) = fixture(tmp.path());
+    lock(bin, &home, &proj);
+    install_uncached_git_library_skill(&home, &proj, "remote-lib");
+    grant(bin, &home, &proj);
+
+    let review = preview(bin, &home, &proj)["review"].clone();
+    let skill = item(&review, "skill", "remote-lib");
+    assert_eq!(
+        skill["identity"], "library",
+        "the resolver's offline verdict leaked into the diff identity: {skill}"
+    );
+    assert_eq!(
+        skill["change"], "unchanged",
+        "a freshly granted, merely-uncached skill reads as drifted: {skill}"
+    );
+
+    // TAMPER: identity must still catch a real source flip. Declaring the same
+    // name inline shadows the library entry, and that IS a change of where the
+    // body comes from.
+    let inline = proj.join(".agentstack/skills/remote-lib");
+    fs::create_dir_all(&inline).unwrap();
+    fs::write(inline.join("SKILL.md"), "# Remote\nlocal impostor\n").unwrap();
+    let manifest = proj.join(".agentstack/agentstack.toml");
+    let text = fs::read_to_string(&manifest).unwrap();
+    fs::write(
+        &manifest,
+        format!("{text}\n[skills.remote-lib]\npath = \"./skills/remote-lib\"\n"),
+    )
+    .unwrap();
+
+    let flipped = item(&preview(bin, &home, &proj)["review"], "skill", "remote-lib").clone();
+    assert_eq!(flipped["identity"], "inline");
+    assert_eq!(
+        flipped["change"], "changed",
+        "a library→inline source flip went unnoticed: {flipped}"
+    );
+}
+
 /// READ-ONLY WITNESS: `trust --preview` is consumed by a panel and must never
 /// write, fetch, or spawn. The fixture declares a git-sourced skill that was
 /// never fetched — the case that would drag in a clone and a worktree if the
