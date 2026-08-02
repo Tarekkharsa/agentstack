@@ -224,3 +224,55 @@ review:** a package member's `ResolvedServer` carries `ServerOrigin::Inline`
 rather than a new variant — carried but never consulted on this path, with
 `provenance` naming the true source — chosen over rippling a third variant
 through six display and lockfile-schema sites.
+
+### W4 (registry half) — leases become visible, and the fence was found open
+
+**The finding that matters most in this item.** Flip precondition 3 (toolset
+fencing) did not hold. With no lease open, the auto-project gateway built
+`Gateway::from_manifest`, whose ambient fence resolves to `None` and serves
+`effective_runtime_servers(.., None)` — every manifest server *plus* every
+toolset's, the implicit union the contract explicitly forbids — reachable
+through `tools_search`/`tools_execute`. Verified empirically by disabling the
+fix and watching both fixtures' tools list. Now, in the zero-files lane, a
+project that declares any toolset gets an empty gateway until a lease names
+one, and closing a lease returns to that state.
+
+Also shipped: a machine-level lease registry whose liveness is **derived at
+read time**, never read from the file as truth — `live` only when the recorded
+PID exists *and* its start token still matches; `stale` when the PID is gone or
+exists with a different start time (PID reuse); `unknown` when start time is
+unavailable, which never folds into `live`. Start time comes from
+`/proc/<pid>/stat` on Linux (split at the last `)`, because the comm field can
+contain parens) and `/bin/ps -o lstart=` on macOS with the PID passed as an
+argv entry, never through a shell — no new dependency, no unsafe, nothing added
+to `sys.rs`. `agentstack lease status [--json]` is the authoritative read,
+advertised as `lease-status-v1`. Gateway-unavailable detection did not exist and
+now does, defined as "the harness has the bridge registered but the command its
+config names is not executable here"; a bare command name is deliberately never
+reported, because the harness's PATH is not reconstructible and claiming an
+unprovable outage is the same dishonesty as claiming unprovable health. One
+sentence stem feeds both `status` and `doctor` so they cannot drift.
+`ENFORCEMENT.md` gained the lease column with its honest qualifications.
+
+Witnesses: `lease_registry` (5) — an open lease visible to another surface; a
+stale record never reading as live, proven both by a dead PID and by a live PID
+whose start time does not match (simulated reuse); no lease meaning
+control-plane tools only with several toolsets declared; a lease exposing
+exactly its toolset; an unavailable gateway yielding no tools, printing the
+one-sentence outage from both surfaces, and leaving the project tree
+byte-for-byte identical.
+
+Judgment calls: the unleased fence is applied to the zero-files lane only, not
+to `Gateway::build` generally — applying it in the constructor would reach
+`agentstack run`, code mode, and the eager `--manifest-dir` bridge, where
+naming a directory is itself the consent; that is a far larger blast radius
+than precondition 3 asks for. The contract says "several toolsets" and the fence
+triggers on one or more, because "two is fenced, one is not" would be an odd
+cliff and a single toolset plus loose inline servers is still a union no
+explicit selection stands behind. A registry write failure degrades to an
+honest note rather than costing the user their toolset, since the registry is an
+observation surface with no enforcement role — a one-line change if the
+maintainer prefers it fail closed. Honest qualification recorded in
+ENFORCEMENT.md rather than left as a superlative: the lease column is strongest
+on tools and audit and on the fence, **not** on isolation, where its egress and
+filesystem rows are identical to the gateway column.

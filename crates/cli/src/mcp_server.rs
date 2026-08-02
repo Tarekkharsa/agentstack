@@ -230,6 +230,7 @@ pub fn serve(
         // stdin EOF: drain in-flight calls before exiting, or their responses
         // (and the stdio children's polite shutdown) would be lost mid-call.
         workers.join_all();
+        release_lease_record(&lease);
         // Remove the machine-local endpoint coordinate file so a dead port+token
         // isn't left behind for the next shim call.
         if let Some(rt) = runtime {
@@ -377,8 +378,19 @@ pub fn serve(
     }
     // stdin EOF: drain in-flight calls before tearing the session down.
     workers.join_all();
+    release_lease_record(&lease);
     auto.shutdown();
     Ok(())
+}
+
+/// Drop this process's lease record on a clean exit. A crash skips this by
+/// definition — which is exactly the case the registry's read-time PID +
+/// start-time validation exists to classify as stale, so there is nothing to
+/// add here for it.
+fn release_lease_record(store: &LeaseStore) {
+    if let Some(instance) = lease_snapshot(store).and_then(|l| l.registry_instance) {
+        crate::lease_registry::unregister(&instance);
+    }
 }
 
 /// Write one protocol frame through the thread-shared writer (line-delimited
@@ -406,6 +418,12 @@ struct McpLease {
     profile: String,
     started_unix: u64,
     loads: Vec<McpLeaseLoad>,
+    /// The runtime-registry instance id this lease was recorded under (W4), so
+    /// closing it removes the right record. `None` when the registry write
+    /// failed — see [`lease_open`]: an unrecordable lease still opens, it is
+    /// just invisible to other surfaces, and saying so beats refusing the user
+    /// their toolset over a bookkeeping error.
+    registry_instance: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -557,6 +575,19 @@ fn is_upstream_call(req: &Value) -> bool {
     req.pointer("/params/name")
         .and_then(Value::as_str)
         .is_some_and(|n| n.contains("__") || n == "tools_execute")
+}
+
+/// Does the project at `base` declare any toolset? The question W4's toolset
+/// fence turns on: a manifest with toolsets has divided its capabilities into
+/// named subsets, and the gateway must serve one only when a lease selects it.
+///
+/// A manifest that fails to load answers `false` — it declares nothing this
+/// process can read, and the gateway build below will find nothing to serve
+/// either way.
+fn declares_toolsets(base: &Path) -> bool {
+    crate::commands::load(Some(base))
+        .map(|ctx| !ctx.loaded.manifest.profiles.is_empty())
+        .unwrap_or(false)
 }
 
 /// Session state for `--auto-project`: which project this MCP session belongs
@@ -847,6 +878,18 @@ impl AutoProject {
 
     fn activate(&mut self, base: &Path, lease_profile: Option<&str>) {
         self.dir = Some(base.to_path_buf());
+        // W4 precondition 3 — toolset fencing. With no lease open, an
+        // unfenced build serves `effective_runtime_servers(.., None)`: every
+        // server the manifest declares PLUS every toolset's, i.e. the implicit
+        // union of everything declared. A project that declares toolsets has
+        // said its capabilities come in named subsets, so serving that union
+        // with nothing selected would expose a surface no explicit selection
+        // stands behind. Such a project gets NO upstream capability surface
+        // until a lease names a toolset — control-plane tools only.
+        //
+        // A project that declares no toolsets is untouched: there is no
+        // selection to make and therefore no union to over-serve.
+        let fenced_unleased = lease_profile.is_none() && declares_toolsets(base);
         // One gateway per process: the code-mode endpoint shares it instead of
         // building (and connecting/spawning) its own copy of every upstream.
         self.gateway = match lease_profile {
@@ -854,13 +897,32 @@ impl AutoProject {
                 Some(base),
                 profile,
             )),
+            None if fenced_unleased => std::sync::Arc::new(crate::gateway::Gateway::empty()),
             None => std::sync::Arc::new(crate::gateway::Gateway::from_manifest(Some(base))),
         };
+        if fenced_unleased {
+            eprintln!(
+                "agentstack mcp: {} declares toolsets and no lease is open — control-plane tools only. Open one with `agentstack_lease_open` to expose that toolset's servers and skills.",
+                base.display()
+            );
+        }
         // W2 — remember which consent this gateway was built against, and
         // which fence it was built with, so `refresh_trust` can recognise a
         // re-trust and restore the same fence. Read off the gateway's own
         // anchor: one derivation, so the two can never disagree.
-        self.anchor_digest = self.gateway.trust_anchor().map(|a| a.digest().to_string());
+        //
+        // The fenced-unleased gateway is empty and therefore carries no anchor
+        // of its own, so take the digest directly. Leaving it `None` over a
+        // Trusted project would make `refresh_trust` see "restored yes" on
+        // every content-loading call and rebuild the same empty gateway
+        // forever.
+        self.anchor_digest = match self.gateway.trust_anchor() {
+            Some(anchor) => Some(anchor.digest().to_string()),
+            None if fenced_unleased => {
+                crate::trust::digest_for(&crate::manifest::project_root_of(base))
+            }
+            None => None,
+        };
         self.profile = lease_profile.map(str::to_string);
         self.built = true;
         if !self.gateway().is_empty() {
@@ -1480,16 +1542,33 @@ fn lease_open(
         .get(profile)
         .with_context(|| format!("no toolset '{profile}' in manifest"))?;
 
+    // W4 — make the lease visible outside this process. The registry is an
+    // observation surface, not an authority: a failure to record must not cost
+    // the user the toolset they asked for, so it degrades to an honest note
+    // instead of refusing. (Nothing downstream reads the registry to decide
+    // anything — see `crate::lease_registry`.)
+    let recorded = crate::lease_registry::register(&ctx.dir, profile);
+    let registry_note = match &recorded {
+        Ok(_) => None,
+        Err(err) => Some(format!(
+            "This lease could not be recorded in the machine lease registry ({err:#}), so other surfaces will not see it. The lease itself is open and fenced."
+        )),
+    };
+    let record = recorded.ok();
+
     *store.lock().unwrap_or_else(|e| e.into_inner()) = Some(McpLease {
         profile: profile.to_string(),
         started_unix: now_secs(),
         loads: Vec::new(),
+        registry_instance: record.as_ref().map(|r| r.instance.clone()),
     });
     Ok(serde_json::to_string_pretty(&json!({
         "opened": profile,
         "delivery": "mcp",
         "lifetime": "this MCP process",
         "native_files_written": false,
+        "instance": record.as_ref().map(|r| r.instance.clone()),
+        "registry_note": registry_note,
         "note": "Server discovery/calls and skill loading are now fenced to this toolset. Closing the MCP connection drops the lease automatically."
     }))?)
 }
@@ -1509,6 +1588,7 @@ fn lease_status(store: &LeaseStore) -> Result<String> {
     Ok(serde_json::to_string_pretty(&json!({
         "active": true,
         "profile": lease.profile,
+        "instance": lease.registry_instance,
         "started_unix": lease.started_unix,
         "loads": loads,
         "native_files_written": false,
@@ -1521,6 +1601,9 @@ fn lease_close(store: &LeaseStore) -> Result<String> {
         .unwrap_or_else(|e| e.into_inner())
         .take()
         .context("no active MCP toolset lease")?;
+    if let Some(instance) = &closed.registry_instance {
+        crate::lease_registry::unregister(instance);
+    }
     Ok(serde_json::to_string_pretty(&json!({
         "closed": closed.profile,
         "loaded_skills": closed.loads.iter().map(|entry| entry.name.clone()).collect::<Vec<_>>(),
@@ -3401,16 +3484,23 @@ mod tests {
         let note = auto.trust_note().expect("untrusted → a trust note");
         assert!(note.contains("agentstack trust"), "got: {note}");
 
-        // Trusted: the same discovery now builds a live gateway.
+        // Trusted: the same discovery now gets past the trust gate. It does
+        // NOT get an upstream surface for free — this fixture declares a
+        // toolset, and W4's toolset fence serves control-plane tools only
+        // until a lease names one (the witness for that rule proper lives in
+        // `tests/lease_registry.rs`). What this test cares about is that the
+        // trust note is gone and a lease now builds a live gateway, where an
+        // untrusted project's lease transition would not.
         crate::trust::trust_unreviewed(proj.path()).unwrap();
         let mut auto = AutoProject::new(None);
         auto.roots.push(proj.path().to_path_buf());
         auto.ensure_gateway();
+        assert!(auto.trust_note().is_none(), "trusted → no note");
+        auto.rebuild_for_lease(Some("p"));
         assert!(
             !auto.gateway().is_empty(),
-            "trusted → gateway proxies the manifest"
+            "trusted → a lease proxies the toolset's servers"
         );
-        assert!(auto.trust_note().is_none(), "trusted → no note");
 
         // A manifest edit during the same MCP process invalidates trust. A
         // later lease transition must re-check and tear the gateway down,

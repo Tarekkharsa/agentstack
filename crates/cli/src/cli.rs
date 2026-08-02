@@ -278,6 +278,17 @@ pub enum Command {
     #[command(subcommand, hide = true)]
     Gateway(GatewayCmd),
 
+    /// Runtime lease registry: which toolset leases are open on this machine.
+    ///
+    /// A lease is the temporary runtime activation of one toolset over an MCP
+    /// connection. It is owned by the MCP process that opened it and disappears
+    /// with that process — so the registry stores a RECORD, and liveness is
+    /// derived on every read from the recorded PID plus that process's start
+    /// time. A record whose process is gone, or whose PID has been reused,
+    /// reads as stale and never as live.
+    #[command(subcommand, hide = true)]
+    Lease(LeaseCmd),
+
     /// Review and approve this project's declared capabilities — required
     /// before anything activates them.
     ///
@@ -1161,6 +1172,19 @@ pub enum GatewayCmd {
 
     /// Remove the agentstack gateway entry from a CLI's global MCP config.
     Disconnect(DisconnectArgs),
+}
+
+/// The runtime lease registry's read surface. Read-only by design: leases are
+/// opened and closed by the MCP connection that owns them, never from here.
+#[derive(Subcommand, Debug)]
+pub enum LeaseCmd {
+    /// Show the lease records on this machine, each with liveness derived now
+    /// from its PID and that process's start time (contract `lease-status-v1`).
+    Status {
+        /// Emit the same reading as JSON.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Args, Debug)]
@@ -2914,7 +2938,7 @@ pub fn full_command_inventory() -> String {
          Undo        undo · restore\n  \
          Protect     trust · explain · secret · guard · sign · verify\n  \
          Run         run · kill · shim · workflow · gateway · mcp · try\n  \
-         Inspect     doctor · report · optimize · proxy\n\
+         Inspect     doctor · report · lease · optimize · proxy\n\
          \n\
          And in full:\n\n",
     );

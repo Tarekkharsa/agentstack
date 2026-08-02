@@ -416,6 +416,11 @@ pub(crate) struct ProjectFacts {
     trust_relevant: bool,
     mode: Mode,
     gateway_connected: bool,
+    /// Harnesses that registered the gateway but cannot launch it (W4
+    /// precondition 6). Registered-and-broken is a different fact from
+    /// not-registered, and the difference is the whole outage: the harness gets
+    /// no tools, and AgentStack writes nothing in the gateway's place.
+    gateway_outages: Vec<crate::commands::connect::GatewayOutage>,
     rendered: bool,
     /// `None` when the caller did not ask for the secrets reading — bare
     /// `agentstack` never does, and asking is not free (it consults every
@@ -636,6 +641,16 @@ fn project_json(f: &ProjectFacts) -> serde_json::Value {
         "trust_relevant": f.trust_relevant,
         "mode": f.mode.label(),
         "gateway_connected": f.gateway_connected,
+        // W4 precondition 6. One sentence per broken harness, the SAME text the
+        // screen prints and `doctor` reports — a UI must never have to compose
+        // its own account of an outage.
+        "gateway_outages": f.gateway_outages.iter()
+            .map(|o| serde_json::json!({
+                "harness": crate::text::sanitize_line(&o.display),
+                "command": crate::text::sanitize_line(&o.command),
+                "explanation": o.sentence(),
+            }))
+            .collect::<Vec<_>>(),
         "rendered": f.rendered,
         // Names of unresolved refs, never values (invariant 5). `null` when
         // the caller did not ask for the reading at all — distinct from an
@@ -1057,6 +1072,7 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
             trust_relevant,
             mode,
             gateway_connected: gateway,
+            gateway_outages: crate::commands::connect::gateway_outages(&ctx.registry, &target_ids),
             rendered,
             secrets: if deep_reads { secret_facts(&ctx) } else { None },
             updates: if deep_reads {
@@ -1235,6 +1251,15 @@ fn print_orientation(o: &Orientation, status: bool) {
                 f.mode.label(),
                 format!("— {}", f.mode.short()).dimmed()
             );
+
+            // W4 precondition 6 — the gateway is registered somewhere and
+            // cannot run. Not dimmed: nothing this project declares reaches
+            // that harness, and AgentStack deliberately does NOT render files
+            // to cover for it (a static fallback is always an explicit user
+            // action). One sentence, naming the one recovery command.
+            for outage in &f.gateway_outages {
+                println!("  {}  {}", "Gateway ".bold(), outage.sentence());
+            }
 
             if status {
                 print_updates_line(&f.updates);
@@ -1650,6 +1675,7 @@ mod tests {
                 trust_relevant: true,
                 mode: Mode::CleanAtRest,
                 gateway_connected: false,
+                gateway_outages: Vec::new(),
                 rendered: false,
                 secrets,
                 needs_your_yes: None,

@@ -124,6 +124,9 @@ fn run() -> Result<()> {
                 commands::connect::run_disconnect(args)
             }
         },
+        Command::Lease(cmd) => match cmd {
+            agentstack::cli::LeaseCmd::Status { json } => commands::lease::run(*json),
+        },
         Command::Trust(args) => commands::trust::run(args),
         Command::Guard(args) => commands::guard::run(args),
         Command::SelfCmd(args) => commands::self_cmd::run(args),

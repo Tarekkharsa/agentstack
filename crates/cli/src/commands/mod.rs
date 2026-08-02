@@ -16,6 +16,7 @@ pub mod init;
 pub mod install;
 pub mod instructions;
 pub mod intake_external;
+pub mod lease;
 pub mod lib;
 pub mod lib_trash;
 pub mod lock;

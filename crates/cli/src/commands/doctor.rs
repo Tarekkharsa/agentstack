@@ -955,6 +955,14 @@ fn run_checks(
             "no CLI connected — optional ↳ agentstack gateway connect --all",
         );
     }
+    // W4 precondition 6 — gateway unavailable. A registered bridge whose
+    // command is not runnable is not "not connected": that harness gets no
+    // tools at all, and AgentStack writes nothing in its place (there is no
+    // silent fallback into the rendered lane). One sentence, the same one
+    // `status` prints, naming the one recovery command.
+    for outage in crate::commands::connect::gateway_outages(&ctx.registry, &target_ids) {
+        report.line(Level::Warn, outage.finding());
+    }
     let base = crate::manifest::project_root_of(&ctx.dir);
     let trust_state = crate::trust::check(&base);
     report.trust = Some(match trust_state {

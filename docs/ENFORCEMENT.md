@@ -114,16 +114,54 @@ Modes are columns; policy dimensions are rows. Legend:
   harness never routes through hooks, bypasses it entirely. Strictly weaker
   than **enforced** and never to be described as enforcement.
 
-| Dimension | `host` | `gateway` | `--sandbox` | `--lockdown` |
-|---|---|---|---|---|
-| **Tools** | unsupported | **enforced** | **enforced**† | **enforced** |
-| **Egress** | coarse | coarse | **enforced**\* | **enforced** |
-| **Secrets** | **enforced** | **enforced** | **enforced**‡ | **enforced** |
-| **Filesystem — write** | cooperative¶ | cooperative¶ | coarse | coarse |
-| **Filesystem — read** | cooperative¶ | cooperative¶ | coarse | coarse |
-| **Audit / recording** | unsupported | **enforced** | **enforced**§ | **enforced** |
-| **Native extensions** | unsupported‖ | unsupported‖ | unsupported‖ | unsupported‖ |
-| **Hooks** | unsupported# | unsupported# | unsupported# | unsupported# |
+| Dimension | `host` | `gateway` | `lease` | `--sandbox` | `--lockdown` |
+|---|---|---|---|---|---|
+| **Tools** | unsupported | **enforced** | **enforced**◇ | **enforced**† | **enforced** |
+| **Egress** | coarse | coarse | coarse | **enforced**\* | **enforced** |
+| **Secrets** | **enforced** | **enforced** | **enforced** | **enforced**‡ | **enforced** |
+| **Filesystem — write** | cooperative¶ | cooperative¶ | cooperative¶ | coarse | coarse |
+| **Filesystem — read** | cooperative¶ | cooperative¶ | cooperative¶ | coarse | coarse |
+| **Audit / recording** | unsupported | **enforced** | **enforced**◆ | **enforced**§ | **enforced** |
+| **Native extensions** | unsupported‖ | unsupported‖ | n/a◈ | unsupported‖ | unsupported‖ |
+| **Hooks** | unsupported# | unsupported# | n/a◈ | unsupported# | unsupported# |
+
+◇ **the strongest tools cell, and fenced on top.** A lease is the `gateway`
+column's dispatch path with one addition: the toolset. Every capability call
+still goes through `Gateway::try_call`, which applies the compiled machine ∩
+project tool policy and re-checks the consent digest before the upstream is
+dialled — and on top of that, only the leased toolset's members are reachable.
+With **no lease open, a project that declares toolsets serves control-plane
+tools only**: the implicit union of everything declared is never served, because
+capability exposure requires an explicit selection. Opening a lease exposes
+exactly that toolset's members and nothing more; closing it returns the
+connection to control-plane tools. What the fence does *not* do is constrain
+what an allowed tool then does — see ◆.
+
+◆ **every brokered MCP call recorded — not "every call recorded".** Each call
+the lease dispatches lands in `calls.jsonl` (and a run's `events.jsonl` inside a
+run) with digest-only arguments. That is evidence of the *request*: AgentStack
+records what was asked of a server, and cannot observe what that server then
+did internally. **Recording is not prevention** — a recorded call already
+happened — and **an allowed destination can still exfiltrate**, exactly as the
+claim-discipline section above states for every column. A lease also does not
+make a call reproducible: only the pinned bytes in the lock do that.
+
+Two further honest limits belong here rather than in a footnote nobody reads.
+**A lease is process-scoped**: it belongs to the MCP process that opened it and
+disappears with that process, so it is not a durable grant and cannot be
+re-attached to. And the delivery claim is **"0 project artifacts for
+gateway-delivered capabilities"**, never a bare "0 files": a project in this
+lane still holds `.agentstack/agentstack.toml`, `agentstack.lock`, and —
+whenever instructions are used — a managed region in an instruction file. Those
+are rendered-lane artifacts and they are real.
+
+◈ **not applicable — these kinds never enter this lane.** Native extensions and
+hooks are executable capability kinds: their code runs inside (or around) the
+harness process at full user permission. They are delivered by rendering files,
+never over a lease, so there is no lease cell to label. The full consent
+ceremony always applies to them, in a package or out of one, and no
+compressed-consent path may ever cover them. Their real story is the ‖ and #
+notes below.
 
 \* **for proxied traffic only.** Plain `--sandbox` points `HTTPS_PROXY` at the
 proxy but the container keeps an ordinary bridge network — a process that
@@ -191,11 +229,13 @@ an executable capability kind alongside extensions — the full consent ceremony
 always applies, and no compressed-consent path may ever cover them. See the
 Hooks section.
 
-Two of the four columns are execution modes for a *rendered* config: **host** is
+Two of the five columns are execution modes for a *rendered* config: **host** is
 `agentstack apply` + `agentstack run` (adapters write native config, the harness
 runs on the bare machine and talks to upstream MCP servers directly).
 **gateway** is the in-process broker (`agentstack mcp`, `connect`, code mode) —
-every MCP call routes through `Gateway::try_call`. **--sandbox** and
+every MCP call routes through `Gateway::try_call`. **lease** is that same broker
+with a toolset selected for one MCP connection (`agentstack_lease_open`) — the
+dynamic delivery lane, and the strongest column here. **--sandbox** and
 **--lockdown** are `agentstack run --sandbox [--lockdown]`: the harness runs in a
 Docker container behind the egress proxy.
 
@@ -212,6 +252,24 @@ Docker container behind the egress proxy.
   dispatch, and `namespaced_tools()` filters denied tools out of discovery too, so
   a denied tool is invisible *and* refused if called anyway. This is the single
   enforcement point. (`Gateway::try_call`, `crates/cli/src/gateway.rs`)
+- **lease — enforced, plus a toolset fence.** Same enforcement point as
+  `gateway` (nothing is duplicated: a lease *is* `Gateway::try_call` with a
+  selected toolset), with the fence described at ◇ above. Two limits belong
+  with the claim rather than under it:
+  - **Lazy server start holds under the default compact mode, and is traded
+    away deliberately in transparent mode.** Compact mode is the default: with
+    no lease, the harness sees control-plane tools only, and a server is
+    started or dialled on first tool use — so activating a toolset costs
+    nothing until something is actually called. Transparent mode
+    (`agentstack mcp --transparent`) advertises the upstream tools directly, and
+    tools cannot be enumerated without asking the servers — so **transparent-mode
+    tool listing starts every upstream in the fence**. That is the cost of the
+    mode, chosen by whoever registered the bridge with `--transparent`; laziness
+    is a property of compact mode and must not be claimed for both.
+  - **A fence is not a sandbox.** Fencing decides *which* upstreams are
+    reachable. It does not observe or constrain what a reached upstream does,
+    and the Egress / Filesystem rows of this column are unchanged from
+    `gateway` for exactly that reason.
 - **sandbox — enforced for gateway-routed traffic.** A trusted run
   builds a host-side gateway (`Gateway::from_frozen` — hard trust gate: untrusted
   → empty → unrouted) and a token-gated HTTP MCP endpoint, then renders one
@@ -363,6 +421,14 @@ matrix rows above are the enforcement claim, and a family whose row says
 `cooperative` or `coarse` keeps saying that no matter how completely its
 decisions are logged. The two are set side by side deliberately, because
 "we have a log of it" is the most tempting way to sound stronger than you are.
+
+The lease column's recording claim is stated in exactly one form: **every
+brokered MCP call recorded** — never "every call recorded". AgentStack records
+what was asked of a server; it cannot observe that server's internal side
+effects, and a call an agent makes by some route that never reaches
+`Gateway::try_call` is not brokered and is therefore not in this log. Absence
+from the log means "AgentStack did not broker it", which is not the same as
+"it did not happen".
 
 Which is which, per denial family:
 

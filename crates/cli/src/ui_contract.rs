@@ -377,6 +377,35 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   the offer surface, with its own honest limits. **It is also not an
 ///   activation reading:** a pinned package is not a running one, and nothing
 ///   here says whether a lease is open or a server started.
+/// - `lease-status-v1`: `lease status --json` emits the machine-level runtime
+///   lease registry — one row per record with `instance`, `project`,
+///   `toolset`, `pid`, `started_unix`, a derived `liveness`, and the `why`
+///   sentence behind it. This is the authoritative read: a lease used to exist
+///   only in the MCP subprocess's memory, so no other surface could see that
+///   one was open.
+///
+///   **What `liveness` promises.** It is DERIVED at read time, never stored.
+///   `live` means the recorded PID exists *and* that process's start time still
+///   matches the one recorded when the lease opened. `stale` means the process
+///   is gone, or its PID now belongs to a different process — a crashed MCP
+///   process leaves its record behind, and PID reuse is exactly why the start
+///   time is part of the comparison rather than the PID alone. A panel may
+///   therefore poll this without caching: the file is a record, not a truth.
+///
+///   **What `unknown` means.** Some platform must supply the process start
+///   time — Linux reads `/proc/<pid>/stat`, macOS asks `ps`. Where neither is
+///   available the row reads `unknown`: the PID exists, but reuse cannot be
+///   ruled out, so nothing is claimed. A UI must render `unknown` as "not
+///   established" and must never fold it into `live`; that is the fail-closed
+///   direction, and it is the only honest one.
+///
+///   **What it does not promise.** A lease is **process-scoped** — it
+///   disappears with the process that owns it, and there is no way to keep one
+///   alive or to re-attach to it. Nothing here is an authority: no enforcement
+///   decision reads this registry, and there is no action on this contract at
+///   all — leases are opened and closed by the MCP connection that owns them,
+///   never from a panel. Its own name for the usual reason: a binary predating
+///   it has no such command and refuses the call outright.
 pub const FEATURES: &[&str] = &[
     "init-plan",
     "apply-setup",
@@ -413,6 +442,7 @@ pub const FEATURES: &[&str] = &[
     "needs-your-yes-v1",
     "update-offer-v1",
     "package-members-v1",
+    "lease-status-v1",
 ];
 
 /// Wrap a response body in the envelope. The two envelope keys are injected
@@ -482,6 +512,7 @@ mod tests {
             "needs-your-yes-v1",
             "update-offer-v1",
             "package-members-v1",
+            "lease-status-v1",
         ] {
             assert!(
                 features.contains(&shipped),
