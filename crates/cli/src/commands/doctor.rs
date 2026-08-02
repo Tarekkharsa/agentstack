@@ -304,20 +304,33 @@ impl Report {
     /// path, or in nothing at all, makes the user invent the next step — the
     /// one thing a status surface exists to remove.
     ///
-    /// The ladder below is ordered by what blocks what: an unrepaired finding
-    /// first, then the review that gates activation, then the one-screen
+    /// The ladder below is ordered by what blocks what: an error first (it
+    /// blocks the commands every other rung would name), then the review that
+    /// gates activation, then an unrepaired warning, then the one-screen
     /// summary. Each rung is reachable and non-destructive.
+    ///
+    /// Consent outranks warning-level repairs on purpose. `status`'s own
+    /// ladder ([`super::overview::next_step`]) puts a pending or stale review
+    /// above every setup step, and the two surfaces answering "the one next
+    /// action" differently is the disagreement this order removes: a project
+    /// that is both drifted and missing, say, the t3code guard used to hear
+    /// `agentstack trust .` from `status` and `agentstack guard install` from
+    /// `doctor`, purely because of which section registered first. Nothing
+    /// below trust is reordered — [`first_fix`](Self::first_fix) keeps its
+    /// documented section-order tie-break.
     fn next_action(&self) -> (String, &'static str) {
-        if let Some(fix) = self.first_fix() {
-            return (fix.to_string(), "the finding to start with");
-        }
-        // A finding with no parseable `↳ fix` still needs a real next step
-        // (F21): `first_fix` returns `None` for a prose remedy, and falling
-        // through to "nothing to repair" printed `1 error` directly above a
-        // next step that claimed there was nothing wrong. Point at the findings
-        // themselves — the report is right here — rather than at another
-        // surface.
+        // Errors stay on top: an outstanding error usually blocks the very
+        // command the review or a warning fix would name.
         if self.errors > 0 {
+            if let Some(fix) = self.first_fix() {
+                return (fix.to_string(), "the finding to start with");
+            }
+            // A finding with no parseable `↳ fix` still needs a real next step
+            // (F21): `first_fix` returns `None` for a prose remedy, and falling
+            // through to "nothing to repair" printed `1 error` directly above a
+            // next step that claimed there was nothing wrong. Point at the
+            // findings themselves — the report is right here — rather than at
+            // another surface.
             return (
                 "review the errors above".to_string(),
                 "each is a problem this project has to fix before it is ready",
@@ -334,6 +347,11 @@ impl Report {
                 "agentstack trust .".to_string(),
                 "the content changed since you last said yes — review what moved",
             );
+        }
+        // Trusted (or trust is not this report's concern): the warning-level
+        // repairs take over, in `first_fix`'s documented order.
+        if let Some(fix) = self.first_fix() {
+            return (fix.to_string(), "the finding to start with");
         }
         if self.warnings > 0 {
             return (
@@ -379,8 +397,11 @@ impl Report {
     /// change meaning under its users), so the honest answer ships beside it
     /// under `status-honesty-v1` and `state` keeps its `status-v1` meaning.
     ///
-    /// The order is what-blocks-what, matching [`next_action`](Self::next_action):
-    /// repair the findings, then pass the consent gate, then activate.
+    /// The order is what-blocks-what: repair the findings, then pass the
+    /// consent gate, then activate. It deliberately reports `needs_attention`
+    /// over a warning that [`next_action`](Self::next_action) ranks *below*
+    /// the review — the two answer different questions ("is anything wrong?"
+    /// versus "what do I do first?"), and a warning is still something wrong.
     fn readiness(&self) -> &'static str {
         // No project context (doctor ran outside one): there is no project
         // readiness to report, and reporting the machine's as the project's is
@@ -3902,6 +3923,40 @@ mod tests {
             !cmd.contains("agentstack status"),
             "the clean terminal must not bounce back to status: {cmd}"
         );
+    }
+
+    /// `status` and `doctor` must not name different "one next actions" for
+    /// the same project. A drifted project that also carries an earlier
+    /// section's warning fix used to hear the warning's command here and
+    /// `agentstack trust .` from `status`; consent now outranks warning-level
+    /// repairs on both surfaces. Below trust, section order still decides.
+    #[test]
+    fn a_pending_review_outranks_an_earlier_sections_warning_fix() {
+        let mut r = Report::new();
+        r.trust = Some("drifted");
+        // Registered FIRST, so `first_fix` would pick it under the old order.
+        r.section("T3 Code");
+        r.line(
+            Level::Warn,
+            "the guard is missing\n  ↳ agentstack guard install",
+        );
+        r.section("Trust");
+        r.line(Level::Warn, "the content changed since you said yes");
+        let (cmd, _) = r.next_action();
+        assert_eq!(cmd, "agentstack trust .", "the review must lead: {cmd}");
+
+        // Same findings, review settled: the warning fix wins again, and the
+        // section-order tie-break below trust is untouched.
+        r.trust = Some("trusted");
+        let (cmd, _) = r.next_action();
+        assert_eq!(cmd, "agentstack guard install", "{cmd}");
+
+        // An error still outranks the review: its command blocks the rest.
+        r.trust = Some("drifted");
+        r.section("Manifest");
+        r.line(Level::Error, "the manifest is invalid\n  ↳ agentstack init");
+        let (cmd, _) = r.next_action();
+        assert_eq!(cmd, "agentstack init", "{cmd}");
     }
 
     #[test]

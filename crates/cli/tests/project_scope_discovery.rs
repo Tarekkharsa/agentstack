@@ -154,8 +154,12 @@ fn doctor_refuses_to_call_an_uncovered_setup_clean() {
         "names the one next action: {text}"
     );
 
-    // One next action, and it is the one that fixes this.
-    assert_eq!(report["next_action"], "agentstack adopt");
+    // One next action. This project has never been reviewed, and consent
+    // outranks warning-level repairs on both `status` and `doctor` — so the
+    // headline is the review, and `agentstack adopt` is named by the finding
+    // itself (asserted above), which is where the user reads it.
+    assert_eq!(report["trust"], "untrusted", "{report}");
+    assert_eq!(report["next_action"], "agentstack trust .");
 }
 
 /// The complement, so the check cannot become permanent noise: once the
