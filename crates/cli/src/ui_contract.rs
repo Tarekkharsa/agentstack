@@ -509,6 +509,32 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   `agentstack instructions` is the per-fragment surface. And a `file` path
 ///   is a destination, not proof anything has been written to it — `rendered`
 ///   and `agentstack diff` answer that.
+/// - `image-plan-v1`: `image --json` emits the packaging plan
+///   (`docs/design/packaging.md`) under `image` — `toolset`, `harness`, `tag`,
+///   `base`, a `posture` object, a `members` array giving every pinned member
+///   its `kind`, `name`, `digest`, `provenance`, `dest` and `compiled` flag,
+///   `required_secrets`, `blockers`, `buildable`, the `context` directory a
+///   `--write` would stage, and the `cmd` the image's entrypoint execs.
+///
+///   **What it promises.** `members` is COMPLETE for the named toolset: every
+///   member that would enter the image is listed with the digest its bytes are
+///   read by, so a panel can show the composition without unpacking anything.
+///   `required_secrets` is a list of `${REF}` NAMES and can never hold a
+///   value — the whole build path constructs no secret resolver
+///   (`CLAUDE.md` invariant 5). `buildable` is `blockers.is_empty()`, and a
+///   plan with blockers exits non-zero while still emitting this payload, so a
+///   UI can render *why* rather than only *that* a build refused.
+///
+///   **What it does not promise.** `posture.slug` / `posture.label` are the
+///   shipped `Posture::Sandbox` values and describe what the artifact is
+///   *prepared for*, never what any run enforces — `posture.established_by` is
+///   the constant `"run"` and `posture.caveat` carries the sentence in full. It
+///   is **not a build receipt**: the plan says what a `--write` would do, not
+///   that an image exists, that Docker is present, or that anything was built;
+///   nothing here is a reading of the local daemon. And it is not a
+///   reproducibility claim beyond the AgentStack layer — the base image may be
+///   a floating tag and a Docker build is not bit-reproducible, both stated in
+///   the design doc rather than implied away here.
 pub const FEATURES: &[&str] = &[
     "init-plan",
     "apply-setup",
@@ -550,6 +576,7 @@ pub const FEATURES: &[&str] = &[
     "delivery-routing-v1",
     "library-sources-v1",
     "instruction-channels-v1",
+    "image-plan-v1",
 ];
 
 /// Wrap a response body in the envelope. The two envelope keys are injected
@@ -622,6 +649,7 @@ mod tests {
             "lease-status-v1",
             "library-sources-v1",
             "instruction-channels-v1",
+            "image-plan-v1",
         ] {
             assert!(
                 features.contains(&shipped),

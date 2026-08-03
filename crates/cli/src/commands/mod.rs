@@ -13,6 +13,7 @@ pub mod diff;
 pub mod doctor;
 pub mod explain;
 pub mod guard;
+pub mod image;
 pub mod init;
 pub mod install;
 pub mod instructions;

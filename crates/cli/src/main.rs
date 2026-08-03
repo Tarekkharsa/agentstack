@@ -134,6 +134,7 @@ fn run() -> Result<()> {
         Command::Completions(args) => commands::completions::run(args),
         Command::Run(args) => commands::runs::run(args, dir),
         Command::Kill(args) => commands::runs::kill(args),
+        Command::Image(args) => commands::image::run(args, dir),
         Command::Shim(cmd) => commands::shim::run(cmd),
         Command::Workflow(cmd) => match cmd {
             agentstack::cli::WorkflowCmd::Run(args) => commands::workflow::run(dir, args),

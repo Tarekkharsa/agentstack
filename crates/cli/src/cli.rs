@@ -220,6 +220,21 @@ pub enum Command {
     #[command(hide = true)]
     Kill(KillArgs),
 
+    /// Compose one toolset and its pinned capabilities into a container image.
+    ///
+    /// The image carries the exact bytes you reviewed — skills laid down where
+    /// the tool reads them, server definitions with their `${REF}`
+    /// placeholders untouched — plus a start-up guard that refuses to launch
+    /// until the secrets those placeholders name are present in the run's own
+    /// environment. Nothing is resolved into the image, and nothing is pushed
+    /// anywhere.
+    ///
+    /// Dry-run by default: a bare `agentstack image` writes no file and does
+    /// not contact Docker. The artifact and every claim it does and does not
+    /// make are written up in `docs/design/packaging.md`.
+    #[command(hide = true)]
+    Image(ImageArgs),
+
     /// Exec-through launcher shim for external supervisors (e.g. t3code).
     ///
     /// `shim make <cli>` writes a tiny wrapper under `~/.agentstack/shims/`;
@@ -1197,6 +1212,47 @@ pub enum GatewayCmd {
 
     /// Remove the agentstack gateway entry from a CLI's global MCP config.
     Disconnect(DisconnectArgs),
+}
+
+/// `agentstack image` — one toolset, materialized as something you run.
+///
+/// One command, not a subcommand tree: there is exactly one artifact and
+/// exactly one act (build it). `--write` is the whole gate — without it
+/// nothing touches disk and the Docker daemon is never contacted.
+#[derive(Args, Debug)]
+pub struct ImageArgs {
+    /// Which toolset to package. Optional only when the project declares
+    /// exactly one — an image is a composition, and picking one of several by
+    /// guess would make the artifact's identity a guess too.
+    #[arg(long, value_name = "NAME", alias = "profile")]
+    pub toolset: Option<String>,
+
+    /// Which tool the image launches (an adapter id, e.g. `claude-code`).
+    /// Defaults to the toolset's own `harness`, then to the project's single
+    /// default target.
+    #[arg(long, value_name = "ID")]
+    pub harness: Option<String>,
+
+    /// Tag for the built image (default `agentstack/<toolset>:latest`). Local
+    /// only — nothing is ever pushed.
+    #[arg(long, value_name = "TAG")]
+    pub tag: Option<String>,
+
+    /// Base image to build `FROM`. Defaults to the same image `run --sandbox`
+    /// would have launched, so a packaged image is that runner plus one
+    /// toolset. Pass a digest reference to close the base-image axis; a
+    /// floating tag leaves it open, and AgentStack will not claim otherwise.
+    #[arg(long, value_name = "IMAGE")]
+    pub from: Option<String>,
+
+    /// Emit the plan as JSON (contract `image-plan-v1`).
+    #[arg(long)]
+    pub json: bool,
+
+    /// Actually stage the build context and build the image (default: plan
+    /// only).
+    #[arg(long)]
+    pub write: bool,
 }
 
 /// `agentstack delivery` — show the routing, or set the one override.
@@ -3099,7 +3155,7 @@ pub fn full_command_inventory() -> String {
          Render      apply · use · yes · instructions · lock · session · diff · uninstall · delivery\n  \
          Undo        undo · restore\n  \
          Protect     trust · explain · secret · guard · sign · verify\n  \
-         Run         run · kill · shim · workflow · gateway · mcp · try\n  \
+         Run         run · kill · shim · workflow · image · gateway · mcp · try\n  \
          Inspect     doctor · report · lease · optimize · proxy\n\
          \n\
          And in full:\n\n",

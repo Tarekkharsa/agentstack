@@ -755,6 +755,48 @@ paragraph above exists to prevent.
   machine-policy tightening mid-run takes effect at the next run, matching
   the in-process gateway's snapshot-at-start semantics.
 
+### Packaged images (`agentstack image`)
+
+**What ships:** one toolset and its pinned members composed into a container
+image the user builds locally and runs themselves
+([`design/packaging.md`](design/packaging.md)). Skill bodies are copied out of
+the content store by the digest `agentstack.lock` records — the same
+pinned-serving rule the MCP and rendered lanes follow — and laid down in the
+harness's own skills directory inside the image. Server *definitions* travel
+verbatim under `/agentstack/servers/`, `${REF}` placeholders intact. Nothing is
+pushed, tagged remotely, signed, or registered, and nothing phones home. The
+build refuses fail-closed on an unpinned member, an unverifiable store deposit,
+a server the frozen resolution rejects, or a project that is not trusted at its
+current bytes.
+
+**The posture label, and its exact scope.** The artifact carries the shipped
+`Posture::Sandbox` label — `SANDBOX / PROXIED · DIRECT ROUTE OPEN` — and that
+label describes what the image is *prepared for*, never what a run enforces.
+**Posture is a property of the run.** Every mechanism the `--sandbox` column
+above claims is supplied by whoever starts the container: the proxy, the
+allowlist, the run log, the gateway. Consequently:
+
+- A **bare `docker run <tag>`** earns the container boundary and nothing else —
+  no egress proxy, no `HTTPS_PROXY`, no allowlist, no flight recorder, no
+  gateway. It is *not* the `--sandbox` column, and no surface says it is.
+- Run through `AGENTSTACK_SANDBOX_IMAGE=<tag> agentstack run … --sandbox`, it
+  is exactly the `--sandbox` column with every qualification in this document
+  intact, including `*` (proxied only; the direct route stays open).
+- `--lockdown` is stronger and is **deliberately not claimed by the artifact**:
+  topological confinement comes from the internal network and the egress
+  sidecar, neither of which an image contains. The same image run under
+  `--lockdown` earns that column; the image itself never advertises it.
+
+**What it is not.** Packaging adds **no enforcement of any kind**. It changes
+where reviewed bytes are, not what a process holding them may do. It is also
+not a reproducibility claim beyond AgentStack's own layer: the members are
+content-addressed and identical across machines, but a Docker build is not
+bit-reproducible (layer metadata varies per build) and the `FROM` base is a
+floating tag unless the user passes `--from` a digest. And no secret is ever
+baked — the build constructs no resolver at all, the image carries only the
+`${REF}` *names* it will require, and a start-up guard refuses to launch the
+harness until those names are present in the run's own environment.
+
 ### Trust-store mutation logging
 
 **What ships:** every mutation of the machine trust store appends one

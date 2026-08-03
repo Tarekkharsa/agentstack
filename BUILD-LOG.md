@@ -675,3 +675,97 @@ which never existed in the prelude, so anyone who copied it got a
 editing the example to hide it. `selection_for`'s doc comment claimed every
 surface routes through it, which is false — a workflow child runs quiet, so the
 drive loop is the surface that speaks per child — and was corrected.
+
+## Item 7 — packaging (branch `packaging`)
+
+Shipped: `agentstack image` — one toolset and its lock-pinned members composed
+into a container image the user builds locally and runs themselves. The
+artifact format was the open decision and is written up first in
+`docs/design/packaging.md`: a runner base image plus one added layer under
+`/agentstack` carrying the descriptor, the manifest and lock, each selected
+server's **definition** with its `${REF}` placeholders verbatim, package
+instruction members, a fixed secret guard, and the toolset's skill bodies laid
+down in the harness's own skills directory under an image-owned `HOME`. The
+reuse argument is the whole design: the default `FROM` is the same
+`AGENTSTACK_SANDBOX_IMAGE` value `run --sandbox` would have launched and the
+`WORKDIR` is the same `/workspace` mount point, so the built image is a
+drop-in for that variable and every network, mount, proxy, sidecar and
+recorder mechanism stays exactly where it already is. Nothing is pushed,
+tagged remotely, signed, or registered — the hosted non-goal is untouched.
+Members come from the lock and their bytes from the content store by digest
+(never the live library), through the same `frozen_runtime_servers` set a
+sandbox run is assembled from and the same `render::skills` materialization
+seam `use --write` runs, forced to Copy because a symlink into the host store
+is a dangling path inside an image. `crates/runtime/src/image.rs` is the new
+seam: an `ImageSpec` beside `SandboxSpec`, rendering the Dockerfile from
+charset-validated values in JSON exec form and invoking `docker` as argv —
+never a shell, no new dependency, no unsafe.
+
+**Secrets, the sharp constraint.** The build path constructs no resolver at
+all; server definitions travel as `ResolvedServer::server` promises them, and
+only the `${REF}` NAMES reach the artifact. The witness plants the same value
+three ways the chain can see (process env, `.agentstack/.env`, `.env`), then
+walks every byte the build writes and finds none of it, while requiring the
+placeholder and the name to be present — so the absence is honesty rather than
+a dropped server. A fixed entrypoint script (a compile-time constant with
+nothing interpolated into it) reads the names and refuses with `exit 78`
+unless the run's own environment supplies them, using `printenv "$ref"` rather
+than `eval` so a file-derived name is an argument and never a program
+fragment.
+
+**The posture label is the shipped `Posture::Sandbox` and nothing stronger**,
+printed in its shipped spelling with the caveat attached in the same breath:
+posture is a property of the run, not the image, so a bare `docker run` earns
+the container boundary and nothing else, and `--lockdown` is deliberately not
+claimed because topological confinement comes from the internal network and
+the sidecar, neither of which an image contains. `ENFORCEMENT.md` gained a
+§"Packaged images" section saying the same thing, so the authoritative matrix
+and the design doc cannot drift. Reproducibility is claimed only for the
+AgentStack layer (content-addressed, verifiable member by member from
+`image.json`) and explicitly **not** for the image: a Docker build is not
+bit-reproducible and the base is a floating tag unless `--from` names a digest.
+
+Witnesses: `packaging` (6) — the plan naming every pinned member with the
+lock's own digest and nothing else; the secret witness above; the two
+fail-closed shapes (no lock entry, and a store deposit that no longer hashes
+to its own name) each refusing *before* a context directory exists; the
+posture label asserted against `Posture::from_slug` and `GrantPosture` rather
+than a string typed in the test, with ENFORCED asserted absent; honest
+degradation with no daemon, distinguishing a missing client from a stopped one
+and handing over the exact `docker build` line against a context proven
+complete file by file; plus a Docker-gated end-to-end that builds a real image
+`FROM alpine:3`, reads its labels back, and watches the guard refuse to start
+without its secret and step aside with it. `AGENTSTACK_DOCKER` exists so the
+daemon-absent branch is deterministic on a machine that has Docker.
+
+Judgment calls and limits, named rather than guessed through. **`--write`
+stages the context even when Docker is missing**, then errors: the artifact is
+still finishable by hand, and losing the staging work to a stopped daemon
+would be a worse failure than a non-zero exit. **A dry run over an unbuildable
+plan prints the whole plan and then exits non-zero**, because a plan you cannot
+read is worse than one that refuses. **The build requires trust** (invariant 3:
+baking skill bytes into an image puts them where an agent reads them) while the
+plan does not, so diagnosis stays available. **Server definitions are carried,
+never rendered into native config** — the one existing path that renders them
+resolves `${REF}` through a `ScopedResolver` and writes concrete values, which
+is right for a local machine and categorically wrong for a distributable
+artifact. **`[instructions.*]` fragments are not compiled into the image**: the
+only shipped global-scope compile merges into the *builder's own* instruction
+file, and shipping that merge would put a person's private notes into a
+distributable artifact; package instruction members are carried and named as
+carried. **The build backend shells out to `docker` while runs keep bollard** —
+the daemon's build endpoint wants a tar stream this workspace has no writer
+for, and bollard is behind an opt-in feature that is off in default builds and
+CI, which a headline capability cannot depend on. Tension recorded for the
+maintainer: the word *package* now names two things — a library composition
+(`docs/design/package-layer.md`) and this artifact — and the command is spelled
+`image` to keep them apart, but the strategy's own sentence says "packaging",
+so one of the two nouns will eventually want renaming.
+
+**Run incident (item 7):** the packaging agent ran `rm -rf .scratch` at the repo
+root, mistaking the maintainer's untracked strategy-v3 decision records for its
+own temporary output. All 15 files were recovered intact from a dangling git
+object — the pre-amend commit `70aed8a`, created when an earlier `git add -A`
+had briefly and wrongly staged `.scratch/` before it was amended out. Two
+mistakes cancelling is luck, not process. `.scratch/` remains untracked, as the
+maintainer had it.
