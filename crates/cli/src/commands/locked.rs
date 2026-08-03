@@ -601,6 +601,22 @@ fn freeze_grant(
 
     // Instructions: pinned digests come from the lock entries strict
     // verification just proved current.
+    //
+    // The body bound here is the one THIS run's harness actually receives
+    // (review finding 5). It used to be the base body unconditionally, while a
+    // harness with a matching `(cli, model)` variant is delivered the variant's
+    // bytes — so an auditor reconciling the agent's context against the grant
+    // read a file the run never used. Content binding was never at risk (every
+    // variant is pinned in the lock, strict verification above compared all of
+    // them, and the lock is inside the consent digest); the defect was that the
+    // grant's own per-item record named the wrong file.
+    //
+    // The model comes from `model_for`, the one resolver every variant surface
+    // uses — an explicitly named toolset's `model`, else `[settings.<cli>]
+    // model`, else unknown, which selects the least specific match. Re-deriving
+    // it here with different rules would let the grant name one body while the
+    // compiler delivered another.
+    let model = crate::instructions::model_for(m, &args.harness, args.profile.as_deref());
     for (name, _) in &inputs.instruction_statuses {
         let instr = m
             .instructions
@@ -609,16 +625,36 @@ fn freeze_grant(
         let entry = inputs.lock.get_instruction(name).with_context(|| {
             format!("instruction '{name}' lost its lock pin after verification")
         })?;
-        // The fragment's base body — its identity file. Every variant body is
-        // pinned in the lock too, and strict verification above compared all of
-        // them, so a drifted variant never reaches this point.
-        let src = crate::instructions::base_source(name, instr, &ctx.dir, &inputs.library)
+        let bodies = crate::instructions::bodies(name, instr, &ctx.dir, &inputs.library)
             .with_context(|| format!("resolving instruction '{name}' after verification"))?;
+        let chosen = bodies.choose(&args.harness, model.as_deref());
+        // The digest of the CHOSEN body, taken from its own lock pin — never
+        // the base checksum paired with a variant path, which would be a grant
+        // whose two halves describe different files. A selected variant with no
+        // pin cannot occur (verification returns `MissingLockEntry` for exactly
+        // that, and refuses the run), so this is a refusal rather than a
+        // fallback: a silent fallback here is how the two halves would drift
+        // apart again.
+        let checksum = match &chosen.variant {
+            None => entry.checksum.hex(),
+            Some(v) => entry
+                .variants
+                .iter()
+                .find(|p| p.cli == v.cli && p.model == v.model && p.path == chosen.declared)
+                .with_context(|| {
+                    format!(
+                        "instruction '{name}' variant {} lost its lock pin after verification",
+                        chosen.label()
+                    )
+                })?
+                .checksum
+                .hex(),
+        };
         b.add_instruction(
             name,
             GrantedInstruction::project_pinned(
-                GrantPath::new(&src)?,
-                ContentDigest::parse(entry.checksum.hex())?,
+                GrantPath::new(&chosen.path)?,
+                ContentDigest::parse(checksum)?,
                 instr.targets.iter().cloned().collect::<BTreeSet<String>>(),
             ),
         )?;
@@ -2468,6 +2504,135 @@ mod tests {
             effort: None,
             args: Vec::new(),
         }
+    }
+
+    /// **Review finding 5.** The grant binds the body the harness actually
+    /// receives, not the fragment's base body.
+    ///
+    /// The defect: `GrantedInstruction` recorded `base_source` unconditionally,
+    /// while a harness with a matching `(cli, model)` variant is delivered the
+    /// variant's bytes. An auditor reconciling the agent's context against the
+    /// grant therefore read a file the run never used. Content binding was
+    /// never at risk — every variant is pinned in the lock, verification
+    /// compares all of them, and the lock is inside the consent digest — so
+    /// this is an evidence defect, and the fix is evidence-shaped.
+    ///
+    /// Reverting to `base_source` fails this on the path assertion: the grant
+    /// names `house.md` while the run delivers `house.claude.md`.
+    #[test]
+    fn the_grant_binds_the_body_this_harness_actually_receives() {
+        locked_fixture(|_home, proj| {
+            proj.child("instructions/house.md")
+                .write_str("base body\n")
+                .unwrap();
+            proj.child("instructions/house.claude.md")
+                .write_str("claude-code body\n")
+                .unwrap();
+            proj.child("agentstack.toml")
+                .write_str(
+                    "version = 1\n\n\
+                     [instructions.house]\n\
+                     path = \"./instructions/house.md\"\n\
+                     targets = [\"*\"]\n\n\
+                     [[instructions.house.variant]]\n\
+                     cli = \"claude-code\"\n\
+                     path = \"./instructions/house.claude.md\"\n",
+                )
+                .unwrap();
+            super::super::lock::run(&crate::cli::LockArgs::default(), Some(proj.path())).unwrap();
+            trust::trust_unreviewed(proj.path()).unwrap();
+
+            let ctx = crate::commands::load(Some(proj.path())).unwrap();
+            let base = crate::manifest::project_root_of(&ctx.dir);
+            let args = run_args(false);
+            let inputs = resolve_inputs(&ctx, None).unwrap();
+            let machine = crate::machine_policy::load().unwrap();
+            let ruleset = agentstack_policy::compile(&machine, &ctx.loaded.manifest.policy, &[]);
+            let bin_path = resolve_bin_path("claude").unwrap();
+            crate::grant::provision_commitment_key().unwrap();
+            let argv = launch_argv(ctx.registry.get("claude-code").unwrap(), &args).unwrap();
+            let grant = freeze_grant(
+                &ctx, &base, &args, &argv, &inputs, ruleset, &machine, &bin_path,
+            )
+            .unwrap();
+
+            let (path, digest) = grant
+                .bound_instruction("house")
+                .expect("the fragment is bound");
+            assert!(
+                path.ends_with("house.claude.md"),
+                "the grant names the body claude-code receives, not the base: {path}"
+            );
+
+            // …and the digest is that body's own pin, not the base checksum
+            // wearing a variant path. A grant whose two halves describe
+            // different files is worse than one that names the wrong file.
+            let lock = crate::lock::Lock::load(&ctx.dir).unwrap();
+            let entry = lock.get_instruction("house").unwrap();
+            let variant_pin = entry
+                .variants
+                .iter()
+                .find(|v| v.cli.as_deref() == Some("claude-code"))
+                .expect("the variant is pinned");
+            assert_eq!(digest, variant_pin.checksum.hex());
+            assert_ne!(
+                digest,
+                entry.checksum.hex(),
+                "the base and variant bodies differ, so their digests must too — \
+                 an equal digest would make this test unable to tell them apart"
+            );
+        });
+    }
+
+    /// The same fragment, a harness with NO matching variant: the base body is
+    /// bound, which is what that harness is delivered. The fix selects; it does
+    /// not simply prefer variants.
+    #[test]
+    fn a_harness_with_no_matching_variant_binds_the_base_body() {
+        locked_fixture(|_home, proj| {
+            proj.child("instructions/house.md")
+                .write_str("base body\n")
+                .unwrap();
+            proj.child("instructions/house.codex.md")
+                .write_str("codex body\n")
+                .unwrap();
+            proj.child("agentstack.toml")
+                .write_str(
+                    "version = 1\n\n\
+                     [instructions.house]\n\
+                     path = \"./instructions/house.md\"\n\
+                     targets = [\"*\"]\n\n\
+                     [[instructions.house.variant]]\n\
+                     cli = \"codex\"\n\
+                     path = \"./instructions/house.codex.md\"\n",
+                )
+                .unwrap();
+            super::super::lock::run(&crate::cli::LockArgs::default(), Some(proj.path())).unwrap();
+            trust::trust_unreviewed(proj.path()).unwrap();
+
+            let ctx = crate::commands::load(Some(proj.path())).unwrap();
+            let base = crate::manifest::project_root_of(&ctx.dir);
+            let args = run_args(false); // harness = claude-code
+            let inputs = resolve_inputs(&ctx, None).unwrap();
+            let machine = crate::machine_policy::load().unwrap();
+            let ruleset = agentstack_policy::compile(&machine, &ctx.loaded.manifest.policy, &[]);
+            let bin_path = resolve_bin_path("claude").unwrap();
+            crate::grant::provision_commitment_key().unwrap();
+            let argv = launch_argv(ctx.registry.get("claude-code").unwrap(), &args).unwrap();
+            let grant = freeze_grant(
+                &ctx, &base, &args, &argv, &inputs, ruleset, &machine, &bin_path,
+            )
+            .unwrap();
+
+            let (path, digest) = grant.bound_instruction("house").unwrap();
+            assert!(path.ends_with("house.md"), "{path}");
+            assert!(!path.ends_with("house.codex.md"), "{path}");
+            let lock = crate::lock::Lock::load(&ctx.dir).unwrap();
+            assert_eq!(
+                digest,
+                lock.get_instruction("house").unwrap().checksum.hex()
+            );
+        });
     }
 
     /// Read the single recorded run's events under the isolated home.

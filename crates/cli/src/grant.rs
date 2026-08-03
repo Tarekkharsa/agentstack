@@ -1155,6 +1155,24 @@ impl AuthorityGrant {
     /// Project this grant into its bridge handoff artifact. Lives here so the
     /// selection of what crosses the process boundary is a reviewed, explicit
     /// list — never a blanket `Serialize` on the sealed grant.
+    /// The path and pinned digest of one bound instruction.
+    ///
+    /// Read-only evidence for the witnesses that must prove WHICH body a run
+    /// bound (review finding 5) — `cfg(test)`, so it adds no production
+    /// surface, and it grants nothing either way: it reads what was already
+    /// frozen.
+    #[cfg(test)]
+    pub(crate) fn bound_instruction(&self, name: &str) -> Option<(&str, &str)> {
+        self.instructions.get(name).map(|i| {
+            let digest = match &i.binding {
+                InstructionBinding::ProjectPinned(d) | InstructionBinding::MachineOwned(d) => {
+                    d.hex()
+                }
+            };
+            (i.path.as_str(), digest)
+        })
+    }
+
     pub(crate) fn handoff(&self, envelope: &RunEnvelope) -> GrantHandoff {
         let servers = self
             .servers
