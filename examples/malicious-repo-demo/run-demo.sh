@@ -2,16 +2,25 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # AgentStack — the malicious-repo demo, as a CI-grade proof.
 #
-# Runs the SAME hostile bundle three ways and ASSERTS the outcome of each:
+# Runs the SAME hostile bundle four ways and ASSERTS the outcome of each:
 #
 #   1. Unprotected              → the server phones home; the sink RECEIVES the
 #                                 planted secret. (The threat is real.)
 #   2. AgentStack, untrusted    → the server is inert; the sink stays EMPTY.
 #                                 (Nothing runs until you review it.)
-#   3. AgentStack, trusted, but
-#      the machine firewall      → the exfil tool is DENIED and audited; the
-#      denies the exfil tool        sink stays EMPTY. (No repo can loosen your
-#                                    own machine policy.)
+#   3. AgentStack, trusted, but → the toolset fence REFUSES the call and audits
+#      nothing leased             it; the sink stays EMPTY. (Trusting a repo is
+#                                 not selecting its capabilities.)
+#   4. AgentStack, trusted, the
+#      toolset leased, and       → the exfil tool is DENIED and audited; the
+#      the machine firewall        sink stays EMPTY. (No repo can loosen your
+#      denies the exfil tool       own machine policy.)
+#
+# 3 and 4 are two different refusals, and the demo asserts which one fired:
+# the fence refuses a name nothing has selected yet, the firewall refuses a
+# tool that IS exposed. Only 4 exercises `[policy.tools]`, and it can only do
+# so with the toolset leased — without the lease the fence answers first and
+# the firewall is never reached.
 #
 # It exits nonzero and prints FAIL on any mismatch, so it is safe to run
 # unattended: the demo either provably works or fails loudly.
@@ -114,12 +123,13 @@ else
   bad "an untrusted repo still phoned home"
 fi
 
-# ── 3) PROTECTED, TRUSTED + machine firewall ─────────────────────────────────
-printf '\n\033[1m3) Trusted, but the machine firewall denies the exfil tool\033[0m\n'
+# ── 3) PROTECTED, TRUSTED, nothing leased — the toolset fence ────────────────
+printf '\n\033[1m3) Trusted, but nothing leased: the toolset fence refuses\033[0m\n'
 pause
 reset_sink
 # the user's OWN machine policy — which no repo can loosen — denies `exfiltrate`
-# on every server (the rename-proof "*" key).
+# on every server (the rename-proof "*" key). Written now, exercised in 4:
+# this step is refused before any policy question is asked.
 cat > "$AGENTSTACK_HOME/agentstack.toml" <<'EOF'
 version = 1
 [policy.tools]
@@ -127,12 +137,38 @@ version = 1
 EOF
 consent=$("$AS" trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')
 "$AS" trust . --yes --consented-digest "$consent" > /dev/null 2>&1
+# The bundle declares a toolset ([profiles.default]), so trusting it exposes
+# nothing on its own — a lease has to select the toolset first.
 printf '%s\n%s\n' "$INIT" \
   '{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"demo__exfiltrate","arguments":{}}}' \
   | "$AS" mcp --auto-project > /dev/null 2>&1 || true
 sleep 0.3
 LAST="$(tail -1 "$AGENTSTACK_HOME/audit/calls.jsonl" 2>/dev/null || true)"
-if grep -q 'denied' <<< "$LAST"; then
+if grep -q '"fence"' <<< "$LAST" && grep -q 'denied' <<< "$LAST"; then
+  ok "the fence refused the call and wrote it to the audit log as denied"
+else
+  bad "expected a denied fence audit record; got: ${LAST:-<none>}"
+fi
+if ! sink_received; then
+  ok "the sink stayed empty — nothing had selected the server, so none ran"
+else
+  bad "an unleased repo still phoned home"
+fi
+
+# ── 4) PROTECTED, TRUSTED, LEASED + machine firewall ─────────────────────────
+printf '\n\033[1m4) Leased, and the machine firewall denies the exfil tool\033[0m\n'
+pause
+reset_sink
+# Opening the lease is what EXPOSES the toolset's server — which is the only
+# way the `[policy.tools]` firewall can be the thing that refuses. Same
+# connection, so the lease is still open when the exfil call arrives.
+printf '%s\n%s\n%s\n' "$INIT" \
+  '{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"agentstack_lease_open","arguments":{"profile":"default"}}}' \
+  '{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"demo__exfiltrate","arguments":{}}}' \
+  | "$AS" mcp --auto-project > /dev/null 2>&1 || true
+sleep 0.3
+LAST="$(tail -1 "$AGENTSTACK_HOME/audit/calls.jsonl" 2>/dev/null || true)"
+if grep -q 'denied' <<< "$LAST" && ! grep -q '"fence"' <<< "$LAST"; then
   ok "the call was firewalled and written to the audit log as denied"
 else
   bad "expected a denied audit record; got: ${LAST:-<none>}"

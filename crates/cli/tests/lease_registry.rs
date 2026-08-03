@@ -420,6 +420,134 @@ fn opening_a_lease_exposes_exactly_that_toolset() {
     cleanup();
 }
 
+/// Every `calls.jsonl` row this sandbox's audit log holds.
+fn audit_rows(home: &Path) -> Vec<Value> {
+    std::fs::read_to_string(home.join("audit/calls.jsonl"))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .collect()
+}
+
+/// The fence is a refusal, and a refusal must leave evidence.
+///
+/// Closing the false precondition made the fenced gateway genuinely empty,
+/// which is the stronger answer — but it also routed the call past the policy
+/// firewall's denial record and into a bare `unknown tool` error. That made
+/// the fence the one refusal shape in the product that blocked something and
+/// wrote nothing down: no audit row for a reviewer, and a sentence that told
+/// the caller a declared capability did not exist rather than that it was not
+/// selected yet.
+#[test]
+fn a_fenced_call_to_a_declared_server_is_refused_and_recorded() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = sandbox_home(tmp.path());
+    let proj = two_toolset_project(tmp.path());
+
+    let mut conn = Connection::open(&["mcp", "--auto-project"], &proj, &home);
+    conn.request(1, "initialize", json!({}));
+
+    // `srva` IS declared, and toolset `alpha` selects it — it is fenced, not
+    // absent. That distinction is the whole point of this witness.
+    let frame = conn.request(
+        2,
+        "tools/call",
+        json!({ "name": "srva__alpha_ping", "arguments": {} }),
+    );
+    assert_eq!(
+        frame["result"]["isError"],
+        json!(true),
+        "the fenced call must be refused: {frame}"
+    );
+    let said = frame["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+
+    // (1) a refusal, in the seatbelt's shape.
+    assert!(said.contains("blocked:"), "not a seatbelt sentence: {said}");
+    assert!(
+        said.contains("srva") && said.contains("alpha_ping"),
+        "the refusal names what was refused: {said}"
+    );
+    assert!(said.contains("nothing ran"), "{said}");
+
+    // (3) and the one command that fixes it, naming the toolset that selects
+    // the server — not `[policy.tools]`, which denied nothing here.
+    assert!(
+        said.contains("agentstack_lease_open"),
+        "the fix is opening a lease: {said}"
+    );
+    assert!(
+        said.contains("profile=alpha"),
+        "and it names the toolset that selects this server: {said}"
+    );
+
+    conn.close();
+
+    // (2) the evidence. One row, denied, filed under the fence's own tag so a
+    // reader cannot mistake it for a `[policy.tools]` denial.
+    let fenced: Vec<Value> = audit_rows(&home)
+        .into_iter()
+        .filter(|r| r["tool"] == json!("fence"))
+        .collect();
+    assert_eq!(
+        fenced.len(),
+        1,
+        "exactly one fence record expected, got {:#?}",
+        audit_rows(&home)
+    );
+    assert_eq!(fenced[0]["outcome"], json!("denied"), "{:#?}", fenced[0]);
+    assert_eq!(fenced[0]["server"], json!("srva"), "{:#?}", fenced[0]);
+
+    cleanup();
+}
+
+/// The other half of the distinction, and the reason the record is scoped to
+/// declared names: a tool nothing declares is a typo, not a security event.
+/// Recording those would let any caller write unbounded rows into the shared
+/// audit log simply by inventing names.
+#[test]
+fn an_undeclared_tool_name_is_refused_but_records_nothing() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = sandbox_home(tmp.path());
+    let proj = two_toolset_project(tmp.path());
+
+    let mut conn = Connection::open(&["mcp", "--auto-project"], &proj, &home);
+    conn.request(1, "initialize", json!({}));
+    let frame = conn.request(
+        2,
+        "tools/call",
+        json!({ "name": "nosuch__whatever", "arguments": {} }),
+    );
+    assert_eq!(
+        frame["result"]["isError"],
+        json!(true),
+        "an unknown name is still an error: {frame}"
+    );
+    let said = frame["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    assert!(
+        said.contains("unknown tool"),
+        "an undeclared name keeps the plain error: {said}"
+    );
+
+    conn.close();
+    assert!(
+        audit_rows(&home)
+            .iter()
+            .all(|r| r["tool"] != json!("fence")),
+        "an undeclared name must not write to the audit log: {:#?}",
+        audit_rows(&home)
+    );
+
+    cleanup();
+}
+
 // ── 5. gateway unavailable ───────────────────────────────────────────────────
 
 /// Every path under `root`, relative and sorted — the "was anything written?"

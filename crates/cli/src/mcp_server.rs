@@ -590,6 +590,87 @@ fn declares_toolsets(base: &Path) -> bool {
         .unwrap_or(false)
 }
 
+/// The toolset fence's own refusal, for a `<server>__<tool>` call the gateway
+/// did not own.
+///
+/// The fence (see [`AutoProject::activate`]) gives a toolset-declaring project
+/// with no lease open an empty gateway. That is the stronger answer, but on
+/// its own it is a *silent* one: dispatch finds no upstream, the call falls
+/// through to `unknown tool`, and the one refusal shape that leaves no
+/// evidence is the one the fence produces. Every other refusal the user can
+/// meet — trust, `[policy.tools]`, egress, pin — is written to the audit log.
+/// This closes that hole using the same seatbelt, not a second mechanism: no
+/// call is dispatched here and no authority is constructed, only the sentence
+/// and the record that the refusal already deserved.
+///
+/// **Declared, not merely unknown.** Evidence is written only when the project
+/// declares `server` somewhere — inline or in a toolset. Then the refusal is
+/// security-relevant: a real capability exists and the fence is what stands
+/// between the caller and it. A name the project does not declare is a typo,
+/// keeps today's plain `unknown tool` error, and records nothing — recording
+/// every invented name would hand any caller an unbounded write into
+/// `calls.jsonl`.
+///
+/// `None` (no refusal, no record) whenever the fence is not the answer: an
+/// un-namespaced name, no project, a project that declares no toolsets at all
+/// (nothing to select, so a missing server there is a *skip* that already
+/// recorded its own reason), or a server nothing declares.
+///
+/// Returns the seatbelt sentence, already recorded. Like [`crate::seatbelt`]'s
+/// other dispatch-path callers it uses `record` rather than `refuse`: the
+/// sentence goes back to the harness, which is where the human reads it.
+fn fence_refusal(
+    name: &str,
+    dir: Option<&Path>,
+    gateway: &crate::gateway::Gateway,
+) -> Option<String> {
+    let (server, tool) = name.split_once("__")?;
+    let ctx = crate::commands::load(Some(dir?)).ok()?;
+    let manifest = &ctx.loaded.manifest;
+    if manifest.profiles.is_empty() {
+        return None;
+    }
+    if !crate::resolve::runtime_server_names(manifest, None)
+        .iter()
+        .any(|n| n == server)
+    {
+        return None;
+    }
+    // Both identifiers came off the wire or out of the manifest — hostile
+    // input, invariant 7 — so they are bounded before they reach a terminal or
+    // a log, exactly as the trust refusal bounds its own.
+    let subject = crate::seatbelt::bounded_reason(server);
+    let attempted = format!("call {}", crate::seatbelt::bounded_reason(tool));
+    let why = "this project fences its servers behind toolsets, and no open lease selects one that exposes it";
+    // The toolsets are listed in manifest order, so the name suggested is
+    // stable across calls. A declared server that no toolset selects has no
+    // lease to open, and saying so beats naming a toolset that would not help.
+    let next_step = match manifest
+        .profiles
+        .iter()
+        .find(|(_, p)| p.servers.iter().any(|s| s == server))
+    {
+        Some((toolset, _)) => format!(
+            "open a lease for the toolset that selects it: `agentstack_lease_open` profile={}",
+            crate::seatbelt::bounded_reason(toolset)
+        ),
+        None => "no toolset selects this server — add it to one in agentstack.toml, then open a lease for that toolset".to_string(),
+    };
+    let denial = crate::seatbelt::Denial {
+        family: crate::seatbelt::Family::Fence,
+        subject: &subject,
+        attempted: &attempted,
+        why,
+        next_step: &next_step,
+    };
+    crate::seatbelt::record(
+        &denial,
+        Some(ctx.dir.display().to_string()),
+        gateway.run_id(),
+    );
+    Some(denial.sentence())
+}
+
 /// Session state for `--auto-project`: which project this MCP session belongs
 /// to, resolved once per session (a new project means a new harness session,
 /// which means a fresh bridge process — no cwd watching needed).
@@ -1122,6 +1203,19 @@ fn handle_with_lease(
                         json!({ "content": [{ "type": "text", "text": crate::text::sanitize_block(&format!("Error: {e}")) }], "isError": true }),
                     ),
                 });
+            }
+            // A namespaced name no upstream held. When the project declares
+            // that server and the toolset fence is why it is not exposed, the
+            // refusal is recorded and says how to open the fence. The trust
+            // gate empties the gateway too, and its own note already explains
+            // that — a fence sentence there would name the wrong fix.
+            if trust_note.is_none() {
+                if let Some(sentence) = fence_refusal(name, dir, gateway) {
+                    return Some(result(
+                        id,
+                        json!({ "content": [{ "type": "text", "text": crate::text::sanitize_block(&format!("Error: {sentence}")) }], "isError": true }),
+                    ));
+                }
             }
             let (text, is_error) = match run_tool_with_lease(name, &args, dir, trust_note, lease) {
                 Ok(t) => (t, false),
