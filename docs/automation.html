@@ -199,7 +199,7 @@
       </li>
       <li><a href="workflows.html">Workflows</a>
       </li>
-      <li><a href="reference.html#the-central-library">Central library</a>
+      <li><a href="reference.html#the-library-linked-source-folders">Library sources</a>
       </li>
       <li><a href="concepts.html#delivery-modes">Delivery modes</a>
       </li>
@@ -286,7 +286,7 @@ error: no agentstack manifest in /var/empty
 $ echo $?
 1</code></pre>
 <h2 id="reads">Reads<a class="hlink" href="#reads" aria-label="Link to this section">#</a></h2>
-<p>Every command below is read-only: it does not write a file, render a config, resolve a <code>${REF}</code> into a value, or start a process — with one deliberate, named exception noted in its row.</p>
+<p>Every command below is read-only: it does not write a file, render a config, resolve a <code>${REF}</code> into a value, or start a server — with two deliberate, named exceptions noted in their rows (<code>doctor --probe</code> starts each stdio server and stops it again; <code>lease status</code> runs <code>/bin/ps</code> on macOS to read a process start time).</p>
 <div class="tblwrap"><table>
 <thead><tr><th>Command</th><th>Contract name</th><th>Body</th></tr></thead><tbody>
 <tr><td><code>agentstack status --json</code></td><td><code>json-reads-v1</code></td><td><code>version</code>, <code>clis_detected</code>, <code>manifest</code>, <code>project</code>, <code>next_action</code></td></tr>
@@ -308,11 +308,22 @@ $ echo $?
 <tr><td><code>agentstack undo --json</code></td><td><code>json-reads-v1</code></td><td><code>entries[]</code> (newest first) — the same recorded writes <code>restore --json</code> lists, keyed for timeline display</td></tr>
 <tr><td><code>agentstack workflow list --json</code></td><td><code>workflow-observe-v1</code></td><td><code>workflows[]</code> with per-entry trust and lock state</td></tr>
 <tr><td><code>agentstack workflow list --json</code></td><td><code>workflow-serial-roles-v1</code></td><td>per-entry <code>serial_roles</code></td></tr>
+<tr><td><code>agentstack workflow list --json</code> / <code>workflow explain --json</code></td><td><code>workflow-role-selection-v1</code></td><td>per-entry <code>role_details[]</code> — each role's <code>harness</code>, <code>model</code>, <code>effort</code>, <code>serial</code>, and any declared value that would not reach the child. <code>explain</code> carries the envelope too; it is the deeper per-workflow read and <strong>re-gates on trust</strong></td></tr>
 <tr><td><code>agentstack workflow runs --json</code></td><td><code>workflow-observe-v1</code></td><td><code>runs[]</code> from the machine-global runs directory</td></tr>
+<tr><td><code>agentstack lease status --json</code></td><td><code>lease-status-v1</code></td><td><code>leases[]</code> — the machine-level runtime lease registry, each row's <code>liveness</code> derived at read time from the PID and that process's start time. <code>unknown</code> never means live. Writes nothing; on macOS it does run <code>/bin/ps</code> per recorded PID to read a start time, because there is no <code>/proc</code> to read instead</td></tr>
+<tr><td><code>agentstack delivery --json</code></td><td><code>delivery-routing-v1</code></td><td><code>default</code> plus one <code>harnesses[]</code> row per targeted CLI with its per-kind <code>routes[]</code> — where bytes go, never whether anything is live</td></tr>
+<tr><td><code>agentstack image --json</code></td><td><code>image-plan-v1</code></td><td>the packaging plan: every pinned <code>members[]</code> entry, <code>required_secrets</code> (names only), <code>blockers</code>, <code>buildable</code></td></tr>
+<tr><td><code>agentstack status --json</code></td><td><code>library-sources-v1</code></td><td><code>project.shadowed_names[]</code> — one sentence per capability name more than one linked library source holds. Always present, <code>[]</code> when nothing collides</td></tr>
+<tr><td><code>agentstack status --json</code></td><td><code>instruction-channels-v1</code></td><td><code>project.instruction_channels[]</code> — one row per targeted CLI, including the ones with no instruction channel at all</td></tr>
+<tr><td><code>agentstack status --json</code></td><td><code>package-members-v1</code></td><td><code>project.packages[]</code> — the effective member set this project pinned, after its overrides. Inserted only when a package is selected</td></tr>
+<tr><td><code>agentstack status --json</code></td><td><code>needs-your-yes-v1</code></td><td><code>project.needs_your_yes</code> — present only when calls were actually refused here since the last yes. Carries a count and the fix, never a card</td></tr>
+<tr><td><code>agentstack status --json</code></td><td><code>update-offer-v1</code></td><td><code>project.updates</code> — an offer, never a currency claim: the check is offline, so a missing key is not "up to date"</td></tr>
 <tr><td><code>agentstack init --plan</code></td><td><code>init-plan</code></td><td>the detection plan, with <code>plan_digest</code></td></tr>
 <tr><td><code>agentstack trust --preview</code></td><td><code>trust-preview</code></td><td>the full reviewed surface, with <code>surface_digest</code></td></tr>
 <tr><td><code>agentstack trust --preview</code></td><td><code>trust-server-blockers-v1</code></td><td>known server/executable blockers, each with a <code>fix</code> of <code>agentstack lock</code> or <code>edit-manifest</code></td></tr>
 <tr><td><code>agentstack trust --preview</code></td><td><code>trust-review-card-v1</code></td><td>the per-item review card a graphical client renders — the first-time surface and, on a re-gate, the changed-lines diff</td></tr>
+<tr><td><code>agentstack trust --preview</code></td><td><code>trust-card-diff-v1</code></td><td><code>review.items[]</code> and <code>review.removed[]</code> — the card itself, structured, with a <code>change</code> marker per item</td></tr>
+<tr><td><code>agentstack trust --preview</code></td><td><code>trust-card-groups-v1</code></td><td><code>review.groups[]</code>, holding <strong>indices</strong> into <code>review.items</code>, plus <code>review.question</code> — the one closing question. There is no per-group or per-item question, accept, or block, and there never will be</td></tr>
 <tr><td><code>agentstack library-index</code></td><td><code>profiles-edit-v1</code></td><td>the central-library catalog (skills + servers)</td></tr>
 </tbody></table></div>
 <h2 id="consent-bound-actions">Consent-bound actions<a class="hlink" href="#consent-bound-actions" aria-label="Link to this section">#</a></h2>
@@ -406,7 +417,7 @@ $ echo $?
 <li><code>trust</code> is three booleans, not a rendered sentence. <code>runs_code</code> is the one to filter on; for <code>kind: "extension"</code> it means in-process code at full user permission, ungoverned at runtime.</li>
 <li><code>add_command</code> is <code>null</code> when there is nothing to offer — either <code>in_manifest</code> is already true, or it is an extension, which is referenced by name in <code>[extensions.*]</code> rather than added.</li>
 <li>Descriptions ship whole. The 70-column truncation is for a terminal.</li>
-<li>This read reaches the <strong>network</strong>: it queries the official MCP Registry alongside your central library and the embedded catalog. It writes nothing.</li>
+<li>This read reaches the <strong>network</strong>: it queries the official MCP Registry alongside your linked library sources and the embedded catalog. It writes nothing.</li>
 </ul>
 <h3 id="adapters-list---json"><code>adapters list --json</code><a class="hlink" href="#adapters-list---json" aria-label="Link to this section">#</a></h3>
 <pre class="block"><code>{
@@ -450,7 +461,7 @@ $ echo $?
 <li><code>agentstack explain &lt;name&gt; --json</code></li>
 <li><code>agentstack report run --json</code>, <code>report runs --json</code>, <code>report calls --json</code>, <code>report wire --json</code></li>
 <li><code>agentstack optimize --json</code></li>
-<li><code>agentstack workflow report --json</code>, <code>workflow explain --json</code></li>
+<li><code>agentstack workflow report --json</code> (<code>workflow explain --json</code> left this list when it gained the envelope and <code>workflow-role-selection-v1</code>)</li>
 </ul>
 <h2 id="guarantees">Guarantees<a class="hlink" href="#guarantees" aria-label="Link to this section">#</a></h2>
 <ul>

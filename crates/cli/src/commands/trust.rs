@@ -39,6 +39,15 @@ struct ReviewDiff {
     seen: HashSet<(String, String)>,
     /// The surface being reviewed now — handed to `trust_with_snapshot`.
     current: Vec<SurfaceItem>,
+    /// The marker each `current` item was rendered with, index-aligned.
+    ///
+    /// Kept beside the surface rather than inside `SurfaceItem` on purpose:
+    /// `SurfaceItem` is a `trust`-crate serde record that a re-gate diffs
+    /// against, and a marker is presentation — it describes *this* review, not
+    /// the consented surface, so persisting it would put display state into the
+    /// thing consent is bound to. The grouped detail body tallies these; it
+    /// never recomputes what changed.
+    marks: Vec<&'static str>,
 }
 
 impl ReviewDiff {
@@ -60,6 +69,7 @@ impl ReviewDiff {
             prior_order: order,
             seen: HashSet::new(),
             current: Vec::new(),
+            marks: Vec::new(),
         }
     }
 
@@ -91,16 +101,20 @@ impl ReviewDiff {
             identity: identity.to_string(),
             pin,
         });
-        let Some(prior) = &self.prior else {
-            return "  ";
+        let marker = match &self.prior {
+            None => "  ",
+            Some(prior) => {
+                let key = (kind.to_string(), name.to_string());
+                self.seen.insert(key.clone());
+                match prior.get(&key) {
+                    None => "+ ",
+                    Some(prev) if prev != identity => "~ ",
+                    Some(_) => "  ",
+                }
+            }
         };
-        let key = (kind.to_string(), name.to_string());
-        self.seen.insert(key.clone());
-        match prior.get(&key) {
-            None => "+ ",
-            Some(prev) if prev != identity => "~ ",
-            Some(_) => "  ",
-        }
+        self.marks.push(marker);
+        marker
     }
 
     /// Prior items no marker was requested for — removed since the last trust.
@@ -110,6 +124,79 @@ impl ReviewDiff {
             .iter()
             .filter(|it| !self.seen.contains(&(it.kind.clone(), it.name.clone())))
             .collect()
+    }
+
+    /// Tally one capability kind's markers, for that group's header line.
+    ///
+    /// Purely a fold over the markers already handed to the per-item lines, so
+    /// a group header can never claim a change the lines below it do not show.
+    fn group_counts(&self, kind: &str) -> GroupCounts {
+        let mut counts = GroupCounts::default();
+        for (item, marker) in self.current.iter().zip(&self.marks) {
+            if item.kind != kind {
+                continue;
+            }
+            match *marker {
+                "+ " => counts.added += 1,
+                "~ " => counts.changed += 1,
+                _ => counts.unchanged += 1,
+            }
+        }
+        counts.removed = self.removed().iter().filter(|it| it.kind == kind).count();
+        counts
+    }
+}
+
+/// One capability group's change tally: how many of its items were added,
+/// changed, left alone, or dropped since the last consent.
+#[derive(Default, Clone, Copy, PartialEq, Eq, Debug)]
+struct GroupCounts {
+    added: usize,
+    changed: usize,
+    unchanged: usize,
+    removed: usize,
+}
+
+impl GroupCounts {
+    fn total(&self) -> usize {
+        self.added + self.changed + self.unchanged
+    }
+
+    /// The group's own marker, the same three words the per-item `change`
+    /// markers use: `added` when the whole group is new, `changed` when
+    /// anything moved, `unchanged` when nothing did.
+    fn change(&self) -> &'static str {
+        if self.changed == 0 && self.removed == 0 && self.added == 0 {
+            "unchanged"
+        } else if self.changed == 0 && self.removed == 0 && self.unchanged == 0 {
+            "added"
+        } else {
+            "changed"
+        }
+    }
+
+    /// The trailing summary for a terminal group header, or `None` when there
+    /// is nothing to say — a first-ever trust (flat mode) has no prior surface
+    /// to compare against, and an untouched group should not be decorated with
+    /// a tally that only restates "nothing happened".
+    fn header_suffix(&self, diffing: bool) -> Option<String> {
+        if !diffing || self.change() == "unchanged" {
+            return None;
+        }
+        let mut parts = Vec::new();
+        if self.added > 0 {
+            parts.push(format!("+{} added", self.added));
+        }
+        if self.changed > 0 {
+            parts.push(format!("~{} changed", self.changed));
+        }
+        if self.unchanged > 0 {
+            parts.push(format!("{} unchanged", self.unchanged));
+        }
+        if self.removed > 0 {
+            parts.push(format!("-{} removed", self.removed));
+        }
+        Some(format!("   [{}]", parts.join(", ")))
     }
 }
 
@@ -138,7 +225,12 @@ const INSTRUCTION_IDENTITY: &str = "";
 /// A stdio server's identity is the command line it runs — the thing the trust
 /// gate exists for. Not the pin or origin annotation: pin drift is a hard
 /// blocker of its own.
-fn server_stdio_identity(server: &crate::manifest::Server) -> String {
+///
+/// `pub(crate)` for `init`, which records a reviewed surface of its own: the
+/// two baselines must be built by the SAME function, or the first `agentstack
+/// trust` after an import would mark every server `~ changed` on a formatting
+/// difference alone.
+pub(crate) fn server_stdio_identity(server: &crate::manifest::Server) -> String {
     format!(
         "{} {}",
         server.command.as_deref().unwrap_or("?"),
@@ -151,7 +243,8 @@ fn server_stdio_identity(server: &crate::manifest::Server) -> String {
 /// Borrowed from `server` rather than cloned so a caller prints exactly the
 /// string it marks; the returned `&str` lives as long as the borrow of the
 /// server it came from, which outlasts every use in both walks.
-fn server_http_identity(server: &crate::manifest::Server) -> &str {
+/// Shared with `init` for the reason [`server_stdio_identity`] gives.
+pub(crate) fn server_http_identity(server: &crate::manifest::Server) -> &str {
     server.url.as_deref().unwrap_or("?")
 }
 
@@ -246,6 +339,38 @@ fn settings_identity(value: &serde_json::Value) -> String {
 fn policy_identity(p: &crate::manifest::Policy) -> String {
     policy_requested_lines(p).join("\n")
 }
+
+/// The capability kinds the card groups by, with the plural label each group
+/// header uses, in the order both walks render them.
+///
+/// One list, so the terminal's group order and the payload's `review.groups`
+/// order cannot diverge: a panel that showed the same review in a different
+/// order would be telling a second story about one consent moment. A kind
+/// missing from this list is not dropped — `CardWalk::groups` appends any
+/// unlisted kind it meets, so a ninth capability kind lands in the grouping
+/// the day it starts marking, unlabelled rather than invisible.
+const CARD_GROUP_ORDER: &[(&str, &str)] = &[
+    ("server", "servers"),
+    ("secrets", "secrets"),
+    ("executable", "local executable content"),
+    ("extension", "native extensions"),
+    ("workflow", "workflows"),
+    ("skill", "skills"),
+    ("instruction", "instruction fragments"),
+    ("hook", "hooks"),
+    ("settings", "settings"),
+    ("policy", "requested policy"),
+];
+
+/// The one closing question the card asks, carried in the payload so a panel
+/// renders the same single yes the terminal does.
+///
+/// It is a constant, and there is exactly one of it, because "one card, one
+/// yes" is the contract: grouping the detail body per capability must not
+/// multiply the moments a human commits to something. The answer is given by
+/// `agentstack trust --yes --consented-digest <surface_digest>` — bound to the
+/// bytes this payload described, never to a group or an item.
+const CARD_QUESTION: &str = "Trust this project — allow the capabilities above to activate here?";
 
 /// What the preview says instead of a library server's live command line when
 /// that definition no longer matches its lock pin. Shared by the `servers`
@@ -392,6 +517,84 @@ impl CardWalk {
         }));
     }
 
+    /// The detail body, grouped per capability (`trust-card-groups-v1`).
+    ///
+    /// This is **presentation over the flat list, not a second list**: a group
+    /// carries INDICES into `review.items` / `review.removed` rather than
+    /// copies of them. That is the structural reason grouping cannot become
+    /// granularity — there is nowhere for a group to hold a fact of its own, no
+    /// per-group question, and no per-group answer. A consumer that renders
+    /// groups and a consumer that renders the flat list are reading the same
+    /// bytes.
+    ///
+    /// `removed` is passed in rather than recomputed so the indices are into
+    /// exactly the array the payload emits.
+    fn groups(&self, removed: &[serde_json::Value]) -> Vec<serde_json::Value> {
+        let kind_of = |v: &serde_json::Value| v["kind"].as_str().unwrap_or_default().to_string();
+        // Listed kinds first, in the shared order; then anything unlisted, in
+        // the order it was met, so a new kind is unlabelled rather than absent.
+        let mut order: Vec<String> = CARD_GROUP_ORDER
+            .iter()
+            .map(|(k, _)| k.to_string())
+            .collect();
+        for value in self.items.iter().chain(removed) {
+            let kind = kind_of(value);
+            if !order.contains(&kind) {
+                order.push(kind);
+            }
+        }
+        let mut groups = Vec::new();
+        for kind in order {
+            let items: Vec<usize> = self
+                .items
+                .iter()
+                .enumerate()
+                .filter(|(_, v)| kind_of(v) == kind)
+                .map(|(ix, _)| ix)
+                .collect();
+            let gone: Vec<usize> = removed
+                .iter()
+                .enumerate()
+                .filter(|(_, v)| kind_of(v) == kind)
+                .map(|(ix, _)| ix)
+                .collect();
+            if items.is_empty() && gone.is_empty() {
+                continue;
+            }
+            let mut counts = GroupCounts {
+                removed: gone.len(),
+                ..GroupCounts::default()
+            };
+            for ix in &items {
+                match self.items[*ix]["change"].as_str() {
+                    Some("added") => counts.added += 1,
+                    Some("changed") => counts.changed += 1,
+                    _ => counts.unchanged += 1,
+                }
+            }
+            let label = CARD_GROUP_ORDER
+                .iter()
+                .find(|(k, _)| *k == kind)
+                .map(|(_, label)| (*label).to_string())
+                .unwrap_or_else(|| kind.clone());
+            groups.push(serde_json::json!({
+                "kind": kind,
+                "label": label,
+                "change": counts.change(),
+                "counts": {
+                    "added": counts.added,
+                    "changed": counts.changed,
+                    "unchanged": counts.unchanged,
+                    "removed": counts.removed,
+                    "total": counts.total(),
+                },
+                "items": items,
+                "removed": gone,
+            }));
+        }
+        groups
+    }
+
     /// Prior items this walk never saw — removed since the last consent. The
     /// mirror of [`ReviewDiff::removed`].
     fn removed(&self) -> Vec<serde_json::Value> {
@@ -531,6 +734,12 @@ pub fn preview_value(base: &Path) -> Result<serde_json::Value> {
                     crate::resolve::ServerOrigin::Library => lock
                         .get_server(name)
                         .is_some_and(|entry| entry.checksum.hex() == r.checksum),
+                    // A package member reached this card only if it was read
+                    // back from the content store and re-verified against the
+                    // digest the lock pins — a check stricter than the library
+                    // arm above, already passed. Showing the definition is
+                    // therefore showing pinned bytes.
+                    crate::resolve::ServerOrigin::Package => true,
                 };
                 // Computed BEFORE the redaction check, and kept out of the
                 // payload when redacting: the card still needs to say whether
@@ -774,6 +983,11 @@ pub fn preview_value(base: &Path) -> Result<serde_json::Value> {
         card.push(CardItem::new("policy", "", policy_identity(&m.policy)));
     }
 
+    // Computed once, in this order: the groups index into the very arrays the
+    // payload emits, so they cannot point at a different list.
+    let card_removed = card.removed();
+    let card_groups = card.groups(&card_removed);
+
     // §7.2: `surface_digest` (computed above, from the same snapshot the
     // display was parsed from) is exactly what a later grant must present as
     // `--consented-digest` — so "the surface shown" and "the bytes granted"
@@ -813,7 +1027,13 @@ pub fn preview_value(base: &Path) -> Result<serde_json::Value> {
             "re_review": re_trust,
             "prior_recorded": prior_recorded,
             "items": card.items,
-            "removed": card.removed(),
+            "removed": card_removed,
+            // `trust-card-groups-v1`. The SAME items, grouped per capability
+            // by index, plus the one closing question. Additive: `items` and
+            // `removed` keep their `trust-card-diff-v1` shape and order, so a
+            // consumer that predates this reads exactly what it read before.
+            "groups": card_groups,
+            "question": CARD_QUESTION,
         },
     });
     Ok(crate::ui_contract::envelope(out))
@@ -1070,9 +1290,23 @@ pub(crate) fn grant_probed(
     macro_rules! say {
         ($($t:tt)*) => { body.push(format!($($t)*)) };
     }
+    // "One card, one yes": the detail body is GROUPED per capability, so a
+    // reviewer reads one kind at a time instead of a flat run of lines. Each
+    // group's header remembers its index here because the group's change tally
+    // is not knowable until every item under it has been marked — it is
+    // appended after the walk, never computed a second time.
+    let mut group_headers: Vec<(&'static str, usize)> = Vec::new();
+    macro_rules! group {
+        ($kind:literal, $($t:tt)*) => {{
+            group_headers.push(($kind, body.len()));
+            body.push(format!($($t)*));
+        }};
+    }
     say!("This project declares — review what auto-mode may run/contact:");
     if servers.is_empty() {
         say!("  (no servers)");
+    } else {
+        group!("server", "  servers (spawned or contacted over MCP):");
     }
     // Trusting pins the lock bytes into the trust digest, so trusting over a
     // drifted or unpinned surface would bless pins that don't match content
@@ -1102,6 +1336,9 @@ pub(crate) fn grant_probed(
         };
         let origin = match r.origin {
             crate::resolve::ServerOrigin::Inline => String::new(),
+            // Labelled, never blank: a blank marker is how the reader is told
+            // "this project's own definition", which a package member is not.
+            crate::resolve::ServerOrigin::Package => "   [package, pinned]".to_string(),
             crate::resolve::ServerOrigin::Library => match lock.get_server(name) {
                 Some(entry) if entry.checksum.hex() == r.checksum => {
                     "   [library, pinned]".to_string()
@@ -1172,7 +1409,10 @@ pub(crate) fn grant_probed(
         .collect();
     let exec_statuses = crate::executable::executable_lock_statuses(&dir, &exec_servers, &lock);
     if !exec_statuses.is_empty() {
-        say!("  local executable content (pinned by current bytes):");
+        group!(
+            "executable",
+            "  local executable content (pinned by current bytes):"
+        );
         for (label, status) in &exec_statuses {
             let disp = crate::text::sanitize_line(label);
             // An executable is identified by its path (the label the review
@@ -1203,7 +1443,8 @@ pub(crate) fn grant_probed(
     // outside the policy ceiling — the pin is the only governance there is,
     // so unpinned AND drifted both block, like the D3 executable surface.
     if !m.extensions.is_empty() {
-        say!(
+        group!(
+            "extension",
             "  native extensions (EXECUTABLE — run inside the harness process; agentstack pins the bytes but cannot govern them at runtime):"
         );
         let store = crate::store::Store::default_store();
@@ -1300,7 +1541,8 @@ pub(crate) fn grant_probed(
     // extension surface; the diff identity is the sorted role set, so a roles
     // widening reads as `~ changed` even with unchanged bytes.
     if !m.workflows.is_empty() {
-        say!(
+        group!(
+            "workflow",
             "  workflows (ORCHESTRATION CODE — spawns agent runs under the declared roles; agentstack executes this, gated and sandboxed):"
         );
         let store = crate::store::Store::default_store();
@@ -1399,7 +1641,7 @@ pub(crate) fn grant_probed(
     // the only thing binding what the human reviews to what gets served.
     let skill_names = review_skill_names(m);
     if !skill_names.is_empty() {
-        say!("  skills loadable over MCP:");
+        group!("skill", "  skills loadable over MCP:");
         let store = crate::store::Store::default_store();
         for name in &skill_names {
             let disp = crate::text::sanitize_line(name);
@@ -1538,7 +1780,10 @@ pub(crate) fn grant_probed(
         .filter(|(_, i)| !i.from_user_layer)
         .collect();
     if !instructions.is_empty() {
-        say!("  instruction fragments (compile into CLAUDE.md / AGENTS.md):");
+        group!(
+            "instruction",
+            "  instruction fragments (compile into CLAUDE.md / AGENTS.md):"
+        );
         for (name, instr) in instructions {
             let disp = crate::text::sanitize_line(name);
             use crate::resolve::InstructionLockStatus;
@@ -1553,7 +1798,7 @@ pub(crate) fn grant_probed(
                 lock.get_instruction(name)
                     .map(|e| e.checksum.hex().to_string()),
             );
-            match crate::resolve::instruction_lock_status(name, instr, &dir, &lock) {
+            match crate::resolve::instruction_lock_status_with(name, instr, &dir, &lock, &library) {
                 InstructionLockStatus::Matches => say!("{mk}· {disp}   [pinned]"),
                 InstructionLockStatus::ChecksumDrift { .. } => {
                     // Instructions now deposit their bytes at pin time
@@ -1564,7 +1809,8 @@ pub(crate) fn grant_probed(
                         lock.get_instruction(name)
                             .map(|e| e.checksum.hex().to_string())
                     });
-                    let live = crate::render::instructions::fragment_source(&dir, &instr.path);
+                    let live = crate::instructions::base_source(name, instr, &dir, &library)
+                        .unwrap_or_else(|| dir.join(name));
                     // F5, instruction flavor: one read, hashed before the
                     // diff renders — the digest `accept` is allowed to pin.
                     let displayed = std::fs::read(&live)
@@ -1629,7 +1875,8 @@ pub(crate) fn grant_probed(
     // timeout, targets): changing ANY of them must read as `~ changed`, never
     // hide behind a stable name.
     if !m.hooks.is_empty() {
-        say!(
+        group!(
+            "hook",
             "  hooks (EXECUTABLE — agentstack compiles these into each harness's native config; the harness runs them at your permission, and agentstack does not govern them at runtime):"
         );
         for (name, hook) in &m.hooks {
@@ -1668,7 +1915,10 @@ pub(crate) fn grant_probed(
     // is the canonical JSON of the whole per-adapter object, so any value
     // change reads as `~ changed`.
     if !m.settings.is_empty() {
-        say!("  settings (merged into each CLI's own config file):");
+        group!(
+            "settings",
+            "  settings (merged into each CLI's own config file):"
+        );
         for (adapter, value) in &m.settings {
             let disp = crate::text::sanitize_line(adapter);
             // Canonical, key-sorted rendering: two objects that differ only in
@@ -1714,6 +1964,19 @@ pub(crate) fn grant_probed(
                 };
                 say!("{} {label}{detail}", "-".red());
             }
+        }
+    }
+
+    // Every item is marked by now, so each group's header can carry its own
+    // change tally. Folded from the SAME markers the per-item lines printed —
+    // a header can never claim a change the lines below it do not show.
+    //
+    // Two kinds deliberately have no header: `secrets` and `policy` are single
+    // aggregate lines whose own `+` / `~` marker already IS the group's change
+    // marker, and a tally beside it would only restate it.
+    for (kind, ix) in &group_headers {
+        if let Some(suffix) = diff.group_counts(kind).header_suffix(diff.diffing()) {
+            body[*ix].push_str(&suffix);
         }
     }
 

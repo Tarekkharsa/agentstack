@@ -50,7 +50,7 @@ pub fn backups_dir() -> PathBuf {
 
 /// `~/.agentstack/lib` — the central capability library. Projects reference its
 /// contents by name instead of copying capability files (see
-/// `docs/reference.md#the-central-library`). Library commands populate
+/// `docs/reference.md#the-library-linked-source-folders`). Library commands populate
 /// `lib/skills/` and `library.toml`.
 pub fn lib_home() -> PathBuf {
     agentstack_home().join("lib")

@@ -65,8 +65,10 @@ $ echo $?
 ## Reads
 
 Every command below is read-only: it does not write a file, render a config,
-resolve a `${REF}` into a value, or start a process — with one deliberate,
-named exception noted in its row.
+resolve a `${REF}` into a value, or start a server — with two deliberate,
+named exceptions noted in their rows (`doctor --probe` starts each stdio
+server and stops it again; `lease status` runs `/bin/ps` on macOS to read a
+process start time).
 
 | Command | Contract name | Body |
 | --- | --- | --- |
@@ -89,11 +91,22 @@ named exception noted in its row.
 | `agentstack undo --json` | `json-reads-v1` | `entries[]` (newest first) — the same recorded writes `restore --json` lists, keyed for timeline display |
 | `agentstack workflow list --json` | `workflow-observe-v1` | `workflows[]` with per-entry trust and lock state |
 | `agentstack workflow list --json` | `workflow-serial-roles-v1` | per-entry `serial_roles` |
+| `agentstack workflow list --json` / `workflow explain --json` | `workflow-role-selection-v1` | per-entry `role_details[]` — each role's `harness`, `model`, `effort`, `serial`, and any declared value that would not reach the child. `explain` carries the envelope too; it is the deeper per-workflow read and **re-gates on trust** |
 | `agentstack workflow runs --json` | `workflow-observe-v1` | `runs[]` from the machine-global runs directory |
+| `agentstack lease status --json` | `lease-status-v1` | `leases[]` — the machine-level runtime lease registry, each row's `liveness` derived at read time from the PID and that process's start time. `unknown` never means live. Writes nothing; on macOS it does run `/bin/ps` per recorded PID to read a start time, because there is no `/proc` to read instead |
+| `agentstack delivery --json` | `delivery-routing-v1` | `default` plus one `harnesses[]` row per targeted CLI with its per-kind `routes[]` — where bytes go, never whether anything is live |
+| `agentstack image --json` | `image-plan-v1` | the packaging plan: every pinned `members[]` entry, `required_secrets` (names only), `blockers`, `buildable` |
+| `agentstack status --json` | `library-sources-v1` | `project.shadowed_names[]` — one sentence per capability name more than one linked library source holds. Always present, `[]` when nothing collides |
+| `agentstack status --json` | `instruction-channels-v1` | `project.instruction_channels[]` — one row per targeted CLI, including the ones with no instruction channel at all |
+| `agentstack status --json` | `package-members-v1` | `project.packages[]` — the effective member set this project pinned, after its overrides. Inserted only when a package is selected |
+| `agentstack status --json` | `needs-your-yes-v1` | `project.needs_your_yes` — present only when calls were actually refused here since the last yes. Carries a count and the fix, never a card |
+| `agentstack status --json` | `update-offer-v1` | `project.updates` — an offer, never a currency claim: the check is offline, so a missing key is not "up to date" |
 | `agentstack init --plan` | `init-plan` | the detection plan, with `plan_digest` |
 | `agentstack trust --preview` | `trust-preview` | the full reviewed surface, with `surface_digest` |
 | `agentstack trust --preview` | `trust-server-blockers-v1` | known server/executable blockers, each with a `fix` of `agentstack lock` or `edit-manifest` |
 | `agentstack trust --preview` | `trust-review-card-v1` | the per-item review card a graphical client renders — the first-time surface and, on a re-gate, the changed-lines diff |
+| `agentstack trust --preview` | `trust-card-diff-v1` | `review.items[]` and `review.removed[]` — the card itself, structured, with a `change` marker per item |
+| `agentstack trust --preview` | `trust-card-groups-v1` | `review.groups[]`, holding **indices** into `review.items`, plus `review.question` — the one closing question. There is no per-group or per-item question, accept, or block, and there never will be |
 | `agentstack library-index` | `profiles-edit-v1` | the central-library catalog (skills + servers) |
 
 ## Consent-bound actions
@@ -218,7 +231,7 @@ Field notes:
   name in `[extensions.*]` rather than added.
 - Descriptions ship whole. The 70-column truncation is for a terminal.
 - This read reaches the **network**: it queries the official MCP Registry
-  alongside your central library and the embedded catalog. It writes nothing.
+  alongside your linked library sources and the embedded catalog. It writes nothing.
 
 ### `adapters list --json`
 
@@ -280,7 +293,8 @@ change without a `schema_version` bump. Treat them as reports, not APIs:
 - `agentstack report run --json`, `report runs --json`, `report calls --json`,
   `report wire --json`
 - `agentstack optimize --json`
-- `agentstack workflow report --json`, `workflow explain --json`
+- `agentstack workflow report --json` (`workflow explain --json` left this list
+  when it gained the envelope and `workflow-role-selection-v1`)
 
 ## Guarantees
 

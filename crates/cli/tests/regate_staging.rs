@@ -774,6 +774,7 @@ fn trusted_project_with_instruction(root: &Path) -> PathBuf {
 fn compile_instructions(proj: &Path) {
     agentstack::commands::instructions::run(
         &agentstack::cli::InstructionsArgs {
+            toolset: None,
             targets: vec!["claude-code".into()],
             scope: Some(agentstack::scope::Scope::Project),
             write: true,

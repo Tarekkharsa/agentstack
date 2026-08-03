@@ -18,6 +18,38 @@
 >
 > **Vocabulary:** Package · Toolset · Lease. Defined in §Package-aware delivery
 > and used consistently below.
+>
+> **Amended 2026-08-02 (STRATEGY.md v3 adoption):** dynamic becomes the
+> default when the workstreams land (arc-end) rather than behind a
+> release-sequenced flip; the advanced override set is reduced to **Render
+> locally** ("Prefer gateway" removed); and the §1.6 activation study is
+> removed from the flip's preconditions — it runs when v3's bar is met and
+> no longer gates delivery.
+>
+> **Landed 2026-08-03 (W4, arc-end): the default is dynamic.** All seven
+> remaining preconditions were verified before the flip; the evidence is
+> recorded in §The preconditions for the flip. The delivery planner ships in
+> `crates/cli/src/delivery.rs`, the override as `[delivery] render_locally`
+> (per project or per harness, `agentstack delivery render-locally`), and the
+> routing is read through `agentstack delivery [--json]`
+> (`delivery-routing-v1`). Everything below this line is the decision as
+> adopted; the flip did not amend any of it.
+>
+> **Corrected 2026-08-03 (item 4, instruction variants): "MCP cannot inject
+> these" was not true.** The delivery matrix below justified routing
+> instructions to the rendered lane with a claim about the MCP protocol. The
+> protocol has a purpose-built `initialize` `instructions` field, AgentStack's
+> own gateway already populates it, and Claude Code is confirmed to consume it
+> ([`research/dynamic-instructions-2026-08.md`](research/dynamic-instructions-2026-08.md)).
+> **The lane is unchanged; the justification is replaced** with the accurate,
+> narrower, per-harness one: no live channel a harness is *known* to consume
+> can carry an instruction **per model** or **behind a lease** — `initialize`
+> carries only a client name and version, and it fires before any toolset is
+> selected. The full argument, the per-harness confirmation matrix, and the
+> variant schema are in
+> [`instruction-variants.md`](instruction-variants.md). Nothing else here
+> changes: instructions still render, and no surface describes one as going
+> live "via gateway".
 
 ## The decision
 
@@ -32,15 +64,15 @@ delivery lane from the capability's *kind* and the *harness* it is going to.
   today.
 
 This is **not a mode switch, and static rendering is not being removed** — it
-is being *routed*. It stays the only correct answer for what MCP cannot inject
-and for harnesses that cannot take a gateway. A project can be, and normally
-will be, in both lanes at once.
+is being *routed*. It stays the only correct answer for what no live channel
+can carry correctly (corrected 2026-08-03 — see the amendment above) and for
+harnesses that cannot take a gateway. A project can be, and normally will be,
+in both lanes at once.
 
 The user setting is **Automatic** by default; the planner runs silently and
-status names what happened. Two advanced overrides exist behind the "More
-control" path, settable per project or per harness:
+status names what happened. One advanced override exists (amended 2026-08-02)
+behind the "More control" path, settable per project or per harness:
 
-- **Prefer gateway** — route anything routable to the lease.
 - **Render locally** — write files even where the lease would work.
 
 The override exists because the reasons to want files are real, and they are
@@ -56,7 +88,7 @@ would make the system harder to recover when automatic routing is wrong.
 |---|---|---|
 | Skills | dynamic | Gateway, on demand — digest-verified per load |
 | MCP servers | dynamic | Gateway lease — brokered, policy-checked, recorded |
-| Instructions (managed `CLAUDE.md` / `AGENTS.md` region) | rendered | Rendered file — MCP cannot inject these |
+| Instructions (managed `CLAUDE.md` / `AGENTS.md` region) | rendered | Rendered file — no live channel a harness is *known* to consume can carry one per model or behind a lease (corrected 2026-08-03; the original "MCP cannot inject these" was disproven — see the amendment above and [`instruction-variants.md`](instruction-variants.md)) |
 | Settings | rendered | Rendered into native config |
 | Hooks · Extensions | rendered | Rendered; full consent ceremony always (executable kinds) |
 | Any kind, non-MCP harness | rendered | Full static delivery, automatically |
@@ -79,7 +111,8 @@ deliberate yes. What moves is its *trigger* and its *rendering*: a refused lease
 or load becomes an event the CLI and the panel surface as a yes-card prompt
 ("Needs your yes"), using the same card as `agentstack trust` and the panel
 (`trust-review-card-v1` / `trust-card-diff-v1`, per
-[`consent-card.md`](consent-card.md)). The refusal must be *loud* — it names
+[`consent-card.md`](../archive/design/consent-card.md) (archived; cited
+normatively)). The refusal must be *loud* — it names
 what was refused and the one command that fixes it — and it must never be
 answerable in the agent's channel, because content the gate exists to govern
 can forge anything that travels in that channel.
@@ -141,8 +174,9 @@ Package-manager semantics, stated as four rules:
    The flow shows the aggregate package diff first (version → version, counts by
    member kind), then the per-member diffs, through the same review card.
 4. **Keep-pinned is the resting state.** Declining an upgrade is a complete,
-   stable answer, not a deferral — per [`consent-card.md`](consent-card.md),
-   keep-pinned keeps the approved bytes actually in use.
+   stable answer, not a deferral — per
+   [`consent-card.md`](../archive/design/consent-card.md) (archived; cited
+   normatively), keep-pinned keeps the approved bytes actually in use.
 
 ### Mixed-lane upgrades are transactional, and report per lane
 
@@ -161,6 +195,18 @@ separately:
 file; the sentence must say so. This is a binding copy rule, not a suggestion —
 a single blended success line is how a user comes to believe no file was
 touched when one was.
+
+> **The example's dynamic-lane wording, settled 2026-08-03.** The literal
+> `2 skills re-pinned — live via gateway now` above is illustrative and is
+> **not** printed, conditionally or otherwise. `upgrade` performs a *pinning*
+> act; whether those exact bytes are being served is an *activation* fact that
+> depends on the bridge being registered, the project being trusted at its
+> current bytes, and a lease selecting a toolset containing the skill — none of
+> which this command touches — and a project may have Render locally set, in
+> which case the bytes go to a file. The shipped line states what is true in
+> every case: `dynamic lane: 2 skills re-pinned — the lock now names the new
+> bytes`. This is the same boundary `package-members-v1` draws: a pinned member
+> is not a running one. Routing is read through `agentstack delivery`.
 
 ## Package-aware delivery
 
@@ -268,8 +314,10 @@ stale-state bug this registry exists to prevent.
 ## t3code surfaces
 
 All reads over existing contracts plus the new registry. The panel gains **no
-new authority** — the boundary in [`ui-control-plane.md`](ui-control-plane.md)
-is unchanged, and no per-item consent answer is collected in the panel.
+new authority** — the boundary in
+[`ui-control-plane.md`](../archive/design/ui-control-plane.md) (archived; cited
+normatively) is unchanged, and no per-item consent answer is collected in the
+panel.
 
 - Packages installed and available, with version and update status.
 - Effective members after this project's overrides.
@@ -356,8 +404,8 @@ instruction.
 ### W4 — Planner, registry, and the flip — **last**
 
 The runtime lease registry and `lease-status-v1`; planner routing wired into
-`init` and onboarding (with the Automatic / Prefer gateway / Render locally
-override); the `ENFORCEMENT.md` lease column; and the default flip itself.
+`init` and onboarding (with the Automatic / Render locally override — amended
+2026-08-02); the `ENFORCEMENT.md` lease column; and the default flip itself.
 
 *Acceptance:* a lease is externally visible with honest liveness (PID plus start
 time), and a stale record never reads as live; `init` states the routing per
@@ -389,10 +437,10 @@ loading bodies; a server starts on first tool use, not on activation; and a
 per-member override is visible as an *effective member set* rather than silently
 diverging from the package.
 
-## The eight preconditions for the flip
+## The preconditions for the flip (amended 2026-08-02)
 
-The default flips only when all eight hold. The flip lands **no earlier than
-the release after v0.18.0**.
+The default flips only when all remaining seven hold; the flip lands with W4,
+at arc-end (amended 2026-08-02).
 
 1. Trust invalidation on every live dispatch — digest-authoritative, generation
    token as cache only (W2).
@@ -403,12 +451,33 @@ the release after v0.18.0**.
    state file read as truth (W4).
 5. Defined mixed-lane failure semantics, witnessed (W2/W3).
 6. Defined gateway-unavailable recovery, witnessed (W4).
-7. The advanced delivery override — Automatic / Prefer gateway / Render locally
-   (W4).
-8. **The §1.6 activation study, run on v0.18.0-rc.2 as pinned.** The kit is
-   pinned to the static-default RC; flipping before the study invalidates the
-   instrument, and the study doubles as the first-run friction measurement the
-   flip has been waiting for.
+7. The advanced delivery override — Render locally (W4; amended 2026-08-02).
+8. ~~The §1.6 activation study, run on v0.18.0-rc.2 as pinned.~~ **Removed
+   2026-08-02:** the study runs when v3's bar is met and no longer gates the
+   flip.
+
+### Verified 2026-08-03 — the flip landed
+
+Each precondition, the code that satisfies it, and the witness that holds it.
+
+| # | Satisfied by | Witness |
+|---|---|---|
+| 1 | `TrustAnchor` re-verified from disk on every upstream dispatch and every `tools/list`; no generation-token cache exists at all, so nothing unauthoritative can shortcut it (`crates/cli/src/trust_anchor.rs`, `gateway.rs`) | `crates/cli/tests/trust_at_dispatch.rs` (7) — revoke, out-of-band manifest edit, and wholesale lock replacement each stop the **next** call on a live connection; control-plane tools survive |
+| 2 | `Store::pinned_content` serves skill bodies from the content-addressed snapshot, never the live library; `use`/`add` materialize from the same snapshot; `lib sync` announces through `status` and writes nothing into any project | `crates/cli/tests/lib_sync_does_not_disturb_projects.rs` (6) — a sync leaves every project byte-identical including symlink targets, and a project keeps serving its pinned bytes |
+| 3 | The unleased fence: a project declaring any toolset gets `Gateway::empty()` until a lease names one (`crates/cli/src/mcp_server.rs`, `AutoProject::activate`). Found **open** during the registry half and closed there | `crates/cli/tests/lease_registry.rs` — `no_lease_means_control_plane_tools_only_even_with_several_toolsets_declared` and `opening_a_lease_exposes_exactly_that_toolset` |
+| 4 | `crates/cli/src/lease_registry.rs` — a record is persisted per lease, and **liveness is derived at read time** from the recorded PID *and* that process's start token; never read from the file as truth. `agentstack lease status [--json]` is the authoritative read (`lease-status-v1`) | `crates/cli/tests/lease_registry.rs` — an open lease visible to another surface; a stale record never reading live, proven by a dead PID *and* by a live PID whose start time disagrees (simulated reuse) |
+| 5 | Drift in any member marks the project Changed and blocks new leases and loads at the existing choke points; a mixed-lane upgrade updates the lock **and** the rendered region or neither, inside one rollback envelope | `crates/cli/tests/upgrade_lanes.rs` (4) — the all-or-nothing transaction proven by a real failure injection, with separate lane lines and no "gateway" claim over an instruction |
+| 6 | Gateway-unavailable detection in `crates/cli/src/commands/connect.rs` (`gateway_outages` / `command_unreachable`), with one sentence stem shared by `status` and `doctor`, and no writing path anywhere on it | `crates/cli/tests/lease_registry.rs` — `an_unavailable_gateway_yields_no_tools_and_writes_no_file`, which also asserts the project tree is byte-for-byte identical afterwards |
+| 7 | **Render locally** — `[delivery] render_locally`, per project and per harness (`crates/core/src/manifest/model.rs::Delivery`), set by `agentstack delivery render-locally [--harness <id>] [--off] --write` and offered behind the wizard's "more control" path | `crates/cli/tests/delivery_planner.rs` — `render_locally_writes_files_where_the_lease_would_have_worked`, both scopes, including a per-harness entry overriding a project-wide one in each direction |
+
+**What "default" means here, precisely.** The planner
+(`crates/cli/src/delivery.rs`) routes skills and MCP servers on an MCP-capable
+harness to the dynamic lane with no override present, and the onboarding wizard's
+default answer is **Automatic** — it states the routing, offers the one bridge
+registration the live lane needs, and renders nothing. `agentstack apply` is
+unchanged and still renders everything it is asked to: it is the rendered lane's
+command, and running it is the explicit user action §Failure semantics 3 requires
+a fallback render to be. Static rendering was not removed anywhere.
 
 ## Invariant check
 

@@ -34,8 +34,32 @@
 //! what the drive thread is doing; "the CLI records `WorkflowFailed` and exits"
 //! is only true if a thread that is *not* stuck in Boa does the recording and
 //! the exit. So even a stalled builtin slice cannot outlive the run — via the
-//! watchdog, not the cooperative check. No JS heap cap exists in-process; v1
-//! states that in the posture label rather than pretending otherwise.
+//! watchdog, not the cooperative check, and the watchdog arms a no-I/O exit
+//! path before its own best-effort reporting so a blocked write cannot keep
+//! the process alive.
+//!
+//! # What is bounded, and what is not
+//!
+//! Stated precisely, because a bound that reads as total when it is partial is
+//! the failure mode "claims match enforcement" exists to prevent.
+//!
+//! **Bounded.** Every path by which *untrusted input* reaches the interpreter
+//! heap: the invoker's `args` and every child result cross a depth-bounded
+//! JSON boundary under the CLI's resident-result ceiling, and `phase()`/`log()`
+//! output is capped per line and per run. The one allocation a script can name
+//! directly, `ArrayBuffer`/`SharedArrayBuffer`, is capped by an engine-owned
+//! ceiling through `HostHooks::max_buffer_size`. Invocations of the natives
+//! this crate installs are charged against a run-TOTAL ceiling.
+//!
+//! **Not bounded.** There is still no JS heap cap: a *trusted, reviewed,
+//! pinned* script that allocates on purpose — doubling a string in a loop —
+//! is bounded by nothing here. Neither is work inside a single Boa built-in:
+//! a backtracking regex, a huge `sort`, or `String.prototype.repeat` ticks no
+//! counter at any setting, because Boa 0.21 exposes no instruction counter or
+//! interrupt hook to build one on. Both residuals are defects in *reviewed*
+//! content rather than hostile-input paths, and both are contained by the
+//! out-of-thread watchdog rather than by a ceiling. Removing them is what the
+//! recorded QuickJS-in-wasmtime fallback is for.
 
 #![forbid(unsafe_code)]
 
@@ -106,8 +130,27 @@ pub const POSTURE_LABEL: &str = concat!(
     "what the drive thread is doing; \"the CLI records `WorkflowFailed` and exits\" ",
     "is only true if a thread that is *not* stuck in Boa does the recording and ",
     "the exit. So even a stalled builtin slice cannot outlive the run — via the ",
-    "watchdog, not the cooperative check. No JS heap cap exists in-process; v1 ",
-    "states that in the posture label rather than pretending otherwise.",
+    "watchdog, not the cooperative check, and the watchdog arms a no-I/O exit path ",
+    "before its own best-effort reporting, so a blocked write, a hung filesystem, ",
+    "or a contended lock can delay the honest reporting but cannot keep the ",
+    "process alive.\n\n",
+    "What is bounded, stated precisely because a partial bound that reads as total ",
+    "is exactly the failure \"claims match enforcement\" exists to prevent. BOUNDED: ",
+    "every path by which untrusted input reaches the interpreter heap — the ",
+    "invoker's `args` and every child result cross a depth-bounded JSON boundary ",
+    "under the resident-result ceiling, and `phase()`/`log()` output is capped per ",
+    "line and per run; the one allocation a script can name directly ",
+    "(`ArrayBuffer`/`SharedArrayBuffer`) is capped by an engine-owned ceiling; and ",
+    "invocations of the natives agentstack installs are charged against a run-total ",
+    "ceiling. NOT BOUNDED: there is still no JS heap cap, so a trusted, reviewed, ",
+    "pinned script that allocates on purpose (doubling a string in a loop) is ",
+    "bounded by nothing here; and work inside a single Boa built-in — a ",
+    "backtracking regex, a large `sort`, `String.prototype.repeat` — ticks no ",
+    "counter at any setting, because Boa 0.21 exposes no instruction counter or ",
+    "interrupt hook to build one on. Both residuals are defects in REVIEWED content ",
+    "rather than hostile-input paths, and both are contained by the out-of-thread ",
+    "watchdog rather than by a ceiling; removing them is what the recorded ",
+    "QuickJS-in-wasmtime fallback is for.",
 );
 
 /// Interpreter ceilings. All host-side, all set before untrusted code runs.
@@ -123,9 +166,25 @@ pub const POSTURE_LABEL: &str = concat!(
 pub struct RuntimeLimits {
     /// Boa's default is `u64::MAX`, so this MUST be set for containment — an
     /// unset loop limit is the `while(true)` containment bug.
+    ///
+    /// Read the bound precisely: Boa counts loop iterations on the
+    /// **`CallFrame`** (`vm/opcode/iteration/loop_ops.rs`), so this bounds one
+    /// frame, never the run. `native_call_limit` below is the only run-TOTAL
+    /// ceiling the engine has.
     pub loop_iteration_limit: u64,
     pub recursion_limit: usize,
     pub stack_size_limit: usize,
+    /// Ceiling on a single `ArrayBuffer` / `SharedArrayBuffer` allocation,
+    /// served through `HostHooks::max_buffer_size`. Boa's default is 1.5 GiB;
+    /// this is the ONE allocation ceiling the engine exposes to a host, and
+    /// leaving it at the default meant a script could name a gigabyte in one
+    /// expression.
+    pub max_buffer_bytes: u64,
+    /// Run-TOTAL ceiling on invocations of the natives this crate installs
+    /// (`agent`, `phase`, `log`, `budget.spawned`, `budget.remaining`).
+    ///
+    /// It bounds our bridge, not Boa's built-ins — see [`POSTURE_LABEL`].
+    pub native_call_limit: u64,
 }
 
 impl Default for RuntimeLimits {
@@ -136,6 +195,13 @@ impl Default for RuntimeLimits {
             loop_iteration_limit: 10_000_000,
             recursion_limit: 400,
             stack_size_limit: 16 * 1024,
+            // 64 MiB: far above anything real orchestration needs (results
+            // cross as JSON, not buffers) and far below the 1.5 GiB default.
+            max_buffer_bytes: 64 * 1024 * 1024,
+            // Generous for a legitimate run — the widest shipped fan-out is
+            // hundreds of agent() calls plus progress lines — while still
+            // finite, which is the property that was missing.
+            native_call_limit: 5_000_000,
         }
     }
 }
@@ -325,6 +391,7 @@ impl WorkflowRun {
         let state = Rc::new(RefCell::new(SpawnState::new(
             meta.roles.clone(),
             max_agents,
+            limits.native_call_limit,
         )));
 
         let mut run = Self {
@@ -448,6 +515,19 @@ impl WorkflowRun {
     }
 
     fn drive(&mut self, results: Vec<StepResult>) -> StepOutcome {
+        // Re-entrancy, refused rather than tolerated. A `drive()` already on
+        // this thread's stack means a host native re-entered the engine, which
+        // would interleave two runs' ceiling arithmetic through one
+        // thread-local. Rust's `&mut self` already makes re-entering THIS run
+        // impossible, so this catches the cross-run case and any future native
+        // that grows a callback — a fail-closed refusal instead of a stack
+        // that silently tolerated nesting.
+        if bridge::drive_in_progress() {
+            return StepOutcome::Failed(WorkflowError::internal(
+                "re-entrant workflow drive refused: a drive is already running on this thread",
+            ));
+        }
+
         // Make this run's state visible to the capture-free `agent()` native for
         // the duration of this synchronous drive; the guard pops it on return.
         let _active = activate(&self.state);
@@ -573,6 +653,10 @@ impl WorkflowRun {
                 return WorkflowError::iteration_limit("interpreter execution limit exceeded");
             }
         }
+        if self.state.borrow().native_budget_exhausted {
+            let limit = self.state.borrow().native_call_limit;
+            return WorkflowError::native_budget_exhausted(limit);
+        }
         if self.state.borrow().exhausted {
             let granted = self.state.borrow().max_agents;
             return WorkflowError::agents_exhausted(granted);
@@ -596,6 +680,16 @@ impl WorkflowRun {
     fn classify_rejection(&mut self, reason: &JsValue) -> WorkflowError {
         if self.compile_denied.get() {
             return WorkflowError::compile_denied();
+        }
+        // Same non-forgeable-flag pattern, same accepted per-run imprecision:
+        // a script that catches the native-budget refusal and later fails for
+        // an unrelated reason is still labeled NativeBudgetExhausted. Both are
+        // Failed, the budget genuinely ran out, and a label can never flip an
+        // outcome. Checked before exhaustion because spending the total native
+        // budget is the more specific statement about what stopped the run.
+        if self.state.borrow().native_budget_exhausted {
+            let limit = self.state.borrow().native_call_limit;
+            return WorkflowError::native_budget_exhausted(limit);
         }
         // Stage D: same non-forgeable-flag pattern for exhaustion, same
         // accepted per-run imprecision as compile_denied above — a script that
@@ -647,8 +741,12 @@ fn build_context(
     compile_denied: Rc<Cell<bool>>,
 ) -> Result<Context, WorkflowError> {
     let mut context = ContextBuilder::new()
-        // Denies `eval(string)` / `new Function(string)` from Context creation.
-        .host_hooks(Rc::new(Hooks { compile_denied }))
+        // Denies `eval(string)` / `new Function(string)` from Context creation,
+        // and carries the buffer-allocation ceiling.
+        .host_hooks(Rc::new(Hooks {
+            compile_denied,
+            max_buffer_bytes: limits.max_buffer_bytes,
+        }))
         // Host-level deterministic-time backstop behind the JS poisoning.
         .clock(Rc::new(FixedClock::from_millis(0)))
         // Refuses ALL module resolution. Without this, Boa defaults to
@@ -677,9 +775,22 @@ fn build_context(
 #[derive(Debug)]
 struct Hooks {
     compile_denied: Rc<Cell<bool>>,
+    max_buffer_bytes: u64,
 }
 
 impl HostHooks for Hooks {
+    /// The one allocation ceiling Boa lets a host set. Boa consults it for
+    /// `ArrayBuffer` and `SharedArrayBuffer` construction and defaults to
+    /// 1.5 GiB, which is not a bound worth having in a process that also
+    /// holds the `CommitmentKey` and in-flight secrets.
+    ///
+    /// It is NOT a heap cap: it bounds one buffer allocation, not the sum of
+    /// every string and array a script builds. `POSTURE_LABEL` states what is
+    /// and is not bounded; do not let this method's existence read as more.
+    fn max_buffer_size(&self, _context: &mut Context) -> u64 {
+        self.max_buffer_bytes
+    }
+
     fn ensure_can_compile_strings(
         &self,
         _realm: Realm,
@@ -1511,6 +1622,297 @@ mod tests {
             other => panic!("expected Done, got {other:?}"),
         }
         assert!(run.exhausted());
+    }
+
+    // ---- Named algorithm helpers (item 6) -------------------------------
+
+    #[test]
+    fn named_algorithm_helpers_compose_the_shipped_primitives() {
+        // The five helpers are pure compositions of parallel/pipeline/shard/
+        // partition. Exercised without any agent() call, because that is the
+        // point: the shapes are callable by name and spend nothing on their
+        // own. `keepUnrefuted` in particular was USED by the worked example in
+        // docs/workflows.md and never defined anywhere — copying that example
+        // raised a ReferenceError until now.
+        let script = "const meta = { roles: [] };\n\
+             const mr = await mapReduce([1, 2, 3, 4], {\n\
+               map: (n) => n * 2,\n\
+               reduce: (bucket) => bucket.reduce((a, b) => a + b, 0),\n\
+               partitions: 2,\n\
+             });\n\
+             const rbk = await reduceByKey(\n\
+               [{ k: 'a', v: 1 }, { k: 'a', v: 2 }, { k: 'b', v: 3 }], 2,\n\
+               (x) => x.k, (bucket) => bucket.map((x) => x.v).join('+'));\n\
+             const comb = await combine([1, 2, 3, 4, 5], 2, (chunk) => chunk.length);\n\
+             const ver = await verify(['c1', 'c2'], (c) => c === 'c1' ? 'refuted' : 'looks fine');\n\
+             const kept = keepUnrefuted(['c1', 'c2'], ver);\n\
+             // Totality: junk arguments clamp instead of throwing.\n\
+             const junk = [\n\
+               (await mapReduce(null, {})).length,\n\
+               (await combine([1], 0, null))[0],\n\
+               keepUnrefuted(['x'], [null]).length,\n\
+             ];\n\
+             return { mrSum: mr.filter((x) => x !== null).reduce((a, b) => a + b, 0),\n\
+                      mrSlots: mr.length, rbkSlots: rbk.length,\n\
+                      combSum: comb.reduce((a, b) => a + b, 0),\n\
+                      verRows: ver.length, verPaired: ver[0].claim === 'c1',\n\
+                      kept, junk };";
+        let value = run_to_done(script);
+        // map doubles 1..4 -> 2,4,6,8; whatever the split, the sums total 20.
+        assert_eq!(value["mrSum"], 20);
+        // Exactly `partitions` slots, so the reducer count is not data-dependent.
+        assert_eq!(value["mrSlots"], 2);
+        assert_eq!(value["rbkSlots"], 2);
+        // shard([1..5], per 2) -> 2+2+1 chunks; combine returns their lengths.
+        assert_eq!(value["combSum"], 5);
+        assert_eq!(value["verRows"], 2);
+        assert_eq!(value["verPaired"], true);
+        // "refuted" drops c1; c2 survives. The default predicate is a text
+        // heuristic over model output, documented as such in the prelude.
+        assert_eq!(value["kept"], serde_json::json!(["c2"]));
+        // Junk in, clamped out: no throw anywhere.
+        assert_eq!(value["junk"], serde_json::json!([1, null, 1]));
+    }
+
+    #[test]
+    fn a_prelude_helper_cannot_widen_a_role() {
+        // The authority argument for adding named helpers at all: not one of
+        // them calls `agent()`. An agent run happens only when the CALLER's
+        // callback calls it, and that call goes through the same bridge a
+        // hand-written script uses — so the `role ∈ meta.roles` check and the
+        // `max_agents` ceiling stay the sole authority path.
+        //
+        // Two halves, because "cannot widen" needs both:
+        //   (a) a helper handed a callback naming an UNDECLARED role is still
+        //       refused at the bridge — the helper grants nothing;
+        //   (b) a helper spawns nothing on its own behalf, so it cannot
+        //       manufacture fan-out the ceiling never granted.
+        //
+        // (a): reduceByKey's reducer names a role meta.roles does not declare.
+        let widening = "const meta = { roles: ['reader'] };\n\
+             return await reduceByKey([1, 2], 1, (x) => 'k',\n\
+               (bucket) => agent('escalate', { role: 'admin' }));";
+        let mut run = new_run_with_grant(
+            widening,
+            Grant {
+                max_agents: 100,
+                max_wall_seconds: 1800,
+                // 'admin' is even ADMITTED by the manifest — the per-call check
+                // is still the script's own declared set, so it refuses anyway.
+                admitted_roles: vec!["reader".into(), "admin".into()],
+            },
+        )
+        .expect("script parses");
+        match run.step(Vec::new()) {
+            StepOutcome::Failed(err) => assert_eq!(err.kind, WorkflowErrorKind::UndeclaredRole),
+            other => panic!("expected Failed(UndeclaredRole), got {other:?}"),
+        }
+
+        // (b): every helper, driven over real data with a grant of ZERO agents,
+        // must reach Done without ever producing a spawn request.
+        let silent = "const meta = { roles: ['reader'] };\n\
+             const a = await mapReduce([1, 2], { map: (x) => x, reduce: (b) => b.length, partitions: 2 });\n\
+             const b = await reduceByKey([1, 2], 2, (x) => String(x), (bk) => bk.length);\n\
+             const c = await combine([1, 2, 3], 2, (ch) => ch.length);\n\
+             const d = await verify(['c'], (x) => 'fine');\n\
+             const e = keepUnrefuted(['c'], d);\n\
+             return [a.length, b.length, c.length, d.length, e.length];";
+        let mut run = new_run_with_grant(
+            silent,
+            Grant {
+                max_agents: 0,
+                max_wall_seconds: 1800,
+                admitted_roles: vec!["reader".into()],
+            },
+        )
+        .expect("script parses");
+        match run.step(Vec::new()) {
+            StepOutcome::Done(v) => assert_eq!(v, serde_json::json!([2, 2, 2, 1, 1])),
+            other => panic!("a helper spawned on its own behalf: {other:?}"),
+        }
+        assert!(
+            !run.exhausted(),
+            "no helper may touch the agent ceiling by itself"
+        );
+    }
+
+    // ---- Promotion findings (item 6) ------------------------------------
+
+    #[test]
+    fn interpreter_memory_is_bounded_at_every_untrusted_ingress() {
+        // Finding: interpreter memory bounds. `HostHooks::max_buffer_size` is
+        // the only allocation ceiling Boa exposes to a host (default 1.5 GiB);
+        // this proves ours is enforced for both `ArrayBuffer` and the typed
+        // arrays built on it. The other half of the ingress argument — that
+        // untrusted input crosses a depth-bounded boundary — is witnessed by
+        // `deeply_nested_step_result_is_refused`,
+        // `deeply_nested_return_value_is_refused` and
+        // `adversarially_nested_args_are_refused_at_construction`.
+        //
+        // What this does NOT prove is in `POSTURE_LABEL`: there is still no JS
+        // heap cap, so a trusted script doubling a string in a loop is bounded
+        // only by the out-of-thread watchdog.
+        let limits = RuntimeLimits {
+            max_buffer_bytes: 1024,
+            ..RuntimeLimits::default()
+        };
+        let script = "const meta = { roles: [] };\n\
+             const out = [];\n\
+             const probe = (fn) => { try { fn(); out.push('ALLOWED'); } catch (e) { out.push('refused'); } };\n\
+             probe(() => new ArrayBuffer(512));\n\
+             probe(() => new ArrayBuffer(4096));\n\
+             probe(() => new Uint8Array(1024 * 1024));\n\
+             return out;";
+        let mut run = WorkflowRun::new(
+            script,
+            limits,
+            serde_json::Value::Null,
+            permissive_grant(script),
+        )
+        .expect("script parses");
+        match run.step(Vec::new()) {
+            // Under the ceiling allocates; over it is refused, in both shapes.
+            StepOutcome::Done(v) => {
+                assert_eq!(v, serde_json::json!(["ALLOWED", "refused", "refused"]))
+            }
+            other => panic!("expected Done, got {other:?}"),
+        }
+        // The engine survived a refused allocation.
+        assert_eq!(run_to_done("const meta = { roles: [] };\nreturn 42;"), 42);
+    }
+
+    #[test]
+    fn a_reentrant_host_native_is_refused() {
+        // Finding: re-entrancy. Converting `agent()`'s own `opts` argument
+        // reads its properties, and reading a property RUNS SCRIPT CODE — a
+        // getter or Proxy trap. So the script can call back into `agent()`
+        // while `agent()` is still executing. This is the concrete
+        // reproduction, and it fails without the `enter_native` guard.
+        //
+        // The getter swallows the refusal itself, so the OUTER call must still
+        // complete normally: the guard is containment, not a new way to kill a
+        // run. And the nested call must leave no spawn behind.
+        let script = "const meta = { roles: ['r'] };\n\
+             let nested = 'NO REFUSAL';\n\
+             const opts = { get role() {\n\
+               try { agent('nested', { role: 'r' }); nested = 'LEAK: nested call ran'; }\n\
+               catch (e) { nested = String(e); }\n\
+               return 'r';\n\
+             } };\n\
+             const out = await agent('outer', opts);\n\
+             return { out, nested };";
+        let mut run = new_run(script).expect("script parses");
+
+        let batch = match run.step(Vec::new()) {
+            StepOutcome::Batch(batch) => batch,
+            other => panic!("expected Batch, got {other:?}"),
+        };
+        // Exactly one spawn: the outer call. The nested one never became a
+        // request, so it also never charged the max_agents ceiling.
+        let prompts: Vec<&str> = batch.requests.iter().map(|r| r.prompt.as_str()).collect();
+        assert_eq!(prompts, ["outer"]);
+
+        let results = vec![StepResult {
+            request_id: batch.requests[0].id,
+            output: StepOutput::Completed(serde_json::Value::String("ok".into())),
+        }];
+        match run.step(results) {
+            StepOutcome::Done(v) => {
+                assert_eq!(v["out"], "ok", "the outer call must still succeed");
+                let nested = v["nested"].as_str().expect("nested is a string");
+                assert!(
+                    nested.contains("re-entrant"),
+                    "the nested call was not refused as re-entrant: {nested}"
+                );
+            }
+            other => panic!("expected Done, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_total_native_call_budget_bounds_host_natives() {
+        // Finding: a total instruction budget for native built-ins. Boa's loop
+        // ceiling lives on the CallFrame, so it bounds one frame and never the
+        // run; nothing bounded how often a script could call into the host
+        // bridge. `budget.spawned()` is the cheapest native there is, which is
+        // exactly why it makes the point: cheap is not free.
+        let limits = RuntimeLimits {
+            native_call_limit: 32,
+            ..RuntimeLimits::default()
+        };
+        let script = "const meta = { roles: [] };\n\
+             let n = 0;\n\
+             while (true) { budget.spawned(); n++; }\n";
+        let mut run = WorkflowRun::new(
+            script,
+            limits,
+            serde_json::Value::Null,
+            permissive_grant(script),
+        )
+        .expect("script parses");
+        match run.step(Vec::new()) {
+            StepOutcome::Failed(err) => {
+                assert_eq!(err.kind, WorkflowErrorKind::NativeBudgetExhausted)
+            }
+            other => panic!("expected Failed(NativeBudgetExhausted), got {other:?}"),
+        }
+        // The engine survived; a fresh run under the default ceiling is fine.
+        assert_eq!(run_to_done("const meta = { roles: [] };\nreturn 42;"), 42);
+    }
+
+    #[test]
+    fn a_forged_native_budget_message_is_a_plain_runtime_error() {
+        // The budget kind rests on the non-forgeable host flag, exactly like
+        // `forged_exhaustion_is_runtime_error_not_agents_exhausted`: a script
+        // that throws a lookalike message must NOT be able to claim the kind.
+        let script = "const meta = { roles: [] };\n\
+             throw new Error('refused: this run spent its total host-native call budget (5)');";
+        let mut run = new_run(script).unwrap();
+        match run.step(Vec::new()) {
+            StepOutcome::Failed(err) => assert_eq!(err.kind, WorkflowErrorKind::RuntimeError),
+            other => panic!("expected Failed(RuntimeError), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cross_host_resume_determinism_denies_locale_sensitive_apis() {
+        // Finding: cross-host resume determinism. The journal replays RESULTS,
+        // never DECISIONS — on resume the script re-runs its own control flow
+        // and is handed recorded outputs for steps it already ran. So every
+        // branch and sort order it derives must come out identical on the
+        // machine that resumes. A locale-aware compare or format leaks the
+        // host's default locale into that derivation: two claims order
+        // differently, a sort reorders, a different item reaches step N, and
+        // step N's recorded output is replayed onto the wrong input — a silent
+        // divergence rather than a refusal.
+        //
+        // "Absent is as safe as denied": boa_engine's default features carry
+        // neither `intl` nor `experimental`, so `Intl` is not built at all.
+        // Denying anyway means enabling the feature later cannot silently
+        // reopen the hole.
+        let script = "const meta = { roles: [] };\n\
+             const out = [];\n\
+             const probe = (label, fn) => { try { fn(); out.push('LEAK: ' + label); } catch (e) { out.push('denied'); } };\n\
+             probe('localeCompare', () => 'a'.localeCompare('b'));\n\
+             probe('toLocaleLowerCase', () => 'A'.toLocaleLowerCase());\n\
+             probe('toLocaleUpperCase', () => 'a'.toLocaleUpperCase());\n\
+             probe('normalize', () => 'a\\u0301'.normalize('NFC'));\n\
+             probe('Number.toLocaleString', () => (1234.5).toLocaleString());\n\
+             probe('Date.toLocaleString', () => new Date(0).toLocaleString());\n\
+             probe('Date.toLocaleDateString', () => new Date(0).toLocaleDateString());\n\
+             probe('Date.toLocaleTimeString', () => new Date(0).toLocaleTimeString());\n\
+             probe('Array.toLocaleString', () => [1, 2].toLocaleString());\n\
+             probe('Intl', () => globalThis.Intl.NumberFormat());\n\
+             // Restoration attempts must fail too, like the Date.now hardening.\n\
+             probe('redefine', () => { Object.defineProperty(String.prototype, 'localeCompare', { value: () => 0 }); return 'x'.localeCompare('y'); });\n\
+             probe('delete', () => { delete String.prototype.localeCompare; return 'x'.localeCompare('y'); });\n\
+             return out;";
+        let value = run_to_done(script);
+        let entries = value.as_array().expect("array result");
+        assert!(!entries.is_empty());
+        for entry in entries {
+            assert_eq!(entry, "denied", "a locale-sensitive API leaked: {value:?}");
+        }
     }
 
     #[test]

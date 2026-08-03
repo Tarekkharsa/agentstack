@@ -201,6 +201,92 @@ impl Store {
         Ok(pin)
     }
 
+    /// **The pinning act, for a server definition.** Third sibling of [`pin`]
+    /// and [`pin_instruction`], and the one that was missing: a server member's
+    /// checksum has always been a plain SHA-256 over the definition text, but
+    /// nothing deposited the bytes that checksum covers — so nothing could
+    /// later serve the definition without re-reading the mutable source it came
+    /// from. Depositing here is what lets the gateway resolve a package-carried
+    /// server from the lock and the store alone
+    /// (`docs/design/pinned-serving-and-library-drift.md` §"The rendered lane":
+    /// serving pinned bytes is a property of *reading*, and every reader
+    /// follows it).
+    ///
+    /// No new digest path: the returned digest is `Sha256Hex::of(text)`, byte
+    /// for byte the same value `resolve_server` computes for an inline table
+    /// and `pin_package_member` computed before this function existed. Only the
+    /// deposit is new.
+    ///
+    /// `name` names the deposited file for a human reading the store; it is not
+    /// part of the address, so two members with identical definitions share one
+    /// content directory under whichever name landed first. Readers take the
+    /// single file they find rather than a name they expect
+    /// ([`pinned_definition`]).
+    ///
+    /// Best-effort, exactly like its two siblings: a failed deposit never fails
+    /// the pin. The cost of a missing deposit is a fail-closed refusal at serve
+    /// time naming `agentstack lock`, never a wrong answer.
+    ///
+    /// [`pin`]: Store::pin
+    /// [`pin_instruction`]: Store::pin_instruction
+    /// [`pinned_definition`]: Store::pinned_definition
+    pub fn pin_server_definition(&self, name: &str, text: &str) -> Sha256Hex {
+        let pin = Sha256Hex::of(text.as_bytes());
+        let _ = self.deposit_bytes(
+            &std::ffi::OsString::from(format!("{name}.toml")),
+            text.as_bytes(),
+            pin.hex(),
+        );
+        pin
+    }
+
+    /// **The serving act, for a pinned single-file definition.** The text a
+    /// pinned server definition must be READ from: the content-addressed
+    /// deposit named by `digest_hex`, never the manifest, library or package
+    /// body it was originally read out of.
+    ///
+    /// The address is re-proven on every read. The store is a writable
+    /// directory, so a read that trusted the path name instead of the bytes
+    /// would be trusting the filesystem rather than the digest — the same
+    /// reasoning [`verified_snapshot`] exists for, applied to the one-file pin
+    /// family. Anything that does not verify is an error, and callers turn that
+    /// into a refusal naming the capability; there is deliberately no fallback
+    /// to a live source, which is exactly the mutable thing the pin exists to
+    /// stop reading.
+    pub fn pinned_definition(&self, digest_hex: &str) -> Result<String> {
+        let dir = self.root.join("content").join(digest_hex);
+        // Rejects a symlink at the address (or anywhere under it) and errors
+        // when nothing is there at all — both are "no verified deposit".
+        crate::scan::reject_symlinks(&dir).with_context(|| {
+            format!(
+                "no verified copy of the pinned definition at {}",
+                dir.display()
+            )
+        })?;
+        let mut files: Vec<PathBuf> = fs::read_dir(&dir)
+            .with_context(|| format!("reading {}", dir.display()))?
+            .flatten()
+            .filter(|e| e.file_type().map(|t| t.is_file()).unwrap_or(false))
+            .map(|e| e.path())
+            .collect();
+        files.sort();
+        let [only] = files.as_slice() else {
+            bail!(
+                "the stored copy at {} is not a single-file definition deposit",
+                dir.display()
+            );
+        };
+        let bytes = fs::read(only).with_context(|| format!("reading {}", only.display()))?;
+        if Sha256Hex::of(&bytes).hex() != digest_hex {
+            bail!(
+                "the stored copy at {} is present but does not hash to {digest_hex}",
+                dir.display()
+            );
+        }
+        String::from_utf8(bytes)
+            .with_context(|| format!("the pinned definition at {} is not UTF-8", dir.display()))
+    }
+
     /// Place one file's bytes at `content/<hex>/<file name>`, write-once.
     ///
     /// The bytes are passed in rather than re-read, so what is deposited is
@@ -213,19 +299,29 @@ impl Store {
             .file_name()
             .map(std::ffi::OsStr::to_os_string)
             .unwrap_or_else(|| std::ffi::OsString::from("fragment"));
+        self.deposit_bytes(&name, bytes, digest_hex)
+    }
+
+    /// [`deposit_file`] for bytes that were never a file: the file name is
+    /// chosen by the caller instead of taken from a source path. Split out so
+    /// the on-disk layout, the write-once rule and the crash-safe rename live
+    /// in one place rather than being restated per pin family.
+    ///
+    /// [`deposit_file`]: Store::deposit_file
+    fn deposit_bytes(&self, name: &std::ffi::OsStr, bytes: &[u8], digest_hex: &str) -> Result<()> {
         let content_root = self.root.join("content");
         let dest = content_root.join(digest_hex);
-        if dest.join(&name).is_file() {
+        if dest.join(name).is_file() {
             return Ok(()); // already deposited, content-addressed
         }
         fs::create_dir_all(&content_root)
             .with_context(|| format!("creating {}", content_root.display()))?;
         let tmp = content_root.join(format!(".tmp-{}", crate::runs::gen_id()));
         fs::create_dir_all(&tmp).with_context(|| format!("creating {}", tmp.display()))?;
-        fs::write(tmp.join(&name), bytes)?;
+        fs::write(tmp.join(name), bytes)?;
         if fs::rename(&tmp, &dest).is_err() {
             let _ = fs::remove_dir_all(&tmp);
-            if !dest.join(&name).is_file() {
+            if !dest.join(name).is_file() {
                 bail!("could not place the content snapshot at {}", dest.display());
             }
         }
@@ -285,6 +381,64 @@ impl Store {
             );
         }
         Ok(dest)
+    }
+
+    /// **The serving act.** The directory a pinned capability's bytes must be
+    /// READ from: the content-addressed snapshot named by `digest_hex` — never
+    /// the mutable directory `verified_live` was resolved from. This is the
+    /// reproducibility rule of `docs/design/automatic-delivery.md`: runtime
+    /// resolves from the project lock and serves the pinned bytes from the
+    /// store by digest, so a central library can move arbitrarily far ahead
+    /// without changing what any project serves.
+    ///
+    /// `verified_live` is used for one thing only — REPAIRING a snapshot that
+    /// is absent — and that is not a hole in the rule. Callers reach here only
+    /// after proving those live bytes hash to `digest_hex`, so the deposit
+    /// stores the pinned-and-reviewed bytes and nothing else; and
+    /// [`snapshot_content`] re-proves the address at the moment it is claimed,
+    /// so a source that moved in between fails the deposit instead of landing
+    /// under an approved name. The repair exists because [`pin`]'s deposit is
+    /// best-effort by design: a store that never received it, or that was
+    /// pruned, must self-heal rather than refuse a load the user consented to.
+    ///
+    /// Present-but-unverifiable is deliberately NOT repaired. Something
+    /// already occupies this address and does not hash to it — a tampered,
+    /// truncated, or symlinked store — which is a signal, not a gap to fill,
+    /// so it errors and the caller turns that into a refusal naming the
+    /// capability.
+    ///
+    /// [`pin`]: Store::pin
+    /// [`snapshot_content`]: Store::snapshot_content
+    pub fn pinned_content(&self, digest_hex: &str, verified_live: &Path) -> Result<PathBuf> {
+        let dest = self.root.join("content").join(digest_hex);
+        // `symlink_metadata`, not `exists()`: a symlink at the address counts
+        // as occupied and must refuse rather than be followed or replaced.
+        if dest.symlink_metadata().is_ok() {
+            if verified_snapshot(&dest, digest_hex) {
+                return Ok(dest);
+            }
+            bail!(
+                "the stored copy at {} is present but does not hash to {digest_hex}",
+                dest.display()
+            );
+        }
+        self.snapshot_content(verified_live, digest_hex)
+    }
+
+    /// Is the pinned snapshot for `digest_hex` ALREADY in the store and still
+    /// hashing to its own name? A pure question, with no repair: the answer is
+    /// what a caller needs when it holds no verified live copy to repair from
+    /// (the library-moved-ahead path in `mcp_server`, where the live directory
+    /// is exactly the thing that no longer matches the pin).
+    ///
+    /// Kept beside [`pinned_content`] rather than folded into it because the
+    /// two differ in one load-bearing way: `pinned_content` may deposit, this
+    /// only observes. A caller with nothing trustworthy to deposit must be
+    /// able to say so in the type of the call it makes.
+    ///
+    /// [`pinned_content`]: Store::pinned_content
+    pub fn has_pinned_content(&self, digest_hex: &str) -> bool {
+        verified_snapshot(&self.root.join("content").join(digest_hex), digest_hex)
     }
 
     /// Resolve a skill to a local directory **without any network access**.
@@ -953,6 +1107,7 @@ mod tests {
             let lock = crate::lock::Lock {
                 version: crate::lock::SUPPORTED_LOCK_VERSION,
                 extensions: Vec::new(),
+                packages: Vec::new(),
                 skills: vec![crate::lock::LockedSkill {
                     name: "x".into(),
                     source: crate::lock::SkillLockSource::Path,

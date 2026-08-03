@@ -17,7 +17,7 @@ use owo_colors::OwoColorize;
 
 use crate::cli::LockArgs;
 use crate::library::Library;
-use crate::lock::Lock;
+use crate::lock::{Lock, LockedInstructionVariant};
 use crate::manifest::Manifest;
 use crate::render::{resolve_active_servers, Selection};
 use crate::resolve::{ResolveMode, ResolvedServer, ResolvedSkill};
@@ -167,6 +167,20 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
         None => Some(manifest.profiles.keys().cloned().collect()),
     };
 
+    // W5: expand every package the selected toolsets reference into exact,
+    // digest-pinned members. Done BEFORE `record_lock` for the same reason
+    // resolution happens before any write — the expansion is strict, and a
+    // package that cannot be expanded must leave the lock untouched rather
+    // than half-written.
+    let packages = record_package_pins(
+        &ctx.dir,
+        manifest,
+        &library,
+        &lib_home,
+        &store,
+        profiles.as_deref().unwrap_or(&[]),
+    )?;
+
     let (skills, servers) = match &profiles {
         Some(profiles) => {
             resolve_profiles(manifest, &ctx.dir, &library, &lib_home, &store, profiles)?
@@ -184,6 +198,11 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
         println!("{} {notice}", "⚠".yellow());
     }
 
+    // W5, the rendered lane. A package's instruction members are pinned above;
+    // this is where the pinned bytes reach a file. Deliberately BEFORE the
+    // `args.quiet` early return: quiet suppresses narration, never a write.
+    let rendered_lane = render_package_instructions(&ctx)?;
+
     let from = match &profiles {
         Some(p) => super::count(p.len(), "toolset"),
         None => "the implicit default (no toolsets declared)".to_string(),
@@ -198,6 +217,7 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
         (executables, "executable pin"),
         (extensions, "extension"),
         (workflows, "workflow"),
+        (packages, "package"),
     ] {
         if n > 0 {
             pinned_parts.push(super::count(n, what));
@@ -213,6 +233,11 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
         // card says so in its own words. A second summary plus a competing
         // "Next:" is exactly the three-screens experience slice B removes.
         println!("  {} pinned {pinned_summary}", "✓".green());
+        // A file written is never suppressed, however quiet the caller asked
+        // to be — the rendered lane is a project artifact, not narration.
+        for line in &rendered_lane {
+            println!("  {line}");
+        }
         return Ok(());
     }
     println!(
@@ -220,9 +245,22 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
         "✓".green(),
         Lock::path(&ctx.dir).display()
     );
-    println!(
-        "  no configs rendered, no skills materialized — that stays `agentstack use --write`."
-    );
+    for line in &rendered_lane {
+        println!("  {line}");
+    }
+    // The claim narrows when a package carried house rules: instructions ARE
+    // rendered on that path, and one blended "nothing was rendered" sentence
+    // beside a `rendered lane:` line is exactly the dishonesty the delivery
+    // contract's copy rules forbid.
+    if rendered_lane.is_empty() {
+        println!(
+            "  no configs rendered, no skills materialized — that stays `agentstack use --write`."
+        );
+    } else {
+        println!(
+            "  no server configs rendered, no skills materialized — that stays `agentstack use --write`."
+        );
+    }
     let target_ids: Vec<String> = ctx.registry.ids().map(str::to_string).collect();
     let mode = super::overview::detect_mode(&ctx, &target_ids);
     let trust = crate::trust::check(&trust_base);
@@ -275,6 +313,9 @@ pub(crate) fn record_instruction_pins(
     // absorb the declined live bytes into the lock with no consent moment.
     // It stays in `declared`, so strict pruning keeps its existing pin.
     let decided = super::use_profile::decided_names(dir, "instruction");
+    // Sourceless fragments resolve their bodies from the linked sources; one
+    // read serves the whole pass.
+    let library = crate::library::Library::load_default_or_warn();
     let mut declared: Vec<String> = Vec::new();
     let mut pinned = 0usize;
     for (name, instr) in &manifest.instructions {
@@ -285,7 +326,18 @@ pub(crate) fn record_instruction_pins(
         if decided.contains(name) {
             continue;
         }
-        let src = crate::render::instructions::fragment_source(dir, &instr.path);
+        // Every body this fragment declares — the base and each per-(CLI, model)
+        // variant. Pinning only the currently-selected one would leave the
+        // others unpinned content the consent digest never covers, which is the
+        // hole `docs/design/instruction-variants.md` §"Every variant body is
+        // pinned" exists to close.
+        let bodies = match crate::instructions::bodies(name, instr, dir, &library) {
+            Ok(b) => b,
+            Err(e) if strict => {
+                return Err(e).context(format!("pinning instruction '{name}'"));
+            }
+            Err(_) => continue,
+        };
         // The pin comes from `Store::pin_instruction`, which deposits the bytes
         // it hashes into the content store as part of producing the checksum —
         // so a later re-gate can show WHICH LINES of this fragment moved
@@ -293,18 +345,48 @@ pub(crate) fn record_instruction_pins(
         // that builds a LockedInstruction, so routing it here makes the
         // deposit a property of pinning rather than of call-site discipline,
         // exactly as `Store::pin` does for skills.
-        match crate::store::Store::default_store().pin_instruction(&src) {
+        let store = crate::store::Store::default_store();
+        let base_src = bodies.source_of(&bodies.base);
+        match store.pin_instruction(&base_src) {
             Ok(checksum) => {
+                // A variant that cannot be pinned is an error in strict mode and
+                // skipped otherwise — the same posture the base body takes, so
+                // one unreadable variant never silently drops the whole entry.
+                let mut variants = Vec::new();
+                for v in &bodies.variants {
+                    let src = bodies.source_of(&v.path);
+                    match store.pin_instruction(&src) {
+                        Ok(checksum) => variants.push(LockedInstructionVariant {
+                            cli: v.cli.clone(),
+                            model: v.model.clone(),
+                            path: v.path.clone(),
+                            checksum,
+                        }),
+                        Err(e) if strict => {
+                            return Err(e).with_context(|| {
+                                format!(
+                                    "pinning instruction '{name}' variant: reading {}",
+                                    src.display()
+                                )
+                            });
+                        }
+                        Err(_) => {}
+                    }
+                }
                 lock.upsert_instruction(agentstack_core::lock::LockedInstruction {
                     name: name.clone(),
-                    path: instr.path.clone(),
+                    path: bodies.base.clone(),
                     checksum,
+                    variants,
                 });
                 pinned += 1;
             }
             Err(e) if strict => {
                 return Err(e).with_context(|| {
-                    format!("pinning instruction '{name}': reading {}", src.display())
+                    format!(
+                        "pinning instruction '{name}': reading {}",
+                        base_src.display()
+                    )
                 });
             }
             Err(_) => {}
@@ -493,6 +575,159 @@ pub(crate) fn record_workflow_pins(
         lock.save(dir)?;
     }
     Ok(pinned)
+}
+
+/// Expand each package a **selected** toolset references and pin its exact
+/// member set (W5, `docs/design/package-layer.md`). Returns how many packages
+/// pinned.
+///
+/// Two scoping rules, and they are different on purpose:
+///
+/// - **Expansion is scoped to the selected toolsets.** `lock --profile backend`
+///   re-reads and re-pins only what `backend` names, exactly as it re-resolves
+///   only that toolset's skills and servers.
+/// - **Pruning is scoped to every DECLARED toolset.** A package another toolset
+///   still selects keeps its pin untouched; a package no toolset names any
+///   more loses it. Pruning against the selected subset instead would silently
+///   drop another toolset's expansion — a member set nothing re-verifies is
+///   exactly the stale pin `retain_instruction_names` exists to prevent, and
+///   here it would also be a member set the runtime resolves from.
+///
+/// Strict like the lock command's other pins: an unknown package, a body that
+/// is not on this machine, a `pack.toml` that drifted from its index pin, a
+/// member path that escapes the package, a package carrying executable kinds,
+/// and every stale or ill-typed override are errors — and all of them happen
+/// before a single byte of the lock is rewritten.
+pub(crate) fn record_package_pins(
+    dir: &Path,
+    manifest: &Manifest,
+    library: &Library,
+    lib_home: &Path,
+    store: &crate::store::Store,
+    selected_toolsets: &[String],
+) -> Result<usize> {
+    let selections = crate::package::selected_packages(manifest, selected_toolsets);
+    let keep: Vec<String> = crate::package::all_selected_packages(manifest)
+        .into_keys()
+        .collect();
+    // Nothing selects a package and nothing is pinned: leave the lock entirely
+    // alone rather than loading and re-saving it for a no-op.
+    if selections.is_empty() && keep.is_empty() && Lock::load(dir)?.packages.is_empty() {
+        return Ok(0);
+    }
+    let expanded =
+        crate::package::expand_selected(manifest, dir, library, lib_home, store, &selections)?;
+
+    let mut lock = Lock::load(dir)?;
+    let before = lock.clone();
+    let pinned = expanded.len();
+    for entry in expanded {
+        lock.upsert_package(entry);
+    }
+    lock.retain_package_names(&keep);
+    // Don't churn the lockfile (or the trust digest) for byte-identical pins.
+    if lock != before {
+        lock.save(dir)?;
+    }
+    Ok(pinned)
+}
+
+/// Compile this project's **pinned** package instruction members into the
+/// managed instruction region, and describe on the rendered lane what happened.
+/// Returns the report lines (empty when the project has no package instruction
+/// member at all, which is the overwhelmingly common case).
+///
+/// Two rules, both inherited rather than invented:
+///
+/// - **Conservative scoping**, exactly as `upgrade::rerender_managed_regions`
+///   applies it (W3): only a target whose instruction file ALREADY carries the
+///   managed region is written. Locking a package must never be the reason a
+///   `CLAUDE.md` first appears in a repo, or the reason an existing one first
+///   gains an agentstack region — that is a decision a human makes by running
+///   `apply` or `instructions --write`. `manages_file` is that whole rule.
+/// - **Region merging is `render::merge_md`'s job**, reached through
+///   `plan_instructions`, so prose outside the markers survives untouched and
+///   there is exactly one implementation of the region contract.
+///
+/// The lane vocabulary is binding: this is the RENDERED lane. A package's
+/// instruction member is never described as going live "via gateway", because
+/// it does not — it goes into a file, and this says which one.
+fn render_package_instructions(ctx: &super::Context) -> Result<Vec<String>> {
+    let pinned = Lock::load(&ctx.dir).unwrap_or_default();
+    let members =
+        crate::package::members_of_kind(&pinned, crate::lock::PackageMemberKind::Instruction, None);
+    if members.is_empty() {
+        return Ok(Vec::new());
+    }
+    let manifest = &ctx.loaded.manifest;
+    let packages = crate::package::effective_members(&pinned);
+    let scope = crate::scope::Scope::default_for(&ctx.dir);
+    let target_ids = crate::render::resolve_targets(manifest, &ctx.registry, &[], &ctx.dir)?;
+
+    let sel = crate::instructions::Selecting::for_command(None);
+    let mut written: Vec<String> = Vec::new();
+    let mut unverifiable: Vec<String> = Vec::new();
+    for id in &target_ids {
+        let Some(desc) = ctx.registry.get(id) else {
+            continue;
+        };
+        let Some(plan) = crate::render::instructions::plan_instructions(
+            manifest, desc, scope, &ctx.dir, packages, &sel,
+        ) else {
+            continue;
+        };
+        if !crate::render::instructions::manages_file(&plan.path) {
+            continue;
+        }
+        // A member whose pinned bytes are missing or fail verification lands in
+        // `missing`; writing then would silently delete its prose from the
+        // region. Fail closed to "not written", and say so.
+        for name in &plan.missing {
+            if !unverifiable.contains(name) {
+                unverifiable.push(name.clone());
+            }
+        }
+        if !plan.missing.is_empty() || !plan.changed() {
+            continue;
+        }
+        let display = plan
+            .path
+            .strip_prefix(&ctx.dir)
+            .unwrap_or(&plan.path)
+            .display()
+            .to_string();
+        plan.write()
+            .with_context(|| format!("rendering {}", plan.path.display()))?;
+        if !written.contains(&display) {
+            written.push(display);
+        }
+    }
+
+    let count = super::count(members.len(), "package house-rule fragment");
+    let mut lines = Vec::new();
+    if written.is_empty() {
+        // The honest negative, and the one command that would render it.
+        lines.push(format!(
+            "rendered lane: {count} pinned; no instruction file here carries agentstack's \
+             managed region, so no file was written"
+        ));
+        lines.push(
+            "  ↳ `agentstack instructions --write` renders the region into CLAUDE.md / AGENTS.md"
+                .to_string(),
+        );
+    } else {
+        lines.push(format!(
+            "rendered lane: {count} pinned; managed region updated in {}",
+            written.join(", ")
+        ));
+    }
+    if !unverifiable.is_empty() {
+        lines.push(format!(
+            "  ↳ {} could not be served from the content store — re-run `agentstack lock`",
+            unverifiable.join(", ")
+        ));
+    }
+    Ok(lines)
 }
 
 /// Resolve the named profiles' skill + server refs through the library-aware

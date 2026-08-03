@@ -9,6 +9,21 @@
 //! the user's daily-driver agent) are gated behind `--with-instructions`/`--yes`,
 //! and the apply is atomic — a failure restores the prior install from a backup.
 //!
+//! W3 widened what "atomic" covers. Per
+//! `docs/design/automatic-delivery.md` §"Mixed-lane upgrades are
+//! transactional", a package whose members span both delivery lanes "updates
+//! the lock **and** re-renders the managed instruction region, or it does
+//! neither" — so the lock re-pin (skills *and* instruction pins) and the
+//! managed-region re-render now happen INSIDE the same backup/rollback
+//! envelope as the manifest and asset writes, not as separate steps after it.
+//! The re-render is deliberately conservative: it refreshes only instruction
+//! files that already carry the managed region, because a package upgrade must
+//! never be the reason a file appears in a project.
+//!
+//! The result report names each lane on its own line, and never describes an
+//! instruction as going live "via gateway" — it went to a file, and the
+//! sentence says which one.
+//!
 //! Known limitation: the catalog is embedded in the binary with a single version
 //! per id, so re-resolving an installed pack yields identical content and
 //! `upgrade` reports "already current". The command is structurally complete for
@@ -26,6 +41,9 @@ use crate::commands::{add, install, remove};
 use crate::lock::Lock;
 use crate::manifest::{Instruction, PackInstall, Skill};
 use crate::provider::{self, Candidate, CandidateKind, PackSpec};
+use crate::render::instructions::{manages_file, plan_instructions};
+use crate::render::resolve_targets;
+use crate::scope::Scope;
 use crate::store::{self, Store};
 use crate::util::{atomic, diff};
 
@@ -281,8 +299,15 @@ fn upgrade_pack(
         return Ok(());
     }
 
-    apply_upgrade(
+    // One transaction, both lanes (design §"Mixed-lane upgrades are
+    // transactional"): the manifest write, the asset swap, the lock re-pin,
+    // and the managed-region re-render either all land or all revert. The lock
+    // and the region used to be separate steps AFTER this call, which is
+    // exactly the state the contract forbids — a lock that moved for a
+    // manifest that rolled back.
+    let outcome = apply_upgrade(
         ctx,
+        manifest_dir,
         pack,
         recipe,
         spec,
@@ -291,9 +316,8 @@ fn upgrade_pack(
         &new_text,
         origin,
     )?;
-    repin_lock(ctx, manifest_dir, recipe, spec)?;
 
-    println!("{} upgraded pack '{}'.", "✓".green(), pack);
+    print_result_report(ctx, pack, recipe, origin, &diff_result, &outcome);
     Ok(())
 }
 
@@ -471,8 +495,9 @@ fn build_upgraded_manifest(
     if want_instructions {
         for instr in &spec.instructions {
             let entry = Instruction {
-                path: format!("./instructions/{}.md", instr.name),
+                path: Some(format!("./instructions/{}.md", instr.name)),
                 targets: vec!["*".into()],
+                variants: Vec::new(),
                 from_user_layer: false,
             };
             text = add::build_manifest_with(
@@ -490,11 +515,37 @@ fn build_upgraded_manifest(
     Ok(text)
 }
 
-/// Apply the upgrade atomically: back up the pack's current files, write the new
-/// manifest, swap the on-disk assets, and on any failure restore everything.
+/// What the applied upgrade actually did, per delivery lane. Only facts the
+/// report is allowed to state — every field is filled in from a completed
+/// write, never from the plan.
+#[derive(Default)]
+struct LaneOutcome {
+    /// Skills re-pinned in the lock (dynamic lane).
+    skills_repinned: usize,
+    /// Instruction fragments re-pinned in the lock (rendered lane).
+    instr_pinned: usize,
+    /// Instruction **fragment source** files this upgrade wrote, under the
+    /// manifest dir.
+    fragments: Vec<PathBuf>,
+    /// Instruction files (`CLAUDE.md` / `AGENTS.md`) whose managed region was
+    /// rewritten. Empty means **no file was written**, which the report says
+    /// out loud rather than implying a write happened.
+    rendered: Vec<PathBuf>,
+}
+
+/// Apply the upgrade atomically: back up everything the run can touch, write
+/// the new manifest, swap the on-disk assets, re-pin the lock, re-render the
+/// managed instruction regions — and on any failure restore all of it.
+///
+/// The backup set is the transaction's scope, so it is worth naming: the
+/// manifest, the pack's old skill dirs, the pack's old instruction fragment
+/// files, **the lockfile** (or its absence), and **every instruction file that
+/// already carries a managed region**. The last two are the W3 additions; the
+/// first three were already covered.
 #[allow(clippy::too_many_arguments)]
 fn apply_upgrade(
     ctx: &super::Context,
+    manifest_dir: Option<&Path>,
     pack: &str,
     recipe: &PackInstall,
     spec: &PackSpec,
@@ -502,7 +553,7 @@ fn apply_upgrade(
     original: &str,
     new_text: &str,
     origin: &add::PackOrigin,
-) -> Result<()> {
+) -> Result<LaneOutcome> {
     let manifest = &ctx.loaded.manifest;
 
     // Old dirs owned by this pack — contained under the manifest dir only, so a
@@ -555,8 +606,22 @@ fn apply_upgrade(
         }
     }
 
+    // The lock joins the transaction. `None` records "there was no lock here",
+    // so a rollback DELETES the one this run created rather than leaving pins
+    // for a manifest that no longer exists — held in memory because a lockfile
+    // is small and the restore must not itself depend on the backup dir.
+    let lock_path = Lock::path(&ctx.dir);
+    let lock_before: Option<Vec<u8>> = fs::read(&lock_path).ok();
+
+    // Instruction files that ALREADY carry a managed region — the only ones
+    // the re-render below may touch. Backed up by content, across every
+    // registered adapter rather than only the resolved targets, so the backup
+    // set is a superset of the write set by construction: a file can never be
+    // rendered without a way back.
+    let region_before = managed_region_snapshot(ctx);
+
     // Mutate. On the first error, restore from the backups and bail.
-    let result = (|| -> Result<()> {
+    let result = (|| -> Result<LaneOutcome> {
         atomic::write(&ctx.loaded.manifest_path, new_text)
             .with_context(|| format!("writing {}", ctx.loaded.manifest_path.display()))?;
         for dir in &old_skill_dirs {
@@ -584,58 +649,181 @@ fn apply_upgrade(
             }
             fs::write(out, body).with_context(|| format!("writing {}", out.display()))?;
         }
-        Ok(())
+
+        // Everything below reads the manifest we just wrote, so reload through
+        // the ordinary command loader rather than parsing the text by hand:
+        // it applies the same machine-layer instruction merge every other
+        // command sees. Compiling the region from an unmerged manifest would
+        // silently drop the user's personal fragments out of a global-scope
+        // CLAUDE.md.
+        let fresh = super::load(manifest_dir).context("re-reading the upgraded manifest")?;
+        let mut outcome = LaneOutcome {
+            fragments: new_instr.iter().map(|(p, _)| p.clone()).collect(),
+            ..LaneOutcome::default()
+        };
+        outcome.skills_repinned = repin_lock(&fresh, recipe, spec)?;
+        // Instruction pins go through `lock.rs`'s recorder — the single
+        // pinning path — rather than a second one here. Strict, because a pack
+        // upgrade that drops an instruction must prune its pin too; the
+        // rollback below is what makes strictness safe.
+        if fresh
+            .loaded
+            .manifest
+            .instructions
+            .values()
+            .any(|i| !i.from_user_layer)
+        {
+            outcome.instr_pinned =
+                super::lock::record_instruction_pins(&fresh.dir, &fresh.loaded.manifest, true)?;
+        }
+        outcome.rendered = rerender_managed_regions(&fresh)?;
+        Ok(outcome)
     })();
 
-    if let Err(e) = result {
-        // Roll back: clear whatever the failed apply produced, restore manifest
-        // and every backed-up file/dir.
-        for asset in &new_skill_assets {
-            let _ = fs::remove_dir_all(ctx.dir.join(asset));
-        }
-        for (out, _) in &new_instr {
-            let _ = fs::remove_file(out);
-        }
-        // Restoring the manifest is the load-bearing rollback step — unlike the
-        // best-effort file cleanup around it, a silent failure here leaves the
-        // user with a possibly-corrupt manifest and no signal, so surface it.
-        if let Err(restore_err) = atomic::write(&ctx.loaded.manifest_path, original) {
-            eprintln!(
-                "warning: rollback could not restore {} ({restore_err:#}); \
-                 the manifest may be inconsistent — check it before re-running",
-                ctx.loaded.manifest_path.display()
-            );
-        }
-        for (orig, backup, is_dir) in &backups {
-            if *is_dir {
-                let _ = fs::remove_dir_all(orig);
-                let _ = crate::util::fsx::copy_dir_all(backup, orig);
-            } else {
-                if let Some(parent) = orig.parent() {
-                    let _ = fs::create_dir_all(parent);
-                }
-                let _ = fs::copy(backup, orig);
+    let outcome = match result {
+        Ok(outcome) => outcome,
+        Err(e) => {
+            // Roll back: clear whatever the failed apply produced, restore
+            // manifest and every backed-up file/dir.
+            for asset in &new_skill_assets {
+                let _ = fs::remove_dir_all(ctx.dir.join(asset));
             }
+            for (out, _) in &new_instr {
+                let _ = fs::remove_file(out);
+            }
+            // Restoring the manifest is the load-bearing rollback step — unlike the
+            // best-effort file cleanup around it, a silent failure here leaves the
+            // user with a possibly-corrupt manifest and no signal, so surface it.
+            if let Err(restore_err) = atomic::write(&ctx.loaded.manifest_path, original) {
+                eprintln!(
+                    "warning: rollback could not restore {} ({restore_err:#}); \
+                     the manifest may be inconsistent — check it before re-running",
+                    ctx.loaded.manifest_path.display()
+                );
+            }
+            // The lock is restored to its exact prior bytes, or removed when
+            // there was none — "or it does neither" has to include the lock,
+            // otherwise a rolled-back upgrade still moved a pin.
+            match &lock_before {
+                Some(bytes) => {
+                    let _ = fs::write(&lock_path, bytes);
+                }
+                None => {
+                    let _ = fs::remove_file(&lock_path);
+                }
+            }
+            // Managed regions: exact prior bytes. These files are never
+            // created by the upgrade, so restoring by write is always exact.
+            for (path, before) in &region_before {
+                let _ = fs::write(path, before);
+            }
+            for (orig, backup, is_dir) in &backups {
+                if *is_dir {
+                    let _ = fs::remove_dir_all(orig);
+                    let _ = crate::util::fsx::copy_dir_all(backup, orig);
+                } else {
+                    if let Some(parent) = orig.parent() {
+                        let _ = fs::create_dir_all(parent);
+                    }
+                    let _ = fs::copy(backup, orig);
+                }
+            }
+            cleanup(&backup_root);
+            return Err(e).context("upgrade rolled back");
         }
-        cleanup(&backup_root);
-        return Err(e).context("upgrade rolled back");
-    }
+    };
 
     cleanup(&backup_root);
-    Ok(())
+    Ok(outcome)
 }
 
-/// Re-pin the lockfile for the pack's skills after an upgrade.
-fn repin_lock(
-    ctx: &super::Context,
-    manifest_dir: Option<&Path>,
-    recipe: &PackInstall,
-    spec: &PackSpec,
-) -> Result<()> {
+/// The current bytes of every instruction file that carries agentstack's
+/// managed region, across every registered adapter at this manifest's default
+/// scope. Read before the mutation so the rollback can put them back exactly;
+/// a file with no region is not in here because it is not ours to write.
+fn managed_region_snapshot(ctx: &super::Context) -> Vec<(PathBuf, Vec<u8>)> {
+    let scope = Scope::default_for(&ctx.dir);
+    let mut out: Vec<(PathBuf, Vec<u8>)> = Vec::new();
+    for desc in ctx.registry.iter() {
+        let Some(spec) = desc.instructions.as_ref() else {
+            continue;
+        };
+        let Some(path) = spec.path_for(scope, &ctx.dir) else {
+            continue;
+        };
+        // Several adapters legitimately share one file (AGENTS.md); back it
+        // up once.
+        if out.iter().any(|(p, _)| *p == path) {
+            continue;
+        }
+        if manages_file(&path) {
+            if let Ok(bytes) = fs::read(&path) {
+                out.push((path, bytes));
+            }
+        }
+    }
+    out
+}
+
+/// Re-render the managed instruction region for every target that **already
+/// has one on disk**, and report which files were written.
+///
+/// The scoping rule is conservative on purpose: an upgrade may refresh a
+/// region a human already accepted, but it must never be the reason an
+/// instruction file — or a managed region inside one — first appears in a
+/// project. `manages_file` is that whole rule, in one predicate; a target
+/// without the marker is skipped, and the report says plainly that nothing was
+/// written and which command would render it.
+///
+/// Region merging is `render::merge_md`'s job via `plan_instructions`, not
+/// reimplemented here: prose outside the markers must survive untouched.
+fn rerender_managed_regions(ctx: &super::Context) -> Result<Vec<PathBuf>> {
+    let manifest = &ctx.loaded.manifest;
+    // W5: a package's instruction members compile into the same region, so an
+    // upgrade in a project whose house rules arrive only through a package
+    // still has a region to refresh.
+    let pinned = Lock::load(&ctx.dir).unwrap_or_default();
+    let packages = crate::package::effective_members(&pinned);
+    if manifest.instructions.is_empty() && packages.iter().all(|p| p.members.is_empty()) {
+        return Ok(Vec::new());
+    }
+    let scope = Scope::default_for(&ctx.dir);
+    let target_ids = resolve_targets(manifest, &ctx.registry, &[], &ctx.dir)?;
+    let sel = crate::instructions::Selecting::for_command(None);
+    let mut written = Vec::new();
+    for id in &target_ids {
+        let Some(desc) = ctx.registry.get(id) else {
+            continue;
+        };
+        let Some(plan) = plan_instructions(manifest, desc, scope, &ctx.dir, packages, &sel) else {
+            continue;
+        };
+        if !manages_file(&plan.path) {
+            continue;
+        }
+        // A missing fragment source would silently delete that fragment's
+        // compiled prose from the region — the same block `instructions
+        // --write` applies. The pack's own fragments were just written, so in
+        // practice this only guards a machine-layer fragment that vanished.
+        if !plan.missing.is_empty() || !plan.changed() {
+            continue;
+        }
+        plan.write()
+            .with_context(|| format!("re-rendering {}", plan.path.display()))?;
+        written.push(plan.path.clone());
+    }
+    Ok(written)
+}
+
+/// Re-pin the lockfile for the pack's skills after an upgrade; returns how many
+/// skills were pinned. Called from inside the transaction with a context
+/// reloaded from the upgraded manifest.
+fn repin_lock(ctx: &super::Context, recipe: &PackInstall, spec: &PackSpec) -> Result<usize> {
     let mut lock = Lock::load(&ctx.dir)?;
     let store = Store::default_store();
     let desired: Vec<String> = spec.skills.iter().map(|s| s.name.clone()).collect();
 
+    let mut pinned = 0usize;
     for skill in &spec.skills {
         let Some(asset) = &skill.path else { continue };
         let entry = Skill {
@@ -648,6 +836,7 @@ fn repin_lock(
             .resolve(&entry, &ctx.dir, None)
             .with_context(|| format!("re-pinning skill '{}'", skill.name))?;
         lock.upsert(install::locked_entry(&skill.name, &entry, &resolved)?);
+        pinned += 1;
     }
     // Drop lock rows for skills the upgrade removed.
     for old in &recipe.skills {
@@ -656,25 +845,216 @@ fn repin_lock(
         }
     }
     lock.save(&ctx.dir)?;
-    let _ = manifest_dir; // reserved for future re-resolve via the loaded context
-    Ok(())
+    Ok(pinned)
 }
 
+/// The pre-write **plan**, already partitioned by delivery lane so the preview
+/// and the result speak the same vocabulary. Nothing here is past tense —
+/// nothing has been written yet, and the steering gate below may still refuse
+/// the whole upgrade.
+///
+/// Skills and the server are the dynamic lane; instructions are the rendered
+/// lane. A lane with no members gets no line at all rather than an empty one.
 fn print_change_summary(d: &PackDiff) {
-    let line = |label: &str, items: &[String]| {
-        if !items.is_empty() {
-            println!("  {} {}: {}", "•".cyan(), label, items.join(", "));
-        }
+    let members = |pairs: &[(&str, &[String])]| -> Vec<String> {
+        pairs
+            .iter()
+            .filter(|(_, items)| !items.is_empty())
+            .map(|(label, items)| format!("{label}: {}", items.join(", ")))
+            .collect()
     };
+
+    let mut dynamic = members(&[
+        ("skills added", &d.skills_added),
+        ("skills changed", &d.skills_changed),
+        ("skills removed", &d.skills_removed),
+    ]);
     if d.server_changed {
-        println!("  {} server changed", "•".cyan());
+        dynamic.push("server definition changed".to_string());
     }
-    line("skills added", &d.skills_added);
-    line("skills changed", &d.skills_changed);
-    line("skills removed", &d.skills_removed);
-    line("house rules added", &d.instr_added);
-    line("house rules changed", &d.instr_body_changed);
-    line("house rules removed", &d.instr_removed);
+    if !dynamic.is_empty() {
+        println!("  {} {}", "dynamic lane:".cyan(), dynamic.join(" · "));
+    }
+
+    let rendered = members(&[
+        ("house rules added", &d.instr_added),
+        ("house rules changed", &d.instr_body_changed),
+        ("house rules removed", &d.instr_removed),
+    ]);
+    if !rendered.is_empty() {
+        println!("  {} {}", "rendered lane:".cyan(), rendered.join(" · "));
+    }
+}
+
+/// The per-lane **result** report (design §"Mixed-lane upgrades are
+/// transactional, and report per lane"). Two rules here are binding copy, not
+/// style:
+///
+/// 1. The lanes get separate lines. Never one blended sentence — that is how a
+///    user comes to believe no file was touched when one was.
+/// 2. An instruction is never described as going live "via gateway". It went
+///    to a file, and the sentence names which file.
+///
+/// A lane with nothing in it prints nothing; a rendered lane that wrote no
+/// instruction file says so out loud instead of implying a write.
+fn print_result_report(
+    ctx: &super::Context,
+    pack: &str,
+    recipe: &PackInstall,
+    origin: &add::PackOrigin,
+    d: &PackDiff,
+    out: &LaneOutcome,
+) {
+    if recipe.version != origin.version {
+        println!(
+            "{} upgraded {pack} {} → {}",
+            "✓".green(),
+            recipe.version,
+            origin.version.bold()
+        );
+    } else {
+        println!("{} upgraded pack '{pack}'.", "✓".green());
+    }
+    if let Some(line) = dynamic_lane_result(d, out) {
+        println!("  {line}");
+    }
+    for line in rendered_lane_result(&ctx.dir, d, out) {
+        println!("  {line}");
+    }
+    // Outside both lane blocks on purpose: the re-pin is neither lane's news,
+    // and it happens whether or not this pack carried a fragment.
+    if let Some(line) = repin_scope_line(out) {
+        println!("  {line}");
+    }
+}
+
+/// The dynamic-lane result line, or `None` when the lane had no members.
+///
+/// Deliberately NOT the contract's literal "live via gateway now" — **revisited
+/// at the flip (W4, 2026-08-03) and kept**.
+///
+/// The reason has changed, and it is stronger than the one W3 recorded. It is
+/// no longer "the default is static": dynamic *is* the default now. It is that
+/// `upgrade` performs a **pinning** act and cannot establish an **activation**
+/// one. Whether these exact bytes are being served depends on three facts this
+/// command never touches — the bridge being registered in some harness, the
+/// project being trusted at its current bytes, and a lease selecting a toolset
+/// that contains the skill — plus one it could read but must not decide from
+/// alone: a project may have Render locally set, in which case the bytes go to
+/// files. A line printed unconditionally would be false on all four counts, and
+/// a line printed conditionally would still be claiming liveness from a
+/// pinning path. This is the same boundary `package-members-v1` draws: a pinned
+/// member is not a running one.
+///
+/// So the line states what is true in every case — the lock now names the new
+/// bytes — and `agentstack delivery` is where routing is read.
+fn dynamic_lane_result(d: &PackDiff, out: &LaneOutcome) -> Option<String> {
+    let mut parts: Vec<String> = Vec::new();
+    if out.skills_repinned > 0 {
+        parts.push(format!(
+            "{} re-pinned",
+            super::count(out.skills_repinned, "skill")
+        ));
+    }
+    if !d.skills_removed.is_empty() {
+        parts.push(format!(
+            "{} removed",
+            super::count(d.skills_removed.len(), "skill")
+        ));
+    }
+    if d.server_changed {
+        parts.push("server definition changed".to_string());
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "dynamic lane: {} — the lock now names the new bytes",
+        parts.join(", ")
+    ))
+}
+
+/// The rendered-lane result lines, naming **what was written and where**.
+/// Empty when the pack has no rendered members at all.
+fn rendered_lane_result(dir: &Path, d: &PackDiff, out: &LaneOutcome) -> Vec<String> {
+    if out.fragments.is_empty() && d.instr_removed.is_empty() {
+        return Vec::new();
+    }
+    let list = |paths: &[PathBuf]| -> String {
+        paths
+            .iter()
+            .map(|p| rel_display(dir, p))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+
+    let mut lines = Vec::new();
+    if out.fragments.is_empty() {
+        // Only removals: the fragments are gone from the manifest and disk,
+        // and no instruction file gained anything.
+        lines.push(format!(
+            "rendered lane: {} removed from this project's fragments; no instruction file gained \
+             new prose",
+            super::count(d.instr_removed.len(), "house rule")
+        ));
+        return lines;
+    }
+
+    let wrote = format!(
+        "{} written to {}",
+        super::count(out.fragments.len(), "house-rule fragment"),
+        list(&out.fragments)
+    );
+    if out.rendered.is_empty() {
+        // The honest negative: fragments moved, but nothing rendered. Say it,
+        // and name the command that would.
+        lines.push(format!(
+            "rendered lane: {wrote}; no instruction file here carries agentstack's managed region, \
+             so no file was rendered"
+        ));
+        lines.push(
+            "  ↳ `agentstack instructions --write` renders the region into CLAUDE.md / AGENTS.md"
+                .to_string(),
+        );
+    } else {
+        lines.push(format!(
+            "rendered lane: {wrote}; managed region updated in {}",
+            list(&out.rendered)
+        ));
+    }
+    lines
+}
+
+/// What the lock re-pin actually covered (review finding 7).
+///
+/// `record_instruction_pins` walks the WHOLE manifest, not the upgraded pack's
+/// fragments — it is the single pinning path, and scoping it to one pack would
+/// mean a second one. So an `agentstack upgrade <pack>` re-pins every
+/// project-declared fragment from its bytes on disk, including fragments the
+/// pack never touched. That is correct (any resulting lock change re-gates the
+/// project through the trust digest, and a fragment under a standing re-gate
+/// answer keeps the pin that answer named), but the report used to print the
+/// count only when the pack itself carried fragments — so the common case, a
+/// pack with none, re-pinned the project's own house rules and said nothing at
+/// all.
+///
+/// This line always prints when something was pinned, and states the scope
+/// rather than leaving "N pinned" to be read as "N of the pack's".
+fn repin_scope_line(out: &LaneOutcome) -> Option<String> {
+    if out.instr_pinned == 0 {
+        return None;
+    }
+    Some(format!(
+        "lock: {} re-pinned from its current bytes — every house rule this project \
+         declares, not only this pack's",
+        super::count(out.instr_pinned, "instruction fragment")
+    ))
+}
+
+/// A path shown relative to the manifest dir when it lives under it, absolute
+/// otherwise — short enough to read, never ambiguous about which file.
+fn rel_display(dir: &Path, path: &Path) -> String {
+    path.strip_prefix(dir).unwrap_or(path).display().to_string()
 }
 
 /// Filesystem-safe slug for scratch/backup directory names.
@@ -682,4 +1062,44 @@ fn sanitize(name: &str) -> String {
     name.chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// **Review finding 7.** The re-pin's SCOPE is stated, and it is stated in
+    /// the common case: a pack that carries no house-rule fragment of its own.
+    ///
+    /// `record_instruction_pins` walks the whole manifest — it is the single
+    /// pinning path — so upgrading any pack re-pins every project-declared
+    /// fragment. The old report printed the count only from inside the
+    /// rendered-lane block, which returns nothing at all when the pack carried
+    /// no fragment, so that re-pin happened silently.
+    #[test]
+    fn the_report_states_the_repin_scope_even_when_the_pack_carried_no_fragment() {
+        let out = LaneOutcome {
+            skills_repinned: 2,
+            instr_pinned: 3,
+            fragments: Vec::new(), // this pack carried no house rule
+            rendered: Vec::new(),
+        };
+        let line = repin_scope_line(&out).expect("a re-pin that happened is reported");
+        assert!(line.contains("3 instruction fragments"), "{line}");
+        assert!(
+            line.contains("not only this pack's"),
+            "the scope is stated, not left to be inferred from a bare count: {line}"
+        );
+
+        // The rendered-lane block is still silent here — which is correct, and
+        // is exactly why the line above cannot live inside it.
+        let d = PackDiff::default();
+        assert!(rendered_lane_result(Path::new("/p"), &d, &out).is_empty());
+    }
+
+    /// No pin, no line: the report never claims an act that did not happen.
+    #[test]
+    fn nothing_repinned_reports_nothing() {
+        assert!(repin_scope_line(&LaneOutcome::default()).is_none());
+    }
 }

@@ -46,3 +46,10 @@ skills:
 instructions:
   global: ~/.copilot/copilot-instructions.md
   project: AGENTS.md
+  live:
+    channel: mcp-instructions
+    display: MCP initialize instructions
+    confirmation: unconfirmed
+    note: >-
+      MCP client, but consumption of the initialize `instructions` field is
+      unverified (docs/design/research/dynamic-instructions-2026-08.md).

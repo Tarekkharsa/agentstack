@@ -1,18 +1,25 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# skills-workout — one skill set, two delivery paths, identical bytes.
+# skills-workout — one skill set, two delivery lanes, identical bytes.
 #
-#   AgentStack can put a skill in front of an agent two ways:
-#     Path A (static render): `agentstack use <profile> --write` symlinks the
-#            profile's skills into the CLI's native skills dir (.claude/skills).
-#     Path B (zero-files lease): an agent connected to `agentstack mcp` opens a
-#            profile lease and pulls the same skills into context on demand —
-#            nothing is written to disk.
+#   Delivery is ROUTED, and `agentstack delivery` is what decides. On an
+#   MCP-capable tool, skills route to the live lane — that is the default, and
+#   the rendered lane is what you get by asking:
+#     Lane B (the default, zero files): an agent connected to `agentstack mcp`
+#            opens a toolset lease and pulls the skills into context on demand.
+#            Nothing is written to disk; there is no file to repair.
+#     Lane A (rendered, on request): `agentstack use <toolset> --write`
+#            symlinks the toolset's skills into the CLI's native skills dir
+#            (.claude/skills) — for a tool that reads files, or a team that
+#            wants them committed.
 #
 #   This proof runs BOTH against the same manifest and asserts they deliver the
-#   SAME skills with byte-identical bodies, that each path respects the profile
-#   fence, that static render prunes cleanly without ever clobbering a hand-made
-#   skill dir, and that the lease refuses a skill outside the profile.
+#   SAME skills with byte-identical bodies, that each lane respects the toolset
+#   fence, that the render prunes cleanly without ever clobbering a hand-made
+#   skill dir, and that the lease refuses a skill outside the toolset.
+#
+#   Lane A runs first only because its bytes are the ones Lane B is compared
+#   against at the end — not because it is the normal path.
 #
 # Self-contained: isolated AGENTSTACK_HOME + HOME, nothing touches real config.
 # Exits nonzero and prints FAIL on any mismatch, so it doubles as a CI check.
@@ -65,9 +72,20 @@ mkdir -p "$PROJECT"
 cp -R "$HERE/bundle/." "$PROJECT/"
 cd "$PROJECT"
 
-printf '\033[1;36m  skills-workout — static render vs zero-files lease, identical bytes\033[0m\n'
+printf '\033[1;36m  skills-workout — the live lane vs the rendered lane, identical bytes\033[0m\n'
 
-# ── seed the central library with the two profile-referenced library skills ──
+# ── which lane is the default here? ask, do not assume ───────────────────────
+say "Delivery is routed — this project's only tool is MCP-capable:"
+DELIVERY="$("$AS" delivery 2>&1 | sed 's/\x1b\[[0-9;]*m//g')"
+printf '%s\n' "$DELIVERY" | sed 's/^/  /'
+if grep -q "Claude Code.*skills.*served live" <<< "$DELIVERY" \
+   && grep -q "0 project artifacts" <<< "$DELIVERY"; then
+  ok "skills route to the LIVE lane by default here — the render below is the ask, not the norm"
+else
+  bad "expected skills routed live on an MCP-capable tool; got: $DELIVERY"
+fi
+
+# ── seed the central library with the two toolset-referenced library skills ──
 say "Seed the isolated central library (sql-review, incident-runbook):"
 "$AS" lib add "$PROJECT/lib-sources/sql-review"       --name sql-review       --write >/dev/null
 "$AS" lib add "$PROJECT/lib-sources/incident-runbook" --name incident-runbook --write >/dev/null
@@ -77,13 +95,13 @@ else
   bad "library seeding failed"
 fi
 
-# Source-of-truth SKILL.md bodies we will compare both paths against.
+# Source-of-truth SKILL.md bodies we will compare both lanes against.
 SRC_API="$PROJECT/.agentstack/skills/api-conventions/SKILL.md"
 SRC_REL="$PROJECT/.agentstack/skills/release-checklist/SKILL.md"
 SRC_SQL="$AGENTSTACK_HOME/lib/skills/sql-review/SKILL.md"
 
 # ─────────────────────────────────────────────────────────────────────────────
-say "PATH A — static render via 'use <profile> --write'"
+say "LANE A (on request) — the rendered lane via 'use <toolset> --write'"
 # ─────────────────────────────────────────────────────────────────────────────
 "$AS" lock >/dev/null
 "$AS" use docs --scope project --write >/dev/null
@@ -115,7 +133,7 @@ else
   bad "rendered sql-review body != library source"
 fi
 
-# Capture Path A's rendered bytes now, before the `all` render prunes them.
+# Capture Lane A's rendered bytes now, before the `all` render prunes them.
 A_API_BODY="$(cat .claude/skills/api-conventions/SKILL.md)"
 A_SQL_BODY="$(cat .claude/skills/sql-review/SKILL.md)"
 
@@ -149,7 +167,7 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-say "PATH B — zero-files lease via 'agentstack mcp'"
+say "LANE B (the default) — the live lane: a toolset lease over 'agentstack mcp'"
 # ─────────────────────────────────────────────────────────────────────────────
 consent=$("$AS" trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')
 "$AS" trust . --yes --consented-digest "$consent" >/dev/null
@@ -157,7 +175,7 @@ consent=$("$AS" trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/
 OUT="$SBX/leaseout"
 python3 "$HERE/lease_client.py" "$AS" "$PROJECT" "$OUT"
 
-# the lease opened on the docs profile and wrote no native files
+# the lease opened on the docs toolset and wrote no native files
 if grep -q '"opened": "docs"' "$OUT/opened.json" \
    && grep -q '"native_files_written": false' "$OUT/opened.json"; then
   ok "lease opened on 'docs' and wrote no native files"
@@ -173,7 +191,7 @@ else
   bad "list_loadable returned {$LOADABLE}, expected the docs skills + using-agentstack"
 fi
 
-# each in-profile load returned the skill's SKILL.md bytes; check origin routing
+# each in-toolset load returned the skill's SKILL.md bytes; check origin routing
 if diff -q "$OUT/loaded-api-conventions.txt" "$SRC_API" >/dev/null; then
   ok "loaded api-conventions body == inline source"
 else
@@ -191,11 +209,11 @@ else
   bad "load reported wrong origins"
 fi
 
-# the fence holds: a real manifest skill outside the profile is refused
+# the fence holds: a real manifest skill outside the toolset is refused
 if grep -qi 'not loadable' "$OUT/refused.txt"; then
-  ok "lease refused release-checklist (real skill, not in docs profile) — fence holds"
+  ok "lease refused release-checklist (real skill, not in the docs toolset) — fence holds"
 else
-  bad "lease did not refuse the out-of-profile skill; got: $(cat "$OUT/refused.txt")"
+  bad "lease did not refuse the out-of-toolset skill; got: $(cat "$OUT/refused.txt")"
 fi
 
 # the load trail records what was loaded, with the agent's stated reasons
@@ -223,17 +241,17 @@ else
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
-say "THE POINT — both paths delivered byte-identical skill bodies"
+say "THE POINT — both lanes delivered byte-identical skill bodies"
 # ─────────────────────────────────────────────────────────────────────────────
 if [[ "$A_API_BODY" == "$(cat "$OUT/loaded-api-conventions.txt")" ]]; then
-  ok "api-conventions: static-rendered bytes == lease-loaded bytes"
+  ok "api-conventions: rendered bytes == lease-loaded bytes"
 else
-  bad "api-conventions: static render and lease disagree"
+  bad "api-conventions: the rendered lane and the live lane disagree"
 fi
 if [[ "$A_SQL_BODY" == "$(cat "$OUT/loaded-sql-review.txt")" ]]; then
-  ok "sql-review: static-rendered bytes == lease-loaded bytes"
+  ok "sql-review: rendered bytes == lease-loaded bytes"
 else
-  bad "sql-review: static render and lease disagree"
+  bad "sql-review: the rendered lane and the live lane disagree"
 fi
 
 printf '\n\033[1mSummary:\033[0m %d passed, %d failed\n' "$PASS" "$FAIL"

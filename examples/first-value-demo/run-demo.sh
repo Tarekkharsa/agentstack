@@ -9,14 +9,23 @@
 #   1. START from two real native configs: Claude Code (~/.claude.json) knows
 #      a `github` server with an inline token; Codex (~/.codex/config.toml)
 #      knows a `tldraw` server. Neither CLI knows the other's server.
-#   2. `agentstack init --yes --secrets env` — ONE import writes ONE manifest;
-#      the inline token is lifted to a `${GITHUB_TOKEN}` reference whose value
-#      lands in a gitignored .env, never in the manifest.
-#   3. `agentstack apply --scope global --write` — the one manifest renders
-#      back into BOTH native formats: now each CLI has BOTH servers.
+#   2. `agentstack init --yes --secrets env` — ONE import. The server
+#      DEFINITIONS land in the library; the manifest references them by name.
+#      The inline token is lifted to a `${GITHUB_TOKEN}` reference in the
+#      library definition, and its value lands in a gitignored .env.
+#   3. `agentstack delivery` — how each tool actually gets them: on an
+#      MCP-capable tool, servers are served live, so there is nothing on disk.
 #   4. `agentstack doctor` — a clean bill of health.
-#   5. `agentstack restore --last --write` (twice: render, then import) — the
-#      machine returns byte-for-byte to where it started.
+#   5. `agentstack apply --toolset default --scope global --write` — the
+#      rendered lane, for when you want the files anyway: BOTH native formats
+#      end up with BOTH servers.
+#   6. `agentstack restore --last --write` (twice: render, then import) — the
+#      machine returns byte-for-byte to where it started, library included.
+#
+# The secret claim is the one this demo exists to make, and after the library
+# inversion it lives in three places at once, so it is proven three times: the
+# manifest holds NO secret material, the library definition holds the
+# `${REF}` and never the value, and the value exists only in a gitignored .env.
 #
 # It exits nonzero and prints FAIL on any mismatch, so it is safe to run
 # unattended. Self-contained: isolated temp HOME, nothing touches your real
@@ -124,18 +133,79 @@ say "Import everything once — one command, one manifest:"
 run "agentstack init --yes --secrets env"
 as init --yes --secrets env 2>&1 | sed 's/^/  /'
 
-say "The manifest is the portable source of truth — and it is commit-safe:"
-run "grep -n GITHUB_TOKEN .agentstack/agentstack.toml"
-grep -n "GITHUB_TOKEN" .agentstack/agentstack.toml | sed 's/^/  /'
-if grep -q '${GITHUB_TOKEN}' .agentstack/agentstack.toml && ! grep -q "$TOKEN" .agentstack/agentstack.toml; then
-  ok "the manifest holds \${GITHUB_TOKEN}, never the value (it lives in the gitignored .env)"
+say "The definitions went to the library; the manifest just names them:"
+run "cat .agentstack/agentstack.toml"
+sed 's/^/  /' .agentstack/agentstack.toml
+LIBDEF="$AGENTSTACK_HOME/lib/servers/github.toml"
+run "cat \$AGENTSTACK_HOME/lib/servers/github.toml"
+sed 's/^/  /' "$LIBDEF"
+
+# The commit-safety claim, split three ways because the truth now lives in
+# three files. Asserting it on the manifest alone would pass for the wrong
+# reason: the manifest is secret-free because it defines nothing at all.
+printf '\n\033[1mThe token is in exactly one of these three places:\033[0m\n'
+if ! grep -q 'GITHUB_TOKEN' .agentstack/agentstack.toml \
+   && ! grep -qF "$TOKEN" .agentstack/agentstack.toml \
+   && grep -q '"github"' .agentstack/agentstack.toml; then
+  ok "the manifest holds no secret material at all — it references 'github' by name"
 else
-  bad "the manifest must hold only the placeholder"
+  bad "the manifest must name the server and carry no secret material"
+fi
+if grep -q '${GITHUB_TOKEN}' "$LIBDEF" && ! grep -qF "$TOKEN" "$LIBDEF"; then
+  ok "the library's github definition holds \${GITHUB_TOKEN}, never the value"
+else
+  bad "the library definition must hold the placeholder, never the value"
+fi
+# Where the value IS — and, by exhaustion, nowhere else under the project or
+# the library. `grep -rl` over both trees, minus the one file allowed to have it.
+LEAKS="$(grep -rlF "$TOKEN" . "$AGENTSTACK_HOME/lib" 2>/dev/null | grep -v '^\./\.agentstack/\.env$' || true)"
+if grep -qF "$TOKEN" .agentstack/.env \
+   && grep -q '/\.agentstack/\.env' .gitignore \
+   && [ -z "$LEAKS" ]; then
+  ok "the value exists only in .agentstack/.env, which init gitignored"
+else
+  bad "the value must live only in the gitignored .env (also found in: ${LEAKS:-nowhere})"
 fi
 
-say "Render the one manifest back into BOTH native formats:"
-run "agentstack apply --scope global --write"
-as apply --scope global --write 2>&1 | tail -6 | sed 's/^/  /'
+say "How does each tool actually get them? Delivery is routed — ask it:"
+run "agentstack delivery"
+DELIVERY_OUT="$(as delivery 2>&1)"
+printf '%s\n' "$DELIVERY_OUT" | sed 's/^/  /'
+# Dynamic is the default: on an MCP-capable tool the servers are served live
+# over the gateway (an open lease naming the toolset), so nothing is written.
+if printf '%s' "$DELIVERY_OUT" | grep -q "Claude Code.*MCP servers served live" \
+   && printf '%s' "$DELIVERY_OUT" | grep -q "Codex CLI.*MCP servers served live"; then
+  ok "both tools are routed to receive the servers live — no files needed for them"
+else
+  bad "delivery should route MCP servers live on both MCP-capable tools"
+fi
+if printf '%s' "$DELIVERY_OUT" | grep -q "0 project artifacts"; then
+  ok "0 project artifacts for the live lane — the import left the repo clean"
+else
+  bad "the live lane should report zero project artifacts"
+fi
+
+say "Is everything healthy? One status command:"
+run "agentstack doctor"
+DOCTOR_OUT="$(as doctor 2>&1)" && DOCTOR_EXIT=0 || DOCTOR_EXIT=$?
+printf '%s\n' "$DOCTOR_OUT" | tail -4 | sed 's/^/  /'
+# Match the summary line doctor actually prints: "0 errors, 0 warnings" with
+# an optional ", N notes" tail. The old literal "0 error(s), 0 warning(s)"
+# predates the conjugation sweep and had stopped matching anything.
+if [ "$DOCTOR_EXIT" -eq 0 ] && printf '%s' "$DOCTOR_OUT" | grep -qE "0 errors, 0 warnings"; then
+  ok "doctor is clean (0 errors, 0 warnings)"
+else
+  bad "doctor should be clean after the import (exit $DOCTOR_EXIT)"
+fi
+
+# ── the rendered lane, on request ────────────────────────────────────────────
+# The live lane above is what happens automatically. `apply` is what happens
+# when you ASK for files — and it is the same one import fanning out, so the
+# toolset has to be named: the definitions are in the library now, not in the
+# manifest's own [servers].
+say "Want the files anyway? Ask for them — one import, both native formats:"
+run "agentstack apply --toolset default --scope global --write"
+as apply --toolset default --scope global --write 2>&1 | tail -6 | sed 's/^/  /'
 
 say "Now each CLI has BOTH servers, in its own format:"
 run "cat ~/.claude.json ~/.codex/config.toml"
@@ -155,23 +225,10 @@ if grep -q "github" "$FAKEHOME/.codex/config.toml"; then
 else
   bad "Codex is missing 'github'"
 fi
-if grep -q "$TOKEN" "$FAKEHOME/.claude.json" && ! grep -q "$TOKEN" .agentstack/agentstack.toml; then
-  ok "the token resolved into the native config; the manifest still holds the placeholder"
+if grep -qF "$TOKEN" "$FAKEHOME/.claude.json" && ! grep -qF "$TOKEN" "$LIBDEF"; then
+  ok "the token resolved into the native config; the library entry still holds the placeholder"
 else
-  bad "secret handling: value must reach native configs only, never the manifest"
-fi
-
-say "Is everything healthy? One status command:"
-run "agentstack doctor"
-DOCTOR_OUT="$(as doctor 2>&1)" && DOCTOR_EXIT=0 || DOCTOR_EXIT=$?
-printf '%s\n' "$DOCTOR_OUT" | tail -4 | sed 's/^/  /'
-# Match the summary line doctor actually prints: "0 errors, 0 warnings" with
-# an optional ", N notes" tail. The old literal "0 error(s), 0 warning(s)"
-# predates the conjugation sweep and had stopped matching anything.
-if [ "$DOCTOR_EXIT" -eq 0 ] && printf '%s' "$DOCTOR_OUT" | grep -qE "0 errors, 0 warnings"; then
-  ok "doctor is clean (0 errors, 0 warnings)"
-else
-  bad "doctor should be clean after the guided journey (exit $DOCTOR_EXIT)"
+  bad "secret handling: value must reach native configs only, never the library"
 fi
 
 say "Changed your mind? Every write is recorded — undo the render, then the import:"
@@ -195,7 +252,15 @@ if [ ! -f .agentstack/agentstack.toml ] && [ ! -f .agentstack/.env ] && [ ! -f .
 else
   bad "restore left onboarding files behind"
 fi
+# The import reached OUTSIDE this project, into the shared library. An undo that
+# stopped at the project boundary would leave the definitions (and the ${REF})
+# behind on the machine.
+if [ ! -f "$LIBDEF" ] && [ -z "$(find "$AGENTSTACK_HOME/lib" -type f 2>/dev/null)" ]; then
+  ok "the library entries the import created are gone too — the undo followed it out of the project"
+else
+  bad "restore left the imported library definitions behind"
+fi
 
-say "Import once → both CLIs in sync → clean doctor → fully reversible."
+say "Import once → routed to both CLIs → clean doctor → fully reversible."
 printf '\n\033[1mSummary:\033[0m %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

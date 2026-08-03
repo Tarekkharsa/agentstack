@@ -16,7 +16,25 @@ pub fn run(args: &InstructionsArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let manifest = &ctx.loaded.manifest;
     let scope = args.scope.unwrap_or_else(|| Scope::default_for(&ctx.dir));
 
-    if manifest.instructions.is_empty() {
+    // Variant selection needs the linked sources and the toolset this
+    // command was explicitly given; one read, before the per-target loop.
+    let sel = crate::instructions::Selecting::for_command(args.toolset.as_deref());
+
+    // The project's pinned package expansions: a package's instruction members
+    // compile into the same managed region (W5, rendered lane), so a project
+    // whose only house rules arrive through a package still has something to
+    // compile.
+    let pinned = crate::lock::Lock::load(&ctx.dir).unwrap_or_default();
+    let packages = crate::package::effective_members(&pinned);
+
+    if manifest.instructions.is_empty()
+        && crate::package::members_of_kind(
+            &pinned,
+            crate::lock::PackageMemberKind::Instruction,
+            None,
+        )
+        .is_empty()
+    {
         println!("Manifest defines no [instructions].");
         return Ok(());
     }
@@ -40,7 +58,13 @@ pub fn run(args: &InstructionsArgs, manifest_dir: Option<&Path>) -> Result<()> {
             .iter()
             .filter(|(n, i)| !i.from_user_layer && !decided.contains(*n))
             .map(|(n, i)| {
-                let status = crate::resolve::instruction_lock_status(n, i, &ctx.dir, &lock);
+                let status = crate::resolve::instruction_lock_status_with(
+                    n,
+                    i,
+                    &ctx.dir,
+                    &lock,
+                    &sel.library,
+                );
                 (n.clone(), status)
             })
             .filter(|(_, s)| {
@@ -85,7 +109,7 @@ pub fn run(args: &InstructionsArgs, manifest_dir: Option<&Path>) -> Result<()> {
         let Some(desc) = ctx.registry.get(id) else {
             continue;
         };
-        let Some(plan) = plan_instructions(manifest, desc, scope, &ctx.dir) else {
+        let Some(plan) = plan_instructions(manifest, desc, scope, &ctx.dir, packages, &sel) else {
             continue;
         };
 
@@ -116,6 +140,40 @@ pub fn run(args: &InstructionsArgs, manifest_dir: Option<&Path>) -> Result<()> {
             })
             .collect();
         println!("  fragments: {}", labels.join(", "));
+        // Which BODY each fragment sent here, when it was not the base one.
+        // The model and where it came from ride along, so a wrong variant is
+        // diagnosable from the line that chose it.
+        for (name, variant, why) in &plan.selected {
+            println!("  {} {name} → variant {variant} ({why})", "↳".dimmed());
+        }
+        // The channel this harness is actually known to take house rules
+        // through — and, when it declares a live one, that it is not used and
+        // why. The same three sentences `status` prints.
+        let rows = crate::instructions::channels(
+            manifest,
+            &ctx.registry,
+            std::slice::from_ref(id),
+            scope,
+            &ctx.dir,
+            &sel.library,
+            sel.toolset(),
+        );
+        if let Some(live) = rows.first().and_then(|row| row.live.as_ref()) {
+            println!(
+                "  {}",
+                format!(
+                    "live channel {}: {}",
+                    live.display,
+                    match live.confirmation {
+                        crate::adapter::Confirmation::Confirmed =>
+                            crate::instructions::CONFIRMED_BUT_UNUSED,
+                        crate::adapter::Confirmation::Unconfirmed =>
+                            crate::instructions::UNCONFIRMED_NEVER_USED,
+                    }
+                )
+                .dimmed()
+            );
+        }
 
         if plan.changed() {
             changed += 1;

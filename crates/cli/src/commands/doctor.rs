@@ -708,19 +708,40 @@ pub fn collect_content_units(
         };
         units.push(unit);
     }
+    // Every body a fragment declares is scanned, base and per-(CLI, model)
+    // variants alike: a variant is content that reaches agent context, so
+    // scanning only the selected one would leave the others unexamined until
+    // the day a toolset selects them. Findings merge into the fragment's one
+    // unit — the fragment is what a reader acts on.
+    let library = crate::library::Library::load_default_or_warn();
     for (name, instr) in &manifest.instructions {
-        let path = resolve_scan_path(dir, &instr.path);
-        let unit = if !path.exists() {
-            skipped_unit("instruction", name, format!("missing file {}", instr.path))
-        } else {
-            match scan::scan_file(&path, &instr.path) {
-                Ok(findings) => Unit {
-                    kind: "instruction",
-                    name: name.clone(),
-                    skipped: None,
-                    findings,
-                },
-                Err(e) => skipped_unit("instruction", name, format!("scan failed: {e}")),
+        let unit = match crate::instructions::bodies(name, instr, dir, &library) {
+            Err(e) => skipped_unit("instruction", name, format!("unresolved: {e:#}")),
+            Ok(bodies) => {
+                let mut findings = Vec::new();
+                let mut skipped: Option<String> = None;
+                for (_, declared, src) in bodies.all() {
+                    if !src.exists() {
+                        skipped = Some(format!("missing file {declared}"));
+                        break;
+                    }
+                    match scan::scan_file(&src, declared) {
+                        Ok(mut f) => findings.append(&mut f),
+                        Err(e) => {
+                            skipped = Some(format!("scan failed: {e}"));
+                            break;
+                        }
+                    }
+                }
+                match skipped {
+                    Some(reason) => skipped_unit("instruction", name, reason),
+                    None => Unit {
+                        kind: "instruction",
+                        name: name.clone(),
+                        skipped: None,
+                        findings,
+                    },
+                }
             }
         };
         units.push(unit);
@@ -734,15 +755,6 @@ fn skipped_unit(kind: &'static str, name: &str, reason: String) -> Unit {
         name: name.to_string(),
         skipped: Some(reason),
         findings: Vec::new(),
-    }
-}
-
-fn resolve_scan_path(dir: &Path, p: &str) -> std::path::PathBuf {
-    let pb = std::path::PathBuf::from(p);
-    if pb.is_absolute() {
-        pb
-    } else {
-        dir.join(pb)
     }
 }
 
@@ -890,10 +902,13 @@ fn run_checks(
     // machine-wide configs belong to whichever manifest manages them, and
     // warning every project about them would be noise, not a finding.
     report.section("Unmanaged setup");
-    let unmanaged = crate::discover::native_configs(
+    // Coverage counts name references too: a library-first import leaves the
+    // definitions in a linked source and the project referencing them by name,
+    // which is managed — not uncovered.
+    let unmanaged = crate::discover::native_configs_with(
         &ctx.registry,
         &ctx.dir,
-        &manifest.servers,
+        &crate::discover::declared_server_names(manifest),
         false, // project scope only
     );
     let pending: Vec<_> = unmanaged
@@ -918,6 +933,74 @@ fn run_checks(
                     crate::text::sanitize_line(&n.unimported.join(", ")),
                 ),
             );
+        }
+    }
+
+    // Linked library sources: the order that decides every bare name, and every
+    // name one source shadows in another.
+    //
+    // Advisory, never an error: shadowing is legal and often deliberate (that
+    // is what putting a source first is FOR), so progressive disclosure says it
+    // does not get an error. What it must never get is silence — an
+    // unreported shadow is a user resolving bytes they did not mean to
+    // (docs/design/linked-library-sources.md §"Collisions are surfaced").
+    report.section("Library sources");
+    let sources = crate::sources::Sources::load_or_warn();
+    let linked = sources.linked();
+    let library = crate::library::Library::load_linked(&linked).unwrap_or_default();
+    if linked.len() < 2 && library.linked.collisions.is_empty() {
+        report.line(
+            Level::Ok,
+            format!(
+                "one library source · {}",
+                linked
+                    .first()
+                    .map(|s| s.root.display().to_string())
+                    .unwrap_or_default()
+            ),
+        );
+        report.mark_irrelevant();
+    } else {
+        report.line(
+            Level::Info,
+            format!(
+                "{:<14} {}",
+                "resolution",
+                linked
+                    .iter()
+                    .map(|s| s.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" → ")
+            ),
+        );
+        for source in &linked {
+            if !source.root.is_dir() {
+                report.line(
+                    Level::Warn,
+                    format!(
+                        "{:<14} linked folder not found: {} ↳ agentstack lib unlink {} --write",
+                        source.name,
+                        tidy_path(&source.root),
+                        source.name
+                    ),
+                );
+            }
+        }
+        for c in &library.linked.collisions {
+            report.line(
+                Level::Warn,
+                format!(
+                    "{:<14} {} also in {} — '{}' wins ↳ pin the other with {}",
+                    crate::text::sanitize_line(&c.name),
+                    c.kind.noun(),
+                    c.shadowed.join(", "),
+                    c.winner,
+                    c.qualified_shadowed(),
+                ),
+            );
+        }
+        if library.linked.collisions.is_empty() {
+            report.line(Level::Ok, "no name is shadowed across sources");
         }
     }
 
@@ -955,6 +1038,14 @@ fn run_checks(
             "no CLI connected — optional ↳ agentstack gateway connect --all",
         );
     }
+    // W4 precondition 6 — gateway unavailable. A registered bridge whose
+    // command is not runnable is not "not connected": that harness gets no
+    // tools at all, and AgentStack writes nothing in its place (there is no
+    // silent fallback into the rendered lane). One sentence, the same one
+    // `status` prints, naming the one recovery command.
+    for outage in crate::commands::connect::gateway_outages(&ctx.registry, &target_ids) {
+        report.line(Level::Warn, outage.finding());
+    }
     let base = crate::manifest::project_root_of(&ctx.dir);
     let trust_state = crate::trust::check(&base);
     report.trust = Some(match trust_state {
@@ -962,14 +1053,32 @@ fn run_checks(
         crate::trust::TrustState::Changed => "drifted",
         crate::trust::TrustState::Untrusted => "untrusted",
     });
+    // W1: what this state has already cost. An advisory clause on the existing
+    // findings rather than a check of its own — the condition is the same one
+    // the trust findings already report, and a second finding would make one
+    // fact read as two problems. The `↳ fix` suffix stays exactly where it is,
+    // so `first_fix` still parses these lines and still names `agentstack
+    // trust`.
+    let pending = super::overview::needs_your_yes(&ctx.dir, &base, trust_state);
+    let refused_clause = pending
+        .as_ref()
+        .map(|p| {
+            format!(
+                " — {} already refused here",
+                super::count(p.refused, "call")
+            )
+        })
+        .unwrap_or_default();
     match trust_state {
         crate::trust::TrustState::Trusted => {
             report.line(Level::Ok, "this project is trusted for auto mode")
         }
         crate::trust::TrustState::Changed => report.line(
             Level::Warn,
-            "trusted, but the manifest or lockfile changed since it was last reviewed \
-             ↳ agentstack trust",
+            format!(
+                "trusted, but the manifest or lockfile changed since it was last reviewed{refused_clause} \
+                 ↳ agentstack trust"
+            ),
         ),
         // Untrusted is a choice, not a fault (Ok) — unless a harness actually
         // uses the bridge AND the project declares a runtime surface (inline
@@ -991,9 +1100,19 @@ fn run_checks(
                 report.line(
                     Level::Warn,
                     format!(
-                        "not trusted — {clis} the gateway, but this project's {servers} not proxied ↳ agentstack trust {}",
+                        "not trusted — {clis} the gateway, but this project's {servers} not proxied{refused_clause} ↳ agentstack trust {}",
                         base.display()
                     ),
+                );
+            } else if let Some(p) = &pending {
+                // Untrusted is normally a choice, not a fault — but not once
+                // something tried to work here and was refused. That is the
+                // one signal that turns "you have not reviewed this" into
+                // "this is costing you calls", so it earns the warning level
+                // even without a registered bridge.
+                report.line(
+                    Level::Warn,
+                    format!("not trusted for auto mode{refused_clause} ↳ {}", p.fix),
                 );
             } else {
                 report.line(
@@ -1050,9 +1169,56 @@ fn run_checks(
 
     report.section("Secrets");
     let refs = manifest.referenced_secrets();
-    if refs.is_empty() {
+    // Varlock health belongs HERE, in the section that already owns secrets,
+    // rather than in a check family of its own: it is one more fact about where
+    // a `${REF}` comes from. It is also the one layer in the chain that can be
+    // opted into and then silently do nothing — `.env.schema` present, binary
+    // missing, every ref quietly falling through to keychain or `.env` — which
+    // is precisely the kind of silence doctor exists to break.
+    let varlock = crate::secret::varlock::health(&ctx.dir);
+    let varlock_opted_in = varlock != crate::secret::varlock::Health::NotOptedIn;
+    if refs.is_empty() && !varlock_opted_in {
         report.line(Level::Unchecked, "no secrets referenced — nothing to check");
         report.mark_irrelevant();
+    }
+    {
+        use crate::secret::varlock::Health;
+        match &varlock {
+            // Info, not Advisory: this is a recommendation, and doctor's
+            // counters are for defects. It never becomes a next action.
+            Health::NotOptedIn => {
+                if !refs.is_empty() {
+                    report.line(
+                        Level::Info,
+                        "varlock              not in use — the recommended vault keeps values \
+                         out of this project entirely; a .env.schema opts in (agentstack init \
+                         offers one)",
+                    );
+                }
+            }
+            Health::NotInstalled => report.line(
+                Level::Warn,
+                "varlock              .env.schema opts this project in, but the varlock binary \
+                 is not runnable — every ref is falling through to the next store \
+                 ↳ install varlock (https://varlock.dev), or remove .env.schema",
+            ),
+            Health::LoadFailed(why) => report.line(
+                Level::Warn,
+                format!(
+                    "varlock              `varlock load` failed — {why} \
+                     ↳ run `varlock load` here to see the full error"
+                ),
+            ),
+            // A green line over an empty schema would be a pass over nothing.
+            Health::Ready { names: 0 } => report.line(
+                Level::Unchecked,
+                "varlock              loaded, but .env.schema declares no names yet",
+            ),
+            Health::Ready { names } => report.line(
+                Level::Ok,
+                format!("varlock              ready — {names} names available from .env.schema"),
+            ),
+        }
     }
     // Name the layer each ref resolves from (env / varlock / keychain / .env) —
     // the same provenance `secret list` and `setup` surface, via one
@@ -1554,17 +1720,26 @@ fn run_checks(
             let Some(desc) = ctx.registry.get(id) else {
                 continue;
             };
+            // W5: package instruction members are part of what compiles, so
+            // doctor's drift/missing view has to see them too.
+            let pinned = crate::lock::Lock::load(&ctx.dir).unwrap_or_default();
+            let packages = crate::package::effective_members(&pinned);
+            let sel = crate::instructions::Selecting::for_command(None);
             let global = crate::render::instructions::plan_instructions(
                 manifest,
                 desc,
                 Scope::Global,
                 &ctx.dir,
+                packages,
+                &sel,
             );
             let project = crate::render::instructions::plan_instructions(
                 manifest,
                 desc,
                 Scope::Project,
                 &ctx.dir,
+                packages,
+                &sel,
             );
             // Missing sources are scope-independent; the global plan sees
             // every declared fragment (project scope filters out inherited
@@ -2580,14 +2755,17 @@ fn check_reproducibility(
 /// gates on them); an unpinned fragment is a warning. Machine-layer fragments
 /// are the user's own content and are never pinned — skipped.
 fn check_instruction_reproducibility(manifest: &Manifest, dir: &Path, report: &mut Report) {
-    use crate::resolve::{instruction_lock_status, InstructionLockStatus};
+    use crate::resolve::{instruction_lock_status_with, InstructionLockStatus};
     let lock = crate::lock::Lock::load(dir).unwrap_or_default();
+    // Library-aware: a sourceless fragment's bodies live in a linked source, and
+    // reporting one as a broken ref would be a fault doctor invented.
+    let library = crate::library::Library::load_default_or_warn();
     for (name, instr) in manifest
         .instructions
         .iter()
         .filter(|(_, i)| !i.from_user_layer)
     {
-        match instruction_lock_status(name, instr, dir, &lock) {
+        match instruction_lock_status_with(name, instr, dir, &lock, &library) {
             InstructionLockStatus::ResolveFailed { error } => report.line(
                 Level::Error,
                 format!("{name:<20} broken instruction ref — {error}"),

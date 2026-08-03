@@ -20,6 +20,13 @@ extensions:
 settings:
   format: json
   global: ~/.pi/agent/settings.json
+  # Pi HAS both notions (pointers into `fields` below), but declares no
+  # `headless:` block at all, so neither can be selected for a single governed
+  # launch — a workflow role bound to pi is refused outright, and every other
+  # surface reports the two dimensions as unavailable per launch rather than
+  # pretending a declared value took effect.
+  model_key: defaultModel
+  effort_key: defaultThinkingLevel
   fields:
     - { key: defaultProvider, type: string, group: General, label: Default provider, help: "e.g. openrouter, anthropic, openai." }
     - { key: defaultModel, type: string, group: General, label: Default model }

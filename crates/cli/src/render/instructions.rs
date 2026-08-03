@@ -4,6 +4,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use agentstack_core::lock::{LockedPackage, PackageMemberKind};
 use anyhow::Result;
 
 use crate::adapter::{AdapterDescriptor, Registry};
@@ -28,6 +29,11 @@ pub struct InstrPlan {
     /// fails closed to the same exclusion rather than compiling the live file
     /// — which holds exactly the change the human declined.
     pub excluded: Vec<(String, String)>,
+    /// Fragments compiled from a per-(CLI, model) **variant** rather than the
+    /// base body: `(fragment, variant label, why that model)`. Empty is the
+    /// ordinary case. Reported rather than derived so a surface names the same
+    /// selection the compile actually made.
+    pub selected: Vec<(String, String, String)>,
 }
 
 impl InstrPlan {
@@ -46,14 +52,37 @@ impl InstrPlan {
 
 /// Build the instruction-file plan for one target in a scope, or `None` if the
 /// adapter has no instruction file for that scope.
+///
+/// `packages` are this project's **pinned** package expansions (W5). Their
+/// instruction members compile into the same managed region as the manifest's
+/// own fragments — the rendered lane, always, and never through the gateway
+/// (`docs/design/package-layer.md` §"Instruction-member semantics"). They are
+/// passed in rather than read from the lock here so each call site states what
+/// it means: `unrender` passes an empty slice because it is planning the whole
+/// region away, and every rendering caller passes
+/// [`crate::package::effective_members`]. A hidden lock read would have made
+/// `unrender` silently keep prose it was asked to remove.
+///
+/// `sel` carries what variant selection needs — the linked library view and the
+/// toolset the command was explicitly given
+/// (`docs/design/instruction-variants.md`). It is built once per command
+/// because the library is one read that must not be repeated per harness per
+/// scope.
 pub fn plan_instructions(
     manifest: &Manifest,
     desc: &AdapterDescriptor,
     scope: Scope,
     project_dir: &Path,
+    packages: &[LockedPackage],
+    sel: &crate::instructions::Selecting,
 ) -> Option<InstrPlan> {
     let spec = desc.instructions.as_ref()?;
     let path = spec.path_for(scope, project_dir)?;
+    // The model for THIS harness, from a declaration we can point at — an
+    // explicitly selected toolset's `model`, or the value we compile into the
+    // CLI's own config. Never sniffed, never defaulted (§"How the model is
+    // determined").
+    let model = crate::instructions::model_for(manifest, &desc.id, sel.toolset());
 
     // Standing re-gate answers reshape the compile exactly as they reshape
     // skill delivery in `use` (F6): until this, a blocked or keep-pinned
@@ -70,6 +99,7 @@ pub fn plan_instructions(
     let mut fragments: Vec<String> = Vec::new();
     let mut missing: Vec<String> = Vec::new();
     let mut excluded: Vec<(String, String)> = Vec::new();
+    let mut selected: Vec<(String, String, String)> = Vec::new();
 
     for (name, instr) in &manifest.instructions {
         // One predicate gates the compile (adapter match + personal fragments
@@ -110,13 +140,57 @@ pub fn plan_instructions(
             }
             None => {}
         }
-        let src = fragment_source(project_dir, &instr.path);
-        match fs::read_to_string(&src) {
+        // Which bytes this harness gets: most specific matching variant, else
+        // the base body. A fragment whose bodies cannot be resolved at all (a
+        // sourceless entry no linked source holds, or a library body that fails
+        // its containment check) is reported missing rather than compiled from
+        // a guess.
+        let Ok(bodies) = crate::instructions::bodies(name, instr, project_dir, &sel.library) else {
+            missing.push(name.clone());
+            continue;
+        };
+        let chosen = bodies.choose(&desc.id, model.as_deref());
+        match fs::read_to_string(&chosen.path) {
             Ok(text) => {
                 blocks.push(text.trim_end_matches('\n').to_string());
                 fragments.push(name.clone());
+                if chosen.variant.is_some() {
+                    // Name the variant beside the fragment, so a report reader
+                    // can tell WHICH body reached this CLI. Never a silent
+                    // substitution: the whole point of the feature is that the
+                    // reader knows which paragraph they got.
+                    selected.push((name.clone(), chosen.label(), model.clause()));
+                }
             }
             Err(_) => missing.push(name.clone()),
+        }
+    }
+
+    // W5 — package instruction members, after the project's own fragments so a
+    // project's prose always has the last word in the region.
+    //
+    // The bytes come from the content store by digest, exactly like a
+    // keep-pinned fragment, and never from the package body in the central
+    // library: that is the reproducibility rule (`automatic-delivery.md`), and
+    // it is why `lib sync` can move a package ahead without rewriting anybody's
+    // CLAUDE.md. `approved_fragment` re-verifies the deposit against the pin,
+    // so a tampered store fails closed to `missing` rather than compiling
+    // unreviewed prose into the user's daily-driver instruction file.
+    for pkg in packages {
+        for member in &pkg.members {
+            if member.kind != PackageMemberKind::Instruction {
+                continue;
+            }
+            // `<package>:<member>` — a report reader has to be able to tell a
+            // package's house rules from one this project wrote.
+            let label = format!("{}:{}", pkg.name, member.name);
+            match approved_fragment(&store, member.checksum.hex()) {
+                Some(text) => {
+                    blocks.push(text.trim_end_matches('\n').to_string());
+                    fragments.push(label);
+                }
+                None => missing.push(label),
+            }
         }
     }
 
@@ -131,6 +205,7 @@ pub fn plan_instructions(
         fragments,
         missing,
         excluded,
+        selected,
     })
 }
 

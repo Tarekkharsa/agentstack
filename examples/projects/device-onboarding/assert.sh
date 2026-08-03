@@ -10,8 +10,9 @@
 #
 #   A. CLI-presence matrix: zero CLIs (honest fallback), one CLI, three CLIs
 #      with servers in three native formats — imports counted, an inline
-#      bearer token lifted to a ${REF} (never plaintext in the manifest),
-#      blocked-then-resolved apply, cross-CLI fan-out.
+#      bearer token lifted to a ${REF} in the LIBRARY definition the import
+#      writes (the manifest only references the server by name, and holds no
+#      secret material at all), blocked-then-resolved `use`, cross-CLI fan-out.
 #   B. Config safety: conflicting server definitions surfaced; re-init never
 #      clobbers a hand-edited manifest; hand-written .mcp.json entries and
 #      CLAUDE.md prose survive apply AND restore; pruning a de-manifested
@@ -119,19 +120,27 @@ OUT=$("$AS" init --no-keychain 2>&1)
 grep -qE "Found 3 coding tool" <<<"$OUT" && ok "detects 3 CLIs" || bad "detection line: $(grep -iE 'found|detect' <<<"$OUT" | head -1)"
 grep -qE "Imported: +3 MCP server" <<<"$OUT" && ok "imports 3 servers across json + toml" || bad "$(grep -i import <<<"$OUT")"
 M=.agentstack/agentstack.toml
+# Import is library-first: the DEFINITIONS land in the library and the manifest
+# references them by name, so the ${REF} is in the library entry — asserting it
+# on the manifest would pass for the wrong reason (the manifest defines nothing).
+LIBDEF="$AGENTSTACK_HOME/lib/servers/github.toml"
 grep -q 'ghp_FAKE' "$M" && bad "PLAINTEXT TOKEN IN THE MANIFEST" || ok "no plaintext token in the manifest"
-grep -q '\${' "$M" && ok "secret lifted to a \${REF}" || bad "no \${REF} in manifest"
+grep -q '"github"' "$M" && ok "the manifest references the imported server by name" || bad "manifest lost the server reference"
+grep -q '\${' "$LIBDEF" && ok "secret lifted to a \${REF} in the library definition" || bad "no \${REF} in the library definition"
+grep -q 'ghp_FAKE' "$LIBDEF" && bad "PLAINTEXT TOKEN IN THE LIBRARY DEFINITION" || ok "no plaintext token in the library definition"
 # --no-keychain (deprecated alias for --secrets skip) must NOT silently drop the
 # lifted value: it names the unstored ref and the exact command to store it.
 grep -qi "not stored" <<<"$OUT" && ok "--no-keychain names the unstored ref (no silent drop)" || bad "--no-keychain silent drop: $OUT"
 grep -q "agentstack secret set" <<<"$OUT" && ok "--no-keychain prints the store one-liner per ref" || bad "no store one-liner in: $OUT"
-"$AS" apply --write >/dev/null 2>&1 && bad "apply exited 0 despite unresolved ref" || ok "apply --write blocks the unresolved ref (nonzero exit)"
-REF=$(grep -o '\${[A-Z0-9_]*}' "$M" | head -1 | tr -d '${}')
-env "$REF=fake-value" "$AS" apply --write >/dev/null 2>&1 && ok "apply succeeds once the ref resolves via env" || bad "resolved apply failed"
+# `use <toolset>` is the render for library-referenced servers; bare `apply`
+# selects the manifest's own [servers], which an import no longer fills.
+"$AS" use default --write >/dev/null 2>&1 && bad "use exited 0 despite unresolved ref" || ok "use --write blocks the unresolved ref (nonzero exit)"
+REF=$(grep -o '\${[A-Z0-9_]*}' "$LIBDEF" | head -1 | tr -d '${}')
+env "$REF=fake-value" "$AS" use default --write >/dev/null 2>&1 && ok "use succeeds once the ref resolves via env" || bad "resolved use failed"
 # Default scope is project inside a repo manifest,
 # so the fan-out lands in the repo's .mcp.json — never in ~/.claude.json.
 grep -q 'linear' .mcp.json && ok "codex-imported server fanned out to the project claude config" || bad "cross-CLI fan-out missing"
-grep -q 'linear' "$H/.claude.json" && bad "repo apply leaked into the global claude config" || ok "global claude config untouched by the repo apply"
+grep -q 'linear' "$H/.claude.json" && bad "repo render leaked into the global claude config" || ok "global claude config untouched by the repo render"
 
 # ═══ B. Config safety ════════════════════════════════════════════════════════
 
@@ -200,13 +209,15 @@ grep -q "my-hand-server" .mcp.json && ok "hand-written server untouched by pruni
 hdr "B6) idempotency + doctor --ci + restore round-trip"
 device
 echo '{"mcpServers":{"docs":{"type":"http","url":"https://docs.example/mcp"}}}' > "$H/.claude.json"
-"$AS" init --yes >/dev/null 2>&1 && "$AS" apply --write >/dev/null 2>&1
-OUT=$("$AS" apply 2>&1)
-grep -qiE "no changes|up to date|0 target" <<<"$OUT" && ok "second apply reports nothing to do" || bad "not idempotent: $(tail -2 <<<"$OUT")"
-"$AS" doctor --ci >/dev/null 2>&1 && ok "doctor --ci green after apply" || bad "doctor --ci red"
+# An imported server is a library server referenced by the toolset, so the
+# render is `use`, and so is the re-render this section round-trips.
+"$AS" init --yes >/dev/null 2>&1 && "$AS" use default --write >/dev/null 2>&1
+OUT=$("$AS" use default 2>&1)
+grep -qiE "up to date|no changes|0 target" <<<"$OUT" && ok "second use reports nothing to do" || bad "not idempotent: $(tail -2 <<<"$OUT")"
+"$AS" doctor --ci >/dev/null 2>&1 && ok "doctor --ci green after the render" || bad "doctor --ci red"
 "$AS" restore --last --write >/dev/null 2>&1
-OUT=$("$AS" apply 2>&1)
-grep -qiE "to apply|would change" <<<"$OUT" && ok "restore reverted — changes pending again" || bad "restore no-op"
+OUT=$("$AS" use default 2>&1)
+grep -qiE "to write|would change" <<<"$OUT" && ok "restore reverted — changes pending again" || bad "restore no-op"
 
 # ═══ C. Environment quirks ═══════════════════════════════════════════════════
 

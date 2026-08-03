@@ -52,6 +52,21 @@ skills:
 # launcher always spawns headless runs with stdin closed.)
 headless:
   args: ["exec", "--", "{prompt}"]
+  # Per-launch MODEL and EFFORT selection, through the same `-c key=value`
+  # config-override mechanism the MCP injection below uses, spliced into the
+  # options region before the "--" guard. Note the placeholder sits INSIDE a
+  # larger token here — the only shape `-c` accepts — which is safe because the
+  # substituted value is first checked against this adapter's own settings
+  # catalog (see settings.model_key / settings.effort_key): `model` is a
+  # free-form string bounded by a conservative charset, and
+  # `model_reasoning_effort` is an enum, so only one of its declared options
+  # can ever be substituted. Relevant because --ignore-user-config (below)
+  # drops the user's own model/effort config: these overrides are how a
+  # governed codex child gets a model at all.
+  model_selection:
+    args: ["-c", "model={model}"]
+  effort_selection:
+    args: ["-c", "model_reasoning_effort={effort}"]
   # Per-child MCP config injection (W2.5): "{mcp_servers_toml}" is replaced (as
   # a WHOLE argv element, spliced before the "--" guard) with one inline TOML
   # override — `mcp_servers={agentstack = {…}}` — carrying ONLY the agentstack
@@ -76,6 +91,16 @@ headless:
 instructions:
   global: ~/.codex/AGENTS.md
   project: AGENTS.md
+  # Codex is an MCP client, so the protocol field reaches it — but no source
+  # confirms Codex surfaces it into the model's context. Unconfirmed is never
+  # used as though it worked.
+  live:
+    channel: mcp-instructions
+    display: MCP initialize instructions
+    confirmation: unconfirmed
+    note: >-
+      MCP client, but consumption of the initialize `instructions` field is
+      unverified (docs/design/research/dynamic-instructions-2026-08.md).
 # Codex supports lifecycle hooks from config.toml. The schema matches the
 # Claude-style hooks object: event → [{matcher?, hooks:[{type, command, …}]}].
 # Hooks are trust-gated by Codex itself; agentstack only renders the config.
@@ -92,6 +117,10 @@ settings:
   format: toml
   global: ~/.codex/config.toml
   project: .codex/config.toml
+  # Pointers into `fields` below (the descriptor fails to parse otherwise) —
+  # the catalog is what a per-role model/effort value is validated against.
+  model_key: model
+  effort_key: model_reasoning_effort
   fields:
     - { key: model, type: string, group: General, label: Model, help: "Default model (e.g. gpt-5.5)." }
     - { key: approval_policy, type: enum, options: [untrusted, on-request, never], group: General, label: Approval policy, help: "When Codex pauses before running commands." }

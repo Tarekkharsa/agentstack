@@ -29,26 +29,100 @@ impl VarlockResolver {
     /// Activate varlock for `dir` if it both opts in (`.env.schema` present) and
     /// has the binary installed and loading succeeds. Returns `None` otherwise,
     /// so the chain silently skips varlock when it isn't in use.
+    ///
+    /// Resolution semantics are unchanged by [`health`]: both go through the
+    /// one [`load`] below, so what `doctor` reports and what the chain does can
+    /// never be two different answers.
     pub fn detect(dir: &Path) -> Option<Self> {
-        if !dir.join(".env.schema").exists() {
-            return None;
+        match load(dir) {
+            Load::Loaded(vars) => Some(VarlockResolver { vars }),
+            _ => None,
         }
-        let output = Command::new("varlock")
-            .args(["load", "--format", "json-full", "--compact"])
-            .current_dir(dir)
-            .output()
-            .ok()?;
-        if !output.status.success() {
-            return None;
-        }
-        let json: Value = serde_json::from_slice(&output.stdout).ok()?;
-        Some(VarlockResolver { vars: parse(&json) })
     }
 
     #[cfg(test)]
     fn from_json(json: &Value) -> Self {
         VarlockResolver { vars: parse(json) }
     }
+}
+
+/// What varlock can do for this project right now — what `doctor` reports.
+///
+/// It deliberately says nothing about VALUES. A count of available names is the
+/// most it carries; no secret is read into this type, printed, or logged, and
+/// `LoadFailed` carries varlock's own diagnostic line, bounded and sanitized,
+/// never its output.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Health {
+    /// No `.env.schema`: this project has not opted in. Not a defect — the
+    /// chain simply has one fewer layer.
+    NotOptedIn,
+    /// Opted in, but the `varlock` binary could not be spawned. This is the
+    /// silent-degradation case worth reporting: the project asked for varlock
+    /// and every ref is quietly falling through to keychain or `.env`.
+    NotInstalled,
+    /// Opted in and installed, but `varlock load` failed or its output could
+    /// not be parsed.
+    LoadFailed(String),
+    /// Opted in and working, serving this many names.
+    Ready { names: usize },
+}
+
+/// Probe varlock for `dir` without activating it. Read-only: it runs the same
+/// `varlock load` the chain runs and throws the values away.
+pub fn health(dir: &Path) -> Health {
+    match load(dir) {
+        Load::NotOptedIn => Health::NotOptedIn,
+        Load::NotInstalled => Health::NotInstalled,
+        Load::Failed(why) => Health::LoadFailed(why),
+        Load::Loaded(vars) => Health::Ready { names: vars.len() },
+    }
+}
+
+/// The single varlock invocation, behind both [`VarlockResolver::detect`] and
+/// [`health`]. Every non-`Loaded` arm is a reason the chain skips the layer.
+enum Load {
+    NotOptedIn,
+    NotInstalled,
+    Failed(String),
+    Loaded(HashMap<String, String>),
+}
+
+fn load(dir: &Path) -> Load {
+    if !dir.join(".env.schema").exists() {
+        return Load::NotOptedIn;
+    }
+    let output = match Command::new("varlock")
+        .args(["load", "--format", "json-full", "--compact"])
+        .current_dir(dir)
+        .output()
+    {
+        Ok(output) => output,
+        // A spawn failure is "not installed" for every practical purpose here;
+        // the distinction between ENOENT and EACCES does not change the fix.
+        Err(_) => return Load::NotInstalled,
+    };
+    if !output.status.success() {
+        return Load::Failed(first_line(&output.stderr));
+    }
+    match serde_json::from_slice::<Value>(&output.stdout) {
+        Ok(json) => Load::Loaded(parse(&json)),
+        Err(e) => Load::Failed(format!("could not parse `varlock load` output: {e}")),
+    }
+}
+
+/// varlock's first diagnostic line, bounded and sanitized before it can reach a
+/// terminal. Subprocess output is untrusted text like any other.
+fn first_line(stderr: &[u8]) -> String {
+    const CAP: usize = 200;
+    let text = String::from_utf8_lossy(stderr);
+    let line = text
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("`varlock load` exited nonzero");
+    let clipped: String = line.chars().take(CAP).collect();
+    crate::text::sanitize_line(&clipped)
 }
 
 impl Resolver for VarlockResolver {

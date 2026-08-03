@@ -99,6 +99,39 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   the field sets are not versions of one another: that one carries the
 ///   KINDS the preview omitted, this one carries the CARD. Recorded as the
 ///   naming correction in `docs/design/consent-card.md` §Panel.
+/// - `trust-card-groups-v1`: `trust --preview` additionally carries
+///   `review.groups` — the card's detail body grouped per capability — and
+///   `review.question`, the one closing question.
+///
+///   A group is `{kind, label, change, counts{added,changed,unchanged,removed,
+///   total}, items[], removed[]}`. `items` and `removed` hold **indices into
+///   `review.items` / `review.removed`**, not copies. That is the point: a
+///   group has nowhere to put a fact of its own, so grouping is presentation
+///   and can never become a second description of the same review. `change` is
+///   the group's marker in the same three words the items use — `added` when
+///   the whole group is new, `changed` when anything under it moved or was
+///   dropped, `unchanged` otherwise.
+///
+///   Three properties a consumer may rely on:
+///
+///   1. **Additive.** `review.items` and `review.removed` keep their
+///      `trust-card-diff-v1` shape AND order byte for byte. A panel that
+///      predates this feature reads exactly what it read before, and a panel
+///      that uses it renders the same items in a different arrangement.
+///   2. **Exactly one question, and no answers.** `review.question` is the
+///      single closing yes for the whole project. There is no per-group and no
+///      per-item question, accept, keep-pinned, or block field, and there never
+///      will be — grouping the body must not multiply the moments a human
+///      commits to something. The answer is `trust --yes --consented-digest
+///      <surface_digest>`, bound to the project's bytes, never to a group.
+///   3. **Complete.** Every kind appearing in `items` or `removed` appears in
+///      exactly one group; a kind this binary does not have a label for is
+///      grouped under its own name rather than dropped.
+///
+///   Delivery routing is NOT a group and is not answerable: which lane a
+///   capability reaches a harness through is informational
+///   (`delivery-routing-v1`), decided by the planner, and never something the
+///   consent moment asks about.
 /// - `activity-skill-load-v1`: a successful on-demand skill load over MCP
 ///   (`agentstack_load`) is recorded as first-class activity. Each one appends
 ///   to the machine-global `~/.agentstack/audit/loads.jsonl`
@@ -309,6 +342,236 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   the refusal at runtime — and lets it fall back to `--help`-driven
 ///   screen-scraping deliberately, on a binary that genuinely predates the
 ///   contract.
+/// - `needs-your-yes-v1`: two additions, one fact. `status --json` gains an
+///   optional `project.needs_your_yes` object — `refused`, `last_refused_ts`,
+///   `fix` — present ONLY when the project is untrusted or drifted AND calls
+///   were actually refused here since its last yes; and the two refusals that
+///   happen before any dispatch (a lease the gateway will not open, a skill it
+///   will not load) now leave the same evidence a refused dispatch does: one
+///   `calls.jsonl` row tagged `trust` and one run-scoped `trust_refused`
+///   event. Together they are what lets a panel show a *pending consent* — an
+///   untrusted project something is actually waiting on — instead of a static
+///   "untrusted" label indistinguishable from a project nobody has touched.
+///
+///   What it deliberately does NOT cover: **no card payload travels with it**.
+///   The object carries a count, a timestamp, and the command — never the
+///   reviewable surface. The card has exactly one walk
+///   (`crates/cli/src/commands/trust.rs`, shipped as `trust-review-card-v1` /
+///   `trust-card-diff-v1`), reachable through `trust --preview`, and a second
+///   construction of it on a status read is precisely the disclosure drift the
+///   single-walk rule exists to prevent. Nor does it cover any way to ANSWER
+///   the consent: there is no MCP-invocable consent path, the refusal the agent
+///   relays names a command a human runs, and gating on this name must never be
+///   read as an affordance to grant trust from a UI without one.
+///   Its own name for the usual reason: a binary predating it emits no such
+///   key, and a UI reading the field on the strength of `status-v1` or
+///   `json-reads-v1` would be sniffing.
+/// - `update-offer-v1`: `status --json`'s `project` gains an optional
+///   `updates` object — `packs[]` of `{name, current, available}` plus the one
+///   `fix` command that takes them. `fix` uses the SHIPPED spelling,
+///   `lock --upgrade <pack>` (or `--all` for several); a friendlier `upgrade`
+///   verb is a working name only, and copy naming a verb the binary lacks is
+///   worse than no copy. The key is INSERTED, never emitted as `null` or `[]`,
+///   so presence alone answers "is there an offer".
+///
+///   What this name explicitly does **not** promise: **absence is not
+///   currency.** The check behind it is offline by construction — `status`
+///   must not hang or fail on a network call — so it reads only the tag pinned
+///   in the `[packs.*]` ledger and the tags git has already fetched into this
+///   machine's store clone. A pack never cloned here, a clone that predates
+///   the newer tag, a machine without git, or a `catalog:` source (one version
+///   per id, so there is no version axis) all contribute nothing, and are
+///   indistinguishable from a pack that is genuinely current. Only
+///   `agentstack lock --upgrade <pack>` asks the remote. A UI must render this
+///   as an offer and must never derive an "up to date" badge from a missing
+///   `updates` key.
+/// - `package-members-v1`: `status --json`'s `project` gains an optional
+///   `packages[]` — one row per package this project **pinned**, each carrying
+///   `name`, `version`, `source`, `rev`, the `toolsets` that selected it, the
+///   `removed` member names, an `overrides` count, and `members[]` with
+///   `name` / `kind` / `lane` / `origin` / `checksum` / `provenance` per member.
+///   The key is INSERTED, never emitted as `[]`, so a project that selects no
+///   package reads exactly as it did before.
+///
+///   What the name promises: this is the **effective** member set — what this
+///   project actually took, after its `[package_overrides.*]` were applied —
+///   read from the LOCK. `origin` says `package` or `project-override` per
+///   member and `removed` names what was dropped, so a panel can render "took
+///   the package, replaced one member" without holding the package itself to
+///   diff against. `lane` is derived from the member's kind (`rendered` for an
+///   instruction, `dynamic` for a skill or server) precisely so no UI can
+///   describe an instruction member as served through the gateway.
+///
+///   What it explicitly does **not** promise. **It is not a view of the
+///   library.** These rows describe pinned bytes, so a package whose library
+///   copy has moved ahead reports the version and digests this project is
+///   pinned to — which is the reproducibility rule working, not staleness. A
+///   UI must not derive "you are on the latest" from it; `update-offer-v1` is
+///   the offer surface, with its own honest limits. **It is also not an
+///   activation reading:** a pinned package is not a running one, and nothing
+///   here says whether a lease is open or a server started.
+/// - `lease-status-v1`: `lease status --json` emits the machine-level runtime
+///   lease registry — one row per record with `instance`, `project`,
+///   `toolset`, `pid`, `started_unix`, a derived `liveness`, and the `why`
+///   sentence behind it. This is the authoritative read: a lease used to exist
+///   only in the MCP subprocess's memory, so no other surface could see that
+///   one was open.
+///
+///   **What `liveness` promises.** It is DERIVED at read time, never stored.
+///   `live` means the recorded PID exists *and* that process's start time still
+///   matches the one recorded when the lease opened. `stale` means the process
+///   is gone, or its PID now belongs to a different process — a crashed MCP
+///   process leaves its record behind, and PID reuse is exactly why the start
+///   time is part of the comparison rather than the PID alone. A panel may
+///   therefore poll this without caching: the file is a record, not a truth.
+///
+///   **What `unknown` means.** Some platform must supply the process start
+///   time — Linux reads `/proc/<pid>/stat`, macOS asks `ps`. Where neither is
+///   available the row reads `unknown`: the PID exists, but reuse cannot be
+///   ruled out, so nothing is claimed. A UI must render `unknown` as "not
+///   established" and must never fold it into `live`; that is the fail-closed
+///   direction, and it is the only honest one.
+///
+///   **What it does not promise.** A lease is **process-scoped** — it
+///   disappears with the process that owns it, and there is no way to keep one
+///   alive or to re-attach to it. Nothing here is an authority: no enforcement
+///   decision reads this registry, and there is no action on this contract at
+///   all — leases are opened and closed by the MCP connection that owns them,
+///   never from a panel. Its own name for the usual reason: a binary predating
+///   it has no such command and refuses the call outright.
+/// - `delivery-routing-v1`: `delivery --json` emits the delivery planner's
+///   answer — `default` (always `"automatic"`), and one `harnesses` row per
+///   targeted CLI with `id`, `display`, `mcp_capable`, `render_locally`,
+///   `override` (`none` / `project` / `harness`), a plain-language `summary`,
+///   and a `routes` array giving each capability `kind` its `lane`
+///   (`dynamic` / `rendered`), the `why`, and `full_ceremony`.
+///
+///   **What it promises.** This is the routing, not a mode. There is exactly
+///   one user setting behind it — **Render locally** — and it can only move a
+///   capability towards files; nothing makes an instruction, a hook, or a
+///   file-only CLI's capability go live, because no channel would carry it. A
+///   panel may therefore render `lane` as a fact about where the bytes go, and
+///   `override` as the scope a person actually set.
+///
+///   **What it does not promise.** It is **not an activation reading**: a
+///   `dynamic` lane says where a capability is routed, not that a lease is
+///   open, that the bridge is registered, or that the project is trusted —
+///   `lease-status-v1`, `doctor-cli-coverage-v1` and the trust surfaces answer
+///   those, each with its own limits. And `full_ceremony` is a statement about
+///   hooks and extensions being executable kinds, never a claim that a
+///   ceremony has happened. Its own name for the usual reason: a binary
+///   predating it has no such command.
+/// - `library-sources-v1`: `status --json`'s `project` gains a
+///   `shadowed_names` array (`project.shadowed_names`, beside the other
+///   per-project readings, so one project card is read from one place) —
+///   one plain sentence per capability name that more than one **linked
+///   library source** holds, naming the source that wins, the count, and the
+///   `<source>:<name>` reference that pins the other copy
+///   (`docs/design/linked-library-sources.md`).
+///
+///   **What it promises.** The array is always present and is `[]` when no
+///   name is shadowed, so a panel can distinguish "checked, nothing shadowed"
+///   from an older binary that has no such key at all. The sentences are the
+///   SAME text `agentstack doctor` and `agentstack lib sources` print, so no
+///   UI has to compose its own account of a collision, and the winner named
+///   here is the one a bare reference actually resolves to.
+///
+///   **What it does not promise.** It is **not a serving reading.** Precedence
+///   decides *selection*; a locked project serves the bytes its lock pins,
+///   read from the content store, so a name shown as shadowed here may be
+///   irrelevant to everything this project currently serves. It says nothing
+///   about which sources are linked, in what order, or where they live — that
+///   is `agentstack lib sources`, deliberately not a panel surface, because
+///   the link list is personal-layer machine state and never project state.
+/// - `instruction-channels-v1`: `status --json`'s `project` gains an
+///   `instruction_channels` array (`project.instruction_channels`, the same
+///   per-project object `shadowed_names` and `packages` live on)
+///   — one row per targeted CLI with `id`, `display`, the `file` that
+///   actually carries house rules there (`null` when the CLI has none), the
+///   `live_channel` its adapter descriptor declares (`id`, `display`,
+///   `confirmation` = `confirmed` / `unconfirmed`, and `used`), the `selection`
+///   (`fragment`, `variant`, `model`, `model_source`), and the one `sentence`
+///   the terminal prints (`docs/design/instruction-variants.md`).
+///
+///   **What it promises.** The array names EVERY targeted CLI, including the
+///   ones with no instruction channel at all — a `file` of `null` is the
+///   honest "house rules do not reach this tool", and an adapter that silently
+///   disappeared from a coverage list would read as covered. `confirmation`
+///   distinguishes "observed consuming this channel" from "documented or
+///   protocol-level and never verified here", and the two are never collapsed.
+///   `model_source` is always one of `toolset:<name>`, `settings`, or
+///   `unknown`, so a panel can show *why* a variant was chosen rather than only
+///   which.
+///
+///   **What it does not promise.** `used` is `false` on every live channel and
+///   is a field rather than an omission for exactly that reason: no live
+///   channel carries house rules today, confirmed or not, because none of them
+///   varies by model or sits behind a lease. A `confirmed` channel is therefore
+///   **not** an activation reading and never means instructions are being
+///   served live — nothing is, and no surface may say otherwise. `selection`
+///   reports the FIRST fragment that compiles for that CLI, not every one;
+///   `agentstack instructions` is the per-fragment surface. And a `file` path
+///   is a destination, not proof anything has been written to it — `rendered`
+///   and `agentstack diff` answer that.
+/// - `image-plan-v1`: `image --json` emits the packaging plan
+///   (`docs/design/packaging.md`) under `image` — `toolset`, `harness`, `tag`,
+///   `base`, a `posture` object, a `members` array giving every pinned member
+///   its `kind`, `name`, `digest`, `provenance`, `dest` and `compiled` flag,
+///   `required_secrets`, `blockers`, `buildable`, the `context` directory a
+///   `--write` would stage, and the `cmd` the image's entrypoint execs.
+///
+///   **What it promises.** `members` is COMPLETE for the named toolset: every
+///   member that would enter the image is listed with the digest its bytes are
+///   read by, so a panel can show the composition without unpacking anything.
+///   `required_secrets` is a list of `${REF}` NAMES and can never hold a
+///   value — the whole build path constructs no secret resolver
+///   (`CLAUDE.md` invariant 5). `buildable` is `blockers.is_empty()`, and a
+///   plan with blockers exits non-zero while still emitting this payload, so a
+///   UI can render *why* rather than only *that* a build refused.
+///
+///   **What it does not promise.** `posture.slug` / `posture.label` are the
+///   shipped `Posture::Sandbox` values and describe what the artifact is
+///   *prepared for*, never what any run enforces — `posture.established_by` is
+///   the constant `"run"` and `posture.caveat` carries the sentence in full. It
+///   is **not a build receipt**: the plan says what a `--write` would do, not
+///   that an image exists, that Docker is present, or that anything was built;
+///   nothing here is a reading of the local daemon. And it is not a
+///   reproducibility claim beyond the AgentStack layer — the base image may be
+///   a floating tag and a Docker build is not bit-reproducible, both stated in
+///   the design doc rather than implied away here.
+/// - `workflow-role-selection-v1`: the per-role model/effort facts become
+///   panel-readable. Two payloads, one contract. Each `workflow list --json`
+///   row gains `role_details[]` — `{role, harness, model, effort, serial,
+///   undeliverable[]}` — and `workflow explain --json` now carries this
+///   envelope, which it did not: it emitted a bare body, so a panel could read
+///   the richest workflow payload the CLI has and could never *negotiate* it.
+///
+///   **What it promises.** The facts come from the SAME `role_selection` walk
+///   `explain` renders, asked of the SAME authority the launch path asks — the
+///   bound adapter's descriptor — so the tree a panel draws and the argv a run
+///   builds cannot tell different stories. `undeliverable[]` carries one entry
+///   per declared value that would not reach the child, each with its
+///   `dimension`, the `harness`, and the plain sentence saying why; the two
+///   distinct cases item 6 shipped stay distinct (the adapter has no notion of
+///   that dimension at all vs. it has the setting but no confirmed way to
+///   select it for a single headless launch), and a value the adapter's own
+///   catalog REJECTS says so with the warning that a real run refuses that
+///   child before launch. `role_details` rides on `list`, which is the
+///   refusal-free surface, so an untrusted or drifted project still renders
+///   its tree.
+///
+///   **What it does not promise.** `model` and `effort` are what the role's
+///   toolset DECLARES, never what a run used — `null` means the toolset
+///   declares none and the harness's own default applies, which AgentStack
+///   does not read. `role_details` is NOT index-aligned with `roles`: a role
+///   with no declared toolset, or one binding an unknown harness, contributes
+///   no entry at all (refusal-free, exactly as `serial_roles` already is), so
+///   a missing entry is "not established" and never "no model" — `run` and
+///   `doctor` are where that entry's bigger problem gets reported. And this is
+///   observation only: it is not an activation reading, and there is **no
+///   action on this contract** — running, resuming, or authoring a workflow
+///   from a panel stays deferred (UI control-plane §Deferred), because each
+///   would need an authority path the read surface does not have.
 pub const FEATURES: &[&str] = &[
     "init-plan",
     "apply-setup",
@@ -330,6 +593,7 @@ pub const FEATURES: &[&str] = &[
     "trust-server-blockers-v1",
     "trust-review-card-v1",
     "trust-card-diff-v1",
+    "trust-card-groups-v1",
     "activity-skill-load-v1",
     "workflow-observe-v1",
     "workflow-serial-roles-v1",
@@ -342,6 +606,185 @@ pub const FEATURES: &[&str] = &[
     "doctor-cli-coverage-v1",
     "set-mode-v1",
     "status-honesty-v1",
+    "needs-your-yes-v1",
+    "update-offer-v1",
+    "package-members-v1",
+    "lease-status-v1",
+    "delivery-routing-v1",
+    "library-sources-v1",
+    "instruction-channels-v1",
+    "image-plan-v1",
+    "workflow-role-selection-v1",
+];
+
+/// How one panel action's apply is bound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Consent {
+    /// The apply requires `--yes` AND the named flag carrying the digest the
+    /// matching `--preview` returned. The CLI recomputes the digest and refuses
+    /// any mismatch before writing a byte, so a reviewed preview can never be
+    /// replayed against state that moved underneath it.
+    Digest(&'static str),
+    /// No digest, because the verb introduces no content for a human to
+    /// review: it re-renders, adopts, reverts, or undoes material that was
+    /// already consented (or that the CLI's own gates re-check on the call).
+    /// These are still fixed verbs with fixed argv — never a command string —
+    /// and every precondition behind them is re-validated here.
+    Preconditions,
+}
+
+/// One entry in the panel's closed action surface.
+pub struct PanelAction {
+    /// The panel-side action name (t3code's `AgentstackActionKind`).
+    pub name: &'static str,
+    /// The clap subcommand path its fixed argv starts with.
+    pub verb: &'static [&'static str],
+    /// How the apply is bound.
+    pub consent: Consent,
+}
+
+/// **The closed set.** Every state-changing thing a panel can do, declared in
+/// the CLI rather than only in the panel's own TypeScript — so "the panel is
+/// never a second authority" is a property this repository can enumerate and
+/// witness (`crates/cli/tests/panel_surfaces.rs`) instead of a promise made
+/// somewhere else. There is no generic `run_command` action, and adding an
+/// entry here is a deliberate edit that fails the witness until the verb really
+/// carries the binding it claims.
+///
+/// Reads are deliberately NOT listed. A read writes nothing, so it needs no
+/// closed set: [`FEATURES`] is how a panel learns which read contracts this
+/// binary serves. This table is about the surface that can change state.
+///
+/// Two things it is not:
+///
+/// 1. **Not an authorization.** Nothing consults this table at runtime — no
+///    enforcement decision may read it, exactly as none may read [`FEATURES`].
+///    A panel that names an action here still meets every gate the terminal
+///    meets: trust state, strict lock verification, machine policy, and the
+///    digest itself.
+/// 2. **Not a per-item consent path.** The review card has exactly one closing
+///    question and one answer — `trust-grant`, over the whole project's bytes.
+///    No entry here accepts, keeps-pinned, or blocks a single reviewed item,
+///    and none ever will (`docs/archive/design/consent-card.md` §Panel).
+pub const PANEL_ACTIONS: &[PanelAction] = &[
+    // Setup and consent: the two digests that bind a reviewed preview.
+    PanelAction {
+        name: "setup-apply",
+        verb: &["init"],
+        consent: Consent::Digest("consented-plan"),
+    },
+    PanelAction {
+        name: "trust-grant",
+        verb: &["trust"],
+        consent: Consent::Digest("consented-digest"),
+    },
+    // Revoking withdraws a yes rather than giving one: there is no reviewed
+    // preview to bind to, and failing to revoke is the unsafe direction.
+    PanelAction {
+        name: "trust-revoke",
+        verb: &["trust"],
+        consent: Consent::Preconditions,
+    },
+    PanelAction {
+        name: "apply-project",
+        verb: &["apply"],
+        consent: Consent::Preconditions,
+    },
+    PanelAction {
+        name: "apply-global",
+        verb: &["apply"],
+        consent: Consent::Preconditions,
+    },
+    PanelAction {
+        name: "adopt-project",
+        verb: &["adopt"],
+        consent: Consent::Preconditions,
+    },
+    PanelAction {
+        name: "adopt-global",
+        verb: &["adopt"],
+        consent: Consent::Preconditions,
+    },
+    PanelAction {
+        name: "guard-install",
+        verb: &["guard", "install"],
+        consent: Consent::Preconditions,
+    },
+    // Bound by the id the `restore --json` inventory returned, never `--last`:
+    // the undo ledger is machine-global and a project panel must undo its own
+    // newest entry.
+    PanelAction {
+        name: "restore-write",
+        verb: &["restore"],
+        consent: Consent::Preconditions,
+    },
+    PanelAction {
+        name: "session-start",
+        verb: &["session", "start"],
+        consent: Consent::Preconditions,
+    },
+    PanelAction {
+        name: "session-end",
+        verb: &["session", "end"],
+        consent: Consent::Preconditions,
+    },
+    // The panel-edit verbs: manifest or library mutations, each previewed and
+    // each bound to the digest its own preview returned.
+    PanelAction {
+        name: "add-skill-to-profile",
+        verb: &["add-skill-to-profile"],
+        consent: Consent::Digest("consented"),
+    },
+    PanelAction {
+        name: "add-server-to-profile",
+        verb: &["add-server-to-profile"],
+        consent: Consent::Digest("consented"),
+    },
+    PanelAction {
+        name: "create-profile",
+        verb: &["create-profile"],
+        consent: Consent::Digest("consented"),
+    },
+    PanelAction {
+        name: "edit-profile",
+        verb: &["edit-profile"],
+        consent: Consent::Digest("consented"),
+    },
+    PanelAction {
+        name: "rename-profile",
+        verb: &["rename-profile"],
+        consent: Consent::Digest("consented"),
+    },
+    PanelAction {
+        name: "delete-profile",
+        verb: &["delete-profile"],
+        consent: Consent::Digest("consented"),
+    },
+    PanelAction {
+        name: "use-profile",
+        verb: &["use-profile"],
+        consent: Consent::Digest("consented"),
+    },
+    PanelAction {
+        name: "remove-from-library",
+        verb: &["remove-from-library"],
+        consent: Consent::Digest("consented"),
+    },
+    PanelAction {
+        name: "remove-capability",
+        verb: &["remove-capability"],
+        consent: Consent::Digest("consented"),
+    },
+    PanelAction {
+        name: "set-gitignore",
+        verb: &["set-gitignore"],
+        consent: Consent::Digest("consented"),
+    },
+    PanelAction {
+        name: "set-mode",
+        verb: &["set-mode"],
+        consent: Consent::Digest("consented"),
+    },
 ];
 
 /// Wrap a response body in the envelope. The two envelope keys are injected
@@ -408,6 +851,14 @@ mod tests {
             "trust-review-card-v1",
             "trust-card-diff-v1",
             "activity-skill-load-v1",
+            "needs-your-yes-v1",
+            "update-offer-v1",
+            "package-members-v1",
+            "lease-status-v1",
+            "library-sources-v1",
+            "instruction-channels-v1",
+            "image-plan-v1",
+            "workflow-role-selection-v1",
         ] {
             assert!(
                 features.contains(&shipped),

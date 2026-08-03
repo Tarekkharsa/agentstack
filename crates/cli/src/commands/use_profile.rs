@@ -559,7 +559,7 @@ pub fn activate(
     let mut blocked_names: Vec<String> = Vec::new();
     let mut pinned_copies: Vec<String> = Vec::new();
     let mut unverified_pins: Vec<String> = Vec::new();
-    let active_skills: Vec<(String, PathBuf)> = resolved_skills
+    let mut active_skills: Vec<(String, PathBuf)> = resolved_skills
         .iter()
         .filter_map(|r| {
             match decisions
@@ -662,6 +662,56 @@ pub fn activate(
         // too, but that runs after targets were already written.
         for r in resolved_servers {
             crate::executable::derive_executable_pins(&ctx.dir, &r.name, &r.server)?;
+        }
+
+        // CONTENT BINDING ON THE RENDERED LANE (invariant 4). The gates above
+        // proved the LIVE bytes still hash to the lock pin. What gets rendered
+        // must nevertheless be the immutable, content-addressed snapshot named
+        // by that pin — never the mutable directory the bytes were read from.
+        //
+        // The hole this closes: `render::skills` symlinks the delivered
+        // artifact at its source dir, and for a central-library skill that dir
+        // is exactly what `lib sync` rewrites. The link's TARGET STRING never
+        // changes, so nothing re-gates, yet the bytes a harness reads *through*
+        // the link become the library's new ones. Unreviewed content reaching
+        // agent context with no re-gate is precisely what invariant 4 forbids,
+        // and it is the same rule the serving lane already follows in
+        // `mcp_server::load_skill`: resolve from the lock, read from the store
+        // by digest.
+        //
+        // Deliberately AFTER `ensure_activatable`, not folded into the
+        // `active_skills` construction above: the drift gate owns the "these
+        // bytes moved" refusal and must keep owning it. Reaching this line
+        // means the live bytes match the pin, which is also what makes
+        // `pinned_content`'s repair-from-live leg safe — it can only ever
+        // deposit the pinned, reviewed content, and `snapshot_content`
+        // re-proves the address as it lands.
+        for (name, path) in active_skills.iter_mut() {
+            // Keep-pinned names already point at their approved snapshot (and
+            // were excluded from the gate above), so there is nothing to
+            // redirect and no live copy to repair from.
+            if pinned_copies.contains(name) {
+                continue;
+            }
+            // Unpinned: no digest to serve by, so behaviour is unchanged —
+            // the live path, plus the pin-me warning the resolver already
+            // emitted. Fabricating a pin here would be inventing consent.
+            let Some(entry) = lock.get(name) else {
+                continue;
+            };
+            *path = libctx
+                .store
+                .pinned_content(entry.checksum.hex(), path)
+                .map_err(|e| {
+                    // Fail closed. Falling back to the live directory would
+                    // restore the exact hole above, so a store that cannot
+                    // produce verified bytes refuses the whole activation.
+                    anyhow::anyhow!(
+                        "refusing to render skill '{name}': its approved bytes could not be \
+                         served from the content store ({e}) — run `agentstack lock` to \
+                         re-pin and review it"
+                    )
+                })?;
         }
     }
 
@@ -1290,6 +1340,18 @@ pub(crate) fn record_lock(
             source: match r.origin {
                 ServerOrigin::Inline => ServerSource::Inline,
                 ServerOrigin::Library => ServerSource::Library,
+                // A package member is pinned as a `[[package.member]]` row by
+                // `record_package_pins`, and must never ALSO become a
+                // `[[server]]` row — two lock rows for one name are two pins
+                // that can disagree. Nothing routes a package member here
+                // today; if something ever does, it must fail loudly rather
+                // than write a second pin under a wrong source label.
+                ServerOrigin::Package => anyhow::bail!(
+                    "server '{}' came from a package and cannot be pinned as a project \
+                     server row — package members are pinned by `agentstack lock` as \
+                     package members. This is a bug; please report it.",
+                    crate::text::sanitize_line(&r.name)
+                ),
             },
             checksum: Sha256Hex::parse(&r.checksum)?,
         });

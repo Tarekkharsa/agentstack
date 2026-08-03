@@ -622,6 +622,20 @@ pub enum GrantedServerBinding {
         definition: ContentDigest,
         provenance: Option<String>,
     },
+    /// A server a selected toolset's package carries. Bound by the digest the
+    /// lock pins for that member, which the store re-verified before the
+    /// definition was parsed.
+    ///
+    /// `provenance` is the member's recorded coordinate
+    /// (`package:<name>@<version>#[server]`, built in one place by
+    /// `package::pin_package_member`), so it names the package, its version and
+    /// the member within it. Folding a package member into `Inline` — which has
+    /// no provenance field at all — is what made the grant unable to say that
+    /// these bytes came from outside the project.
+    Package {
+        definition: ContentDigest,
+        provenance: Option<String>,
+    },
 }
 
 /// Runtime image identity: `Host` (no image) vs a container image that may be
@@ -976,6 +990,13 @@ impl GrantedServer {
                 definition,
                 provenance: resolved.provenance.clone(),
             },
+            // Never `Inline`: a package member's definition is not this
+            // project's bytes, and the grant is the artifact an auditor reads
+            // to find out whose bytes ran.
+            crate::resolve::ServerOrigin::Package => GrantedServerBinding::Package {
+                definition,
+                provenance: resolved.provenance.clone(),
+            },
         };
         Ok(GrantedServer {
             server: resolved.server.clone(),
@@ -1120,7 +1141,8 @@ pub struct GrantHandoff {
 #[serde(deny_unknown_fields)]
 pub struct HandoffServer {
     pub name: String,
-    /// `"inline"` or `"library"` — anything else fails closed at load.
+    /// `"inline"`, `"library"` or `"package"` — anything else fails closed at
+    /// load.
     pub origin: String,
     /// The `${REF}`-only definition (never resolved secret values).
     pub server: agentstack_core::manifest::Server,
@@ -1133,6 +1155,24 @@ impl AuthorityGrant {
     /// Project this grant into its bridge handoff artifact. Lives here so the
     /// selection of what crosses the process boundary is a reviewed, explicit
     /// list — never a blanket `Serialize` on the sealed grant.
+    /// The path and pinned digest of one bound instruction.
+    ///
+    /// Read-only evidence for the witnesses that must prove WHICH body a run
+    /// bound (review finding 5) — `cfg(test)`, so it adds no production
+    /// surface, and it grants nothing either way: it reads what was already
+    /// frozen.
+    #[cfg(test)]
+    pub(crate) fn bound_instruction(&self, name: &str) -> Option<(&str, &str)> {
+        self.instructions.get(name).map(|i| {
+            let digest = match &i.binding {
+                InstructionBinding::ProjectPinned(d) | InstructionBinding::MachineOwned(d) => {
+                    d.hex()
+                }
+            };
+            (i.path.as_str(), digest)
+        })
+    }
+
     pub(crate) fn handoff(&self, envelope: &RunEnvelope) -> GrantHandoff {
         let servers = self
             .servers
@@ -1146,6 +1186,10 @@ impl AuthorityGrant {
                         definition,
                         provenance,
                     } => ("library", definition.hex().to_string(), provenance.clone()),
+                    GrantedServerBinding::Package {
+                        definition,
+                        provenance,
+                    } => ("package", definition.hex().to_string(), provenance.clone()),
                 };
                 HandoffServer {
                     name: name.clone(),
@@ -1356,6 +1400,7 @@ pub fn frozen_from_handoff(handoff: &GrantHandoff) -> Result<Vec<crate::resolve:
             let origin = match s.origin.as_str() {
                 "inline" => crate::resolve::ServerOrigin::Inline,
                 "library" => crate::resolve::ServerOrigin::Library,
+                "package" => crate::resolve::ServerOrigin::Package,
                 other => bail!("unknown server origin {other:?} in run-grant artifact"),
             };
             Ok((
@@ -1539,6 +1584,17 @@ impl AuthorityGrant {
                     provenance,
                 } => {
                     e.text("server.binding", "library");
+                    e.text("server.definition", definition.hex());
+                    e.opt_text("server.provenance", provenance.as_deref());
+                }
+                // A distinct binding label, so the digest of a run serving a
+                // package's server can never collide with the digest of a run
+                // serving an inline server of the same name and bytes.
+                GrantedServerBinding::Package {
+                    definition,
+                    provenance,
+                } => {
+                    e.text("server.binding", "package");
                     e.text("server.definition", definition.hex());
                     e.opt_text("server.provenance", provenance.as_deref());
                 }
@@ -2782,6 +2838,105 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("machine authentication"));
+    }
+
+    /// **Review finding 6.** A package member binds as `Package`, carries its
+    /// provenance all the way into the sealed handoff, and reads back as
+    /// `ServerOrigin::Package` — never as this project's own inline server.
+    ///
+    /// `GrantedServerBinding::Inline` has no provenance field at all, so the
+    /// old `ServerOrigin::Inline` mapping did not merely mislabel a package
+    /// member: it DELETED the only record of where its bytes came from.
+    /// Reverting `from_resolved`'s `Package` arm to `Inline` fails this on the
+    /// binding assertion, and reverting only the handoff arm fails it on the
+    /// provenance assertion.
+    #[test]
+    fn a_package_member_binds_as_package_and_keeps_its_provenance() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let root = GrantPath::new(tmp.path()).unwrap();
+
+        // Built through the honest constructor, from the shape
+        // `resolve::resolve_package_server` produces — not a hand-made literal.
+        let resolved = crate::resolve::ResolvedServer {
+            name: "rust-backend".into(),
+            origin: crate::resolve::ServerOrigin::Package,
+            server: toml::from_str("type = \"http\"\nurl = \"https://backend.example/mcp\"\n")
+                .unwrap(),
+            checksum: h64('7'),
+            provenance: Some("package:rust-backend@1.4.0#[server]".into()),
+        };
+        let granted = GrantedServer::from_resolved(&resolved).unwrap();
+        assert!(
+            matches!(
+                &granted.binding,
+                GrantedServerBinding::Package { provenance, .. }
+                    if provenance.as_deref() == Some("package:rust-backend@1.4.0#[server]")
+            ),
+            "a package member must bind as Package with its provenance, got {:?}",
+            granted.binding
+        );
+
+        let mut b = host_builder(&root);
+        b.add_server("rust-backend", granted).unwrap();
+        let grant = b.build().unwrap();
+
+        // It survives the process boundary: the artifact the bridge reads says
+        // "package", not "inline", and still names the source.
+        let envelope = RunEnvelope::new(
+            "run-pkg".into(),
+            "events.jsonl".into(),
+            GrantDigest::parse(&h64('d')).unwrap(),
+        );
+        let handoff = grant.handoff(&envelope);
+        assert_eq!(handoff.servers[0].origin, "package");
+        assert_eq!(
+            handoff.servers[0].provenance.as_deref(),
+            Some("package:rust-backend@1.4.0#[server]")
+        );
+
+        let key = CommitmentKey([0x33u8; 32]);
+        let file = tmp.child("grant.json");
+        file.write_str(
+            &serde_json::to_string_pretty(&seal_handoff(handoff, &key).unwrap()).unwrap(),
+        )
+        .unwrap();
+        let frozen = frozen_from_handoff(&load_handoff(file.path(), &key).unwrap()).unwrap();
+        let rs = frozen[0].1.as_ref().unwrap();
+        assert!(matches!(rs.origin, crate::resolve::ServerOrigin::Package));
+        assert_eq!(
+            rs.provenance.as_deref(),
+            Some("package:rust-backend@1.4.0#[server]")
+        );
+    }
+
+    /// The grant digest separates the two bindings. Identical name, identical
+    /// definition bytes, different origin — the digests must differ, or a run
+    /// serving a package's server would be indistinguishable from one serving
+    /// an inline server of the same name.
+    #[test]
+    fn the_grant_digest_distinguishes_a_package_binding_from_an_inline_one() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let root = GrantPath::new(tmp.path()).unwrap();
+        let definition = ContentDigest::parse(&h64('7')).unwrap();
+        let src = "type = \"http\"\nurl = \"https://backend.example/mcp\"\n";
+
+        let key = CommitmentKey([0x44u8; 32]);
+        let digest_with = |binding: GrantedServerBinding| {
+            let mut b = host_builder(&root);
+            b.add_server("rust-backend", granted_server(src, binding))
+                .unwrap();
+            b.build().unwrap().digest(&key).unwrap().hex().to_string()
+        };
+
+        assert_ne!(
+            digest_with(GrantedServerBinding::Inline {
+                definition: definition.clone(),
+            }),
+            digest_with(GrantedServerBinding::Package {
+                definition,
+                provenance: Some("package:rust-backend@1.4.0#[server]".into()),
+            })
+        );
     }
 
     /// Fail-closed on every skew axis: artifact schema, compiled-ruleset

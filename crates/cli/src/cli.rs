@@ -183,10 +183,10 @@ pub enum Command {
     #[command(hide = true)]
     Try(TryArgs),
 
-    /// Manage the central capability library.
+    /// Manage your linked capability library sources.
     ///
-    /// `~/.agentstack/lib/` holds capabilities that projects reference by
-    /// name instead of copying files.
+    /// Any folder can be linked as a source, several at once; the first source
+    /// holding a name wins. `~/.agentstack/lib/` is the one you start with.
     #[command(hide = true)]
     Lib(LibArgs),
 
@@ -220,6 +220,21 @@ pub enum Command {
     #[command(hide = true)]
     Kill(KillArgs),
 
+    /// Compose one toolset and its pinned capabilities into a container image.
+    ///
+    /// The image carries the exact bytes you reviewed — skills laid down where
+    /// the tool reads them, server definitions with their `${REF}`
+    /// placeholders untouched — plus a start-up guard that refuses to launch
+    /// until the secrets those placeholders name are present in the run's own
+    /// environment. Nothing is resolved into the image, and nothing is pushed
+    /// anywhere.
+    ///
+    /// Dry-run by default: a bare `agentstack image` writes no file and does
+    /// not contact Docker. The artifact and every claim it does and does not
+    /// make are written up in `docs/design/packaging.md`.
+    #[command(hide = true)]
+    Image(ImageArgs),
+
     /// Exec-through launcher shim for external supervisors (e.g. t3code).
     ///
     /// `shim make <cli>` writes a tiny wrapper under `~/.agentstack/shims/`;
@@ -232,15 +247,20 @@ pub enum Command {
 
     /// Run a reviewed multi-agent task using toolsets you already approved.
     ///
-    /// Hidden from the everyday list, not from the CLI: the interpreter
-    /// boundary passed its review (so the `(preview)` label is gone), but
-    /// workflows stay an advanced lane until the repeated-use gate in
-    /// `TODO.md` closes — and their vocabulary (admission, ceilings, locked
-    /// child runs) is the densest in the product. Full detail lives in
-    /// `agentstack workflow --help`: each `agent()` call is admitted against
-    /// the trust gate, verified against a strict lock, capped by the machine
-    /// ceiling, and spawned as its own locked child run.
-    #[command(subcommand, hide = true)]
+    /// Visible since the six interpreter-boundary review findings closed, each
+    /// with its own witness (the watchdog's no-I/O exit, interpreter memory
+    /// bounds, host-native re-entrancy, a run-total native call budget,
+    /// cross-host resume determinism, and the crate boundary). Un-hiding
+    /// changed DISCOVERABILITY only — not one enforcement boundary moved with
+    /// it, and `docs/workflows.md`'s *Honest limits* still hold in full: a
+    /// host-tier step is cooperative-guard only, step outputs are untrusted
+    /// model data, and the interpreter's residual bounds are stated in
+    /// `agentstack workflow report`'s posture block rather than papered over.
+    ///
+    /// Full detail lives in `agentstack workflow --help`: each `agent()` call
+    /// is admitted against the trust gate, verified against a strict lock,
+    /// capped by the machine ceiling, and spawned as its own locked child run.
+    #[command(subcommand)]
     Workflow(WorkflowCmd),
 
     /// Every "what happened" view in one place.
@@ -277,6 +297,28 @@ pub enum Command {
     /// --auto-project` with no per-project files.
     #[command(subcommand, hide = true)]
     Gateway(GatewayCmd),
+
+    /// Runtime lease registry: which toolset leases are open on this machine.
+    ///
+    /// A lease is the temporary runtime activation of one toolset over an MCP
+    /// connection. It is owned by the MCP process that opened it and disappears
+    /// with that process — so the registry stores a RECORD, and liveness is
+    /// derived on every read from the recorded PID plus that process's start
+    /// time. A record whose process is gone, or whose PID has been reused,
+    /// reads as stale and never as live.
+    #[command(subcommand, hide = true)]
+    Lease(LeaseCmd),
+
+    /// How each capability reaches each of your tools — and the one override.
+    ///
+    /// Delivery is routed, not chosen: skills and MCP servers are served live
+    /// to tools that can take them, while house rules, settings, hooks and
+    /// extensions are written into native files, as is everything for a tool
+    /// that reads files only. `agentstack delivery` shows the routing;
+    /// `agentstack delivery render-locally` is the single override — write
+    /// files even where the live channel would have worked.
+    #[command(hide = true)]
+    Delivery(DeliveryArgs),
 
     /// Review and approve this project's declared capabilities — required
     /// before anything activates them.
@@ -505,11 +547,12 @@ and requires the project to be trusted first — trust is never granted here.
     #[command(name = "use-profile", hide = true)]
     UseProfile(PanelUseProfileArgs),
 
-    /// The central-library catalog (skills + servers) for the panel browser.
+    /// The library catalog (skills + servers), merged across linked sources,
+    /// for the panel browser.
     #[command(name = "library-index", hide = true)]
     LibraryIndex,
 
-    /// Remove a skill or server from the central library (panel action;
+    /// Remove a skill or server from the library (panel action;
     /// digest-bound). Moves it to the library trash — recoverable with
     /// `agentstack lib trash --restore <id> --write`.
     #[command(name = "remove-from-library", hide = true)]
@@ -1057,8 +1100,16 @@ pub struct WorkflowDeclareArgs {
     pub blueprint: Option<PathBuf>,
 
     /// A role the script's `agent()` calls may name (repeatable). Every role
-    /// must already exist as a `[profiles.<role>]` table — this command
-    /// declares a workflow, it never mints authority.
+    /// must already be a declared toolset — this command declares a workflow,
+    /// it never mints authority.
+    //
+    // The manifest key behind a toolset is still spelled `[profiles.<name>]`,
+    // and this help used to say so. It cannot now that `workflow` is visible:
+    // `visible_help_says_toolset` reserves the word "profile" for the manifest
+    // key, the wire contract, and the frozen panel argv, and clap help is
+    // prose a beginner reads. The key name is not lost — `docs/workflows.md`
+    // and `agentstack toolset --help` both carry it, in places that can put it
+    // in a code span.
     #[arg(long = "role")]
     pub roles: Vec<String>,
 
@@ -1163,6 +1214,102 @@ pub enum GatewayCmd {
     Disconnect(DisconnectArgs),
 }
 
+/// `agentstack image` — one toolset, materialized as something you run.
+///
+/// One command, not a subcommand tree: there is exactly one artifact and
+/// exactly one act (build it). `--write` is the whole gate — without it
+/// nothing touches disk and the Docker daemon is never contacted.
+#[derive(Args, Debug)]
+pub struct ImageArgs {
+    /// Which toolset to package. Optional only when the project declares
+    /// exactly one — an image is a composition, and picking one of several by
+    /// guess would make the artifact's identity a guess too.
+    #[arg(long, value_name = "NAME", alias = "profile")]
+    pub toolset: Option<String>,
+
+    /// Which tool the image launches (an adapter id, e.g. `claude-code`).
+    /// Defaults to the toolset's own `harness`, then to the project's single
+    /// default target.
+    #[arg(long, value_name = "ID")]
+    pub harness: Option<String>,
+
+    /// Tag for the built image (default `agentstack/<toolset>:latest`). Local
+    /// only — nothing is ever pushed.
+    #[arg(long, value_name = "TAG")]
+    pub tag: Option<String>,
+
+    /// Base image to build `FROM`. Defaults to the same image `run --sandbox`
+    /// would have launched, so a packaged image is that runner plus one
+    /// toolset. Pass a digest reference to close the base-image axis; a
+    /// floating tag leaves it open, and AgentStack will not claim otherwise.
+    #[arg(long, value_name = "IMAGE")]
+    pub from: Option<String>,
+
+    /// Emit the plan as JSON (contract `image-plan-v1`).
+    #[arg(long)]
+    pub json: bool,
+
+    /// Actually stage the build context and build the image (default: plan
+    /// only).
+    #[arg(long)]
+    pub write: bool,
+}
+
+/// `agentstack delivery` — show the routing, or set the one override.
+///
+/// There is deliberately no `--mode` here and no second knob: the automatic
+/// answer is the routed one, and **Render locally** is the whole escape hatch.
+#[derive(Args, Debug)]
+pub struct DeliveryArgs {
+    #[command(subcommand)]
+    pub command: Option<DeliveryCmd>,
+
+    /// Emit the routing as JSON (contract `delivery-routing-v1`).
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum DeliveryCmd {
+    /// Write files even where the live channel would have worked.
+    ///
+    /// The reasons this exists, so nobody has to re-argue them: offline
+    /// operation; deterministic native files; inspection with ordinary
+    /// filesystem tools; a corporate policy that forbids a persistent
+    /// background process; debugging without another runtime dependency; and
+    /// compatibility testing against a CLI's own behaviour.
+    ///
+    /// Records `[delivery] render_locally` in the manifest so the answer is the
+    /// same on every clone and every run. Dry-run by default.
+    RenderLocally {
+        /// Set it for one tool only (an adapter id, e.g. `claude-code`).
+        /// Omitted, it applies to the whole project.
+        #[arg(long, value_name = "ID")]
+        harness: Option<String>,
+
+        /// Remove the override instead of setting it — back to automatic.
+        #[arg(long)]
+        off: bool,
+
+        /// Actually write the manifest (default: preview only).
+        #[arg(long)]
+        write: bool,
+    },
+}
+
+/// The runtime lease registry's read surface. Read-only by design: leases are
+/// opened and closed by the MCP connection that owns them, never from here.
+#[derive(Subcommand, Debug)]
+pub enum LeaseCmd {
+    /// Show the lease records on this machine, each with liveness derived now
+    /// from its PID and that process's start time (contract `lease-status-v1`).
+    Status {
+        /// Emit the same reading as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+}
+
 #[derive(Args, Debug)]
 pub struct SignArgs {
     /// Print only the public-key line (for scripting).
@@ -1188,16 +1335,25 @@ pub struct RunArgs {
     #[arg(value_name = "CLI")]
     pub harness: String,
 
-    /// Promote this host run to the Protected tier (fail-closed): refuse to
-    /// launch unless the project is explicitly trusted, every input in the
-    /// declared integrity surface is pinned and matching, and the declared
-    /// capability requests fit under the machine policy ceiling — recording
-    /// what was decided, including refusals. No Docker required. Not kernel
-    /// isolation: see the printed limits.
+    /// Ask for the Protected tier explicitly. This is the DEFAULT now — a
+    /// plain `agentstack run <cli>` is already protected — so the flag only
+    /// keeps working for the scripts, docs, and panels that already type it.
+    /// It still owns its combination rules: `--locked --sandbox/--lockdown` is
+    /// a named not-yet limitation and refuses, exactly as before.
     #[arg(long)]
     pub locked: bool,
 
-    /// Run the harness headless with TEXT as its prompt (requires --locked).
+    /// Opt OUT of the Protected default and launch on the host with no
+    /// pre-launch gate: no trust check, no strict lock verification, no policy
+    /// admission, no frozen grant. Labelled `HOST / ADVISORY`, because that is
+    /// what it is. The escape hatch for a project you have not locked or
+    /// trusted yet, and for anything the gates refuse for a reason you have
+    /// decided to accept — never the way to run day to day.
+    #[arg(long)]
+    pub unprotected: bool,
+
+    /// Run the harness headless with TEXT as its prompt (the Protected default;
+    /// cannot be combined with --unprotected, --sandbox, or --lockdown).
     /// The prompt is delivered as one whole argv element via the adapter's
     /// declared headless invocation (e.g. `claude -p`, `codex exec`) — never
     /// through a shell — and is committed verbatim into the frozen grant's
@@ -1252,6 +1408,24 @@ pub struct RunArgs {
     /// Works without Docker or the `sandbox` feature.
     #[arg(long)]
     pub plan: bool,
+
+    /// Which model this run's child should use, and how much reasoning effort
+    /// it should spend. INTERNAL PLUMBING, not user-facing flags — hence
+    /// `#[arg(skip)]`: the only producer is the workflow drive loop, which
+    /// copies them from the role's toolset (`[profiles.<role>] model/effort`),
+    /// and the only consumer is the headless launch path, which asks the
+    /// adapter's descriptor how (or whether) to carry them.
+    ///
+    /// Deliberately NOT exposed as `agentstack run --model`. Two reasons, both
+    /// already in this file's grain: `launch_argv`'s doc comment explains why a
+    /// user-typed harness flag on `run` is a misparse hazard once `--prompt`'s
+    /// `--` terminator is in play, and a user-facing selection flag is product
+    /// surface this item did not ask for. The manifest is where a model is
+    /// declared; the flag would be a second, undeclared authority for it.
+    #[arg(skip)]
+    pub model: Option<String>,
+    #[arg(skip)]
+    pub effort: Option<String>,
 
     /// Extra arguments passed through to the CLI (after `--`).
     #[arg(
@@ -1712,6 +1886,12 @@ pub struct InitArgs {
     /// the run prints each unstored `${REF}` and how to store it.
     #[arg(long)]
     pub no_keychain: bool,
+
+    /// Write the imported MCP servers into this project's manifest as inline
+    /// `[servers.*]` entries instead of into your first linked library source.
+    /// The default is library-first: the project references them by name.
+    #[arg(long)]
+    pub project_servers: bool,
 
     /// Run the promptless import without a terminal: acknowledge that the
     /// manifest (and any lifted token values) will be written. Required when
@@ -2342,13 +2522,13 @@ Examples:
     AddHook(LibAddHookArgs),
     /// List the skills, servers, extensions, and hooks in the central library.
     List,
-    /// Remove a skill from the central library.
+    /// Remove a skill from the library source that holds it.
     Remove(LibRemoveArgs),
-    /// Remove a server from the central library.
+    /// Remove a server from the library source that holds it.
     RemoveServer(LibRemoveServerArgs),
-    /// Remove an extension from the central library.
+    /// Remove an extension from the library source that holds it.
     RemoveExtension(LibRemoveExtensionArgs),
-    /// Remove a hook from the central library.
+    /// Remove a hook from the library source that holds it.
     RemoveHook(LibRemoveHookArgs),
     /// List what removal put in the library trash, and restore or empty it.
     /// Every `lib remove*` moves the entry here instead of deleting it.
@@ -2365,6 +2545,59 @@ Examples:
     /// directory. Publish by pushing the repo and tagging a version (e.g.
     /// v0.1.0); install with `agentstack add from git:<host>/<repo>@<tag>`.
     PackInit(PackInitArgs),
+    /// Link a folder as a library source. Any folder works — a git clone, a
+    /// synced drive, or a plain directory.
+    #[command(after_help = "\
+Examples:
+  agentstack lib link ~/work/team-capabilities --write
+  agentstack lib link ~/scratch/skills --name scratch --first --write")]
+    Link(LibLinkArgs),
+    /// Unlink a library source. The folder itself is left alone.
+    Unlink(LibUnlinkArgs),
+    /// Show the linked library sources in precedence order, and every name one
+    /// source shadows in another.
+    Sources,
+    /// Set the precedence order of the linked library sources. Name every
+    /// linked source exactly once, first to last.
+    Reorder(LibReorderArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct LibLinkArgs {
+    /// The folder to link.
+    pub path: String,
+    /// The name this source is addressed by in a `<source>:<name>` reference.
+    /// Defaults to the folder's own name.
+    #[arg(long)]
+    pub name: Option<String>,
+    /// Link at the front of the list, so this source wins name collisions.
+    #[arg(long)]
+    pub first: bool,
+    /// A one-line note about what this source is.
+    #[arg(long)]
+    pub note: Option<String>,
+    /// Write the change (else preview).
+    #[arg(long)]
+    pub write: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct LibUnlinkArgs {
+    /// The source name to unlink.
+    pub name: String,
+    /// Write the change (else preview).
+    #[arg(long)]
+    pub write: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct LibReorderArgs {
+    /// Every linked source name, in the order you want them resolved.
+    #[arg(required = true)]
+    pub names: Vec<String>,
+    /// Write the change (else preview).
+    #[arg(long)]
+    pub write: bool,
 }
 
 #[derive(Args, Debug)]
@@ -2386,6 +2619,9 @@ pub struct LibSyncArgs {
     /// sync is blocked — secrets should be `${REF}` placeholders).
     #[arg(long)]
     pub allow_secrets: bool,
+    /// Which linked library source to sync (default: the first one).
+    #[arg(long)]
+    pub source: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -2562,6 +2798,12 @@ pub struct InstructionsArgs {
     /// Only act on these CLIs (repeatable). Defaults to [targets].default.
     #[arg(long = "target", value_name = "CLI")]
     pub targets: Vec<String>,
+
+    /// Compile the house rules this toolset selects — its `model` picks the
+    /// per-(CLI, model) variant. Without it the model is unknown and the least
+    /// specific matching body is used, which the output states.
+    #[arg(long = "toolset", alias = "profile", value_name = "NAME")]
+    pub toolset: Option<String>,
 
     /// Where writes land: global (each CLI user-level config) or project
     /// (repo-local). Defaults to the manifest home.
@@ -2910,11 +3152,11 @@ pub fn full_command_inventory() -> String {
          Set up      init · up · status · adapters · settings · self · completions\n  \
          Edit        add · set · search · remove · install · lib · toolset · adopt · export · import\n  \
          Share       share · receive · publisher\n  \
-         Render      apply · use · yes · instructions · lock · session · diff · uninstall\n  \
+         Render      apply · use · yes · instructions · lock · session · diff · uninstall · delivery\n  \
          Undo        undo · restore\n  \
          Protect     trust · explain · secret · guard · sign · verify\n  \
-         Run         run · kill · shim · workflow · gateway · mcp · try\n  \
-         Inspect     doctor · report · optimize · proxy\n\
+         Run         run · kill · shim · workflow · image · gateway · mcp · try\n  \
+         Inspect     doctor · report · lease · optimize · proxy\n\
          \n\
          And in full:\n\n",
     );

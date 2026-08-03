@@ -1,10 +1,17 @@
-//! `agentstack lib` — manage the central capability library
-//! (`~/.agentstack/lib/`) that projects reference by name instead of copying
-//! files (see `docs/reference.md#the-central-library`).
+//! `agentstack lib` — manage the linked capability library sources that
+//! projects reference by name instead of copying files (see
+//! `docs/reference.md#the-library-linked-source-folders` and
+//! `docs/design/linked-library-sources.md`). `~/.agentstack/lib/` is the source
+//! every machine starts with; `lib link`/`unlink`/`sources`/`reorder` manage
+//! the rest of the ordered list.
 //!
 //! This module owns the **library write contract**: [`add_skill`] is the single
-//! insertion path — how an item enters `library.toml`, how its files land under
-//! `lib/skills/`, and how its checksum + provenance are recorded.
+//! insertion path — how an item enters a source's `library.toml`, how its files
+//! land under `<source>/skills/`, and how its checksum + provenance are
+//! recorded. Every write defaults to the **first** linked source ([`write_root`])
+//! — that is what "authoring is library-first" means mechanically — while
+//! commands acting on an existing entry follow it to whichever source holds it
+//! ([`owning_root`]).
 
 use agentstack_core::digest::Sha256Hex;
 use std::path::{Path, PathBuf};
@@ -14,14 +21,37 @@ use owo_colors::OwoColorize;
 
 use crate::cli::{
     LibAddArgs, LibAddExtensionArgs, LibAddHookArgs, LibAddServerArgs, LibArgs, LibKind,
-    LibRemoveArgs, LibRemoveExtensionArgs, LibRemoveHookArgs, LibRemoveServerArgs, LibSyncArgs,
-    LibTrashArgs,
+    LibLinkArgs, LibRemoveArgs, LibRemoveExtensionArgs, LibRemoveHookArgs, LibRemoveServerArgs,
+    LibReorderArgs, LibSyncArgs, LibTrashArgs, LibUnlinkArgs,
 };
 use crate::commands::lib_trash;
-use crate::library::{Library, LibraryExtension, LibraryHook, LibraryServer, LibrarySkill};
+use crate::library::{Kind, Library, LibraryExtension, LibraryHook, LibraryServer, LibrarySkill};
 use crate::manifest::{Hook, Server, Skill};
+use crate::sources::Sources;
 use crate::store::{dir_digest, dir_size, Store};
 use crate::util::paths;
+
+/// Where a library **write** lands: the first linked source.
+///
+/// This is what "authoring is library-first" means mechanically — `lib add`,
+/// `lib new`, `lib add-server` and friends all default here. On a machine that
+/// never linked a folder the first source *is* `~/.agentstack/lib`, so nothing
+/// about a single-library setup changes.
+fn write_root() -> PathBuf {
+    Sources::load_or_warn().primary().root
+}
+
+/// The linked source that holds `name`, for commands acting on an entry that
+/// already exists (remove, and the messages that follow it). Falls back to the
+/// first source, so "not in the library" still comes from the folder a user
+/// would look in.
+fn owning_root(kind: Kind, name: &str) -> PathBuf {
+    let primary = write_root();
+    match Library::load_default() {
+        Ok(library) => library.source_root(kind, &primary, name),
+        Err(_) => primary,
+    }
+}
 
 /// Above this, a skill is almost certainly carrying vendored dependencies —
 /// and every full-library pass (doctor, install, use) pays to read it.
@@ -42,6 +72,10 @@ pub fn run(args: &LibArgs, manifest_dir: Option<&Path>) -> Result<()> {
         LibKind::Trash(a) => trash_cli(a),
         LibKind::Sync(a) => sync(a),
         LibKind::PackInit(a) => super::pack::init(a.name.as_deref()),
+        LibKind::Link(a) => link_cmd(a),
+        LibKind::Unlink(a) => unlink_cmd(a),
+        LibKind::Sources => sources_cmd(),
+        LibKind::Reorder(a) => reorder_cmd(a),
     }
 }
 
@@ -308,7 +342,7 @@ fn add_skill_inner(
 
 fn add(args: &LibAddArgs) -> Result<()> {
     use crate::provider::source::{parse_source, SkillSource};
-    let lib_home = paths::lib_home();
+    let lib_home = write_root();
     let parsed = parse_source(&args.source)?;
     let mut requested = args.skill.clone();
     if let Some(alias) = &parsed.skill_alias {
@@ -537,13 +571,17 @@ fn new_skill(args: &crate::cli::LibNewArgs) -> Result<()> {
     println!("{} scaffolded ./{name}/SKILL.md", "✓".green());
     println!("  edit the description first — search and agents find skills by it");
     println!("  then adopt it:");
-    println!(
-        "    agentstack add skill ./{name} --write     {}",
-        "# this project".dimmed()
-    );
+    // Library-first: the reusable destination is named first, and named with
+    // the folder it actually lands in, because with several linked sources
+    // "the central library" is no longer a single well-known place.
+    let primary = Sources::load_or_warn().primary();
     println!(
         "    agentstack lib add ./{name} --write       {}",
-        "# every project (central library)".dimmed()
+        format!("# every project ({})", primary.name).dimmed()
+    );
+    println!(
+        "    agentstack add skill ./{name} --write     {}",
+        "# this project only (quick capture)".dimmed()
     );
     Ok(())
 }
@@ -734,7 +772,7 @@ pub fn add_server_def(
 }
 
 fn add_server_cli(args: &LibAddServerArgs, manifest_dir: Option<&Path>) -> Result<()> {
-    let lib_home = paths::lib_home();
+    let lib_home = write_root();
     let outcome = if args.from_manifest {
         let ctx = super::load(manifest_dir)?;
         let Some(server) = ctx.loaded.manifest.servers.get(&args.name) else {
@@ -990,7 +1028,7 @@ pub fn remove_server(lib_home: &Path, name: &str, write: bool) -> Result<ServerR
 }
 
 fn remove_server_cli(args: &LibRemoveServerArgs) -> Result<()> {
-    let lib_home = paths::lib_home();
+    let lib_home = owning_root(Kind::Server, &args.name);
     let outcome = remove_server(&lib_home, &args.name, args.write)?;
     if outcome.written {
         println!(
@@ -1131,7 +1169,7 @@ fn hook_suspicious_secrets(hook: &Hook) -> Vec<String> {
 }
 
 fn add_hook_cli(args: &LibAddHookArgs, manifest_dir: Option<&Path>) -> Result<()> {
-    let lib_home = paths::lib_home();
+    let lib_home = write_root();
     let outcome = if args.from_manifest {
         let ctx = super::load(manifest_dir)?;
         let Some(hook) = ctx.loaded.manifest.hooks.get(&args.name) else {
@@ -1254,7 +1292,7 @@ pub fn remove_hook(lib_home: &Path, name: &str, write: bool) -> Result<HookRemov
 }
 
 fn remove_hook_cli(args: &LibRemoveHookArgs) -> Result<()> {
-    let lib_home = paths::lib_home();
+    let lib_home = owning_root(Kind::Hook, &args.name);
     let outcome = remove_hook(&lib_home, &args.name, args.write)?;
     if outcome.written {
         println!(
@@ -1475,7 +1513,7 @@ fn remove_path(path: &Path) -> Result<()> {
 }
 
 fn add_extension_cli(args: &LibAddExtensionArgs) -> Result<()> {
-    let lib_home = paths::lib_home();
+    let lib_home = write_root();
     let (git_url, url_frag) = match &args.git {
         Some(g) => match g.split_once('#') {
             Some((u, frag)) => (Some(u.to_string()), Some(frag.to_string())),
@@ -1618,7 +1656,7 @@ pub fn remove_extension(
 }
 
 fn remove_extension_cli(args: &LibRemoveExtensionArgs) -> Result<()> {
-    let lib_home = paths::lib_home();
+    let lib_home = owning_root(Kind::Extension, &args.name);
     let outcome = remove_extension(&lib_home, &args.name, args.write)?;
     if outcome.written {
         println!(
@@ -1667,9 +1705,174 @@ fn contained_lib_extension_dir(lib_home: &Path, path: &str) -> Option<PathBuf> {
 /// `lib list` — a plain read of the index. No resolver, no store, no filesystem
 /// validation: it reports what `library.toml` records, nothing more.
 fn list() -> Result<()> {
-    let lib_home = paths::lib_home();
-    let library = Library::load(&lib_home)?;
+    let sources = Sources::load_or_warn();
+    let lib_home = sources.primary().root;
+    // The merged view, so browsing shows what a project would actually get —
+    // and, under it, the names one source shadows in another. A listing that
+    // silently dropped the shadowed copies would be the exact failure the
+    // precedence rule exists to avoid.
+    let library = Library::load_linked(&sources.linked())?;
     print!("{}", render_list(&library, &lib_home));
+    print!("{}", render_collisions(&library));
+    Ok(())
+}
+
+/// The shadowed-name report shared by `lib list` and `lib sources`. Empty when
+/// nothing collides, which is the common case.
+fn render_collisions(library: &Library) -> String {
+    if library.linked.collisions.is_empty() {
+        return String::new();
+    }
+    let mut o = String::from("\nShadowed names\n");
+    for c in &library.linked.collisions {
+        o.push_str(&format!(
+            "  {:<20} {:<10} {} used · {} shadowed   ↳ {}\n",
+            crate::text::sanitize_line(&c.name),
+            c.kind.noun(),
+            c.winner,
+            c.shadowed.join(", "),
+            c.qualified_shadowed(),
+        ));
+    }
+    o
+}
+
+/// `agentstack lib sources` — the order that decides every bare name, and
+/// every name one source shadows in another.
+fn sources_cmd() -> Result<()> {
+    let sources = Sources::load_or_warn();
+    let linked = sources.linked();
+    let library = Library::load_linked(&linked)?;
+
+    println!("Library sources (first match wins)");
+    for (i, source) in linked.iter().enumerate() {
+        // A folder that is not there yet is worth saying plainly — it is not
+        // an error (a source can be linked before it is populated), but a user
+        // reading "nothing resolves" deserves to see why.
+        let state = if source.root.is_dir() {
+            String::new()
+        } else {
+            format!("  {}", "(folder not found)".yellow())
+        };
+        let default = if source.explicit {
+            String::new()
+        } else {
+            format!("  {}", "(the default — nothing linked yet)".dimmed())
+        };
+        println!(
+            "  {}. {:<12} {}{}{}",
+            i + 1,
+            source.name,
+            source.root.display(),
+            state,
+            default
+        );
+    }
+    print!("{}", render_collisions(&library));
+    if library.linked.collisions.is_empty() {
+        println!("\nNo shadowed names.");
+    }
+    Ok(())
+}
+
+/// `agentstack lib link` — make a folder a library source.
+fn link_cmd(args: &LibLinkArgs) -> Result<()> {
+    let root = paths::expand_tilde(&args.path);
+    // Absolutize before recording: a source list is machine state and a
+    // relative path in it would mean something different from every other
+    // working directory.
+    let root = if root.is_absolute() {
+        root
+    } else {
+        std::env::current_dir()?.join(root)
+    };
+    let name = match &args.name {
+        Some(n) => n.clone(),
+        None => root
+            .file_name()
+            .map(|n| n.to_string_lossy().to_lowercase())
+            .unwrap_or_default(),
+    };
+
+    let mut sources = Sources::load()?;
+    sources.link(&name, &root, args.first, args.note.as_deref())?;
+
+    if !args.write {
+        println!(
+            "{} would link {} as '{}' ({})",
+            "→".cyan(),
+            root.display(),
+            name,
+            if args.first { "first" } else { "last" }
+        );
+        println!("  re-run with --write to apply");
+        return Ok(());
+    }
+    sources.save()?;
+    println!("{} linked {} as '{}'", "✓".green(), root.display(), name);
+    if !root.is_dir() {
+        println!("  the folder does not exist yet — it will be read once it does");
+    }
+    println!("  agentstack lib sources   (the order, and any shadowed names)");
+    Ok(())
+}
+
+/// `agentstack lib unlink` — stop resolving against a folder. The folder is
+/// never touched: unlinking is a change to this machine's list, not a removal.
+fn unlink_cmd(args: &LibUnlinkArgs) -> Result<()> {
+    let mut sources = Sources::load()?;
+    let linked = sources.linked();
+    if !linked.iter().any(|s| s.name == args.name) {
+        bail!(
+            "'{}' is not a linked library source — `agentstack lib sources` lists them",
+            args.name.escape_debug()
+        );
+    }
+    if linked.len() == 1 {
+        bail!(
+            "'{}' is the only linked library source — link another folder before unlinking it, \
+             or nothing would resolve by name",
+            args.name.escape_debug()
+        );
+    }
+    // Unlinking the implicit default has to materialize the list first, or the
+    // saved file would be empty and read back as "use the default".
+    if sources.sources.is_empty() {
+        sources.reorder(&linked.iter().map(|s| s.name.clone()).collect::<Vec<_>>())?;
+    }
+    sources.unlink(&args.name);
+
+    if !args.write {
+        println!("{} would unlink '{}'", "→".cyan(), args.name);
+        println!("  the folder itself is left alone");
+        println!("  re-run with --write to apply");
+        return Ok(());
+    }
+    sources.save()?;
+    println!(
+        "{} unlinked '{}' — the folder itself is untouched",
+        "✓".green(),
+        args.name
+    );
+    Ok(())
+}
+
+/// `agentstack lib reorder` — change which source wins a shared name.
+fn reorder_cmd(args: &LibReorderArgs) -> Result<()> {
+    let mut sources = Sources::load()?;
+    sources.reorder(&args.names)?;
+
+    if !args.write {
+        println!("{} would resolve in this order:", "→".cyan());
+        for (i, s) in sources.linked().iter().enumerate() {
+            println!("  {}. {:<12} {}", i + 1, s.name, s.root.display());
+        }
+        println!("  re-run with --write to apply");
+        println!("  nothing a project already locked can change — serving reads pinned bytes");
+        return Ok(());
+    }
+    sources.save()?;
+    println!("{} new order: {}", "✓".green(), args.names.join(" → "));
     Ok(())
 }
 
@@ -1886,7 +2089,7 @@ pub fn remove_skill(lib_home: &Path, name: &str, write: bool) -> Result<RemoveOu
 }
 
 fn remove(args: &LibRemoveArgs) -> Result<()> {
-    let lib_home = paths::lib_home();
+    let lib_home = owning_root(Kind::Skill, &args.name);
     let outcome = remove_skill(&lib_home, &args.name, args.write)?;
 
     if outcome.written {
@@ -1923,7 +2126,7 @@ fn remove(args: &LibRemoveArgs) -> Result<()> {
 /// bare command because that is what someone reaches for first ("what did I
 /// remove?"); both mutations need `--write`, like every other library write.
 fn trash_cli(args: &LibTrashArgs) -> Result<()> {
-    let lib_home = paths::lib_home();
+    let lib_home = write_root();
 
     if let Some(id) = &args.restore {
         let outcome = lib_trash::restore(&lib_home, id, args.replace, args.write)?;
@@ -2206,16 +2409,38 @@ fn git_ok(dir: &Path, args: &[&str]) -> bool {
 }
 
 fn sync(args: &LibSyncArgs) -> Result<()> {
-    let lib = paths::lib_home();
+    let sources = Sources::load_or_warn();
+    let linked = sources.linked();
+    let source = match &args.source {
+        Some(name) => linked
+            .iter()
+            .find(|s| &s.name == name)
+            .with_context(|| {
+                format!(
+                    "'{}' is not a linked library source — `agentstack lib sources` lists them",
+                    name.escape_debug()
+                )
+            })?
+            .clone(),
+        None => sources.primary(),
+    };
+    let lib = source.root;
 
     if args.init {
         return sync_init(&lib, args.remote.as_deref());
     }
     if !lib.join(".git").exists() {
+        // Not a misconfiguration. Git is the productized option for versioning
+        // and sharing a source, never a requirement (STRATEGY.md §"The shape"),
+        // so this says what `sync` needs rather than implying the folder is
+        // broken — and names the one command that opts in.
         bail!(
-            "the central library at {} is not a git repo yet — run \
-             `agentstack lib sync --init [--remote <url>]`",
-            lib.display()
+            "library source '{}' at {} is a plain folder, which is fine — it just has no git \
+             history to sync. To version and share it, opt in with \
+             `agentstack lib sync --init [--remote <url>] --source {}`",
+            source.name,
+            lib.display(),
+            source.name
         );
     }
     if let Some(url) = &args.remote {

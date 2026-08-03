@@ -114,16 +114,54 @@ Modes are columns; policy dimensions are rows. Legend:
   harness never routes through hooks, bypasses it entirely. Strictly weaker
   than **enforced** and never to be described as enforcement.
 
-| Dimension | `host` | `gateway` | `--sandbox` | `--lockdown` |
-|---|---|---|---|---|
-| **Tools** | unsupported | **enforced** | **enforced**† | **enforced** |
-| **Egress** | coarse | coarse | **enforced**\* | **enforced** |
-| **Secrets** | **enforced** | **enforced** | **enforced**‡ | **enforced** |
-| **Filesystem — write** | cooperative¶ | cooperative¶ | coarse | coarse |
-| **Filesystem — read** | cooperative¶ | cooperative¶ | coarse | coarse |
-| **Audit / recording** | unsupported | **enforced** | **enforced**§ | **enforced** |
-| **Native extensions** | unsupported‖ | unsupported‖ | unsupported‖ | unsupported‖ |
-| **Hooks** | unsupported# | unsupported# | unsupported# | unsupported# |
+| Dimension | `host` | `gateway` | `lease` | `--sandbox` | `--lockdown` |
+|---|---|---|---|---|---|
+| **Tools** | unsupported | **enforced** | **enforced**◇ | **enforced**† | **enforced** |
+| **Egress** | coarse | coarse | coarse | **enforced**\* | **enforced** |
+| **Secrets** | **enforced** | **enforced** | **enforced** | **enforced**‡ | **enforced** |
+| **Filesystem — write** | cooperative¶ | cooperative¶ | cooperative¶ | coarse | coarse |
+| **Filesystem — read** | cooperative¶ | cooperative¶ | cooperative¶ | coarse | coarse |
+| **Audit / recording** | unsupported | **enforced** | **enforced**◆ | **enforced**§ | **enforced** |
+| **Native extensions** | unsupported‖ | unsupported‖ | n/a◈ | unsupported‖ | unsupported‖ |
+| **Hooks** | unsupported# | unsupported# | n/a◈ | unsupported# | unsupported# |
+
+◇ **the strongest tools cell, and fenced on top.** A lease is the `gateway`
+column's dispatch path with one addition: the toolset. Every capability call
+still goes through `Gateway::try_call`, which applies the compiled machine ∩
+project tool policy and re-checks the consent digest before the upstream is
+dialled — and on top of that, only the leased toolset's members are reachable.
+With **no lease open, a project that declares toolsets serves control-plane
+tools only**: the implicit union of everything declared is never served, because
+capability exposure requires an explicit selection. Opening a lease exposes
+exactly that toolset's members and nothing more; closing it returns the
+connection to control-plane tools. What the fence does *not* do is constrain
+what an allowed tool then does — see ◆.
+
+◆ **every brokered MCP call recorded — not "every call recorded".** Each call
+the lease dispatches lands in `calls.jsonl` (and a run's `events.jsonl` inside a
+run) with digest-only arguments. That is evidence of the *request*: AgentStack
+records what was asked of a server, and cannot observe what that server then
+did internally. **Recording is not prevention** — a recorded call already
+happened — and **an allowed destination can still exfiltrate**, exactly as the
+claim-discipline section above states for every column. A lease also does not
+make a call reproducible: only the pinned bytes in the lock do that.
+
+Two further honest limits belong here rather than in a footnote nobody reads.
+**A lease is process-scoped**: it belongs to the MCP process that opened it and
+disappears with that process, so it is not a durable grant and cannot be
+re-attached to. And the delivery claim is **"0 project artifacts for
+gateway-delivered capabilities"**, never a bare "0 files": a project in this
+lane still holds `.agentstack/agentstack.toml`, `agentstack.lock`, and —
+whenever instructions are used — a managed region in an instruction file. Those
+are rendered-lane artifacts and they are real.
+
+◈ **not applicable — these kinds never enter this lane.** Native extensions and
+hooks are executable capability kinds: their code runs inside (or around) the
+harness process at full user permission. They are delivered by rendering files,
+never over a lease, so there is no lease cell to label. The full consent
+ceremony always applies to them, in a package or out of one, and no
+compressed-consent path may ever cover them. Their real story is the ‖ and #
+notes below.
 
 \* **for proxied traffic only.** Plain `--sandbox` points `HTTPS_PROXY` at the
 proxy but the container keeps an ordinary bridge network — a process that
@@ -164,7 +202,7 @@ guard hook observes or constrains it once the harness loads it, so there is no
 runtime cell to earn a stronger label. What agentstack governs happens entirely
 *before* delivery: the source is content-pinned in `agentstack.lock`, an
 untrusted or drifted project renders zero bytes, `apply` copies (never symlinks)
-the pinned bytes into the harness's extension directory, and `run --locked`
+the pinned bytes into the harness's extension directory, and a protected `run`
 re-verifies each delivered copy against its pin before launch. That pipeline is
 provenance and content binding — which bytes, from where, reviewed by whom — not
 runtime enforcement, and it is deliberately labelled as such. See the Native
@@ -191,13 +229,40 @@ an executable capability kind alongside extensions — the full consent ceremony
 always applies, and no compressed-consent path may ever cover them. See the
 Hooks section.
 
-Two of the four columns are execution modes for a *rendered* config: **host** is
+Two of the five columns are execution modes for a *rendered* config: **host** is
 `agentstack apply` + `agentstack run` (adapters write native config, the harness
 runs on the bare machine and talks to upstream MCP servers directly).
 **gateway** is the in-process broker (`agentstack mcp`, `connect`, code mode) —
-every MCP call routes through `Gateway::try_call`. **--sandbox** and
+every MCP call routes through `Gateway::try_call`. **lease** is that same broker
+with a toolset selected for one MCP connection (`agentstack_lease_open`) — the
+dynamic delivery lane, and the strongest column here. **--sandbox** and
 **--lockdown** are `agentstack run --sandbox [--lockdown]`: the harness runs in a
 Docker container behind the egress proxy.
+
+The `host` column covers the **protected default** too. A plain
+`agentstack run <cli>` now gates the launch fail-closed, but every one of those
+gates runs *before* the harness starts, so it changes no cell here: pre-launch
+gating is not runtime confinement, and the label `HOST / PROTECTED` says exactly
+that much and no more.
+
+**Which column a capability lands in is now routed, not chosen** (delivery flip,
+2026-08-03; [`design/automatic-delivery.md`](design/automatic-delivery.md)). The
+delivery planner sends **skills and MCP servers on an MCP-capable CLI** down the
+dynamic lane by default, and **instructions, settings, hooks, extensions, and
+every capability bound for a CLI without MCP** down the rendered lane. One
+override, **Render locally** (`[delivery] render_locally`, per project or per
+harness), forces the rendered lane where the lease would have worked; nothing
+moves a capability the other way, because no channel would carry it.
+
+None of that changes what any column *enforces* — the cells below are unchanged
+by the flip, and a routing default is not an enforcement claim. What it changes
+is which column an ordinary project is in: the **lease** column is now the
+everyday one for skills and servers rather than an opt-in mode, so its honest
+limits (◇, ◆, process scope, and the transparent-mode listing cost) are limits
+most users now meet, not edge cases. Routing is also not activation: a
+capability routed to the dynamic lane is served only once the bridge is
+registered, the project is trusted at its current bytes, and a lease names a
+toolset containing it.
 
 ## Per-cell notes
 
@@ -212,6 +277,24 @@ Docker container behind the egress proxy.
   dispatch, and `namespaced_tools()` filters denied tools out of discovery too, so
   a denied tool is invisible *and* refused if called anyway. This is the single
   enforcement point. (`Gateway::try_call`, `crates/cli/src/gateway.rs`)
+- **lease — enforced, plus a toolset fence.** Same enforcement point as
+  `gateway` (nothing is duplicated: a lease *is* `Gateway::try_call` with a
+  selected toolset), with the fence described at ◇ above. Two limits belong
+  with the claim rather than under it:
+  - **Lazy server start holds under the default compact mode, and is traded
+    away deliberately in transparent mode.** Compact mode is the default: with
+    no lease, the harness sees control-plane tools only, and a server is
+    started or dialled on first tool use — so activating a toolset costs
+    nothing until something is actually called. Transparent mode
+    (`agentstack mcp --transparent`) advertises the upstream tools directly, and
+    tools cannot be enumerated without asking the servers — so **transparent-mode
+    tool listing starts every upstream in the fence**. That is the cost of the
+    mode, chosen by whoever registered the bridge with `--transparent`; laziness
+    is a property of compact mode and must not be claimed for both.
+  - **A fence is not a sandbox.** Fencing decides *which* upstreams are
+    reachable. It does not observe or constrain what a reached upstream does,
+    and the Egress / Filesystem rows of this column are unchanged from
+    `gateway` for exactly that reason.
 - **sandbox — enforced for gateway-routed traffic.** A trusted run
   builds a host-side gateway (`Gateway::from_frozen` — hard trust gate: untrusted
   → empty → unrouted) and a token-gated HTTP MCP endpoint, then renders one
@@ -364,6 +447,14 @@ matrix rows above are the enforcement claim, and a family whose row says
 decisions are logged. The two are set side by side deliberately, because
 "we have a log of it" is the most tempting way to sound stronger than you are.
 
+The lease column's recording claim is stated in exactly one form: **every
+brokered MCP call recorded** — never "every call recorded". AgentStack records
+what was asked of a server; it cannot observe that server's internal side
+effects, and a call an agent makes by some route that never reaches
+`Gateway::try_call` is not brokered and is therefore not in this log. Absence
+from the log means "AgentStack did not broker it", which is not the same as
+"it did not happen".
+
 Which is which, per denial family:
 
 | Denial family | Enforcement claim | Recorded? | Where |
@@ -374,6 +465,26 @@ Which is which, per denial family:
 | Secret-scope refusal | **enforced** — the ref reaches no backing store | yes, **new in Phase 3** | `calls.jsonl` (`tool: secret`) + run `events.jsonl` (`SecretDenied`) |
 | Filesystem guard | **cooperative** — the harness chose to ask | yes | `calls.jsonl` (`server: host-guard`, `run: None`) |
 | Content-pin refusal | **enforced** — the server is dropped before it is spawned or dialled | yes, **new in Phase 4** | `calls.jsonl` (`tool: pin`) + run `events.jsonl` (`PinRejected`) |
+| Trust-at-dispatch refusal | **enforced** — the call is refused before the upstream is dialled | yes, **new in W2** | `calls.jsonl` (`tool: trust`) + run `events.jsonl` (`TrustRefused`) |
+
+The trust-at-dispatch row is the sixth family, added in W2 (automatic
+delivery). It fires when the project's consent digest stops matching the one a
+*live* connection was authorized against — trust revoked, the manifest edited
+out of band, or `agentstack.lock` replaced wholesale by a `git pull` or a
+branch switch. Before W2 an already-spawned server stayed proxied until the
+next lease, load, or session call happened to re-check, so a withdrawn yes left
+a working path open; now every gateway dispatch recompares the digest, and any
+uncertainty — an unreadable manifest, an inconclusive recompute — refuses.
+
+Two honesty notes specific to it. First, what it empties is the **upstream
+capability surface**: the leased servers' tools go away and `tools/list` stops
+advertising them, while agentstack's own control-plane tools stay reachable on
+the same connection, deliberately — a user whose project just went untrusted
+has to be able to diagnose and fix it, and blinding them would turn a
+fail-closed refusal into a dead end. Second, the comparison is recomputed on
+every dispatch rather than cached: `git pull`, a manual edit, and a lock swap
+all happen outside agentstack, so a cache here could only ever be a guess that
+nothing moved.
 
 The content-pin row is the fifth family, added in Phase 4. It differs from the
 other four in what refused: nothing the user *authored* denied anything here,
@@ -448,7 +559,7 @@ paragraph above exists to prevent.
   untrusted or drifted project renders no server config and spawns nothing.
   A stdio server's *executable* is a separate pin: repo-local commands and
   interpreter-script args are pinned as D3 `LockedExecutable` entries, which
-  `run --locked` re-verifies before launch.
+  a protected `run` re-verifies before launch.
 - **runtime — this is the tools row, not a separate one.** Once a server is
   spawned, what it may do is governed as tool calls: see [Tools](#tools) for
   what each mode enforces, and [Egress](#egress) for where it may talk. The
@@ -559,7 +670,7 @@ paragraph above exists to prevent.
   intercepts it — it is not a tool call. Every runtime cell is `unsupported`,
   and honestly so. (`crates/cli/src/render/extensions.rs`)
 - **pre-delivery — content-pinned, trust-gated, copy-rendered, then re-verified
-  under `--locked`.** This is the entire governed surface, and it runs before
+  under the protected run.** This is the entire governed surface, and it runs before
   the harness ever loads a byte. The source is pinned in `agentstack.lock` with
   the strict integrity-root digest (symlinks rejected, `.git` included), so any
   change re-gates trust review. `apply` renders fail-closed: an untrusted or
@@ -567,7 +678,7 @@ paragraph above exists to prevent.
   are **copied** (never symlinked) into the harness's extension directory, so
   the delivered bytes are the reviewed bytes. An ownership ledger scopes pruning
   to what agentstack placed and hard-excludes the guard's `agentstack-guard*`
-  artifacts. Under `run --locked`, the `rendered-verify` gate re-digests each
+  artifacts. Under a protected `run`, the `rendered-verify` gate re-digests each
   delivered copy against its pin before launch, refusing on drift and naming the
   extension. All of this is provenance and content binding — not runtime
   enforcement. (`crates/cli/src/render/extensions.rs` `render` / `verify_rendered`,
@@ -608,8 +719,14 @@ paragraph above exists to prevent.
   `crates/cli/src/commands/doctor.rs` `check_workflow_reproducibility` /
   `check_workflow_ceilings`)
 
-### The locked run's frozen grant (`run --locked`)
+<a id="the-locked-runs-frozen-grant-run---locked"></a>
+### The protected run's frozen grant (the default `run`)
 
+- **When it applies.** A bare `agentstack run <cli>` takes this path;
+  `--locked` names it explicitly and still works; `--unprotected` opts out to an
+  ungated `HOST / ADVISORY` run with none of the gates below. Only the *default*
+  moved — every claim in this section is byte-for-byte the claim it was, and an
+  `--unprotected` run earns none of it.
 - **What is enforced.** The launch is gated fail-closed *before* the harness
   starts: enforced trust, strict lock verification (including the D3
   executable pins — pin derivation and verification share one classifier and
@@ -637,6 +754,48 @@ paragraph above exists to prevent.
   that harness apps rewrite mid-run would risk clobbering user state). A
   machine-policy tightening mid-run takes effect at the next run, matching
   the in-process gateway's snapshot-at-start semantics.
+
+### Packaged images (`agentstack image`)
+
+**What ships:** one toolset and its pinned members composed into a container
+image the user builds locally and runs themselves
+([`design/packaging.md`](design/packaging.md)). Skill bodies are copied out of
+the content store by the digest `agentstack.lock` records — the same
+pinned-serving rule the MCP and rendered lanes follow — and laid down in the
+harness's own skills directory inside the image. Server *definitions* travel
+verbatim under `/agentstack/servers/`, `${REF}` placeholders intact. Nothing is
+pushed, tagged remotely, signed, or registered, and nothing phones home. The
+build refuses fail-closed on an unpinned member, an unverifiable store deposit,
+a server the frozen resolution rejects, or a project that is not trusted at its
+current bytes.
+
+**The posture label, and its exact scope.** The artifact carries the shipped
+`Posture::Sandbox` label — `SANDBOX / PROXIED · DIRECT ROUTE OPEN` — and that
+label describes what the image is *prepared for*, never what a run enforces.
+**Posture is a property of the run.** Every mechanism the `--sandbox` column
+above claims is supplied by whoever starts the container: the proxy, the
+allowlist, the run log, the gateway. Consequently:
+
+- A **bare `docker run <tag>`** earns the container boundary and nothing else —
+  no egress proxy, no `HTTPS_PROXY`, no allowlist, no flight recorder, no
+  gateway. It is *not* the `--sandbox` column, and no surface says it is.
+- Run through `AGENTSTACK_SANDBOX_IMAGE=<tag> agentstack run … --sandbox`, it
+  is exactly the `--sandbox` column with every qualification in this document
+  intact, including `*` (proxied only; the direct route stays open).
+- `--lockdown` is stronger and is **deliberately not claimed by the artifact**:
+  topological confinement comes from the internal network and the egress
+  sidecar, neither of which an image contains. The same image run under
+  `--lockdown` earns that column; the image itself never advertises it.
+
+**What it is not.** Packaging adds **no enforcement of any kind**. It changes
+where reviewed bytes are, not what a process holding them may do. It is also
+not a reproducibility claim beyond AgentStack's own layer: the members are
+content-addressed and identical across machines, but a Docker build is not
+bit-reproducible (layer metadata varies per build) and the `FROM` base is a
+floating tag unless the user passes `--from` a digest. And no secret is ever
+baked — the build constructs no resolver at all, the image carries only the
+`${REF}` *names* it will require, and a start-up guard refuses to launch the
+harness until those names are present in the run's own environment.
 
 ### Trust-store mutation logging
 

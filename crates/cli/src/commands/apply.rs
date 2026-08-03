@@ -148,6 +148,9 @@ fn render(
         Some(p) => Selection::Profile(p.clone()),
         None => Selection::All,
     };
+    // House-rule variant selection: an explicitly named toolset carries the
+    // model, and one library read serves every target below.
+    let sel = crate::instructions::Selecting::for_command(args.profile.as_deref());
     // Named once for the history ledger below — `restore`'s listing renders
     // this so an `apply --profile backend` entry reads differently from a
     // plain `apply` (both otherwise touch the same files).
@@ -221,7 +224,13 @@ fn render(
             .iter()
             .filter(|(n, i)| !i.from_user_layer && !decided.contains(*n))
             .map(|(n, i)| {
-                let status = crate::resolve::instruction_lock_status(n, i, &ctx.dir, &lock);
+                let status = crate::resolve::instruction_lock_status_with(
+                    n,
+                    i,
+                    &ctx.dir,
+                    &lock,
+                    &sel.library,
+                );
                 (n.clone(), status)
             })
             .filter(|(_, s)| {
@@ -660,22 +669,36 @@ fn render(
             // Only when the manifest declares [instructions.*]: a manifest without
             // any must never touch — let alone empty out — a region another layer
             // (e.g. the machine manifest seeded by `init --global`) owns.
-            if !manifest.instructions.is_empty() {
+            // W5: a package's instruction members compile into the same region,
+            // so a project whose house rules arrive only through a package is
+            // not "a manifest without any [instructions.*]" for this purpose.
+            let pinned = crate::lock::Lock::load(&ctx.dir).unwrap_or_default();
+            let pkg_instr = !crate::package::members_of_kind(
+                &pinned,
+                crate::lock::PackageMemberKind::Instruction,
+                None,
+            )
+            .is_empty();
+            if !manifest.instructions.is_empty() || pkg_instr {
                 // …and only when fragments actually apply at THIS scope: project
                 // scope filters out every machine-layer fragment, so a project
                 // with none of its own compiles to an empty string there — writing
                 // that would strip a committed managed region from the repo.
-                if let Some(ip) = plan_instructions(manifest, desc, scope, &ctx.dir)
-                    // An excluded-only plan still compiles (to a region without
-                    // the refused fragment): skipping it would leave a blocked
-                    // fragment's bytes sitting in the managed region, which is
-                    // the refusal not holding.
-                    .filter(|ip| {
-                        !ip.fragments.is_empty()
-                            || !ip.missing.is_empty()
-                            || !ip.excluded.is_empty()
-                    })
-                {
+                if let Some(ip) = plan_instructions(
+                    manifest,
+                    desc,
+                    scope,
+                    &ctx.dir,
+                    crate::package::effective_members(&pinned),
+                    &sel,
+                )
+                // An excluded-only plan still compiles (to a region without
+                // the refused fragment): skipping it would leave a blocked
+                // fragment's bytes sitting in the managed region, which is
+                // the refusal not holding.
+                .filter(|ip| {
+                    !ip.fragments.is_empty() || !ip.missing.is_empty() || !ip.excluded.is_empty()
+                }) {
                     for m in &ip.missing {
                         crate::outln!("  {} instruction fragment '{m}' source missing", "✗".red());
                         error_count += 1;

@@ -87,6 +87,14 @@ pub fn serve(
         if !gateway.is_empty() {
             eprintln!("agentstack mcp: gateway active — proxying this project's MCP servers");
         }
+        // W2 — eager mode has no `AutoProject`, so it passed `trust_note: None`
+        // for the whole life of the connection: a skill could still be loaded
+        // from a project whose trust had been revoked ten minutes earlier.
+        // Borrowed from the gateway rather than re-derived, so the digest that
+        // gates a dispatch is the digest that gates a load. `None` for a
+        // project trust never gated (an explicit `--manifest-dir` launch is
+        // itself the consent), which keeps that path exactly as it was.
+        let mut trust_anchor = gateway.trust_anchor().cloned();
 
         // Code mode (Phase 2): expose a loopback, token-gated endpoint the generated
         // client POSTs to. Best-effort and contained — None when there's nothing to
@@ -159,11 +167,14 @@ pub fn serve(
                 });
             } else {
                 let before = lease_profile(&lease);
+                // Recomputed per request, not cached: the whole point is to
+                // catch a change no command in this process made.
+                let note = trust_anchor.as_ref().and_then(|a| a.note());
                 let resp = handle_with_lease(
                     &req,
                     dir.as_deref(),
                     &gateway,
-                    None,
+                    note.as_deref(),
                     transparent,
                     &lease,
                     true,
@@ -173,14 +184,33 @@ pub fn serve(
                     if let Some(rt) = runtime.take() {
                         rt.shutdown();
                     }
-                    gateway = match after.as_deref() {
-                        Some(profile) => std::sync::Arc::new(
+                    // A lease transition rebuilds the gateway from disk. If the
+                    // anchor no longer verifies, that rebuild would produce an
+                    // UNGATED gateway (`build` only anchors a project that is
+                    // trusted right now, and this one is not) — handing back a
+                    // live upstream surface the connection just lost the right
+                    // to. So the transition fails closed instead.
+                    let violated = trust_anchor.as_ref().is_some_and(|a| a.verify().is_err());
+                    gateway = match (violated, after.as_deref()) {
+                        (true, _) => std::sync::Arc::new(crate::gateway::Gateway::empty()),
+                        (false, Some(profile)) => std::sync::Arc::new(
                             crate::gateway::Gateway::from_manifest_lease(dir.as_deref(), profile),
                         ),
-                        None => std::sync::Arc::new(crate::gateway::Gateway::from_manifest(
-                            dir.as_deref(),
-                        )),
+                        (false, None) => std::sync::Arc::new(
+                            crate::gateway::Gateway::from_manifest(dir.as_deref()),
+                        ),
                     };
+                    // Re-borrow the loop's anchor from the gateway that now
+                    // serves the connection — asymmetrically. On the clean
+                    // path the rebuild may have ANCHORED a project that had
+                    // none at launch (never trusted then, trusted now), and a
+                    // stale `None` would leave later skill loads ungated after
+                    // a revoke. On the violated path we keep the OLD anchor:
+                    // the empty gateway carries none, and that old anchor is
+                    // exactly what keeps yielding the refusal note for loads.
+                    if !violated {
+                        trust_anchor = gateway.trust_anchor().cloned();
+                    }
                     runtime = crate::codemode::endpoint::start(
                         dir.as_deref(),
                         std::sync::Arc::clone(&gateway),
@@ -200,6 +230,7 @@ pub fn serve(
         // stdin EOF: drain in-flight calls before exiting, or their responses
         // (and the stdio children's polite shutdown) would be lost mid-call.
         workers.join_all();
+        release_lease_record(&lease);
         // Remove the machine-local endpoint coordinate file so a dead port+token
         // isn't left behind for the next shim call.
         if let Some(rt) = runtime {
@@ -347,8 +378,19 @@ pub fn serve(
     }
     // stdin EOF: drain in-flight calls before tearing the session down.
     workers.join_all();
+    release_lease_record(&lease);
     auto.shutdown();
     Ok(())
+}
+
+/// Drop this process's lease record on a clean exit. A crash skips this by
+/// definition — which is exactly the case the registry's read-time PID +
+/// start-time validation exists to classify as stale, so there is nothing to
+/// add here for it.
+fn release_lease_record(store: &LeaseStore) {
+    if let Some(instance) = lease_snapshot(store).and_then(|l| l.registry_instance) {
+        crate::lease_registry::unregister(&instance);
+    }
 }
 
 /// Write one protocol frame through the thread-shared writer (line-delimited
@@ -376,6 +418,12 @@ struct McpLease {
     profile: String,
     started_unix: u64,
     loads: Vec<McpLeaseLoad>,
+    /// The runtime-registry instance id this lease was recorded under (W4), so
+    /// closing it removes the right record. `None` when the registry write
+    /// failed — see [`lease_open`]: an unrecordable lease still opens, it is
+    /// just invisible to other surfaces, and saying so beats refusing the user
+    /// their toolset over a bookkeeping error.
+    registry_instance: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -529,6 +577,100 @@ fn is_upstream_call(req: &Value) -> bool {
         .is_some_and(|n| n.contains("__") || n == "tools_execute")
 }
 
+/// Does the project at `base` declare any toolset? The question W4's toolset
+/// fence turns on: a manifest with toolsets has divided its capabilities into
+/// named subsets, and the gateway must serve one only when a lease selects it.
+///
+/// A manifest that fails to load answers `false` — it declares nothing this
+/// process can read, and the gateway build below will find nothing to serve
+/// either way.
+fn declares_toolsets(base: &Path) -> bool {
+    crate::commands::load(Some(base))
+        .map(|ctx| !ctx.loaded.manifest.profiles.is_empty())
+        .unwrap_or(false)
+}
+
+/// The toolset fence's own refusal, for a `<server>__<tool>` call the gateway
+/// did not own.
+///
+/// The fence (see [`AutoProject::activate`]) gives a toolset-declaring project
+/// with no lease open an empty gateway. That is the stronger answer, but on
+/// its own it is a *silent* one: dispatch finds no upstream, the call falls
+/// through to `unknown tool`, and the one refusal shape that leaves no
+/// evidence is the one the fence produces. Every other refusal the user can
+/// meet — trust, `[policy.tools]`, egress, pin — is written to the audit log.
+/// This closes that hole using the same seatbelt, not a second mechanism: no
+/// call is dispatched here and no authority is constructed, only the sentence
+/// and the record that the refusal already deserved.
+///
+/// **Declared, not merely unknown.** Evidence is written only when the project
+/// declares `server` somewhere — inline or in a toolset. Then the refusal is
+/// security-relevant: a real capability exists and the fence is what stands
+/// between the caller and it. A name the project does not declare is a typo,
+/// keeps today's plain `unknown tool` error, and records nothing — recording
+/// every invented name would hand any caller an unbounded write into
+/// `calls.jsonl`.
+///
+/// `None` (no refusal, no record) whenever the fence is not the answer: an
+/// un-namespaced name, no project, a project that declares no toolsets at all
+/// (nothing to select, so a missing server there is a *skip* that already
+/// recorded its own reason), or a server nothing declares.
+///
+/// Returns the seatbelt sentence, already recorded. Like [`crate::seatbelt`]'s
+/// other dispatch-path callers it uses `record` rather than `refuse`: the
+/// sentence goes back to the harness, which is where the human reads it.
+fn fence_refusal(
+    name: &str,
+    dir: Option<&Path>,
+    gateway: &crate::gateway::Gateway,
+) -> Option<String> {
+    let (server, tool) = name.split_once("__")?;
+    let ctx = crate::commands::load(Some(dir?)).ok()?;
+    let manifest = &ctx.loaded.manifest;
+    if manifest.profiles.is_empty() {
+        return None;
+    }
+    if !crate::resolve::runtime_server_names(manifest, None)
+        .iter()
+        .any(|n| n == server)
+    {
+        return None;
+    }
+    // Both identifiers came off the wire or out of the manifest — hostile
+    // input, invariant 7 — so they are bounded before they reach a terminal or
+    // a log, exactly as the trust refusal bounds its own.
+    let subject = crate::seatbelt::bounded_reason(server);
+    let attempted = format!("call {}", crate::seatbelt::bounded_reason(tool));
+    let why = "this project fences its servers behind toolsets, and no open lease selects one that exposes it";
+    // The toolsets are listed in manifest order, so the name suggested is
+    // stable across calls. A declared server that no toolset selects has no
+    // lease to open, and saying so beats naming a toolset that would not help.
+    let next_step = match manifest
+        .profiles
+        .iter()
+        .find(|(_, p)| p.servers.iter().any(|s| s == server))
+    {
+        Some((toolset, _)) => format!(
+            "open a lease for the toolset that selects it: `agentstack_lease_open` profile={}",
+            crate::seatbelt::bounded_reason(toolset)
+        ),
+        None => "no toolset selects this server — add it to one in agentstack.toml, then open a lease for that toolset".to_string(),
+    };
+    let denial = crate::seatbelt::Denial {
+        family: crate::seatbelt::Family::Fence,
+        subject: &subject,
+        attempted: &attempted,
+        why,
+        next_step: &next_step,
+    };
+    crate::seatbelt::record(
+        &denial,
+        Some(ctx.dir.display().to_string()),
+        gateway.run_id(),
+    );
+    Some(denial.sentence())
+}
+
 /// Session state for `--auto-project`: which project this MCP session belongs
 /// to, resolved once per session (a new project means a new harness session,
 /// which means a fresh bridge process — no cwd watching needed).
@@ -554,6 +696,16 @@ struct AutoProject {
     /// one per surface. No outer mutex: the gateway is Sync with per-upstream
     /// locking.
     gateway: std::sync::Arc<crate::gateway::Gateway>,
+    /// W2 — the consent digest the live gateway was built against, copied from
+    /// its own anchor at activation. Kept so [`AutoProject::refresh_trust`] can
+    /// tell "still the same yes" from "a NEW yes, granted mid-connection":
+    /// re-trusting changes the digest, so a gateway anchored to the old one
+    /// would refuse every dispatch forever until the connection restarted.
+    anchor_digest: Option<String>,
+    /// The lease profile the live gateway was fenced to, so a rebuild forced
+    /// by a re-trust restores the SAME fence instead of silently widening the
+    /// surface back to the unleased one.
+    profile: Option<String>,
     resolved: bool,
     built: bool,
     runtime: Option<crate::codemode::endpoint::RuntimeHandle>,
@@ -569,6 +721,8 @@ impl AutoProject {
             dir: None,
             trust: None,
             gateway: std::sync::Arc::new(crate::gateway::Gateway::empty()),
+            anchor_digest: None,
+            profile: None,
             resolved: false,
             built: false,
             runtime: None,
@@ -689,19 +843,52 @@ impl AutoProject {
     /// A commit-safe control-plane edit can invalidate trust during one MCP
     /// connection; no later lease transition may reuse the earlier decision.
     fn refresh_trust(&mut self) {
+        self.refresh_trust_with(true);
+    }
+
+    /// `refresh_trust`, with the re-trust rebuild suppressed.
+    ///
+    /// `rebuild_for_lease` passes `false`: it is about to activate with the
+    /// NEW lease profile anyway, and rebuilding here first would spawn every
+    /// stdio child twice — once for the old fence, once for the new.
+    fn refresh_trust_with(&mut self, rebuild_on_retrust: bool) {
         if self.explicit.is_some() {
             return;
         }
-        if let Some(base) = &self.dir {
-            let state = crate::trust::check(base);
-            self.trust = Some(state);
-            if state != crate::trust::TrustState::Trusted {
-                if let Some(rt) = self.runtime.take() {
-                    rt.shutdown();
-                }
-                self.gateway = std::sync::Arc::new(crate::gateway::Gateway::empty());
-                self.built = true;
+        let Some(base) = self.dir.clone() else {
+            return;
+        };
+        // One read of the consent bytes, both decisions from it.
+        let digest = crate::trust::digest_for(&base);
+        let state = crate::trust::check_digest(&base, digest.as_deref());
+        self.trust = Some(state);
+        if state != crate::trust::TrustState::Trusted {
+            if let Some(rt) = self.runtime.take() {
+                rt.shutdown();
             }
+            self.gateway = std::sync::Arc::new(crate::gateway::Gateway::empty());
+            self.anchor_digest = None;
+            self.built = true;
+            return;
+        }
+        // Trusted — but is it the same yes? Two cases fail the comparison, and
+        // both need the rebuild. A NEW yes over DIFFERENT bytes leaves the live
+        // gateway anchored to the old digest, so its per-dispatch gate would
+        // refuse every call until the client reconnected. A `None` anchor while
+        // the state is Trusted means the gateway is empty but the project is
+        // trusted right now — the yes restored after a revoke (which clears the
+        // anchor above), or a first grant mid-connection. Recovery must not
+        // wait for a lease transition, so the boundary that noticed the trust
+        // is the boundary that restores the surface. (`digest` is always `Some`
+        // here: `check_digest` cannot return Trusted without one.) In the
+        // window before this fires, the stale anchor keeps refusing —
+        // fail-closed is the right side to err on.
+        if rebuild_on_retrust && self.built && self.anchor_digest.as_deref() != digest.as_deref() {
+            if let Some(rt) = self.runtime.take() {
+                rt.shutdown();
+            }
+            let profile = self.profile.clone();
+            self.activate(&base, profile.as_deref());
         }
     }
 
@@ -709,7 +896,7 @@ impl AutoProject {
     /// by `ensure_project`; an untrusted auto-project remains inert.
     fn rebuild_for_lease(&mut self, profile: Option<&str>) {
         self.ensure_project();
-        self.refresh_trust();
+        self.refresh_trust_with(false);
         let Some(base) = self.dir.clone() else {
             return;
         };
@@ -720,6 +907,7 @@ impl AutoProject {
                 rt.shutdown();
             }
             self.gateway = std::sync::Arc::new(crate::gateway::Gateway::empty());
+            self.anchor_digest = None;
             self.built = true;
             return;
         }
@@ -771,6 +959,18 @@ impl AutoProject {
 
     fn activate(&mut self, base: &Path, lease_profile: Option<&str>) {
         self.dir = Some(base.to_path_buf());
+        // W4 precondition 3 — toolset fencing. With no lease open, an
+        // unfenced build serves `effective_runtime_servers(.., None)`: every
+        // server the manifest declares PLUS every toolset's, i.e. the implicit
+        // union of everything declared. A project that declares toolsets has
+        // said its capabilities come in named subsets, so serving that union
+        // with nothing selected would expose a surface no explicit selection
+        // stands behind. Such a project gets NO upstream capability surface
+        // until a lease names a toolset — control-plane tools only.
+        //
+        // A project that declares no toolsets is untouched: there is no
+        // selection to make and therefore no union to over-serve.
+        let fenced_unleased = lease_profile.is_none() && declares_toolsets(base);
         // One gateway per process: the code-mode endpoint shares it instead of
         // building (and connecting/spawning) its own copy of every upstream.
         self.gateway = match lease_profile {
@@ -778,8 +978,33 @@ impl AutoProject {
                 Some(base),
                 profile,
             )),
+            None if fenced_unleased => std::sync::Arc::new(crate::gateway::Gateway::empty()),
             None => std::sync::Arc::new(crate::gateway::Gateway::from_manifest(Some(base))),
         };
+        if fenced_unleased {
+            eprintln!(
+                "agentstack mcp: {} declares toolsets and no lease is open — control-plane tools only. Open one with `agentstack_lease_open` to expose that toolset's servers and skills.",
+                base.display()
+            );
+        }
+        // W2 — remember which consent this gateway was built against, and
+        // which fence it was built with, so `refresh_trust` can recognise a
+        // re-trust and restore the same fence. Read off the gateway's own
+        // anchor: one derivation, so the two can never disagree.
+        //
+        // The fenced-unleased gateway is empty and therefore carries no anchor
+        // of its own, so take the digest directly. Leaving it `None` over a
+        // Trusted project would make `refresh_trust` see "restored yes" on
+        // every content-loading call and rebuild the same empty gateway
+        // forever.
+        self.anchor_digest = match self.gateway.trust_anchor() {
+            Some(anchor) => Some(anchor.digest().to_string()),
+            None if fenced_unleased => {
+                crate::trust::digest_for(&crate::manifest::project_root_of(base))
+            }
+            None => None,
+        };
+        self.profile = lease_profile.map(str::to_string);
         self.built = true;
         if !self.gateway().is_empty() {
             eprintln!(
@@ -978,6 +1203,19 @@ fn handle_with_lease(
                         json!({ "content": [{ "type": "text", "text": crate::text::sanitize_block(&format!("Error: {e}")) }], "isError": true }),
                     ),
                 });
+            }
+            // A namespaced name no upstream held. When the project declares
+            // that server and the toolset fence is why it is not exposed, the
+            // refusal is recorded and says how to open the fence. The trust
+            // gate empties the gateway too, and its own note already explains
+            // that — a fence sentence there would name the wrong fix.
+            if trust_note.is_none() {
+                if let Some(sentence) = fence_refusal(name, dir, gateway) {
+                    return Some(result(
+                        id,
+                        json!({ "content": [{ "type": "text", "text": crate::text::sanitize_block(&format!("Error: {sentence}")) }], "isError": true }),
+                    ));
+                }
             }
             let (text, is_error) = match run_tool_with_lease(name, &args, dir, trust_note, lease) {
                 Ok(t) => (t, false),
@@ -1227,6 +1465,130 @@ fn tool_defs() -> Value {
     Value::Array(tools)
 }
 
+/// Why the lease path refused, in the two forms the evidence needs: the closed
+/// `state` tag the run log files it under, and the short machine-authored
+/// sentence fragment the user reads.
+///
+/// Re-derived from disk rather than threaded down from the caller's note. The
+/// note arrives as prose (composed by [`AutoProject::trust_note`] or
+/// [`crate::trust_anchor::TrustAnchor::note`]) and parsing prose back into a
+/// tag would be the kind of guess this codebase does not make. Reading the
+/// current state instead answers the question the *user* has to act on — where
+/// this project stands now — and it is the same read the fix (`agentstack
+/// trust`) will make.
+///
+/// The honest limit, stated because a reader of the log deserves it: a
+/// withdrawn yes leaves no trace in the store, so a revoke reads back as
+/// `untrusted` here, where the dispatch path (which holds the anchor the
+/// connection was authorized against) can still say `revoked`.
+fn trust_refusal_reason(root: Option<&Path>) -> (&'static str, String) {
+    let Some(root) = root else {
+        // No project to check against. Fail closed and say so, rather than
+        // implying a state was read.
+        return (
+            "unreadable",
+            "this connection has no project to check trust against (fail closed)".to_string(),
+        );
+    };
+    let digest = crate::trust::digest_for(root);
+    if digest.is_none() {
+        return (
+            "unreadable",
+            "could not read this project's manifest and lock to check trust (fail closed)"
+                .to_string(),
+        );
+    }
+    match crate::trust::check_digest(root, digest.as_deref()) {
+        crate::trust::TrustState::Untrusted => (
+            "untrusted",
+            // No second dash: the sentence already carries one, and the next
+            // step says who has to review it.
+            "this project is not trusted on this machine".to_string(),
+        ),
+        crate::trust::TrustState::Changed => (
+            "changed",
+            "this project's manifest or lockfile changed since it was trusted".to_string(),
+        ),
+        // The caller's gate said no and disk now says yes: a re-trust landed
+        // between the two reads. Rare, and still a refusal — this request was
+        // decided against the older reading. `changed` is the honest tag: the
+        // trust state moved under this connection.
+        crate::trust::TrustState::Trusted => (
+            "changed",
+            "this project's trust state changed while this request was in flight".to_string(),
+        ),
+    }
+}
+
+/// W1 — one refused lease or load, made loud and left as evidence.
+///
+/// Both refusal sites below used to `bail!` a bare sentence and record
+/// nothing, so the one moment a project stops serving was the one moment
+/// nothing could be looked up afterwards. This writes the same two-destination
+/// evidence the W2 dispatch refusal writes (`gateway.rs`): ONE `calls.jsonl`
+/// row through [`crate::seatbelt::record`] (`tool: "trust"`, outcome denied)
+/// plus the run-scoped [`agentstack_recorder::RunEvent::TrustRefused`] mirror.
+///
+/// The two slots read differently here than at dispatch, deliberately: nothing
+/// was dispatched, so `tool` carries the **control-plane verb** that was
+/// refused and `server` carries the **capability** it was refused for — the
+/// toolset for a lease, the skill for a load.
+///
+/// `attempted_phrase` names only the ATTEMPT, never the capability: the
+/// sentence template is `"{subject} tried to {attempted}"`, so it already joins
+/// the two, and a phrase that repeats the name stutters ("helper tried to load
+/// skill helper"). This follows [`crate::seatbelt::Family::Pin`]'s call site in
+/// `gateway.rs`, whose `attempted` is the bare `"be served by the gateway"`.
+/// The name is carried once, by `subject`.
+///
+/// Returns the sentence to bail with. It does not refuse anything itself: the
+/// caller still owns the `bail!`, which is the seatbelt's structural rule that
+/// explaining a denial can never be a way to acquire permission.
+fn trust_refusal(
+    dir: Option<&Path>,
+    verb: &str,
+    subject_raw: &str,
+    attempted_phrase: &str,
+) -> String {
+    // Either shape of input (project root or `.agentstack/` manifest dir)
+    // normalizes to the same pair, so the `project` this records is the string
+    // `status` matches its own reading against.
+    let root = dir.map(crate::manifest::project_root_of);
+    let manifest_dir = root.as_deref().map(crate::manifest::resolve_manifest_dir);
+    let (state, why) = trust_refusal_reason(root.as_deref());
+    let why = crate::seatbelt::bounded_reason(&why);
+    // Toolset and skill names are caller- or manifest-authored: hostile input
+    // (invariant 7), bounded before they reach a terminal or a log.
+    let subject = crate::seatbelt::bounded_reason(subject_raw);
+    // Machine-authored, and bounded anyway so every part of the sentence is
+    // held to the same length rule.
+    let attempted = crate::seatbelt::bounded_reason(attempted_phrase);
+    let where_ = root
+        .as_deref()
+        .map(|r| crate::text::sanitize_line(&r.display().to_string()))
+        .unwrap_or_else(|| ".".to_string());
+    let next_step = format!("review it and run `agentstack trust {where_}`");
+    let denial = crate::seatbelt::Denial {
+        family: crate::seatbelt::Family::Trust,
+        subject: &subject,
+        attempted: &attempted,
+        why: &why,
+        next_step: &next_step,
+    };
+    // Run attribution comes from the environment, as it does for every other
+    // record this process writes (`record_load_activity`).
+    let run = std::env::var(crate::calllog::RUN_ID_ENV)
+        .ok()
+        .filter(|id| !id.is_empty());
+    crate::seatbelt::record(
+        &denial,
+        manifest_dir.map(|d| d.display().to_string()),
+        run.as_deref(),
+    );
+    crate::seatbelt::record_trust_refused(run.as_deref(), &subject, verb, state, &why);
+    denial.sentence()
+}
+
 /// Dispatch one control-plane tool call. `trust_note` is `Some` exactly when
 /// this is auto-project mode AND the project is Untrusted/Changed (eager mode
 /// and trusted projects pass `None`) — the strict gate for anything that
@@ -1237,8 +1599,25 @@ fn lease_open(
     trust_note: Option<&str>,
     store: &LeaseStore,
 ) -> Result<String> {
-    if let Some(note) = trust_note {
-        anyhow::bail!("agentstack_lease_open is disabled for this project: {note}");
+    if trust_note.is_some() {
+        // Named before it is validated: the refusal has to say WHAT was
+        // refused, and the toolset the agent asked for is that. An absent or
+        // malformed `profile` is still refused here — the trust gate outranks
+        // argument validation, exactly as it did before.
+        let profile = args
+            .get("profile")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .unwrap_or("<unnamed>");
+        anyhow::bail!(
+            "{}",
+            trust_refusal(
+                dir,
+                "agentstack_lease_open",
+                profile,
+                "be opened as a toolset lease"
+            )
+        );
     }
     let profile = args
         .get("profile")
@@ -1257,16 +1636,33 @@ fn lease_open(
         .get(profile)
         .with_context(|| format!("no toolset '{profile}' in manifest"))?;
 
+    // W4 — make the lease visible outside this process. The registry is an
+    // observation surface, not an authority: a failure to record must not cost
+    // the user the toolset they asked for, so it degrades to an honest note
+    // instead of refusing. (Nothing downstream reads the registry to decide
+    // anything — see `crate::lease_registry`.)
+    let recorded = crate::lease_registry::register(&ctx.dir, profile);
+    let registry_note = match &recorded {
+        Ok(_) => None,
+        Err(err) => Some(format!(
+            "This lease could not be recorded in the machine lease registry ({err:#}), so other surfaces will not see it. The lease itself is open and fenced."
+        )),
+    };
+    let record = recorded.ok();
+
     *store.lock().unwrap_or_else(|e| e.into_inner()) = Some(McpLease {
         profile: profile.to_string(),
         started_unix: now_secs(),
         loads: Vec::new(),
+        registry_instance: record.as_ref().map(|r| r.instance.clone()),
     });
     Ok(serde_json::to_string_pretty(&json!({
         "opened": profile,
         "delivery": "mcp",
         "lifetime": "this MCP process",
         "native_files_written": false,
+        "instance": record.as_ref().map(|r| r.instance.clone()),
+        "registry_note": registry_note,
         "note": "Server discovery/calls and skill loading are now fenced to this toolset. Closing the MCP connection drops the lease automatically."
     }))?)
 }
@@ -1286,6 +1682,7 @@ fn lease_status(store: &LeaseStore) -> Result<String> {
     Ok(serde_json::to_string_pretty(&json!({
         "active": true,
         "profile": lease.profile,
+        "instance": lease.registry_instance,
         "started_unix": lease.started_unix,
         "loads": loads,
         "native_files_written": false,
@@ -1298,6 +1695,9 @@ fn lease_close(store: &LeaseStore) -> Result<String> {
         .unwrap_or_else(|e| e.into_inner())
         .take()
         .context("no active MCP toolset lease")?;
+    if let Some(instance) = &closed.registry_instance {
+        crate::lease_registry::unregister(instance);
+    }
     Ok(serde_json::to_string_pretty(&json!({
         "closed": closed.profile,
         "loaded_skills": closed.loads.iter().map(|entry| entry.name.clone()).collect::<Vec<_>>(),
@@ -2047,6 +2447,51 @@ fn list_loadable_with_lease(
             }
             None => {}
         }
+        // A PINNED skill's description comes from the PINNED bytes.
+        //
+        // This closes the seam `pinned-serving-and-library-drift.md` §"Debt"
+        // named: the catalog used to resolve every skill `PathOnly` and read
+        // the description out of the LIVE `SKILL.md`, so after a `lib sync`
+        // the one-line description an agent saw could come from the library's
+        // newer bytes while the body `agentstack_load` served was the pinned
+        // one. Two surfaces, one skill, two stories.
+        //
+        // The cheap half of the two options that doc weighed: read the
+        // description from the store snapshot, rather than digesting every
+        // body at list time. That means the description is not re-verified
+        // here — deliberately, and it is not a weakening: it is exactly the
+        // trust level the live-frontmatter read already had (one bounded line
+        // of content assumed hostile either way), while the BODY is still
+        // re-verified against the pin by `load_capability_with_lease` before a
+        // byte of it enters context. What changes is only which bytes the line
+        // comes from: the ones this project consented to.
+        //
+        // Origin is derived from the manifest table rather than the resolver,
+        // which is the resolver's own inline-first rule stated directly — and
+        // it lets a pinned skill skip resolution entirely.
+        if let Some(entry) = lock.get(&name) {
+            let snap = libctx
+                .store
+                .root()
+                .join("content")
+                .join(entry.checksum.hex());
+            if let (Some(desc), _) = read_skill_md(&snap) {
+                let origin = if m.skills.contains_key(&name) {
+                    "manifest"
+                } else {
+                    "library"
+                };
+                entries.push(json!({
+                    "name": name,
+                    "description": desc,
+                    "kind": "skill",
+                    "origin": origin,
+                    "pinned": true,
+                    "loaded": loaded.contains(&name),
+                }));
+                continue;
+            }
+        }
         // PathOnly: this catalog only reads SKILL.md descriptions — digesting
         // every skill body here would turn a cheap list into a full-library
         // read+hash pass.
@@ -2079,6 +2524,46 @@ fn list_loadable_with_lease(
             "kind": "skill",
             "origin": origin,
             "loaded": loaded.contains(&name),
+        }));
+    }
+    // W5 — **the package boundary, without the bodies.**
+    //
+    // Activating a package makes its capability boundary discoverable: each
+    // member skill's name and one-line description, plus where it came from.
+    // Not its contents. Nothing below reads a member's body into any response;
+    // a body enters context only when `agentstack_load` is called for that one
+    // member, one at a time, digest-verified. Eagerly injecting twenty skill
+    // bodies because a package was selected is the context bloat this whole
+    // lane exists to remove (`automatic-delivery.md` §"Boundary, not bodies").
+    //
+    // The member set comes from the LOCK — never the library, which may have
+    // moved arbitrarily far ahead — and is fenced by the same toolset that
+    // fences everything else. A member name a manifest or library skill
+    // already claimed is skipped, so the inline-first precedence that governs
+    // the load path governs this listing too.
+    for (pkg, member) in
+        crate::package::members_of_kind(&lock, crate::lock::PackageMemberKind::Skill, profile)
+    {
+        if entries.iter().any(|e| e["name"] == member.name.as_str()) {
+            continue;
+        }
+        let snap = libctx
+            .store
+            .root()
+            .join("content")
+            .join(member.checksum.hex());
+        let desc = read_skill_md(&snap)
+            .0
+            .unwrap_or_else(|| "(pinned bytes unavailable — run `agentstack lock`)".to_string());
+        entries.push(json!({
+            "name": member.name,
+            "description": desc,
+            "kind": "skill",
+            "origin": "package",
+            "package": pkg.name,
+            "provenance": member.provenance,
+            "pinned": true,
+            "loaded": loaded.contains(&member.name),
         }));
     }
     // The built-in manual rides along unless the project carries its own copy
@@ -2255,8 +2740,16 @@ fn load_capability_with_lease(
 
     // Untrusted means inert: in auto mode no bundle skill content enters any
     // agent context until a human reviews and trusts the project.
-    if let Some(note) = trust_note {
-        anyhow::bail!("'{name}' can't be loaded: {note}");
+    if trust_note.is_some() {
+        anyhow::bail!(
+            "{}",
+            trust_refusal(
+                Some(&ctx.dir),
+                "agentstack_load",
+                name,
+                "be loaded into agent context"
+            )
+        );
     }
 
     let m = &ctx.loaded.manifest;
@@ -2267,13 +2760,23 @@ fn load_capability_with_lease(
         .as_ref()
         .map(|l| l.profile.as_str())
         .or_else(|| session.as_ref().map(|s| s.profile.as_str()));
+    // Read once, used three times below (the fence, the package-member serve,
+    // and the pin verification of an ordinary skill). Loaded here rather than
+    // further down so the fence and the serve cannot disagree about what this
+    // project pinned.
+    let lock = crate::lock::Lock::load(&ctx.dir)?;
+    let declared = loadable_skill_names(m, &libctx.library, profile);
+    // W5 — a package member is admitted by the package's selection, not by
+    // being named in the toolset's `skills` list. The toolset still fences it:
+    // `member_of_kind` only returns members of packages THIS toolset selected.
+    let package_member =
+        crate::package::member_of_kind(&lock, crate::lock::PackageMemberKind::Skill, profile, name)
+            .map(|(pkg, member)| (pkg.name.clone(), member.clone()));
+
     // Fence: an MCP lease takes precedence; the native session remains the
     // backward-compatible fallback.
     if let Some(profile) = profile {
-        if !loadable_skill_names(m, &libctx.library, Some(profile))
-            .iter()
-            .any(|n| n == name)
-        {
+        if !declared.iter().any(|n| n == name) && package_member.is_none() {
             anyhow::bail!(
                 "'{name}' is not loadable in toolset '{profile}' — add it to the toolset to allow it"
             );
@@ -2335,11 +2838,59 @@ fn load_capability_with_lease(
         None => {}
     }
 
+    // W5 — serve one package member skill, on demand, from its pinned bytes.
+    //
+    // Only when no manifest or library skill claims the name: inline-first
+    // precedence is the resolver's rule, and the loadable index above applies
+    // exactly the same one, so the two surfaces cannot advertise one skill and
+    // serve another.
+    //
+    // There is no live path here at all — no resolver, no library directory,
+    // nothing that a `lib sync` could move underneath the project. The bytes
+    // come from the content-addressed store, addressed by the digest the lock
+    // pins, and `verified_snapshot` re-proves that the deposit still hashes to
+    // its own name before a byte of it is read (the store is writable, so a
+    // read that did not re-prove would be trusting the filesystem instead of
+    // the digest). A missing or tampered snapshot refuses; there is
+    // deliberately no fallback to the package body in the library, which is
+    // exactly the mutable thing the pin exists to stop reading.
+    if let Some((package, member)) = package_member.filter(|_| !declared.iter().any(|n| n == name))
+    {
+        let hex = member.checksum.hex();
+        let snap = libctx.store.root().join("content").join(hex);
+        if !crate::store::verified_snapshot(&snap, hex) {
+            anyhow::bail!(
+                "refusing to load '{name}': its pinned bytes are missing from the content store \
+                 or failed verification — run `agentstack lock` to re-pin package '{package}'"
+            );
+        }
+        let (_, body) = read_skill_md(&snap);
+        let instructions = body.with_context(|| format!("skill '{name}' has no SKILL.md"))?;
+        let newly = if lease.is_some() {
+            record_lease_load(lease_store, name, reason)?
+        } else if session.is_some() {
+            crate::session::record_load(&ctx.dir, name, reason)?
+        } else {
+            false
+        };
+        record_load_activity(name, reason, Some(ctx.dir.display().to_string()));
+        return Ok(serde_json::to_string_pretty(&json!({
+            "loaded": name,
+            "origin": "package",
+            "package": package,
+            "provenance": member.provenance,
+            "instructions": instructions,
+            "sticky": lease.is_some() || session.is_some(),
+            "newly_loaded": newly,
+            "fenced": profile.is_some(),
+            "lease": lease.as_ref().map(|l| l.profile.clone()),
+        }))?);
+    }
+
     // Inline-first, then the central library — same order as `use`. NoFetch
     // (not PathOnly): what's served must be digest-verified against its
     // agentstack.lock pin — the content the human trusted — so the body is
     // hashed even though nothing here records a lock entry.
-    let lock = crate::lock::Lock::load(&ctx.dir)?;
     let pinned_rev = lock.get(name).and_then(|entry| entry.rev.as_deref());
     let resolved = crate::resolve::resolve_skill_with_pin(
         m,
@@ -2361,7 +2912,53 @@ fn load_capability_with_lease(
     let status =
         crate::resolve::classify_skill(name, &resolved.checksum, resolved.rev.as_deref(), &lock);
     let mut warning: Option<String> = None;
+    let mut note: Option<String> = None;
+
+    // A LIBRARY skill whose live bytes have moved ahead of this project's pin
+    // is an UPDATE AVAILABLE, not project drift — the one narrow exemption
+    // from the fail-closed rule below, decided in
+    // `docs/design/pinned-serving-and-library-drift.md`. The project's
+    // composition is what its manifest declares and its lock pins; a library
+    // moving ahead changes neither, so per the delivery contract "`lib sync`
+    // announces; it never re-gates and never interrupts". Blocking here would
+    // make the library's state interrupt a project that never read it.
+    //
+    // Three conditions, all required, each one a way this could otherwise
+    // widen:
+    //
+    // - CHECKSUM drift only. Every other `Block` reason — rev drift, an
+    //   uncached git source, a broken ref — is untouched: none of them means
+    //   "the library has a newer version", they mean the pin cannot be
+    //   verified at all.
+    // - LIBRARY origin only. An inline skill's bytes are the project's own
+    //   content; those changing IS project drift and must keep refusing.
+    //   `resolved.origin` is decided by the resolver (inline block wins over
+    //   the library index), not inferred here.
+    // - The pinned snapshot is ALREADY in the store and still hashes to its
+    //   own name. Nothing unreviewed becomes reachable, because what gets
+    //   served is that snapshot and nothing else — and `has_pinned_content`
+    //   asks without repairing, which matters precisely here: the live
+    //   directory is the thing that no longer matches the pin, so it is not a
+    //   source anything may be repaired from. A store miss keeps the refusal.
+    let library_moved_ahead = matches!(
+        status,
+        crate::resolve::SkillLockStatus::ChecksumDrift { .. }
+    ) && matches!(resolved.origin, crate::resolve::SkillOrigin::Library)
+        && lock
+            .get(name)
+            .is_some_and(|entry| libctx.store.has_pinned_content(entry.checksum.hex()));
+
     match crate::verify::skill_verdict(&status) {
+        // Keep-pinned is the resting state, so this offers rather than warns:
+        // the project is not broken, stale, or in need of repair. It serves
+        // the bytes the human approved and names the one command that takes
+        // the newer ones.
+        crate::verify::Verdict::Block(_) if library_moved_ahead => {
+            note = Some(format!(
+                "a newer version of '{name}' is available in your central library — \
+                 this project is serving the version it pinned; run `agentstack lock` to take it"
+            ));
+        }
         crate::verify::Verdict::Block(why) => {
             anyhow::bail!(
                 "refusing to load '{name}': {why} — review the change, then run `agentstack lock` to accept it"
@@ -2380,7 +2977,44 @@ fn load_capability_with_lease(
         crate::verify::Verdict::Ok => {}
     }
 
-    let (_, body) = read_skill_md(&resolved.path);
+    // The reproducibility rule (docs/design/automatic-delivery.md): what is
+    // SERVED is resolved from the lock and read from the content-addressed
+    // store by digest, never from the mutable current state of the library.
+    // `resolved.path` is a live directory — for a central-library skill it is
+    // exactly the directory `lib sync` rewrites — so reading it here would
+    // reopen the window between the digest above and the read below, and would
+    // make a project's served bytes depend on library state it never consented
+    // to.
+    //
+    // Repairing an absent snapshot from `resolved.path` is not a weakening:
+    // reaching this line means `skill_verdict` returned `Ok`, i.e. the lock
+    // carries a pin and the live bytes hash to it, so what gets deposited IS
+    // the pinned, reviewed content. It self-heals a store that never received
+    // `Store::pin`'s best-effort deposit (or that was pruned) instead of
+    // refusing a load the human already said yes to. Everything else — a
+    // snapshot that fails verification, a repair that cannot be placed — fails
+    // closed below; there is no path back to serving live bytes.
+    //
+    // The one other way to reach here is `library_moved_ahead`, where the live
+    // bytes do NOT match the pin — and there the repair branch is unreachable
+    // by construction: that path is only taken when the snapshot is already
+    // present and verified.
+    let body_dir = match lock.get(name) {
+        Some(entry) => libctx
+            .store
+            .pinned_content(entry.checksum.hex(), &resolved.path)
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "refusing to load '{name}': its approved bytes could not be served from the \
+                     content store ({e}) — run `agentstack lock` to re-pin and review it"
+                )
+            })?,
+        // No pin: the unpinned library-skill path warned about above. There is
+        // no digest to serve by, so the resolved body is what there is — this
+        // path's policy is unchanged.
+        None => resolved.path.clone(),
+    };
+    let (_, body) = read_skill_md(&body_dir);
     let instructions = body.with_context(|| format!("skill '{name}' has no SKILL.md"))?;
 
     let newly = if lease.is_some() {
@@ -2407,6 +3041,13 @@ fn load_capability_with_lease(
     });
     if let Some(w) = warning {
         out["warning"] = json!(w);
+    }
+    // Deliberately NOT the `warning` slot: nothing is wrong with a project
+    // whose library moved ahead, and a warning-shaped sentence would teach the
+    // agent (and the human reading over its shoulder) that keep-pinned is a
+    // degraded state rather than the resting one.
+    if let Some(n) = note {
+        out["note"] = json!(n);
     }
     Ok(serde_json::to_string_pretty(&out)?)
 }
@@ -2937,16 +3578,23 @@ mod tests {
         let note = auto.trust_note().expect("untrusted → a trust note");
         assert!(note.contains("agentstack trust"), "got: {note}");
 
-        // Trusted: the same discovery now builds a live gateway.
+        // Trusted: the same discovery now gets past the trust gate. It does
+        // NOT get an upstream surface for free — this fixture declares a
+        // toolset, and W4's toolset fence serves control-plane tools only
+        // until a lease names one (the witness for that rule proper lives in
+        // `tests/lease_registry.rs`). What this test cares about is that the
+        // trust note is gone and a lease now builds a live gateway, where an
+        // untrusted project's lease transition would not.
         crate::trust::trust_unreviewed(proj.path()).unwrap();
         let mut auto = AutoProject::new(None);
         auto.roots.push(proj.path().to_path_buf());
         auto.ensure_gateway();
+        assert!(auto.trust_note().is_none(), "trusted → no note");
+        auto.rebuild_for_lease(Some("p"));
         assert!(
             !auto.gateway().is_empty(),
-            "trusted → gateway proxies the manifest"
+            "trusted → a lease proxies the toolset's servers"
         );
-        assert!(auto.trust_note().is_none(), "trusted → no note");
 
         // A manifest edit during the same MCP process invalidates trust. A
         // later lease transition must re-check and tear the gateway down,
@@ -2960,6 +3608,129 @@ mod tests {
             auto.trust_note()
                 .is_some_and(|note| note.contains("changed since")),
             "changed trust must be surfaced after a lease transition"
+        );
+        auto.shutdown();
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    /// W2, eager mode. The default serve loop has no `AutoProject`, so it
+    /// passed `trust_note: None` for the whole life of a connection and a
+    /// skill could still be loaded from a project whose trust had been
+    /// revoked. The anchor is now what supplies that note.
+    #[test]
+    fn eager_mode_refuses_skill_loads_once_the_anchor_stops_verifying() {
+        use assert_fs::prelude::*;
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+
+        let proj = assert_fs::TempDir::new().unwrap();
+        proj.child(".agentstack/agentstack.toml")
+            .write_str("version = 1\n")
+            .unwrap();
+        crate::trust::trust_unreviewed(proj.path()).unwrap();
+
+        // The anchor the eager loop captures: borrowed from the gateway, so
+        // one digest gates both dispatch and loading.
+        let anchor = crate::gateway::Gateway::from_manifest(Some(proj.path()))
+            .trust_anchor()
+            .cloned()
+            .expect("a trusted project anchors its gateway");
+        assert!(anchor.note().is_none(), "trusted → no note");
+
+        // Revoked out of band. Nothing in this process was told.
+        std::fs::remove_file(crate::trust::store_path()).unwrap();
+        let note = anchor.note().expect("a violated anchor must yield a note");
+        assert!(note.contains("agentstack trust"), "got: {note}");
+
+        let refusal = load_capability_with_lease(
+            &json!({ "name": "anything", "reason": "a task" }),
+            Some(proj.path()),
+            Some(&note),
+            &new_lease_store(),
+        )
+        .expect_err("a violated anchor must refuse the load");
+        assert!(
+            refusal.to_string().contains("agentstack trust"),
+            "got: {refusal}"
+        );
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    /// W2, auto mode. Re-trusting mid-connection consents to DIFFERENT bytes,
+    /// so a gateway still anchored to the old digest would refuse every
+    /// dispatch until the client reconnected. The refresh has to rebuild.
+    #[test]
+    fn auto_project_rebuilds_when_the_user_re_trusts_mid_connection() {
+        use assert_fs::prelude::*;
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+
+        let proj = assert_fs::TempDir::new().unwrap();
+        proj.child(".agentstack/agentstack.toml")
+            .write_str("version = 1\n[servers.x]\ntype = \"http\"\nurl = \"https://x/mcp\"\n")
+            .unwrap();
+        crate::trust::trust_unreviewed(proj.path()).unwrap();
+
+        let mut auto = AutoProject::new(None);
+        auto.roots.push(proj.path().to_path_buf());
+        auto.ensure_gateway();
+        let first = auto
+            .anchor_digest
+            .clone()
+            .expect("a trusted activation records its anchor");
+
+        // The human edits, reviews, and re-trusts — all outside this process.
+        proj.child(".agentstack/agentstack.toml")
+            .write_str("version = 1\n[servers.x]\ntype = \"http\"\nurl = \"https://y/mcp\"\n")
+            .unwrap();
+        crate::trust::trust_unreviewed(proj.path()).unwrap();
+
+        auto.refresh_trust();
+        assert_eq!(auto.trust, Some(crate::trust::TrustState::Trusted));
+        let second = auto
+            .anchor_digest
+            .clone()
+            .expect("the rebuilt gateway must carry the NEW anchor");
+        assert_ne!(
+            first, second,
+            "a re-trust must re-anchor, or every later dispatch is refused forever"
+        );
+        assert!(
+            !auto.gateway().is_empty(),
+            "the newly consented surface must be served"
+        );
+
+        // And the other direction: revoke, then restore the SAME yes. A revoke
+        // clears the anchor, so recovery cannot depend on the digest differing
+        // — nor on a lease transition happening to come along later.
+        std::fs::remove_file(crate::trust::store_path()).unwrap();
+        auto.refresh_trust();
+        assert_eq!(auto.trust, Some(crate::trust::TrustState::Untrusted));
+        assert!(auto.gateway().is_empty(), "a revoke must empty the gateway");
+        assert!(
+            auto.anchor_digest.is_none(),
+            "a revoke must clear the anchor"
+        );
+
+        crate::trust::trust_unreviewed(proj.path()).unwrap();
+        auto.refresh_trust();
+        assert_eq!(auto.trust, Some(crate::trust::TrustState::Trusted));
+        assert_eq!(
+            auto.anchor_digest.as_deref(),
+            Some(second.as_str()),
+            "re-trusting the same bytes must re-anchor at this boundary"
+        );
+        assert!(
+            !auto.gateway().is_empty(),
+            "the restored yes must restore the surface without a lease transition"
         );
         auto.shutdown();
 
@@ -3282,9 +4053,20 @@ mod tests {
         std::env::remove_var("AGENTSTACK_HOME");
     }
 
+    /// W1: the refusal is seatbelt-shaped, names the toolset it refused, and
+    /// names the one command that fixes it. (The wording moved here from a
+    /// bare `agentstack_lease_open is disabled for this project: <note>` — the
+    /// note said what was wrong but never what was *asked for*.)
     #[test]
     fn untrusted_project_cannot_open_mcp_lease() {
         use assert_fs::prelude::*;
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        // Sandboxed: this path now WRITES evidence, and a unit test must not
+        // append to the developer's real audit log.
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
         let proj = assert_fs::TempDir::new().unwrap();
         proj.child(".agentstack/agentstack.toml")
             .write_str("version = 1\n[profiles.backend]\n")
@@ -3298,8 +4080,111 @@ mod tests {
         )
         .unwrap_err()
         .to_string();
-        assert!(err.contains("not trusted"));
+        assert!(err.starts_with("blocked:"), "{err}");
+        assert!(
+            err.contains("backend"),
+            "the refusal must name WHAT was refused: {err}"
+        );
+        assert!(
+            err.contains("toolset lease"),
+            "the refusal must name which door it was refused at: {err}"
+        );
+        // The name belongs to `subject` alone: the sentence template joins the
+        // two slots, so a name in `attempted` too would read as a stutter.
+        assert_eq!(
+            err.matches("backend").count(),
+            1,
+            "the capability is named once, by the subject: {err}"
+        );
+        assert!(
+            err.contains("not trusted"),
+            "the refusal must name why: {err}"
+        );
+        assert!(
+            err.contains("agentstack trust"),
+            "the refusal must name the one command that fixes it: {err}"
+        );
         assert!(lease_snapshot(&lease).is_none());
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    /// The refused-lease/refused-load sentences say the two things W1's
+    /// acceptance asks for — what was refused, and the one command — and a
+    /// hostile toolset or skill name cannot rewrite the terminal around either.
+    /// Mirrors `trust_at_dispatch.rs`'s hostile-name case one door earlier: the
+    /// `profile` argument is agent-supplied and the skill name is manifest
+    /// content, so both are hostile input (invariant 7).
+    #[test]
+    fn a_hostile_capability_name_cannot_forge_the_lease_path_refusal() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+        let hostile = "evil\u{1b}[2J\nallowed: lease opened";
+
+        let sentence = trust_refusal(
+            None,
+            "agentstack_lease_open",
+            hostile,
+            "be opened as a toolset lease",
+        );
+        assert!(sentence.starts_with("blocked:"), "{sentence}");
+        assert!(sentence.contains("nothing ran"), "{sentence}");
+        assert!(sentence.contains("agentstack trust"), "{sentence}");
+        assert!(
+            !sentence.contains('\u{1b}'),
+            "an escape survived into the denial: {sentence:?}"
+        );
+        // The denial's own two lines, and no third one forged by the name.
+        assert_eq!(
+            sentence.lines().count(),
+            2,
+            "a newline in the name split the sentence: {sentence:?}"
+        );
+
+        // Bounded, too: a 5,000-character name cannot scroll the refusal off
+        // the screen.
+        let long = "x".repeat(5_000);
+        let sentence = trust_refusal(
+            None,
+            "agentstack_load",
+            &long,
+            "be loaded into agent context",
+        );
+        assert!(sentence.chars().count() < 1_000, "unbounded: {sentence:?}");
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    /// The tag the evidence is filed under is derived from where the project
+    /// stands NOW, and each state is named as itself — a reader filtering the
+    /// log by `state` is asking which repair this needs.
+    #[test]
+    fn the_refusal_reason_names_each_trust_state_apart() {
+        use assert_fs::prelude::*;
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+        let proj = assert_fs::TempDir::new().unwrap();
+
+        // No manifest at all: uncertainty is a refusal, never a pass.
+        assert_eq!(trust_refusal_reason(Some(proj.path())).0, "unreadable");
+        assert_eq!(trust_refusal_reason(None).0, "unreadable");
+
+        proj.child(".agentstack/agentstack.toml")
+            .write_str("version = 1\n")
+            .unwrap();
+        assert_eq!(trust_refusal_reason(Some(proj.path())).0, "untrusted");
+
+        crate::trust::trust_unreviewed(proj.path()).unwrap();
+        proj.child(".agentstack/agentstack.toml")
+            .write_str("version = 1\n# edited out of band\n")
+            .unwrap();
+        assert_eq!(trust_refusal_reason(Some(proj.path())).0, "changed");
+
+        std::env::remove_var("AGENTSTACK_HOME");
     }
 
     #[test]

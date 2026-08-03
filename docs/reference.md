@@ -43,7 +43,7 @@ implementation internals — live in
   - [Rendering and merging](#rendering-and-merging)
   - [State tracking](#state-tracking)
   - [Scopes](#scopes)
-- [Delivery modes — where rendered files live](#delivery-modes--where-rendered-files-live)
+- [Delivery — routing, and where rendered files live](#delivery--routing-and-where-rendered-files-live)
   - [Owned servers (`owner = "codex"`)](#owned-servers-owner--codex)
 - [Agent-operable (`agentstack mcp`)](#agent-operable-agentstack-mcp)
   - [Transparent mode (`--transparent`)](#transparent-mode---transparent)
@@ -60,8 +60,8 @@ implementation internals — live in
 - [Content scanning](#content-scanning)
 - [Ephemeral sessions (`agentstack session`)](#ephemeral-sessions-agentstack-session)
   - [Execution posture](#execution-posture)
-  - [The Protected tier in detail (`run --locked`)](#the-protected-tier-in-detail-run---locked)
-- [The central library](#the-central-library)
+  - [The Protected tier in detail (the default `run`)](#the-protected-tier-in-detail-the-default-run)
+- [The library: linked source folders](#the-library-linked-source-folders)
   - [Layout and name resolution](#layout-and-name-resolution)
   - [Pinning and provenance](#pinning-and-provenance)
   - [Adding capabilities](#adding-capabilities)
@@ -189,9 +189,17 @@ no project can loosen.
 
 The chain — process env → **varlock** → **OS keychain** → project `.env` — and
 the `${REF}` rules live in [concepts.md — secrets](concepts.md#secrets);
-unresolved refs are reported, never blanked. Operational specifics: the varlock
-link activates only when the project opts in (a `.env.schema` present) and the
-`varlock` binary is on PATH, otherwise the chain silently skips it. When active,
+unresolved refs are reported, never blanked. **varlock is the recommended
+vault** — the one link in the chain that keeps values out of the project
+entirely; the OS keychain and a gitignored `.env` are the local fallbacks.
+
+Operational specifics: the varlock
+link activates only when the project opts in (a `.env.schema` next to the
+manifest, in `.agentstack/` — the directory the chain probes) and the
+`varlock` binary is runnable, otherwise the chain silently skips it. That
+silence is why `agentstack doctor` reports varlock's health in its **Secrets**
+section: an opted-in project whose binary is missing would otherwise degrade
+without a word. When active,
 agentstack shells out to `varlock load --format json-full --compact` and
 delegates the whole provider matrix (1Password, AWS/Azure/GCP, Bitwarden,
 device-local stores) to it — see [varlock.dev](https://varlock.dev). Each ref
@@ -214,6 +222,15 @@ to `keychain` when absent, so CI never starts writing plaintext by surprise.
 unstored `${REF}` with the command to store it. The `.env` writer places values
 next to the manifest, and `secret set --env-file` targets that same `.env`. The
 manifest itself only ever holds `${REF}` placeholders (rule 5).
+
+`init` also **offers** a `.env.schema` when it lifts references — the opt-in for
+varlock, written next to the manifest in `.agentstack/`, the same directory the
+resolution chain probes. The offer is declined silently when nothing is
+interactive (so a scripted `init` writes exactly what it wrote before), and an
+existing schema is never overwritten. The file declares **names with empty
+values and nothing else**, so it is safe to commit: values stay in the vault,
+and a declared name with no value still fails closed at use time — which is the
+whole point of `${REF}`.
 
 Because that file holds real values rather than placeholders, it gets two
 protections the rendered configs don't need. It is written **mode `0600`** —
@@ -377,7 +394,7 @@ agentstack add ...                        # flag-driven add of a server or skill
 
 ### Search across providers
 
-`search` queries **your central library first** (skill and library-server names,
+`search` queries **your linked library sources first** (skill and library-server names,
 labelled `[library]`), then the embedded catalog **and the official MCP
 Registry**; `add from <id>` resolves a registry/catalog server, lifts its secrets
 to `${REF}`s, and renders it to **all your CLIs at once**.
@@ -429,6 +446,16 @@ agentstack kill <id>           # SIGTERM, then SIGKILL if it won't go
 agentstack kill <id> --force   # SIGKILL immediately
 ```
 
+**A plain `run` is the Protected tier.** Before the harness starts, agentstack
+checks content trust, verifies the lock strictly, admits every declared
+capability against the machine ceiling, and freezes the run's tool surface — and
+refuses the launch, naming the fix, if any of that fails. The banner reads
+`HOST / PROTECTED`. That is pre-launch gating, not kernel isolation: the agent
+still runs as you, on the host. `--unprotected` opts out (no gate at all, banner
+`HOST / ADVISORY`), `--locked` asks for the default by name, and
+`--sandbox`/`--lockdown` add containment. The whole gate sequence is
+[the Protected tier in detail](#the-protected-tier-in-detail-the-default-run).
+
 Launching is a terminal act (the CLIs are interactive TUIs). The registry is
 self-healing: a run
 whose wrapper died is pruned on the next `report runs`. A toolset-bound run uses
@@ -439,7 +466,7 @@ Unix only for now.
 
 ## Part II — The power surface
 
-These are the commands `agentstack --help` keeps hidden as progressive disclosure, plus the advanced delivery and enforcement modes the everyday loop only points at. Hidden is not unsupported — every command here is fully maintained and carries its own `--help`, exactly as the [All commands](#all-commands) preamble spells out. Reach in when you need a machine-wide policy ceiling, the zero-files gateway, ephemeral sessions, locked runs, the central library, or the observability tooling.
+These are the commands `agentstack --help` keeps hidden as progressive disclosure, plus the advanced delivery and enforcement modes the everyday loop only points at. Hidden is not unsupported — every command here is fully maintained and carries its own `--help`, exactly as the [All commands](#all-commands) preamble spells out. Reach in when you need a machine-wide policy ceiling, the zero-files gateway, ephemeral sessions, the protected run's full gate sequence, the linked library sources, or the observability tooling.
 
 ## Core engine
 
@@ -532,16 +559,43 @@ scope your writes actually recorded, so a deliberate `--scope` choice is
 honored, not second-guessed.
 
 <a id="where-rendered-files-live-three-modes"></a>
-## Delivery modes — where rendered files live
+## Delivery — routing, and where rendered files live
 
-You always commit the *intent* (`agentstack.toml` + `agentstack.lock`); the
-rendered artifacts — `.mcp.json`, `.claude/skills/`, the compiled
-`CLAUDE.md` / `AGENTS.md` — are a per-project choice of **static**,
-**clean-at-rest**, or **zero-files**. What each mode *is*:
-[concepts.md — delivery modes](concepts.md#delivery-modes); which to pick:
-[which mode do I need?](choose.md). The operational levers:
+You always commit the *intent* (`agentstack.toml` + `agentstack.lock`). Where
+the rendered artifacts — `.mcp.json`, `.claude/skills/`, the compiled
+`CLAUDE.md` / `AGENTS.md` — come from is **routed**, not chosen (flip,
+2026-08-03): the delivery planner sends each capability down a lane from its
+kind and the CLI it is going to. What the lanes *are*:
+[concepts.md — delivery](concepts.md#delivery-modes); the shape of the decision:
+[how capabilities reach your CLIs](choose.md).
 
-- **static** (default) — artifacts on disk, kept out of git by a managed
+| Capability kind | Lane |
+|---|---|
+| Skills · MCP servers, on a CLI with MCP | dynamic — served live, digest-verified per load |
+| House rules · settings | rendered — settings only a file carries; house rules because no live channel a CLI is *known* to consume varies by model |
+| Hooks · extensions | rendered, full consent ceremony always |
+| Any kind, on a CLI without MCP | rendered |
+
+- `agentstack delivery` prints the routing per CLI; `--json` is the same reading
+  for a UI (`delivery-routing-v1`), with `default`, per-harness
+  `mcp_capable` / `render_locally` / `override`, and a `routes` array carrying
+  each kind's `lane`, `why`, and `full_ceremony`.
+- **Render locally** is the one override: `[delivery] render_locally = true`, or
+  `[delivery.harness.<id>] render_locally = true` for a single CLI. Set it with
+  `agentstack delivery render-locally [--harness <id>] [--off] --write`. It
+  writes files even where the live channel would have worked — offline work,
+  deterministic native files, filesystem inspection, a rule against a persistent
+  background process, debugging without another runtime dependency, or
+  compatibility testing against a CLI's own behaviour. Clearing it removes the
+  key: automatic is the *absence* of an override, not a second stored value.
+- A gateway-served project keeps **0 project artifacts for the capabilities
+  served live** — never "0 files": the manifest, the lockfile, and any managed
+  house-rules region remain.
+
+The three older per-project modes still exist behind `agentstack set-mode` and
+the wizard's "more control" path, and are no longer how delivery is decided:
+
+- **static** — artifacts on disk, kept out of git by a managed
   `.gitignore` block; pass `--no-gitignore` to commit them instead.
 - **clean-at-rest** — `agentstack lock` pins name refs *without rendering*, so
   `git status` stays silent; a toolset arrives via
@@ -554,21 +608,27 @@ rendered artifacts — `.mcp.json`, `.claude/skills/`, the compiled
   `codemode/endpoint.json` coordinate may exist for the connection's duration —
   see [the zero-files gateway](#the-zero-files-gateway---auto-project--trust).
 
-**Recommendation:** prefer the zero-file lease path for interactive work when the
-CLI supports MCP; use static or clean-at-rest when the CLI must read native
-skill/instruction files. Add `--sandbox --lockdown` when the agent process
+**Recommendation:** none needed — the planner already routes to the live lease
+path where the CLI supports MCP and to files where it does not. Reach for
+`render locally` only when you actively need files. Add `--sandbox --lockdown` when the agent process
 itself needs isolation — a lease is a capability fence, not a sandbox. See
 [the primitives and decision table](ARCHITECTURE.md#operating-model--choose-the-boundary-you-need).
 
-Interactive `init` presents the three as an arrow-key choice **before any
-write**, and the selection **forks** the run: **static** takes the render path
-(preview → confirm → `apply --write` → activate skills → doctor);
-**clean-at-rest** renders nothing and pins the lockfile, teaching the
-`session start`/`session end` rhythm; **zero-files** renders nothing and offers
-to register the gateway (`gateway connect --all --write`), then points at
-`agentstack trust .` (which the wizard never runs for you — trust is human
-consent). Bare `agentstack` reports the project's current mode on its `Mode`
-line, derived from what is on disk.
+Interactive `init` asks **one** question before any write — automatic, or "more
+control" — and the answer **forks** the run. **Automatic** (the default, and
+what a non-interactive `init` takes on a project that has never rendered) states
+the routing per CLI, offers to register the bridge
+(`gateway connect --all --write`), points at `agentstack trust .` (which the
+wizard never runs for you — trust is human consent), and renders nothing itself:
+the rendered lane's command is the explicit `apply --write`. Behind **more
+control** sit **render locally** (record the override, then the render path:
+preview → confirm → `apply --write` → activate skills → doctor) and the three
+older modes, unchanged — **static** takes the render path; **clean-at-rest**
+renders nothing and pins the lockfile, teaching the `session start`/`session
+end` rhythm; **zero-files** renders nothing and offers the bridge. A project
+that already has rendered files keeps its render path in a scripted run: the
+files are a fact, and un-rendering stays the explicit `set-mode` act. Bare
+`agentstack` reports the project's derived mode on its `Mode` line.
 
 The managed `.gitignore` block is anchored to **outcomes, not declarations**: an
 entry exists only for a file agentstack actually wrote or still manages, so a
@@ -985,9 +1045,16 @@ of the claim, so it is quoted here as printed. What each label guarantees is
 lockdown, and even there the honest claim is *unapproved egress is blocked*, not
 that exfiltration is impossible.
 
+Which label a run gets is decided by the flags you type, and the default moved:
+a bare `agentstack run <cli>` is the Protected tier and prints
+`HOST / PROTECTED`. `--unprotected` is the explicit opt-out to the ungated host
+run and prints `HOST / ADVISORY`. `--sandbox` and `--lockdown` are unchanged and
+print their own labels — they are checked before the protected default, so
+`run --sandbox` means exactly what it has always meant.
+
 The label appears on the run banner, in `agentstack run --sandbox --plan`, and in
 `agentstack report run <id>` (`report --json` carries the `posture` slug); a
-sandbox run records it beside the flight-recorder log, and a `--locked` run
+sandbox run records it beside the flight-recorder log, and a protected run
 carries it in its `attempt_started` event. `agentstack doctor` also prints a
 one-word **machine-policy summary** — `open`, `restrictive`, or `mixed` —
 describing the machine policy's shape (`restrictive` means a `"*"` rule or a
@@ -996,14 +1063,16 @@ Ready-to-use machine policies for common setups live in
 [`examples/policies/`](../examples/policies/) (`compatible`, `developer`,
 `locked-down`, `ci`).
 
-### The Protected tier in detail (`run --locked`)
+<a id="the-protected-tier-in-detail-run---locked"></a>
+### The Protected tier in detail (the default `run`)
 
 ```text
-agentstack run <cli> --locked
-agentstack run <cli> --locked --plan   # walk the gate sequence read-only
+agentstack run <cli>            # the default — this IS the Protected tier
+agentstack run <cli> --plan     # walk the gate sequence read-only
+agentstack run <cli> --locked   # the same run, named explicitly
 ```
 
-A locked run is a fail-closed **pre-launch gate sequence plus a frozen
+A protected run is a fail-closed **pre-launch gate sequence plus a frozen
 capability surface** — every decision recorded, nothing re-derived mid-run:
 
 1. **Gates, in order** (each records a `gate_decision` event; the first
@@ -1036,29 +1105,65 @@ capability surface** — every decision recorded, nothing re-derived mid-run:
    state is applied or reverted.
 6. **Hygiene.** The original project MCP config is parked in the run's
    private dir (never left in the repo) and restored byte-identical; a
-   sentinel makes overlapping locked runs refuse instead of stacking; a
+   sentinel makes overlapping protected runs refuse instead of stacking; a
    crash leaves the more restrictive state.
 
-`run --locked --plan` walks the whole sequence read-only, printing every decision
+**Spellings and opt-outs.** `--locked` still parses and still means exactly this
+run — it is kept for the scripts, docs, and panels that already type it, and it
+keeps its own combination rule: `--locked --sandbox` and `--locked --lockdown`
+refuse as a named not-yet-wired combination, so reach for `--sandbox` or
+`--lockdown` on their own. `--unprotected` is the way out: an ordinary host run
+with **no pre-launch gate at all** — no trust check, no strict lock
+verification, no policy admission, no frozen grant — labelled `HOST / ADVISORY`,
+with a launch banner that names each check it skipped. `--locked --unprotected`
+refuses rather than letting flag order decide which one you meant.
+
+**Headless.** `agentstack run <cli> --prompt "<text>"` is the governed headless
+form. It requires the protected run and refuses beside `--unprotected`,
+`--sandbox`, or `--lockdown`; the prompt is committed verbatim into the frozen
+grant's argv, so the recorded evidence binds what the agent was asked to do.
+
+`run --plan` walks the whole sequence read-only, printing every decision
 the live path would (plus the grant digest a live run would freeze) and mutating
-nothing. What is and isn't claimed at this tier (pre-launch gating on the HOST
-tier, not kernel isolation) is [ENFORCEMENT.md — the locked run's frozen
-grant](ENFORCEMENT.md#the-locked-runs-frozen-grant-run---locked); the asserted
+nothing; `--unprotected --plan` refuses, because an ungated run has no gate
+sequence to walk. What is and isn't claimed at this tier (pre-launch gating on
+the HOST tier, not kernel isolation — the harness still runs as you, on the
+host) is [ENFORCEMENT.md — the protected run's frozen
+grant](ENFORCEMENT.md#the-protected-runs-frozen-grant-the-default-run); the asserted
 walkthrough is [`examples/projects/locked-run/`](../examples/projects/locked-run/)
 and the full contract is
-the [locked-run enforcement contract](ENFORCEMENT.md#the-locked-runs-frozen-grant-run---locked).
+the [protected-run enforcement contract](ENFORCEMENT.md#the-protected-runs-frozen-grant-the-default-run).
 
-## The central library
+## The library: linked source folders
 
-One managed home — `~/.agentstack/lib/` — that projects reference **by name**
-instead of copying files between repos.
+Managed folders that projects reference **by name** instead of copying files
+between repos. Any folder on the device can be linked as a source, and several
+at once — `~/.agentstack/lib/` is simply the first one on a fresh machine.
+`agentstack lib link <path> --write` adds one, `lib unlink` removes one,
+`lib sources` shows the order, and `lib reorder` changes it. The full contract
+is [`design/linked-library-sources.md`](design/linked-library-sources.md).
+
+**Precedence is `PATH` semantics:** the first source holding a capability of
+the requested kind and name wins. A name held by more than one source is
+reported — never silently shadowed — by `lib sources`, `lib list`, `status`,
+and `doctor`, each naming the winner, the shadowed sources, and the
+`<source>:<name>` reference that pins the other copy. A project that wants to
+be explicit rather than order-dependent writes that qualified form
+(`skills = ["team:sql-review"]`); it resolves only in the source it names, and
+the capability's identity everywhere else — lock key, rendered directory,
+gateway name — stays the bare name.
+
+Reordering or relinking sources changes what the **next** `lock` selects and
+changes nothing an already-locked project serves: serving reads the bytes the
+lock pins, from the content store.
 
 ### Layout and name resolution
 
-Skill dirs (`lib/skills/`) and MCP server definitions (`lib/servers/*.toml`)
-are indexed in `library.toml`. A toolset's `skills = ["sql-review"]` /
-`servers = ["kibana"]` resolve from there; an inline `[skills.*]` /
-`[servers.*]` table always overrides the library. Provider folders are never
+Each source holds the same taxonomy: skill dirs (`skills/`) and MCP server
+definitions (`servers/*.toml`), indexed in that source's own `library.toml`.
+A toolset's `skills = ["sql-review"]` / `servers = ["kibana"]` resolve through
+the ordered sources; an inline `[skills.*]` / `[servers.*]` table always
+overrides every source. Provider folders are never
 owned — only their skills and MCP entries are managed. The runtime gateway
 resolves server name refs through the same inline-first/central-library path as
 rendering, but where rendering hard-fails a run on a broken ref, the gateway
@@ -1091,8 +1196,8 @@ agentstack lib add-server <name>                        # reusable server defini
 agentstack lib new <name>                               # scaffold a new skill
 ```
 
-`lib add ./<dir>` **copies** the source into `lib/skills/<name>` — the library
-copy is canonical from then on (source edits have no effect), provenance records
+`lib add ./<dir>` **copies** the source into `<first linked source>/skills/<name>`
+— the library copy is canonical from then on (source edits have no effect), provenance records
 the original path, and a temp-dir source gets a dangling-path warning. `lib add
 owner/repo --subpath <dir>` (any git URL, `--skill <name>` selecting from a
 multi-skill repo) installs from a repo subdirectory, staging the fetch so a dry
@@ -1166,8 +1271,9 @@ Three ways a skill or server reaches a toolset; the manifest syntax alone picks
 which:
 
 - **By-name library reference** — `skills = ["greet"]` / `servers = ["kibana"]`
-  with **no** matching `[skills.greet]` / `[servers.kibana]` table. Resolved
-  fresh from `~/.agentstack/lib` on every lock, pinned there by `checksum`
+  with **no** matching `[skills.greet]` / `[servers.kibana]` table (optionally
+  qualified as `"team:greet"`). Resolved fresh through the linked library
+  sources on every lock, pinned there by `checksum`
   (skills) or definition digest (servers); nothing is copied into the repo. The
   cross-repo default.
 - **Vendored pack copy** — installed with `add from git:<host>/<repo>`. Members
@@ -1301,6 +1407,53 @@ owns — and `doctor` flags a stale managed region (warn ↳ `instructions --wri
 or a missing fragment source (error, gates `--ci`). Installing a pack's house
 rules prints the exact compile command.
 
+#### Variants: one fragment, per CLI and per model
+
+A fragment can carry alternative bodies selected by `cli`, by `model`, or by
+both. `targets` decides *whether* a fragment reaches a CLI; `variant` decides
+*which bytes* it sends once it does.
+
+```toml
+[instructions.house]
+path = "./instructions/house.md"
+
+  [[instructions.house.variant]]
+  cli = "claude-code"
+  model = "opus"
+  path = "./instructions/house.claude-opus.md"
+
+  [[instructions.house.variant]]
+  cli = "codex"
+  path = "./instructions/house.codex.md"
+```
+
+**Most specific wins:** exact `(cli, model)` → `(cli)` → `(model)` → the base
+`path`. Two variants with the identical selector resolve to the first declared.
+A variant with neither selector is refused — it could never be chosen.
+
+**The model comes from a declaration, never a guess:** the `model` of a toolset
+a command explicitly names (`instructions --toolset backend`,
+`apply --profile backend`), else `[settings.<cli>] model` — the value agentstack
+itself writes into that CLI's config. With neither, the model is **unknown**,
+the least specific matching body is used, and every surface says so. No harness
+has native per-model instructions; the switch is agentstack's.
+
+**Every variant body is pinned** in `agentstack.lock`, including one nothing
+currently selects, so editing any of them re-gates review before delivery.
+
+A fragment with no `path` resolves its bodies — base and variants — from the
+[linked library sources](#the-library-linked-source-folders) by its own name,
+first match wins, as `<source>/instructions/<name>/instruction.toml`.
+
+**What carries them, per CLI.** `status` names, for each targeted CLI, the file
+that actually carries house rules there, which variant it receives and why, and
+whether that CLI's *live* channel (MCP's `initialize` `instructions` field) is
+**confirmed** or merely **unconfirmed**. No live channel carries house rules
+today, confirmed or not: none of them varies by model or sits behind a lease.
+Seven of the thirteen adapters have no instruction channel at all, and `status`
+says that plainly rather than omitting them. Design:
+[instruction-variants.md](design/instruction-variants.md).
+
 ### The machine layer
 
 The machine manifest is the personal, cross-project layer (concept:
@@ -1393,7 +1546,7 @@ re-render prunes exactly what agentstack placed. An untrusted or drifted project
 renders **zero** extension bytes. Two adapters render today — **pi**
 (`~/.pi/agent/extensions`, or `.pi/extensions` at project scope) and **OpenCode**
 (`~/.config/opencode/plugins`, global only); any other target validates but
-**warns and does not render**. Under `run --locked`, a `rendered-verify` gate
+**warns and does not render**. Under a protected `run`, a `rendered-verify` gate
 re-checks each delivered copy against its lock pin before launch.
 
 ### `report usage` (usage analytics)
@@ -1619,14 +1772,14 @@ subcommand carries a trailing `*` (e.g. `guard`'s `check*`). Reach for it when
 you need the exact verb, flag, or subcommand.
 
 <!-- agentstack:generated commands -->
-- **`init`** — Setup: find the CLIs you have and bring their setups together — flags `--global/--force/--dry-run/--plan/--secrets/--no-keychain/--yes/--consented-plan`
+- **`init`** — Setup: find the CLIs you have and bring their setups together — flags `--global/--force/--dry-run/--plan/--secrets/--no-keychain/--project-servers/--yes/--consented-plan`
 - **`up`** — Set this machine up from a setup that already exists: one command — flags `--targets/--toolset/--no-gitignore`
 - **`status`** — Status: where this project stands, on one screen, and the one next step — flags `--json`
 - **`add`** — Add a server or skill to this project's setup — subcommands `from/server/skill`
 - **`set`** _(hidden)_ — Create or update a manifest entry in place (idempotent `add`) — subcommands `server`
 - **`search`** — Search the capability catalog (and mark what's already added) — flags `--all/--json`
 - **`apply`** — Write this setup into each CLI's own config — flags `--target/--toolset/--dry-run/--write/--scope/--allow-unresolved/--prune-foreign/--no-gitignore/--verbose`
-- **`instructions`** _(hidden)_ — Compile [instructions.*] into each CLI's CLAUDE.md / AGENTS.md — flags `--target/--scope/--write`
+- **`instructions`** _(hidden)_ — Compile [instructions.*] into each CLI's CLAUDE.md / AGENTS.md — flags `--target/--toolset/--scope/--write`
 - **`doctor`** — Check the setup in depth: what is wired up, what is missing, what changed — flags `--ci/--live/--probe/--fix/--deep/--all/--json`
 - **`remove`** _(hidden)_ — Remove a server or skill from the manifest (and lockfile) — flags `--write`
 - **`install`** _(hidden)_ — Fetch skill sources into the store and write the lockfile — flags `--locked/--allow-flagged`
@@ -1635,20 +1788,23 @@ you need the exact verb, flag, or subcommand.
 - **`publisher`** _(hidden)_ — Your publishing key, and the publishers you recognize — subcommands `show/trust`
 - **`lock`** _(hidden)_ — Resolve each toolset's skill + server refs and pin `agentstack.lock` — flags `--profile/--update/--upgrade/--all/--with-instructions/--yes/--write`
 - **`try`** _(hidden)_ — Try a skill without installing anything: stage, scan, and emit a wrapper prompt on stdout for piping into any agent CLI — flags `--skill/--rev/--subpath/--allow-flagged`
-- **`lib`** _(hidden)_ — Manage the central capability library — subcommands `new/add/add-server/add-extension/add-hook/list/remove/remove-server/remove-extension/remove-hook/trash/sync/pack-init`
+- **`lib`** _(hidden)_ — Manage your linked capability library sources — subcommands `new/add/add-server/add-extension/add-hook/list/remove/remove-server/remove-extension/remove-hook/trash/sync/pack-init/link/unlink/sources/reorder`
 - **`toolset`** — Work with toolsets: name one that bundles what you already have — subcommands `create/rename/delete/list`
 - **`use`** — Toolset: switch to one — its servers and skills go live in your CLIs — flags `--target/--scope/--write/--allow-unresolved/--prune-foreign/--no-gitignore/--list/--json`
 - **`yes`** — Review and activate the files you dropped into this project — one step — flags `--yes`
 - **`session`** _(hidden)_ — Use a toolset temporarily: load it for now, then put every file back — subcommands `start/end/list/freeze`
-- **`run`** — Launch an agent CLI as a tracked run — flags `--locked/--prompt/--toolset/--scope/--keep/--sandbox/--lockdown/--plan`
+- **`run`** — Launch an agent CLI as a tracked run — flags `--locked/--unprotected/--prompt/--toolset/--scope/--keep/--sandbox/--lockdown/--plan`
 - **`kill`** _(hidden)_ — Kill a tracked run by id (and revert its toolset if it owned one) — flags `--force`
+- **`image`** _(hidden)_ — Compose one toolset and its pinned capabilities into a container image — flags `--toolset/--harness/--tag/--from/--json/--write`
 - **`shim`** _(hidden)_ — Exec-through launcher shim for external supervisors (e.g. t3code) — subcommands `make/exec*`
-- **`workflow`** _(hidden)_ — Run a reviewed multi-agent task using toolsets you already approved — subcommands `run/report/list/runs/explain/declare`
+- **`workflow`** — Run a reviewed multi-agent task using toolsets you already approved — subcommands `run/report/list/runs/explain/declare`
 - **`report`** _(hidden)_ — Every "what happened" view in one place — subcommands `run/runs/usage/calls/wire`
 - **`sign`** _(hidden)_ — Sign this project's agentstack.lock with a fresh ed25519 key (writes a detached agentstack.lock.sig, prints the public key to publish) — flags `--print-key-only`
 - **`verify`** _(hidden)_ — Verify agentstack.lock against a published ed25519 public key and its detached signature — flags `--pubkey/--signature`
 - **`guard`** _(hidden)_ — Machine-level destructive-command guard — subcommands `check*/test/install/uninstall/status`
 - **`gateway`** _(hidden)_ — The zero-files gateway: register it once per CLI (`connect`) and every trusted repo brings its own servers through `agentstack mcp --auto-project` with no per-project files — subcommands `connect/disconnect`
+- **`lease`** _(hidden)_ — Runtime lease registry: which toolset leases are open on this machine — subcommands `status`
+- **`delivery`** _(hidden)_ — How each capability reaches each of your tools — and the one override — subcommands `render-locally` — flags `--json`
 - **`trust`** — Review and approve this project's declared capabilities — required before anything activates them — flags `--list/--revoke/--yes/--consented-digest/--preview`
 - **`restore`** — Undo a recorded write: revert what apply/use/session changed — flags `--last/--list/--scope/--write/--json`
 - **`undo`** — Take it back: pick a point from your recent changes and revert to it — flags `--to/--write/--json`
@@ -1675,8 +1831,8 @@ you need the exact verb, flag, or subcommand.
 - **`rename-profile`** _(hidden)_ — Fixed-argv alias of `agentstack toolset rename` (panel action) — flags `--name/--to/--preview/--yes/--consented/--allow-unresolved`
 - **`delete-profile`** _(hidden)_ — Fixed-argv alias of `agentstack toolset delete` (panel action) — flags `--name/--preview/--yes/--consented/--allow-unresolved`
 - **`use-profile`** _(hidden)_ — Activate an existing toolset (panel action; digest-bound) — flags `--profile/--preview/--yes/--consented/--allow-unresolved`
-- **`library-index`** _(hidden)_ — The central-library catalog (skills + servers) for the panel browser
-- **`remove-from-library`** _(hidden)_ — Remove a skill or server from the central library (panel action; digest-bound). Moves it to the library trash — recoverable with `agentstack lib trash --restore <id> --write` — flags `--kind/--name/--preview/--yes/--consented/--allow-unresolved`
+- **`library-index`** _(hidden)_ — The library catalog (skills + servers), merged across linked sources, for the panel browser
+- **`remove-from-library`** _(hidden)_ — Remove a skill or server from the library (panel action; digest-bound). Moves it to the library trash — recoverable with `agentstack lib trash --restore <id> --write` — flags `--kind/--name/--preview/--yes/--consented/--allow-unresolved`
 - **`remove-capability`** _(hidden)_ — Remove a skill or server from this project's manifest (panel action; digest-bound), then re-lock and re-render — flags `--kind/--name/--preview/--yes/--consented/--allow-unresolved`
 <!-- agentstack:end -->
 
@@ -1688,14 +1844,16 @@ to confirm a feature is real before you go hunting for its section above.
 13 adapters · `init`/`add`/`apply`/`diff`/`use`/`instructions`/`adopt` ·
 package manager (`install`/`lock --update`/`remove` + lockfile) · central capability
 library (`lib` skills + servers referenced by name, digest-pinned in the lock,
-drift in `doctor`/`explain`) · secrets (keychain +
-varlock) · scopes (global/project) · `doctor` (`--live`/`--fix`/`--ci`/`--deep`) ·
+drift in `doctor`/`explain`) · secrets (keychain + varlock as the recommended
+vault — `init` offers the `.env.schema`, `doctor` reports its
+health) · scopes (global/project) · `doctor` (`--live`/`--fix`/`--ci`/`--deep`) ·
 content scanning on install + `doctor --deep` · official MCP Registry provider +
 `search`/`add from` · `[policy]` trust gate · native per-CLI settings
 (`[settings.*]` → settings.json) · native extensions (`[extensions.*]` →
-content-pinned harness add-ons, re-verified at `run --locked`) · atomic writes + backups ·
+content-pinned harness add-ons, re-verified at the protected `run`) · atomic writes + backups ·
 `export`/`import` · portable lifecycle hooks · agent-operable `mcp` server ·
-graphical-integration contracts · live runs (`run`/`report runs`/`kill`) ·
+graphical-integration contracts · live runs (`run` — protected by default,
+`--unprotected` to opt out — plus `report runs`/`kill`) ·
 GitHub Action trust gate ·
 nightly adapter-conformance CI · zero-files gateway (`gateway connect` + `mcp
 --auto-project` + digest-pinned `trust`) · `optimize` (evidence-backed

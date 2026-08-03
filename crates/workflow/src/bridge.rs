@@ -16,8 +16,27 @@
 //! in live Rust memory is *rooted* (boa_gc root-counts handles that live outside
 //! the GC heap), so the resolvers cannot be collected while we hold them — no
 //! tracing is required. The thread-local is a transient pointer, not ownership:
-//! each `WorkflowRun` still owns its own `SpawnState`, and because a `drive()`
-//! never nests, concurrent runs never observe each other's state.
+//! each `WorkflowRun` still owns its own `SpawnState`, and a `drive()` is now
+//! *refused* if one is already on this thread's stack ([`drive_in_progress`]),
+//! so concurrent runs never observe each other's state.
+//!
+//! ## Why host natives refuse re-entry
+//!
+//! Reading properties off a script-supplied object runs SCRIPT CODE: `obj.get`
+//! and `own_property_keys` fire getters and Proxy traps. So the conversion
+//! `agent()` performs on its own `opts` argument is a place where the script
+//! can call back into a host native *while that native is still running* —
+//! `agent('p', { get role() { agent('nested', …) } })` is the concrete shape.
+//! Nothing in the old design corrupted memory (the `RefCell` borrows are all
+//! transient), but a native that can be re-entered mid-argument-conversion is
+//! reasoning nobody should have to redo on every future edit: the inner call
+//! observes half-converted state, and the ceiling arithmetic is suddenly
+//! interleaved rather than sequential.
+//!
+//! So every native this crate installs enters through [`enter_native`], which
+//! refuses a nested invocation outright and releases its flag through an RAII
+//! guard — including on the `?` error paths, where an early return would
+//! otherwise leak it and wedge the run.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -106,10 +125,26 @@ pub(crate) struct SpawnState {
     /// [`MAX_PROGRESS_EVENTS`]; overflow increments `progress_dropped`.
     pub(crate) progress: Vec<Progress>,
     pub(crate) progress_dropped: u64,
+    /// True while a host native installed by this crate is executing. Set and
+    /// cleared ONLY by [`enter_native`] / [`NativeGuard`]; a second native
+    /// entry while it is set is refused (see the module doc). Not script-
+    /// reachable.
+    pub(crate) in_native: bool,
+    /// Host-native invocations charged so far this RUN, and the ceiling they
+    /// are charged against. Boa's own `loop_iteration_limit` is per call frame
+    /// (the counter lives on `CallFrame`), so it bounds no total; this is the
+    /// run-total ceiling for the natives this crate installs.
+    pub(crate) native_calls: u64,
+    pub(crate) native_call_limit: u64,
+    /// Set ONLY when a native is refused at `native_call_limit`. Same
+    /// non-forgeable host-flag pattern as `exhausted` / `compile_denied`:
+    /// classification reads this flag, never a script-controlled string, so a
+    /// script cannot fake the kind by throwing a lookalike message.
+    pub(crate) native_budget_exhausted: bool,
 }
 
 impl SpawnState {
-    pub(crate) fn new(roles: Vec<String>, max_agents: u32) -> Self {
+    pub(crate) fn new(roles: Vec<String>, max_agents: u32, native_call_limit: u64) -> Self {
         Self {
             next_id: 0,
             max_agents,
@@ -121,6 +156,10 @@ impl SpawnState {
             undeclared: None,
             progress: Vec::new(),
             progress_dropped: 0,
+            in_native: false,
+            native_calls: 0,
+            native_call_limit,
+            native_budget_exhausted: false,
         }
     }
 
@@ -154,9 +193,13 @@ fn bound_progress_line(s: &str) -> String {
 
 thread_local! {
     /// A stack of the states whose `drive()` is currently on this thread's call
-    /// stack. `agent()` reads the top; `ActiveGuard` keeps it in sync. A stack
-    /// (rather than a single slot) is defensive — a `drive()` should never nest,
-    /// but if it ever did, each frame still sees its own state.
+    /// stack. `agent()` reads the top; `ActiveGuard` keeps it in sync. A nested
+    /// `drive()` is now *refused* rather than merely tolerated — see
+    /// [`drive_in_progress`], which `WorkflowRun::drive` consults before it
+    /// activates. The stack shape is kept anyway: it costs nothing, it keeps
+    /// the "each frame sees its own state" property true by construction, and
+    /// it is what makes the refusal a cheap `is_empty()` check instead of a
+    /// second piece of bookkeeping that could disagree with reality.
     static ACTIVE_STATE: RefCell<Vec<Rc<RefCell<SpawnState>>>> = const { RefCell::new(Vec::new()) };
 }
 
@@ -182,6 +225,82 @@ fn current_state() -> Option<Rc<RefCell<SpawnState>>> {
     ACTIVE_STATE.with(|stack| stack.borrow().last().map(Rc::clone))
 }
 
+/// Whether a `drive()` is already on this thread's call stack. `WorkflowRun`
+/// checks this to refuse a nested drive outright.
+pub(crate) fn drive_in_progress() -> bool {
+    ACTIVE_STATE.with(|stack| !stack.borrow().is_empty())
+}
+
+/// RAII release for the non-reentrancy flag. Holding the `Rc` (rather than
+/// reading the thread-local again on drop) means the flag is cleared on the
+/// state that set it, even if the stack has since changed — and `Drop` runs on
+/// every exit path, including an early `?` and a panic unwind, so a refused
+/// call can never leave the run permanently wedged in "a native is running".
+pub(crate) struct NativeGuard(Rc<RefCell<SpawnState>>);
+
+impl Drop for NativeGuard {
+    fn drop(&mut self) {
+        self.0.borrow_mut().in_native = false;
+    }
+}
+
+/// The single entry point every host native this crate installs goes through.
+/// It does three things, in this order, and returns the run state plus the
+/// guard that releases the flag:
+///
+/// 1. Finds the active run; a native called outside a drive is a host bug.
+/// 2. **Refuses re-entry.** A getter or Proxy trap that calls back into a
+///    native while one is running gets a clear `TypeError` naming re-entrancy
+///    (see the module doc for the concrete `opts` getter shape).
+/// 3. **Charges the run-total native budget.** Past the ceiling the native
+///    fails closed with a synchronous throw and sets the non-forgeable
+///    `native_budget_exhausted` host flag, so classification can report the
+///    distinct `NativeBudgetExhausted` kind.
+///
+/// `name` is a fixed host string naming the native WITHOUT its parentheses
+/// (`"agent"`, `"budget.spawned"`); the messages add `()`. It is never
+/// script-derived.
+fn enter_native(name: &str) -> JsResult<(Rc<RefCell<SpawnState>>, NativeGuard)> {
+    let state = current_state().ok_or_else(|| {
+        JsError::from(
+            JsNativeError::typ().with_message(format!("{name}() called outside a workflow drive")),
+        )
+    })?;
+
+    if state.borrow().in_native {
+        return Err(JsError::from(JsNativeError::typ().with_message(format!(
+            "{name}() refused: re-entrant call into a workflow host function. A property \
+             accessor or Proxy trap ran while a host function was already executing (for \
+             example a getter on the object passed to agent()); nesting host calls is not \
+             permitted"
+        ))));
+    }
+
+    // Set the flag and take the guard BEFORE anything that can fail, so every
+    // path below releases it.
+    state.borrow_mut().in_native = true;
+    let guard = NativeGuard(Rc::clone(&state));
+
+    let over_budget = {
+        let mut s = state.borrow_mut();
+        s.native_calls = s.native_calls.saturating_add(1);
+        if s.native_calls > s.native_call_limit {
+            s.native_budget_exhausted = true;
+            Some(s.native_call_limit)
+        } else {
+            None
+        }
+    };
+    if let Some(limit) = over_budget {
+        return Err(JsError::from(JsNativeError::error().with_message(format!(
+            "{name}() refused: this run's ceiling of {limit} host-function call(s) is spent — \
+             the call fails closed and every further host call will too"
+        ))));
+    }
+
+    Ok((state, guard))
+}
+
 /// Install the global `agent(prompt, opts)` function. The closure captures
 /// nothing (so it is `Copy`, as `from_copy_closure` requires); it reaches the
 /// active `SpawnState` through the thread-local.
@@ -193,11 +312,10 @@ fn current_state() -> Option<Rc<RefCell<SpawnState>>> {
 /// `role` is *also* extracted from it for the consistency check and fan-out.
 pub(crate) fn install_agent(context: &mut Context) -> JsResult<()> {
     let agent = NativeFunction::from_copy_closure(|_this, args, context| {
-        let state = current_state().ok_or_else(|| {
-            JsError::from(
-                JsNativeError::typ().with_message("agent() called outside a workflow drive"),
-            )
-        })?;
+        // Non-reentrancy + native budget. `_guard` must stay alive for the whole
+        // body: the `js_to_value` call below runs script getters, and this is
+        // what stops one of them calling back into `agent()`.
+        let (state, _guard) = enter_native("agent")?;
 
         // First arg: the required prompt string.
         let prompt = string_arg(args, 0).ok_or_else(|| {
@@ -210,10 +328,15 @@ pub(crate) fn install_agent(context: &mut Context) -> JsResult<()> {
         // the whole object can ride in the spawn request. A missing or non-object
         // arg leaves `opts` as JSON null, which fails the `role` check below.
         let opts = match args.get(1) {
+            // A failure here is either the depth bound (A2) or a property
+            // accessor on `opts` that threw — including the re-entrancy
+            // refusal above, when a getter tried to call back into a native.
+            // The message names both rather than blaming nesting alone.
             Some(v) if !v.is_null_or_undefined() => js_to_value(v, context, 0).map_err(|_| {
-                JsError::from(
-                    JsNativeError::typ().with_message("agent() opts is nested too deeply"),
-                )
+                JsError::from(JsNativeError::typ().with_message(
+                    "agent() opts could not be read: it is nested past the JSON depth bound, \
+                     or one of its property accessors failed",
+                ))
             })?,
             _ => serde_json::Value::Null,
         };
@@ -297,12 +420,7 @@ pub(crate) fn install_progress(context: &mut Context) -> JsResult<()> {
         make: fn(String) -> Progress,
     ) -> impl Fn(&JsValue, &[JsValue], &mut Context) -> JsResult<JsValue> + Copy {
         move |_this, args, _context| {
-            let state = current_state().ok_or_else(|| {
-                JsError::from(
-                    JsNativeError::typ()
-                        .with_message(format!("{name}() called outside a workflow drive")),
-                )
-            })?;
+            let (state, _guard) = enter_native(name)?;
             let text = string_arg(args, 0).ok_or_else(|| {
                 JsError::from(
                     JsNativeError::typ()
@@ -347,23 +465,17 @@ pub(crate) fn install_budget(
     max_agents: u32,
     max_wall_seconds: u64,
 ) -> JsResult<()> {
+    // Both budget readers go through `enter_native` like every other native:
+    // they are O(1), but "cheap" is not "free" — an unbounded pacing loop is
+    // exactly the shape the run-total native budget exists to bound, and a
+    // native exempted from the guard would also be a re-entrancy hole.
     let spawned = NativeFunction::from_copy_closure(|_this, _args, _context| {
-        let state = current_state().ok_or_else(|| {
-            JsError::from(
-                JsNativeError::typ()
-                    .with_message("budget.spawned() called outside a workflow drive"),
-            )
-        })?;
+        let (state, _guard) = enter_native("budget.spawned")?;
         let n = state.borrow().next_id;
         Ok(JsValue::from(n as f64))
     });
     let remaining = NativeFunction::from_copy_closure(|_this, _args, _context| {
-        let state = current_state().ok_or_else(|| {
-            JsError::from(
-                JsNativeError::typ()
-                    .with_message("budget.remaining() called outside a workflow drive"),
-            )
-        })?;
+        let (state, _guard) = enter_native("budget.remaining")?;
         let s = state.borrow();
         let rem = u64::from(s.max_agents).saturating_sub(s.next_id);
         Ok(JsValue::from(rem as f64))

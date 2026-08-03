@@ -261,16 +261,23 @@ pub fn build(manifest_dir: Option<&Path>) -> Result<Value> {
         .instructions
         .iter()
         .map(|(name, instr)| {
-            let path = if Path::new(&instr.path).is_absolute() {
-                std::path::PathBuf::from(&instr.path)
-            } else {
-                ctx.dir.join(&instr.path)
-            };
+            // A sourceless fragment's body lives in a linked library source, so
+            // there is no project-relative path to report — `declared` says so
+            // rather than inventing one.
+            let path = instr.path.as_deref().map(|declared| {
+                if Path::new(declared).is_absolute() {
+                    std::path::PathBuf::from(declared)
+                } else {
+                    ctx.dir.join(declared)
+                }
+            });
             json!({
                 "name": name,
                 "path": instr.path,
+                "declared": crate::instructions::declared_label(name, instr),
                 "targets": instr.targets,
-                "exists": path.exists(),
+                "variants": instr.variants.len(),
+                "exists": path.is_some_and(|p| p.exists()),
             })
         })
         .collect();

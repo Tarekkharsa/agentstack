@@ -34,9 +34,27 @@ fn init_args() -> InitArgs {
         plan: false,
         secrets: None,
         no_keychain: true,
+        project_servers: false,
         yes: true,
         consented_plan: None,
     }
+}
+
+/// Library-first `init` puts the imported definitions in the first linked
+/// library source and leaves the project referencing them by name. "Imported"
+/// therefore means both halves: the manifest's default toolset names it, and
+/// the library holds its definition.
+fn imported(loaded: &agentstack::manifest::LoadedManifest, tmp: &Path, name: &str) -> bool {
+    let referenced = loaded
+        .manifest
+        .profiles
+        .values()
+        .any(|p| p.servers.iter().any(|s| s == name));
+    let defined = tmp
+        .join("home/.agentstack/lib/servers")
+        .join(format!("{name}.toml"))
+        .exists();
+    referenced && defined
 }
 
 /// A repo with servers ONLY in project-scope native configs, and an isolated,
@@ -108,14 +126,12 @@ fn init_imports_project_scope_configs_instead_of_an_empty_manifest() {
 
     let loaded = agentstack::manifest::load_from_dir(&proj.join(".agentstack")).unwrap();
     assert!(
-        loaded.manifest.servers.contains_key("filesystem"),
-        "the .mcp.json server was imported: {:?}",
-        loaded.manifest.servers.keys().collect::<Vec<_>>()
+        imported(&loaded, tmp.path(), "filesystem"),
+        "the .mcp.json server was imported into the library and referenced here"
     );
     assert!(
-        loaded.manifest.servers.contains_key("sqlite"),
-        "the .codex/config.toml server was imported: {:?}",
-        loaded.manifest.servers.keys().collect::<Vec<_>>()
+        imported(&loaded, tmp.path(), "sqlite"),
+        "the .codex/config.toml server was imported into the library and referenced here"
     );
 }
 
@@ -202,7 +218,7 @@ fn init_over_repo_supplied_config_imports_but_never_self_trusts() {
 
     // Imported — the convenience is intact…
     let loaded = agentstack::manifest::load_from_dir(&proj.join(".agentstack")).unwrap();
-    assert!(loaded.manifest.servers.contains_key("filesystem"));
+    assert!(imported(&loaded, tmp.path(), "filesystem"));
     // …but NOT granted: repo-supplied bytes take the gated review.
     assert_eq!(
         agentstack::trust::check(&proj),
@@ -236,7 +252,7 @@ fn init_over_machine_global_config_still_grants() {
 
     let loaded = agentstack::manifest::load_from_dir(&proj.join(".agentstack")).unwrap();
     assert!(
-        loaded.manifest.servers.contains_key("filesystem"),
+        imported(&loaded, tmp.path(), "filesystem"),
         "the machine-global server was imported"
     );
     assert_eq!(

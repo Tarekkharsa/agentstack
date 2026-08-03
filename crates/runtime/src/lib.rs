@@ -23,6 +23,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod image;
 pub mod orchestrate;
 pub mod sandbox;
 pub mod spec;
@@ -33,6 +34,7 @@ pub mod docker;
 #[cfg(feature = "docker")]
 pub mod lockdown;
 
+pub use image::{DockerStatus, ImageError, ImageSpec};
 pub use orchestrate::run;
 pub use sandbox::{Exit, Sandbox, SandboxHandle, Stream, StreamChunk};
 pub use spec::{Mount, NetworkPolicy, SandboxSecurity, SandboxSpec};

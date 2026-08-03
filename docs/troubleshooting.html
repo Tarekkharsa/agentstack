@@ -199,7 +199,7 @@
       </li>
       <li><a href="workflows.html">Workflows</a>
       </li>
-      <li><a href="reference.html#the-central-library">Central library</a>
+      <li><a href="reference.html#the-library-linked-source-folders">Library sources</a>
       </li>
       <li><a href="concepts.html#delivery-modes">Delivery modes</a>
       </li>
@@ -296,7 +296,7 @@ agentstack doctor    # every check, each finding followed by ↳ its fix</code><
 <h2 id="a-secret-wont-resolve">A secret won't resolve<a class="hlink" href="#a-secret-wont-resolve" aria-label="Link to this section">#</a></h2>
 <p>agentstack never stores secret values in the manifest — only <code>${REF}</code> placeholders resolved per machine. An unresolved ref <strong>blocks the write</strong>; that is the intended behaviour, not a bug to route around.</p>
 <p><strong><code>✗ unresolved secret LINEAR_TOKEN (server 'linear') ↳ agentstack secret set LINEAR_TOKEN</code></strong></p>
-<p>Nothing in the resolution chain (env, varlock, project <code>.env</code>, OS keychain) holds a value for that name.</p>
+<p>Nothing in the resolution chain (env, varlock, keychain, project <code>.env</code>) holds a value for that name.</p>
 <pre class="block"><code>agentstack secret set LINEAR_TOKEN
 agentstack apply --write</code></pre>
 <p><strong><code>✗ not written — unresolved secrets; set them or pass --allow-unresolved</code></strong></p>
@@ -315,6 +315,13 @@ agentstack apply --write</code></pre>
 <pre class="block"><code>chmod 600 .env</code></pre>
 <p><strong><code>✗ blocked by policy: &lt;entry&gt;</code></strong></p>
 <p>Not a missing secret — a refusal. <code>[policy.secrets]</code> or <code>[policy.egress]</code> denied that resolution, and <code>--allow-unresolved</code> does <strong>not</strong> override policy. Widen the machine ceiling or narrow what the project asks for.</p>
+<p>Three more lines <code>doctor</code> prints in the same <strong>Secrets</strong> section speak about the recommended vault rather than about one ref:</p>
+<p><strong><code>varlock  .env.schema opts this project in, but the varlock binary is not runnable</code></strong></p>
+<p>The project asked for varlock and it is not there, so <strong>every ref is quietly falling through to the next store</strong> — the silence this finding exists to break. Install varlock (<a href="https://varlock.dev">varlock.dev</a>), or delete <code>.agentstack/.env.schema</code> to drop the layer on purpose.</p>
+<p><strong><code>varlock  varlock load failed — …</code></strong></p>
+<p>varlock is installed but could not resolve this project's schema. Doctor quotes the first line of its error; run <code>varlock load</code> in the project to see all of it.</p>
+<p><strong><code>varlock  not in use — the recommended vault keeps values out of this project entirely</code></strong></p>
+<p>Not a defect and never doctor's next action — an invitation. <code>agentstack init</code> offers to write the <code>.env.schema</code> that opts in, or drop one in next to the manifest yourself. It declares names, never values.</p>
 <p>More: <a href="reference.html#secret-resolution">reference — secret resolution</a> and <a href="reference.html#unresolved-secrets-block-writes">unresolved secrets block writes</a>.</p>
 <h2 id="it-says-my-files-drifted">It says my files drifted<a class="hlink" href="#it-says-my-files-drifted" aria-label="Link to this section">#</a></h2>
 <p>Drift means the native config on disk no longer matches what the manifest would render. agentstack never silently reconciles it — you choose which side wins.</p>

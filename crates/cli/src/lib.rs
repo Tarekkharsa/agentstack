@@ -20,6 +20,7 @@ pub mod catalog;
 pub mod cli;
 pub mod codemode;
 pub mod commands;
+pub mod delivery;
 pub mod discover;
 pub mod eve;
 pub mod executable;
@@ -31,7 +32,10 @@ pub mod gitx;
 pub mod grant;
 pub mod guard;
 pub mod history;
+pub mod image;
+pub mod instructions;
 pub mod intake;
+pub mod lease_registry;
 pub mod library;
 pub mod machine_policy;
 // TODO(phase-1): re-export shims — migrate callers to agentstack_core:: paths
@@ -40,6 +44,7 @@ pub use agentstack_core::lock;
 pub mod manifest;
 pub mod mcp;
 pub mod mcp_server;
+pub mod package;
 pub mod provider;
 pub mod proxy;
 pub mod publisher;
@@ -55,6 +60,7 @@ pub mod seatbelt;
 pub mod secret;
 pub mod session;
 pub mod snapshot;
+pub mod sources;
 pub mod state;
 pub mod store;
 #[allow(unsafe_code)]
@@ -94,6 +100,7 @@ macro_rules! out {
 }
 // TODO(phase-1): shim — migrate callers to agentstack_trust:: and drop.
 pub use agentstack_trust as trust;
+pub mod trust_anchor;
 pub mod usage;
 pub mod verify;
 pub mod workflows;

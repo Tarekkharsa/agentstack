@@ -41,6 +41,20 @@ skills:
 # permissions") can never be parsed as a flag.
 headless:
   args: ["-p", "--", "{prompt}"]
+  # Per-launch MODEL selection: `claude -p --model <model> -- "<prompt>"`. The
+  # fragment is spliced into the options region before the "--" guard, exactly
+  # like mcp_injection, and "{model}" is substituted only AFTER the value has
+  # been checked against this adapter's own settings catalog (settings.model_key
+  # below → the `model` field, a free-form string, so the conservative charset
+  # bound applies).
+  model_selection:
+    args: ["--model", "{model}"]
+  # NO effort_selection, deliberately. Claude Code HAS the notion — settings.
+  # effortLevel below — but no CONFIRMED per-launch flag applies it to a single
+  # headless run, and the only other route (writing effortLevel into the user's
+  # ~/.claude/settings.json) is persistent machine state a governed child run
+  # must never touch. Unconfirmed is never used as though it worked; the
+  # launcher and `workflow explain` say so out loud instead.
   # Per-child MCP config injection (W2.5): the launcher renders a config file
   # containing ONLY the agentstack gateway entry into the run's private dir and
   # substitutes its path for "{mcp_config_path}" (a WHOLE argv element, spliced
@@ -54,6 +68,20 @@ headless:
 instructions:
   global: ~/.claude/CLAUDE.md
   project: CLAUDE.md
+  # The one CONFIRMED live instruction channel among the registered adapters:
+  # MCP's `initialize` result carries a purpose-built `instructions` string,
+  # and Claude Code was observed surfacing agentstack's own gateway text to the
+  # agent as an MCP-server instruction block. House rules still render to the
+  # file above — a channel that cannot know the model and fires before any
+  # toolset is leased cannot carry a per-(CLI, model) variant
+  # (docs/design/instruction-variants.md).
+  live:
+    channel: mcp-instructions
+    display: MCP initialize instructions
+    confirmation: confirmed
+    note: >-
+      Observed live 2026-08-02 — the gateway's own initialize `instructions`
+      reached the agent (docs/design/research/dynamic-instructions-2026-08.md).
 # Native settings file: permissions, hooks, feature flags. Separate from the
 # MCP config (~/.claude.json); agentstack owns only the top-level keys you
 # declare under [settings.claude-code] and leaves the rest untouched.
@@ -69,6 +97,13 @@ settings:
   format: json
   global: ~/.claude/settings.json
   project: .claude/settings.json
+  # Which catalog field carries "which model" and "how much reasoning effort".
+  # These are POINTERS into `fields` below (the descriptor fails to parse if a
+  # key names no field there): the catalog already documents each setting's
+  # type and legal values, so a per-role model/effort value is checked against
+  # it rather than against a second, drift-prone list.
+  model_key: model
+  effort_key: effortLevel
   # Curated catalog of common, user-facing settings (verified against the
   # official settings.json reference). Enterprise "managed only" keys and
   # complex object settings (hooks, statusLine) are intentionally omitted; any

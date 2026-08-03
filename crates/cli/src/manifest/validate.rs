@@ -46,6 +46,11 @@ pub enum IssueKind {
     /// `UnknownSkillRef`, which means the name resolves nowhere at all.
     UnresolvableSkillRef,
     UnknownHookRef,
+    /// A `[profiles.X] packages` entry names no package in the central library
+    /// (W5). There is no inline package form — a package is always a library
+    /// composition — so an unindexed name resolves nowhere and the toolset
+    /// could never be locked.
+    UnknownPackageRef,
     MissingTransportFields,
     UnknownTargetServer,
     /// A `[servers.X] targets` entry names an adapter id that isn't registered
@@ -62,6 +67,11 @@ pub enum IssueKind {
     /// registered — the fragment would silently compile into no harness the
     /// author expected (the instruction analogue of `UnknownServerTarget`).
     UnknownInstructionTarget,
+    /// An `[[instructions.X.variant]]` that selects nothing — neither `cli`
+    /// nor `model`. It would be a second base body with no rule to choose
+    /// between them, so it is refused rather than resolved
+    /// (`docs/design/instruction-variants.md` §"The variant schema").
+    SelectorlessInstructionVariant,
     /// A `[policy.egress]` pattern the grammar cannot interpret (bad bracket
     /// form or invalid `:port` suffix). At run time such a pattern fails the
     /// decision CLOSED, so this is caught here first — at authoring time.
@@ -118,12 +128,14 @@ impl IssueKind {
                 | IssueKind::UnknownSkillRef
                 | IssueKind::UnresolvableSkillRef
                 | IssueKind::UnknownHookRef
+                | IssueKind::UnknownPackageRef
                 | IssueKind::MissingTransportFields
                 | IssueKind::UnknownTargetServer
                 | IssueKind::UnknownServerTarget
                 | IssueKind::UnknownExtraTarget
                 | IssueKind::UnknownServerOwner
                 | IssueKind::UnknownInstructionTarget
+                | IssueKind::SelectorlessInstructionVariant
                 | IssueKind::MalformedEgressPattern
                 | IssueKind::UnknownExtensionTarget
                 | IssueKind::InvalidExtensionSource
@@ -420,6 +432,26 @@ fn run<'a>(
                 ),
             }
         }
+        // W5 package refs. Unlike servers and skills there is no inline form:
+        // a package always comes from the central library, so a name that is
+        // not indexed there resolves nowhere. Checked only with a context —
+        // without a library there is nothing to check against, and reporting
+        // every package ref as unknown would be a false alarm, not a finding.
+        if let Some(cx) = ctx {
+            for pref in &profile.packages {
+                if cx.library.get_package(pref).is_none() {
+                    issues.push(
+                        Issue::new(
+                            IssueKind::UnknownPackageRef,
+                            format!("toolset '{pname}' references unknown package '{pref}'"),
+                        )
+                        .with_fix(format!(
+                            "install it into the central library, or remove '{pref}' from [profiles.{pname}] packages"
+                        )),
+                    );
+                }
+            }
+        }
     }
 
     // Instruction fragment targets: a typo'd adapter id in `[instructions.X]
@@ -445,6 +477,28 @@ fn run<'a>(
                     };
                     issues.push(Issue::new(IssueKind::UnknownInstructionTarget, msg).with_fix(fix));
                 }
+            }
+        }
+    }
+
+    // Instruction variants: a variant that selects nothing can never win — the
+    // resolver refuses to fall back to it — so a declaration carrying one is
+    // silently dead bytes. Refuse it at authoring time, where the typo is.
+    for (name, instr) in &manifest.instructions {
+        for variant in &instr.variants {
+            if variant.cli.is_none() && variant.model.is_none() {
+                issues.push(
+                    Issue::new(
+                        IssueKind::SelectorlessInstructionVariant,
+                        format!(
+                            "instruction '{name}' declares a variant with neither `cli` nor `model`                              (path '{}') — it selects nothing and can never be chosen",
+                            crate::text::sanitize_line(&variant.path)
+                        ),
+                    )
+                    .with_fix(format!(
+                        "give the variant a `cli` or a `model` selector, or move its prose into                          [instructions.{name}] path if it is meant to be the base body"
+                    )),
+                );
             }
         }
     }

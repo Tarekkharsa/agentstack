@@ -82,7 +82,10 @@ fn add_pack_writes_all_four_sections_with_instructions() {
         .instructions
         .get("linear_rules")
         .expect("instruction written");
-    assert_eq!(instr.path, "./instructions/linear_rules.md");
+    assert_eq!(
+        instr.path.as_deref(),
+        Some("./instructions/linear_rules.md")
+    );
     let instr_body = fs::read_to_string(dir.join("instructions/linear_rules.md")).unwrap();
     assert!(instr_body.starts_with("<!-- agentstack:vendor linear-pack (unofficial) -->"));
 
@@ -205,7 +208,15 @@ fn pack_instruction_carries_provenance_into_rendered_region() {
     let m = load(dir);
     let reg = Registry::load().unwrap();
     let claude = reg.get("claude-code").unwrap();
-    let plan = plan_instructions(&m, claude, Scope::Global, dir).unwrap();
+    let plan = plan_instructions(
+        &m,
+        claude,
+        Scope::Global,
+        dir,
+        &[],
+        &agentstack::instructions::Selecting::none(),
+    )
+    .unwrap();
 
     assert!(plan.fragments.contains(&"linear_rules".to_string()));
     assert!(plan

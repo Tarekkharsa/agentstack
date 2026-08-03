@@ -199,10 +199,40 @@ pub struct NativeConfig {
 /// thing to survive, not to die on. `doctor`'s own parse checks still report
 /// it. Repository content is hostile input (invariant 7) — nothing here is
 /// executed or interpolated, only counted and named.
+/// The set of server names a manifest covers: its own inline `[servers.*]`
+/// keys **plus** every name its toolsets reference, whether that name is
+/// satisfied inline or by a linked library source.
+///
+/// Referencing a library server by name has always been a way to declare it,
+/// and library-first `init` made it the common one — so a coverage check that
+/// only looked at inline keys would tell a perfectly managed project that its
+/// own servers are "not in this manifest".
+pub fn declared_server_names(
+    manifest: &crate::manifest::Manifest,
+) -> std::collections::HashSet<String> {
+    let mut names: std::collections::HashSet<String> = manifest.servers.keys().cloned().collect();
+    for name in crate::resolve::runtime_server_names(manifest, None) {
+        names.insert(crate::sources::capability_name(&name).to_string());
+    }
+    names
+}
+
 pub fn native_configs(
     registry: &crate::adapter::Registry,
     dir: &std::path::Path,
     manifest_servers: &IndexMap<String, Server>,
+    include_global: bool,
+) -> Vec<NativeConfig> {
+    let declared: std::collections::HashSet<String> = manifest_servers.keys().cloned().collect();
+    native_configs_with(registry, dir, &declared, include_global)
+}
+
+/// [`native_configs`] against an explicit set of covered names — what a caller
+/// that resolved name references (see [`declared_server_names`]) passes.
+pub fn native_configs_with(
+    registry: &crate::adapter::Registry,
+    dir: &std::path::Path,
+    manifest_servers: &std::collections::HashSet<String>,
     include_global: bool,
 ) -> Vec<NativeConfig> {
     use crate::scope::Scope;
@@ -229,7 +259,7 @@ pub fn native_configs(
                 .collect();
             let unimported: Vec<String> = servers
                 .iter()
-                .filter(|n| !manifest_servers.contains_key(*n))
+                .filter(|n| !manifest_servers.contains(*n))
                 .cloned()
                 .collect();
             out.push(NativeConfig {

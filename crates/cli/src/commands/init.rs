@@ -21,7 +21,7 @@ use crate::adapter::{extract_servers_with_skips, extract_settings, Registry};
 use crate::cli::{InitArgs, SecretStore};
 use crate::discover::{lift_secrets, merge_servers, Lifted};
 use crate::manifest::load::MANIFEST_FILE;
-use crate::manifest::model::{Manifest, Meta, Server, Targets};
+use crate::manifest::model::{Delivery, Manifest, Meta, Server, Targets};
 use crate::secret::{env_file, keychain};
 
 /// Store lifted secret values, collecting the references whose store write
@@ -130,6 +130,196 @@ fn prompt_secret_store() -> Result<SecretStore> {
     } else {
         read_numbered_secret_choice()
     }
+}
+
+/// Offer this project a varlock `.env.schema` — the opt-in for the recommended
+/// vault ([varlock.dev](https://varlock.dev)), which resolves names from
+/// 1Password, a cloud secret manager, or device-local encryption instead of a
+/// file next to the code.
+///
+/// Returns the captured pre-write state when the file was written, so the
+/// caller folds it into init's ONE undoable transaction.
+///
+/// Three silent refusals, each deliberate: nothing to declare, a `.env.schema`
+/// already present (never overwrite the user's own schema), and a
+/// non-interactive run — `confirm` answers false without prompting there, which
+/// is the CI and t3code contract, so scripted `init` writes exactly what it
+/// wrote before.
+///
+/// **Nothing here writes a secret value.** The schema declares NAMES; values
+/// stay in the vault, and a name with no value still fails closed at use time,
+/// which is the whole point of `${REF}`.
+fn offer_env_schema(dir: &Path, names: &[String]) -> Result<Option<crate::history::FileChange>> {
+    let path = dir.join(".env.schema");
+    let declared = schema_names(names);
+    if declared.is_empty() || path.exists() {
+        return Ok(None);
+    }
+    println!(
+        "\nvarlock ({}) can resolve these names from 1Password, a cloud secret \
+         manager, or device-local encryption — no values in this project at all. A \
+         .env.schema opts in; it declares names only, so it is safe to commit.",
+        "https://varlock.dev".dimmed()
+    );
+    if !crate::util::confirm::confirm(&format!(
+        "Write .env.schema declaring {}?",
+        super::count(declared.len(), "name")
+    ))? {
+        println!("  · skipped — drop a .env.schema in this project anytime to opt in.");
+        return Ok(None);
+    }
+    let change = crate::history::capture(&path, ".env.schema · varlock declarations");
+    crate::util::atomic::write(&path, &env_schema_body(&declared))
+        .with_context(|| format!("writing {}", path.display()))?;
+    println!(
+        "{}  Wrote .env.schema — `agentstack doctor` reports varlock's health from here on.",
+        "🔑".dimmed()
+    );
+    Ok(Some(change))
+}
+
+/// One imported server whose name is already taken in the target library
+/// source by a DIFFERENT definition.
+struct LibraryCollision {
+    name: String,
+    /// What the library's existing definition runs or contacts.
+    existing: String,
+    /// What this import would write in its place.
+    incoming: String,
+}
+
+/// Imported servers whose name the library already holds with different bytes
+/// (review finding 3).
+///
+/// **Identical content is not a collision.** Re-importing the same machine
+/// config into a second project is the ordinary case, and asking a question
+/// with no consequence is how a person learns to answer without reading.
+///
+/// The comparison is over the NORMALIZED definition — `toml::to_string_pretty`
+/// of the `Server` table, which is exactly the byte string `lib::add_server_def`
+/// writes and digests. Comparing raw file bytes instead would report key order
+/// or whitespace as a difference and produce that meaningless question.
+fn library_collisions(
+    lib_root: &Path,
+    servers: &IndexMap<String, Server>,
+) -> Vec<LibraryCollision> {
+    let Ok(library) = crate::library::Library::load(lib_root) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (name, incoming) in servers {
+        if library.get_server(name).is_none() {
+            continue;
+        }
+        let path = crate::resolve::library_server_path(lib_root, name);
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue; // an indexed server with no readable body is not a
+                      // definition this import can be said to overwrite
+        };
+        let Ok(existing) = toml::from_str::<Server>(&text) else {
+            continue;
+        };
+        let (Ok(a), Ok(b)) = (
+            toml::to_string_pretty(&existing),
+            toml::to_string_pretty(incoming),
+        ) else {
+            continue;
+        };
+        if a == b {
+            continue; // same definition — nothing is being replaced
+        }
+        out.push(LibraryCollision {
+            name: name.clone(),
+            existing: server_identity_line(&existing),
+            incoming: server_identity_line(incoming),
+        });
+    }
+    out
+}
+
+/// What a server does, in one line — the same two facts the import review and
+/// the trust card lead with.
+fn server_identity_line(server: &Server) -> String {
+    match server.server_type {
+        crate::manifest::ServerType::Stdio => {
+            format!("runs {}", super::trust::server_stdio_identity(server))
+        }
+        crate::manifest::ServerType::Http => {
+            format!("contacts {}", super::trust::server_http_identity(server))
+        }
+    }
+}
+
+/// The collision block, in the pre-write review: which name clashes, what the
+/// library has now, and what the import would put there instead.
+///
+/// Pure so its wording is unit-testable. Every value is hostile input (other
+/// CLIs' configs on one side, a possibly shared library folder on the other),
+/// so both sides are sanitized before display.
+fn render_library_collisions(source_name: &str, collisions: &[LibraryCollision]) -> String {
+    let mut out = format!(
+        "\n{}  {} in library source '{}' already {} a different definition:\n",
+        "⚠".yellow(),
+        super::count(collisions.len(), "name"),
+        crate::text::sanitize_line(source_name),
+        if collisions.len() == 1 {
+            "holds"
+        } else {
+            "hold"
+        }
+    );
+    for c in collisions {
+        out.push_str(&format!(
+            "      {}\n        in the library:  {}\n        this import:     {}\n",
+            crate::text::sanitize_line(&c.name),
+            crate::text::truncate_chars(&crate::text::sanitize_line(&c.existing), 64),
+            crate::text::truncate_chars(&crate::text::sanitize_line(&c.incoming), 64),
+        ));
+    }
+    out.push_str(
+        "      The library is shared: replacing a definition makes every other project \
+         that\n      pinned the old one report drift until it re-locks. Nothing is \
+         replaced without\n      a yes below.\n",
+    );
+    out
+}
+
+/// The names a schema may declare: sorted, de-duplicated, and restricted to
+/// well-formed reference names. The filter is not defensive decoration — these
+/// names come from imported third-party CLI configs, and anything that is not a
+/// `${REF}` name has no business being written into a file at all.
+fn schema_names(names: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = names
+        .iter()
+        .filter(|n| agentstack_core::refs::is_ref_name(n))
+        .cloned()
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// The `.env.schema` body: varlock's root decorators, the `# ---` divider that
+/// ends them, and one declaration per name with an EMPTY value.
+///
+/// Empty is the contract, not an omission. A value written here would be a
+/// secret serialized into the repository — the exact thing `${REF}` exists to
+/// prevent — so the file is a declaration and the vault holds the values.
+fn env_schema_body(names: &[String]) -> String {
+    let mut out = String::from(
+        "# varlock schema — https://varlock.dev\n\
+         # Written by `agentstack init`. Declares the names this project needs.\n\
+         # Values are NEVER written here: agentstack keeps ${REF} placeholders and\n\
+         # resolves them in memory at run time. Safe to commit.\n\
+         # @defaultSensitive=true\n\
+         # @defaultRequired=true\n\
+         # ---\n",
+    );
+    for name in names {
+        out.push_str(name);
+        out.push_str("=\n");
+    }
+    out
 }
 
 /// Print the three storage options' full help text plus the varlock note — the
@@ -920,8 +1110,9 @@ pub fn seed_house_rules(dir: &Path) -> Result<bool> {
     }
 
     let entry = crate::manifest::Instruction {
-        path: format!("./instructions/{HOUSE_RULES_NAME}.md"),
+        path: Some(format!("./instructions/{HOUSE_RULES_NAME}.md")),
         targets: vec!["*".into()],
+        variants: Vec::new(),
         from_user_layer: false,
     };
     let new_text = super::add::build_manifest_with(
@@ -1309,10 +1500,83 @@ version = 1
         render_managed_files(&manifest_path, &destinations, &project_root)
     );
 
+    // W4: the delivery planner's routing, stated per tool in plain language,
+    // in the same pre-write review. A fresh manifest carries no override, so
+    // this is the Automatic answer — skills and MCP servers served live to the
+    // tools that can take them, everything else written into files.
+    print!("{}", render_delivery_routing(&target_defaults));
+
     // Counts for the closing summary — `servers`/`settings` move into the
     // manifest below.
     let server_count = servers.len();
     let settings_count = settings.len();
+
+    // Library-first import (`docs/design/linked-library-sources.md` §"What
+    // `init` imports"). A server that was already configured globally in three
+    // CLIs was never this project's own content: it goes into the first linked
+    // library source, and the project references it by name. `--project-servers`
+    // keeps the old inline shape for a caller that wants it.
+    let library_import = !args.project_servers && !servers.is_empty();
+    let library_source = crate::sources::Sources::load_or_warn().primary();
+    let library_root_display = library_source.root.display().to_string();
+
+    // Review finding 3: the library is SHARED state, and a second project's
+    // import must not silently rewrite what a first project pinned. Collisions
+    // are found before anything is written, shown in the review, and answered
+    // by a person; `keep_library` names the servers whose existing definition
+    // wins. A non-interactive run answers "keep" without prompting, which is
+    // the safe default for automation — `confirm` returns false there.
+    let collisions = if library_import {
+        library_collisions(&library_source.root, &servers)
+    } else {
+        Vec::new()
+    };
+    let mut keep_library: Vec<String> = Vec::new();
+    if !collisions.is_empty() {
+        print!(
+            "{}",
+            render_library_collisions(&library_source.name, &collisions)
+        );
+        // A preview asks nothing, and `--yes` is a promise that this run does
+        // not stop to ask. Both therefore take the non-destructive answer, and
+        // say which answer they took — a scripted `init` must never be the
+        // thing that rewrites another project's pinned definition.
+        let ask = !args.dry_run && !args.yes;
+        for c in &collisions {
+            let replace = ask
+                && crate::util::confirm::confirm(&format!(
+                    "Replace the library's '{}' with the imported definition?",
+                    crate::text::sanitize_line(&c.name)
+                ))?;
+            if replace {
+                println!(
+                    "  {} '{}' will be replaced — other projects pinned to the old \
+                     definition will report drift until they re-lock.",
+                    "⚠".yellow(),
+                    crate::text::sanitize_line(&c.name)
+                );
+            } else {
+                println!(
+                    "  {} keeping the library's '{}' — this project will use it.",
+                    "·".dimmed(),
+                    crate::text::sanitize_line(&c.name)
+                );
+                keep_library.push(c.name.clone());
+            }
+        }
+    }
+
+    let (manifest_servers, profiles) = if library_import {
+        let default_toolset = crate::manifest::Profile {
+            servers: servers.keys().cloned().collect(),
+            ..Default::default()
+        };
+        let mut profiles = IndexMap::new();
+        profiles.insert("default".to_string(), default_toolset);
+        (IndexMap::new(), profiles)
+    } else {
+        (servers.clone(), IndexMap::new())
+    };
 
     // Assemble the manifest.
     let manifest = Manifest {
@@ -1321,27 +1585,41 @@ version = 1
             name: None,
             gitignore: None,
         },
-        servers,
+        servers: manifest_servers,
         skills: IndexMap::new(),
-        profiles: IndexMap::new(),
+        profiles,
         instructions: IndexMap::new(),
         settings,
         hooks: IndexMap::new(),
         extensions: IndexMap::new(),
         workflows: IndexMap::new(),
         packs: IndexMap::new(),
+        package_overrides: IndexMap::new(),
         targets: Targets {
             default: target_defaults.clone(),
         },
         policy: Default::default(),
         guard: Default::default(),
         experimental: Default::default(),
+        // Absent = Automatic: the delivery planner routes each capability by
+        // kind and harness. `init` never writes an override — the escape hatch
+        // is something a person asks for.
+        delivery: Default::default(),
     };
     let toml_text = toml::to_string_pretty(&manifest).context("serializing manifest to TOML")?;
 
     if args.dry_run {
         println!("\n{} (preview — nothing written)\n", MANIFEST_FILE.bold());
         println!("{toml_text}");
+        if library_import {
+            println!(
+                "Would write {} into library source '{}' ({}); the manifest above references \
+                 them by name.",
+                super::count(server_count, "server definition"),
+                library_source.name,
+                library_root_display
+            );
+        }
         if !lifted.is_empty() {
             // A preview never prompts, so resolve the store non-interactively.
             match preresolved_store.map_or_else(|| resolve_secret_store(args, false), Ok)? {
@@ -1456,11 +1734,79 @@ version = 1
                     refs_needing_values = lifted.iter().map(|l| l.reference.clone()).collect();
                 }
             }
+            // Varlock is the recommended vault, and `.env.schema` is how a
+            // project opts into it. Offer it here, where the names this project
+            // needs have just been discovered. Whatever the user answers, the
+            // chain and `${REF}` resolution are unchanged: this only adds a
+            // layer between env and the keychain.
+            let names: Vec<String> = lifted.iter().map(|l| l.reference.clone()).collect();
+            if let Some(change) = offer_env_schema(&dir, &names)? {
+                backups.push(change);
+            }
+        }
+
+        // The imported servers land in the first linked library source, through
+        // the one library write path (`lib::add_server_def`) rather than a
+        // second importer. Each definition file is captured first, so this stays
+        // inside init's single undoable transaction: a failure here rolls the
+        // library writes back along with the manifest.
+        if library_import {
+            // Capture BEFORE any library write — a capture taken afterwards
+            // would record the new bytes and make undo a no-op.
+            backups.push(crate::history::capture(
+                &crate::library::Library::path(&library_source.root),
+                "library · index",
+            ));
+            for (name, server) in &servers {
+                // Finding 3: a name the user chose to keep is NOT written. The
+                // project still references it, and resolution serves the
+                // library's existing definition — which is what the review said
+                // would happen.
+                if keep_library.contains(name) {
+                    continue;
+                }
+                let dest = crate::resolve::library_server_path(&library_source.root, name);
+                backups.push(crate::history::capture(&dest, format!("library · {name}")));
+                super::lib::add_server_def(
+                    &library_source.root,
+                    name,
+                    server,
+                    format!("init:{}", crate::text::sanitize_line(&library_source.name)),
+                    // `replace` is now an ANSWERED question, not a default. A
+                    // differing definition reached this line only because a
+                    // person said yes to replacing it above; an identical one
+                    // is not a replacement at all.
+                    true,
+                    true,
+                )?;
+            }
         }
 
         backups.push(crate::history::capture(&manifest_path, "manifest · import"));
         crate::util::atomic::write(&manifest_path, &toml_text)
             .with_context(|| format!("writing {}", manifest_path.display()))?;
+
+        // A manifest that references library capabilities by name needs pins
+        // before anything can serve them, and pinning is the machine's job
+        // (STRATEGY.md §"The design law": the manifest and lock are
+        // system-maintained; the one thing never automated is the yes). Without
+        // this the library-first import would end on "library server, not
+        // locked" and cost the user two extra commands for a decision they
+        // never had to make. Inline-only imports pin nothing and skip it.
+        if library_import {
+            backups.push(crate::history::capture(
+                &dir.join(agentstack_core::lock::LOCK_FILE),
+                "lockfile · import",
+            ));
+            super::lock::run(
+                &crate::cli::LockArgs {
+                    quiet: true,
+                    ..Default::default()
+                },
+                Some(&base),
+            )
+            .context("pinning the imported library servers")?;
+        }
         Ok(())
     })();
 
@@ -1526,7 +1872,7 @@ version = 1
     let trusted = if project_sourced {
         false
     } else {
-        grant_trust_for_import(&base, &toml_text, &manifest)
+        grant_trust_for_import(&base, &toml_text, &manifest, library_import)
     };
     if project_sourced {
         println!(
@@ -1571,6 +1917,9 @@ version = 1
                     .iter()
                     .flat_map(|c| c.configs.iter())
                     .all(|p| p.starts_with(&project_root)),
+                &delivery_summary_lines(&target_defaults),
+                library_import
+                    .then_some((library_source.name.as_str(), library_root_display.as_str())),
             )
         );
     }
@@ -1598,21 +1947,42 @@ version = 1
 ///
 /// Returns whether trust was actually recorded, so the closing summary can say
 /// so honestly instead of the user discovering it later.
-fn grant_trust_for_import(base: &Path, manifest_bytes: &str, manifest: &Manifest) -> bool {
+fn grant_trust_for_import(
+    base: &Path,
+    manifest_bytes: &str,
+    manifest: &Manifest,
+    // True when this same import wrote the lockfile (the library-first path).
+    // A lock THIS run produced from the manifest it just showed is part of what
+    // was reviewed; a lock that was merely lying on disk is not, and still
+    // fails closed below.
+    wrote_lock: bool,
+) -> bool {
     let dir = crate::manifest::resolve_manifest_dir(base);
     let local = dir.join(crate::manifest::load::LOCAL_FILE);
     let lock = dir.join(agentstack_core::lock::LOCK_FILE);
-    if local.exists() || lock.exists() {
+    if local.exists() {
         return false;
     }
+    let lock_bytes = match (wrote_lock, lock.exists()) {
+        // Our own pins, read back from the file we just wrote — the same rule
+        // the manifest half follows (bind to the bytes on disk now, so a later
+        // edit reads `Changed` instead of being silently blessed).
+        (true, true) => match std::fs::read(&lock) {
+            Ok(bytes) => Some(bytes),
+            Err(_) => return false,
+        },
+        (_, true) => return false,
+        (_, false) => None,
+    };
 
     // The snapshot this grant binds to: our bytes, and the explicit absence of
-    // the other two — which is what `ConsentSnapshot::read` would observe a
-    // moment from now, so `digest_for` agrees and the project reads `Trusted`.
+    // the ones we did not write — which is what `ConsentSnapshot::read` would
+    // observe a moment from now, so `digest_for` agrees and the project reads
+    // `Trusted`.
     let snapshot = crate::trust::ConsentSnapshot {
         manifest: manifest_bytes.as_bytes().to_vec(),
         local: None,
-        lock: None,
+        lock: lock_bytes,
     };
 
     // The reviewed surface, in the same shape `trust`'s own review records, so
@@ -1620,29 +1990,51 @@ fn grant_trust_for_import(base: &Path, manifest_bytes: &str, manifest: &Manifest
     // baseline: per-server identity is the command line for stdio (what
     // actually runs) or the URL for http, plus one aggregate line for the
     // secret refs.
-    let mut surface: Vec<crate::trust::SurfaceItem> = manifest
-        .servers
-        .iter()
-        .map(|(name, server)| crate::trust::SurfaceItem {
+    //
+    // Resolved, not read off `manifest.servers` (review finding 2). Library-first
+    // import moves every imported server OUT of `[servers.*]` and into a linked
+    // library source, leaving the default toolset to reference them by name — so
+    // reading the manifest map here recorded an EMPTY surface on the default
+    // path, while the digest above blessed every one of those servers through
+    // the lock. A re-gate then had nothing to diff against: each server could
+    // only ever read `+ added`, never `~ changed`, which is the one thing the
+    // diff exists to say. `effective_runtime_servers` is the resolver `trust`'s
+    // own review walks and the gateway serves from, so this surface names the
+    // definitions that will actually run.
+    let library = crate::library::Library::load_default_or_warn();
+    let lib_home = crate::util::paths::lib_home();
+    let resolved = crate::resolve::effective_runtime_servers(manifest, &library, &lib_home, None);
+    let mut surface: Vec<crate::trust::SurfaceItem> = Vec::with_capacity(resolved.len());
+    for (name, r) in resolved {
+        // Fail closed. A server that does not resolve is a server this grant
+        // cannot describe, and recording a surface that is missing an entry the
+        // digest blesses is exactly the defect above. Withhold the grant and
+        // let the ordinary `agentstack trust` review ask the question — the
+        // documented cost of not granting is one prompt.
+        let Ok(r) = r else {
+            return false;
+        };
+        surface.push(crate::trust::SurfaceItem {
             kind: "server".to_string(),
-            name: name.clone(),
-            identity: match server.server_type {
-                crate::manifest::ServerType::Stdio => format!(
-                    "{} {}",
-                    server.command.as_deref().unwrap_or("?"),
-                    server.args.join(" ")
-                ),
+            name,
+            // The SAME two helpers `trust`'s review marks with, so the baseline
+            // recorded here and the identity computed at the next re-gate are
+            // byte-identical by construction.
+            identity: match r.server.server_type {
+                crate::manifest::ServerType::Stdio => {
+                    super::trust::server_stdio_identity(&r.server)
+                }
                 crate::manifest::ServerType::Http => {
-                    server.url.as_deref().unwrap_or("?").to_string()
+                    super::trust::server_http_identity(&r.server).to_string()
                 }
             },
-            // Servers are pinned through the lock's own server entries, not
-            // through a content snapshot — a server has no body of bytes for a
-            // re-gate to diff, only a command line, which `identity` already
-            // carries.
+            // `None`, matching what `trust`'s review records for a server:
+            // `identity` is the diff key, and a server has no body of bytes for
+            // a re-gate to diff. Recording a pin here that the review does not
+            // would make every server read `~ changed` on the first re-trust.
             pin: None,
-        })
-        .collect();
+        });
+    }
     let refs = manifest.referenced_secrets();
     if !refs.is_empty() {
         surface.push(crate::trust::SurfaceItem {
@@ -1661,6 +2053,10 @@ fn grant_trust_for_import(base: &Path, manifest_bytes: &str, manifest: &Manifest
 /// unit-testable without touching real CLI configs. One block, five facts:
 /// manifest path, source CLIs, imported counts, secrets still needing values,
 /// and the next commands (`apply --write`, then `doctor`).
+// Every parameter here is one display fact the summary states, and the function
+// is pure so those facts stay testable. A struct would name the same eight
+// values once more for a single call site.
+#[allow(clippy::too_many_arguments)]
 fn render_import_summary(
     manifest_path: &str,
     sources: &[String],
@@ -1674,6 +2070,13 @@ fn render_import_summary(
     // `--scope global` would send the user to write machine-wide files they
     // never asked about.
     sources_are_project_scope: bool,
+    // The delivery planner's per-tool routing, already rendered as
+    // "<tool> — <what goes live> · <what is written>" lines. Empty when no tool
+    // could be described, which is the only honest way to say nothing here.
+    delivery_lines: &[String],
+    // Where the imported servers landed: the linked library source's name and
+    // folder, or `None` when `--project-servers` kept them inline.
+    library_dest: Option<(&str, &str)>,
 ) -> String {
     let mut out = String::new();
     out.push_str("\nImport complete.\n");
@@ -1689,6 +2092,14 @@ fn render_import_summary(
         ));
     }
     out.push_str(&format!("  Imported:  {imported}\n"));
+    // Library-first: say where the reusable half went, so nobody has to guess
+    // why the manifest lists names instead of commands.
+    if let Some((name, root)) = library_dest {
+        out.push_str(&format!(
+            "  Library:   the servers landed in '{name}' ({root}); the manifest\n\
+             \x20            references them by name, so this project stays clean\n"
+        ));
+    }
     // M4: the CLIs deliberately left out of `[targets] default`. Naming them —
     // and why — is what keeps "we only targeted two of your six tools" from
     // looking like a detection failure. There is no command that edits
@@ -1733,8 +2144,26 @@ fn render_import_summary(
              \x20            manages them from this manifest, so there is no second copy.\n",
         );
     }
+    // W4: the routing, per tool, before the next-step list — so "apply --write"
+    // is read as the command for the rendered lane rather than as the command
+    // for everything. Skills and MCP servers reach an MCP-capable tool live;
+    // saying nothing here would let `apply --write` keep implying otherwise.
+    if !delivery_lines.is_empty() {
+        out.push_str("  Delivery:  ");
+        for (i, line) in delivery_lines.iter().enumerate() {
+            if i > 0 {
+                out.push_str("             ");
+            }
+            out.push_str(line);
+            out.push('\n');
+        }
+        out.push_str(
+            "             agentstack delivery   (the routing per tool, and how to write \
+             files instead)\n",
+        );
+    }
     out.push_str("  Undo:      agentstack restore --last --write\n");
-    out.push_str("  Next:      agentstack apply --write   (render this setup into your CLIs)\n");
+    out.push_str("  Next:      agentstack apply --write   (write the files your tools read)\n");
     out.push_str("             agentstack doctor          (check the result)\n");
     // Toolsets are deliberately NOT offered here (review finding H3). Import is
     // the moment a user has just learned what the manifest is; a first-time user
@@ -1862,9 +2291,83 @@ fn render_managed_files(
     out
 }
 
+/// The delivery planner's answer for a fresh project, one line per tool
+/// (W4, `docs/design/automatic-delivery.md` §"The decision").
+///
+/// Two things make this honest rather than decorative:
+///
+/// - it says *served live* and *written to files* per tool, so a project in
+///   both lanes at once — the normal case — reads as being in both;
+/// - it never claims "0 files". The `rendered lane:` line names what really
+///   gets written and where, and the live-lane note names what stays behind in
+///   the project even when nothing is rendered for a tool.
+///
+/// A fresh manifest carries no `[delivery]` override, so this is Automatic by
+/// construction; the override is something a person asks for later.
+fn delivery_summary_lines(target_ids: &[String]) -> Vec<String> {
+    let Ok(registry) = Registry::load() else {
+        return Vec::new();
+    };
+    let plan = crate::delivery::Plan::build(&Delivery::default(), &registry, target_ids);
+    super::delivery::summary_lines(&plan)
+}
+
+fn render_delivery_routing(target_ids: &[String]) -> String {
+    let Ok(registry) = Registry::load() else {
+        // The routing is a statement, not a gate: a registry we cannot load is
+        // a reason to say nothing, never a reason to guess.
+        return String::new();
+    };
+    let plan = crate::delivery::Plan::build(&Delivery::default(), &registry, target_ids);
+    if plan.harnesses.is_empty() {
+        return String::new();
+    }
+
+    let mut out = String::new();
+    out.push_str("🚚  How each tool gets them:\n");
+    let width = plan
+        .harnesses
+        .iter()
+        .map(|h| h.display.len())
+        .max()
+        .unwrap_or(0);
+    for h in &plan.harnesses {
+        out.push_str(&format!("      {:width$}   {}\n", h.display, h.sentence()));
+    }
+    if plan.has_dynamic_lane() {
+        out.push_str(&format!("      {}\n", crate::delivery::ZERO_ARTIFACTS));
+    }
+    if let Some(line) = crate::delivery::rendered_lane_line(&plan) {
+        out.push_str(&format!("      {line}\n"));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// W4: the routing screen states both lanes per tool, names what is really
+    /// written, and never degrades into a "0 files" claim.
+    #[test]
+    fn delivery_routing_states_both_lanes_and_never_claims_zero_files() {
+        let text = render_delivery_routing(&["claude-code".to_string()]);
+        assert!(text.contains("Claude Code"), "{text}");
+        assert!(text.contains("served live"), "{text}");
+        assert!(text.contains("rendered lane:"), "{text}");
+        assert!(text.contains("0 project artifacts"), "{text}");
+        assert!(!text.contains("0 files"), "{text}");
+        // An instruction is never described as going live. Each harness row
+        // keeps its lanes in separate clauses, so the live clause can be read
+        // on its own — and it must never name a file-only kind.
+        for line in text.lines().filter(|l| l.contains("served live")) {
+            let live_clause = line.split(" · ").find(|c| c.contains("served live"));
+            let live_clause = live_clause.unwrap_or(line);
+            assert!(!live_clause.contains("house rules"), "{live_clause}");
+            assert!(!live_clause.contains("settings"), "{live_clause}");
+            assert!(!live_clause.contains("hooks"), "{live_clause}");
+        }
+    }
 
     /// Consent-fidelity witness (independent review, 2026-07-23): the plan
     /// digest must cover the FULL import the write performs, not the display
@@ -1952,6 +2455,69 @@ mod tests {
         );
     }
 
+    /// Review finding 3: the collision block names the clash, BOTH sides, and
+    /// what replacing costs. A block that named only the clash would leave the
+    /// person answering a yes/no with nothing to answer it from.
+    #[test]
+    fn the_collision_block_names_both_sides_and_the_cost() {
+        let out = render_library_collisions(
+            "local",
+            &[LibraryCollision {
+                name: "search".into(),
+                existing: "runs npx -y search-mcp".into(),
+                incoming: "runs npx -y search-FORK".into(),
+            }],
+        );
+        assert!(out.contains("search"), "{out}");
+        assert!(
+            out.contains("in the library:  runs npx -y search-mcp"),
+            "{out}"
+        );
+        assert!(
+            out.contains("this import:     runs npx -y search-FORK"),
+            "{out}"
+        );
+        assert!(
+            out.contains("report drift until it re-locks"),
+            "the cost of replacing is stated, not implied: {out}"
+        );
+    }
+
+    /// Hostile input on both sides: the library folder may be someone else's,
+    /// and the incoming definition came from another CLI's config file.
+    #[test]
+    fn the_collision_block_sanitizes_both_sides() {
+        let out = render_library_collisions(
+            "src\u{1b}[31m",
+            &[LibraryCollision {
+                name: "ev\u{1b}[2Kil".into(),
+                existing: "runs a\nb".into(),
+                incoming: "runs c\u{7}d".into(),
+            }],
+        );
+        // Every hostile value is neutralized. (The block's own `⚠` still
+        // carries this crate's colour codes — those are ours, not input.)
+        assert!(
+            out.contains("source 'src'"),
+            "the source name is stripped: {out:?}"
+        );
+        assert!(
+            out.contains("      evil\n"),
+            "the server name is stripped: {out:?}"
+        );
+        assert!(
+            !out.contains("\u{1b}[2K"),
+            "no cursor control from input: {out:?}"
+        );
+        assert!(
+            !out.contains("\u{1b}[31m"),
+            "no colour injection from input: {out:?}"
+        );
+        assert!(!out.contains('\u{7}'), "no bell from input: {out:?}");
+        // A newline inside a value cannot forge a line of its own.
+        assert!(out.contains("runs a b"), "{out:?}");
+    }
+
     /// Stage 1.2: imported servers are listed BY NAME with what each runs or
     /// contacts, before anything is written. Hostile names/targets are
     /// sanitized and bounded.
@@ -2026,6 +2592,11 @@ mod tests {
             &["GITHUB_TOKEN".to_string()],
             &["Gemini CLI".to_string(), "OpenCode".to_string()],
             false,
+            &[
+                "Claude Code — skills + MCP servers served live · house rules written to files"
+                    .to_string(),
+            ],
+            None,
         );
         assert!(out.contains("Manifest:  /tmp/proj/.agentstack/agentstack.toml"));
         assert!(out.contains("From:      Claude Code · Codex CLI"));
@@ -2035,6 +2606,25 @@ mod tests {
         assert!(out.contains("agentstack restore --last --write"));
         assert!(out.contains("agentstack apply --write"));
         assert!(out.contains("agentstack doctor"));
+
+        // W4: the routing is stated before the next-step list, so `apply
+        // --write` reads as the rendered lane's command rather than as the
+        // command for everything. A summary with no routing lines prints no
+        // Delivery block at all — never an empty one.
+        assert!(out.contains("Delivery:  Claude Code — skills + MCP servers served live"));
+        assert!(out.contains("agentstack delivery"));
+        assert!(!render_import_summary(
+            "/m",
+            &["Claude Code".to_string()],
+            1,
+            0,
+            &[],
+            &[],
+            false,
+            &[],
+            None,
+        )
+        .contains("Delivery:"));
 
         // F09: import copies, it does not move — say so, and name the command
         // that brings the originals under the same manifest.
@@ -2057,28 +2647,64 @@ mod tests {
         assert!(out.contains("agentstack apply --target <id> --write"));
 
         // Nothing left out → no "also seen" line at all, not an empty one.
-        let all_contributed =
-            render_import_summary("/m", &["Claude Code".to_string()], 2, 0, &[], &[], false);
+        let all_contributed = render_import_summary(
+            "/m",
+            &["Claude Code".to_string()],
+            2,
+            0,
+            &[],
+            &[],
+            false,
+            &[],
+            None,
+        );
         assert!(!all_contributed.contains("Also seen:"));
 
         // Nothing pending → no secrets section at all, not an empty one.
-        let clean =
-            render_import_summary("/m", &["Claude Code".to_string()], 1, 0, &[], &[], false);
+        let clean = render_import_summary(
+            "/m",
+            &["Claude Code".to_string()],
+            1,
+            0,
+            &[],
+            &[],
+            false,
+            &[],
+            None,
+        );
         assert!(!clean.contains("Secrets:"));
         assert!(!clean.contains("settings from"));
         assert!(clean.contains("agentstack doctor"));
         assert!(!clean.contains("create-profile"));
 
         // No servers at all → nothing was copied, so no duplication note.
-        let empty =
-            render_import_summary("/m", &["Claude Code".to_string()], 0, 1, &[], &[], false);
+        let empty = render_import_summary(
+            "/m",
+            &["Claude Code".to_string()],
+            0,
+            1,
+            &[],
+            &[],
+            false,
+            &[],
+            None,
+        );
         assert!(!empty.contains("the CLI configs above are unchanged"));
         assert!(!empty.contains("create-profile"));
 
         // Server count and whether a name was available used to gate the
         // toolset offer; now no input produces one.
-        let unnamed =
-            render_import_summary("/m", &["Claude Code".to_string()], 4, 0, &[], &[], false);
+        let unnamed = render_import_summary(
+            "/m",
+            &["Claude Code".to_string()],
+            4,
+            0,
+            &[],
+            &[],
+            false,
+            &[],
+            None,
+        );
         assert!(!unnamed.contains("create-profile"));
     }
 
@@ -2149,6 +2775,7 @@ mod tests {
             plan: false,
             secrets: None,
             no_keychain: false,
+            project_servers: false,
             yes: false,
             consented_plan: None,
         };
@@ -2179,6 +2806,7 @@ mod tests {
             plan: true,
             secrets: None,
             no_keychain: false,
+            project_servers: false,
             yes: false,
             consented_plan: None,
         };
@@ -2205,6 +2833,7 @@ mod tests {
             plan: false,
             secrets: None,
             no_keychain: false,
+            project_servers: false,
             yes: false,
             consented_plan: None,
         };
@@ -2231,5 +2860,31 @@ mod tests {
             std::fs::read_to_string(dir.path().join("agentstack.toml")).unwrap(),
             "version = 1\n"
         );
+    }
+
+    /// The vault opt-in declares NAMES. A value here would be a secret
+    /// serialized into the repository — the precise thing `${REF}` exists to
+    /// prevent — so this asserts the file can never carry one, and that the
+    /// names it does carry are well-formed and de-duplicated.
+    #[test]
+    fn the_env_schema_declares_names_and_never_a_value() {
+        let names = schema_names(&[
+            "B_TOKEN".into(),
+            "A_TOKEN".into(),
+            "B_TOKEN".into(),
+            "not a ref".into(),
+            "$(rm -rf /)".into(),
+        ]);
+        assert_eq!(names, vec!["A_TOKEN".to_string(), "B_TOKEN".to_string()]);
+        let body = env_schema_body(&names);
+        assert!(body.contains("\n# ---\n"), "{body}");
+        assert!(body.contains("\nA_TOKEN=\n"), "{body}");
+        assert!(body.contains("\nB_TOKEN=\n"), "{body}");
+        for line in body.lines().filter(|l| !l.starts_with('#')) {
+            assert!(
+                line.is_empty() || line.ends_with('='),
+                "every declaration ends at the `=`: {line:?}"
+            );
+        }
     }
 }

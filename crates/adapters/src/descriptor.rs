@@ -180,6 +180,37 @@ impl AdapterDescriptor {
             .and_then(|s| s.project_dir.as_ref())
             .is_some()
     }
+
+    /// This CLI's own name for one selection dimension, or `None` when its
+    /// settings catalog has no such notion. Pure lookup, for surfaces that
+    /// report what a harness can and cannot carry without needing a value.
+    pub fn selection_key(&self, dimension: Dimension) -> Option<&str> {
+        self.settings.as_ref().and_then(|s| s.key_for(dimension))
+    }
+
+    /// What this harness can do with `value` for `dimension` on ONE headless
+    /// launch — the single entry point to a substituted selection fragment.
+    ///
+    /// `Ok(Selection::Args(..))` is the deliverable case, and it is the ONLY
+    /// path that substitutes: the value has passed [`check_selection_value`]
+    /// against this adapter's own catalog by then, which is what licenses the
+    /// inside-a-token substitution [`SelectionSpec`] documents. The other two
+    /// `Ok` answers are honest capability facts for a caller to report, not
+    /// swallow. `Err` is a value this adapter's catalog refuses — a manifest
+    /// authoring error, named in full rather than silently dropped.
+    pub fn select(&self, dimension: Dimension, value: &str) -> Result<Selection, String> {
+        let Some(key) = self.selection_key(dimension) else {
+            return Ok(Selection::NoNotion);
+        };
+        let Some(spec) = self.headless.as_ref().and_then(|h| h.selection(dimension)) else {
+            return Ok(Selection::NotPerLaunch {
+                key: key.to_string(),
+            });
+        };
+        let field = self.settings.as_ref().and_then(|s| s.field(key));
+        check_selection_value(&self.id, dimension, key, field, value)?;
+        Ok(Selection::Args(spec.argv(value)))
+    }
 }
 
 /// How to invoke a CLI headless: an argv template where each element is either
@@ -205,6 +236,8 @@ impl AdapterDescriptor {
 pub struct HeadlessSpec {
     args: Vec<String>,
     mcp_injection: Option<McpInjectionSpec>,
+    model_selection: Option<SelectionSpec>,
+    effort_selection: Option<SelectionSpec>,
 }
 
 /// The unvalidated wire shape `HeadlessSpec` is parsed through.
@@ -214,6 +247,10 @@ struct RawHeadlessSpec {
     args: Vec<String>,
     #[serde(default)]
     mcp_injection: Option<McpInjectionSpec>,
+    #[serde(default)]
+    model_selection: Option<RawSelectionSpec>,
+    #[serde(default)]
+    effort_selection: Option<RawSelectionSpec>,
 }
 
 /// The placeholder a headless argv element may consist of — the WHOLE element,
@@ -280,9 +317,23 @@ impl TryFrom<RawHeadlessSpec> for HeadlessSpec {
                  would end option parsing early and demote later options to positionals"
             ));
         }
+        // The two per-launch selection fragments validate the same way, each
+        // against its OWN placeholder — done here (rather than in a plain
+        // `Deserialize` impl on `SelectionSpec`) because only the enclosing
+        // field name says which dimension a fragment is for.
+        let model_selection = raw
+            .model_selection
+            .map(|r| SelectionSpec::validated(r, Dimension::Model))
+            .transpose()?;
+        let effort_selection = raw
+            .effort_selection
+            .map(|r| SelectionSpec::validated(r, Dimension::Effort))
+            .transpose()?;
         Ok(HeadlessSpec {
             args: raw.args,
             mcp_injection: raw.mcp_injection,
+            model_selection,
+            effort_selection,
         })
     }
 }
@@ -326,6 +377,284 @@ impl HeadlessSpec {
     pub fn mcp_injection(&self) -> Option<&McpInjectionSpec> {
         self.mcp_injection.as_ref()
     }
+
+    /// The per-launch selection fragment for one dimension, if this harness
+    /// declared a CONFIRMED way to select it at launch. `None` means exactly
+    /// that and nothing more: the harness may still have the setting (see
+    /// [`AdapterDescriptor::selection_key`]) — it just has no flag that
+    /// applies it to a single non-interactive run, and writing a governed
+    /// child's choice into the CLI's persistent settings file is not an
+    /// option. Callers report that; they never guess a flag.
+    pub fn selection(&self, dimension: Dimension) -> Option<&SelectionSpec> {
+        match dimension {
+            Dimension::Model => self.model_selection.as_ref(),
+            Dimension::Effort => self.effort_selection.as_ref(),
+        }
+    }
+}
+
+// ─────────────────── per-launch model / effort selection ────────────────────
+
+/// The placeholder a `headless.model_selection` fragment substitutes the
+/// chosen model into.
+pub const MODEL_PLACEHOLDER: &str = "{model}";
+
+/// The placeholder a `headless.effort_selection` fragment substitutes the
+/// chosen reasoning-effort level into.
+pub const EFFORT_PLACEHOLDER: &str = "{effort}";
+
+/// The two per-launch choices a workflow role makes about the child it spawns:
+/// WHICH model runs, and HOW MUCH reasoning effort it spends.
+///
+/// A dimension is deliberately not a per-CLI branch. Each adapter declares in
+/// its OWN descriptor what it calls the setting (`settings.model_key` /
+/// `settings.effort_key`, which must name a key the settings catalog already
+/// documents) and how to select it for one launch
+/// (`headless.model_selection` / `headless.effort_selection`). Nothing on the
+/// delivery path names a CLI, so supporting a new harness stays a YAML edit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Dimension {
+    Model,
+    Effort,
+}
+
+impl Dimension {
+    /// The dimension's name in user-facing sentences.
+    pub fn label(self) -> &'static str {
+        match self {
+            Dimension::Model => "model",
+            Dimension::Effort => "effort",
+        }
+    }
+
+    /// The placeholder its `*_selection` fragment substitutes.
+    pub fn placeholder(self) -> &'static str {
+        match self {
+            Dimension::Model => MODEL_PLACEHOLDER,
+            Dimension::Effort => EFFORT_PLACEHOLDER,
+        }
+    }
+
+    /// The `headless.*` descriptor field, for errors that point at the YAML.
+    fn selection_field(self) -> &'static str {
+        match self {
+            Dimension::Model => "model_selection",
+            Dimension::Effort => "effort_selection",
+        }
+    }
+
+    /// The `settings.*` descriptor field naming the catalog key.
+    pub fn settings_key_field(self) -> &'static str {
+        match self {
+            Dimension::Model => "settings.model_key",
+            Dimension::Effort => "settings.effort_key",
+        }
+    }
+
+    /// Both dimensions, in the order surfaces report them.
+    pub const ALL: [Dimension; 2] = [Dimension::Model, Dimension::Effort];
+}
+
+/// How a harness selects a model or an effort level FOR ONE LAUNCH: extra argv
+/// elements spliced into the options region — exactly where
+/// [`McpInjectionSpec`]'s are, and before the `--` guard for the same reason —
+/// with one occurrence of the dimension's placeholder standing in for the
+/// chosen value.
+///
+/// **One deliberate difference from every other placeholder in this file:** the
+/// value MAY be substituted inside a larger argv token (`-c model={model}`),
+/// because that is the only shape Codex's `-c key=value` override accepts.
+/// Splicing a value into the middle of a token is precisely what rule 7 forbids
+/// for repository content, and it is safe here for one reason only: the value
+/// is checked against THIS adapter's own settings catalog before substitution
+/// (see [`AdapterDescriptor::select`]), so it is either one of the `enum`
+/// options the descriptor itself lists, or a bounded string over a conservative
+/// charset that contains no whitespace, no `=`, and no shell metacharacter.
+/// Remove that check and this becomes an injection point into the child's own
+/// config-override parser. (There is no shell anywhere on the path either way —
+/// each element reaches `execve` whole.)
+///
+/// Validated in `try_from` on the enclosing [`HeadlessSpec`], so every parse
+/// path — embedded descriptors, user drop-ins, direct `serde_yaml::from_str` —
+/// refuses a malformed fragment at LOAD rather than at launch.
+#[derive(Debug, Clone)]
+pub struct SelectionSpec {
+    args: Vec<String>,
+    dimension: Dimension,
+}
+
+/// The unvalidated wire shape a [`SelectionSpec`] is parsed through. It has no
+/// `Deserialize` route of its own into a validated spec: only
+/// [`HeadlessSpec`]'s `try_from` builds one, because only the field name it was
+/// read from says which dimension the fragment belongs to.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawSelectionSpec {
+    args: Vec<String>,
+}
+
+impl SelectionSpec {
+    fn validated(raw: RawSelectionSpec, dimension: Dimension) -> Result<Self, String> {
+        let field = dimension.selection_field();
+        let placeholder = dimension.placeholder();
+        // A fragment with no arguments would select nothing while claiming the
+        // harness can select — the exact silent-no-op this task forbids.
+        if raw.args.is_empty() {
+            return Err(format!(
+                "{field} args must not be empty — a fragment that carries no argv elements \
+                 would silently select nothing"
+            ));
+        }
+        let mut occurrences = 0usize;
+        for a in &raw.args {
+            if a == OPTIONS_TERMINATOR {
+                // Same reason as `mcp_injection`: the fragment is spliced into
+                // the OPTIONS region, and a `--` there would demote every flag
+                // after it — including the prompt guard — to positional text.
+                return Err(format!(
+                    "{field} args may not contain a literal {OPTIONS_TERMINATOR:?} — an \
+                     end-of-options separator inside the options region would demote the \
+                     flags after it to positionals"
+                ));
+            }
+            occurrences += a.matches(placeholder).count();
+            // Every OTHER known placeholder is a descriptor bug here: this
+            // fragment is substituted with one value and nothing else, so a
+            // stray `{prompt}` or `{mcp_config_path}` would reach the child
+            // verbatim as a bogus literal.
+            for other in [
+                PROMPT_PLACEHOLDER,
+                MCP_CONFIG_PATH_PLACEHOLDER,
+                MCP_SERVERS_TOML_PLACEHOLDER,
+                MODEL_PLACEHOLDER,
+                EFFORT_PLACEHOLDER,
+            ] {
+                if other != placeholder && a.contains(other) {
+                    return Err(format!(
+                        "{field} arg {a:?} contains {other} — only {placeholder} is substituted \
+                         here, so any other placeholder would reach the harness verbatim"
+                    ));
+                }
+            }
+            if a != placeholder && a.starts_with('{') && a.ends_with('}') {
+                return Err(format!(
+                    "{field} arg {a:?} is not a known placeholder — only {placeholder} is \
+                     recognized in this fragment"
+                ));
+            }
+        }
+        // Zero occurrences would drop the value; more than one has no defined
+        // meaning (which copy is the value, which is a literal?).
+        if occurrences != 1 {
+            return Err(format!(
+                "{field} args must contain exactly one {placeholder} occurrence (found \
+                 {occurrences})"
+            ));
+        }
+        Ok(SelectionSpec {
+            args: raw.args,
+            dimension,
+        })
+    }
+
+    /// Which dimension this fragment carries.
+    pub fn dimension(&self) -> Dimension {
+        self.dimension
+    }
+
+    /// Substitute an ALREADY-VALIDATED value. Private on purpose: the only
+    /// route to a substituted fragment is [`AdapterDescriptor::select`], which
+    /// runs the catalog check first — see this type's docstring for why that
+    /// ordering is the whole safety argument.
+    fn argv(&self, value: &str) -> Vec<String> {
+        self.args
+            .iter()
+            .map(|a| a.replace(self.dimension.placeholder(), value))
+            .collect()
+    }
+}
+
+/// The upper bound on a free-form (non-`enum`) selection value, in bytes.
+/// A model name is a short identifier; anything longer is not one, and an
+/// unbounded value spliced into an argv token is unbounded input reaching a
+/// child's parser (rule 7: bound it).
+pub const MAX_SELECTION_VALUE_BYTES: usize = 64;
+
+/// The conservative charset a free-form selection value may draw from: ASCII
+/// alphanumerics plus the punctuation real model ids actually use
+/// (`claude-opus-4-5`, `openai/gpt-5.5`, `anthropic:claude@latest`). No
+/// whitespace, no `=`, no quote, no shell metacharacter — which is what makes
+/// substituting the value INSIDE a `-c key=value` token safe.
+fn selection_char_permitted(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ':' | '/' | '@')
+}
+
+/// Check one declared value against the adapter's OWN settings catalog before
+/// it is ever substituted into an argv token.
+///
+/// Two rules, in order: an `enum` field is authoritative (the value must be one
+/// of the options the descriptor lists — the CLI would reject anything else
+/// anyway, and we would rather refuse loudly here than launch a child that
+/// dies on its own config parse); anything else falls back to the conservative
+/// bounded charset above. Errors name the adapter, the setting key, the
+/// offending value, and the legal set, because a refusal a user cannot act on
+/// is a worse outcome than the misconfiguration.
+fn check_selection_value(
+    adapter: &str,
+    dimension: Dimension,
+    key: &str,
+    field: Option<&SettingField>,
+    value: &str,
+) -> Result<(), String> {
+    let label = dimension.label();
+    if let Some(f) = field {
+        if f.kind == SettingKind::Enum {
+            if f.options.iter().any(|o| o == value) {
+                return Ok(());
+            }
+            return Err(format!(
+                "{adapter} cannot take {label} {value:?}: its `{key}` setting is an enum whose \
+                 legal values are {}",
+                if f.options.is_empty() {
+                    "(none declared)".to_string()
+                } else {
+                    f.options.join(", ")
+                }
+            ));
+        }
+    }
+    if value.is_empty() || value.len() > MAX_SELECTION_VALUE_BYTES {
+        return Err(format!(
+            "{adapter} cannot take {label} {value:?} for its `{key}` setting: a free-form \
+             selection value must be 1..={MAX_SELECTION_VALUE_BYTES} bytes long"
+        ));
+    }
+    if !value.chars().all(selection_char_permitted) {
+        return Err(format!(
+            "{adapter} cannot take {label} {value:?} for its `{key}` setting: a free-form \
+             selection value may only use ASCII letters, digits, and '. _ - : / @' — the value \
+             is spliced into an argv token, so the charset is the bound that keeps it inert"
+        ));
+    }
+    Ok(())
+}
+
+/// What one adapter can do with a per-role model/effort value. Three answers,
+/// and only the first one launches with the value applied — the other two are
+/// facts a surface must SAY, never swallow (rule 8: claims match enforcement).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Selection {
+    /// Deliverable: these argv elements carry the validated value and splice
+    /// into the options region.
+    Args(Vec<String>),
+    /// The harness's settings catalog names no key for this dimension at all —
+    /// it has no notion of it, so there is nothing to select.
+    NoNotion,
+    /// The harness HAS the setting (its catalog names `key`) but declares no
+    /// confirmed way to select it for a single launch. The value would only
+    /// apply if written into that CLI's persistent settings file, which a
+    /// governed child run must never do.
+    NotPerLaunch { key: String },
 }
 
 /// The placeholder for a per-run MCP config FILE the launcher renders into the
@@ -643,6 +972,52 @@ pub struct InstructionsSpec {
     /// Project instruction file relative to the repo (e.g. `CLAUDE.md`).
     #[serde(default)]
     pub project: Option<String>,
+    /// A **live** (non-file) channel this harness can take instruction content
+    /// through, and how well that is actually known
+    /// (`docs/design/instruction-variants.md` §"Channels: confirmation-gated").
+    ///
+    /// Absent means no live channel is claimed at all. This lives on the
+    /// descriptor so that adding a harness — or upgrading a channel from
+    /// `unconfirmed` to `confirmed` — is a YAML edit plus a line of evidence,
+    /// with no branch anywhere in the delivery path that names a CLI.
+    #[serde(default)]
+    pub live: Option<LiveInstructionChannel>,
+}
+
+/// How well a harness is known to consume a live instruction channel.
+///
+/// Two states, and the difference is the whole honesty rule: `Confirmed` means
+/// somebody observed it working; `Unconfirmed` means documented or
+/// protocol-level and never verified here. An unconfirmed channel is never used
+/// as though it worked, and no surface may present it as confirmed.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Confirmation {
+    Confirmed,
+    Unconfirmed,
+}
+
+impl Confirmation {
+    pub fn slug(self) -> &'static str {
+        match self {
+            Confirmation::Confirmed => "confirmed",
+            Confirmation::Unconfirmed => "unconfirmed",
+        }
+    }
+}
+
+/// One live instruction channel a harness declares.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LiveInstructionChannel {
+    /// Machine id of the channel (`mcp-instructions`).
+    pub channel: String,
+    /// Human name of the channel, for the sentences surfaces print.
+    pub display: String,
+    pub confirmation: Confirmation,
+    /// Why the confirmation state is what it is — the evidence, in one line.
+    #[serde(default)]
+    pub note: Option<String>,
 }
 
 impl InstructionsSpec {
@@ -672,20 +1047,96 @@ pub struct ExtensionsSpec {
 /// Native settings-file locations for a CLI (permissions, feature flags, etc.).
 /// Distinct from the MCP config file; merged non-destructively at the top level.
 #[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "RawSettingsSpec")]
 pub struct SettingsSpec {
     /// File format (json for Claude `settings.json`, toml for Codex `config.toml`).
     pub format: Format,
     /// Global settings file (e.g. `~/.claude/settings.json`).
     pub global: String,
     /// Project settings file relative to the repo (e.g. `.claude/settings.json`).
-    #[serde(default)]
     pub project: Option<String>,
     /// Curated catalog of this CLI's known settings, so external UIs can render
     /// typed controls (toggles / dropdowns) instead of a raw JSON box. Keys not
     /// listed here are still honored — they're just edited by hand.
-    #[serde(default)]
     pub fields: Vec<SettingField>,
+    /// Which catalog key means "which model", if this CLI has such a notion.
+    ///
+    /// A POINTER into `fields`, never a second copy of it: the catalog is
+    /// already the authority on what this CLI calls its settings and which
+    /// values are legal, so naming the key here buys per-role value checking
+    /// (an `enum` field's `options`, a `string` field's charset bound) with no
+    /// duplicated knowledge to drift. Absent = this harness has no notion of a
+    /// model at all, which surfaces report rather than hide.
+    pub model_key: Option<String>,
+    /// Which catalog key means "how much reasoning effort" — same contract as
+    /// [`Self::model_key`].
+    pub effort_key: Option<String>,
+}
+
+/// The unvalidated wire shape `SettingsSpec` is parsed through, so the
+/// pointer-into-`fields` invariant is checked on EVERY parse path.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawSettingsSpec {
+    format: Format,
+    global: String,
+    #[serde(default)]
+    project: Option<String>,
+    #[serde(default)]
+    fields: Vec<SettingField>,
+    #[serde(default)]
+    model_key: Option<String>,
+    #[serde(default)]
+    effort_key: Option<String>,
+}
+
+impl TryFrom<RawSettingsSpec> for SettingsSpec {
+    type Error = String;
+
+    fn try_from(raw: RawSettingsSpec) -> Result<Self, Self::Error> {
+        // A declared key that names no catalog field would give a per-role
+        // value nothing to be checked against — silently degrading the
+        // enum/charset check into "anything goes". Refuse the descriptor at
+        // load instead.
+        for (dimension, declared) in [
+            (Dimension::Model, raw.model_key.as_deref()),
+            (Dimension::Effort, raw.effort_key.as_deref()),
+        ] {
+            let Some(key) = declared else { continue };
+            if !raw.fields.iter().any(|f| f.key == key) {
+                return Err(format!(
+                    "{} names {key:?}, which is not a key in this adapter's settings `fields` \
+                     catalog — the catalog is what a per-role {} value is checked against, so \
+                     the key must exist there",
+                    dimension.settings_key_field(),
+                    dimension.label()
+                ));
+            }
+        }
+        Ok(SettingsSpec {
+            format: raw.format,
+            global: raw.global,
+            project: raw.project,
+            fields: raw.fields,
+            model_key: raw.model_key,
+            effort_key: raw.effort_key,
+        })
+    }
+}
+
+impl SettingsSpec {
+    /// The catalog key this CLI uses for one dimension, if it has the notion.
+    pub fn key_for(&self, dimension: Dimension) -> Option<&str> {
+        match dimension {
+            Dimension::Model => self.model_key.as_deref(),
+            Dimension::Effort => self.effort_key.as_deref(),
+        }
+    }
+
+    /// The catalog entry for a key, if the catalog documents it.
+    pub fn field(&self, key: &str) -> Option<&SettingField> {
+        self.fields.iter().find(|f| f.key == key)
+    }
 }
 
 /// One known setting in a CLI's settings file. `key` is a dotted path
@@ -912,6 +1363,257 @@ mod mcp_injection_spec_tests {
         let spec = headless.mcp_injection().unwrap();
         assert!(spec.needs_servers_toml() && !spec.needs_config_path());
         assert!(spec.argv(Some("/ignored"), None).is_err());
+    }
+}
+
+#[cfg(test)]
+mod selection_spec_tests {
+    use super::{AdapterDescriptor, Dimension, Selection};
+
+    /// A minimal descriptor with a settings catalog and both selection
+    /// fragments: `model` is a free-form string, `effort` an enum — the two
+    /// value-checking regimes, on one adapter.
+    fn desc() -> AdapterDescriptor {
+        serde_yaml::from_str(
+            r#"
+id: fake
+display: Fake
+headless:
+  args: ["exec", "--", "{prompt}"]
+  model_selection:
+    args: ["-c", "model={model}"]
+  effort_selection:
+    args: ["--effort", "{effort}"]
+settings:
+  format: json
+  global: ~/.fake/settings.json
+  model_key: model
+  effort_key: reasoning
+  fields:
+    - { key: model, type: string }
+    - { key: reasoning, type: enum, options: [low, medium, high] }
+"#,
+        )
+        .expect("valid descriptor")
+    }
+
+    /// The happy path, including the one shape that makes the value check
+    /// load-bearing: `{model}` substituted INSIDE a `-c key=value` token.
+    #[test]
+    fn a_validated_value_substitutes_into_the_declared_fragment() {
+        let d = desc();
+        assert_eq!(
+            d.select(Dimension::Model, "gpt-5.5").unwrap(),
+            Selection::Args(vec!["-c".to_string(), "model=gpt-5.5".to_string()])
+        );
+        assert_eq!(
+            d.select(Dimension::Effort, "high").unwrap(),
+            Selection::Args(vec!["--effort".to_string(), "high".to_string()])
+        );
+    }
+
+    /// An `enum` field is authoritative: a value outside its options is
+    /// refused, and the refusal names the adapter, the key, the value, and the
+    /// legal set — everything a user needs to fix the manifest.
+    #[test]
+    fn an_enum_field_refuses_a_value_outside_its_options() {
+        let err = desc()
+            .select(Dimension::Effort, "extreme")
+            .expect_err("an out-of-catalog enum value must be refused");
+        for expected in ["fake", "reasoning", "extreme", "low, medium, high"] {
+            assert!(err.contains(expected), "{err}");
+        }
+    }
+
+    /// The hostile-input bound (rule 7): because a free-form value is spliced
+    /// INSIDE an argv token, anything carrying whitespace, `=`, quotes, shell
+    /// metacharacters, a leading-dash injection attempt, or sheer length is
+    /// refused before substitution — the check the inside-a-token splice
+    /// depends on.
+    #[test]
+    fn a_free_form_value_is_bounded_by_a_conservative_charset() {
+        let d = desc();
+        for hostile in [
+            "gpt 5.5",
+            "x=y",
+            "$(whoami)",
+            "a;rm -rf ~",
+            "a\nb",
+            "\"q\"",
+            "café",
+            "",
+        ] {
+            let err = d
+                .select(Dimension::Model, hostile)
+                .expect_err("hostile free-form value must be refused: {hostile:?}");
+            assert!(err.contains("fake") && err.contains("model"), "{err}");
+        }
+        let too_long = "a".repeat(super::MAX_SELECTION_VALUE_BYTES + 1);
+        assert!(d.select(Dimension::Model, &too_long).is_err());
+        // …and the boundary itself still passes.
+        let at_bound = "a".repeat(super::MAX_SELECTION_VALUE_BYTES);
+        assert!(d.select(Dimension::Model, &at_bound).is_ok());
+    }
+
+    /// The two honest capability answers, distinguished: no catalog key at all
+    /// (`NoNotion`) versus a catalog key with no confirmed per-launch flag
+    /// (`NotPerLaunch`, which names the key so a surface can say what it is).
+    #[test]
+    fn an_undeliverable_dimension_is_reported_not_swallowed() {
+        let no_notion: AdapterDescriptor = serde_yaml::from_str(
+            "id: bare\ndisplay: Bare\nheadless:\n  args: [\"--\", \"{prompt}\"]\n",
+        )
+        .unwrap();
+        assert_eq!(
+            no_notion.select(Dimension::Model, "anything").unwrap(),
+            Selection::NoNotion
+        );
+
+        let key_only: AdapterDescriptor = serde_yaml::from_str(
+            r#"
+id: keyed
+display: Keyed
+headless:
+  args: ["--", "{prompt}"]
+settings:
+  format: json
+  global: ~/.keyed/settings.json
+  effort_key: effortLevel
+  fields:
+    - { key: effortLevel, type: enum, options: [low, high] }
+"#,
+        )
+        .unwrap();
+        assert_eq!(
+            key_only.select(Dimension::Effort, "low").unwrap(),
+            Selection::NotPerLaunch {
+                key: "effortLevel".to_string()
+            }
+        );
+        // A value the harness cannot deliver is never silently "valid":
+        // reporting outranks checking, so no error is raised either.
+        assert_eq!(
+            key_only.select(Dimension::Model, "x").unwrap(),
+            Selection::NoNotion
+        );
+    }
+
+    /// Every malformed selection fragment is refused at LOAD, on every parse
+    /// path — the same discipline `mcp_injection` gets, because these
+    /// fragments splice into the same options region.
+    #[test]
+    fn malformed_selection_fragments_are_refused_at_parse() {
+        let parse = |fragment: &str| {
+            serde_yaml::from_str::<AdapterDescriptor>(&format!(
+                "id: x\ndisplay: X\nheadless:\n  args: [\"--\", \"{{prompt}}\"]\n  {fragment}\n"
+            ))
+        };
+        for (bad, why) in [
+            ("model_selection:\n    args: []", "an empty fragment"),
+            (
+                "model_selection:\n    args: [\"--model\"]",
+                "no placeholder at all",
+            ),
+            (
+                "model_selection:\n    args: [\"--model\", \"{model}\", \"{model}\"]",
+                "a duplicate placeholder",
+            ),
+            (
+                "model_selection:\n    args: [\"-c\", \"model={model}-{model}\"]",
+                "two occurrences inside one token",
+            ),
+            (
+                "model_selection:\n    args: [\"--\", \"--model\", \"{model}\"]",
+                "a literal `--` in the options region",
+            ),
+            (
+                "model_selection:\n    args: [\"--model\", \"{effort}\"]",
+                "the other dimension's placeholder",
+            ),
+            (
+                "model_selection:\n    args: [\"--model\", \"{model}\", \"{prompt}\"]",
+                "{prompt} in a selection fragment",
+            ),
+            (
+                "model_selection:\n    args: [\"--model\", \"{model}\", \"{nope}\"]",
+                "an unknown placeholder",
+            ),
+            (
+                "effort_selection:\n    args: [\"--effort\", \"{model}\"]",
+                "the wrong placeholder for the field",
+            ),
+        ] {
+            assert!(parse(bad).is_err(), "{why} must be refused at load");
+        }
+    }
+
+    /// A `model_key`/`effort_key` that names no catalog field is refused at
+    /// LOAD: it would leave a per-role value with nothing to be checked
+    /// against, quietly turning the enum/charset guard into "anything goes".
+    #[test]
+    fn a_selection_key_naming_no_catalog_field_is_refused_at_parse() {
+        let dangling = serde_yaml::from_str::<AdapterDescriptor>(
+            "id: x\ndisplay: X\nsettings:\n  format: json\n  global: ~/x.json\n  \
+             model_key: model\n  fields: []\n",
+        );
+        assert!(
+            dangling.is_err(),
+            "a model_key with no matching catalog field must be refused at load"
+        );
+    }
+
+    /// The shipped descriptors say what this task claims they say. A witness,
+    /// not a restatement: the delivery path has no CLI branch, so these three
+    /// YAML declarations ARE the feature for claude-code, codex and pi.
+    #[test]
+    fn the_shipped_descriptors_declare_what_they_can_carry() {
+        let reg = crate::registry::Registry::load().unwrap();
+
+        let claude = reg.get("claude-code").unwrap();
+        assert!(matches!(
+            claude.select(Dimension::Model, "claude-opus-4-5"),
+            Ok(Selection::Args(_))
+        ));
+        // Claude Code has effortLevel in its catalog but no confirmed
+        // per-launch flag — the honest middle case.
+        assert_eq!(
+            claude.select(Dimension::Effort, "high").unwrap(),
+            Selection::NotPerLaunch {
+                key: "effortLevel".to_string()
+            }
+        );
+
+        let codex = reg.get("codex").unwrap();
+        assert_eq!(
+            codex.select(Dimension::Model, "gpt-5.5").unwrap(),
+            Selection::Args(vec!["-c".to_string(), "model=gpt-5.5".to_string()])
+        );
+        assert_eq!(
+            codex.select(Dimension::Effort, "high").unwrap(),
+            Selection::Args(vec![
+                "-c".to_string(),
+                "model_reasoning_effort=high".to_string()
+            ])
+        );
+        // codex's effort IS an enum in its catalog, so a bogus level refuses.
+        assert!(codex.select(Dimension::Effort, "turbo").is_err());
+
+        // gemini has no settings block at all: no notion of either dimension.
+        let gemini = reg.get("gemini").unwrap();
+        for dimension in Dimension::ALL {
+            assert_eq!(gemini.select(dimension, "x").unwrap(), Selection::NoNotion);
+        }
+
+        // pi has both keys but no headless block: neither is per-launch.
+        let pi = reg.get("pi").unwrap();
+        assert!(matches!(
+            pi.select(Dimension::Model, "sonnet").unwrap(),
+            Selection::NotPerLaunch { .. }
+        ));
+        assert!(matches!(
+            pi.select(Dimension::Effort, "high").unwrap(),
+            Selection::NotPerLaunch { .. }
+        ));
     }
 }
 

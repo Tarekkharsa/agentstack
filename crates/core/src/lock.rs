@@ -68,6 +68,15 @@ pub struct Lock {
     /// unpinning cannot pass any gate downstream.
     #[serde(default, rename = "workflow")]
     pub workflows: Vec<LockedWorkflow>,
+    /// Expanded package pins (W5, `docs/design/package-layer.md`). Additive
+    /// `#[serde(default)]` at version 2, on the same justification as the
+    /// executable, extension and workflow pins above: an older binary that
+    /// rewrites these away changes the lock bytes, which flips the trust digest
+    /// and forces re-review — and a toolset that selects a package refuses to
+    /// activate without its expansion, so silent unpinning cannot pass any gate
+    /// downstream.
+    #[serde(default, rename = "package")]
+    pub packages: Vec<LockedPackage>,
 }
 
 impl Default for Lock {
@@ -80,8 +89,133 @@ impl Default for Lock {
             executables: Vec::new(),
             extensions: Vec::new(),
             workflows: Vec::new(),
+            packages: Vec::new(),
         }
     }
+}
+
+/// Which kind of capability one package member is. Serializes lowercase
+/// (`"skill"` / `"server"` / `"instruction"`).
+///
+/// **Hooks and extensions are absent on purpose and must stay absent.** They
+/// are executable kinds for which the full consent ceremony always applies, and
+/// a package reference is by construction a compressed consent path — one name
+/// standing for a set of members. Adding a variant here would be the schema
+/// half of exactly the compression `CLAUDE.md`'s standing classification
+/// forbids, so the intake gate refuses such a package by name instead
+/// (`docs/design/package-layer.md` §"Deferred by name").
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "lowercase")]
+pub enum PackageMemberKind {
+    Skill,
+    Server,
+    Instruction,
+}
+
+impl PackageMemberKind {
+    /// The lane this kind is delivered through — a property of the KIND, not of
+    /// a choice any caller makes, which is why it is derived here rather than
+    /// stored. Skills and servers go through the gateway lease; instructions
+    /// are written into a file, and no surface may say otherwise
+    /// (`docs/design/automatic-delivery.md` §"Mixed-lane upgrades").
+    pub fn lane(&self) -> &'static str {
+        match self {
+            PackageMemberKind::Skill | PackageMemberKind::Server => "dynamic",
+            PackageMemberKind::Instruction => "rendered",
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PackageMemberKind::Skill => "skill",
+            PackageMemberKind::Server => "server",
+            PackageMemberKind::Instruction => "instruction",
+        }
+    }
+}
+
+/// Who decided one member of the effective set. Serializes as
+/// `"package"` / `"project-override"`.
+///
+/// The whole point of the field: a compact package reference could otherwise
+/// diverge silently, and the W5 acceptance criterion is that an override is
+/// visible as an *effective member set* rather than a quiet divergence.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum PackageMemberOrigin {
+    /// The package published this member and the project took it as published.
+    Package,
+    /// The project replaced this member with one of its own declarations.
+    ProjectOverride,
+}
+
+impl PackageMemberOrigin {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            PackageMemberOrigin::Package => "package",
+            PackageMemberOrigin::ProjectOverride => "project-override",
+        }
+    }
+}
+
+/// One member of a package's **effective** set, pinned.
+///
+/// The per-member digest is the reason a compact reference is safe: the
+/// checksum comes from the same pinning acts every other kind uses
+/// (`Store::pin` for a skill tree, `Store::pin_instruction` for a fragment, the
+/// server-definition digest for a server), so a member's bytes moving changes
+/// the lock bytes, which flips the trust digest and re-gates. There is
+/// deliberately no fast path that accepts a package on its version alone.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LockedPackageMember {
+    /// The member name, as the package publishes it. Stable across an override:
+    /// replacing a member does not rename it, or `removed`/`replace` keys in
+    /// one project would stop matching the package's own vocabulary.
+    pub name: String,
+    pub kind: PackageMemberKind,
+    pub origin: PackageMemberOrigin,
+    /// Content digest of this member's bytes.
+    pub checksum: Sha256Hex,
+    /// Where these bytes came from, for a human:
+    /// `package:<name>@<version>#<path-in-package>`, or `project:<key>` for an
+    /// overriding member. Not a second copy of the package coordinates — those
+    /// are on [`LockedPackage`] — this says which artifact produced the digest.
+    pub provenance: String,
+}
+
+/// One package a toolset selected, expanded to its exact members.
+///
+/// `docs/design/package-layer.md` §"The lock expansion". Everything the
+/// contract names is here: the exact version and revision, the exact member
+/// list, per-member digests, and per-member provenance — plus the two fields
+/// that keep an override honest (`removed`, and each member's `origin`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LockedPackage {
+    pub name: String,
+    /// The exact package version this project is pinned to.
+    pub version: String,
+    /// Where the package was resolved from: `library:<name>` for a
+    /// central-library body, or `git:<url>@<tag>[#subdir]` for a git-hosted one.
+    pub source: String,
+    /// The exact revision for a git-sourced package (`None` for a path body,
+    /// which has no revision axis). Distinguishes "the same package, later"
+    /// from "the same package".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rev: Option<String>,
+    /// Which toolsets selected this package — sorted, de-duplicated. Without
+    /// it, dropping one toolset's `packages` line would leave a lock entry that
+    /// nothing in the manifest explains.
+    #[serde(default)]
+    pub toolsets: Vec<String>,
+    /// Package member names this project dropped (`[package_overrides.<p>]
+    /// remove`), sorted. Kept OUT of `members`: the member list is the
+    /// effective set, and something removed is not a member. It is recorded
+    /// here instead so a reader can still see that the project diverged.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub removed: Vec<String>,
+    /// The effective member set, sorted by name.
+    #[serde(default, rename = "member")]
+    pub members: Vec<LockedPackageMember>,
 }
 
 /// Where a pinned server's definition came from: declared inline in the
@@ -206,6 +340,34 @@ pub struct LockedServer {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LockedInstruction {
     pub name: String,
+    pub path: String,
+    pub checksum: Sha256Hex,
+    /// One pin per declared per-(CLI, model) variant body
+    /// (`docs/design/instruction-variants.md` §"Every variant body is
+    /// pinned"). A variant is content, and content is pinned — including a
+    /// variant nothing currently selects, because consent is over content and
+    /// not over what happened to be chosen today.
+    ///
+    /// Additive `#[serde(default)]` at version 2, on the same justification as
+    /// the executable, extension, workflow and package pins above: a lock
+    /// written before this parses unchanged, and an older binary that rewrote
+    /// these away would change the lock bytes, which flips the trust digest and
+    /// forces a review rather than losing the pins silently. An empty list
+    /// serializes to nothing, so a project with no variants keeps a
+    /// byte-identical lock.
+    #[serde(default, rename = "variant", skip_serializing_if = "Vec::is_empty")]
+    pub variants: Vec<LockedInstructionVariant>,
+}
+
+/// A pinned instruction **variant** body: its selector plus the SHA-256 of the
+/// file's raw bytes, produced by the same `Store::pin_instruction` act as the
+/// base fragment. No second digest path exists, and none may be added.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LockedInstructionVariant {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cli: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     pub path: String,
     pub checksum: Sha256Hex,
 }
@@ -463,6 +625,42 @@ impl Lock {
     /// stale-pin pruning rule as extensions (`retain_extension_names`).
     pub fn retain_workflow_names(&mut self, keep: &[String]) {
         self.workflows.retain(|w| keep.contains(&w.name));
+    }
+
+    pub fn get_package(&self, name: &str) -> Option<&LockedPackage> {
+        self.packages.iter().find(|p| p.name == name)
+    }
+
+    /// Insert or replace a package pin, keeping entries sorted by name and
+    /// canonicalizing the three lists it carries.
+    ///
+    /// Canonicalization here rather than at the call site for the same reason
+    /// [`upsert_workflow`] canonicalizes `roles`: these lists feed the lock
+    /// bytes, which feed the trust digest, so declaration or map-iteration
+    /// order must never fake a change (or, worse, mask one).
+    ///
+    /// [`upsert_workflow`]: Lock::upsert_workflow
+    pub fn upsert_package(&mut self, mut entry: LockedPackage) {
+        entry.toolsets.sort();
+        entry.toolsets.dedup();
+        entry.removed.sort();
+        entry.removed.dedup();
+        entry.members.sort_by(|a, b| a.name.cmp(&b.name));
+        if let Some(existing) = self.packages.iter_mut().find(|p| p.name == entry.name) {
+            *existing = entry;
+        } else {
+            self.packages.push(entry);
+        }
+        self.packages.sort_by(|a, b| a.name.cmp(&b.name));
+    }
+
+    /// Drop package pins whose name is no longer selected — the same stale-pin
+    /// pruning rule as extensions and workflows. A package nobody selects must
+    /// not leave an expansion behind: a stale member set is a set nothing
+    /// re-verifies, and it would keep answering "which members?" long after the
+    /// reference that justified it went away.
+    pub fn retain_package_names(&mut self, keep: &[String]) {
+        self.packages.retain(|p| keep.contains(&p.name));
     }
 
     /// Insert or replace a server entry, keeping entries sorted by name.
@@ -854,6 +1052,77 @@ mod tests {
         assert_eq!(ext.checksum, "cafe");
     }
 
+    /// W5: a package pin canonicalizes its three lists, round-trips through the
+    /// lockfile parser with the exact wire spellings external readers gate on,
+    /// and prunes to the selected set. An existing v2 lock without
+    /// `[[package]]` parses to an empty pin set (additive field, same rule as
+    /// executables/extensions/workflows).
+    #[test]
+    fn package_upsert_canonicalizes_roundtrips_and_retains() {
+        let member = |name: &str, kind, origin| LockedPackageMember {
+            name: name.into(),
+            kind,
+            origin,
+            checksum: Sha256Hex::of(name.as_bytes()),
+            provenance: format!("package:rust-backend@1.4.0#{name}"),
+        };
+        let mut lock = Lock::default();
+        lock.upsert_package(LockedPackage {
+            name: "rust-backend".into(),
+            version: "1.4.0".into(),
+            source: "library:rust-backend".into(),
+            rev: None,
+            toolsets: vec!["ops".into(), "backend".into(), "ops".into()],
+            removed: vec!["legacy".into(), "legacy".into()],
+            members: vec![
+                member(
+                    "sql-review",
+                    PackageMemberKind::Skill,
+                    PackageMemberOrigin::Package,
+                ),
+                member(
+                    "house-rules",
+                    PackageMemberKind::Instruction,
+                    PackageMemberOrigin::ProjectOverride,
+                ),
+            ],
+        });
+        let pinned = lock.get_package("rust-backend").expect("pinned");
+        assert_eq!(pinned.toolsets, vec!["backend", "ops"], "sorted-unique");
+        assert_eq!(pinned.removed, vec!["legacy"], "sorted-unique");
+        assert_eq!(
+            pinned
+                .members
+                .iter()
+                .map(|m| m.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["house-rules", "sql-review"],
+            "members sorted by name"
+        );
+
+        // The wire spellings are the contract an external reader gates on.
+        let text = toml::to_string_pretty(&lock).unwrap();
+        assert!(text.contains("[[package]]"), "{text}");
+        assert!(text.contains("[[package.member]]"), "{text}");
+        assert!(text.contains("kind = \"instruction\""), "{text}");
+        assert!(text.contains("origin = \"project-override\""), "{text}");
+        assert!(text.contains("origin = \"package\""), "{text}");
+        let parsed: Lock = toml::from_str(&text).unwrap();
+        assert_eq!(parsed.packages, lock.packages);
+
+        // Lane is derived from the kind, never stored — an instruction can
+        // never be described as going live via the gateway.
+        assert_eq!(PackageMemberKind::Instruction.lane(), "rendered");
+        assert_eq!(PackageMemberKind::Skill.lane(), "dynamic");
+        assert_eq!(PackageMemberKind::Server.lane(), "dynamic");
+
+        lock.retain_package_names(&[]);
+        assert!(lock.get_package("rust-backend").is_none());
+        let parsed: Lock =
+            toml::from_str(&format!("version = {SUPPORTED_LOCK_VERSION}\n")).unwrap();
+        assert!(parsed.packages.is_empty());
+    }
+
     #[test]
     fn instruction_upsert_sorts_roundtrips_and_retains() {
         let mut lock = Lock::default();
@@ -861,11 +1130,18 @@ mod tests {
             name: "style".into(),
             path: "./instructions/style.md".into(),
             checksum: Sha256Hex::of(b"cafe"),
+            variants: Vec::new(),
         });
         lock.upsert_instruction(LockedInstruction {
             name: "house".into(),
             path: "./instructions/house.md".into(),
             checksum: Sha256Hex::of(b"beef"),
+            variants: vec![LockedInstructionVariant {
+                cli: Some("claude-code".into()),
+                model: Some("opus".into()),
+                path: "./instructions/house.opus.md".into(),
+                checksum: Sha256Hex::of(b"0p05"),
+            }],
         });
         assert_eq!(lock.instructions[0].name, "house", "sorted by name");
 
@@ -874,6 +1150,7 @@ mod tests {
             name: "house".into(),
             path: "./instructions/house.md".into(),
             checksum: Sha256Hex::of(b"f00d"),
+            variants: Vec::new(),
         });
         assert_eq!(
             lock.get_instruction("house").unwrap().checksum,

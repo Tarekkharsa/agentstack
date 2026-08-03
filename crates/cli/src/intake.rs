@@ -174,7 +174,7 @@ fn collision_detail(
             None => "already declared".to_string(),
         },
         Kind::Instruction => match manifest.instructions.get(name) {
-            Some(i) => format!("path {}", i.path),
+            Some(i) => crate::instructions::declared_label(name, i),
             None => "already declared".to_string(),
         },
     };
@@ -382,10 +382,19 @@ fn declared_paths(kind: Kind, dir: &Path, manifest: &Manifest) -> Vec<PathBuf> {
             .filter_map(|s| s.path.as_deref())
             .map(anchor)
             .collect(),
+        // Every body a fragment declares, base and per-(CLI, model) variants
+        // alike: a variant body IS declared content, and leaving it out of this
+        // set made the funnel report a declared variant as a stray drop.
         Kind::Instruction => manifest
             .instructions
             .values()
-            .map(|i| anchor(&i.path))
+            .flat_map(|i| {
+                i.path
+                    .iter()
+                    .chain(i.variants.iter().map(|v| &v.path))
+                    .map(|p| anchor(p))
+                    .collect::<Vec<_>>()
+            })
             .collect(),
     }
 }

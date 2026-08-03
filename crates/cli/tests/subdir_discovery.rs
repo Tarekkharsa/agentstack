@@ -74,6 +74,7 @@ fn init_from_a_subdir_refuses_to_silently_nest() {
         plan: false,
         secrets: None,
         no_keychain: false,
+        project_servers: false,
         yes: true,
         consented_plan: None,
     };

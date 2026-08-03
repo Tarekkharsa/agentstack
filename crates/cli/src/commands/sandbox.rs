@@ -31,12 +31,15 @@ use agentstack_policy::CompiledRuleset;
 use agentstack_runtime::{Mount, NetworkPolicy, SandboxSpec};
 
 /// Where the project is mounted inside the container.
-const WORKSPACE: &str = "/workspace";
+/// Public because `agentstack image` builds artifacts for this exact mount
+/// point: a packaged image whose WORKDIR disagreed with where a sandbox run
+/// mounts the workspace would behave differently in the two paths.
+pub const WORKSPACE: &str = "/workspace";
 
 /// The image the sandbox runs the agent CLI in. Overridable with
 /// `AGENTSTACK_SANDBOX_IMAGE` (used by the integration test); otherwise a
 /// maintainer-provided default that carries the harness binary.
-fn sandbox_image() -> String {
+pub fn sandbox_image() -> String {
     std::env::var("AGENTSTACK_SANDBOX_IMAGE")
         .unwrap_or_else(|_| "agentstack/sandbox:latest".to_string())
 }
@@ -1706,6 +1709,7 @@ mod tests {
         let args = |plan: bool| RunArgs {
             harness: "claude-code".to_string(),
             locked: false,
+            unprotected: false,
             prompt: None,
             profile: None,
             scope: Some(agentstack_core::scope::Scope::Project),
@@ -1713,6 +1717,8 @@ mod tests {
             sandbox: true,
             lockdown: false,
             plan,
+            model: None,
+            effort: None,
             args: Vec::new(),
         };
 

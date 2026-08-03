@@ -313,30 +313,132 @@ pub(crate) fn bridge_capable(desc: &AdapterDescriptor) -> bool {
 
 /// Whether a config already carries a bridge entry under (dotted) `location`.
 pub fn has_bridge_entry(existing: &str, location: &str, format: Format) -> bool {
+    bridge_entry(existing, location, format).is_some()
+}
+
+/// The bridge entry itself, as the harness config holds it. Same walk as
+/// [`has_bridge_entry`] — one traversal, so "is it registered" and "what did it
+/// register" can never disagree.
+pub fn bridge_entry(existing: &str, location: &str, format: Format) -> Option<Value> {
     if existing.trim().is_empty() {
-        return false;
+        return None;
     }
     let value: Value = match format {
-        Format::Json => match serde_json::from_str(existing) {
-            Ok(v) => v,
-            Err(_) => return false,
-        },
-        Format::Toml => match existing.parse::<toml::Value>() {
-            Ok(t) => match serde_json::to_value(t) {
-                Ok(v) => v,
-                Err(_) => return false,
-            },
-            Err(_) => return false,
-        },
+        Format::Json => serde_json::from_str(existing).ok()?,
+        Format::Toml => serde_json::to_value(existing.parse::<toml::Value>().ok()?).ok()?,
     };
     let mut cur = &value;
     for key in location.split('.') {
-        match cur.get(key) {
-            Some(v) => cur = v,
-            None => return false,
+        cur = cur.get(key)?;
+    }
+    cur.get(BRIDGE_ENTRY).cloned()
+}
+
+/// One harness whose registered gateway cannot be launched here — the
+/// concrete, checkable form of "gateway unavailable"
+/// (`docs/design/automatic-delivery.md` §"Failure semantics" 3). The harness
+/// spawns the command in its config; if that command is not on disk, the
+/// harness gets no bridge process and therefore **no tools at all**.
+pub struct GatewayOutage {
+    /// Harness display name, e.g. "Claude Code".
+    pub display: String,
+    /// The command its config names, which is not runnable here.
+    pub command: String,
+}
+
+/// The one command that fixes a gateway outage: re-register the bridge at the
+/// binary's current location. One constant, so no surface can name a different
+/// recovery than another.
+pub const GATEWAY_RECOVERY: &str = "agentstack gateway connect --all";
+
+impl GatewayOutage {
+    /// What happened, in one clause: the harness gets no tools, and AgentStack
+    /// writes nothing in the gateway's place (a static fallback render is
+    /// always an explicit user action, never a silent one).
+    fn explanation(&self) -> String {
+        format!(
+            "Gateway unavailable: {} has the agentstack bridge registered as `{}`, which is not \
+             executable here, so that harness receives no tools and nothing is written in its \
+             place",
+            crate::text::sanitize_line(&self.display),
+            crate::text::sanitize_line(&self.command),
+        )
+    }
+
+    /// The one-sentence outage explanation for a prose surface (`status`), with
+    /// the recovery command named in it.
+    pub fn sentence(&self) -> String {
+        format!(
+            "{} — recover with `{GATEWAY_RECOVERY}`.",
+            self.explanation()
+        )
+    }
+
+    /// The same sentence for `doctor`, whose lines name their fix after `↳` so
+    /// `first_fix` can route the report's one next action to it.
+    pub fn finding(&self) -> String {
+        format!("{} ↳ {GATEWAY_RECOVERY}", self.explanation())
+    }
+}
+
+/// Every detected harness among `target_ids` whose registered bridge command is
+/// missing.
+///
+/// The check is deliberately narrow. A bare command name (no `/`) is resolved
+/// from the *harness's* PATH, which this process cannot reconstruct, so it is
+/// never reported as an outage: claiming an outage we cannot prove is the same
+/// dishonesty as claiming health we cannot prove (invariant 8). What is proven
+/// is an absolute path that is not there.
+pub fn gateway_outages(registry: &Registry, target_ids: &[String]) -> Vec<GatewayOutage> {
+    let mut out = Vec::new();
+    for id in target_ids {
+        let Some(desc) = registry.get(id) else {
+            continue;
+        };
+        let (Some(cfg), Some(mcp)) = (desc.config.as_ref(), desc.mcp.as_ref()) else {
+            continue;
+        };
+        if !desc.detected() {
+            continue;
+        }
+        let path = crate::util::paths::expand_tilde(&cfg.path);
+        let existing = std::fs::read_to_string(&path).unwrap_or_default();
+        let Some(entry) = bridge_entry(&existing, &mcp.location, cfg.format) else {
+            continue;
+        };
+        let Some(command) = entry.get("command").and_then(Value::as_str) else {
+            continue;
+        };
+        if command_unreachable(command) {
+            out.push(GatewayOutage {
+                display: desc.display.clone(),
+                command: command.to_string(),
+            });
         }
     }
-    cur.get(BRIDGE_ENTRY).is_some()
+    out
+}
+
+/// Whether `command` provably cannot be launched: a path that names no file,
+/// or (on Unix) a file with no execute bit. Everything else answers `false`.
+fn command_unreachable(command: &str) -> bool {
+    if !command.contains('/') {
+        return false; // resolved from the harness's PATH — not ours to judge
+    }
+    let path = std::path::Path::new(command);
+    let Ok(meta) = std::fs::metadata(path) else {
+        return true;
+    };
+    if !meta.is_file() {
+        return true;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        meta.permissions().mode() & 0o111 == 0
+    }
+    #[cfg(not(unix))]
+    false
 }
 
 /// Honesty about harness limits: MCP servers, secrets, firewall, audit, and

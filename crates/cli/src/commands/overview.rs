@@ -40,7 +40,13 @@ impl Mode {
         match self {
             Mode::Static => "config files on disk, kept out of git",
             Mode::CleanAtRest => "active only while you work, then restored",
-            Mode::ZeroFiles => "nothing on disk — served live to your CLIs after review",
+            // Honesty rule (design §"Honesty rules"): never a bare "nothing on
+            // disk". The project still holds its manifest and lock, and any
+            // house-rules region stays in its file — what this mode removes is
+            // the GENERATED artifacts.
+            Mode::ZeroFiles => {
+                "no generated files — capabilities served live to your CLIs after review"
+            }
         }
     }
 
@@ -52,7 +58,7 @@ impl Mode {
         match self {
             Mode::Static => "Config files stay on disk, kept out of git. Works with every CLI, zero moving parts. This is what you have now.",
             Mode::CleanAtRest => "Use a toolset temporarily: `agentstack session start` activates it and `session end` puts every file back exactly as it was. Nothing stays in your repo between sessions.",
-            Mode::ZeroFiles => "Nothing is ever written; your CLIs fetch servers and skills live from agentstack, and each repo stays inert until you review it once. Best when you work across many repos.",
+            Mode::ZeroFiles => "No generated files are written; your CLIs fetch servers and skills live from agentstack, and each repo stays inert until you review it once. The repo still keeps its agentstack manifest and lock, and any house-rules region stays in its file. Best when you work across many repos.",
         }
     }
 }
@@ -416,11 +422,54 @@ pub(crate) struct ProjectFacts {
     trust_relevant: bool,
     mode: Mode,
     gateway_connected: bool,
+    /// Harnesses that registered the gateway but cannot launch it (W4
+    /// precondition 6). Registered-and-broken is a different fact from
+    /// not-registered, and the difference is the whole outage: the harness gets
+    /// no tools, and AgentStack writes nothing in the gateway's place.
+    gateway_outages: Vec<crate::commands::connect::GatewayOutage>,
+    /// One line per library name that more than one linked source holds:
+    /// which source wins, which are shadowed, and the qualified reference that
+    /// pins the other copy. Empty is the common case, and the only case that
+    /// prints nothing (docs/design/linked-library-sources.md).
+    shadowed_names: Vec<String>,
+    /// The delivery planner's routing, one plain-language line per CLI (W4).
+    /// The planner runs silently; this is where `status` names what it did.
+    delivery: Vec<String>,
+    /// The per-harness house-rules honesty matrix (item 4): which channel
+    /// actually carries instructions to each CLI, whether that CLI's live
+    /// channel is confirmed or merely declared, and which variant it receives.
+    /// Present for every targeted harness — including the ones with no
+    /// instruction channel at all, because an adapter that quietly disappears
+    /// from a coverage list reads as covered
+    /// (`docs/design/instruction-variants.md`).
+    instruction_channels: Vec<crate::instructions::HarnessChannel>,
+    /// The `rendered lane:` line, present only when something is actually
+    /// written — an empty lane line is its own small lie.
+    delivery_rendered_lane: Option<String>,
+    /// Whether anything is routed to the live lane, which is the only condition
+    /// under which the zero-artifacts sentence is true here.
+    delivery_has_live: bool,
     rendered: bool,
     /// `None` when the caller did not ask for the secrets reading — bare
     /// `agentstack` never does, and asking is not free (it consults every
     /// resolver).
     secrets: Option<SecretFacts>,
+    /// Refusals recorded against this project since its last yes (W1). `None`
+    /// for a trusted project and for one nothing has tried to use.
+    needs_your_yes: Option<NeedsYourYes>,
+    /// Installed packs with a newer version resolvable **offline** (see
+    /// [`crate::commands::updates::available_updates`]). Empty means "nothing
+    /// to offer here", which is NOT the same as "up to date": the check never
+    /// touches the network, so a pack whose local clone is stale, absent, or
+    /// catalog-sourced is silently missing from this list. Every rendering of
+    /// it offers; none of them may claim currency.
+    updates: Vec<crate::commands::updates::PackUpdate>,
+    /// The **effective member set** of every package this project pinned (W5,
+    /// `docs/design/package-layer.md`). Read from the LOCK through
+    /// [`crate::package::effective_members`] — never from the library, whose
+    /// whole purpose is to be free to move ahead. Empty for a project that
+    /// selects no package, and for one that has never been locked.
+    packages: Vec<agentstack_core::lock::LockedPackage>,
 }
 
 pub(crate) struct SessionFacts {
@@ -428,6 +477,77 @@ pub(crate) struct SessionFacts {
     started_unix: u64,
     age_secs: u64,
     abandoned: bool,
+}
+
+/// W1 — "needs your yes": the evidence-bearing form of an untrusted or drifted
+/// project. Present only when calls were actually refused here since the last
+/// yes, which is what separates "you have not reviewed this yet" (a state) from
+/// "something tried to work and could not" (a consequence).
+///
+/// It carries no card. The one authoritative card is rendered by the command
+/// named in [`NeedsYourYes::fix`] — `agentstack trust` — and there is
+/// deliberately no second construction of it here or anywhere a UI could reach
+/// without going through that command.
+pub(crate) struct NeedsYourYes {
+    /// How many refusals were recorded for this project since it was last
+    /// trusted (since the beginning of the log when it never was).
+    pub(crate) refused: usize,
+    /// The most recent refusal's timestamp — so a surface can say "just now"
+    /// rather than only "at some point".
+    pub(crate) last_refused_ts: u64,
+    /// The one command that answers it, naming the project explicitly so a
+    /// caller acting from another directory does not have to guess.
+    pub(crate) fix: String,
+}
+
+/// Count this project's recorded trust refusals since its last yes.
+///
+/// `None` for a trusted project — and cheaply so: the whole read is skipped,
+/// which matters because `status` must feel instant and this walks the machine
+/// audit log. A project that is untrusted or drifted has already lost the fast
+/// path in every other sense, and it is the only one that can have anything to
+/// report.
+///
+/// `manifest_dir` must be the same string form `seatbelt::record` files under
+/// (the resolved manifest dir), or the filter silently matches nothing.
+pub(crate) fn needs_your_yes(
+    manifest_dir: &Path,
+    root: &Path,
+    trust: crate::trust::TrustState,
+) -> Option<NeedsYourYes> {
+    if trust == crate::trust::TrustState::Trusted {
+        return None;
+    }
+    // Since the last yes, not since forever: refusals from before a grant
+    // describe a project state the user already answered. No entry (never
+    // trusted, or revoked) means the whole log is in scope.
+    let since = crate::trust::TrustStore::load()
+        .trusted
+        .get(&crate::trust::key_for(root))
+        .map(|entry| entry.trusted_at)
+        .unwrap_or(0);
+    let want = manifest_dir.display().to_string();
+    let refusals: Vec<u64> = crate::calllog::read_all()
+        .into_iter()
+        .filter(|rec| {
+            rec.tool == "trust"
+                && rec.outcome == crate::calllog::CallOutcome::Denied
+                && rec.ts >= since
+                && rec.project.as_deref() == Some(want.as_str())
+        })
+        .map(|rec| rec.ts)
+        .collect();
+    if refusals.is_empty() {
+        return None;
+    }
+    Some(NeedsYourYes {
+        refused: refusals.len(),
+        last_refused_ts: refusals.iter().copied().max().unwrap_or_default(),
+        fix: format!(
+            "agentstack trust {}",
+            crate::text::sanitize_line(&root.display().to_string())
+        ),
+    })
 }
 
 pub(crate) struct SecretFacts {
@@ -441,9 +561,36 @@ pub(crate) struct SecretFacts {
 /// signals a glance wants (secrets resolving?) and the pointer to the deep
 /// check. Everything expensive (drift rendering, content scans) stays in
 /// `doctor`; status must feel instant.
+/// One sentence per shadowed library name, or nothing at all.
+///
+/// Cheap by construction — reading the linked indexes is the same work name
+/// resolution already does — and best-effort: an unreadable source list must
+/// never take the orientation screen down with it.
+fn shadowed_name_lines() -> Vec<String> {
+    let sources = crate::sources::Sources::load_or_warn();
+    let Ok(library) = crate::library::Library::load_linked(&sources.linked()) else {
+        return Vec::new();
+    };
+    library
+        .linked
+        .collisions
+        .iter()
+        .map(|c| {
+            format!(
+                "{} '{}' is in {} sources — '{}' wins; `{}` pins the other",
+                c.kind.noun(),
+                crate::text::sanitize_line(&c.name),
+                c.shadowed.len() + 1,
+                c.winner,
+                c.qualified_shadowed(),
+            )
+        })
+        .collect()
+}
+
 pub fn run_status(manifest_dir: Option<&Path>, json: bool) -> Result<()> {
     // `--json` changes only the rendering: the same collect, with the same
-    // `with_secrets` the named `status` screen already asks for.
+    // deep readings the named `status` screen already asks for.
     let orientation = collect(manifest_dir, true)?;
     if json {
         println!(
@@ -454,6 +601,15 @@ pub fn run_status(manifest_dir: Option<&Path>, json: bool) -> Result<()> {
     }
     print_orientation(&orientation, true);
     Ok(())
+}
+
+/// The `status --json` body for a project, without the envelope.
+///
+/// The one public seam onto the same reading `agentstack status --json` prints,
+/// so a witness can assert the shipped sentences rather than a paraphrase of
+/// them. Read-only, like the command.
+pub fn status_body(manifest_dir: Option<&Path>) -> Result<serde_json::Value> {
+    Ok(status_json(&collect(manifest_dir, true)?))
 }
 
 pub fn run(manifest_dir: Option<&Path>) -> Result<()> {
@@ -521,7 +677,7 @@ pub(crate) fn status_json(o: &Orientation) -> serde_json::Value {
 }
 
 fn project_json(f: &ProjectFacts) -> serde_json::Value {
-    serde_json::json!({
+    let mut body = serde_json::json!({
         "servers": f.servers,
         "skills": f.skills,
         // Pinned targets and the fan-out count are different questions, so
@@ -549,6 +705,23 @@ fn project_json(f: &ProjectFacts) -> serde_json::Value {
         "trust_relevant": f.trust_relevant,
         "mode": f.mode.label(),
         "gateway_connected": f.gateway_connected,
+        // W4 precondition 6. One sentence per broken harness, the SAME text the
+        // screen prints and `doctor` reports — a UI must never have to compose
+        // its own account of an outage.
+        "gateway_outages": f.gateway_outages.iter()
+            .map(|o| serde_json::json!({
+                "harness": crate::text::sanitize_line(&o.display),
+                "command": crate::text::sanitize_line(&o.command),
+                "explanation": o.sentence(),
+            }))
+            .collect::<Vec<_>>(),
+        "shadowed_names": f.shadowed_names,
+        // `instruction-channels-v1`. Always present (`[]` when the project
+        // targets nothing), so a panel can tell "checked, nothing to say" from
+        // an older binary that has no such key.
+        "instruction_channels": f.instruction_channels.iter()
+            .map(|c| c.to_json())
+            .collect::<Vec<_>>(),
         "rendered": f.rendered,
         // Names of unresolved refs, never values (invariant 5). `null` when
         // the caller did not ask for the reading at all — distinct from an
@@ -557,7 +730,92 @@ fn project_json(f: &ProjectFacts) -> serde_json::Value {
             "referenced": s.referenced,
             "unresolved": s.unresolved,
         })),
-    })
+    });
+    // `needs-your-yes-v1`. Inserted rather than emitted as `null`, because the
+    // question it answers is "has anything been refused here", and a project
+    // where nothing has must read exactly as it did before this field existed.
+    // No card payload rides along: `fix` names the command that renders the one
+    // authoritative card, and that command is the only thing that renders it.
+    if let Some(n) = &f.needs_your_yes {
+        body["needs_your_yes"] = serde_json::json!({
+            "refused": n.refused,
+            "last_refused_ts": n.last_refused_ts,
+            "fix": n.fix,
+        });
+    }
+
+    // `package-members-v1`. The effective member set, straight from the lock.
+    // Inserted rather than emitted as an empty list, on the same reasoning as
+    // `updates` below: a project that selects no package must read exactly as
+    // it did before this field existed.
+    //
+    // Every member carries `origin`, and every package carries `removed`, so a
+    // reader can always answer "which of these came from the package, and which
+    // did this project change?" without holding the package to diff against —
+    // which is the whole W5 acceptance criterion for overrides. `lane` is
+    // derived from the kind, so an instruction member can never be rendered as
+    // something served through the gateway.
+    if !f.packages.is_empty() {
+        if let Some(map) = body.as_object_mut() {
+            map.insert(
+                "packages".into(),
+                serde_json::Value::Array(
+                    f.packages
+                        .iter()
+                        .map(|p| {
+                            serde_json::json!({
+                                "name": crate::text::sanitize_line(&p.name),
+                                "version": crate::text::sanitize_line(&p.version),
+                                "source": crate::text::sanitize_line(&p.source),
+                                "rev": p.rev.as_deref().map(crate::text::sanitize_line),
+                                "toolsets": p.toolsets.iter()
+                                    .map(|t| crate::text::sanitize_line(t))
+                                    .collect::<Vec<_>>(),
+                                "removed": p.removed.iter()
+                                    .map(|r| crate::text::sanitize_line(r))
+                                    .collect::<Vec<_>>(),
+                                "overrides": p.members.iter()
+                                    .filter(|m| m.origin
+                                        == agentstack_core::lock::PackageMemberOrigin::ProjectOverride)
+                                    .count(),
+                                "members": p.members.iter().map(|m| serde_json::json!({
+                                    "name": crate::text::sanitize_line(&m.name),
+                                    "kind": m.kind.as_str(),
+                                    "lane": m.kind.lane(),
+                                    "origin": m.origin.as_str(),
+                                    "checksum": m.checksum.hex(),
+                                    "provenance": crate::text::sanitize_line(&m.provenance),
+                                })).collect::<Vec<_>>(),
+                            })
+                        })
+                        .collect(),
+                ),
+            );
+        }
+    }
+
+    // `update-offer-v1`. Inserted, never emitted as `null` or as an empty
+    // list: presence means "there is an offer", and its ABSENCE means only
+    // "no offer was produced" — never "you are current" (the check is offline
+    // and stays silent about everything it cannot answer). Keeping the key out
+    // entirely is what stops a consumer from rendering an "up to date" badge
+    // off an empty array.
+    if !f.updates.is_empty() {
+        if let Some(map) = body.as_object_mut() {
+            map.insert(
+                "updates".into(),
+                serde_json::json!({
+                    "packs": f.updates.iter().map(|u| serde_json::json!({
+                        "name": u.name,
+                        "current": u.current,
+                        "available": u.available,
+                    })).collect::<Vec<_>>(),
+                    "fix": super::updates::fix_command(&f.updates),
+                }),
+            );
+        }
+    }
+    body
 }
 
 /// Secrets at a glance for `status`: the single most common thing broken after
@@ -578,6 +836,39 @@ fn secret_facts(ctx: &super::Context) -> Option<SecretFacts> {
         referenced: refs.len(),
         unresolved,
     })
+}
+
+/// The update **offer** (design §Update model rule 2): name that newer
+/// versions exist and the one command that takes them. Nothing is printed when
+/// there is no offer — deliberately not a green "up to date", because the
+/// check behind this is offline and cannot prove currency (see
+/// [`crate::commands::updates::available_updates`]).
+///
+/// Rule 4 shapes the second line: keep-pinned is the resting state, so this
+/// offers and then says so. It must not read as a warning, a nag, or a claim
+/// that staying put is a fault.
+fn print_updates_line(updates: &[crate::commands::updates::PackUpdate]) {
+    if updates.is_empty() {
+        return;
+    }
+    let list = updates
+        .iter()
+        .map(|u| format!("{} {} → {}", u.name, u.current, u.available))
+        .collect::<Vec<_>>()
+        .join(" · ");
+    println!(
+        "  {}  {} with a newer version: {list}",
+        "Updates ".bold(),
+        super::count(updates.len(), "pack")
+    );
+    println!(
+        "            {}",
+        format!(
+            "take it with `{}` — staying on the pinned version is a complete answer",
+            crate::commands::updates::fix_command(updates)
+        )
+        .dimmed()
+    );
 }
 
 /// One aligned line when everything resolves; one line per missing secret,
@@ -671,10 +962,13 @@ fn tidy(path: &std::path::Path) -> String {
         .to_string()
 }
 
-/// Read every fact the orientation screen states. `with_secrets` is the one
-/// knob: bare `agentstack` has never consulted the resolvers, and gathering
-/// unconditionally would make it slower for a line it does not print.
-fn collect(manifest_dir: Option<&Path>, with_secrets: bool) -> Result<Orientation> {
+/// Read every fact the orientation screen states. `deep_reads` is the one
+/// knob, and it covers the two readings only the named `status` screen asks
+/// for: the secrets resolution (bare `agentstack` has never consulted the
+/// resolvers) and the offline update check (one local git ref read per
+/// installed git pack). Gathering either unconditionally would make bare
+/// `agentstack` slower for lines it does not print.
+fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation> {
     let registry = Registry::load()?;
 
     // Walk up to the project root so `agentstack` from `src/deep` describes
@@ -772,7 +1066,13 @@ fn collect(manifest_dir: Option<&Path>, with_secrets: bool) -> Result<Orientatio
     // Native configs here whose servers this manifest does not declare. Cheap
     // (a handful of small files at project scope) and the answer to the pilot's
     // silent case: a manifest that covers none of what is actually configured.
-    let native = crate::discover::native_configs(&ctx.registry, &ctx.dir, &m.servers, false);
+    let native = crate::discover::native_configs_with(
+        &ctx.registry,
+        &ctx.dir,
+        // Name references count as declared — see `declared_server_names`.
+        &crate::discover::declared_server_names(m),
+        false,
+    );
     let unimported = native.iter().any(|n| !n.unimported.is_empty());
     let any_detected = !detected_clis.is_empty();
 
@@ -780,6 +1080,11 @@ fn collect(manifest_dir: Option<&Path>, with_secrets: bool) -> Result<Orientatio
     // one next action is (`agentstack yes`), so the routing has to know.
     let intake = crate::intake::scan(&ctx.dir, &project_root, m).items;
     let undeclared_drops = !intake.is_empty();
+
+    // W1: what actually got refused here since the last yes. Computed before
+    // the next step is chosen, because evidence outranks every other routing
+    // signal — see the `pending` override below.
+    let pending = needs_your_yes(&ctx.dir, &project_root, trust);
 
     let fallback = next_step(
         trust,
@@ -805,6 +1110,33 @@ fn collect(manifest_dir: Option<&Path>, with_secrets: bool) -> Result<Orientatio
     let next = clean_at_rest_next_step(mode, trust, locked, active_session.is_some(), profile)
         .filter(|_| !undeclared_drops)
         .unwrap_or_else(|| (fallback.0.to_string(), fallback.1));
+    // ...and a refusal outranks the drop. `next_step`'s ladder puts a waiting
+    // drop above an untrusted (not drifted) project, which is right when
+    // nothing has tried to use the project yet. Once something HAS — and been
+    // refused — the screen would otherwise print the needs-your-yes line and
+    // then recommend a different command, which is the two-surfaces-disagree
+    // failure the single-next-step rule exists to prevent. Same verb the
+    // untrusted and drifted branches already name, so nothing new is invented
+    // here; only the ordering is made explicit.
+    let next = match &pending {
+        Some(_) => (
+            "agentstack trust .".to_string(),
+            "calls were refused here — review this project and say yes",
+        ),
+        None => next,
+    };
+
+    // W4: the delivery planner's routing for this project — computed once here
+    // so the screen and the JSON body cannot disagree about it.
+    //
+    // Scoped to the manifest's OWN targets, not the whole registry. The mode
+    // and gateway readings above deliberately span every adapter (a rendered
+    // file or a registered bridge is a fact wherever it is); routing is the
+    // opposite question — where THIS project's capabilities go — and answering
+    // it for eleven CLIs the project never named would bury the two it did.
+    let delivery_targets = crate::render::resolve_targets(m, &ctx.registry, &[], &ctx.dir)
+        .unwrap_or_else(|_| m.targets.default.clone());
+    let delivery_plan = crate::delivery::Plan::build(&m.delivery, &ctx.registry, &delivery_targets);
 
     Ok(Orientation {
         catalog_size: ctx.registry.ids().count(),
@@ -829,12 +1161,36 @@ fn collect(manifest_dir: Option<&Path>, with_secrets: bool) -> Result<Orientatio
             trust_relevant,
             mode,
             gateway_connected: gateway,
+            gateway_outages: crate::commands::connect::gateway_outages(&ctx.registry, &target_ids),
+            shadowed_names: shadowed_name_lines(),
+            delivery: crate::commands::delivery::summary_lines(&delivery_plan),
+            instruction_channels: crate::instructions::channels(
+                m,
+                &ctx.registry,
+                &delivery_targets,
+                crate::scope::Scope::default_for(&ctx.dir),
+                &ctx.dir,
+                &crate::library::Library::load_default_or_warn(),
+                // `status` names no toolset, so the model comes from
+                // `[settings.<cli>] model` or is honestly unknown.
+                None,
+            ),
+            delivery_rendered_lane: crate::delivery::rendered_lane_line(&delivery_plan),
+            delivery_has_live: delivery_plan.has_dynamic_lane(),
             rendered,
-            secrets: if with_secrets {
-                secret_facts(&ctx)
+            secrets: if deep_reads { secret_facts(&ctx) } else { None },
+            updates: if deep_reads {
+                super::updates::available_updates(m)
             } else {
-                None
+                Vec::new()
             },
+            needs_your_yes: pending,
+            // A malformed lock is doctor's finding, not status's: degrade to
+            // "no packages" rather than turning the orientation screen into an
+            // error. `locked` above already says whether a lock exists at all.
+            packages: crate::lock::Lock::load(&ctx.dir)
+                .map(|lock| crate::package::effective_members(&lock).to_vec())
+                .unwrap_or_default(),
         })),
         next,
     })
@@ -942,6 +1298,21 @@ fn print_orientation(o: &Orientation, status: bool) {
                 );
             }
 
+            // A package is only ever named by a toolset, and only a toolset
+            // delivers one: `package_runtime_servers` contributes nothing to an
+            // unfenced run, so the member set `status --json` publishes is not
+            // what a plain `agentstack run <cli>` loads (invariant 8 — claims
+            // match enforcement, `docs/design/package-layer.md`). Printed only
+            // when this project pinned a package, so a project without one
+            // reads exactly as it did before.
+            if !f.packages.is_empty() {
+                println!(
+                    "            {}",
+                    "package servers reach a run only when the run names a toolset that selects the package"
+                        .dimmed()
+                );
+            }
+
             // Stage 2.2: an active temporary session is a first-class fact of
             // the default status surface — its own line, not just the (active)
             // marker inside the profiles list, with the command that reverts it.
@@ -977,6 +1348,21 @@ fn print_orientation(o: &Orientation, status: bool) {
                 }
             }
 
+            // W1. The line above says what an untrusted project *means*; this
+            // one says what it already cost, so it is not dimmed — it is the
+            // louder, evidence-bearing version of the same fact, and it is
+            // shown whether or not trust is "relevant" here, because a recorded
+            // refusal is not a judgement about relevance. `agentstack trust .`
+            // is deliberately the same command the Next line prints: the JSON
+            // `fix` carries the resolved path for a caller working elsewhere,
+            // the screen keeps the phrasing the human is about to read again.
+            if let Some(pending) = &f.needs_your_yes {
+                println!(
+                    "            needs your yes: {} refused since you last said yes · review with `agentstack trust .`",
+                    super::count(pending.refused, "call")
+                );
+            }
+
             // Which delivery mode this project is in — a glance, not a guess.
             println!(
                 "  {}  {} {}",
@@ -985,7 +1371,54 @@ fn print_orientation(o: &Orientation, status: bool) {
                 format!("— {}", f.mode.short()).dimmed()
             );
 
+            // W4: the planner routes silently, so this is where a person finds
+            // out what it decided — per CLI, both lanes, in plain language.
+            // The two binding honesty rules follow it on their own lines: never
+            // a bare "0 files", and a separate `rendered lane:` naming what is
+            // really written.
+            for (i, line) in f.delivery.iter().enumerate() {
+                let label = if i == 0 { "Delivery" } else { "        " };
+                println!("  {}  {}", label.bold(), line);
+            }
+            if !f.delivery.is_empty() {
+                if f.delivery_has_live {
+                    println!("            {}", crate::delivery::ZERO_ARTIFACTS.dimmed());
+                }
+                if let Some(lane) = &f.delivery_rendered_lane {
+                    println!("            {}", lane.dimmed());
+                }
+            }
+
+            // W4 precondition 6 — the gateway is registered somewhere and
+            // cannot run. Not dimmed: nothing this project declares reaches
+            // that harness, and AgentStack deliberately does NOT render files
+            // to cover for it (a static fallback is always an explicit user
+            // action). One sentence, naming the one recovery command.
+            for outage in &f.gateway_outages {
+                println!("  {}  {}", "Gateway ".bold(), outage.sentence());
+            }
+
+            // Shadowed library names. Printed only when one exists — a name
+            // resolving to a copy the user did not mean is the one thing the
+            // precedence rule must never do quietly, and silence here is what
+            // "hidden" would look like.
+            for line in &f.shadowed_names {
+                println!("  {}  {}", "Library ".bold(), line);
+            }
+
+            // The house-rules honesty matrix. Printed only when this project
+            // actually has house rules — an orientation screen stays four ideas
+            // wide until there is something to say — but then it names EVERY
+            // targeted harness, including the ones that cannot receive them.
+            if f.instructions > 0 {
+                for (i, row) in f.instruction_channels.iter().enumerate() {
+                    let label = if i == 0 { "House   " } else { "        " };
+                    println!("  {}  {}", label.bold(), row.sentence());
+                }
+            }
+
             if status {
+                print_updates_line(&f.updates);
                 if let Some(secrets) = &f.secrets {
                     print_secrets_line(secrets);
                 }
@@ -1381,6 +1814,7 @@ mod tests {
                 settings: 0,
                 hooks: 0,
                 extensions: 0,
+                packages: Vec::new(),
                 skills: 1,
                 pinned_targets: vec!["claude-code".into()],
                 fanout_targets: 1,
@@ -1397,10 +1831,53 @@ mod tests {
                 trust_relevant: true,
                 mode: Mode::CleanAtRest,
                 gateway_connected: false,
+                gateway_outages: Vec::new(),
+                shadowed_names: Vec::new(),
+                instruction_channels: Vec::new(),
+                delivery: Vec::new(),
+                delivery_rendered_lane: None,
+                delivery_has_live: false,
                 rendered: false,
                 secrets,
+                needs_your_yes: None,
+                updates: Vec::new(),
             })),
             next: ("agentstack trust .".into(), "review and re-trust"),
+        }
+    }
+
+    /// `needs-your-yes-v1`, at the serializer: the key appears only when
+    /// something was actually refused, and it carries the fix — never a card.
+    /// A project with nothing refused must read byte-for-byte as it did before
+    /// the field existed, which is why absence (not `null`) is the contract.
+    #[test]
+    fn needs_your_yes_appears_only_with_evidence_and_carries_no_card() {
+        let clean = status_json(&loaded_orientation(None));
+        assert!(
+            clean["project"].get("needs_your_yes").is_none(),
+            "a project with no recorded refusal must not carry the key: {clean}"
+        );
+
+        let mut o = loaded_orientation(None);
+        if let ManifestState::Loaded(f) = &mut o.manifest {
+            f.needs_your_yes = Some(NeedsYourYes {
+                refused: 3,
+                last_refused_ts: 1_700_000_100,
+                fix: "agentstack trust /repo".to_string(),
+            });
+        }
+        let out = status_json(&o);
+        let pending = &out["project"]["needs_your_yes"];
+        assert_eq!(pending["refused"], 3);
+        assert_eq!(pending["last_refused_ts"], 1_700_000_100u64);
+        assert_eq!(pending["fix"], "agentstack trust /repo");
+        // The card stays behind `agentstack trust` — one walk, one renderer.
+        // Anything resembling a reviewable surface here would be a second one.
+        for absent in ["items", "review", "servers", "skills", "surface_digest"] {
+            assert!(
+                pending.get(absent).is_none(),
+                "status must not carry card payload ({absent}): {pending}"
+            );
         }
     }
 
@@ -1490,6 +1967,103 @@ mod tests {
         // "asked, everything resolves".
         let unasked = status_json(&loaded_orientation(None));
         assert_eq!(unasked["project"]["secrets"], serde_json::Value::Null);
+    }
+
+    /// `update-offer-v1`, both directions. The offer carries the three fields
+    /// and the SHIPPED command; no offer means the key is absent entirely —
+    /// not `null`, not `[]` — because absence must stay unreadable as
+    /// "current" (the check is offline and never proves currency).
+    #[test]
+    fn status_json_offers_updates_and_omits_the_key_when_there_is_none() {
+        let none = status_json(&loaded_orientation(None));
+        assert!(
+            none["project"].get("updates").is_none(),
+            "no offer must not materialize the key: {}",
+            none["project"]
+        );
+
+        let mut o = loaded_orientation(None);
+        if let ManifestState::Loaded(f) = &mut o.manifest {
+            f.updates = vec![crate::commands::updates::PackUpdate {
+                name: "acme".into(),
+                current: "v0.1.0".into(),
+                available: "v0.2.0".into(),
+            }];
+        }
+        let out = status_json(&o);
+        let updates = &out["project"]["updates"];
+        assert_eq!(updates["packs"][0]["name"], "acme");
+        assert_eq!(updates["packs"][0]["current"], "v0.1.0");
+        assert_eq!(updates["packs"][0]["available"], "v0.2.0");
+        assert_eq!(updates["fix"], "agentstack lock --upgrade acme");
+    }
+
+    /// `package-members-v1`, at the serializer. A project selecting no package
+    /// must read exactly as it did before the field existed (absence, not
+    /// `[]`); a project with one must expose the EFFECTIVE set — both origins
+    /// named, the removal named, the override counted, and each member's lane
+    /// derived from its kind so an instruction can never be presented as
+    /// something the gateway serves.
+    #[test]
+    fn status_json_carries_the_effective_member_set_and_omits_the_key_when_empty() {
+        let none = status_json(&loaded_orientation(None));
+        assert!(
+            none["project"].get("packages").is_none(),
+            "no package must not materialize the key: {}",
+            none["project"]
+        );
+
+        use agentstack_core::digest::Sha256Hex;
+        use agentstack_core::lock::{
+            LockedPackage, LockedPackageMember, PackageMemberKind, PackageMemberOrigin,
+        };
+        let mut o = loaded_orientation(None);
+        if let ManifestState::Loaded(f) = &mut o.manifest {
+            f.packages = vec![LockedPackage {
+                name: "rust-backend".into(),
+                version: "1.4.0".into(),
+                source: "library:rust-backend".into(),
+                rev: None,
+                toolsets: vec!["backend".into()],
+                removed: vec!["legacy".into()],
+                members: vec![
+                    LockedPackageMember {
+                        name: "house-rules".into(),
+                        kind: PackageMemberKind::Instruction,
+                        origin: PackageMemberOrigin::Package,
+                        checksum: Sha256Hex::of(b"a"),
+                        provenance: "package:rust-backend@1.4.0#instructions/house.md".into(),
+                    },
+                    LockedPackageMember {
+                        name: "sql-review".into(),
+                        kind: PackageMemberKind::Skill,
+                        origin: PackageMemberOrigin::ProjectOverride,
+                        checksum: Sha256Hex::of(b"b"),
+                        provenance: "project:skills.house-sql-review".into(),
+                    },
+                ],
+            }];
+        }
+        let out = status_json(&o);
+        let pkg = &out["project"]["packages"][0];
+        assert_eq!(pkg["name"], "rust-backend");
+        assert_eq!(pkg["version"], "1.4.0");
+        assert_eq!(pkg["toolsets"][0], "backend");
+        assert_eq!(pkg["removed"][0], "legacy");
+        assert_eq!(pkg["overrides"], 1);
+        assert_eq!(pkg["members"][0]["kind"], "instruction");
+        assert_eq!(pkg["members"][0]["lane"], "rendered");
+        assert_eq!(pkg["members"][0]["origin"], "package");
+        assert_eq!(pkg["members"][1]["lane"], "dynamic");
+        assert_eq!(pkg["members"][1]["origin"], "project-override");
+        assert_eq!(
+            pkg["members"][1]["provenance"],
+            "project:skills.house-sql-review"
+        );
+        assert_eq!(
+            pkg["members"][1]["checksum"].as_str().map(str::len),
+            Some(64)
+        );
     }
 
     // Stage 2.2: a live session reads as active; an abandoned one is flagged

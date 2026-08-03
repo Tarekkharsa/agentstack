@@ -17,7 +17,12 @@
 # The journey, exactly as two people run it:
 #   1. A project with one manifest and a hand-written .mcp.json of its own.
 #   2. A skill folder is dropped into .agentstack/skills/. Activating it pins
-#      it in the lock and renders it where the CLI actually reads skills.
+#      it in the lock, and `use --write` renders it where the CLI reads skills.
+#      That render is the ASK, not the automatic path: delivery is routed, and
+#      on an MCP-capable tool skills and servers are served live over a lease
+#      (see examples/projects/skills-workout for both lanes side by side). This
+#      demo takes the rendered lane deliberately — undo/share/receive/up are all
+#      about files on disk, and files are what it has to compare byte-for-byte.
 #   3. `agentstack undo --to 1 --write` puts the native config back BYTE FOR
 #      BYTE — including the hand-written server the render had merged with.
 #   4. `agentstack share` writes a signed .astack bundle.

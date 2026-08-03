@@ -199,7 +199,7 @@
       </li>
       <li><a href="workflows.html">Workflows</a>
       </li>
-      <li><a href="reference.html#the-central-library">Central library</a>
+      <li><a href="reference.html#the-library-linked-source-folders">Library sources</a>
       </li>
       <li><a href="concepts.html#delivery-modes">Delivery modes</a>
       </li>
@@ -261,15 +261,18 @@
 <h1 id="which-mode-do-i-need">Which mode do I need?</h1>
 <p>AgentStack has two decisions to make: where the rendered files should live, and how much protection you want. This page picks both from what you are trying to do. New to a word below? Every term is defined in <a href="concepts.html">concepts</a>.</p>
 <p>Your <em>CLIs</em> are the agent tools you run — Claude Code, Codex, Cursor, and the rest.</p>
-<h2 id="first-where-do-the-rendered-files-live">First: where do the rendered files live?<a class="hlink" href="#first-where-do-the-rendered-files-live" aria-label="Link to this section">#</a></h2>
-<p>This is your <em>delivery mode</em> — how your chosen capabilities reach each CLI.</p>
+<h2 id="first-how-do-capabilities-reach-your-clis">First: how do capabilities reach your CLIs?<a class="hlink" href="#first-how-do-capabilities-reach-your-clis" aria-label="Link to this section">#</a></h2>
+<p><strong>You do not have to choose.</strong> Since 2026-08-03 delivery is <em>routed</em>, not picked: AgentStack decides per capability, from what kind it is and which CLI it is going to, and says what it decided. <code>agentstack delivery</code> shows the routing for your project.</p>
 <div class="tblwrap"><table>
-<thead><tr><th>Delivery mode</th><th>Pick it when</th><th>Where capabilities live</th></tr></thead><tbody>
-<tr><td><strong>static</strong> (default)</td><td>you want zero setup, and it must work with every CLI</td><td>Rendered files sit on disk, ready the moment a CLI starts. Zero moving parts.</td></tr>
-<tr><td><strong>clean-at-rest</strong></td><td>the repo must stay pristine between sessions</td><td>Files exist only between <code>session start</code> and <code>session end</code>. Nothing is left behind at rest.</td></tr>
-<tr><td><strong>zero-files</strong></td><td>you juggle many repos and your CLI speaks MCP (Model Context Protocol)</td><td>Nothing on disk. The gateway serves each trusted repo's capabilities live.</td></tr>
+<thead><tr><th>Capability</th><th>Where it goes</th><th>Why</th></tr></thead><tbody>
+<tr><td>Skills · MCP servers, on a CLI that speaks MCP</td><td>served live, on demand</td><td>brokered, policy-checked, digest-verified, recorded — and nothing generated lands in your repo for them</td></tr>
+<tr><td>House rules · settings</td><td>written into native files</td><td>a setting only a file carries; house rules because no live channel a CLI is <em>known</em> to consume varies by model</td></tr>
+<tr><td>Hooks · extensions</td><td>written into native files, reviewed in full every time</td><td>they run code</td></tr>
+<tr><td>Anything, on a CLI that reads files only</td><td>written into native files</td><td>that CLI has no live channel</td></tr>
 </tbody></table></div>
-<p>The wizard defaults to <strong>static</strong>, and you can switch delivery mode any time — switching changes only how files are delivered, never what you trust or what your policy allows. Not sure? Stay on static. See <a href="concepts.html">delivery modes in concepts</a> for the fuller definitions, and <a href="architecture.html#operating-model--choose-the-boundary-you-need">ARCHITECTURE — operating model</a> for how delivery sits beside selection and isolation.</p>
+<p>A project is normally in <strong>both</strong> lanes at once, and that is the ordinary case, not a compromise.</p>
+<p><strong>The one escape hatch: render locally.</strong> <code>agentstack delivery render-locally --write</code> (add <code>--harness &lt;id&gt;</code> for a single CLI) writes files even where the live channel would have worked. Pick it for offline work, deterministic native files, inspection with ordinary filesystem tools, a rule against a persistent background process, debugging without another runtime dependency, or testing a CLI's own behaviour. Switching it changes only <em>where the bytes go</em> — never what you trust or what your policy allows.</p>
+<p>The older per-project delivery modes (<code>static</code>, <code>clean-at-rest</code>, <code>zero-files</code>) still exist behind <code>agentstack set-mode</code> and the wizard's "more control" path; they are no longer the way delivery is chosen. See <a href="concepts.html">delivery modes in concepts</a> for what each still means, and <a href="architecture.html#operating-model--choose-the-boundary-you-need">ARCHITECTURE — operating model</a> for how delivery sits beside selection and isolation.</p>
 <h2 id="then-how-much-protection">Then: how much protection?<a class="hlink" href="#then-how-much-protection" aria-label="Link to this section">#</a></h2>
 <p>Find the row that sounds like you. The last column says how strongly each option is <em>actually</em> enforced, in the <a href="enforcement.html">enforcement matrix's</a> own words.</p>
 <div class="tblwrap"><table>
@@ -277,11 +280,11 @@
 <tr><td>just syncing config across your CLIs</td><td>config sync</td><td><code>init</code> then <code>apply --write</code></td><td>Copies your reviewed config into each CLI. No runtime check — nothing is blocked once an agent is running.</td></tr>
 <tr><td>worried about <code>rm -rf</code> or <code>.env</code> accidents</td><td>the guard</td><td><code>guard install</code></td><td><strong>Cooperative</strong>: catches an agent's <em>accidents</em> through each CLI's own hook. Not a determined attacker.</td></tr>
 <tr><td>cloning repos you didn't write</td><td>the trust gate</td><td><code>gateway connect</code> then <code>trust .</code></td><td>A repo's servers, skills, and secrets stay <strong>inert</strong> until you trust it. Trust gates whether they load — it does not sandbox the code.</td></tr>
-<tr><td>launching a frozen, verified surface, no Docker</td><td>a Protected run</td><td><code>run &lt;cli&gt; --locked</code></td><td>Fail-closed trust and pin checks before launch, then a frozen surface. Labelled <code>HOST / PROTECTED</code>. Not kernel isolation — the agent still runs as you.</td></tr>
+<tr><td>launching a frozen, verified surface, no Docker</td><td>a Protected run — already the default</td><td><code>run &lt;cli&gt;</code></td><td>Fail-closed trust and pin checks before launch, then a frozen surface. This is what a plain <code>agentstack run</code> does now; <code>--unprotected</code> opts out. Labelled <code>HOST / PROTECTED</code>. Not kernel isolation — the agent still runs as you.</td></tr>
 <tr><td>running sensitive work that must not leak</td><td>Lockdown (Docker)</td><td><code>run &lt;cli&gt; --sandbox --lockdown</code></td><td>Container with no route out; egress is <strong>enforced</strong>. Unapproved egress is blocked — that never means exfiltration is impossible. Labelled <code>LOCKDOWN / ENFORCED</code>.</td></tr>
 </tbody></table></div>
-<p>The rows stack: guard, the trust gate, and a locked or lockdown run each add protection the one above does not, so most people end up combining several. The legend words — <strong>cooperative</strong>, <strong>enforced</strong>, coarse, unsupported — are defined once in the <a href="enforcement.html">enforcement matrix</a>, which spells out exactly what each mode does and does not stop. <code>--lockdown</code> needs Docker; <code>--locked</code> does not.</p>
-<p><strong>Not sure?</strong> Static plus <code>guard install</code> is the right answer for almost everyone. <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/start.html">Get started</a> sets both up.</p>
+<p>The rows stack: guard, the trust gate, and a protected or lockdown run each add protection the one above does not, so most people end up combining several. The legend words — <strong>cooperative</strong>, <strong>enforced</strong>, coarse, unsupported — are defined once in the <a href="enforcement.html">enforcement matrix</a>, which spells out exactly what each mode does and does not stop. <code>--lockdown</code> needs Docker; the protected default does not.</p>
+<p><strong>Not sure?</strong> Let delivery stay automatic and add <code>guard install</code> — that is the right answer for almost everyone. <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/start.html">Get started</a> sets both up.</p>
   <p class="srcline">Source of truth: <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/choose.md">docs/choose.md</a> — this page is generated from it.</p>
   </main>
 </div>

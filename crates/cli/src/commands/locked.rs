@@ -101,6 +101,10 @@ pub(crate) fn run_locked_child(
     .ok_or_else(|| anyhow::anyhow!("child delivery mode must yield a report"))
 }
 
+/// The Protected tier. Note that `args.locked` is NOT the switch that got us
+/// here: since `run` became protected by default, `commands::runs::run` decides
+/// the tier and calls this, so `args.locked` merely records whether the user
+/// typed the flag. Nothing below branches on it.
 pub fn run_locked(manifest_dir: Option<&Path>, args: &RunArgs) -> Result<()> {
     // Named limitations, checked before anything resolves. Refusing loudly is
     // honest; silently degrading the contract's semantics is not.
@@ -274,7 +278,9 @@ fn resolve_inputs(ctx: &Context, profile: Option<&str>) -> Result<LockedInputs> 
         .map(|(name, instr)| {
             (
                 name.clone(),
-                crate::resolve::instruction_lock_status(name, instr, &ctx.dir, &lock),
+                crate::resolve::instruction_lock_status_with(
+                    name, instr, &ctx.dir, &lock, &library,
+                ),
             )
         })
         .collect();
@@ -595,6 +601,22 @@ fn freeze_grant(
 
     // Instructions: pinned digests come from the lock entries strict
     // verification just proved current.
+    //
+    // The body bound here is the one THIS run's harness actually receives
+    // (review finding 5). It used to be the base body unconditionally, while a
+    // harness with a matching `(cli, model)` variant is delivered the variant's
+    // bytes — so an auditor reconciling the agent's context against the grant
+    // read a file the run never used. Content binding was never at risk (every
+    // variant is pinned in the lock, strict verification above compared all of
+    // them, and the lock is inside the consent digest); the defect was that the
+    // grant's own per-item record named the wrong file.
+    //
+    // The model comes from `model_for`, the one resolver every variant surface
+    // uses — an explicitly named toolset's `model`, else `[settings.<cli>]
+    // model`, else unknown, which selects the least specific match. Re-deriving
+    // it here with different rules would let the grant name one body while the
+    // compiler delivered another.
+    let model = crate::instructions::model_for(m, &args.harness, args.profile.as_deref());
     for (name, _) in &inputs.instruction_statuses {
         let instr = m
             .instructions
@@ -603,12 +625,36 @@ fn freeze_grant(
         let entry = inputs.lock.get_instruction(name).with_context(|| {
             format!("instruction '{name}' lost its lock pin after verification")
         })?;
-        let src = crate::render::instructions::fragment_source(&ctx.dir, &instr.path);
+        let bodies = crate::instructions::bodies(name, instr, &ctx.dir, &inputs.library)
+            .with_context(|| format!("resolving instruction '{name}' after verification"))?;
+        let chosen = bodies.choose(&args.harness, model.as_deref());
+        // The digest of the CHOSEN body, taken from its own lock pin — never
+        // the base checksum paired with a variant path, which would be a grant
+        // whose two halves describe different files. A selected variant with no
+        // pin cannot occur (verification returns `MissingLockEntry` for exactly
+        // that, and refuses the run), so this is a refusal rather than a
+        // fallback: a silent fallback here is how the two halves would drift
+        // apart again.
+        let checksum = match &chosen.variant {
+            None => entry.checksum.hex(),
+            Some(v) => entry
+                .variants
+                .iter()
+                .find(|p| p.cli == v.cli && p.model == v.model && p.path == chosen.declared)
+                .with_context(|| {
+                    format!(
+                        "instruction '{name}' variant {} lost its lock pin after verification",
+                        chosen.label()
+                    )
+                })?
+                .checksum
+                .hex(),
+        };
         b.add_instruction(
             name,
             GrantedInstruction::project_pinned(
-                GrantPath::new(&src)?,
-                ContentDigest::parse(entry.checksum.hex())?,
+                GrantPath::new(&chosen.path)?,
+                ContentDigest::parse(checksum)?,
                 instr.targets.iter().cloned().collect::<BTreeSet<String>>(),
             ),
         )?;
@@ -1021,32 +1067,236 @@ impl McpInjection {
 }
 
 /// The ONE headless argv construction both `live` and `plan` commit: the
-/// launch argv with the per-child MCP injection spliced into the options
-/// region, when this run is headless and the harness declares an
-/// `mcp_injection` block. Non-headless runs (and harnesses without injection)
-/// pass `base_argv` through untouched. Pure — `prepare` renders in memory;
-/// only live's `materialize` ever writes — which is exactly what lets `--plan`
+/// launch argv with the per-child MCP injection AND the per-role model/effort
+/// selection fragments spliced into the options region, when this run is
+/// headless and the harness declares them. Non-headless runs — and headless
+/// runs where the harness declares neither and the role selects nothing — pass
+/// `base_argv` through untouched. Pure — `prepare` renders in memory; only
+/// live's `materialize` ever writes — which is exactly what lets `--plan`
 /// preview the same argv (and thus the same redacted-arg count and grant
 /// digest, run identity held equal) that a live run freezes.
+///
+/// Both splices land in the SAME options region, ahead of the `--` guard, in a
+/// fixed order (MCP injection, then model, then effort) so the argv — and
+/// therefore the grant digest — is a function of the inputs alone. This stays
+/// one construction on purpose: a second argv path for model/effort would be a
+/// second thing the grant could fail to commit.
+/// The `selection` argument is the ALREADY-RESOLVED [`RoleSelection`] — its
+/// own refusal (a value this adapter's catalog rejects) belongs to its own
+/// gate in the caller's evidence, not to this function's, so resolution
+/// happens once, at the call site, and only its result arrives here.
 fn headless_argv_and_injection(
     desc: &crate::adapter::AdapterDescriptor,
     args: &RunArgs,
     base_argv: Vec<String>,
     run_dir: &Path,
     handoff_path: &Path,
+    selection: &RoleSelection,
 ) -> Result<(Vec<String>, Option<McpInjection>)> {
     let Some(prompt) = args.prompt.as_deref() else {
         return Ok((base_argv, None));
     };
-    let Some(injection) = McpInjection::prepare(desc, run_dir, handoff_path)? else {
+    let injection = McpInjection::prepare(desc, run_dir, handoff_path)?;
+    if injection.is_none() && selection.args.is_empty() {
+        // Nothing to splice: the base argv already IS the committed argv.
         return Ok((base_argv, None));
-    };
+    }
+    let mut spliced: Vec<String> = Vec::new();
+    if let Some(inj) = &injection {
+        spliced.extend(inj.args.iter().cloned());
+    }
+    spliced.extend(selection.args.iter().cloned());
     let argv = desc
         .headless
         .as_ref()
         .expect("a prompt implies a headless spec (launch_argv enforced it)")
-        .argv_with_injection(prompt, &injection.args);
-    Ok((argv, Some(injection)))
+        .argv_with_injection(prompt, &spliced);
+    Ok((argv, injection))
+}
+
+/// What one declared model/effort value became for one harness.
+///
+/// Three verdicts, and keeping them apart IS the honesty rule (rule 8: claims
+/// match enforcement). "The harness has no such notion" and "the harness has
+/// the setting but no confirmed per-launch flag" are genuinely different facts,
+/// and a surface that collapses them tells a user the wrong story about what to
+/// do next.
+pub(crate) enum DimensionVerdict {
+    /// Carried: this dimension's fragment is in [`RoleSelection::args`].
+    Delivered,
+    /// This harness cannot carry the value at launch. The sentence says why.
+    /// Callers REPORT this and proceed — refusing would break every manifest
+    /// that already declares `[profiles.x] model` for instruction-variant
+    /// selection, which is a real and older use of the same field.
+    Undeliverable(String),
+    /// The adapter's own settings catalog rejects the value. The sentence says
+    /// why. This is a manifest mistake, not a capability gap, so a live launch
+    /// REFUSES on it — starting a child with a config value its CLI will
+    /// reject helps nobody — while static surfaces merely report it.
+    Rejected(String),
+}
+
+/// What a role's declared model/effort become for one harness: the argv
+/// fragments to splice, plus a verdict per declared dimension.
+#[derive(Default)]
+pub(crate) struct RoleSelection {
+    pub(crate) args: Vec<String>,
+    /// One entry per DECLARED dimension, in `Dimension::ALL` order. A
+    /// dimension the role left unset contributes nothing.
+    pub(crate) outcomes: Vec<DimensionOutcome>,
+}
+
+pub(crate) struct DimensionOutcome {
+    pub(crate) dimension: crate::adapter::descriptor::Dimension,
+    /// The declared value, sanitized for display (rule 7: manifest text on its
+    /// way to a terminal line).
+    pub(crate) value: String,
+    pub(crate) verdict: DimensionVerdict,
+}
+
+impl RoleSelection {
+    /// The first catalog rejection, if any — what a launch path refuses on.
+    pub(crate) fn rejection(&self) -> Option<&str> {
+        self.outcomes.iter().find_map(|o| match &o.verdict {
+            DimensionVerdict::Rejected(why) => Some(why.as_str()),
+            _ => None,
+        })
+    }
+
+    /// The undeliverable sentences, in declaration order.
+    pub(crate) fn notes(&self) -> impl Iterator<Item = (&'static str, &str)> {
+        self.outcomes.iter().filter_map(|o| match &o.verdict {
+            DimensionVerdict::Undeliverable(why) => Some((o.dimension.label(), why.as_str())),
+            _ => None,
+        })
+    }
+
+    /// `model=x, effort=y` over what actually reached the argv, or `None` when
+    /// nothing did — what a launch banner states positively.
+    pub(crate) fn delivered_summary(&self) -> Option<String> {
+        let parts: Vec<String> = self
+            .outcomes
+            .iter()
+            .filter(|o| matches!(o.verdict, DimensionVerdict::Delivered))
+            .map(|o| format!("{}={}", o.dimension.label(), o.value))
+            .collect();
+        (!parts.is_empty()).then(|| parts.join(", "))
+    }
+}
+
+/// The ONE sentence saying why a declared model/effort will NOT reach a child,
+/// or `None` when the outcome is the deliverable one.
+///
+/// Shared on purpose. Three surfaces state this fact — the locked launch
+/// banner and `--plan` preview (through [`selection_for`]), the workflow drive
+/// loop's per-child lines, and the static `workflow explain` — and a user who
+/// reads two of them must not get two stories. This function is where the
+/// wording lives so there is only one to change.
+///
+/// `None` for [`Selection::Args`] is load-bearing, not a degenerate case:
+/// callers holding a raw `Selection` (`workflow explain`) read it as "nothing
+/// to report about this dimension".
+///
+/// `subject` is the phrase naming who declared the value — `role 'reviewer'`
+/// for the static explain, `toolset 'reviewer'` for a live launch. `value` is
+/// raw manifest text on its way to a terminal line, so it is sanitized HERE
+/// (invariant 7) rather than at each of the three call sites.
+pub(crate) fn undeliverable_note(
+    subject: &str,
+    desc: &crate::adapter::AdapterDescriptor,
+    dimension: crate::adapter::descriptor::Dimension,
+    value: &str,
+    outcome: &crate::adapter::descriptor::Selection,
+) -> Option<String> {
+    use crate::adapter::descriptor::Selection;
+    let shown = crate::text::sanitize_line(value);
+    match outcome {
+        // Delivered: the argv carries it, so there is nothing to warn about.
+        Selection::Args(_) => None,
+        Selection::NoNotion => Some(format!(
+            "{subject} declares {} '{shown}', but {} has no notion of {} at all (its adapter \
+             declares no {}) — the value is NOT applied",
+            dimension.label(),
+            desc.display,
+            dimension.label(),
+            dimension.settings_key_field(),
+        )),
+        Selection::NotPerLaunch { key } => Some(format!(
+            "{subject} declares {} '{shown}', and {} does have that setting ('{}') — but no \
+             confirmed way to select it for a single headless launch, and a governed run never \
+             writes a harness's persistent settings file — the value is NOT applied",
+            dimension.label(),
+            desc.display,
+            crate::text::sanitize_line(key),
+        )),
+    }
+}
+
+/// The launch path's view: resolve `args.model` / `args.effort` for this
+/// harness, naming the run's toolset as the declaring subject.
+fn resolve_selection(desc: &crate::adapter::AdapterDescriptor, args: &RunArgs) -> RoleSelection {
+    let subject = format!(
+        "toolset '{}'",
+        crate::text::sanitize_line(args.profile.as_deref().unwrap_or("(unnamed)"))
+    );
+    selection_for(
+        desc,
+        &subject,
+        args.model.as_deref(),
+        args.effort.as_deref(),
+    )
+}
+
+/// The ONE place that decides what a declared model/effort DOES on a launch —
+/// asked of the descriptor, which is the single authority on what a CLI can
+/// select and how.
+///
+/// Both launch surfaces go through here — `live` (which splices `args` and
+/// refuses a rejection) and `plan` (which previews the identical resolution),
+/// so the argv, and therefore the grant digest, is decided once. The two
+/// read-only surfaces in `workflow` render the same facts without needing the
+/// argv, and share the wording through [`undeliverable_note`] rather than by
+/// building their own sentences.
+///
+/// `subject` is the phrase naming who declared the value — `role 'reviewer'`
+/// for the static explain, `toolset 'reviewer'` for a live launch.
+pub(crate) fn selection_for(
+    desc: &crate::adapter::AdapterDescriptor,
+    subject: &str,
+    model: Option<&str>,
+    effort: Option<&str>,
+) -> RoleSelection {
+    use crate::adapter::descriptor::{Dimension, Selection};
+    let mut out = RoleSelection::default();
+    for (dimension, declared) in [(Dimension::Model, model), (Dimension::Effort, effort)] {
+        let Some(value) = declared else { continue };
+        let shown = crate::text::sanitize_line(value);
+        let verdict = match desc.select(dimension, value) {
+            // A catalog rejection is a manifest authoring error, not a
+            // capability gap, so it never becomes a "note" — the launch path
+            // refuses on it.
+            Err(why) => DimensionVerdict::Rejected(format!("{subject}: {why}")),
+            Ok(outcome) => match undeliverable_note(subject, desc, dimension, value, &outcome) {
+                Some(note) => DimensionVerdict::Undeliverable(note),
+                // No note means `Selection::Args` — the one deliverable
+                // outcome — so the fragment is right here to splice. Taking
+                // both the verdict and the fragment from the SAME outcome is
+                // what keeps the banner and the argv from disagreeing.
+                None => {
+                    if let Selection::Args(fragment) = outcome {
+                        out.args.extend(fragment);
+                    }
+                    DimensionVerdict::Delivered
+                }
+            },
+        };
+        out.outcomes.push(DimensionOutcome {
+            dimension,
+            value: shown,
+            verdict,
+        });
+    }
+    out
 }
 
 /// A rendered server entry (JSON) as an inline TOML value, for the one-element
@@ -1465,6 +1715,34 @@ fn live(
         });
     let handoff_path = run_dir.join(crate::grant::HANDOFF_FILE);
 
+    // The role's model/effort, resolved against THIS harness's descriptor
+    // before the argv is built (its fragments are digest input too, exactly
+    // like the injection below). Its own gate, because its own failure mode is
+    // its own: a value the adapter's settings catalog rejects is a manifest
+    // mistake, not an MCP-injection failure, and the evidence should say so.
+    let selection = resolve_selection(desc, args);
+    if let Some(why) = selection.rejection() {
+        return Err(ev.refuse("model-effort", anyhow::anyhow!("{why}")));
+    }
+    if let Some(summary) = selection.delivered_summary() {
+        banner!(
+            quiet,
+            headless,
+            "  {} toolset selection delivered to {} as launch flags: {}",
+            "✓".green(),
+            display,
+            summary
+        );
+    }
+    for (_, note) in selection.notes() {
+        // Rule 8: an unsupported setting is stated, never swallowed. The run
+        // still proceeds — the harness simply runs on its own default. For a
+        // workflow child every banner here is quiet by delivery mode, and the
+        // drive loop prints the SAME sentence per child (it owns the per-child
+        // voice, exactly as it does for the codex connector residual).
+        banner!(quiet, headless, "  {} {}", "⚠".yellow(), note);
+    }
+
     // W2.5 (workflows design §12.1): a headless child gets a per-run,
     // launcher-authored MCP config injected through harness-native flags, so N
     // concurrent locked children can share one project without touching the
@@ -1473,7 +1751,7 @@ fn live(
     // the grant commits the exact per-child injection the same way it commits
     // the prompt. Interactive runs (no `--prompt`) keep the park/swap path.
     let (argv, injection) =
-        match headless_argv_and_injection(desc, args, argv, &run_dir, &handoff_path) {
+        match headless_argv_and_injection(desc, args, argv, &run_dir, &handoff_path, &selection) {
             Ok(x) => x,
             Err(e) => return Err(ev.refuse("mcp-injection", e)),
         };
@@ -1837,7 +2115,29 @@ fn plan(ctx: &Context, base: &Path, args: &RunArgs) -> Result<()> {
                     "✓".green()
                 );
             }
-            match headless_argv_and_injection(d, args, v, &run_dir, &handoff_path) {
+            // Same resolution the live path performs, previewed here — an
+            // undeliverable model/effort is a fact the plan must show, and a
+            // catalog-rejected value is a blocker a live run would refuse on.
+            let selection = resolve_selection(d, args);
+            if let Some(why) = selection.rejection() {
+                println!(
+                    "  {} model/effort: the declared value is not one this harness accepts",
+                    "✗".red()
+                );
+                blockers.push(("model-effort".into(), why.to_string()));
+                return None;
+            }
+            if let Some(summary) = selection.delivered_summary() {
+                println!(
+                    "  {} model/effort: {summary} would be selected for this launch as {} flags",
+                    "✓".green(),
+                    d.display
+                );
+            }
+            for (_, note) in selection.notes() {
+                println!("  {} {}", "⚠".yellow(), note);
+            }
+            match headless_argv_and_injection(d, args, v, &run_dir, &handoff_path, &selection) {
                 Ok((argv, Some(inj))) => {
                     println!(
                         "  {} headless: per-run MCP config would be injected via harness \
@@ -2192,6 +2492,7 @@ mod tests {
         RunArgs {
             harness: "claude-code".to_string(),
             locked: true,
+            unprotected: false,
             prompt: None,
             profile: None,
             scope: Some(agentstack_core::scope::Scope::Project),
@@ -2199,8 +2500,139 @@ mod tests {
             sandbox: false,
             lockdown: false,
             plan,
+            model: None,
+            effort: None,
             args: Vec::new(),
         }
+    }
+
+    /// **Review finding 5.** The grant binds the body the harness actually
+    /// receives, not the fragment's base body.
+    ///
+    /// The defect: `GrantedInstruction` recorded `base_source` unconditionally,
+    /// while a harness with a matching `(cli, model)` variant is delivered the
+    /// variant's bytes. An auditor reconciling the agent's context against the
+    /// grant therefore read a file the run never used. Content binding was
+    /// never at risk — every variant is pinned in the lock, verification
+    /// compares all of them, and the lock is inside the consent digest — so
+    /// this is an evidence defect, and the fix is evidence-shaped.
+    ///
+    /// Reverting to `base_source` fails this on the path assertion: the grant
+    /// names `house.md` while the run delivers `house.claude.md`.
+    #[test]
+    fn the_grant_binds_the_body_this_harness_actually_receives() {
+        locked_fixture(|_home, proj| {
+            proj.child("instructions/house.md")
+                .write_str("base body\n")
+                .unwrap();
+            proj.child("instructions/house.claude.md")
+                .write_str("claude-code body\n")
+                .unwrap();
+            proj.child("agentstack.toml")
+                .write_str(
+                    "version = 1\n\n\
+                     [instructions.house]\n\
+                     path = \"./instructions/house.md\"\n\
+                     targets = [\"*\"]\n\n\
+                     [[instructions.house.variant]]\n\
+                     cli = \"claude-code\"\n\
+                     path = \"./instructions/house.claude.md\"\n",
+                )
+                .unwrap();
+            super::super::lock::run(&crate::cli::LockArgs::default(), Some(proj.path())).unwrap();
+            trust::trust_unreviewed(proj.path()).unwrap();
+
+            let ctx = crate::commands::load(Some(proj.path())).unwrap();
+            let base = crate::manifest::project_root_of(&ctx.dir);
+            let args = run_args(false);
+            let inputs = resolve_inputs(&ctx, None).unwrap();
+            let machine = crate::machine_policy::load().unwrap();
+            let ruleset = agentstack_policy::compile(&machine, &ctx.loaded.manifest.policy, &[]);
+            let bin_path = resolve_bin_path("claude").unwrap();
+            crate::grant::provision_commitment_key().unwrap();
+            let argv = launch_argv(ctx.registry.get("claude-code").unwrap(), &args).unwrap();
+            let grant = freeze_grant(
+                &ctx, &base, &args, &argv, &inputs, ruleset, &machine, &bin_path,
+            )
+            .unwrap();
+
+            let (path, digest) = grant
+                .bound_instruction("house")
+                .expect("the fragment is bound");
+            assert!(
+                path.ends_with("house.claude.md"),
+                "the grant names the body claude-code receives, not the base: {path}"
+            );
+
+            // …and the digest is that body's own pin, not the base checksum
+            // wearing a variant path. A grant whose two halves describe
+            // different files is worse than one that names the wrong file.
+            let lock = crate::lock::Lock::load(&ctx.dir).unwrap();
+            let entry = lock.get_instruction("house").unwrap();
+            let variant_pin = entry
+                .variants
+                .iter()
+                .find(|v| v.cli.as_deref() == Some("claude-code"))
+                .expect("the variant is pinned");
+            assert_eq!(digest, variant_pin.checksum.hex());
+            assert_ne!(
+                digest,
+                entry.checksum.hex(),
+                "the base and variant bodies differ, so their digests must too — \
+                 an equal digest would make this test unable to tell them apart"
+            );
+        });
+    }
+
+    /// The same fragment, a harness with NO matching variant: the base body is
+    /// bound, which is what that harness is delivered. The fix selects; it does
+    /// not simply prefer variants.
+    #[test]
+    fn a_harness_with_no_matching_variant_binds_the_base_body() {
+        locked_fixture(|_home, proj| {
+            proj.child("instructions/house.md")
+                .write_str("base body\n")
+                .unwrap();
+            proj.child("instructions/house.codex.md")
+                .write_str("codex body\n")
+                .unwrap();
+            proj.child("agentstack.toml")
+                .write_str(
+                    "version = 1\n\n\
+                     [instructions.house]\n\
+                     path = \"./instructions/house.md\"\n\
+                     targets = [\"*\"]\n\n\
+                     [[instructions.house.variant]]\n\
+                     cli = \"codex\"\n\
+                     path = \"./instructions/house.codex.md\"\n",
+                )
+                .unwrap();
+            super::super::lock::run(&crate::cli::LockArgs::default(), Some(proj.path())).unwrap();
+            trust::trust_unreviewed(proj.path()).unwrap();
+
+            let ctx = crate::commands::load(Some(proj.path())).unwrap();
+            let base = crate::manifest::project_root_of(&ctx.dir);
+            let args = run_args(false); // harness = claude-code
+            let inputs = resolve_inputs(&ctx, None).unwrap();
+            let machine = crate::machine_policy::load().unwrap();
+            let ruleset = agentstack_policy::compile(&machine, &ctx.loaded.manifest.policy, &[]);
+            let bin_path = resolve_bin_path("claude").unwrap();
+            crate::grant::provision_commitment_key().unwrap();
+            let argv = launch_argv(ctx.registry.get("claude-code").unwrap(), &args).unwrap();
+            let grant = freeze_grant(
+                &ctx, &base, &args, &argv, &inputs, ruleset, &machine, &bin_path,
+            )
+            .unwrap();
+
+            let (path, digest) = grant.bound_instruction("house").unwrap();
+            assert!(path.ends_with("house.md"), "{path}");
+            assert!(!path.ends_with("house.codex.md"), "{path}");
+            let lock = crate::lock::Lock::load(&ctx.dir).unwrap();
+            assert_eq!(
+                digest,
+                lock.get_instruction("house").unwrap().checksum.hex()
+            );
+        });
     }
 
     /// Read the single recorded run's events under the isolated home.
@@ -2274,6 +2706,7 @@ mod tests {
             let args = RunArgs {
                 harness: "pi".to_string(),
                 locked: true,
+                unprotected: false,
                 prompt: None,
                 profile: None,
                 scope: Some(agentstack_core::scope::Scope::Project),
@@ -2281,6 +2714,8 @@ mod tests {
                 sandbox: false,
                 lockdown: false,
                 plan: false,
+                model: None,
+                effort: None,
                 args: Vec::new(),
             };
             let err = run_locked(Some(proj.path()), &args).unwrap_err();
@@ -2800,14 +3235,24 @@ mod tests {
             let run_dir = home.path().join("runs").join("r-witness");
             let handoff = run_dir.join(crate::grant::HANDOFF_FILE);
             let base_argv = launch_argv(desc, &args).unwrap();
+            // Both surfaces resolve the role selection the same way and hand
+            // the SAME resolved value to the one argv construction.
+            let selection = resolve_selection(desc, &args);
 
             // The construction `plan` previews…
-            let (plan_argv, inj) =
-                headless_argv_and_injection(desc, &args, base_argv.clone(), &run_dir, &handoff)
-                    .unwrap();
+            let (plan_argv, inj) = headless_argv_and_injection(
+                desc,
+                &args,
+                base_argv.clone(),
+                &run_dir,
+                &handoff,
+                &selection,
+            )
+            .unwrap();
             // …and the construction `live` commits — the same function.
             let (live_argv, _) =
-                headless_argv_and_injection(desc, &args, base_argv, &run_dir, &handoff).unwrap();
+                headless_argv_and_injection(desc, &args, base_argv, &run_dir, &handoff, &selection)
+                    .unwrap();
             assert_eq!(plan_argv, live_argv);
             let inj = inj.expect("claude-code declares mcp_injection");
             assert!(

@@ -30,6 +30,15 @@ pub enum WorkflowErrorKind {
     /// A Boa `RuntimeLimit` (loop / recursion / stack) fired. Non-catchable
     /// from JavaScript, so a script can never swallow its own ceiling.
     IterationLimit,
+    /// The run spent its total ceiling on host-native invocations (the
+    /// natives THIS crate installs: `agent`, `phase`, `log`, `budget.*`).
+    ///
+    /// Distinct from [`IterationLimit`](Self::IterationLimit) on purpose:
+    /// Boa's loop ceiling lives on the `CallFrame`, so it bounds one frame,
+    /// never the run. This kind names the run-total bound instead, so an
+    /// operator reading the evidence can tell "one runaway loop" apart from
+    /// "this script hammered the host bridge for the whole run".
+    NativeBudgetExhausted,
     /// The script tried to turn a string into code (`eval` / `Function(str)`);
     /// denied by the compile-strings host hook.
     CompileDenied,
@@ -71,6 +80,9 @@ impl WorkflowError {
             }
             WorkflowErrorKind::IterationLimit => {
                 "the workflow exceeded an interpreter execution limit"
+            }
+            WorkflowErrorKind::NativeBudgetExhausted => {
+                "the workflow exhausted its total host-native call budget"
             }
             WorkflowErrorKind::CompileDenied => "the workflow tried to compile a string into code",
             WorkflowErrorKind::Panicked => "the workflow interpreter aborted and was discarded",
@@ -117,6 +129,18 @@ impl WorkflowError {
                 "the workflow exhausted its granted agent ceiling ({granted}): the pending \
                  agent() call failed closed and spawning stopped — pace with budget.remaining() \
                  to avoid exhaustion (the exhaustion is recorded in the workflow run evidence)"
+            ),
+        }
+    }
+
+    pub(crate) fn native_budget_exhausted(limit: u64) -> Self {
+        Self {
+            kind: WorkflowErrorKind::NativeBudgetExhausted,
+            message: format!(
+                "the workflow spent its total host-native call budget ({limit}): the pending \
+                 call failed closed. This bounds the natives agentstack installs, NOT Boa's own \
+                 built-ins — work inside a single built-in ticks no counter and is bounded only \
+                 by the out-of-thread watchdog"
             ),
         }
     }

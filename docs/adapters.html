@@ -199,7 +199,7 @@
       </li>
       <li><a href="workflows.html">Workflows</a>
       </li>
-      <li><a href="reference.html#the-central-library">Central library</a>
+      <li><a href="reference.html#the-library-linked-source-folders">Library sources</a>
       </li>
       <li><a href="concepts.html#delivery-modes">Delivery modes</a>
       </li>
@@ -336,7 +336,7 @@
 <li><strong>Hooks</strong> — lifecycle hooks the tool runs. Two adapters expose them.</li>
 <li><strong>Settings</strong> — a curated catalog of that tool's own settings keys AgentStack can write; every key it does not list is preserved and still hand-editable.</li>
 <li><strong>Extensions</strong> — a plugin directory the tool loads code from. Declared for two adapters, discovered read-only.</li>
-<li><strong>Headless run</strong> — a prompt-in/text-out invocation, which is what <code>agentstack run --locked --prompt</code> and workflow steps drive. Only two adapters declare one.</li>
+<li><strong>Headless run</strong> — a prompt-in/text-out invocation, which is what <code>agentstack run &lt;cli&gt; --prompt</code> (the protected default) and workflow steps drive. Only two adapters declare one.</li>
 </ul>
 <p>Two things this table deliberately does not tell you. It does not say a <code>yes</code> cell is nightly-verified — cross-reference <a href="#the-matrix">the matrix</a> for that. And it does not say the tool is <em>confined</em>: what AgentStack enforces once a CLI is running is a separate question, answered in the <a href="enforcement.html">enforcement matrix</a>.</p>
 <h2 id="when-an-upstream-cli-changes-its-schema">When an upstream CLI changes its schema<a class="hlink" href="#when-an-upstream-cli-changes-its-schema" aria-label="Link to this section">#</a></h2>

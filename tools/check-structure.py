@@ -106,8 +106,9 @@ EXPECTED_KINDS: tuple[str, ...] = (
 # Manifest struct fields that are configuration/bookkeeping, not a pinned
 # capability kind with its own governance surface. Verified against
 # model.rs's actual field list (version, meta, servers, skills, profiles,
-# instructions, settings, hooks, extensions, workflows, packs, targets,
-# policy, guard, experimental) minus EXPECTED_KINDS.
+# instructions, settings, hooks, extensions, workflows, packs,
+# package_overrides, targets, policy, guard, experimental, delivery) minus
+# EXPECTED_KINDS.
 CONFIG_ALLOWLIST: frozenset[str] = frozenset(
     {
         "version",
@@ -117,6 +118,14 @@ CONFIG_ALLOWLIST: frozenset[str] = frozenset(
         "policy",
         "guard",
         "experimental",
+        # Per-member project divergence from a selected package: which
+        # members a taken package's selection is remove/replace-overridden
+        # for. It modifies package member selection, not a capability kind.
+        "package_overrides",
+        # The delivery-lane override table (render_locally, project-wide and
+        # per-harness). It steers how already-declared capabilities are
+        # delivered, not a capability kind of its own.
+        "delivery",
     }
 )
 

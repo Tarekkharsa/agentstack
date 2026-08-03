@@ -199,7 +199,7 @@
       </li>
       <li><a href="../workflows.html">Workflows</a>
       </li>
-      <li><a href="../reference.html#the-central-library">Central library</a>
+      <li><a href="../reference.html#the-library-linked-source-folders">Library sources</a>
       </li>
       <li><a href="../concepts.html#delivery-modes">Delivery modes</a>
       </li>
@@ -264,20 +264,20 @@
 agentstack run claude-code --sandbox --lockdown --plan
 
 # Then climb only as far as you need:
-agentstack run claude-code --locked              # protected host run, no Docker
+agentstack run claude-code                       # protected host run, no Docker (the default)
 agentstack run claude-code --sandbox             # container + proxied egress
 agentstack run claude-code --sandbox --lockdown  # container, no route out</code></pre>
 <p>Each step confines more, and each prints its <a href="../concepts.html">posture</a> label — what each label actually guarantees is the <a href="../enforcement.html#the-matrix">enforcement matrix</a>:</p>
 <ul>
-<li><code>run --locked</code> promotes a plain host run to the Protected tier. No Docker. It enforces content trust, strict <a href="../concepts.html">lockfile</a> verification, and policy admission <strong>before</strong> launch, and freezes the tool surface for the run. It is not isolation — the agent still runs as you, on the host. Posture: <code>HOST / PROTECTED</code>.</li>
+<li>A plain <code>run</code> is <strong>already</strong> the Protected tier. No Docker. It enforces content trust, strict <a href="../concepts.html">lockfile</a> verification, and policy admission <strong>before</strong> launch, and freezes the tool surface for the run. It is not isolation — the agent still runs as you, on the host. Posture: <code>HOST / PROTECTED</code>. <code>--locked</code> names the same run explicitly and still works; <code>--unprotected</code> opts out of the gate entirely (posture <code>HOST / ADVISORY</code>, and the banner names each check that was skipped).</li>
 <li><code>run --sandbox</code> launches the CLI inside a Docker container with the project mounted as its workspace and HTTPS routed through a host-side egress proxy. The container's bridge network still has a direct route a proxy-ignoring process could use. Posture: <code>SANDBOX / PROXIED · DIRECT ROUTE OPEN</code>.</li>
 <li><code>run --sandbox --lockdown</code> puts the container on an internal-only network whose sole peer is the egress sidecar — no host route, no internet. Posture: <code>LOCKDOWN / ENFORCED · NO DIRECT ROUTE</code>.</li>
 </ul>
 <p>Point <code>AGENTSTACK_SANDBOX_IMAGE</code> at an image that carries your agent CLI. The lockdown egress sidecar is pulled from GHCR automatically, pinned per release (override with <code>AGENTSTACK_EGRESS_IMAGE</code>).</p>
 <p>After a run, <code>agentstack report run &lt;id&gt;</code> replays its posture label and every egress and tool-call decision — see <a href="../howto/see-what-happened.html">see what your agents did</a>.</p>
-<p><strong>Limits.</strong> The posture labels name each mode's ceiling honestly: <code>--locked</code> is pre-launch gating plus a frozen surface, not a kernel fence, and only <code>--lockdown</code> is topologically confined. What each mode actually enforces per dimension, with every strength caveat, is the <a href="../enforcement.html#the-matrix">enforcement matrix</a>.</p>
+<p><strong>Limits.</strong> The posture labels name each mode's ceiling honestly: the protected default is pre-launch gating plus a frozen surface, not a kernel fence — the harness still runs as you, on the host — and only <code>--lockdown</code> is topologically confined. What each mode actually enforces per dimension, with every strength caveat, is the <a href="../enforcement.html#the-matrix">enforcement matrix</a>.</p>
 <ul>
-<li><a href="../concepts.html">Concepts</a> — sandbox vs lockdown vs <code>--locked</code>, posture</li>
+<li><a href="../concepts.html">Concepts</a> — sandbox vs lockdown vs the protected run, posture</li>
 <li><a href="../reference.html#execution-posture">Reference: execution posture</a></li>
 <li><a href="../enforcement.html#the-matrix">Enforcement: the matrix</a></li>
 </ul>

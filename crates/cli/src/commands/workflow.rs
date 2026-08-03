@@ -90,6 +90,14 @@ const WATCHDOG_EXIT_CODE: i32 = 124;
 /// just burning CPU, and both paths fail closed.
 const WATCHDOG_GRACE_SECS: u64 = 30;
 
+/// How long the watchdog's *best-effort reporting* gets before the guaranteed
+/// no-I/O exit fires anyway (see [`arm_no_io_exit`]).
+///
+/// Generous for the work it covers — one stderr line, one `O_APPEND` write and
+/// a few `kill(2)`s — and short enough that a wedged report cannot add a
+/// meaningful delay to a run that is already past its ceiling plus 30s.
+const NO_IO_EXIT_GRACE_SECS: u64 = 5;
+
 /// D3 (Stage E): the script-authored `label` is byte-bounded at append time
 /// (char-boundary truncation, visible ellipsis) and stored as data in the
 /// JSON event; `sanitize_line` runs at REPORT render — the same
@@ -186,6 +194,7 @@ fn kind_slug(kind: WorkflowErrorKind) -> &'static str {
         K::RuntimeError => "runtime_error",
         K::Internal => "internal",
         K::AgentsExhausted => "agents_exhausted",
+        K::NativeBudgetExhausted => "native_budget_exhausted",
     }
 }
 
@@ -308,6 +317,29 @@ pub(crate) struct RoleBinding {
     /// codex carries the §12.1 connector residual — surfaced PER CHILD in
     /// the run output (a workflow multiplies the exposure N times).
     pub(crate) codex_residual: bool,
+    /// The role's declared model and effort, copied from its toolset
+    /// (`[profiles.<role>] model` / `effort`) at admission. Carried on the
+    /// binding rather than looked up at spawn time for the same reason
+    /// `harness` is: the manifest is consulted ONCE, during admission, and the
+    /// drive loop then works from resolved facts. Whether either value can
+    /// actually reach the child is the ADAPTER's answer, given per launch —
+    /// see `locked::resolve_selection`.
+    pub(crate) model: Option<String>,
+    pub(crate) effort: Option<String>,
+    /// Ready-to-print lines about this role's model/effort: what the adapter
+    /// will actually carry, and one plain sentence for anything it cannot.
+    ///
+    /// Resolved here, at admission, and printed by the drive loop rather than
+    /// by the locked-run banner — because a workflow child runs under
+    /// `LockedDelivery::WorkflowChild`, whose `quiet()` is `true`, so every
+    /// `banner!` inside `live()` is suppressed. The one path this feature
+    /// exists for is precisely the path that silences the launcher's own
+    /// report, and "an unsupported setting must be visible, not swallowed" is
+    /// the rule. The drive loop is the surface that speaks per child, so the
+    /// sentence is printed there — from the SAME `undeliverable_note` the
+    /// static `workflow explain` uses, so the two never tell different
+    /// stories.
+    pub(crate) selection_lines: Vec<String>,
 }
 
 pub fn run(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<()> {
@@ -1075,6 +1107,52 @@ fn contained<T>(f: impl FnOnce() -> T) -> Result<T> {
 /// Resolve each admitted role to its profile's harness binding. `Profile.harness`
 /// is consulted ONLY here (interactive `run <harness> --profile` keeps its
 /// positional harness); absent means the engine default, claude-code.
+/// One role's model/effort story, as lines the drive loop prints beside its
+/// `▶ agent #N` header.
+///
+/// A delivered value gets a `✓` naming what the harness will actually receive;
+/// an undeliverable one gets the shared `undeliverable_note` under a `⚠`. A
+/// role that declares neither produces nothing — silence is correct when there
+/// was no intent to honor.
+///
+/// A value the adapter's own settings catalog REJECTS (an effort outside the
+/// enum, a model failing the charset bound) is not reported here: that is a
+/// manifest error, and the launch path refuses it loudly rather than
+/// downgrading it to a note.
+fn selection_lines_for(
+    role: &str,
+    desc: &crate::adapter::AdapterDescriptor,
+    model: Option<&str>,
+    effort: Option<&str>,
+) -> Vec<String> {
+    use crate::adapter::descriptor::{Dimension, Selection};
+    let subject = format!("role '{role}'");
+    let mut out = Vec::new();
+    for (dimension, value) in [(Dimension::Model, model), (Dimension::Effort, effort)] {
+        let Some(value) = value else { continue };
+        match desc.select(dimension, value) {
+            Ok(Selection::Args(_)) => out.push(format!(
+                "{} {} {} '{}' delivered to {} as launch flags",
+                "✓".green(),
+                subject,
+                dimension.label(),
+                sanitize_line(value),
+                desc.display,
+            )),
+            Ok(outcome) => {
+                if let Some(note) =
+                    super::locked::undeliverable_note(&subject, desc, dimension, value, &outcome)
+                {
+                    out.push(format!("{} {note}", "⚠".yellow()));
+                }
+            }
+            // A rejected value is the launch path's refusal to make, not ours.
+            Err(_) => {}
+        }
+    }
+    out
+}
+
 fn resolve_bindings(
     ctx: &super::Context,
     wf: &NormalizedWorkflow,
@@ -1109,6 +1187,14 @@ fn resolve_bindings(
                 harness: harness.clone(),
                 injectable: supports_injection(desc),
                 codex_residual: desc.id == "codex",
+                model: profile.model.clone(),
+                effort: profile.effort.clone(),
+                selection_lines: selection_lines_for(
+                    role,
+                    desc,
+                    profile.model.as_deref(),
+                    profile.effort.as_deref(),
+                ),
             },
         );
     }
@@ -1172,6 +1258,33 @@ fn script_entry_path(anchor: &Path, declared: &str) -> Result<PathBuf> {
 /// SIGTERMs the live child process groups, and force-exits the PROCESS — the
 /// §12.2 hard backstop, deliberately not a cooperative check (a drive thread
 /// stuck inside a Boa builtin slice cannot observe a deadline).
+/// Arm the **guaranteed exit**: a thread that sleeps `grace` and then calls
+/// `exit`, performing no I/O whatsoever on the way.
+///
+/// The finding this closes: the watchdog's exit was the *last* thing it did,
+/// behind four unbounded operations — an `eprintln!` (a full pipe blocks
+/// forever), a `RunLog` append (a hung filesystem blocks forever), a `Mutex`
+/// acquisition, and a `kill(2)` loop. `POSTURE_LABEL` promises that "even a
+/// stalled builtin slice cannot outlive the run", and that promise was only as
+/// strong as the *reporting* code in front of the exit. Any one of those four
+/// blocking could keep a runaway process alive indefinitely — precisely the
+/// outcome the watchdog exists to prevent.
+///
+/// So the order is inverted: the exit is armed FIRST and the reporting runs
+/// behind it. Honest reporting can now be lost; the exit cannot be. Dying
+/// silently beats not dying.
+///
+/// This thread touches no file, no lock, no channel and no terminal — it
+/// sleeps, then exits. `exit` is a parameter purely so the witness can observe
+/// the firing without terminating the test process; production passes
+/// `std::process::exit`.
+fn arm_no_io_exit(grace: Duration, exit: impl FnOnce() + Send + 'static) {
+    std::thread::spawn(move || {
+        std::thread::sleep(grace);
+        exit();
+    });
+}
+
 fn spawn_watchdog(
     name: String,
     run_id: String,
@@ -1186,6 +1299,13 @@ fn spawn_watchdog(
         // Completion (or the sender dropped on any exit path): retire.
         Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => {}
         Err(mpsc::RecvTimeoutError::Timeout) => {
+            // FIRST: arm the guaranteed, I/O-free exit. Everything below this
+            // line is best-effort reporting that may block forever (a full
+            // stderr pipe, a hung filesystem, a contended lock); none of it is
+            // allowed to stand between a runaway run and its death.
+            arm_no_io_exit(Duration::from_secs(NO_IO_EXIT_GRACE_SECS), || {
+                std::process::exit(WATCHDOG_EXIT_CODE)
+            });
             eprintln!(
                 "✗ workflow '{name}' ran past its effective wall-clock ceiling ({effective_wall}s) \
                  plus the {WATCHDOG_GRACE_SECS}s watchdog grace — force-exiting (out-of-thread \
@@ -1217,12 +1337,18 @@ fn spawn_watchdog(
                     duration_ms: started.elapsed().as_millis() as u64,
                 });
             }
-            let held: Vec<i32> = pids
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .iter()
-                .copied()
-                .collect();
+            // `try_lock`, not `lock`: this is best-effort cleanup behind an
+            // already-armed exit, and blocking on a lock the drive thread
+            // holds would only delay the honest reporting. A missed SIGTERM
+            // costs a child that outlives us by moments; the process still
+            // dies on schedule either way.
+            let held: Vec<i32> = match pids.try_lock() {
+                Ok(set) => set.iter().copied().collect(),
+                Err(std::sync::TryLockError::Poisoned(e)) => {
+                    e.into_inner().iter().copied().collect()
+                }
+                Err(std::sync::TryLockError::WouldBlock) => Vec::new(),
+            };
             for pid in held {
                 // Best-effort cleanup (children are their own process groups);
                 // the hard guarantee is the exit below, not this signal.
@@ -1597,6 +1723,12 @@ pub(crate) fn run_child(
             ""
         },
     );
+    // The role's model/effort, per child. `live()`'s own banner is suppressed
+    // for workflow children (`WorkflowChild::quiet()`), so this is the surface
+    // that keeps an undeliverable value visible instead of swallowed.
+    for line in &binding.selection_lines {
+        eprintln!("    {line}");
+    }
     if binding.codex_residual {
         // Gate condition 1 (§12.1): the codex connector residual is surfaced
         // at RUN TIME, per codex child — N children multiply the exposure.
@@ -1649,6 +1781,7 @@ pub(crate) fn run_child(
     let child_args = RunArgs {
         harness: binding.harness.clone(),
         locked: true,
+        unprotected: false,
         prompt: Some(prompt),
         // The role's profile FENCES the child (witness 9: its grant is ≤ the
         // profile's capability set — the shipped W2 profile-fence semantics).
@@ -1658,6 +1791,14 @@ pub(crate) fn run_child(
         sandbox: false,
         lockdown: false,
         plan: false,
+        // Right model, right effort, right CLI per role: the role's toolset
+        // declared these, admission resolved them onto the binding, and the
+        // locked launch path asks the bound adapter's descriptor how to carry
+        // them (or reports that it cannot). Internal plumbing — never a flag
+        // a script or an invoker can set, so a workflow cannot escalate its
+        // children past what the manifest declares.
+        model: binding.model.clone(),
+        effort: binding.effort.clone(),
         args: Vec::new(),
     };
 
@@ -2305,6 +2446,8 @@ fn render_workflow_report_json(run_id: &str) -> Result<String> {
 /// constructing an interpreter `Context`, and no child is spawned.
 pub fn explain(manifest_dir: Option<&Path>, args: &crate::cli::WorkflowExplainArgs) -> Result<()> {
     let value = explain_value(manifest_dir, &args.name)?;
+    // The envelope's two keys are injected into the body object, so
+    // `print_explain` reads exactly the field paths it always did.
     if args.json {
         println!("{}", serde_json::to_string_pretty(&value)?);
         return Ok(());
@@ -2314,7 +2457,13 @@ pub fn explain(manifest_dir: Option<&Path>, args: &crate::cli::WorkflowExplainAr
 }
 
 /// The analysis as a `Value` — the testable seam, and what `--json` prints.
-fn explain_value(manifest_dir: Option<&Path>, name: &str) -> Result<serde_json::Value> {
+///
+/// Enveloped since `workflow-role-selection-v1`: this is the richest workflow
+/// payload the CLI has, and before that a panel could read it but never
+/// *negotiate* it, because it carried no `schema_version`/`features`. The
+/// envelope injects its two keys into this object, so every existing body path
+/// (`roles`, `effective_max_agents`, …) is unmoved.
+pub fn explain_value(manifest_dir: Option<&Path>, name: &str) -> Result<serde_json::Value> {
     let ctx = super::load(manifest_dir)?;
     let base = crate::manifest::project_root_of(&ctx.dir);
     let machine_policy = crate::machine_policy::load()?;
@@ -2363,14 +2512,26 @@ fn explain_value(manifest_dir: Option<&Path>, name: &str) -> Result<serde_json::
         .roles
         .iter()
         .map(|role| {
-            serde_json::json!({
+            let mut row = serde_json::json!({
                 "role": sanitize_line(role),
                 "serial": serial.contains(role),
-            })
+            });
+            // Additive: the existing two keys keep their names and meaning,
+            // and the selection facts join them on the same object.
+            if let (Some(obj), Some(facts)) = (row.as_object_mut(), role_selection(&ctx, role)) {
+                obj.insert("harness".into(), serde_json::json!(facts.harness));
+                obj.insert("model".into(), serde_json::json!(facts.model));
+                obj.insert("effort".into(), serde_json::json!(facts.effort));
+                obj.insert(
+                    "undeliverable".into(),
+                    serde_json::json!(facts.undeliverable),
+                );
+            }
+            row
         })
         .collect();
 
-    Ok(serde_json::json!({
+    Ok(crate::ui_contract::envelope(serde_json::json!({
         "workflow": sanitize_line(&wf.name),
         "workflow_digest": wf.checksum,
         "roles": roles,
@@ -2378,7 +2539,68 @@ fn explain_value(manifest_dir: Option<&Path>, name: &str) -> Result<serde_json::
         "effective_max_wall_seconds": effective_wall,
         "max_concurrent": max_concurrent,
         "agent_call_sites": agent_call_sites(&script),
-    }))
+    })))
+}
+
+/// What `explain` says about one role's model and effort.
+struct RoleSelectionFacts {
+    harness: String,
+    /// What the role's toolset declares, sanitized. `None` = it declares none.
+    model: Option<String>,
+    effort: Option<String>,
+    /// One entry per declared value that would NOT reach the child, each
+    /// carrying the dimension and the plain sentence saying why.
+    undeliverable: Vec<serde_json::Value>,
+}
+
+/// The per-role model/effort facts, asked of the SAME authority the launch
+/// path asks: the bound adapter's descriptor.
+///
+/// Refusal-free, matching `explain`'s per-role rendering and
+/// [`serial_roles_of`]: a role with no declared toolset, or one binding an
+/// unknown harness, simply contributes no facts — that entry has a bigger
+/// problem than model selection, and `run`/`doctor` are where it gets
+/// reported. A value the adapter's catalog outright REJECTS is reported here
+/// as undeliverable rather than raised, because it is exactly the fact an
+/// author opened `explain` to learn — stated with the warning that a real run
+/// refuses on it.
+fn role_selection(ctx: &super::Context, role: &str) -> Option<RoleSelectionFacts> {
+    use crate::adapter::descriptor::Dimension;
+    let profile = ctx.loaded.manifest.profiles.get(role)?;
+    let harness = profile
+        .harness
+        .clone()
+        .unwrap_or_else(|| "claude-code".to_string());
+    let desc = ctx.registry.get(&harness)?;
+    let subject = format!("role '{}'", sanitize_line(role));
+    let mut undeliverable = Vec::new();
+    for (dimension, declared) in [
+        (Dimension::Model, profile.model.as_deref()),
+        (Dimension::Effort, profile.effort.as_deref()),
+    ] {
+        let Some(value) = declared else { continue };
+        let reason = match desc.select(dimension, value) {
+            Ok(outcome) => {
+                super::locked::undeliverable_note(&subject, desc, dimension, value, &outcome)
+            }
+            Err(refusal) => Some(format!(
+                "{subject}: {refusal} — a run would REFUSE this child before launch"
+            )),
+        };
+        if let Some(reason) = reason {
+            undeliverable.push(serde_json::json!({
+                "dimension": dimension.label(),
+                "harness": desc.id,
+                "reason": reason,
+            }));
+        }
+    }
+    Some(RoleSelectionFacts {
+        harness: sanitize_line(&harness),
+        model: profile.model.as_deref().map(sanitize_line),
+        effort: profile.effort.as_deref().map(sanitize_line),
+        undeliverable,
+    })
 }
 
 /// Count literal `agent(` occurrences outside string and comment context.
@@ -2454,6 +2676,32 @@ fn print_explain(v: &serde_json::Value) {
                 "concurrent"
             }
         );
+        // Right model, right effort, right CLI per role — and, when a value
+        // cannot be carried, one plain sentence saying so instead of a silent
+        // drop the author would only discover from the model's behavior.
+        if let Some(harness) = role["harness"].as_str() {
+            let shown = |key: &str| match role[key].as_str() {
+                Some(v) => v.to_string(),
+                None => "(harness default)".to_string(),
+            };
+            println!(
+                "  {:<20} harness={harness}  model={}  effort={}",
+                "",
+                shown("model"),
+                shown("effort")
+            );
+        }
+        for note in role["undeliverable"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+        {
+            println!(
+                "  {:<20} ⚠ {}",
+                "",
+                note["reason"].as_str().unwrap_or("(unstated)")
+            );
+        }
     }
     println!();
     println!(
@@ -2492,9 +2740,45 @@ struct WorkflowListRow {
     /// the run log — i.e. after the author had already designed the fan-out
     /// and paid for it once.
     serial_roles: Vec<String>,
+    /// `workflow-role-selection-v1`: one entry per role whose toolset and
+    /// harness could both be resolved, carrying the model/effort story
+    /// [`role_selection`] computes for `explain`. Pre-rendered as JSON because
+    /// only the payload consumes it — the human table shows roles, and
+    /// `explain` is the terminal's per-role screen.
+    role_details: Vec<serde_json::Value>,
     max_agents: u32,
     max_wall_seconds: u64,
     checksum: Option<String>,
+}
+
+/// The per-role selection facts for a `workflow list` row, from the SAME
+/// [`role_selection`] walk `explain` renders — so the tree a panel draws and
+/// the argv a run builds can never tell different stories.
+///
+/// Refusal-free like everything else on this row, and deliberately NOT
+/// index-aligned with `roles`: a role with no declared toolset, or one binding
+/// an unknown harness, contributes nothing. That entry has a bigger problem
+/// than model selection, and a fabricated `model: null` beside it would read as
+/// "declares no model" when the truth is "nothing could be established".
+fn role_details_of(
+    ctx: &super::Context,
+    roles: &[String],
+    serial: &[String],
+) -> Vec<serde_json::Value> {
+    roles
+        .iter()
+        .filter_map(|role| {
+            let facts = role_selection(ctx, role)?;
+            Some(serde_json::json!({
+                "role": sanitize_line(role),
+                "harness": facts.harness,
+                "model": facts.model,
+                "effort": facts.effort,
+                "serial": serial.contains(role),
+                "undeliverable": facts.undeliverable,
+            }))
+        })
+        .collect()
 }
 
 /// Which of `roles` launch through the serial park/swap path, decided by the
@@ -2634,12 +2918,14 @@ fn collect_workflow_list_rows(manifest_dir: Option<&Path>) -> Result<Vec<Workflo
             .max_wall_seconds
             .map_or(requested_wall, |cap| requested_wall.min(cap));
 
+        let serial_roles = serial_roles_of(&ctx, &roles);
         rows.push(WorkflowListRow {
             name: name.clone(),
             declared: true,
             trusted,
             lock_status,
-            serial_roles: serial_roles_of(&ctx, &roles),
+            role_details: role_details_of(&ctx, &roles, &serial_roles),
+            serial_roles,
             roles,
             max_agents,
             max_wall_seconds,
@@ -2665,6 +2951,10 @@ fn workflow_list_json(rows: &[WorkflowListRow]) -> serde_json::Value {
                 "lock_status": r.lock_status,
                 "roles": r.roles.iter().map(|s| sanitize_line(s)).collect::<Vec<_>>(),
                 "serial_roles": r.serial_roles.iter().map(|s| sanitize_line(s)).collect::<Vec<_>>(),
+                // `workflow-role-selection-v1`. Additive: every key above keeps
+                // its `workflow-observe-v1` name and meaning, so a panel that
+                // predates this reads exactly what it read before.
+                "role_details": r.role_details,
                 "max_agents": r.max_agents,
                 "max_wall_seconds": r.max_wall_seconds,
                 "checksum": r.checksum,
@@ -2922,6 +3212,53 @@ fn print_workflow_runs_table(rows: &[WorkflowRunRow]) {
 mod tests {
     use super::*;
     use assert_fs::prelude::*;
+
+    /// Finding: the watchdog's no-I/O exit path.
+    ///
+    /// `POSTURE_LABEL` promises that a stalled interpreter slice "cannot
+    /// outlive the run". That promise used to sit behind the watchdog's
+    /// best-effort reporting — an `eprintln!`, a run-log append, a `Mutex`
+    /// acquisition and a `kill(2)` loop — any of which can block forever on a
+    /// full pipe or a hung filesystem. The exit was last, so a wedged report
+    /// meant no exit at all.
+    ///
+    /// This drives the seam directly with reporting that never returns, and
+    /// asserts the exit still fires. It fails if the arming is moved back
+    /// behind the I/O.
+    #[test]
+    fn the_watchdog_exit_survives_reporting_that_never_returns() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let exited = Arc::new(AtomicBool::new(false));
+        let flag = Arc::clone(&exited);
+
+        // Arm first, exactly as the timeout branch does.
+        arm_no_io_exit(Duration::from_millis(50), move || {
+            flag.store(true, Ordering::SeqCst);
+        });
+
+        // Now the "best-effort reporting" wedges permanently: a lock that is
+        // already held, standing in for a blocked write or a hung append.
+        let held = Arc::new(Mutex::new(()));
+        let _guard = held.lock().unwrap_or_else(|e| e.into_inner());
+        let blocked = Arc::clone(&held);
+        std::thread::spawn(move || {
+            // Never returns for the life of the test — the report is lost.
+            let _wedged = blocked.lock();
+        });
+
+        // The exit fires anyway. Poll rather than sleep-once so a slow CI box
+        // cannot make this flaky.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline && !exited.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            exited.load(Ordering::SeqCst),
+            "the no-I/O exit did not fire while the best-effort reporting was wedged — \
+             the watchdog's hard guarantee is only as strong as this path"
+        );
+    }
 
     /// The Stage C fixture: serialized env (AGENTSTACK_HOME + PATH), a fake
     /// `claude` harness on PATH whose behavior is driven by the prompt (the
@@ -3951,6 +4288,12 @@ mod tests {
                     harness: "claude-code".into(),
                     injectable: false,
                     codex_residual: false,
+                    model: None,
+                    effort: None,
+                    // The role declares neither dimension, so there is nothing
+                    // to say about selection — this witness is about serial
+                    // scheduling.
+                    selection_lines: Vec::new(),
                 },
             );
             let request = SpawnRequest {

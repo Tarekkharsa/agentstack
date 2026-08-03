@@ -34,10 +34,15 @@ fn status_parses_and_help_maps_every_command() {
         visible,
         [
             "init", "up", "status", "add", "search", "apply", "doctor", "share", "receive",
-            "toolset", "use", "yes", "run", "trust", "restore", "undo", "adopt"
+            "toolset", "use", "yes", "run", "workflow", "trust", "restore", "undo", "adopt"
         ],
-        "the visible list is the beginner loop, in task order — `workflow` stays \
-         reachable but out of it until the repeated-use gate closes. `up` is \
+        "the visible list is the beginner loop, in task order. `workflow` joined \
+         it when the six interpreter-boundary review findings closed with \
+         witnesses, and it sits directly after `run` because that is what it \
+         is: one command that fans out into many governed runs. Un-hiding \
+         moved DISCOVERABILITY only — every *Honest limits* claim still \
+         holds, a host-tier step is still cooperative-guard only, and nothing \
+         in this list may be read as a containment promise. `up` is \
          visible, and sits next to `init`, because the two are the same moment \
          asked from opposite directions: `init` is for a setup that does not \
          exist yet, `up` is for one that does and a machine that has not caught \
@@ -48,7 +53,7 @@ fn status_parses_and_help_maps_every_command() {
          with something else, which is the one path around the review card. \
          `publisher` stays hidden — key management is machinery you reach for \
          once, and both visible verbs name it at the moment it becomes relevant. \
-         reachable but out of it until the repeated-use gate closes. `undo` is \
+         `undo` is \
          visible because Undo is one of the four ideas and the one a person \
          reaches for while something is already wrong — it must be findable \
          without knowing that `restore` is its other name. `toolset` is \

@@ -1,15 +1,23 @@
 //! Name resolution — the single seam that maps a `skills = ["name"]` or
 //! `servers = ["name"]` reference to a concrete definition (see
-//! `docs/reference.md#the-central-library`).
+//! `docs/reference.md#the-library-linked-source-folders`).
 //!
 //! Resolution order (first hit wins), for both skills and servers:
 //!
 //! 1. **Inline** — a `[skills.<name>]` / `[servers.<name>]` entry in the project
 //!    manifest. An inline definition always wins (a project that wants to override
-//!    a central item defines it inline).
-//! 2. **Central library** — a `[[skill]]` / `[[server]]` entry in
-//!    `<lib_home>/library.toml`, whose body lives under `<lib_home>/skills/` or
-//!    `<lib_home>/servers/<name>.toml`.
+//!    a library item defines it inline).
+//! 2. **The linked library sources, in order** — a `[[skill]]` / `[[server]]`
+//!    entry in a source's `library.toml`, whose body lives under that source's
+//!    `skills/` or `servers/<name>.toml`. First source holding the name wins;
+//!    `docs/design/linked-library-sources.md` is the contract.
+//!
+//! A reference may be **qualified** as `<source>:<name>`, which resolves only in
+//! the source it names and skips step 1 entirely — inline is not a source, and
+//! letting it win would make the explicit spelling weaker than the bare one.
+//! The qualifier is a selector: the resolved capability's `name` is always the
+//! bare one, so the lock key, the rendered directory and the gateway's name for
+//! it are unchanged by how a project chose to spell the reference.
 //!
 //! An unresolved name is a hard, structured error. Resolvers return the
 //! definition plus metadata (checksum/provenance) for later lock + drift steps;
@@ -137,49 +145,63 @@ pub fn resolve_skill_with_pin(
     mode: ResolveMode,
     pinned_rev: Option<&str>,
 ) -> Result<ResolvedSkill, ResolveError> {
+    // A `<source>:<name>` reference names one linked library source, so it
+    // never consults the manifest: inline entries are not a source, and letting
+    // one win would make the explicit spelling weaker than the bare one. The
+    // capability's identity is the bare name in either case — the qualifier is
+    // a selector (docs/design/linked-library-sources.md §"Being explicit").
+    let qualifier = crate::sources::split_reference(name);
+    if let Some((source, _)) = qualifier {
+        if !library.linked.has_source(source) {
+            return Err(unknown_source(library, name, source, "skill").into());
+        }
+    }
+    let bare = crate::sources::capability_name(name);
+
     // Locate the source (inline wins over the central library) and the base dir
     // its relative paths resolve against.
-    let (skill, base, origin, provenance) = if let Some(skill) = manifest.skills.get(name) {
-        // P19: an inline block with no source, when a library skill of the same
-        // name exists, is almost always someone who meant to reference the
-        // library copy but left an empty `[skills.<name>]` block behind. Teach
-        // the fix here — where both the manifest and the library are in hand —
-        // instead of letting the store surface the low-level source error.
-        // `return` diverges (type `!`), so the `if let` arm still yields the
-        // tuple on the normal path.
-        if skill.path.is_none() && skill.git.is_none() && library.get(name).is_some() {
-            return Err(ResolveError::InlineNoSourceShadowsLibrary {
+    let (skill, base, origin, provenance) =
+        if let Some(skill) = manifest.skills.get(name).filter(|_| qualifier.is_none()) {
+            // P19: an inline block with no source, when a library skill of the same
+            // name exists, is almost always someone who meant to reference the
+            // library copy but left an empty `[skills.<name>]` block behind. Teach
+            // the fix here — where both the manifest and the library are in hand —
+            // instead of letting the store surface the low-level source error.
+            // `return` diverges (type `!`), so the `if let` arm still yields the
+            // tuple on the normal path.
+            if skill.path.is_none() && skill.git.is_none() && library.get(name).is_some() {
+                return Err(ResolveError::InlineNoSourceShadowsLibrary {
+                    name: name.to_string(),
+                });
+            }
+            (
+                skill.clone(),
+                manifest_dir.to_path_buf(),
+                SkillOrigin::Inline,
+                None,
+            )
+        } else if let Some(entry) = library.get(name) {
+            let skill = Skill {
+                path: entry.path.clone(),
+                git: entry.git.clone(),
+                rev: entry.rev.clone(),
+                subpath: entry.subpath.clone(),
+            };
+            (
+                skill,
+                lib_home.join("skills"),
+                SkillOrigin::Library,
+                entry.provenance.clone(),
+            )
+        } else {
+            return Err(ResolveError::Unresolved {
                 name: name.to_string(),
             });
-        }
-        (
-            skill.clone(),
-            manifest_dir.to_path_buf(),
-            SkillOrigin::Inline,
-            None,
-        )
-    } else if let Some(entry) = library.get(name) {
-        let skill = Skill {
-            path: entry.path.clone(),
-            git: entry.git.clone(),
-            rev: entry.rev.clone(),
-            subpath: entry.subpath.clone(),
         };
-        (
-            skill,
-            lib_home.join("skills"),
-            SkillOrigin::Library,
-            entry.provenance.clone(),
-        )
-    } else {
-        return Err(ResolveError::Unresolved {
-            name: name.to_string(),
-        });
-    };
 
     let resolved = resolve_source(store, &skill, &base, mode, name, pinned_rev)?;
     Ok(ResolvedSkill {
-        name: name.to_string(),
+        name: bare.to_string(),
         origin,
         path: resolved.path,
         source_kind: resolved.source_kind,
@@ -187,6 +209,25 @@ pub fn resolve_skill_with_pin(
         checksum: resolved.checksum,
         provenance,
     })
+}
+
+/// The error for a qualified reference naming a library source that is not
+/// linked. "No such source" and "no such capability" are different mistakes
+/// with different fixes, so they get different messages — and this one lists
+/// the sources that *are* linked rather than making the user go look.
+fn unknown_source(library: &Library, reference: &str, source: &str, noun: &str) -> anyhow::Error {
+    let linked = library.linked.source_names().join(", ");
+    let linked = if linked.is_empty() {
+        "none".to_string()
+    } else {
+        linked
+    };
+    anyhow::anyhow!(
+        "{noun} '{}' names library source '{}', which is not linked — linked sources: {linked} \
+         (see `agentstack lib sources`)",
+        crate::text::sanitize_line(reference),
+        crate::text::sanitize_line(source),
+    )
 }
 
 /// Resolve a located source through the store, honoring the fetch mode. A
@@ -223,6 +264,17 @@ pub enum ServerOrigin {
     Inline,
     /// Resolved from the central library (`[[server]]` + `servers/<name>.toml`).
     Library,
+    /// Carried by a package a toolset selected, read back from the content
+    /// store by the digest the lock pins (`[[package.member]]`).
+    ///
+    /// A third variant rather than a reuse of [`ServerOrigin::Inline`]: a
+    /// package member is content from OUTSIDE this project, and every surface
+    /// that answers "where did this definition come from?" must be able to say
+    /// so. Reusing `Inline` made `explain` print "inline (this project)" for a
+    /// package's bytes and made the frozen grant record them under a binding
+    /// with no provenance field at all. The compiler now forces each of those
+    /// sites to answer for this case.
+    Package,
 }
 
 /// A server name resolved to its **definition** — the `manifest::Server` with
@@ -251,6 +303,14 @@ pub enum ServerResolveError {
     Source(#[from] anyhow::Error),
 }
 
+/// Where a central-library server's definition file lives. One place spells the
+/// layout out, so a caller that needs the raw definition BYTES (rather than the
+/// parsed table) cannot disagree with [`resolve_server`] about which file it
+/// hashed.
+pub fn library_server_path(lib_home: &Path, name: &str) -> PathBuf {
+    lib_home.join("servers").join(format!("{name}.toml"))
+}
+
 /// Resolve a single server name: inline `[servers.<name>]` wins, else the central
 /// library's `[[server]]` entry (definition at `<lib_home>/servers/<name>.toml`).
 /// Returns the definition with `${REF}`s intact — no secret resolution.
@@ -260,8 +320,19 @@ pub fn resolve_server(
     lib_home: &Path,
     name: &str,
 ) -> Result<ResolvedServer, ServerResolveError> {
+    // Same qualification rule as skills: `<source>:<name>` addresses one linked
+    // library source, bypasses inline entirely, and keeps the bare name as the
+    // capability's identity.
+    let qualifier = crate::sources::split_reference(name);
+    if let Some((source, _)) = qualifier {
+        if !library.linked.has_source(source) {
+            return Err(unknown_source(library, name, source, "server").into());
+        }
+    }
+    let bare = crate::sources::capability_name(name);
+
     // 1. Inline manifest server wins.
-    if let Some(server) = manifest.servers.get(name) {
+    if let Some(server) = manifest.servers.get(name).filter(|_| qualifier.is_none()) {
         let text = toml::to_string(server)
             .map_err(|e| anyhow::anyhow!("serializing inline server '{name}': {e}"))?;
         return Ok(ResolvedServer {
@@ -273,15 +344,18 @@ pub fn resolve_server(
         });
     }
 
-    // 2. Central library.
+    // 2. Linked library sources, in precedence order.
     if let Some(entry) = library.get_server(name) {
-        let path = lib_home.join("servers").join(format!("{name}.toml"));
+        // A server definition is a bare file with no `path` field, so the
+        // owning source's root is what decides where it lives.
+        let root = library.source_root(crate::library::Kind::Server, lib_home, name);
+        let path = library_server_path(&root, bare);
         let content = std::fs::read_to_string(&path)
             .map_err(|e| anyhow::anyhow!("reading {}: {e}", path.display()))?;
         let server: Server = toml::from_str(&content)
             .map_err(|e| anyhow::anyhow!("parsing {}: {e}", path.display()))?;
         return Ok(ResolvedServer {
-            name: name.to_string(),
+            name: bare.to_string(),
             origin: ServerOrigin::Library,
             server,
             checksum: sha256_hex(content.as_bytes()),
@@ -363,6 +437,110 @@ pub fn verify_library_pin(
     }
 }
 
+/// The **package-carried** runtime servers a toolset fence admits, as the same
+/// [`FrozenServer`] entries [`effective_runtime_servers`] produces — so a
+/// package's server joins the gateway's upstream set through one shape and one
+/// dispatch path, never a parallel one (`CLAUDE.md` invariant 6).
+///
+/// Two properties do all the work here.
+///
+/// **Fenced by toolset.** A member is in scope only under a toolset that
+/// selected its package; `crate::package::members_of_kind` applies exactly the
+/// fence the loadable index applies to skill members. The unfenced read
+/// (`profile == None`) contributes **nothing**: an unfenced gateway already
+/// serves every manifest server, and unioning every package's server on top of
+/// that would turn package membership into a way to widen the surface rather
+/// than something a toolset selects. A fence naming a toolset that is gone
+/// never reaches here at all — the caller has already resolved that to "no
+/// servers", which is the rule this must not regress.
+///
+/// **Resolved from the lock and the store, never from the library.** The
+/// definition is read out of the content-addressed deposit named by the
+/// member's pinned checksum and re-verified against it
+/// ([`Store::pinned_definition`]). The package's current `pack.toml` is never
+/// opened: it is precisely the mutable thing the pin exists to stop reading
+/// (`docs/design/pinned-serving-and-library-drift.md`). Anything unresolvable
+/// or unverifiable becomes a per-member `Err` — the same fail-closed skip
+/// reason a drifted library pin produces — so the gateway refuses it out loud
+/// through the existing seatbelt path instead of the member quietly vanishing.
+///
+/// `already_served` are the names the manifest/library resolution has already
+/// claimed. Inline-first precedence is the resolver's rule everywhere else, so
+/// it holds here too; a collision is reported rather than dropped.
+///
+/// [`Store::pinned_definition`]: crate::store::Store::pinned_definition
+pub fn package_runtime_servers(
+    lock: &Lock,
+    store: &Store,
+    profile: Option<&str>,
+    already_served: &[String],
+) -> Vec<FrozenServer> {
+    let Some(profile) = profile else {
+        return Vec::new();
+    };
+    crate::package::members_of_kind(lock, crate::lock::PackageMemberKind::Server, Some(profile))
+        .into_iter()
+        .map(|(pkg, member)| {
+            let name = member.name.clone();
+            if already_served.iter().any(|n| n == &name) {
+                return (
+                    name.clone(),
+                    // Reasons stay short on purpose: the gateway bounds them to
+                    // 200 characters before they reach a terminal or the audit
+                    // log, and a diagnosis that gets truncated mid-sentence is
+                    // worse than a brief one.
+                    Err(format!(
+                        "package '{}' carries a server of this name and the project already \
+                         serves one — two upstreams under one name have no unambiguous dispatch",
+                        crate::text::sanitize_line(&pkg.name)
+                    )),
+                );
+            }
+            (name, resolve_package_server(store, pkg, member))
+        })
+        .collect()
+}
+
+/// One pinned package server member, read back from the content store.
+fn resolve_package_server(
+    store: &Store,
+    pkg: &agentstack_core::lock::LockedPackage,
+    member: &agentstack_core::lock::LockedPackageMember,
+) -> Result<ResolvedServer, String> {
+    let hex = member.checksum.hex();
+    let text = store.pinned_definition(hex).map_err(|_| {
+        format!(
+            "its pinned definition is not in the content store, or no longer verifies against \
+             the digest package '{}' pins — re-pin with `agentstack lock`",
+            crate::text::sanitize_line(&pkg.name)
+        )
+    })?;
+    // The bytes just verified against the pin; parsing them is the same
+    // round trip `resolve_server` performs on a library definition file.
+    let server: Server = toml::from_str(&text).map_err(|_| {
+        format!(
+            "its pinned definition is not a readable server table — re-pin package '{}' with \
+             `agentstack lock`",
+            crate::text::sanitize_line(&pkg.name)
+        )
+    })?;
+    Ok(ResolvedServer {
+        // `Package`, not `Inline`. The integrity question these two share —
+        // "does this need `verify_library_pin`'s extra lock check?" — has the
+        // same answer for both (no: the digest that binds it is in the lock,
+        // the lock is inside the trust digest, and the bytes were re-verified
+        // against that digest a few lines above). But integrity is not the only
+        // question `origin` is asked. Display and evidence surfaces ask where
+        // the bytes came from, and for a package member "this project" is a
+        // false answer.
+        name: member.name.clone(),
+        origin: ServerOrigin::Package,
+        server,
+        checksum: hex.to_string(),
+        provenance: Some(member.provenance.clone()),
+    })
+}
+
 /// Resolve the profile-fenced runtime server set ONE time for a sandbox/lockdown
 /// run, freezing the exact definitions that will feed BOTH D4 classification and
 /// the gateway's dispatch — eliminating the classification/dispatch mismatch of
@@ -378,6 +556,20 @@ pub fn verify_library_pin(
 /// Per-server errors are preserved rather than dropped: the gateway skips them
 /// (host-proxy semantics), while a lockdown classification fails the whole run
 /// rather than leave a selected endpoint reachable.
+///
+/// **Package members are part of the frozen set** (review finding 1). They used
+/// to be added by the gateway and the image builder only, which meant a
+/// Protected run — the default for a plain `agentstack run <cli>` — silently
+/// omitted every server a toolset's package carried, while `status --json`
+/// listed it as an effective member. Adding them HERE, rather than at each
+/// consumer, is what makes "one frozen set feeds classification, dispatch, the
+/// grant and the image" true by construction instead of by care (invariant 6).
+///
+/// The toolset fence is unchanged and is the reason this cannot widen anything:
+/// `package_runtime_servers` contributes nothing when `profile` is `None`,
+/// because an unfenced set already carries every manifest server and unioning
+/// every package's servers on top of that would make package membership a way
+/// to widen rather than something a toolset selects.
 pub fn frozen_runtime_servers(
     manifest: &Manifest,
     library: &Library,
@@ -394,7 +586,7 @@ pub fn frozen_runtime_servers(
         }
     }
     let lock = Lock::load(dir).ok();
-    Ok(
+    let mut out: Vec<FrozenServer> =
         effective_runtime_servers(manifest, library, lib_home, profile)
             .into_iter()
             .map(|(name, resolved)| {
@@ -404,8 +596,23 @@ pub fn frozen_runtime_servers(
                 };
                 (name, out)
             })
-            .collect(),
-    )
+            .collect();
+    // Appended AFTER `verify_library_pin`, for the reason the gateway states:
+    // a package member is not library-referenced, and its bytes were already
+    // re-verified against the digest the lock pins — a stricter check than
+    // `verify_library_pin`'s, applied to the definition itself rather than to a
+    // name. A name collision with an already-resolved server becomes a per-member
+    // `Err` inside `package_runtime_servers`, never a silent replacement.
+    if let Some(lock) = lock.as_ref() {
+        let taken: Vec<String> = out.iter().map(|(n, _)| n.clone()).collect();
+        out.extend(package_runtime_servers(
+            lock,
+            &crate::store::Store::default_store(),
+            profile,
+            &taken,
+        ));
+    }
+    Ok(out)
 }
 
 /// Derive the D4 gateway-only host set for a **lockdown** run from a
@@ -589,13 +796,83 @@ pub fn instruction_lock_status(
     manifest_dir: &Path,
     lock: &Lock,
 ) -> InstructionLockStatus {
-    let src = crate::render::instructions::fragment_source(manifest_dir, &instr.path);
-    match std::fs::read(&src) {
-        Ok(bytes) => classify_instruction(name, &agentstack_core::digest::sha256_hex(&bytes), lock),
-        Err(e) => InstructionLockStatus::ResolveFailed {
-            error: format!("reading {}: {e}", src.display()),
-        },
+    instruction_lock_status_with(
+        name,
+        instr,
+        manifest_dir,
+        lock,
+        &crate::library::Library::default(),
+    )
+}
+
+/// [`instruction_lock_status`] with the linked library view in hand — needed to
+/// resolve a **sourceless** fragment's bodies, and to see its variants.
+///
+/// Every declared body is compared, base and variants alike: a variant nothing
+/// currently selects is still content the consent digest covers, so its bytes
+/// moving must read as drift rather than pass unnoticed until the day some
+/// toolset selects it. The first mismatch wins — one drifted body is enough to
+/// mark the fragment changed, and naming more than one would not change the
+/// single fix (`agentstack lock`).
+pub fn instruction_lock_status_with(
+    name: &str,
+    instr: &crate::manifest::Instruction,
+    manifest_dir: &Path,
+    lock: &Lock,
+    library: &crate::library::Library,
+) -> InstructionLockStatus {
+    let bodies = match crate::instructions::bodies(name, instr, manifest_dir, library) {
+        Ok(b) => b,
+        Err(e) => {
+            return InstructionLockStatus::ResolveFailed {
+                error: format!("{e:#}"),
+            };
+        }
+    };
+
+    let entry = lock.get_instruction(name);
+    for (variant, declared, src) in bodies.all() {
+        let bytes = match std::fs::read(&src) {
+            Ok(b) => b,
+            Err(e) => {
+                return InstructionLockStatus::ResolveFailed {
+                    error: format!("reading {}: {e}", src.display()),
+                };
+            }
+        };
+        let current = agentstack_core::digest::sha256_hex(&bytes);
+        match variant {
+            None => match entry {
+                None => return InstructionLockStatus::MissingLockEntry,
+                Some(e) if e.checksum.hex() != current => {
+                    return InstructionLockStatus::ChecksumDrift {
+                        locked: e.checksum.hex().to_string(),
+                        current,
+                    };
+                }
+                Some(_) => {}
+            },
+            Some(v) => {
+                // A variant with no pin is the same state an unpinned fragment
+                // is in — `agentstack lock` is the fix, and the caller's
+                // existing MissingLockEntry handling already says so.
+                let Some(pin) = entry.and_then(|e| {
+                    e.variants
+                        .iter()
+                        .find(|p| p.cli == v.cli && p.model == v.model && p.path == declared)
+                }) else {
+                    return InstructionLockStatus::MissingLockEntry;
+                };
+                if pin.checksum.hex() != current {
+                    return InstructionLockStatus::ChecksumDrift {
+                        locked: pin.checksum.hex().to_string(),
+                        current,
+                    };
+                }
+            }
+        }
     }
+    InstructionLockStatus::Matches
 }
 
 /// Where a resolved native extension came from — mirrors [`SkillOrigin`].
@@ -1430,6 +1707,7 @@ mod tests {
             name: "house".into(),
             path: "./instructions/house.md".into(),
             checksum: Sha256Hex::of(b"aaaa"),
+            variants: Vec::new(),
         });
         assert_eq!(
             classify_instruction("house", Sha256Hex::of(b"aaaa").hex(), &lock),
@@ -1462,6 +1740,7 @@ mod tests {
             name: "house".into(),
             path: "./instructions/house.md".into(),
             checksum,
+            variants: Vec::new(),
         });
 
         assert_eq!(

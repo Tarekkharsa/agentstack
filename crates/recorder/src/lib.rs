@@ -640,6 +640,60 @@ pub enum RunEvent {
         /// are repository content and therefore hostile input (invariant 7).
         reason: String,
     },
+    /// The gateway refused to dispatch to an already-connected upstream
+    /// because the project's consent digest no longer matched the one the
+    /// connection was authorized against — trust revoked, the manifest edited
+    /// out of band, or the lock replaced wholesale (W2, "trust is checked at
+    /// dispatch, from the digest").
+    ///
+    /// Its own variant for the same reason [`RunEvent::PinRejected`] is one:
+    /// no existing variant means "a live connection stopped being authorized".
+    /// Filing it under [`RunEvent::ToolCall`] with `outcome: denied` would put
+    /// it in the same bucket as a `[policy.tools]` block — a reviewer counting
+    /// policy denials is asking a different question from one asking whether a
+    /// consent boundary moved underneath a running session, and a call that
+    /// was refused for *lack of a valid yes* is not a call the run made.
+    ///
+    /// Identity-shaped: the server and tool NAMES, a closed-set `state` tag,
+    /// and the reason in the words the user was shown. Never the arguments —
+    /// a call refused because trust no longer holds is precisely one whose
+    /// payload should not be copied anywhere.
+    ///
+    /// Best-effort and never gating, like every event here: the refusal has
+    /// already happened by the time this is written, and a recorder failure
+    /// can only lose the evidence — never restore the call.
+    ///
+    /// The same variant also carries the two refusals that happen *before* any
+    /// dispatch (W1, "the yes on the lease path"): a lease the gateway would
+    /// not open and a skill it would not load, for a project whose yes does not
+    /// hold. They are the same fact — "the review no longer covers this
+    /// project" — met at an earlier door, so they get the same event rather
+    /// than a second one a reader would have to learn about separately.
+    TrustRefused {
+        ts: u64,
+        /// The name of the capability the refusal was about: the upstream
+        /// server a dispatch was addressed to, or — when the refusal happened
+        /// at lease-open or load — the toolset or skill that was refused.
+        /// Manifest- or caller-authored, therefore hostile input — bounded and
+        /// control-character stripped by the caller (invariant 7).
+        server: String,
+        /// The bare upstream tool name, bounded by the caller for the same
+        /// reason. For a refusal that happened at lease-open or load rather
+        /// than at dispatch, this is the **control-plane verb** that was
+        /// refused (`agentstack_lease_open`, `agentstack_load`) — machine
+        /// authored, because no upstream tool was ever named.
+        tool: String,
+        /// Which way trust failed: `"revoked"`, `"changed"`, `"untrusted"`, or
+        /// `"unreadable"`. A closed, machine-authored set. `"revoked"` is
+        /// reachable only from the dispatch path, which holds the anchor the
+        /// connection was authorized against; a lease/load refusal reads a
+        /// withdrawn yes back as `"untrusted"`, because the store keeps no
+        /// trace of an entry that was removed.
+        state: String,
+        /// Why, in the words the user saw. Machine-authored text; bounded by
+        /// the caller so the log line and the terminal line are identical.
+        reason: String,
+    },
     /// A skill body entered this run's agent context on demand
     /// (`agentstack_load`) — the run-scoped mirror of one `loads.jsonl` line.
     ///

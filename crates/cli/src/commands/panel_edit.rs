@@ -2,9 +2,11 @@
 //! verbs t3code drives to load/add skills & servers, create toolsets, and
 //! activate them — plus the library-index read that feeds the browser.
 //!
-//! The panel bridge is CLI-argv, not MCP: these are new fixed actions in the
-//! closed set (pinned by `crates/cli/tests/t3code_parity.rs`), never MCP tools
-//! wired into a browser. Reads carry the versioned `ui_contract::envelope`.
+//! The panel bridge is CLI-argv, not MCP: these are fixed actions in the closed
+//! set — declared in [`crate::ui_contract::PANEL_ACTIONS`], pinned end-to-end by
+//! `crates/cli/tests/t3code_parity.rs` and asserted as a closed, digest-bound
+//! surface by `crates/cli/tests/panel_surfaces.rs` — never MCP tools wired into
+//! a browser. Reads carry the versioned `ui_contract::envelope`.
 //!
 //! Every MUTATION follows the house pipeline:
 //!   mutate manifest → re-lock → re-render → digest-bound consent.

@@ -124,12 +124,17 @@ fn run() -> Result<()> {
                 commands::connect::run_disconnect(args)
             }
         },
+        Command::Lease(cmd) => match cmd {
+            agentstack::cli::LeaseCmd::Status { json } => commands::lease::run(*json),
+        },
+        Command::Delivery(args) => commands::delivery::run(args, dir),
         Command::Trust(args) => commands::trust::run(args),
         Command::Guard(args) => commands::guard::run(args),
         Command::SelfCmd(args) => commands::self_cmd::run(args),
         Command::Completions(args) => commands::completions::run(args),
         Command::Run(args) => commands::runs::run(args, dir),
         Command::Kill(args) => commands::runs::kill(args),
+        Command::Image(args) => commands::image::run(args, dir),
         Command::Shim(cmd) => commands::shim::run(cmd),
         Command::Workflow(cmd) => match cmd {
             agentstack::cli::WorkflowCmd::Run(args) => commands::workflow::run(dir, args),
