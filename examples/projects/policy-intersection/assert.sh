@@ -10,16 +10,24 @@
 #
 #     1. Untrusted           → the server is inert; the gateway serves only its
 #                              control plane. Nothing spawned, nothing audited.
-#     2. Trusted, discovery  → `tools_search` returns only the read-only tools.
+#     2. Trusted, unleased   → still nothing. This project declares a toolset,
+#                              so the gateway offers its control plane only
+#                              until a lease NAMES one. Policy is the second
+#                              fence, not the first.
+#     3. Leased, discovery   → `tools_search` returns only the read-only tools.
 #                              `delete_everything` is INVISIBLE, even though the
 #                              repo allowlisted it.
-#     3. Trusted, execution  → `get_status` succeeds; `delete_everything` and
+#     4. Leased, execution   → `get_status` succeeds; `delete_everything` and
 #                              `admin_reset` are refused, and the refusal NAMES
 #                              the machine layer. The audit log records the ok
 #                              call as "ok" and the denied calls as "denied"
 #                              with the exact rule.
-#     4. `explain opsbox`    → shows BOTH policy layers (project + machine).
-#     5. `doctor`            → reports the machine-policy summary as "restrictive".
+#     5. `explain opsbox`    → shows BOTH policy layers (project + machine).
+#     6. `doctor`            → reports the machine-policy summary as "restrictive".
+#
+# Steps 2-4 run in ONE gateway session (gateway_probe.py), so the fence and the
+# intersection are proven against the same connection: it sees nothing, then it
+# sees exactly the filtered set.
 #
 # Exits nonzero and prints FAIL on any mismatch; safe to run unattended. Runs
 # entirely inside an isolated sandbox — nothing touches your real config.
@@ -120,14 +128,18 @@ else
   bad "untrusted: the audit log recorded a call while the repo was untrusted"
 fi
 
-# ── 2 + 3) TRUSTED — discovery filtering + execution firewall + audit ─────────
-say "2+3) Trusted: review the manifest, then drive the gateway through one session"
+# ── 2 + 3 + 4) TRUSTED — the toolset fence, then the policy intersection ──────
+say "2-4) Trusted: review the manifest, then drive the gateway through one session"
 consent=$("$AS" trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')
 "$AS" trust . --yes --consented-digest "$consent" >/dev/null 2>&1
 
 PROBE="$(python3 "$HERE/gateway_probe.py" "$AS" "$PROJECT")"
 
 # pull each [is_error, text] pair out of the probe's JSON result
+fenced_search_text="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['fenced_search'][1])" "$PROBE")"
+fenced_call_err="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['fenced_call'][0])" "$PROBE")"
+fenced_call_text="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['fenced_call'][1])" "$PROBE")"
+lease_text="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['lease'][1])" "$PROBE")"
 search_text="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['search'][1])" "$PROBE")"
 gs_err="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['get_status'][0])" "$PROBE")"
 gs_text="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['get_status'][1])" "$PROBE")"
@@ -135,6 +147,26 @@ del_err="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['delete_ev
 del_text="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['delete_everything'][1])" "$PROBE")"
 adm_err="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['admin_reset'][0])" "$PROBE")"
 adm_text="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['admin_reset'][1])" "$PROBE")"
+
+# the fence: trusted is not enough. This project declares [profiles.default],
+# so nothing is proxied until a lease names a toolset — the policy layers below
+# only ever get to decide about a server the fence has already let through.
+if ! grep -q 'opsbox__' <<< "$fenced_search_text"; then
+  ok "fenced: trusted but unleased, tools_search still surfaces no proxied tool"
+else
+  bad "fenced: an unleased gateway exposed proxied tools: $fenced_search_text"
+fi
+if [ "$fenced_call_err" = "True" ] && grep -q 'no open lease' <<< "$fenced_call_text"; then
+  ok "fenced: a direct opsbox__get_status is refused, and the refusal names the missing lease"
+else
+  bad "fenced: expected a no-lease refusal; got err=$fenced_call_err text=$fenced_call_text"
+fi
+if grep -q '"opened": "default"' <<< "$lease_text" \
+   && grep -q '"native_files_written": false' <<< "$lease_text"; then
+  ok "the lease opens the 'default' toolset live — no native files written for it"
+else
+  bad "the lease did not open the default toolset: $lease_text"
+fi
 
 # discovery: read-only tools visible, destructive/privileged INVISIBLE
 if grep -q 'opsbox__get_status' <<< "$search_text" && grep -q 'opsbox__list_items' <<< "$search_text"; then
@@ -195,8 +227,8 @@ else
   bad "audit: expected a denied record naming the rule; got: ${del_line:-<none>}"
 fi
 
-# ── 4) explain shows BOTH policy layers ───────────────────────────────────────
-say "4) explain opsbox — surfaces both the project and machine policy layers"
+# ── 5) explain shows BOTH policy layers ───────────────────────────────────────
+say "5) explain opsbox — surfaces both the project and machine policy layers"
 EXPLAIN="$("$AS" explain opsbox --manifest-dir "$PROJECT" 2>&1)"
 sed 's/^/  /' <<< "$EXPLAIN"
 if grep -q 'Tool policy' <<< "$EXPLAIN" && grep -qi 'get_\*' <<< "$EXPLAIN"; then
@@ -215,8 +247,8 @@ else
   bad "explain: missing the egress/secret dimensions"
 fi
 
-# ── 5) doctor reports the machine-policy summary as restrictive ───────────────
-say "5) doctor — machine-policy summary"
+# ── 6) doctor reports the machine-policy summary as restrictive ───────────────
+say "6) doctor — machine-policy summary"
 DOCTOR="$("$AS" doctor --manifest-dir "$PROJECT" 2>&1)"
 ESC="$(printf '\033')"
 DOCTOR_PLAIN="$(sed "s/${ESC}\[[0-9;]*m//g" <<< "$DOCTOR")"
@@ -228,6 +260,6 @@ else
   bad "doctor: expected a restrictive machine-policy line; got: ${SUMMARY:-<none>}"
 fi
 
-say "Two layers in. The intersection is the effective policy. The floor wins."
+say "A lease to get in the door. Two layers past it. The floor wins."
 printf '\n\033[1mSummary:\033[0m %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1
