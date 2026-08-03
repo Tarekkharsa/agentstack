@@ -13,5 +13,5 @@
 5. [x] Surface finish — grouped review card; `run` locked by default; Varlock productization
 6. [x] Workflows promotion — per-role model/effort, algorithm helpers, security findings closed, un-hidden
 7. [x] Packaging — toolset into a self-run image
-8. [ ] The panel — the new surfaces over the existing ui-contract
+8. [x] The panel — the new surfaces over the existing ui-contract
 9. [ ] When the bar is met — re-pin the study kit, run it, fix its three blockers, publish, launch

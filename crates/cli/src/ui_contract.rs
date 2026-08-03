@@ -461,7 +461,9 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   hooks and extensions being executable kinds, never a claim that a
 ///   ceremony has happened. Its own name for the usual reason: a binary
 ///   predating it has no such command.
-/// - `library-sources-v1`: `status --json` gains a `shadowed_names` array —
+/// - `library-sources-v1`: `status --json`'s `project` gains a
+///   `shadowed_names` array (`project.shadowed_names`, beside the other
+///   per-project readings, so one project card is read from one place) —
 ///   one plain sentence per capability name that more than one **linked
 ///   library source** holds, naming the source that wins, the count, and the
 ///   `<source>:<name>` reference that pins the other copy
@@ -481,8 +483,10 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   about which sources are linked, in what order, or where they live — that
 ///   is `agentstack lib sources`, deliberately not a panel surface, because
 ///   the link list is personal-layer machine state and never project state.
-/// - `instruction-channels-v1`: `status --json` gains an `instruction_channels`
-///   array — one row per targeted CLI with `id`, `display`, the `file` that
+/// - `instruction-channels-v1`: `status --json`'s `project` gains an
+///   `instruction_channels` array (`project.instruction_channels`, the same
+///   per-project object `shadowed_names` and `packages` live on)
+///   — one row per targeted CLI with `id`, `display`, the `file` that
 ///   actually carries house rules there (`null` when the CLI has none), the
 ///   `live_channel` its adapter descriptor declares (`id`, `display`,
 ///   `confirmation` = `confirmed` / `unconfirmed`, and `used`), the `selection`
@@ -535,6 +539,39 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   reproducibility claim beyond the AgentStack layer — the base image may be
 ///   a floating tag and a Docker build is not bit-reproducible, both stated in
 ///   the design doc rather than implied away here.
+/// - `workflow-role-selection-v1`: the per-role model/effort facts become
+///   panel-readable. Two payloads, one contract. Each `workflow list --json`
+///   row gains `role_details[]` — `{role, harness, model, effort, serial,
+///   undeliverable[]}` — and `workflow explain --json` now carries this
+///   envelope, which it did not: it emitted a bare body, so a panel could read
+///   the richest workflow payload the CLI has and could never *negotiate* it.
+///
+///   **What it promises.** The facts come from the SAME `role_selection` walk
+///   `explain` renders, asked of the SAME authority the launch path asks — the
+///   bound adapter's descriptor — so the tree a panel draws and the argv a run
+///   builds cannot tell different stories. `undeliverable[]` carries one entry
+///   per declared value that would not reach the child, each with its
+///   `dimension`, the `harness`, and the plain sentence saying why; the two
+///   distinct cases item 6 shipped stay distinct (the adapter has no notion of
+///   that dimension at all vs. it has the setting but no confirmed way to
+///   select it for a single headless launch), and a value the adapter's own
+///   catalog REJECTS says so with the warning that a real run refuses that
+///   child before launch. `role_details` rides on `list`, which is the
+///   refusal-free surface, so an untrusted or drifted project still renders
+///   its tree.
+///
+///   **What it does not promise.** `model` and `effort` are what the role's
+///   toolset DECLARES, never what a run used — `null` means the toolset
+///   declares none and the harness's own default applies, which AgentStack
+///   does not read. `role_details` is NOT index-aligned with `roles`: a role
+///   with no declared toolset, or one binding an unknown harness, contributes
+///   no entry at all (refusal-free, exactly as `serial_roles` already is), so
+///   a missing entry is "not established" and never "no model" — `run` and
+///   `doctor` are where that entry's bigger problem gets reported. And this is
+///   observation only: it is not an activation reading, and there is **no
+///   action on this contract** — running, resuming, or authoring a workflow
+///   from a panel stays deferred (UI control-plane §Deferred), because each
+///   would need an authority path the read surface does not have.
 pub const FEATURES: &[&str] = &[
     "init-plan",
     "apply-setup",
@@ -577,6 +614,177 @@ pub const FEATURES: &[&str] = &[
     "library-sources-v1",
     "instruction-channels-v1",
     "image-plan-v1",
+    "workflow-role-selection-v1",
+];
+
+/// How one panel action's apply is bound.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Consent {
+    /// The apply requires `--yes` AND the named flag carrying the digest the
+    /// matching `--preview` returned. The CLI recomputes the digest and refuses
+    /// any mismatch before writing a byte, so a reviewed preview can never be
+    /// replayed against state that moved underneath it.
+    Digest(&'static str),
+    /// No digest, because the verb introduces no content for a human to
+    /// review: it re-renders, adopts, reverts, or undoes material that was
+    /// already consented (or that the CLI's own gates re-check on the call).
+    /// These are still fixed verbs with fixed argv — never a command string —
+    /// and every precondition behind them is re-validated here.
+    Preconditions,
+}
+
+/// One entry in the panel's closed action surface.
+pub struct PanelAction {
+    /// The panel-side action name (t3code's `AgentstackActionKind`).
+    pub name: &'static str,
+    /// The clap subcommand path its fixed argv starts with.
+    pub verb: &'static [&'static str],
+    /// How the apply is bound.
+    pub consent: Consent,
+}
+
+/// **The closed set.** Every state-changing thing a panel can do, declared in
+/// the CLI rather than only in the panel's own TypeScript — so "the panel is
+/// never a second authority" is a property this repository can enumerate and
+/// witness (`crates/cli/tests/panel_surfaces.rs`) instead of a promise made
+/// somewhere else. There is no generic `run_command` action, and adding an
+/// entry here is a deliberate edit that fails the witness until the verb really
+/// carries the binding it claims.
+///
+/// Reads are deliberately NOT listed. A read writes nothing, so it needs no
+/// closed set: [`FEATURES`] is how a panel learns which read contracts this
+/// binary serves. This table is about the surface that can change state.
+///
+/// Two things it is not:
+///
+/// 1. **Not an authorization.** Nothing consults this table at runtime — no
+///    enforcement decision may read it, exactly as none may read [`FEATURES`].
+///    A panel that names an action here still meets every gate the terminal
+///    meets: trust state, strict lock verification, machine policy, and the
+///    digest itself.
+/// 2. **Not a per-item consent path.** The review card has exactly one closing
+///    question and one answer — `trust-grant`, over the whole project's bytes.
+///    No entry here accepts, keeps-pinned, or blocks a single reviewed item,
+///    and none ever will (`docs/archive/design/consent-card.md` §Panel).
+pub const PANEL_ACTIONS: &[PanelAction] = &[
+    // Setup and consent: the two digests that bind a reviewed preview.
+    PanelAction {
+        name: "setup-apply",
+        verb: &["init"],
+        consent: Consent::Digest("consented-plan"),
+    },
+    PanelAction {
+        name: "trust-grant",
+        verb: &["trust"],
+        consent: Consent::Digest("consented-digest"),
+    },
+    // Revoking withdraws a yes rather than giving one: there is no reviewed
+    // preview to bind to, and failing to revoke is the unsafe direction.
+    PanelAction {
+        name: "trust-revoke",
+        verb: &["trust"],
+        consent: Consent::Preconditions,
+    },
+    PanelAction {
+        name: "apply-project",
+        verb: &["apply"],
+        consent: Consent::Preconditions,
+    },
+    PanelAction {
+        name: "apply-global",
+        verb: &["apply"],
+        consent: Consent::Preconditions,
+    },
+    PanelAction {
+        name: "adopt-project",
+        verb: &["adopt"],
+        consent: Consent::Preconditions,
+    },
+    PanelAction {
+        name: "adopt-global",
+        verb: &["adopt"],
+        consent: Consent::Preconditions,
+    },
+    PanelAction {
+        name: "guard-install",
+        verb: &["guard", "install"],
+        consent: Consent::Preconditions,
+    },
+    // Bound by the id the `restore --json` inventory returned, never `--last`:
+    // the undo ledger is machine-global and a project panel must undo its own
+    // newest entry.
+    PanelAction {
+        name: "restore-write",
+        verb: &["restore"],
+        consent: Consent::Preconditions,
+    },
+    PanelAction {
+        name: "session-start",
+        verb: &["session", "start"],
+        consent: Consent::Preconditions,
+    },
+    PanelAction {
+        name: "session-end",
+        verb: &["session", "end"],
+        consent: Consent::Preconditions,
+    },
+    // The panel-edit verbs: manifest or library mutations, each previewed and
+    // each bound to the digest its own preview returned.
+    PanelAction {
+        name: "add-skill-to-profile",
+        verb: &["add-skill-to-profile"],
+        consent: Consent::Digest("consented"),
+    },
+    PanelAction {
+        name: "add-server-to-profile",
+        verb: &["add-server-to-profile"],
+        consent: Consent::Digest("consented"),
+    },
+    PanelAction {
+        name: "create-profile",
+        verb: &["create-profile"],
+        consent: Consent::Digest("consented"),
+    },
+    PanelAction {
+        name: "edit-profile",
+        verb: &["edit-profile"],
+        consent: Consent::Digest("consented"),
+    },
+    PanelAction {
+        name: "rename-profile",
+        verb: &["rename-profile"],
+        consent: Consent::Digest("consented"),
+    },
+    PanelAction {
+        name: "delete-profile",
+        verb: &["delete-profile"],
+        consent: Consent::Digest("consented"),
+    },
+    PanelAction {
+        name: "use-profile",
+        verb: &["use-profile"],
+        consent: Consent::Digest("consented"),
+    },
+    PanelAction {
+        name: "remove-from-library",
+        verb: &["remove-from-library"],
+        consent: Consent::Digest("consented"),
+    },
+    PanelAction {
+        name: "remove-capability",
+        verb: &["remove-capability"],
+        consent: Consent::Digest("consented"),
+    },
+    PanelAction {
+        name: "set-gitignore",
+        verb: &["set-gitignore"],
+        consent: Consent::Digest("consented"),
+    },
+    PanelAction {
+        name: "set-mode",
+        verb: &["set-mode"],
+        consent: Consent::Digest("consented"),
+    },
 ];
 
 /// Wrap a response body in the envelope. The two envelope keys are injected
@@ -650,6 +858,7 @@ mod tests {
             "library-sources-v1",
             "instruction-channels-v1",
             "image-plan-v1",
+            "workflow-role-selection-v1",
         ] {
             assert!(
                 features.contains(&shipped),

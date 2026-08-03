@@ -15,7 +15,9 @@
 //! before the panel ships the drift.
 //!
 //! The argv here must stay in sync with t3code's `AgentstackCli.actionArgv`
-//! (apps/server/src/agentstack/AgentstackCli.ts). `--secrets skip` stands in
+//! (apps/server/src/agentstack/AgentstackCli.ts) and with the closed set
+//! declared in `agentstack::ui_contract::PANEL_ACTIONS`, which
+//! `crates/cli/tests/panel_surfaces.rs` checks verb by verb. `--secrets skip` stands in
 //! for the panel's store choice so the witness never touches the OS keychain;
 //! parity is independent of which store both sides name.
 

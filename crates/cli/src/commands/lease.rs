@@ -21,14 +21,20 @@ const SCOPE_NOTE: &str = "A lease is process-scoped: it disappears with the proc
 pub fn run(json: bool) -> Result<()> {
     let leases = lease_registry::open_leases();
     if json {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&crate::ui_contract::envelope(body(&leases)))?
-        );
+        println!("{}", serde_json::to_string_pretty(&status_value(&leases))?);
         return Ok(());
     }
     print_screen(&leases);
     Ok(())
+}
+
+/// The enveloped `lease status --json` payload as a `Value` — the
+/// Rust-callable primitive (like `workflow::list_value`) a panel witness reads
+/// without scraping stdout. Takes the already-derived reading rather than
+/// calling [`lease_registry::open_leases`] itself, so there is still exactly
+/// one place a record becomes a liveness claim.
+pub fn status_value(leases: &[(lease_registry::LeaseRecord, Liveness)]) -> serde_json::Value {
+    crate::ui_contract::envelope(body(leases))
 }
 
 fn body(leases: &[(lease_registry::LeaseRecord, Liveness)]) -> serde_json::Value {

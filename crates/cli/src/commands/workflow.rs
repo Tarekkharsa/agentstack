@@ -2446,6 +2446,8 @@ fn render_workflow_report_json(run_id: &str) -> Result<String> {
 /// constructing an interpreter `Context`, and no child is spawned.
 pub fn explain(manifest_dir: Option<&Path>, args: &crate::cli::WorkflowExplainArgs) -> Result<()> {
     let value = explain_value(manifest_dir, &args.name)?;
+    // The envelope's two keys are injected into the body object, so
+    // `print_explain` reads exactly the field paths it always did.
     if args.json {
         println!("{}", serde_json::to_string_pretty(&value)?);
         return Ok(());
@@ -2455,7 +2457,13 @@ pub fn explain(manifest_dir: Option<&Path>, args: &crate::cli::WorkflowExplainAr
 }
 
 /// The analysis as a `Value` — the testable seam, and what `--json` prints.
-fn explain_value(manifest_dir: Option<&Path>, name: &str) -> Result<serde_json::Value> {
+///
+/// Enveloped since `workflow-role-selection-v1`: this is the richest workflow
+/// payload the CLI has, and before that a panel could read it but never
+/// *negotiate* it, because it carried no `schema_version`/`features`. The
+/// envelope injects its two keys into this object, so every existing body path
+/// (`roles`, `effective_max_agents`, …) is unmoved.
+pub fn explain_value(manifest_dir: Option<&Path>, name: &str) -> Result<serde_json::Value> {
     let ctx = super::load(manifest_dir)?;
     let base = crate::manifest::project_root_of(&ctx.dir);
     let machine_policy = crate::machine_policy::load()?;
@@ -2523,7 +2531,7 @@ fn explain_value(manifest_dir: Option<&Path>, name: &str) -> Result<serde_json::
         })
         .collect();
 
-    Ok(serde_json::json!({
+    Ok(crate::ui_contract::envelope(serde_json::json!({
         "workflow": sanitize_line(&wf.name),
         "workflow_digest": wf.checksum,
         "roles": roles,
@@ -2531,7 +2539,7 @@ fn explain_value(manifest_dir: Option<&Path>, name: &str) -> Result<serde_json::
         "effective_max_wall_seconds": effective_wall,
         "max_concurrent": max_concurrent,
         "agent_call_sites": agent_call_sites(&script),
-    }))
+    })))
 }
 
 /// What `explain` says about one role's model and effort.
@@ -2732,9 +2740,45 @@ struct WorkflowListRow {
     /// the run log — i.e. after the author had already designed the fan-out
     /// and paid for it once.
     serial_roles: Vec<String>,
+    /// `workflow-role-selection-v1`: one entry per role whose toolset and
+    /// harness could both be resolved, carrying the model/effort story
+    /// [`role_selection`] computes for `explain`. Pre-rendered as JSON because
+    /// only the payload consumes it — the human table shows roles, and
+    /// `explain` is the terminal's per-role screen.
+    role_details: Vec<serde_json::Value>,
     max_agents: u32,
     max_wall_seconds: u64,
     checksum: Option<String>,
+}
+
+/// The per-role selection facts for a `workflow list` row, from the SAME
+/// [`role_selection`] walk `explain` renders — so the tree a panel draws and
+/// the argv a run builds can never tell different stories.
+///
+/// Refusal-free like everything else on this row, and deliberately NOT
+/// index-aligned with `roles`: a role with no declared toolset, or one binding
+/// an unknown harness, contributes nothing. That entry has a bigger problem
+/// than model selection, and a fabricated `model: null` beside it would read as
+/// "declares no model" when the truth is "nothing could be established".
+fn role_details_of(
+    ctx: &super::Context,
+    roles: &[String],
+    serial: &[String],
+) -> Vec<serde_json::Value> {
+    roles
+        .iter()
+        .filter_map(|role| {
+            let facts = role_selection(ctx, role)?;
+            Some(serde_json::json!({
+                "role": sanitize_line(role),
+                "harness": facts.harness,
+                "model": facts.model,
+                "effort": facts.effort,
+                "serial": serial.contains(role),
+                "undeliverable": facts.undeliverable,
+            }))
+        })
+        .collect()
 }
 
 /// Which of `roles` launch through the serial park/swap path, decided by the
@@ -2874,12 +2918,14 @@ fn collect_workflow_list_rows(manifest_dir: Option<&Path>) -> Result<Vec<Workflo
             .max_wall_seconds
             .map_or(requested_wall, |cap| requested_wall.min(cap));
 
+        let serial_roles = serial_roles_of(&ctx, &roles);
         rows.push(WorkflowListRow {
             name: name.clone(),
             declared: true,
             trusted,
             lock_status,
-            serial_roles: serial_roles_of(&ctx, &roles),
+            role_details: role_details_of(&ctx, &roles, &serial_roles),
+            serial_roles,
             roles,
             max_agents,
             max_wall_seconds,
@@ -2905,6 +2951,10 @@ fn workflow_list_json(rows: &[WorkflowListRow]) -> serde_json::Value {
                 "lock_status": r.lock_status,
                 "roles": r.roles.iter().map(|s| sanitize_line(s)).collect::<Vec<_>>(),
                 "serial_roles": r.serial_roles.iter().map(|s| sanitize_line(s)).collect::<Vec<_>>(),
+                // `workflow-role-selection-v1`. Additive: every key above keeps
+                // its `workflow-observe-v1` name and meaning, so a panel that
+                // predates this reads exactly what it read before.
+                "role_details": r.role_details,
                 "max_agents": r.max_agents,
                 "max_wall_seconds": r.max_wall_seconds,
                 "checksum": r.checksum,

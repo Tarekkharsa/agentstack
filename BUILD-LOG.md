@@ -769,3 +769,89 @@ object — the pre-amend commit `70aed8a`, created when an earlier `git add -A`
 had briefly and wrongly staged `.scratch/` before it was amended out. Two
 mistakes cancelling is luck, not process. `.scratch/` remains untracked, as the
 maintainer had it.
+
+## Item 8 — the panel (branch `panel-surfaces`)
+
+**Mostly verification, plus one gap and two wrong addresses.** Items 1–7 had
+already shipped the reads behind all four surfaces the queue names, so this
+item's honest job was to check them from a panel's side rather than to add
+capability, and the audit says: lease status, the grouped review card, and
+library sources were already served correctly and needed nothing. Two of the
+three had the wrong address written down, though — `library-sources-v1` and
+`instruction-channels-v1` both said "`status --json` gains …" when the arrays
+are on `status --json`'s **`project`** object, so a panel following the feature
+docs would have looked one level too high and concluded the binary predated the
+contract. Both doc-comments now name the real path (and this was caught by the
+witness failing, not by reading).
+
+The one real gap was **workflow control**. Item 6 shipped per-role model and
+effort, but the only surface carrying them was `workflow explain --json`, which
+(a) emitted a bare body with no `schema_version`/`features`, so a panel could
+read the richest workflow payload the CLI has and never *negotiate* it, and
+(b) re-gates on trust, because parsing an untrusted bundle's script is what
+rule 3 forbids — so on the state a panel usually meets a project in, the
+model/effort story was simply unavailable. Closed as `workflow-role-selection-v1`:
+`workflow list --json` rows gain `role_details[]` (`role`, `harness`, `model`,
+`effort`, `serial`, `undeliverable[]`) from the SAME `role_selection` walk
+`explain` renders and the same authority the launch path asks — the bound
+adapter's descriptor — and `explain --json` gained the envelope. `list` is the
+refusal-free surface, so the tree answers untrusted. Deliberately NOT
+index-aligned with `roles`: a role with no declared toolset contributes no
+entry at all, because a fabricated `model: null` beside it would read as
+"declares no model" when the truth is "nothing could be established".
+
+**No new fixed verb, and that is the finding, not an omission.** Every action
+the four surfaces would want turns out to need an authority path the read
+surface does not have. Leases are opened and closed by the MCP connection that
+owns them — `lease-status-v1` says outright there is no action on the contract,
+and a panel-driven open would be a second lease owner with no process to die
+with. Linked library sources are personal-layer machine state (`lib link` /
+`reorder`): a project-scoped panel able to re-point resolution at a folder the
+user never linked is invariant 3 with extra steps. Running or resuming a
+workflow stays deferred per the UI control-plane's own §Deferred. And no
+per-item consent answer was added anywhere, per `consent-card.md` §Panel —
+the card still has exactly one question and one answer, over the whole project.
+
+What *was* added on the action side is a declaration, not a capability:
+`ui_contract::PANEL_ACTIONS` names the closed set (22 entries) in the CLI
+rather than only in the panel's TypeScript, so "the panel is never a second
+authority" became a property this repository can enumerate. Nothing reads it at
+runtime — same rule as `FEATURES`.
+
+Witnesses: `panel_surfaces` (6) — all four surfaces read end to end through the
+real binary on the fixed argv a panel emits (not in-process helpers), each
+negotiable by name and coherent with the others; a stale and an unknown lease
+row never rendering live in the panel payload, each carrying the `why` sentence
+so no UI has to infer liveness from `pid` itself; the grouped card reaching the
+panel with exactly one `question` — asserted by walking every key path in the
+payload, plus the absence of any accept/keep-pinned/block spelling, plus every
+item appearing in exactly one group by index; the closed set checked verb by
+verb against the clap tree with each digest flag proven to exist on the verb
+that claims it; a stale consent digest refused with the manifest byte-identical
+after; and the second-authority witness in two halves — a source scan proving
+no code outside `ui_contract.rs` reads `FEATURES` or `PANEL_ACTIONS`, and a
+project advertising every contract this binary serves still refused activation
+on its own trust gate.
+
+Judgment calls and tensions, named rather than guessed through. **The queue's
+phrasing "every action … bound to a `consent_digest`" is not what the shipped
+closed set is**, and the table says so instead of pretending: thirteen actions bind
+a digest, and nine do not (`apply` and `adopt` in both scopes, `guard install`,
+`trust --revoke`, `restore <id> --write`, `session start` / `end`) — they introduce
+no new content for a human to review — they render, adopt, revert, or withdraw.
+Withdrawing a yes is the sharpest case: binding a revoke to a reviewed preview
+would make failing-to-revoke the easy path, which is the wrong direction to
+fail. `Consent::Preconditions` is the honest name for that half, and what makes
+those safe is the CLI's own gates, witnessed elsewhere. **`docs/automation.md`
+was three items behind** — none of `lease-status-v1`, `delivery-routing-v1`,
+`image-plan-v1`, `package-members-v1`, `library-sources-v1`,
+`instruction-channels-v1`, `needs-your-yes-v1`, `update-offer-v1`,
+`trust-card-diff-v1` or `trust-card-groups-v1` appeared on the integrator's
+table, which is a read-surface gap even though every payload worked; all are
+now listed with their limits, and `workflow explain --json` moved off the
+"not part of this contract" list. One honesty fix fell out of the same pass:
+that page promised its reads "start no process", while `lease status` runs
+`/bin/ps` per recorded PID on macOS because there is no `/proc` — now named in
+the row and in the section preamble, beside `doctor --probe`. **The two card
+renderers were not merged** and were not touched; the three reasons in
+`consent-card.md` §Panel still hold.
