@@ -196,8 +196,11 @@ Key decisions:
 - Skills and instructions are content-pinned like code because they can alter
   agent behavior. Inline skills cannot be trusted until they are lock-pinned;
   library server drift likewise blocks trust and governed execution.
-- Secrets appear only as `${REF}` placeholders, resolved by the OS keychain
-  (`keyring`) or varlock. Resolution happens in memory at run time.
+- Secrets appear only as `${REF}` placeholders, resolved through the chain
+  process env → varlock → OS keychain (`keyring`) → project `.env`. varlock is
+  the recommended vault — a project opts in with a `.env.schema` (which `init`
+  offers to write and `doctor` health-checks), and that file carries names, never
+  values. Resolution happens in memory at run time.
   Unresolvable secret → fail closed.
 
 ## Layer 2 — Trust gate (`crates/trust`)
@@ -351,9 +354,9 @@ target harness's extension directory, so the harness loads exactly the reviewed
 bytes rather than whatever a later source edit leaves behind. A per-directory
 ownership ledger scopes pruning to what agentstack placed, and a hard deny-list
 keeps the renderer from ever authoring, overwriting, or pruning the host
-guard's reserved `agentstack-guard*` artifacts. `run --locked` re-verifies each
-delivered copy against its pin before launch. What this buys is provenance and
-content binding, not runtime enforcement; the trade-offs and staging are in
+guard's reserved `agentstack-guard*` artifacts. A protected `run` (the default)
+re-verifies each delivered copy against its pin before launch. What this buys is
+provenance and content binding, not runtime enforcement; the trade-offs and staging are in
 The enforcement limits are recorded in
 [`ENFORCEMENT.md`](ENFORCEMENT.md#native-extensions).
 

@@ -60,7 +60,7 @@ implementation internals — live in
 - [Content scanning](#content-scanning)
 - [Ephemeral sessions (`agentstack session`)](#ephemeral-sessions-agentstack-session)
   - [Execution posture](#execution-posture)
-  - [The Protected tier in detail (`run --locked`)](#the-protected-tier-in-detail-run---locked)
+  - [The Protected tier in detail (the default `run`)](#the-protected-tier-in-detail-the-default-run)
 - [The library: linked source folders](#the-library-linked-source-folders)
   - [Layout and name resolution](#layout-and-name-resolution)
   - [Pinning and provenance](#pinning-and-provenance)
@@ -189,9 +189,17 @@ no project can loosen.
 
 The chain — process env → **varlock** → **OS keychain** → project `.env` — and
 the `${REF}` rules live in [concepts.md — secrets](concepts.md#secrets);
-unresolved refs are reported, never blanked. Operational specifics: the varlock
-link activates only when the project opts in (a `.env.schema` present) and the
-`varlock` binary is on PATH, otherwise the chain silently skips it. When active,
+unresolved refs are reported, never blanked. **varlock is the recommended
+vault** — the one link in the chain that keeps values out of the project
+entirely; the OS keychain and a gitignored `.env` are the local fallbacks.
+
+Operational specifics: the varlock
+link activates only when the project opts in (a `.env.schema` next to the
+manifest, in `.agentstack/` — the directory the chain probes) and the
+`varlock` binary is runnable, otherwise the chain silently skips it. That
+silence is why `agentstack doctor` reports varlock's health in its **Secrets**
+section: an opted-in project whose binary is missing would otherwise degrade
+without a word. When active,
 agentstack shells out to `varlock load --format json-full --compact` and
 delegates the whole provider matrix (1Password, AWS/Azure/GCP, Bitwarden,
 device-local stores) to it — see [varlock.dev](https://varlock.dev). Each ref
@@ -214,6 +222,15 @@ to `keychain` when absent, so CI never starts writing plaintext by surprise.
 unstored `${REF}` with the command to store it. The `.env` writer places values
 next to the manifest, and `secret set --env-file` targets that same `.env`. The
 manifest itself only ever holds `${REF}` placeholders (rule 5).
+
+`init` also **offers** a `.env.schema` when it lifts references — the opt-in for
+varlock, written next to the manifest in `.agentstack/`, the same directory the
+resolution chain probes. The offer is declined silently when nothing is
+interactive (so a scripted `init` writes exactly what it wrote before), and an
+existing schema is never overwritten. The file declares **names with empty
+values and nothing else**, so it is safe to commit: values stay in the vault,
+and a declared name with no value still fails closed at use time — which is the
+whole point of `${REF}`.
 
 Because that file holds real values rather than placeholders, it gets two
 protections the rendered configs don't need. It is written **mode `0600`** —
@@ -429,6 +446,16 @@ agentstack kill <id>           # SIGTERM, then SIGKILL if it won't go
 agentstack kill <id> --force   # SIGKILL immediately
 ```
 
+**A plain `run` is the Protected tier.** Before the harness starts, agentstack
+checks content trust, verifies the lock strictly, admits every declared
+capability against the machine ceiling, and freezes the run's tool surface — and
+refuses the launch, naming the fix, if any of that fails. The banner reads
+`HOST / PROTECTED`. That is pre-launch gating, not kernel isolation: the agent
+still runs as you, on the host. `--unprotected` opts out (no gate at all, banner
+`HOST / ADVISORY`), `--locked` asks for the default by name, and
+`--sandbox`/`--lockdown` add containment. The whole gate sequence is
+[the Protected tier in detail](#the-protected-tier-in-detail-the-default-run).
+
 Launching is a terminal act (the CLIs are interactive TUIs). The registry is
 self-healing: a run
 whose wrapper died is pruned on the next `report runs`. A toolset-bound run uses
@@ -439,7 +466,7 @@ Unix only for now.
 
 ## Part II — The power surface
 
-These are the commands `agentstack --help` keeps hidden as progressive disclosure, plus the advanced delivery and enforcement modes the everyday loop only points at. Hidden is not unsupported — every command here is fully maintained and carries its own `--help`, exactly as the [All commands](#all-commands) preamble spells out. Reach in when you need a machine-wide policy ceiling, the zero-files gateway, ephemeral sessions, locked runs, the linked library sources, or the observability tooling.
+These are the commands `agentstack --help` keeps hidden as progressive disclosure, plus the advanced delivery and enforcement modes the everyday loop only points at. Hidden is not unsupported — every command here is fully maintained and carries its own `--help`, exactly as the [All commands](#all-commands) preamble spells out. Reach in when you need a machine-wide policy ceiling, the zero-files gateway, ephemeral sessions, the protected run's full gate sequence, the linked library sources, or the observability tooling.
 
 ## Core engine
 
@@ -1018,9 +1045,16 @@ of the claim, so it is quoted here as printed. What each label guarantees is
 lockdown, and even there the honest claim is *unapproved egress is blocked*, not
 that exfiltration is impossible.
 
+Which label a run gets is decided by the flags you type, and the default moved:
+a bare `agentstack run <cli>` is the Protected tier and prints
+`HOST / PROTECTED`. `--unprotected` is the explicit opt-out to the ungated host
+run and prints `HOST / ADVISORY`. `--sandbox` and `--lockdown` are unchanged and
+print their own labels — they are checked before the protected default, so
+`run --sandbox` means exactly what it has always meant.
+
 The label appears on the run banner, in `agentstack run --sandbox --plan`, and in
 `agentstack report run <id>` (`report --json` carries the `posture` slug); a
-sandbox run records it beside the flight-recorder log, and a `--locked` run
+sandbox run records it beside the flight-recorder log, and a protected run
 carries it in its `attempt_started` event. `agentstack doctor` also prints a
 one-word **machine-policy summary** — `open`, `restrictive`, or `mixed` —
 describing the machine policy's shape (`restrictive` means a `"*"` rule or a
@@ -1029,14 +1063,16 @@ Ready-to-use machine policies for common setups live in
 [`examples/policies/`](../examples/policies/) (`compatible`, `developer`,
 `locked-down`, `ci`).
 
-### The Protected tier in detail (`run --locked`)
+<a id="the-protected-tier-in-detail-run---locked"></a>
+### The Protected tier in detail (the default `run`)
 
 ```text
-agentstack run <cli> --locked
-agentstack run <cli> --locked --plan   # walk the gate sequence read-only
+agentstack run <cli>            # the default — this IS the Protected tier
+agentstack run <cli> --plan     # walk the gate sequence read-only
+agentstack run <cli> --locked   # the same run, named explicitly
 ```
 
-A locked run is a fail-closed **pre-launch gate sequence plus a frozen
+A protected run is a fail-closed **pre-launch gate sequence plus a frozen
 capability surface** — every decision recorded, nothing re-derived mid-run:
 
 1. **Gates, in order** (each records a `gate_decision` event; the first
@@ -1069,17 +1105,34 @@ capability surface** — every decision recorded, nothing re-derived mid-run:
    state is applied or reverted.
 6. **Hygiene.** The original project MCP config is parked in the run's
    private dir (never left in the repo) and restored byte-identical; a
-   sentinel makes overlapping locked runs refuse instead of stacking; a
+   sentinel makes overlapping protected runs refuse instead of stacking; a
    crash leaves the more restrictive state.
 
-`run --locked --plan` walks the whole sequence read-only, printing every decision
+**Spellings and opt-outs.** `--locked` still parses and still means exactly this
+run — it is kept for the scripts, docs, and panels that already type it, and it
+keeps its own combination rule: `--locked --sandbox` and `--locked --lockdown`
+refuse as a named not-yet-wired combination, so reach for `--sandbox` or
+`--lockdown` on their own. `--unprotected` is the way out: an ordinary host run
+with **no pre-launch gate at all** — no trust check, no strict lock
+verification, no policy admission, no frozen grant — labelled `HOST / ADVISORY`,
+with a launch banner that names each check it skipped. `--locked --unprotected`
+refuses rather than letting flag order decide which one you meant.
+
+**Headless.** `agentstack run <cli> --prompt "<text>"` is the governed headless
+form. It requires the protected run and refuses beside `--unprotected`,
+`--sandbox`, or `--lockdown`; the prompt is committed verbatim into the frozen
+grant's argv, so the recorded evidence binds what the agent was asked to do.
+
+`run --plan` walks the whole sequence read-only, printing every decision
 the live path would (plus the grant digest a live run would freeze) and mutating
-nothing. What is and isn't claimed at this tier (pre-launch gating on the HOST
-tier, not kernel isolation) is [ENFORCEMENT.md — the locked run's frozen
-grant](ENFORCEMENT.md#the-locked-runs-frozen-grant-run---locked); the asserted
+nothing; `--unprotected --plan` refuses, because an ungated run has no gate
+sequence to walk. What is and isn't claimed at this tier (pre-launch gating on
+the HOST tier, not kernel isolation — the harness still runs as you, on the
+host) is [ENFORCEMENT.md — the protected run's frozen
+grant](ENFORCEMENT.md#the-protected-runs-frozen-grant-the-default-run); the asserted
 walkthrough is [`examples/projects/locked-run/`](../examples/projects/locked-run/)
 and the full contract is
-the [locked-run enforcement contract](ENFORCEMENT.md#the-locked-runs-frozen-grant-run---locked).
+the [protected-run enforcement contract](ENFORCEMENT.md#the-protected-runs-frozen-grant-the-default-run).
 
 ## The library: linked source folders
 
@@ -1493,7 +1546,7 @@ re-render prunes exactly what agentstack placed. An untrusted or drifted project
 renders **zero** extension bytes. Two adapters render today — **pi**
 (`~/.pi/agent/extensions`, or `.pi/extensions` at project scope) and **OpenCode**
 (`~/.config/opencode/plugins`, global only); any other target validates but
-**warns and does not render**. Under `run --locked`, a `rendered-verify` gate
+**warns and does not render**. Under a protected `run`, a `rendered-verify` gate
 re-checks each delivered copy against its lock pin before launch.
 
 ### `report usage` (usage analytics)
@@ -1740,7 +1793,7 @@ you need the exact verb, flag, or subcommand.
 - **`use`** — Toolset: switch to one — its servers and skills go live in your CLIs — flags `--target/--scope/--write/--allow-unresolved/--prune-foreign/--no-gitignore/--list/--json`
 - **`yes`** — Review and activate the files you dropped into this project — one step — flags `--yes`
 - **`session`** _(hidden)_ — Use a toolset temporarily: load it for now, then put every file back — subcommands `start/end/list/freeze`
-- **`run`** — Launch an agent CLI as a tracked run — flags `--locked/--prompt/--toolset/--scope/--keep/--sandbox/--lockdown/--plan`
+- **`run`** — Launch an agent CLI as a tracked run — flags `--locked/--unprotected/--prompt/--toolset/--scope/--keep/--sandbox/--lockdown/--plan`
 - **`kill`** _(hidden)_ — Kill a tracked run by id (and revert its toolset if it owned one) — flags `--force`
 - **`shim`** _(hidden)_ — Exec-through launcher shim for external supervisors (e.g. t3code) — subcommands `make/exec*`
 - **`workflow`** _(hidden)_ — Run a reviewed multi-agent task using toolsets you already approved — subcommands `run/report/list/runs/explain/declare`
@@ -1790,14 +1843,16 @@ to confirm a feature is real before you go hunting for its section above.
 13 adapters · `init`/`add`/`apply`/`diff`/`use`/`instructions`/`adopt` ·
 package manager (`install`/`lock --update`/`remove` + lockfile) · central capability
 library (`lib` skills + servers referenced by name, digest-pinned in the lock,
-drift in `doctor`/`explain`) · secrets (keychain +
-varlock) · scopes (global/project) · `doctor` (`--live`/`--fix`/`--ci`/`--deep`) ·
+drift in `doctor`/`explain`) · secrets (keychain + varlock as the recommended
+vault — `init` offers the `.env.schema`, `doctor` reports its
+health) · scopes (global/project) · `doctor` (`--live`/`--fix`/`--ci`/`--deep`) ·
 content scanning on install + `doctor --deep` · official MCP Registry provider +
 `search`/`add from` · `[policy]` trust gate · native per-CLI settings
 (`[settings.*]` → settings.json) · native extensions (`[extensions.*]` →
-content-pinned harness add-ons, re-verified at `run --locked`) · atomic writes + backups ·
+content-pinned harness add-ons, re-verified at the protected `run`) · atomic writes + backups ·
 `export`/`import` · portable lifecycle hooks · agent-operable `mcp` server ·
-graphical-integration contracts · live runs (`run`/`report runs`/`kill`) ·
+graphical-integration contracts · live runs (`run` — protected by default,
+`--unprotected` to opt out — plus `report runs`/`kill`) ·
 GitHub Action trust gate ·
 nightly adapter-conformance CI · zero-files gateway (`gateway connect` + `mcp
 --auto-project` + digest-pinned `trust`) · `optimize` (evidence-backed

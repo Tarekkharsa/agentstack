@@ -166,14 +166,17 @@ a determined attacker: any CLI that ignores its own hooks, or a process it never
 routes through a hook, bypasses it entirely. It is never enforcement. More:
 [ENFORCEMENT.md — filesystem write](ENFORCEMENT.md#filesystem--write).
 
-## Sandbox, lockdown, and `run --locked`
+<a id="sandbox-lockdown-and-run---locked"></a>
+## Sandbox, lockdown, and the protected run
 
 Three ways to raise how strongly a run is confined, lightest to strongest:
 
-**`run --locked`** — no container. AgentStack runs the fail-closed pre-launch
+**A plain `run` (the Protected tier, and the default)** — no container.
+AgentStack runs the fail-closed pre-launch
 gates (trust, lock verification, policy admission) and freezes the run's tool
 surface, then launches the CLI on your host. Protection before launch, not
-kernel isolation.
+kernel isolation — the agent still runs as you. `--locked` is the same run
+named explicitly; `--unprotected` opts out to an ungated host run.
 
 **`run --sandbox`** — a Docker container with a host-side egress proxy. Proxied
 HTTPS is checked against policy, but the container keeps a direct network route a
@@ -191,7 +194,9 @@ enforced, printed on the run banner. The four labels are `HOST / ADVISORY`,
 `LOCKDOWN / ENFORCED · NO DIRECT ROUTE` — the sandbox and lockdown labels are
 emitted with those suffixes, and the suffix is the honest half: plain
 `--sandbox` proxies egress but leaves a direct route a proxy-ignoring process
-can take. The labels are enumerated in
+can take. `HOST / PROTECTED` is what a bare `agentstack run <cli>` prints;
+`HOST / ADVISORY` belongs to the `--unprotected` opt-out. The labels are
+enumerated in
 [reference.md — execution posture](reference.md#execution-posture); what each
 one actually guarantees is
 [ENFORCEMENT.md — the matrix](ENFORCEMENT.md#the-matrix), which is keyed by mode
@@ -267,19 +272,21 @@ with `agentstack set-mode`, but they are no longer how delivery is decided:
   stays silent.
 - **zero-files** — no *generated* per-project files. The gateway is registered
   once per CLI, and every trusted repo serves its own stack live over it; a
-  [lease](#lease-session-or-locked-run-fence) can fence one connection to a
+  [lease](#lease-session-or-protected-run-fence) can fence one connection to a
   toolset without rendering native files. The repo still carries its manifest,
   its lockfile, and any managed house-rules region.
 
 Not sure which you need? See [how capabilities reach your CLIs](choose.md). More:
 [reference.md — where rendered files live](reference.md#where-rendered-files-live-three-modes).
 
-## Lease, session, or locked-run fence
+<a id="lease-session-or-locked-run-fence"></a>
+## Lease, session, or protected-run fence
 
 Three ways to give a run only *part* of a manifest for a while. A **session**
 renders a toolset to disk and reverts it on `session end`; a **lease** does the
-same for one live MCP connection without rendering anything; a **locked-run
-fence** narrows one run's frozen surface and ends when the process does. A
+same for one live MCP connection without rendering anything; a **protected-run
+fence** (`run <cli> --toolset <name>`) narrows one run's frozen surface and ends
+when the process does. A
 lease and a session are mutually exclusive, and `freeze` on either promotes
 what was actually used into a new toolset — a proposal you review, then
 `agentstack lock`. Full comparison:
@@ -299,11 +306,15 @@ managed gitignore); gateway-backed and clean-at-rest delivery resolve host-side
 and keep values out of files at rest. The manifest and lockfile never hold
 values in any mode.
 
-**Keychain and varlock** — the two backing stores a `${REF}` resolves from. The
-OS **keychain** (service `agentstack`) holds values locally; **varlock** is an
-optional resolver fronting 1Password, cloud secret managers, and more, active
-only when a project opts in and the `varlock` binary is present — otherwise the
-chain skips it. The full chain is process env → varlock → keychain → project
+**Keychain and varlock** — the two backing stores a `${REF}` resolves from.
+**varlock** is the **recommended vault**: a resolver fronting 1Password, cloud
+secret managers, and device-local encryption, so no value lives in the project
+at all. It is active only when a project opts in — a `.env.schema` next to the
+manifest, which `agentstack init` offers to write and which declares names, never
+values — and the `varlock` binary is runnable; otherwise the chain skips it
+silently, which is why `agentstack doctor` reports its health. The OS
+**keychain** (service `agentstack`) and a gitignored project `.env` are the
+local fallbacks. The full chain is process env → varlock → keychain → project
 `.env`. More: [reference.md — secret resolution](reference.md#secret-resolution).
 
 ## Library, catalog, registry, trust store

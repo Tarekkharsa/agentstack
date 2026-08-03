@@ -54,15 +54,15 @@ own words.
 | just syncing config across your CLIs | config sync | `init` then `apply --write` | Copies your reviewed config into each CLI. No runtime check — nothing is blocked once an agent is running. |
 | worried about `rm -rf` or `.env` accidents | the guard | `guard install` | **Cooperative**: catches an agent's *accidents* through each CLI's own hook. Not a determined attacker. |
 | cloning repos you didn't write | the trust gate | `gateway connect` then `trust .` | A repo's servers, skills, and secrets stay **inert** until you trust it. Trust gates whether they load — it does not sandbox the code. |
-| launching a frozen, verified surface, no Docker | a Protected run | `run <cli> --locked` | Fail-closed trust and pin checks before launch, then a frozen surface. Labelled `HOST / PROTECTED`. Not kernel isolation — the agent still runs as you. |
+| launching a frozen, verified surface, no Docker | a Protected run — already the default | `run <cli>` | Fail-closed trust and pin checks before launch, then a frozen surface. This is what a plain `agentstack run` does now; `--unprotected` opts out. Labelled `HOST / PROTECTED`. Not kernel isolation — the agent still runs as you. |
 | running sensitive work that must not leak | Lockdown (Docker) | `run <cli> --sandbox --lockdown` | Container with no route out; egress is **enforced**. Unapproved egress is blocked — that never means exfiltration is impossible. Labelled `LOCKDOWN / ENFORCED`. |
 
-The rows stack: guard, the trust gate, and a locked or lockdown run each add
+The rows stack: guard, the trust gate, and a protected or lockdown run each add
 protection the one above does not, so most people end up combining several.
 The legend words — **cooperative**, **enforced**, coarse, unsupported — are
 defined once in the [enforcement matrix](ENFORCEMENT.md), which spells out
-exactly what each mode does and does not stop. `--lockdown` needs Docker;
-`--locked` does not.
+exactly what each mode does and does not stop. `--lockdown` needs Docker; the
+protected default does not.
 
 **Not sure?** Let delivery stay automatic and add `guard install` — that is the
 right answer for almost everyone. [Get started](start.html) sets both up.

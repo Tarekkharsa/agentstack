@@ -13,7 +13,7 @@ binaries have it; a bare `cargo build` needs `--features sandbox`).
 agentstack run claude-code --sandbox --lockdown --plan
 
 # Then climb only as far as you need:
-agentstack run claude-code --locked              # protected host run, no Docker
+agentstack run claude-code                       # protected host run, no Docker (the default)
 agentstack run claude-code --sandbox             # container + proxied egress
 agentstack run claude-code --sandbox --lockdown  # container, no route out
 ```
@@ -22,11 +22,13 @@ Each step confines more, and each prints its [posture](../concepts.md) label —
 what each label actually guarantees is the
 [enforcement matrix](../ENFORCEMENT.md#the-matrix):
 
-- `run --locked` promotes a plain host run to the Protected tier. No Docker. It
+- A plain `run` is **already** the Protected tier. No Docker. It
   enforces content trust, strict [lockfile](../concepts.md) verification, and
   policy admission **before** launch, and freezes the tool surface for the run.
   It is not isolation — the agent still runs as you, on the host. Posture:
-  `HOST / PROTECTED`.
+  `HOST / PROTECTED`. `--locked` names the same run explicitly and still works;
+  `--unprotected` opts out of the gate entirely (posture `HOST / ADVISORY`, and
+  the banner names each check that was skipped).
 - `run --sandbox` launches the CLI inside a Docker container with the project
   mounted as its workspace and HTTPS routed through a host-side egress proxy.
   The container's bridge network still has a direct route a proxy-ignoring
@@ -42,12 +44,13 @@ lockdown egress sidecar is pulled from GHCR automatically, pinned per release
 After a run, `agentstack report run <id>` replays its posture label and every
 egress and tool-call decision — see [see what your agents did](see-what-happened.md).
 
-**Limits.** The posture labels name each mode's ceiling honestly: `--locked` is
-pre-launch gating plus a frozen surface, not a kernel fence, and only
+**Limits.** The posture labels name each mode's ceiling honestly: the protected
+default is pre-launch gating plus a frozen surface, not a kernel fence — the
+harness still runs as you, on the host — and only
 `--lockdown` is topologically confined. What each mode actually enforces per
 dimension, with every strength caveat, is the
 [enforcement matrix](../ENFORCEMENT.md#the-matrix).
 
-- [Concepts](../concepts.md) — sandbox vs lockdown vs `--locked`, posture
+- [Concepts](../concepts.md) — sandbox vs lockdown vs the protected run, posture
 - [Reference: execution posture](../reference.md#execution-posture)
 - [Enforcement: the matrix](../ENFORCEMENT.md#the-matrix)

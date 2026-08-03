@@ -132,6 +132,90 @@ fn prompt_secret_store() -> Result<SecretStore> {
     }
 }
 
+/// Offer this project a varlock `.env.schema` — the opt-in for the recommended
+/// vault ([varlock.dev](https://varlock.dev)), which resolves names from
+/// 1Password, a cloud secret manager, or device-local encryption instead of a
+/// file next to the code.
+///
+/// Returns the captured pre-write state when the file was written, so the
+/// caller folds it into init's ONE undoable transaction.
+///
+/// Three silent refusals, each deliberate: nothing to declare, a `.env.schema`
+/// already present (never overwrite the user's own schema), and a
+/// non-interactive run — `confirm` answers false without prompting there, which
+/// is the CI and t3code contract, so scripted `init` writes exactly what it
+/// wrote before.
+///
+/// **Nothing here writes a secret value.** The schema declares NAMES; values
+/// stay in the vault, and a name with no value still fails closed at use time,
+/// which is the whole point of `${REF}`.
+fn offer_env_schema(dir: &Path, names: &[String]) -> Result<Option<crate::history::FileChange>> {
+    let path = dir.join(".env.schema");
+    let declared = schema_names(names);
+    if declared.is_empty() || path.exists() {
+        return Ok(None);
+    }
+    println!(
+        "\nvarlock ({}) can resolve these names from 1Password, a cloud secret \
+         manager, or device-local encryption — no values in this project at all. A \
+         .env.schema opts in; it declares names only, so it is safe to commit.",
+        "https://varlock.dev".dimmed()
+    );
+    if !crate::util::confirm::confirm(&format!(
+        "Write .env.schema declaring {}?",
+        super::count(declared.len(), "name")
+    ))? {
+        println!("  · skipped — drop a .env.schema in this project anytime to opt in.");
+        return Ok(None);
+    }
+    let change = crate::history::capture(&path, ".env.schema · varlock declarations");
+    crate::util::atomic::write(&path, &env_schema_body(&declared))
+        .with_context(|| format!("writing {}", path.display()))?;
+    println!(
+        "{}  Wrote .env.schema — `agentstack doctor` reports varlock's health from here on.",
+        "🔑".dimmed()
+    );
+    Ok(Some(change))
+}
+
+/// The names a schema may declare: sorted, de-duplicated, and restricted to
+/// well-formed reference names. The filter is not defensive decoration — these
+/// names come from imported third-party CLI configs, and anything that is not a
+/// `${REF}` name has no business being written into a file at all.
+fn schema_names(names: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = names
+        .iter()
+        .filter(|n| agentstack_core::refs::is_ref_name(n))
+        .cloned()
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// The `.env.schema` body: varlock's root decorators, the `# ---` divider that
+/// ends them, and one declaration per name with an EMPTY value.
+///
+/// Empty is the contract, not an omission. A value written here would be a
+/// secret serialized into the repository — the exact thing `${REF}` exists to
+/// prevent — so the file is a declaration and the vault holds the values.
+fn env_schema_body(names: &[String]) -> String {
+    let mut out = String::from(
+        "# varlock schema — https://varlock.dev\n\
+         # Written by `agentstack init`. Declares the names this project needs.\n\
+         # Values are NEVER written here: agentstack keeps ${REF} placeholders and\n\
+         # resolves them in memory at run time. Safe to commit.\n\
+         # @defaultSensitive=true\n\
+         # @defaultRequired=true\n\
+         # ---\n",
+    );
+    for name in names {
+        out.push_str(name);
+        out.push_str("=\n");
+    }
+    out
+}
+
 /// Print the three storage options' full help text plus the varlock note — the
 /// context that prints once, above whichever selector runs.
 fn print_secret_store_help() {
@@ -1497,6 +1581,15 @@ version = 1
                     refs_needing_values = lifted.iter().map(|l| l.reference.clone()).collect();
                 }
             }
+            // Varlock is the recommended vault, and `.env.schema` is how a
+            // project opts into it. Offer it here, where the names this project
+            // needs have just been discovered. Whatever the user answers, the
+            // chain and `${REF}` resolution are unchanged: this only adds a
+            // layer between env and the keychain.
+            let names: Vec<String> = lifted.iter().map(|l| l.reference.clone()).collect();
+            if let Some(change) = offer_env_schema(&dir, &names)? {
+                backups.push(change);
+            }
         }
 
         // The imported servers land in the first linked library source, through
@@ -2518,5 +2611,31 @@ mod tests {
             std::fs::read_to_string(dir.path().join("agentstack.toml")).unwrap(),
             "version = 1\n"
         );
+    }
+
+    /// The vault opt-in declares NAMES. A value here would be a secret
+    /// serialized into the repository — the precise thing `${REF}` exists to
+    /// prevent — so this asserts the file can never carry one, and that the
+    /// names it does carry are well-formed and de-duplicated.
+    #[test]
+    fn the_env_schema_declares_names_and_never_a_value() {
+        let names = schema_names(&[
+            "B_TOKEN".into(),
+            "A_TOKEN".into(),
+            "B_TOKEN".into(),
+            "not a ref".into(),
+            "$(rm -rf /)".into(),
+        ]);
+        assert_eq!(names, vec!["A_TOKEN".to_string(), "B_TOKEN".to_string()]);
+        let body = env_schema_body(&names);
+        assert!(body.contains("\n# ---\n"), "{body}");
+        assert!(body.contains("\nA_TOKEN=\n"), "{body}");
+        assert!(body.contains("\nB_TOKEN=\n"), "{body}");
+        for line in body.lines().filter(|l| !l.starts_with('#')) {
+            assert!(
+                line.is_empty() || line.ends_with('='),
+                "every declaration ends at the `=`: {line:?}"
+            );
+        }
     }
 }

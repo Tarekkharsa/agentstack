@@ -99,6 +99,39 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   the field sets are not versions of one another: that one carries the
 ///   KINDS the preview omitted, this one carries the CARD. Recorded as the
 ///   naming correction in `docs/design/consent-card.md` §Panel.
+/// - `trust-card-groups-v1`: `trust --preview` additionally carries
+///   `review.groups` — the card's detail body grouped per capability — and
+///   `review.question`, the one closing question.
+///
+///   A group is `{kind, label, change, counts{added,changed,unchanged,removed,
+///   total}, items[], removed[]}`. `items` and `removed` hold **indices into
+///   `review.items` / `review.removed`**, not copies. That is the point: a
+///   group has nowhere to put a fact of its own, so grouping is presentation
+///   and can never become a second description of the same review. `change` is
+///   the group's marker in the same three words the items use — `added` when
+///   the whole group is new, `changed` when anything under it moved or was
+///   dropped, `unchanged` otherwise.
+///
+///   Three properties a consumer may rely on:
+///
+///   1. **Additive.** `review.items` and `review.removed` keep their
+///      `trust-card-diff-v1` shape AND order byte for byte. A panel that
+///      predates this feature reads exactly what it read before, and a panel
+///      that uses it renders the same items in a different arrangement.
+///   2. **Exactly one question, and no answers.** `review.question` is the
+///      single closing yes for the whole project. There is no per-group and no
+///      per-item question, accept, keep-pinned, or block field, and there never
+///      will be — grouping the body must not multiply the moments a human
+///      commits to something. The answer is `trust --yes --consented-digest
+///      <surface_digest>`, bound to the project's bytes, never to a group.
+///   3. **Complete.** Every kind appearing in `items` or `removed` appears in
+///      exactly one group; a kind this binary does not have a label for is
+///      grouped under its own name rather than dropped.
+///
+///   Delivery routing is NOT a group and is not answerable: which lane a
+///   capability reaches a harness through is informational
+///   (`delivery-routing-v1`), decided by the planner, and never something the
+///   consent moment asks about.
 /// - `activity-skill-load-v1`: a successful on-demand skill load over MCP
 ///   (`agentstack_load`) is recorded as first-class activity. Each one appends
 ///   to the machine-global `~/.agentstack/audit/loads.jsonl`
@@ -497,6 +530,7 @@ pub const FEATURES: &[&str] = &[
     "trust-server-blockers-v1",
     "trust-review-card-v1",
     "trust-card-diff-v1",
+    "trust-card-groups-v1",
     "activity-skill-load-v1",
     "workflow-observe-v1",
     "workflow-serial-roles-v1",

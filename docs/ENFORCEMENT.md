@@ -202,7 +202,7 @@ guard hook observes or constrains it once the harness loads it, so there is no
 runtime cell to earn a stronger label. What agentstack governs happens entirely
 *before* delivery: the source is content-pinned in `agentstack.lock`, an
 untrusted or drifted project renders zero bytes, `apply` copies (never symlinks)
-the pinned bytes into the harness's extension directory, and `run --locked`
+the pinned bytes into the harness's extension directory, and a protected `run`
 re-verifies each delivered copy against its pin before launch. That pipeline is
 provenance and content binding — which bytes, from where, reviewed by whom — not
 runtime enforcement, and it is deliberately labelled as such. See the Native
@@ -238,6 +238,12 @@ with a toolset selected for one MCP connection (`agentstack_lease_open`) — the
 dynamic delivery lane, and the strongest column here. **--sandbox** and
 **--lockdown** are `agentstack run --sandbox [--lockdown]`: the harness runs in a
 Docker container behind the egress proxy.
+
+The `host` column covers the **protected default** too. A plain
+`agentstack run <cli>` now gates the launch fail-closed, but every one of those
+gates runs *before* the harness starts, so it changes no cell here: pre-launch
+gating is not runtime confinement, and the label `HOST / PROTECTED` says exactly
+that much and no more.
 
 **Which column a capability lands in is now routed, not chosen** (delivery flip,
 2026-08-03; [`design/automatic-delivery.md`](design/automatic-delivery.md)). The
@@ -553,7 +559,7 @@ paragraph above exists to prevent.
   untrusted or drifted project renders no server config and spawns nothing.
   A stdio server's *executable* is a separate pin: repo-local commands and
   interpreter-script args are pinned as D3 `LockedExecutable` entries, which
-  `run --locked` re-verifies before launch.
+  a protected `run` re-verifies before launch.
 - **runtime — this is the tools row, not a separate one.** Once a server is
   spawned, what it may do is governed as tool calls: see [Tools](#tools) for
   what each mode enforces, and [Egress](#egress) for where it may talk. The
@@ -664,7 +670,7 @@ paragraph above exists to prevent.
   intercepts it — it is not a tool call. Every runtime cell is `unsupported`,
   and honestly so. (`crates/cli/src/render/extensions.rs`)
 - **pre-delivery — content-pinned, trust-gated, copy-rendered, then re-verified
-  under `--locked`.** This is the entire governed surface, and it runs before
+  under the protected run.** This is the entire governed surface, and it runs before
   the harness ever loads a byte. The source is pinned in `agentstack.lock` with
   the strict integrity-root digest (symlinks rejected, `.git` included), so any
   change re-gates trust review. `apply` renders fail-closed: an untrusted or
@@ -672,7 +678,7 @@ paragraph above exists to prevent.
   are **copied** (never symlinked) into the harness's extension directory, so
   the delivered bytes are the reviewed bytes. An ownership ledger scopes pruning
   to what agentstack placed and hard-excludes the guard's `agentstack-guard*`
-  artifacts. Under `run --locked`, the `rendered-verify` gate re-digests each
+  artifacts. Under a protected `run`, the `rendered-verify` gate re-digests each
   delivered copy against its pin before launch, refusing on drift and naming the
   extension. All of this is provenance and content binding — not runtime
   enforcement. (`crates/cli/src/render/extensions.rs` `render` / `verify_rendered`,
@@ -713,8 +719,14 @@ paragraph above exists to prevent.
   `crates/cli/src/commands/doctor.rs` `check_workflow_reproducibility` /
   `check_workflow_ceilings`)
 
-### The locked run's frozen grant (`run --locked`)
+<a id="the-locked-runs-frozen-grant-run---locked"></a>
+### The protected run's frozen grant (the default `run`)
 
+- **When it applies.** A bare `agentstack run <cli>` takes this path;
+  `--locked` names it explicitly and still works; `--unprotected` opts out to an
+  ungated `HOST / ADVISORY` run with none of the gates below. Only the *default*
+  moved — every claim in this section is byte-for-byte the claim it was, and an
+  `--unprotected` run earns none of it.
 - **What is enforced.** The launch is gated fail-closed *before* the harness
   starts: enforced trust, strict lock verification (including the D3
   executable pins — pin derivation and verification share one classifier and

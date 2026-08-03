@@ -1706,6 +1706,7 @@ mod tests {
         let args = |plan: bool| RunArgs {
             harness: "claude-code".to_string(),
             locked: false,
+            unprotected: false,
             prompt: None,
             profile: None,
             scope: Some(agentstack_core::scope::Scope::Project),

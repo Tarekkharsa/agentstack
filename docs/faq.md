@@ -36,9 +36,16 @@ binary is not removed — take that off the way you installed it. Details:
 ## Is my API key stored in the manifest?
 
 No. Manifests hold `${REF}` placeholders only; values are resolved per machine
-from your environment, varlock, a gitignored project `.env`, or the OS
-keychain. A ref that does not resolve **blocks the write** rather than
+from your environment, varlock, the OS keychain, or a gitignored project `.env`.
+A ref that does not resolve **blocks the write** rather than
 rendering an empty string.
+
+**varlock** is the vault we recommend, because it keeps values out of the
+project entirely — 1Password, a cloud secret manager, or device-local
+encryption behind one resolver. `agentstack init` offers to write the
+`.env.schema` that opts in; that file declares names with empty values and
+nothing else, so it is safe to commit, and `agentstack doctor` reports whether
+varlock is actually serving them.
 
 That is why the manifest is safe to commit, and why a teammate cloning it runs
 `agentstack secret set <NAME>` for their own values instead of receiving yours.
@@ -119,8 +126,10 @@ instead. Walkthrough: [add a skill](howto/add-a-skill.md).
 
 No. It configures the CLIs you already run — you keep launching `claude`,
 `codex`, or whatever you use. `agentstack run <cli>` is an optional wrapper
-that launches one as a tracked run so you get a flight recording, and the
-stronger `--locked` / `--sandbox` / `--lockdown` postures build on that. Plain
+that launches one as a tracked run so you get a flight recording — and it is the
+Protected tier by default: fail-closed trust, lock, and policy checks before
+launch, with `--unprotected` as the explicit way past them. The stronger
+`--sandbox` / `--lockdown` postures build on that. Plain
 `apply` needs none of it.
 
 ## What is the difference between `use` and `session start`?

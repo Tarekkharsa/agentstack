@@ -114,7 +114,7 @@ is the intended behaviour, not a bug to route around.
 
 **`✗ unresolved secret LINEAR_TOKEN (server 'linear') ↳ agentstack secret set LINEAR_TOKEN`**
 
-Nothing in the resolution chain (env, varlock, project `.env`, OS keychain)
+Nothing in the resolution chain (env, varlock, keychain, project `.env`)
 holds a value for that name.
 
 ```bash
@@ -169,6 +169,27 @@ chmod 600 .env
 Not a missing secret — a refusal. `[policy.secrets]` or `[policy.egress]`
 denied that resolution, and `--allow-unresolved` does **not** override policy.
 Widen the machine ceiling or narrow what the project asks for.
+
+Three more lines `doctor` prints in the same **Secrets** section speak about the
+recommended vault rather than about one ref:
+
+**`varlock  .env.schema opts this project in, but the varlock binary is not runnable`**
+
+The project asked for varlock and it is not there, so **every ref is quietly
+falling through to the next store** — the silence this finding exists to break.
+Install varlock ([varlock.dev](https://varlock.dev)), or delete
+`.agentstack/.env.schema` to drop the layer on purpose.
+
+**`varlock  varlock load failed — …`**
+
+varlock is installed but could not resolve this project's schema. Doctor quotes
+the first line of its error; run `varlock load` in the project to see all of it.
+
+**`varlock  not in use — the recommended vault keeps values out of this project entirely`**
+
+Not a defect and never doctor's next action — an invitation. `agentstack init`
+offers to write the `.env.schema` that opts in, or drop one in next to the
+manifest yourself. It declares names, never values.
 
 More: [reference — secret resolution](reference.md#secret-resolution) and
 [unresolved secrets block writes](reference.md#unresolved-secrets-block-writes).

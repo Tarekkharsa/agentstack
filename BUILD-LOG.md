@@ -519,3 +519,99 @@ written, which is an intake decision with its own consent surface. And a
 vocabulary gap surfaced rather than papered over: the design docs say
 `[toolsets.<name>]` while the manifest key is still `profiles` — the CLI's
 `--toolset`/`--profile` alias is the same split, and it predates this item.
+
+## Item 5 — surface finish (branch `surface-finish`)
+
+Three separable changes, one theme: the shape's finish, not new capability.
+
+**The grouped review card.** The detail body is now grouped per capability with
+change markers, on both renderers, and the two renderers still are not merged —
+`docs/archive/design/consent-card.md` §Panel gives three reasons they must not
+be, and all three still hold. In the terminal, each kind's items sit under a
+header that carries the group's own tally (`+2 added, ~1 changed, 3 unchanged,
+-1 removed`), folded from the SAME markers `ReviewDiff` handed the per-item
+lines — a new index-aligned `marks` vector beside `current`, deliberately not a
+field on `SurfaceItem`, which is a `trust`-crate serde record consent is bound
+to and has no business carrying presentation. Servers gained the header they
+never had; `secrets` and `policy` deliberately did not, because each is a single
+aggregate line whose own `+`/`~` already IS its group's marker. In the payload,
+a new `trust-card-groups-v1` carries `review.groups` — and the load-bearing
+decision is that **a group holds INDICES into `review.items`, never copies**.
+That is what makes "grouping is presentation, not granularity" structural rather
+than a promise: a group has nowhere to put a fact of its own, so it has nowhere
+to put a decision either. `review.question` carries the one closing question,
+and there is exactly one `question` key in the whole payload — asserted by
+walking every key path, because absence is the kind of property that stops being
+true quietly. `trust-card-diff-v1`'s item shape is asserted EXACTLY, key set and
+order, so the addition cannot have moved anything a panel already renders.
+Delivery routing stays informational and unanswerable, as item 2's planner left
+it.
+
+**`run` is protected by default.** A bare `agentstack run <cli>` now takes the
+fail-closed path `--locked` used to opt into; `--unprotected` is the explicit
+way out, keeping its unchanged `HOST / ADVISORY` label and gaining a banner that
+names what it turned off. The routing order is the whole design: `--locked`
+first (so an explicit invocation reaches the identical refusals it always did,
+including the `--locked --sandbox` not-yet limitation), then `--sandbox` /
+`--lockdown` (so the isolation opt-ins mean exactly what they meant), then the
+protected default, with `--unprotected` last. Only the *unflagged* run moved,
+and it moved fail-closed. `--locked --unprotected` refuses rather than letting
+flag order decide. `--prompt` now keys on "the protected run" instead of on the
+flag name. Posture labels are untouched — `HOST / PROTECTED`,
+`SANDBOX / PROXIED · DIRECT ROUTE OPEN`, `LOCKDOWN / ENFORCED · NO DIRECT ROUTE`
+— and the protected run is still not kernel isolation, still says so.
+
+**Varlock productization, surfacing only.** `VarlockResolver::detect` and a new
+`varlock::health` now go through ONE `load`, so what `doctor` reports and what
+the chain does can never be two answers; the chain's order, `${REF}` semantics,
+and fail-closed resolution are byte-identical. `init` offers a `.env.schema`
+next to the manifest when it has names to declare — declined silently when
+non-interactive, never overwriting an existing schema, folded into init's one
+undoable transaction, and carrying NAMES with empty values only. `doctor`
+reports varlock health inside the existing **Secrets** section rather than as a
+new check family: `Info` when the project has not opted in (a recommendation
+never becomes the one next action), `Warn` for the silent-degradation case that
+motivated it (schema present, binary not runnable, every ref quietly falling
+through), `Warn` on a failed load, `Unchecked` over an empty schema so no green
+line claims a pass over nothing.
+
+Witnesses: `surface_finish` (7) — grouping present with change markers and
+exactly one question; no per-capability answer affordance anywhere in the
+payload; the shipped item shape byte-for-byte; the new default with its opt-out,
+its contradiction refusal, `--locked`'s unchanged routing, a bare `--plan`
+becoming the protected plan, and both isolation posture labels; an untrusted and
+a drifted project each refused with a runnable harness binary sitting right
+there unrun, against the same project running under `--unprotected`; init's
+offer and doctor's three varlock health readings; and the mechanism guard — an
+unresolved `${REF}` still blocks the write, with and without a `.env.schema`.
+Plus one unit witness that the schema builder can never emit a value.
+
+Judgment calls and debts, named rather than guessed through: **the opt-out is
+spelled `--unprotected`**, not `--host` (the protected run is a host run too) and
+not `--no-locked` (a negation of a flag that is now the default reads as a
+double negative) — it names what you give up, which is the honest thing for a
+fail-open escape hatch. **`--locked` was kept, not deprecated**: it is in
+docs, examples, the workflow child constructor, and t3code's vocabulary, and
+retiring it is a separate decision. **`.env.schema` goes next to the manifest**
+(`.agentstack/`), because that is the directory `Chain::default_for_dir` is
+handed — the docs' looser "drop a `.env.schema` in the project" was already
+imprecise, and making `health` look in two places would have been the one thing
+that lets doctor and the chain disagree. **The `.env.schema` body's decorator
+lines** (`@defaultSensitive`, `@defaultRequired`, the `# ---` divider) are
+varlock's documented schema shape but are not verified against a live varlock
+in CI — the whole body is one small function, `env_schema_body`, so a correction
+is one edit. And the ordering fact found while witnessing the flip: the
+protected run resolves the harness binary BEFORE the trust gate, so a project
+that is both untrusted and missing its CLI reads as "not on your PATH" rather
+than as a trust refusal. It still fails closed either way; the message is just
+about the wrong thing first. Not fixed here — reordering that resolution is a
+behaviour change of its own — but the witness pins a real binary in place so it
+proves the gate rather than the PATH.
+
+**Post-item note (found in item 5, caused by items 2 and 3):** `tools/check-structure.py`
+was failing on two undeclared manifest fields, `package_overrides` and
+`delivery`. Both are configuration rather than capability kinds — one reshapes
+selection of an existing kind's members, the other steers how already-declared
+capabilities are delivered — so both were declared in `CONFIG_ALLOWLIST`. The
+lint exists to force exactly this decision deliberately rather than letting a
+new field drift in unclassified; it now reports zero findings.

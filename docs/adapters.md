@@ -149,8 +149,8 @@ Column meanings:
 - **Extensions** — a plugin directory the tool loads code from. Declared for two
   adapters, discovered read-only.
 - **Headless run** — a prompt-in/text-out invocation, which is what
-  `agentstack run --locked --prompt` and workflow steps drive. Only two adapters
-  declare one.
+  `agentstack run <cli> --prompt` (the protected default) and workflow steps
+  drive. Only two adapters declare one.
 
 Two things this table deliberately does not tell you. It does not say a `yes`
 cell is nightly-verified — cross-reference [the matrix](#the-matrix) for that.

@@ -1649,6 +1649,7 @@ pub(crate) fn run_child(
     let child_args = RunArgs {
         harness: binding.harness.clone(),
         locked: true,
+        unprotected: false,
         prompt: Some(prompt),
         // The role's profile FENCES the child (witness 9: its grant is ≤ the
         // profile's capability set — the shipped W2 profile-fence semantics).

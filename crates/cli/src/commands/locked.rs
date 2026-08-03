@@ -101,6 +101,10 @@ pub(crate) fn run_locked_child(
     .ok_or_else(|| anyhow::anyhow!("child delivery mode must yield a report"))
 }
 
+/// The Protected tier. Note that `args.locked` is NOT the switch that got us
+/// here: since `run` became protected by default, `commands::runs::run` decides
+/// the tier and calls this, so `args.locked` merely records whether the user
+/// typed the flag. Nothing below branches on it.
 pub fn run_locked(manifest_dir: Option<&Path>, args: &RunArgs) -> Result<()> {
     // Named limitations, checked before anything resolves. Refusing loudly is
     // honest; silently degrading the contract's semantics is not.
@@ -2198,6 +2202,7 @@ mod tests {
         RunArgs {
             harness: "claude-code".to_string(),
             locked: true,
+            unprotected: false,
             prompt: None,
             profile: None,
             scope: Some(agentstack_core::scope::Scope::Project),
@@ -2280,6 +2285,7 @@ mod tests {
             let args = RunArgs {
                 harness: "pi".to_string(),
                 locked: true,
+                unprotected: false,
                 prompt: None,
                 profile: None,
                 scope: Some(agentstack_core::scope::Scope::Project),

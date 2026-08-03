@@ -1266,16 +1266,25 @@ pub struct RunArgs {
     #[arg(value_name = "CLI")]
     pub harness: String,
 
-    /// Promote this host run to the Protected tier (fail-closed): refuse to
-    /// launch unless the project is explicitly trusted, every input in the
-    /// declared integrity surface is pinned and matching, and the declared
-    /// capability requests fit under the machine policy ceiling — recording
-    /// what was decided, including refusals. No Docker required. Not kernel
-    /// isolation: see the printed limits.
+    /// Ask for the Protected tier explicitly. This is the DEFAULT now — a
+    /// plain `agentstack run <cli>` is already protected — so the flag only
+    /// keeps working for the scripts, docs, and panels that already type it.
+    /// It still owns its combination rules: `--locked --sandbox/--lockdown` is
+    /// a named not-yet limitation and refuses, exactly as before.
     #[arg(long)]
     pub locked: bool,
 
-    /// Run the harness headless with TEXT as its prompt (requires --locked).
+    /// Opt OUT of the Protected default and launch on the host with no
+    /// pre-launch gate: no trust check, no strict lock verification, no policy
+    /// admission, no frozen grant. Labelled `HOST / ADVISORY`, because that is
+    /// what it is. The escape hatch for a project you have not locked or
+    /// trusted yet, and for anything the gates refuse for a reason you have
+    /// decided to accept — never the way to run day to day.
+    #[arg(long)]
+    pub unprotected: bool,
+
+    /// Run the harness headless with TEXT as its prompt (the Protected default;
+    /// cannot be combined with --unprotected, --sandbox, or --lockdown).
     /// The prompt is delivered as one whole argv element via the adapter's
     /// declared headless invocation (e.g. `claude -p`, `codex exec`) — never
     /// through a shell — and is committed verbatim into the frozen grant's

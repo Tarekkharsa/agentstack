@@ -1169,9 +1169,56 @@ fn run_checks(
 
     report.section("Secrets");
     let refs = manifest.referenced_secrets();
-    if refs.is_empty() {
+    // Varlock health belongs HERE, in the section that already owns secrets,
+    // rather than in a check family of its own: it is one more fact about where
+    // a `${REF}` comes from. It is also the one layer in the chain that can be
+    // opted into and then silently do nothing — `.env.schema` present, binary
+    // missing, every ref quietly falling through to keychain or `.env` — which
+    // is precisely the kind of silence doctor exists to break.
+    let varlock = crate::secret::varlock::health(&ctx.dir);
+    let varlock_opted_in = varlock != crate::secret::varlock::Health::NotOptedIn;
+    if refs.is_empty() && !varlock_opted_in {
         report.line(Level::Unchecked, "no secrets referenced — nothing to check");
         report.mark_irrelevant();
+    }
+    {
+        use crate::secret::varlock::Health;
+        match &varlock {
+            // Info, not Advisory: this is a recommendation, and doctor's
+            // counters are for defects. It never becomes a next action.
+            Health::NotOptedIn => {
+                if !refs.is_empty() {
+                    report.line(
+                        Level::Info,
+                        "varlock              not in use — the recommended vault keeps values \
+                         out of this project entirely; a .env.schema opts in (agentstack init \
+                         offers one)",
+                    );
+                }
+            }
+            Health::NotInstalled => report.line(
+                Level::Warn,
+                "varlock              .env.schema opts this project in, but the varlock binary \
+                 is not runnable — every ref is falling through to the next store \
+                 ↳ install varlock (https://varlock.dev), or remove .env.schema",
+            ),
+            Health::LoadFailed(why) => report.line(
+                Level::Warn,
+                format!(
+                    "varlock              `varlock load` failed — {why} \
+                     ↳ run `varlock load` here to see the full error"
+                ),
+            ),
+            // A green line over an empty schema would be a pass over nothing.
+            Health::Ready { names: 0 } => report.line(
+                Level::Unchecked,
+                "varlock              loaded, but .env.schema declares no names yet",
+            ),
+            Health::Ready { names } => report.line(
+                Level::Ok,
+                format!("varlock              ready — {names} names available from .env.schema"),
+            ),
+        }
     }
     // Name the layer each ref resolves from (env / varlock / keychain / .env) —
     // the same provenance `secret list` and `setup` surface, via one

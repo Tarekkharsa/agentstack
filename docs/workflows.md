@@ -17,7 +17,7 @@ workflow, run it end to end with `agentstack workflow run`, render its
 evidence tree with `agentstack workflow report`, and resume an interrupted
 run with `--resume` (replay from the recorded journal — byte-identical
 script and args, or it refuses). Every agent step runs as a governed
-[locked run](reference.html). The interpreter boundary was independently
+[protected run](reference.html). The interpreter boundary was independently
 security-reviewed on 2026-07-23 and judged acceptable for this experimental
 stage; findings that must close before workflows leave experimental are
 retained in `TODO.md`. What that review settled is the *posture*, not the
@@ -46,7 +46,7 @@ until you review and pin it.
   *requests* a closed set of roles; it can never grant or widen authority. A
   child step's grant is always within the workflow's, which is within your
   machine policy.
-- **Every step is a locked run.** Each agent step goes through the full
+- **Every step is a protected run.** Each agent step goes through the full
   protected-run path — trust gate, lock verification, policy admission, a
   frozen grant, its own scoped MCP config, and a recorded outcome.
 - **Per-child isolation.** Concurrent steps in one project each get their own
