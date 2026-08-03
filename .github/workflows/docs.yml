@@ -48,6 +48,13 @@ jobs:
 
   deploy:
     needs: verify
+    # Publish by hand only, for now. `main` documents behaviour that no
+    # installable release carries yet, so an automatic push-to-main deploy
+    # would put a page live that describes a build nobody can get (decided
+    # 2026-08-02; TODO.md item 10). `verify` above still runs on every push,
+    # so the docs regression checks keep catching drift while the site is
+    # frozen. Delete this one condition when the release ships.
+    if: github.event_name == 'workflow_dispatch'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
