@@ -112,7 +112,10 @@ fn house_rules_seed_is_idempotent_and_compiles() {
     assert_eq!(instr.path.as_deref(), Some("./instructions/agentstack.md"));
     let body = fs::read_to_string(home.join("instructions/agentstack.md")).unwrap();
     assert!(body.contains("agentstack house rules"));
-    assert!(body.contains("do not create one")); // clean-at-rest lesson
+    // The routed-delivery lesson: a capability served live over the lease
+    // leaves no native file behind, and an agent must not invent one.
+    assert!(body.contains("served live"));
+    assert!(body.contains("do not create one"));
 
     // And it compiles into a managed region for a harness.
     let reg = agentstack::adapter::Registry::load().unwrap();

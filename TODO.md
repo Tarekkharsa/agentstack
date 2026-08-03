@@ -15,3 +15,4 @@
 7. [x] Packaging — toolset into a self-run image
 8. [x] The panel — the new surfaces over the existing ui-contract
 9. [ ] When the bar is met — re-pin the study kit, run it, fix its three blockers, publish, launch
+      The docs site rides with this release, not before it: `.github/workflows/docs.yml` deploys on any push to `main` touching `docs/**`, and `main` documents behaviour no installable version has (decided 2026-08-02 — publishing earlier would describe a product nobody can run).
