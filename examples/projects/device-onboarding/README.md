@@ -11,16 +11,18 @@ odd their environment is.
 starter manifest, with `apply`/`doctor` still green. One CLI with an empty
 config imports nothing and targets correctly. Three CLIs across three native
 formats (Claude JSON, Codex TOML, Cursor JSON) import together — and an
-inline bearer token is lifted to a `${REF}`: the manifest never holds the
-plaintext, a blocked `apply` exits nonzero until the ref resolves, and a
-server imported from one CLI fans out to the others.
+inline bearer token is lifted to a `${REF}`. Import is library-first, so the
+definition (and the `${REF}`) lands in the library while the manifest only
+references the server by name and holds no secret material at all; a blocked
+`use` exits nonzero until the ref resolves, and a server imported from one CLI
+fans out to the others.
 
 **B. Config safety.** Conflicting definitions of the same server name are
 surfaced, never silently picked. Re-`init` preserves a hand-edited manifest.
 Hand-written `.mcp.json` entries and `CLAUDE.md` prose survive `apply` *and*
 `restore` (which removes only the managed region), and the managed gitignore
 never hides hand-written files. Pruning a de-manifested server keeps both the
-still-managed and the hand-written entries. `apply` is idempotent,
+still-managed and the hand-written entries. `use` is idempotent,
 `doctor --ci` is green after a write, and `restore` reverts it.
 
 **C. Environment quirks.** Paths with spaces and unicode (through
