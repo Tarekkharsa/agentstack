@@ -1816,27 +1816,44 @@ pub fn set_meta_gitignore(text: &str, enabled: bool) -> Result<String> {
     Ok(doc.to_string())
 }
 
-/// Append `name` to `profiles.<profile>.<field>` (creating the array if needed).
+/// Which table key this document already uses for toolsets.
+///
+/// `toolsets` is the spelling we write; `profiles` is the older one the model
+/// still accepts. Every `toml_edit` writer asks this first, so editing a
+/// manifest that predates the rename extends the table it already has instead
+/// of adding a second one beside it — two tables would make the manifest fail
+/// to parse (serde rejects the duplicate), and the edit that broke it would
+/// look innocent.
+pub(crate) fn toolsets_key(doc: &DocumentMut) -> &'static str {
+    if doc.get("toolsets").is_none() && doc.get("profiles").is_some() {
+        "profiles"
+    } else {
+        "toolsets"
+    }
+}
+
+/// Append `name` to `toolsets.<toolset>.<field>` (creating the array if needed).
 pub fn add_to_profile(text: &str, profile: &str, field: &str, name: &str) -> Result<String> {
     use toml_edit::{Item, Table};
     let mut doc: DocumentMut = text.parse().context("parsing manifest as TOML")?;
+    let key = toolsets_key(&doc);
 
-    // Ensure `[profiles]` and `[profiles.<profile>]` exist as standalone tables
-    // (not inline) so freshly-created profiles render cleanly.
-    if doc.get("profiles").is_none() {
+    // Ensure `[toolsets]` and `[toolsets.<toolset>]` exist as standalone tables
+    // (not inline) so freshly-created toolsets render cleanly.
+    if doc.get(key).is_none() {
         let mut t = Table::new();
         t.set_implicit(true);
-        doc.insert("profiles", Item::Table(t));
+        doc.insert(key, Item::Table(t));
     }
-    let profiles = doc["profiles"]
+    let profiles = doc[key]
         .as_table_mut()
-        .context("`profiles` is not a table")?;
+        .with_context(|| format!("`{key}` is not a table"))?;
     if profiles.get(profile).is_none() {
         profiles.insert(profile, Item::Table(Table::new()));
     }
     let ptable = profiles[profile]
         .as_table_mut()
-        .with_context(|| format!("profiles.{profile} is not a table"))?;
+        .with_context(|| format!("{key}.{profile} is not a table"))?;
 
     let slot = &mut ptable[field];
     if slot.is_none() {
@@ -1844,7 +1861,7 @@ pub fn add_to_profile(text: &str, profile: &str, field: &str, name: &str) -> Res
     }
     let arr = slot
         .as_array_mut()
-        .with_context(|| format!("profiles.{profile}.{field} is not an array"))?;
+        .with_context(|| format!("{key}.{profile}.{field} is not an array"))?;
     if !arr.iter().any(|v| v.as_str() == Some(name)) {
         arr.push(name);
     }
@@ -2184,11 +2201,39 @@ mod tests {
         assert_eq!(again.matches("\"b\"").count(), 1);
     }
 
+    /// A manifest with no toolsets yet gets the CURRENT spelling.
     #[test]
     fn creates_profile_array_when_absent() {
         let out = add_to_profile("version = 1\n", "new", "skills", "x").unwrap();
         let doc: DocumentMut = out.parse().unwrap();
-        assert!(doc["profiles"]["new"]["skills"].is_array());
+        assert!(doc["toolsets"]["new"]["skills"].is_array());
+        assert!(
+            doc.get("profiles").is_none(),
+            "the older spelling is read, never written: {out}"
+        );
+    }
+
+    /// TODO.md item 9's compatibility half, and the trap it has to avoid.
+    ///
+    /// A manifest written before the rename says `[profiles.*]`. Editing it
+    /// must EXTEND that table, not add a `[toolsets]` beside it — a manifest
+    /// carrying both is a serde duplicate-field error, so the second table
+    /// would turn an ordinary `add` into a file that no longer parses.
+    #[test]
+    fn an_older_manifest_keeps_its_own_spelling() {
+        let text = "version = 1\n[profiles.backend]\nservers = [\"a\"]\n";
+        let out = add_to_profile(text, "backend", "skills", "x").unwrap();
+        assert!(
+            !out.contains("[toolsets"),
+            "a second table beside the old one: {out}"
+        );
+
+        let doc: DocumentMut = out.parse().unwrap();
+        assert!(doc["profiles"]["backend"]["skills"].is_array());
+
+        // The decisive half: it still parses, through the alias.
+        let m: crate::manifest::Manifest = toml::from_str(&out).expect("still parses");
+        assert!(m.profiles.contains_key("backend"));
     }
 
     fn linear_pack_spec() -> PackSpec {

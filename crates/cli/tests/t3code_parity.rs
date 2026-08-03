@@ -328,7 +328,7 @@ fn panel_create_profile_relocks_and_does_not_render() {
     // The manifest entry exists — the create half really happened.
     let manifest = fs::read_to_string(proj.join("agentstack.toml")).unwrap();
     assert!(
-        manifest.contains("[profiles.web]"),
+        manifest.contains("[toolsets.web]"),
         "create-profile writes the manifest entry: {manifest}"
     );
 
@@ -437,34 +437,29 @@ fn panel_remove_capability_updates_manifest_and_rendered_config() {
     std::env::remove_var("AGENTSTACK_HOME");
 }
 
-/// Witness (set-mode-v1): the delivery-mode switch has a real un-render leg,
-/// a real render leg, digest-bound consent, and fail-closed edges.
+/// Witness (TODO.md item 9): the Mode axis is retired, and retiring it left no
+/// half-open door.
 ///
-/// The property under test is the one the panel's mode picker depends on: the
-/// DERIVED mode actually flips. Before this verb existed, `mode_switch_plan`
-/// had no un-render leg — a rendered project that "switched" to a
-/// nothing-at-rest mode kept its files, so `mode_from_signals` (rendered
-/// first) kept deriving static, and any UI truthfully rendering the derivation
-/// displayed a mode the user had explicitly left.
+/// Three properties, because a retired verb can fail in three different ways:
+/// it can still switch (the concept survives), it can vanish into a usage
+/// error (a scripted caller learns nothing), or it can refuse while the panel
+/// still believes the picker is offered (the UI shows a dead button).
+///
+/// What this replaced: `set_mode_switch_unrenders_rerenders_and_fails_closed`,
+/// which drove the full un-render/re-render round trip. Its subject is gone,
+/// not merely untested — the apply path was deleted with the verb. The removal
+/// leg it exercised lives on under `uninstall`, whose own witnesses cover it.
 #[test]
-fn set_mode_switch_unrenders_rerenders_and_fails_closed() {
+fn set_mode_is_retired_and_says_so() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = assert_fs::TempDir::new().unwrap();
     let home = tmp.path().join("home");
     fs::create_dir_all(&home).unwrap();
     std::env::set_var("HOME", &home);
     std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
-    // The `detected >= 1` assertion below says "the temp-HOME claude.json is
-    // detected" — so write one. Without it the assertion was really testing
-    // whether the MACHINE running the suite happens to have an agent CLI on
-    // `$PATH`: green on a developer laptop, red on a bare runner. (It had never
-    // failed CI because a `--fail-fast` abort earlier in the run meant this
-    // test was among the 464 that never got to run.)
     fs::write(home.join(".claude.json"), "{}\n").unwrap();
 
     let proj = tmp.path().join("proj");
-    // A git repo, so the managed .gitignore block is written (it is skipped in
-    // a non-repo) and the un-render witness covers its removal too.
     fs::create_dir_all(proj.join(".git")).unwrap();
     fs::write(
         proj.join("agentstack.toml"),
@@ -475,7 +470,7 @@ fn set_mode_switch_unrenders_rerenders_and_fails_closed() {
     .unwrap();
     let proj_root = proj.to_str().unwrap();
 
-    // Render the project (the static state the switch must undo).
+    // Render first, so "changed nothing" is a claim with something to lose.
     commands::apply::run(
         &ApplyArgs {
             targets: vec![],
@@ -491,173 +486,84 @@ fn set_mode_switch_unrenders_rerenders_and_fails_closed() {
         Some(&proj),
     )
     .unwrap();
-    assert!(
-        proj.join(".mcp.json").exists(),
-        "rendered before the switch"
-    );
-    assert!(
-        fs::read_to_string(proj.join(".gitignore"))
-            .unwrap()
-            .contains(".mcp.json"),
-        "managed block written before the switch"
-    );
+    assert!(proj.join(".mcp.json").exists(), "rendered before the call");
 
-    let doctor = commands::doctor::collect(Some(&proj)).unwrap();
-    assert_eq!(doctor["mode"], "static", "rendered project derives static");
-    // doctor-cli-coverage-v1: the field is present and internally consistent.
-    // Counts are machine-dependent (detection reads PATH), so the witness pins
-    // the invariants, not the numbers.
-    let clis = &doctor["clis"];
-    let detected = clis["detected"].as_u64().unwrap();
-    let capable = clis["bridge_capable"].as_u64().unwrap();
-    let incapable = clis["bridge_incapable"].as_array().unwrap();
-    assert!(detected >= 1, "the temp-HOME claude.json is detected");
-    assert_eq!(
-        capable + incapable.len() as u64,
-        detected,
-        "every detected CLI is either bridge-capable or named as not"
-    );
-
-    let preview_of = |mode: &str| {
-        let argv = [
-            "agentstack",
-            "--manifest-dir",
-            proj_root,
-            "set-mode",
-            mode,
-            "--preview",
-        ];
-        match command_of(&argv) {
-            Command::SetMode(args) => {
-                commands::mode_switch::set_mode_preview(&args, Some(&proj)).unwrap()
-            }
-            _ => panic!("argv names set-mode"),
+    // 1. It refuses, and the refusal names the replacement rather than just
+    //    saying no. `--yes --consented <digest>` is the strongest form a
+    //    caller can send: if anything still switched, this is what would.
+    let preview = match command_of(&[
+        "agentstack",
+        "--manifest-dir",
+        proj_root,
+        "set-mode",
+        "clean-at-rest",
+        "--preview",
+    ]) {
+        Command::SetMode(args) => {
+            commands::mode_switch::set_mode_preview(&args, Some(&proj)).unwrap()
         }
+        _ => panic!("argv names set-mode"),
     };
-
-    // ── zero-files on an untrusted project: the plan says so, the apply
-    // refuses, and NOTHING is removed. Trust is never granted here.
-    let preview = preview_of("zero-files");
-    assert_eq!(preview["requires_trust"], true);
-    assert_eq!(preview["machine_scope"], true);
-    assert!(
-        !preview["removes"].as_array().unwrap().is_empty(),
-        "the plan names what would come off disk"
-    );
-    assert!(preview["bridge"].is_object(), "the plan carries coverage");
     let digest = preview["consent_digest"].as_str().unwrap().to_string();
     let err = dispatch(&[
         "agentstack",
         "--manifest-dir",
         proj_root,
         "set-mode",
-        "zero-files",
+        "clean-at-rest",
         "--yes",
         "--consented",
         &digest,
     ])
-    .expect_err("zero-files must refuse an untrusted project");
-    assert!(err.to_string().contains("not trusted"), "{err}");
+    .expect_err("set-mode is retired and must refuse");
+    let msg = err.to_string();
+    assert!(msg.contains("retired"), "{msg}");
+    assert!(
+        msg.contains("agentstack status"),
+        "the refusal names where delivery is now reported: {msg}"
+    );
+    assert!(
+        msg.contains("uninstall"),
+        "and where a user who wanted files gone now goes: {msg}"
+    );
+
+    // 2. Nothing moved. A refusal that still un-rendered would be the worst
+    //    outcome of the three: the user is told no and charged anyway.
     assert!(
         proj.join(".mcp.json").exists(),
-        "a refused switch removes nothing"
-    );
-
-    // ── clean-at-rest: consent binds the manifest bytes — an edit after the
-    // preview flips the digest and the apply refuses before writing.
-    let stale = preview_of("clean-at-rest")["consent_digest"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    let manifest_path = proj.join("agentstack.toml");
-    let mut text = fs::read_to_string(&manifest_path).unwrap();
-    text.push_str("# reviewed\n");
-    fs::write(&manifest_path, text).unwrap();
-    let err = dispatch(&[
-        "agentstack",
-        "--manifest-dir",
-        proj_root,
-        "set-mode",
-        "clean-at-rest",
-        "--yes",
-        "--consented",
-        &stale,
-    ])
-    .expect_err("a stale digest must refuse");
-    assert!(err.to_string().contains("consent digest mismatch"), "{err}");
-
-    // Fresh preview, real switch: the un-render leg runs.
-    let digest = preview_of("clean-at-rest")["consent_digest"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    dispatch(&[
-        "agentstack",
-        "--manifest-dir",
-        proj_root,
-        "set-mode",
-        "clean-at-rest",
-        "--yes",
-        "--consented",
-        &digest,
-    ])
-    .unwrap();
-    assert!(
-        !proj.join(".mcp.json").exists(),
-        "the switch removed the rendered config"
-    );
-    assert!(
-        !proj.join(".gitignore").exists(),
-        "our block was the whole file, so the file went with it"
+        "a retired verb removes nothing"
     );
     let doctor = commands::doctor::collect(Some(&proj)).unwrap();
-    assert_eq!(
-        doctor["mode"], "clean-at-rest",
-        "the DERIVED mode flips — the ledger stopped claiming the render"
-    );
-    assert_eq!(doctor["activation"], "locked", "the switch pinned the lock");
+    assert_eq!(doctor["mode"], "static", "the derived reading is untouched");
 
-    // The removal is one recorded, undoable decision.
-    let registry = agentstack::adapter::Registry::load().unwrap();
-    let inventory = commands::restore::list_json_value(&registry, &proj);
+    // 3. The panel can SEE the retirement, and cannot mistake it for an old
+    //    binary it could tell the user to upgrade.
+    let env = agentstack::ui_contract::envelope(serde_json::json!({}));
+    let features: Vec<&str> = env["features"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    let superseded: Vec<&str> = env["superseded"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert!(!features.contains(&"set-mode-v1"), "no longer offered");
     assert!(
-        inventory["entries"]
-            .as_array()
-            .unwrap()
+        superseded.contains(&"set-mode-v1"),
+        "and said to be retired"
+    );
+
+    // The fixed-argv action surface drops with it — a digest-bound action a
+    // panel may still call is an offer, whatever the feature list says.
+    assert!(
+        !agentstack::ui_contract::PANEL_ACTIONS
             .iter()
-            .any(|e| e["operation"]
-                .as_str()
-                .is_some_and(|o| o.contains("set-mode"))
-                && e["touches_project"] == true),
-        "the un-render is in the undo ledger: {inventory}"
-    );
-
-    // ── back to static: the render leg is the one activation path.
-    let preview = preview_of("static");
-    assert!(
-        preview["renders"].is_object(),
-        "the plan names what a render would activate: {preview}"
-    );
-    let digest = preview["consent_digest"].as_str().unwrap().to_string();
-    dispatch(&[
-        "agentstack",
-        "--manifest-dir",
-        proj_root,
-        "set-mode",
-        "static",
-        "--yes",
-        "--consented",
-        &digest,
-    ])
-    .unwrap();
-    assert!(
-        proj.join(".mcp.json").exists(),
-        "switching back re-renders the config"
-    );
-    let doctor = commands::doctor::collect(Some(&proj)).unwrap();
-    assert_eq!(
-        doctor["mode"], "static",
-        "the round trip lands where it started"
+            .any(|a| a.name == "set-mode"),
+        "the panel action goes with the feature name"
     );
 
     std::env::remove_var("HOME");

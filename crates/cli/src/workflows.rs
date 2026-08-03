@@ -344,7 +344,7 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(err.contains("ghost"), "{err}");
-        assert!(err.contains("profiles"), "{err}");
+        assert!(err.contains("toolsets"), "{err}");
 
         std::env::remove_var("AGENTSTACK_HOME");
     }

@@ -24,8 +24,20 @@ pub struct Manifest {
     #[serde(default)]
     pub skills: IndexMap<String, Skill>,
 
-    /// Named bundles for selective loading.
-    #[serde(default)]
+    /// Named bundles for selective loading — the **toolset**, one of the four
+    /// user-facing ideas.
+    ///
+    /// The manifest key is `toolsets`. `profiles` is accepted as a silent
+    /// older spelling so no existing manifest breaks, and it is never written
+    /// back: `rename` decides what serialization emits, `alias` only widens
+    /// what deserialization accepts. A manifest carrying *both* keys is a
+    /// serde duplicate-field error, which is the honest answer — we cannot
+    /// know which one the author meant.
+    ///
+    /// The Rust field keeps the older name; renaming it touches ~30 files for
+    /// no user-visible gain, and `profiles` is still what most of this crate's
+    /// internals say. See TODO.md item 9.
+    #[serde(default, rename = "toolsets", alias = "profiles")]
     pub profiles: IndexMap<String, Profile>,
 
     /// Portable instruction fragments compiled into each harness's CLAUDE.md /

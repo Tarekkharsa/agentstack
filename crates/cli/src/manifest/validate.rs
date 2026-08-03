@@ -338,7 +338,7 @@ fn run<'a>(
                             format!("toolset '{pname}' references unknown server '{sref}'"),
                         )
                         .with_fix(format!(
-                            "define it (agentstack add server {sref} …) or remove '{sref}' from [profiles.{pname}] servers"
+                            "define it (agentstack add server {sref} …) or remove '{sref}' from [toolsets.{pname}] servers"
                         )),
                     ),
                     Err(ServerResolveError::Source(e)) => issues.push(
@@ -347,7 +347,7 @@ fn run<'a>(
                             format!("toolset '{pname}' server '{sref}' failed to resolve: {e}"),
                         )
                         .with_fix(format!(
-                            "re-add its source (agentstack add server {sref} …) or remove '{sref}' from [profiles.{pname}] servers"
+                            "re-add its source (agentstack add server {sref} …) or remove '{sref}' from [toolsets.{pname}] servers"
                         )),
                     ),
                 },
@@ -357,7 +357,7 @@ fn run<'a>(
                         format!("toolset '{pname}' references unknown server '{sref}'"),
                     )
                     .with_fix(format!(
-                        "define it (agentstack add server {sref} …) or remove '{sref}' from [profiles.{pname}] servers"
+                        "define it (agentstack add server {sref} …) or remove '{sref}' from [toolsets.{pname}] servers"
                     )),
                 ),
             }
@@ -391,7 +391,7 @@ fn run<'a>(
                                 format!("toolset '{pname}' references unknown skill '{kref}'"),
                             )
                             .with_fix(format!(
-                                "define it (agentstack add skill <source> --name {kref}) or remove '{kref}' from [profiles.{pname}] skills"
+                                "define it (agentstack add skill <source> --name {kref}) or remove '{kref}' from [toolsets.{pname}] skills"
                             )),
                         ),
                         // Unreachable in practice — an inline `[skills.<name>]`
@@ -416,7 +416,7 @@ fn run<'a>(
                                 format!("toolset '{pname}' skill '{kref}' failed to resolve: {e}"),
                             )
                             .with_fix(format!(
-                                "re-add its source (agentstack add skill <source> --name {kref}) or remove '{kref}' from [profiles.{pname}] skills"
+                                "re-add its source (agentstack add skill <source> --name {kref}) or remove '{kref}' from [toolsets.{pname}] skills"
                             )),
                         ),
                     }
@@ -427,7 +427,7 @@ fn run<'a>(
                         format!("toolset '{pname}' references unknown skill '{kref}'"),
                     )
                     .with_fix(format!(
-                        "define it (agentstack add skill <source> --name {kref}) or remove '{kref}' from [profiles.{pname}] skills"
+                        "define it (agentstack add skill <source> --name {kref}) or remove '{kref}' from [toolsets.{pname}] skills"
                     )),
                 ),
             }
@@ -446,7 +446,7 @@ fn run<'a>(
                             format!("toolset '{pname}' references unknown package '{pref}'"),
                         )
                         .with_fix(format!(
-                            "install it into the central library, or remove '{pref}' from [profiles.{pname}] packages"
+                            "install it into the central library, or remove '{pref}' from [toolsets.{pname}] packages"
                         )),
                     );
                 }
@@ -651,10 +651,10 @@ fn run<'a>(
                 issues.push(
                     Issue::new(
                         IssueKind::UnknownWorkflowRole,
-                        format!("workflow '{name}' role '{role}' names no `[profiles.{role}]` — every role must be a declared profile"),
+                        format!("workflow '{name}' role '{role}' names no `[toolsets.{role}]` — every role must be a declared toolset"),
                     )
                     .with_fix(format!(
-                        "add a [profiles.{role}] table, or remove '{role}' from [workflows.{name}] roles"
+                        "add a [toolsets.{role}] table, or remove '{role}' from [workflows.{name}] roles"
                     )),
                 );
             }
