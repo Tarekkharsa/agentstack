@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# AgentStack — `run <harness> --locked`: the Protected host tier, proven
-# END-TO-END with a stub harness.
+# AgentStack — `run <harness>`: the Protected host tier, proven END-TO-END with
+# a stub harness.
 #
-#   A locked run refuses to launch unless the project is trusted, every pinned
-#   byte still matches, and the declared capabilities fit under the machine
-#   ceiling — then freezes an AuthorityGrant and hands the bridge a sealed
-#   run-grant artifact it consumes VERBATIM (no disk re-derivation). This
-#   script proves:
+#   Protected is the DEFAULT. A bare `agentstack run <cli>` refuses to launch
+#   unless the project is trusted, every pinned byte still matches, and the
+#   declared capabilities fit under the machine ceiling — then freezes an
+#   AuthorityGrant and hands the bridge a sealed run-grant artifact it consumes
+#   VERBATIM (no disk re-derivation). `--locked` only asks for that tier out
+#   loud; `--unprotected` is the labelled way out of it. This script proves:
 #
 #     1. `--plan`      → prints the full plan, mutates nothing, records nothing.
-#     2. Clean run     → grant frozen, harness launched AT THE PROJECT ROOT,
-#                        outcome recorded, no bridge-config residue in the repo.
+#     2. Default run   → a bare `run` is HOST / PROTECTED: grant frozen, harness
+#                        launched AT THE PROJECT ROOT, outcome recorded, no
+#                        bridge-config residue in the repo.
+#     2b. Opt-out      → `--unprotected` drops to HOST / ADVISORY, freezes no
+#                        grant, and names every gate it skipped.
 #     3. Frozen bridge → under `mcp --grant`, mutating / secret-resolving
 #                        control-plane tools (session_start, lease_open,
 #                        add_server) are refused fail-closed; read-only
@@ -22,8 +26,8 @@
 #                        the run before launch (rule 4).
 #     6. D3 pins       → a one-byte edit to a pinned server executable refuses
 #                        the run; re-lock + re-trust readmits it.
-#     7. Profile fence → `--locked --profile ci` freezes ONLY the fenced
-#                        subset into the grant the bridge serves.
+#     7. Toolset fence → `--toolset ci` freezes ONLY the fenced subset into the
+#                        grant the bridge serves.
 #
 # Exits nonzero and prints FAIL on any mismatch; safe to run unattended. Runs
 # entirely inside an isolated sandbox — nothing touches your real config.
@@ -99,10 +103,10 @@ INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":
 
 call() { printf '{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"%s","arguments":%s}}' "$1" "${2:-\{\}}"; }
 
-printf '\033[1;36m  agentstack — run --locked: the Protected host tier\033[0m\n'
+printf '\033[1;36m  agentstack — run: the Protected host tier, by default\033[0m\n'
 
-# ── pin + trust: the locked tier's entry requirements ────────────────────────
-say "Pin the surface (lock) and grant consent (trust) — locked runs demand both"
+# ── pin + trust: the Protected tier's entry requirements ─────────────────────
+say "Pin the surface (lock) and grant consent (trust) — a protected run demands both"
 "$AS" lock --manifest-dir "$PROJECT" >/dev/null
 consent=$("$AS" trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')
 "$AS" trust . --yes --consented-digest "$consent" >/dev/null 2>&1
@@ -121,9 +125,17 @@ else
   bad "--plan left run evidence behind: $(ls "$RUNS")"
 fi
 
-# ── 2) clean locked run ──────────────────────────────────────────────────────
-say "2) run claude-code --locked — every gate passes, the grant freezes, the harness runs"
-OUT="$("$AS" run claude-code --locked 2>&1)" || { bad "locked run failed: $OUT"; }
+# ── 2) the Protected default — no flag asked for it ──────────────────────────
+# Deliberately the BARE command. `--locked` still works and the steps below
+# still use it, but the tier is what you get without typing anything, and this
+# is the one place that would notice if that ever silently changed back.
+say "2) run claude-code — no flag: every gate passes, the grant freezes, the harness runs"
+OUT="$("$AS" run claude-code 2>&1)" || { bad "protected run failed: $OUT"; }
+if grep -q 'HOST / PROTECTED' <<< "$OUT"; then
+  ok "run: a bare \`run\` is Protected — the posture line says so before anything launches"
+else
+  bad "run: expected the HOST / PROTECTED posture without a flag; got: $OUT"
+fi
 if grep -q 'authority grant frozen' <<< "$OUT"; then
   ok "run: the AuthorityGrant froze (digest printed) before launch"
 else
@@ -156,6 +168,23 @@ GRANT="$RUNS/$RUN1/grant.json"
 if [ ! -f "$GRANT" ]; then
   # fall back: find the artifact wherever the run dir put it
   GRANT="$(find "$RUNS/$RUN1" -name 'grant.json' | head -1)"
+fi
+
+# ── 2b) the opt-out, labelled for what it is ─────────────────────────────────
+# The escape hatch has to stay honest about what it turned off; a quiet
+# downgrade is the failure mode worth asserting against.
+say "2b) run claude-code --unprotected — the escape hatch, and what it admits"
+rm -f "$SBX/harness-cwd"
+UNPROT="$("$AS" run claude-code --unprotected 2>&1)" || bad "unprotected run failed: $UNPROT"
+if grep -q 'HOST / ADVISORY' <<< "$UNPROT" && ! grep -q 'authority grant frozen' <<< "$UNPROT"; then
+  ok "unprotected: the posture drops to HOST / ADVISORY and NO grant is frozen"
+else
+  bad "unprotected: expected an ADVISORY posture with no frozen grant; got: $UNPROT"
+fi
+if grep -q 'pre-launch gate is OFF' <<< "$UNPROT"; then
+  ok "unprotected: it names the gates it skipped — trust, lock verification, policy admission"
+else
+  bad "unprotected: expected the gates-off warning; got: $UNPROT"
 fi
 
 # ── 3) the frozen bridge refuses the mutating control plane ──────────────────
@@ -240,11 +269,11 @@ else
   bad "D3: expected the re-gated project to run again"
 fi
 
-# ── 7) --profile is a FENCE: the grant freezes only the subset ────────────────
-say "7) run claude-code --locked --profile ci — the grant carries ONLY the fenced subset"
-OUT="$("$AS" run claude-code --locked --profile ci 2>&1)" || bad "fenced run failed: $OUT"
-# The run banner says "toolset fence" — `--profile` stays the frozen flag
-# name, but every line a person reads says toolset (finding H2).
+# ── 7) --toolset is a FENCE: the grant freezes only the subset ────────────────
+say "7) run claude-code --toolset ci — the grant carries ONLY the fenced subset"
+OUT="$("$AS" run claude-code --toolset ci 2>&1)" || bad "fenced run failed: $OUT"
+# `--toolset` is the current spelling; `--profile` still parses for scripts
+# that already type it, and every line a person reads says toolset (finding H2).
 if grep -q "toolset fence: 'ci'" <<< "$OUT"; then
   ok "fence: the run states the toolset fence up front"
 else
