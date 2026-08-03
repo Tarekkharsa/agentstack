@@ -4,6 +4,14 @@ A runnable, recordable proof of AgentStack's **portability wedge**: you author
 your agent setup once, and `agentstack apply` renders it into each CLI's own
 native config format — no hand-editing three files, no drift between them.
 
+`apply` is the **rendered lane** — the command for when you want the files, not
+what happens automatically. Delivery is routed: on an MCP-capable tool servers
+are served live and nothing is written for them (`agentstack delivery` prints
+the routing per tool). Files are the whole claim here, so this demo asks for
+them. The manifest also declares its server **inline**, the shape a repo
+commits; an `init` import is library-first instead, and the `${REF}` then lives
+in the library definition — see `examples/first-value-demo/`.
+
 ```bash
 ./run-demo.sh              # fast, asserting; exits nonzero on any mismatch
 DEMO_PAUSE=2.5 ./run-demo.sh   # paced, for an asciinema recording

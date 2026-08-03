@@ -6,6 +6,17 @@
 #    CLI's own native config format — Claude Code, Codex, and Cursor here —
 #    and your secret stays a `${REF}` in the manifest, resolved per-machine."
 #
+# `apply` is the RENDERED lane: the command for when you want the files. It is
+# not what happens automatically — delivery is routed, and on an MCP-capable
+# tool servers are served live instead (`agentstack delivery` prints the
+# routing per tool). Files are exactly what this demo is about, though: three
+# native formats at three paths from one source is a claim you can only make
+# about bytes on disk, so it asks for them.
+#
+# This project declares its servers INLINE, in the manifest's own [servers] —
+# the shape a repo commits. An `init` import is library-first instead, and the
+# `${REF}` then lives in the library definition (see first-value-demo).
+#
 # The demo:
 #   1. Shows the single committed manifest and proves it holds NO secret value,
 #      only a `${GITHUB_TOKEN}` placeholder.
@@ -84,8 +95,8 @@ printf '\033[1;36m  agentstack — one manifest, every CLI\033[0m\n'
 say "One file, committed to the repo, is the whole team's agent setup:"
 run "cat .agentstack/agentstack.toml"
 sed 's/^/  /' .agentstack/agentstack.toml
-note "It targets three CLIs, declares one MCP server, one instruction fragment,"
-note "and references the token only as \${GITHUB_TOKEN} — no secret value here."
+note "It targets three CLIs, declares one MCP server INLINE, one instruction"
+note "fragment, and references the token only as \${GITHUB_TOKEN} — no value here."
 
 say "Prove the portable artifact is secret-free before we render anything:"
 run "grep GITHUB_TOKEN .agentstack/agentstack.toml"
@@ -99,7 +110,7 @@ fi
 
 "$AS" lock --manifest-dir "$PROJECT" >/dev/null
 
-say "Preview the render — one manifest, three CLIs' native configs, three paths:"
+say "Ask for the files — preview first: one manifest, three CLIs, three paths:"
 run "agentstack apply --scope project        # read-only; writes nothing"
 "$AS" apply --manifest-dir "$PROJECT" --scope project 2>&1 | sed 's/^/  /'
 note "The preview MASKS the secret as \${GITHUB_TOKEN} in every diff."
