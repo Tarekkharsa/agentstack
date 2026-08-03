@@ -17,10 +17,34 @@ layer `~/.agentstack/agentstack.toml`).
 - Nothing touches disk without `--write`; dry-run output is always safe.
   Propose (edit the manifest, show the dry-run), let a human apply.
 
-## Authoring a skill or instruction: write the file, let the user say yes
+## Delivery is routed — read it before "fixing" a missing file
 
-Dropping a file into the project is a first-class way to author a capability.
-Write it where it belongs and stop there:
+`agentstack delivery` prints, per tool, which kinds are served live and which
+are written to files. Check it first.
+
+- On an MCP-capable tool, **skills and MCP servers are served live** over that
+  tool's gateway lease. There is nothing on disk to repair: a missing
+  `.mcp.json` or `.claude/skills/` is expected — **do not create one**. Skills
+  arrive through the `agentstack` MCP tools (`agentstack_list_loadable` to
+  browse, `agentstack_load(name, reason)` for the body).
+- **House rules, settings, hooks and extensions are always written to files**,
+  and on a tool that reads files only, so is everything else.
+- Live serving requires an open lease naming a toolset (the manifest's
+  `profiles` table). Without one the gateway offers control-plane tools only —
+  nothing is served implicitly. `agentstack lease status` shows what is open.
+- The single override is `agentstack delivery render-locally --write` (add
+  `--harness <id>` for one tool, `--off` to undo). It records
+  `[delivery] render_locally`, so every clone answers the same way.
+
+## Authoring: library first, dropping a file second
+
+The library is one or more **linked folders**. `agentstack lib sources` shows
+them in precedence order and names what shadows what; the first source holding
+a name wins. Author there — `agentstack lib new <name>` scaffolds
+`./<name>/SKILL.md`, `agentstack lib add <source> --write` takes a skill in,
+`agentstack lib link <folder> --write` links another folder as a source.
+
+Dropping a file into the project stays the quick capture. Write it and stop:
 
 - a skill → `.agentstack/skills/<name>/SKILL.md`
 - an instruction fragment → `.agentstack/instructions/<name>.md`
@@ -31,8 +55,8 @@ it without asking, because creating it grants nothing.
 
 Then tell the user to run **`agentstack yes`**. It shows one review — what will
 be declared, what will be pinned, what will be written, and the full consent
-surface — and their single confirmation makes it live in every CLI. Do not run
-it for them: it is the human's yes, and it refuses without a terminal anyway.
+surface — and their single confirmation makes it live. Do not run it for them:
+it is the human's yes, and it refuses without a terminal anyway.
 
 Do not hand-edit `[skills.*]` / `[instructions.*]` to declare what you just
 wrote, and do not run `lock`/`trust`/`use` yourself to shortcut the review.
@@ -43,29 +67,37 @@ eligible for that path and takes the full staged review
 
 Servers are different: they carry commands, env, and secrets, so there is no
 file to drop — declare them (`agentstack add server …`). Hooks and extensions
-are executable and always get the full ceremony.
+are executable: they are declared (`agentstack lib add-hook`,
+`agentstack lib add-extension`), never dropped, and always get the full
+ceremony.
 
-## Recognize the artifact mode before "fixing" anything
+## Running
 
-1. **Static** — `.mcp.json` / `.claude/skills/` exist on disk, gitignored via a
-   managed block. Activate with `agentstack use <profile> --scope project --write`.
-2. **Clean-at-rest** — nothing generated exists between sessions; capabilities
-   appear only during `agentstack run <cli> --profile <p>` or between
-   `agentstack session start <p>` and `session end`. A missing `.mcp.json`
-   here is **intentional — do not create one**, and do not hand-create
-   `.claude/skills/`.
-3. **Zero-files / MCP** — skills arrive through the `agentstack` MCP tools
-   (`agentstack_list_loadable` to browse, `agentstack_load(name, reason)` for
-   the body); there is nothing on disk to repair.
+`agentstack run <cli>` is **Protected by default** — trust, strict lock
+verification, policy admission, a frozen grant. `--unprotected` opts out into a
+plain host launch with none of those gates: an escape hatch, not the daily
+path. Name the toolset with `--toolset <name>` (`--profile` is the older
+spelling); an unfenced run contributes no package servers at all.
+
+`agentstack workflow run <name>` drives a reviewed multi-agent task, each role
+bound to a toolset that may set its own `model` and `effort`.
+`agentstack image --toolset <name>` composes one toolset's pinned bytes into a
+container image locally — nothing resolved into it, nothing pushed.
 
 ## Keep the loop closed
 
-- After editing a profile's `skills`/`servers` lists, re-lock:
-  `agentstack use <profile> --write` refreshes `agentstack.lock`, and
-  `doctor` treats lock drift as an error until you do.
+- After editing a toolset's `skills`/`servers`/`packages`, re-pin:
+  `agentstack lock`, or `agentstack use <toolset> --write` which also renders.
+  `doctor` treats lock drift as an error until you do. A selected package
+  expands in the lock to its exact pinned members.
 - Drift decision rule: a hand-added server you want to keep →
   `agentstack adopt --write` (pull it into the manifest); the manifest is the
-  truth → `agentstack apply --write` (re-render). Never edit the rendered
-  file to "fix" drift.
-- After changing `[instructions.*]`, recompile: `agentstack instructions --write`.
-- Verify with `agentstack doctor`; undo a bad write with `agentstack restore`.
+  truth → `agentstack apply --write` (re-render). Never edit a rendered file
+  to "fix" drift.
+- After changing `[instructions.*]`, recompile: `agentstack instructions
+  --write`. A fragment may carry per-(CLI, model) bodies under
+  `[[instructions.<name>.variant]]`; the model is known only from an
+  explicitly named toolset's `model` or `[settings.<cli>] model`, and an
+  unknown model never matches a `model` selector.
+- Verify with `agentstack doctor`; undo a bad write with `agentstack restore`
+  or `agentstack undo`.
