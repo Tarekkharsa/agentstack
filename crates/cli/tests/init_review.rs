@@ -200,3 +200,73 @@ fn plan_json_carries_configs_found_and_destinations() {
     assert!(!proj.join(".agentstack").exists());
     assert!(!proj.join("agentstack.toml").exists());
 }
+
+#[test]
+fn init_preserves_namespaced_server_names_inline_and_imports_safe_names_to_library() {
+    let bin = env!("CARGO_BIN_EXE_agentstack");
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    fs::write(
+        home.join(".claude.json"),
+        r#"{"mcpServers":{
+            "upstash/context7":{"type":"http","url":"https://mcp.context7.com/mcp"},
+            "filesystem":{"command":"npx","args":["-y","@modelcontextprotocol/server-filesystem","."]}
+        }}"#,
+    )
+    .unwrap();
+
+    let stub_bin = tmp.path().join("bin");
+    fs::create_dir_all(&stub_bin).unwrap();
+    write_stub(&stub_bin, "claude");
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+
+    let (text, ok) = run(bin, &["init", "--yes"], &home, &proj, &stub_bin);
+    assert!(ok, "init failed after its pre-write review:\n{text}");
+    assert!(
+        text.contains("Kept inline in this manifest: upstash/context7"),
+        "the review must disclose the mixed placement before writing:\n{text}"
+    );
+
+    let manifest_path = proj.join(".agentstack/agentstack.toml");
+    let manifest_text = fs::read_to_string(&manifest_path).unwrap();
+    let manifest: toml::Value = toml::from_str(&manifest_text).unwrap();
+    assert!(
+        manifest["servers"].get("upstash/context7").is_some(),
+        "the namespaced server stays inline under its exact native name:\n{manifest_text}"
+    );
+    assert!(
+        manifest["servers"].get("filesystem").is_none(),
+        "the filename-safe server should use the normal library-first path:\n{manifest_text}"
+    );
+
+    let default_servers = manifest["toolsets"]["default"]["servers"]
+        .as_array()
+        .unwrap();
+    assert!(
+        default_servers
+            .iter()
+            .any(|name| name.as_str() == Some("upstash/context7")),
+        "the default toolset still activates the inline server"
+    );
+    assert!(
+        default_servers
+            .iter()
+            .any(|name| name.as_str() == Some("filesystem")),
+        "the default toolset still activates the library server"
+    );
+
+    assert!(
+        home.join(".agentstack/lib/servers/filesystem.toml")
+            .exists(),
+        "the safe server definition was imported to the library"
+    );
+    assert!(
+        !home
+            .join(".agentstack/lib/servers/upstash/context7.toml")
+            .exists(),
+        "a namespaced identifier must never become a nested library path"
+    );
+}

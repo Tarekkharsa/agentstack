@@ -188,6 +188,42 @@ struct LibraryCollision {
     incoming: String,
 }
 
+/// Split imported native server names by whether the library can represent
+/// them as one definition file. Native MCP configs commonly use namespaced
+/// identifiers such as `upstash/context7`; changing that identifier during an
+/// import would break references, while treating it as a library path would
+/// escape the library's one-file-per-server contract. Those definitions stay
+/// inline in the project manifest under their original names.
+fn partition_library_servers(
+    servers: &IndexMap<String, Server>,
+) -> (IndexMap<String, Server>, IndexMap<String, Server>) {
+    let mut library = IndexMap::new();
+    let mut inline = IndexMap::new();
+    for (name, server) in servers {
+        if super::lib::valid_lib_name(name) {
+            library.insert(name.clone(), server.clone());
+        } else {
+            inline.insert(name.clone(), server.clone());
+        }
+    }
+    (library, inline)
+}
+
+/// Explain the exceptional placement before the consent gate. The important
+/// promise is that the imported identifier is preserved byte-for-byte.
+fn render_inline_library_servers(names: &[String]) -> String {
+    let names = names
+        .iter()
+        .map(|name| crate::text::sanitize_line(name))
+        .collect::<Vec<_>>()
+        .join(" · ");
+    format!(
+        "\n{}  Kept inline in this manifest: {names}\n\
+         \x20     These native names cannot be library filenames; their names and definitions stay unchanged.\n",
+        "·".dimmed()
+    )
+}
+
 /// Imported servers whose name the library already holds with different bytes
 /// (review finding 3).
 ///
@@ -1513,10 +1549,22 @@ version = 1
 
     // Library-first import (`docs/design/linked-library-sources.md` §"What
     // `init` imports"). A server that was already configured globally in three
-    // CLIs was never this project's own content: it goes into the first linked
-    // library source, and the project references it by name. `--project-servers`
-    // keeps the old inline shape for a caller that wants it.
-    let library_import = !args.project_servers && !servers.is_empty();
+    // CLIs was never this project's own content: filename-safe definitions go
+    // into the first linked library source, and the project references them by
+    // name. Namespaced native identifiers such as `upstash/context7` cannot be
+    // represented by the library's one-file-per-server layout, so they remain
+    // inline without being renamed. `--project-servers` keeps every definition
+    // inline for a caller that wants it.
+    let (library_servers, inline_servers) = if args.project_servers {
+        (IndexMap::new(), servers.clone())
+    } else {
+        partition_library_servers(&servers)
+    };
+    let library_import = !library_servers.is_empty();
+    if !args.project_servers && !inline_servers.is_empty() {
+        let names = inline_servers.keys().cloned().collect::<Vec<_>>();
+        print!("{}", render_inline_library_servers(&names));
+    }
     let library_source = crate::sources::Sources::load_or_warn().primary();
     let library_root_display = library_source.root.display().to_string();
 
@@ -1527,7 +1575,7 @@ version = 1
     // wins. A non-interactive run answers "keep" without prompting, which is
     // the safe default for automation — `confirm` returns false there.
     let collisions = if library_import {
-        library_collisions(&library_source.root, &servers)
+        library_collisions(&library_source.root, &library_servers)
     } else {
         Vec::new()
     };
@@ -1573,7 +1621,7 @@ version = 1
         };
         let mut profiles = IndexMap::new();
         profiles.insert("default".to_string(), default_toolset);
-        (IndexMap::new(), profiles)
+        (inline_servers.clone(), profiles)
     } else {
         (servers.clone(), IndexMap::new())
     };
@@ -1615,7 +1663,7 @@ version = 1
             println!(
                 "Would write {} into library source '{}' ({}); the manifest above references \
                  them by name.",
-                super::count(server_count, "server definition"),
+                super::count(library_servers.len(), "server definition"),
                 library_source.name,
                 library_root_display
             );
@@ -1757,7 +1805,7 @@ version = 1
                 &crate::library::Library::path(&library_source.root),
                 "library · index",
             ));
-            for (name, server) in &servers {
+            for (name, server) in &library_servers {
                 // Finding 3: a name the user chose to keep is NOT written. The
                 // project still references it, and resolution serves the
                 // library's existing definition — which is what the review said
@@ -1918,8 +1966,12 @@ version = 1
                     .flat_map(|c| c.configs.iter())
                     .all(|p| p.starts_with(&project_root)),
                 &delivery_summary_lines(&target_defaults),
-                library_import
-                    .then_some((library_source.name.as_str(), library_root_display.as_str())),
+                library_import.then_some((
+                    library_source.name.as_str(),
+                    library_root_display.as_str(),
+                    library_servers.len(),
+                    inline_servers.len(),
+                )),
             )
         );
     }
@@ -2076,7 +2128,7 @@ fn render_import_summary(
     delivery_lines: &[String],
     // Where the imported servers landed: the linked library source's name and
     // folder, or `None` when `--project-servers` kept them inline.
-    library_dest: Option<(&str, &str)>,
+    library_dest: Option<(&str, &str, usize, usize)>,
 ) -> String {
     let mut out = String::new();
     out.push_str("\nImport complete.\n");
@@ -2094,11 +2146,20 @@ fn render_import_summary(
     out.push_str(&format!("  Imported:  {imported}\n"));
     // Library-first: say where the reusable half went, so nobody has to guess
     // why the manifest lists names instead of commands.
-    if let Some((name, root)) = library_dest {
-        out.push_str(&format!(
-            "  Library:   the servers landed in '{name}' ({root}); the manifest\n\
-             \x20            references them by name, so this project stays clean\n"
-        ));
+    if let Some((name, root, library_count, inline_count)) = library_dest {
+        if inline_count == 0 {
+            out.push_str(&format!(
+                "  Library:   the servers landed in '{name}' ({root}); the manifest\n\
+                 \x20            references them by name, so this project stays clean\n"
+            ));
+        } else {
+            out.push_str(&format!(
+                "  Library:   {} landed in '{name}' ({root}); {} with native names that\n\
+                 \x20            cannot be library filenames stayed inline, unchanged\n",
+                super::count(library_count, "server"),
+                super::count(inline_count, "server")
+            ));
+        }
     }
     // M4: the CLIs deliberately left out of `[targets] default`. Naming them —
     // and why — is what keeps "we only targeted two of your six tools" from

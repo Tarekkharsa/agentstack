@@ -2318,7 +2318,7 @@ fn remove_as_transaction(
 /// Two predicates that disagreed would trash a body under a name the restore
 /// would then reject — recoverable in name only (review finding F22). A name
 /// this rejects is removed from the index alone, with nothing on disk touched.
-fn valid_lib_name(name: &str) -> bool {
+pub(crate) fn valid_lib_name(name: &str) -> bool {
     lib_trash::is_plain_component(name)
 }
 
