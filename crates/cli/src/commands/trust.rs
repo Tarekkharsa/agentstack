@@ -728,6 +728,12 @@ pub fn preview_value(base: &Path) -> Result<serde_json::Value> {
                     crate::resolve::ServerOrigin::Library => lock
                         .get_server(name)
                         .is_some_and(|entry| entry.checksum.hex() == r.checksum),
+                    // A package member reached this card only if it was read
+                    // back from the content store and re-verified against the
+                    // digest the lock pins — a check stricter than the library
+                    // arm above, already passed. Showing the definition is
+                    // therefore showing pinned bytes.
+                    crate::resolve::ServerOrigin::Package => true,
                 };
                 // Computed BEFORE the redaction check, and kept out of the
                 // payload when redacting: the card still needs to say whether
@@ -1324,6 +1330,9 @@ pub(crate) fn grant_probed(
         };
         let origin = match r.origin {
             crate::resolve::ServerOrigin::Inline => String::new(),
+            // Labelled, never blank: a blank marker is how the reader is told
+            // "this project's own definition", which a package member is not.
+            crate::resolve::ServerOrigin::Package => "   [package, pinned]".to_string(),
             crate::resolve::ServerOrigin::Library => match lock.get_server(name) {
                 Some(entry) if entry.checksum.hex() == r.checksum => {
                     "   [library, pinned]".to_string()

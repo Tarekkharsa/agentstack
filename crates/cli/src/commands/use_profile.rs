@@ -1340,6 +1340,18 @@ pub(crate) fn record_lock(
             source: match r.origin {
                 ServerOrigin::Inline => ServerSource::Inline,
                 ServerOrigin::Library => ServerSource::Library,
+                // A package member is pinned as a `[[package.member]]` row by
+                // `record_package_pins`, and must never ALSO become a
+                // `[[server]]` row — two lock rows for one name are two pins
+                // that can disagree. Nothing routes a package member here
+                // today; if something ever does, it must fail loudly rather
+                // than write a second pin under a wrong source label.
+                ServerOrigin::Package => anyhow::bail!(
+                    "server '{}' came from a package and cannot be pinned as a project \
+                     server row — package members are pinned by `agentstack lock` as \
+                     package members. This is a bug; please report it.",
+                    crate::text::sanitize_line(&r.name)
+                ),
             },
             checksum: Sha256Hex::parse(&r.checksum)?,
         });

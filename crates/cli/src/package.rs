@@ -490,6 +490,17 @@ fn pin_replacement(
             // fail-closed miss at serve time, never a wrong definition served.
             let definition = match resolved.origin {
                 crate::resolve::ServerOrigin::Inline => toml::to_string(&resolved.server).ok(),
+                // Unreachable by construction: the ensure above proved
+                // `replacement` is a `[servers.<name>]` key, and
+                // `resolve_server` reads only the manifest and the library. An
+                // explicit refusal rather than a silent deposit, because a
+                // package member replacing a package member would be a
+                // self-referential pin nobody could re-verify.
+                crate::resolve::ServerOrigin::Package => anyhow::bail!(
+                    "override replaces {kind_word} '{}' with a package-carried server — a \
+                     replacement must be a capability this project declares",
+                    crate::text::sanitize_line(&member.name)
+                ),
                 // The definition file lives under whichever linked source
                 // satisfied the name, which is what `source_root` answers.
                 crate::resolve::ServerOrigin::Library => {

@@ -1464,3 +1464,262 @@ fn a_package_carried_server_that_cannot_be_verified_fails_closed_with_a_reason()
         "and names the package: {detail}"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Review finding 1 + 6: a package's server reaches EVERY run, and it never
+// reaches one wearing this project's name.
+//
+// The defect these witness: `package_runtime_servers` had exactly two callers —
+// the live host gateway and the image builder. `locked.rs` never saw packages,
+// so a Protected run (the DEFAULT for a plain `agentstack run <cli>`) silently
+// omitted every server a toolset's package carried, while `status --json`
+// listed it as an effective member. The fix adds them to
+// `frozen_runtime_servers`, which is the ONE set a Protected run freezes into
+// its authority grant, the sandbox classifies from, and the image is built
+// from.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// **The load-bearing witness for finding 1.** `frozen_runtime_servers` is the
+/// set `locked.rs::resolve_inputs` builds `LockedInputs::frozen` from, and
+/// `freeze_grant` binds one `GrantedServer` per entry. So a package server
+/// present here — with `ServerOrigin::Package` and its provenance intact — is a
+/// package server in the Protected run's frozen grant.
+///
+/// Reverting the fix (dropping the `package_runtime_servers` extension from
+/// `frozen_runtime_servers`) fails this on the first assertion: the toolset's
+/// server set is empty.
+#[test]
+fn a_toolset_package_server_reaches_the_frozen_set_a_protected_run_freezes() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let (proj, lib_home) = machine(&tmp);
+    install_package(
+        &lib_home,
+        "rust-backend",
+        "1.4.0",
+        FULL_PACK,
+        &full_pack_members(),
+    );
+    write_manifest(
+        &proj,
+        "version = 1\n[profiles.backend]\npackages = [\"rust-backend\"]\n",
+    );
+    lock_cmd::run(&LockArgs::default(), Some(&proj)).unwrap();
+
+    let loaded = agentstack::manifest::load_from_dir(&proj).unwrap();
+    let library = Library::load_default_or_warn();
+    let frozen = agentstack::resolve::frozen_runtime_servers(
+        &loaded.manifest,
+        &library,
+        &lib_home,
+        &proj,
+        Some("backend"),
+    )
+    .unwrap();
+
+    let (name, resolved) = frozen
+        .iter()
+        .find(|(n, _)| n == "rust-backend")
+        .expect("the toolset's package server is in the frozen set a Protected run freezes");
+    let r = resolved.as_ref().expect("and it resolved");
+    assert_eq!(name, "rust-backend");
+
+    // Finding 6: NOT `Inline`. `GrantedServer::from_resolved` maps this origin
+    // to `GrantedServerBinding::Package`, which is the only server binding that
+    // carries provenance out of the grant and into the handoff artifact.
+    assert_eq!(
+        r.origin,
+        agentstack::resolve::ServerOrigin::Package,
+        "a package member must never bind as this project's own inline server"
+    );
+    assert_eq!(
+        r.provenance.as_deref(),
+        Some("package:rust-backend@1.4.0#[server]"),
+        "provenance names the package, its version and the member — this is what \
+         the `Inline` binding had nowhere to put"
+    );
+
+    // The definition is the pinned one, and it still carries `${REF}` rather
+    // than a value (invariant 5).
+    assert_eq!(r.server.server_type, agentstack::manifest::ServerType::Http);
+    assert_eq!(r.server.url.as_deref(), Some("https://backend.example/mcp"));
+    let text = toml::to_string(&r.server).unwrap();
+    assert!(
+        text.contains("${"),
+        "the secret header stays a reference in the frozen definition: {text}"
+    );
+
+    // The digest the grant binds is the one the lock pins for that member —
+    // not a re-derivation.
+    let lock = Lock::load(&proj).unwrap();
+    let member = lock
+        .get_package("rust-backend")
+        .unwrap()
+        .members
+        .iter()
+        .find(|m| m.name == "rust-backend" && m.kind == PackageMemberKind::Server)
+        .unwrap();
+    assert_eq!(r.checksum, member.checksum.hex());
+}
+
+/// The fence is what keeps the fix from being a widening: a package's server is
+/// in the frozen set of the toolset that selected it, and of no other. An
+/// unfenced set contributes none of them — it already carries every manifest
+/// server, so unioning packages in would make membership a way to widen rather
+/// than something a toolset selects.
+#[test]
+fn a_package_server_is_fenced_to_the_toolset_that_selected_it() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let (proj, lib_home) = machine(&tmp);
+    install_package(
+        &lib_home,
+        "rust-backend",
+        "1.4.0",
+        FULL_PACK,
+        &full_pack_members(),
+    );
+    write_manifest(
+        &proj,
+        "version = 1\n\
+         [profiles.backend]\npackages = [\"rust-backend\"]\n\
+         [profiles.frontend]\n",
+    );
+    lock_cmd::run(&LockArgs::default(), Some(&proj)).unwrap();
+
+    let loaded = agentstack::manifest::load_from_dir(&proj).unwrap();
+    let library = Library::load_default_or_warn();
+    let names = |profile: Option<&str>| -> Vec<String> {
+        agentstack::resolve::frozen_runtime_servers(
+            &loaded.manifest,
+            &library,
+            &lib_home,
+            &proj,
+            profile,
+        )
+        .unwrap()
+        .into_iter()
+        .map(|(n, _)| n)
+        .collect()
+    };
+
+    assert_eq!(names(Some("backend")), vec!["rust-backend".to_string()]);
+    assert!(
+        names(Some("frontend")).is_empty(),
+        "a toolset that selected no package gets none of its servers"
+    );
+    assert!(
+        names(None).is_empty(),
+        "and the unfenced set contributes no package server at all"
+    );
+}
+
+/// Finding 1's third acceptance clause: the two rails agree on what reaches a
+/// run. The git-pack rail vendors a `pack.toml`'s `[server]` into
+/// `[servers.<pack>]`; the library-package rail references it. Both must put
+/// the SAME definition in the frozen set — otherwise "reference is as safe as
+/// vendoring" (`automatic-delivery.md`) is false at the only place it matters.
+#[test]
+fn the_vendored_and_referenced_rails_freeze_the_same_server_definition() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let (proj, lib_home) = machine(&tmp);
+    install_package(
+        &lib_home,
+        "rust-backend",
+        "1.4.0",
+        FULL_PACK,
+        &full_pack_members(),
+    );
+
+    // The referenced rail.
+    write_manifest(
+        &proj,
+        "version = 1\n[profiles.backend]\npackages = [\"rust-backend\"]\n",
+    );
+    lock_cmd::run(&LockArgs::default(), Some(&proj)).unwrap();
+    let loaded = agentstack::manifest::load_from_dir(&proj).unwrap();
+    let library = Library::load_default_or_warn();
+    let referenced = agentstack::resolve::frozen_runtime_servers(
+        &loaded.manifest,
+        &library,
+        &lib_home,
+        &proj,
+        Some("backend"),
+    )
+    .unwrap();
+    let referenced = referenced
+        .into_iter()
+        .find(|(n, _)| n == "rust-backend")
+        .and_then(|(_, r)| r.ok())
+        .expect("referenced rail freezes the package's server");
+
+    // The vendored rail: the same `[server]` table, written inline as the
+    // install rail writes it.
+    let vendored_dir = tmp.path().join("vendored");
+    fs::create_dir_all(&vendored_dir).unwrap();
+    // Built through the vendored rail's own `Candidate::to_server`, not
+    // hand-copied — a hand-written table would prove only that I can type the
+    // same TOML twice.
+    let parsed: agentstack::provider::gitpack::PackToml = toml::from_str(FULL_PACK).unwrap();
+    let candidate = agentstack::provider::Candidate {
+        id: "rust-backend".into(),
+        name: "rust-backend".into(),
+        description: String::new(),
+        source: "catalog",
+        kind: agentstack::provider::CandidateKind::Pack(agentstack::provider::PackSpec {
+            server: Some(parsed.server.as_ref().unwrap().to_install().unwrap()),
+            skills: Vec::new(),
+            instructions: Vec::new(),
+            targets: Vec::new(),
+        }),
+    };
+    let server = candidate.to_server();
+    // Nested through `toml::Value` rather than string concatenation: a server
+    // with a `[headers]` sub-table pasted under `[servers.<name>]` by hand
+    // re-parses as a TOP-LEVEL `[headers]`, which would silently drop the
+    // secret header and make this comparison pass for the wrong reason.
+    let mut servers = toml::value::Table::new();
+    servers.insert(
+        "rust-backend".to_string(),
+        toml::Value::try_from(&server).unwrap(),
+    );
+    let mut root = toml::value::Table::new();
+    root.insert("version".to_string(), toml::Value::Integer(1));
+    root.insert("servers".to_string(), toml::Value::Table(servers));
+    write_manifest(
+        &vendored_dir,
+        &toml::to_string(&toml::Value::Table(root)).unwrap(),
+    );
+    let vendored_loaded = agentstack::manifest::load_from_dir(&vendored_dir).unwrap();
+    let vendored = agentstack::resolve::frozen_runtime_servers(
+        &vendored_loaded.manifest,
+        &library,
+        &lib_home,
+        &vendored_dir,
+        None,
+    )
+    .unwrap();
+    let vendored = vendored
+        .into_iter()
+        .find(|(n, _)| n == "rust-backend")
+        .and_then(|(_, r)| r.ok())
+        .expect("vendored rail freezes the same server");
+
+    // Same definition, and the same content digest over it — one `pack.toml`
+    // grammar, one server definition, whichever rail installed it.
+    assert_eq!(
+        toml::to_string(&referenced.server).unwrap(),
+        toml::to_string(&vendored.server).unwrap()
+    );
+    assert_eq!(referenced.checksum, vendored.checksum);
+
+    // What legitimately differs is the ORIGIN, and that difference is the
+    // point of finding 6: the referenced rail says "a package", the vendored
+    // rail says "this project", and neither is allowed to say the other.
+    assert_eq!(
+        referenced.origin,
+        agentstack::resolve::ServerOrigin::Package
+    );
+    assert_eq!(vendored.origin, agentstack::resolve::ServerOrigin::Inline);
+}
