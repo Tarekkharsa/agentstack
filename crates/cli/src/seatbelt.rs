@@ -101,6 +101,25 @@ pub enum Family {
     /// command that fixes it — so the same family, and one `tool: "trust"` tag
     /// a reader can filter the audit log by.
     Trust,
+    /// A call named a server this project declares, but the toolset fence is
+    /// not open on a toolset that selects it — so nothing exposed the name and
+    /// the call was refused (W4 precondition 3).
+    ///
+    /// The seventh family, and — like [`Family::Pin`] and [`Family::Trust`] —
+    /// not a policy dimension. It is its own family for the reason those two
+    /// are: the answer here is "nothing has selected this yet", not "you
+    /// disallowed this" and not "your yes stopped holding", and only this
+    /// answer is fixed by opening a lease. A reader filtering `tool: "tool"`
+    /// must not find a fence refusal there and read it as `[policy.tools]`.
+    ///
+    /// Genuine prevention: the fenced gateway holds no upstream for the name,
+    /// so nothing was spawned, dialled, or forwarded.
+    ///
+    /// Recorded only for a server the project **declares**. A name nothing
+    /// declares is a typo, not a security event, and stays an ordinary unknown
+    /// tool error — otherwise any caller could write unbounded rows into the
+    /// audit log just by inventing names.
+    Fence,
 }
 
 impl Family {
@@ -119,6 +138,8 @@ impl Family {
             // refusal happens before the round trip, so the same clause is
             // the true one.
             Family::Trust => "nothing ran",
+            // No upstream held the name, so there was nothing to run.
+            Family::Fence => "nothing ran",
         }
     }
 
@@ -132,6 +153,7 @@ impl Family {
             Family::Filesystem => "filesystem",
             Family::Pin => "pin",
             Family::Trust => "trust",
+            Family::Fence => "fence",
         }
     }
 }
@@ -147,7 +169,15 @@ impl Family {
 /// discipline the recorder applies with `SecretDenied` vs `SecretAccess`, one
 /// layer up: a denial that never happened as a call must not be counted as
 /// one.
-pub const AUDIT_TOOLS: &[&str] = &["tool", "egress", "secret", "filesystem", "pin", "trust"];
+pub const AUDIT_TOOLS: &[&str] = &[
+    "tool",
+    "egress",
+    "secret",
+    "filesystem",
+    "pin",
+    "trust",
+    "fence",
+];
 
 /// Bound a refusal reason before it is printed or recorded.
 ///
@@ -369,6 +399,7 @@ mod tests {
             (Family::Filesystem, "nothing was written"),
             (Family::Pin, "nothing ran"),
             (Family::Trust, "nothing ran"),
+            (Family::Fence, "nothing ran"),
         ] {
             assert_eq!(family.nothing_clause(), clause);
         }
@@ -415,5 +446,26 @@ mod tests {
         assert!(s.contains("nothing ran"), "{s}");
         assert!(s.contains("agentstack.lock"), "{s}");
         assert!(s.contains("trust"), "{s}");
+    }
+
+    /// The fence denial points at the lease, not at policy: nothing was
+    /// disallowed, nothing has been selected yet, and opening a lease is the
+    /// whole fix. It files under its own `tool` tag for the same reason.
+    #[test]
+    fn the_fence_denial_points_at_the_lease_not_at_policy() {
+        let d = Denial {
+            family: Family::Fence,
+            subject: "demo",
+            attempted: "call exfiltrate",
+            why: "this project fences its servers behind toolsets and no open lease selects one that exposes it",
+            next_step: "open a lease for the toolset that selects it: `agentstack_lease_open` profile=default",
+        };
+        let s = d.sentence();
+        assert!(s.contains("nothing ran"), "{s}");
+        assert!(s.contains("lease"), "{s}");
+        assert!(s.contains("profile=default"), "{s}");
+        assert!(!s.contains("[policy.tools]"), "{s}");
+        assert_eq!(Family::Fence.audit_tool(), "fence");
+        assert!(AUDIT_TOOLS.contains(&"fence"));
     }
 }

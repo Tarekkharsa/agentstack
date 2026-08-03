@@ -1094,6 +1094,15 @@ impl Gateway {
         self.upstreams.is_empty()
     }
 
+    /// The run this gateway attributes its records to, captured at
+    /// construction. Exposed so a refusal raised just outside dispatch — the
+    /// toolset fence's, which fires for a name no upstream holds — files its
+    /// evidence against the same run as the refusals raised inside it, rather
+    /// than re-reading the ambient environment and possibly disagreeing.
+    pub fn run_id(&self) -> Option<&str> {
+        self.run_id.as_deref()
+    }
+
     /// The immutable effective ruleset captured at gateway construction.
     /// Execution uses this exact artifact for its lockdown topology instead of
     /// re-reading either manifest layer.
