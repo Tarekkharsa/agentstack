@@ -1298,6 +1298,21 @@ fn print_orientation(o: &Orientation, status: bool) {
                 );
             }
 
+            // A package is only ever named by a toolset, and only a toolset
+            // delivers one: `package_runtime_servers` contributes nothing to an
+            // unfenced run, so the member set `status --json` publishes is not
+            // what a plain `agentstack run <cli>` loads (invariant 8 — claims
+            // match enforcement, `docs/design/package-layer.md`). Printed only
+            // when this project pinned a package, so a project without one
+            // reads exactly as it did before.
+            if !f.packages.is_empty() {
+                println!(
+                    "            {}",
+                    "package servers reach a run only when the run names a toolset that selects the package"
+                        .dimmed()
+                );
+            }
+
             // Stage 2.2: an active temporary session is a first-class fact of
             // the default status surface — its own line, not just the (active)
             // marker inside the profiles list, with the command that reverts it.
