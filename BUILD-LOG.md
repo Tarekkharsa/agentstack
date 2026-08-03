@@ -855,3 +855,144 @@ that page promised its reads "start no process", while `lease status` runs
 the row and in the section preamble, beside `doctor --probe`. **The two card
 renderers were not merged** and were not touched; the three reasons in
 `consent-card.md` §Panel still hold.
+
+## Review fixes — the seven findings against `3d64899..HEAD` (branch `review-fixes`)
+
+Seven defects found by line-by-line review of the eight-item run, fixed in
+severity order on `review-fixes`, one commit each. Every security witness was
+verified by temporarily reverting its fix and confirming the test went red on
+the intended assertion; each is named below with the failure it produced.
+Nothing merged, nothing pushed.
+
+**1 + 6 — package servers reach every run, and never wearing this project's
+name (fixed together, trap first).** `resolve::package_runtime_servers` had
+exactly two callers, the live host gateway and the image builder. `locked.rs`
+never saw packages, so a Protected run — **the default for a plain
+`agentstack run <cli>`**, not merely `--sandbox`/`--lockdown` as the W5 entry
+above records — silently omitted every server a toolset's package carried,
+while `status --json` listed it as an effective member. The reach was wider
+than the flag that was flagged. Closing it required closing finding 6 first:
+`GrantedServer::from_resolved` mapped a package member's `ServerOrigin::Inline`
+onto `GrantedServerBinding::Inline`, which has **no provenance field**, so
+wiring package servers into the grant without that fix would not have
+mislabelled them — it would have *deleted* the record of where their bytes came
+from. `ServerOrigin::Package` is now a third variant, and the six display,
+evidence and lock-writing sites the W5 entry avoided rippling through each
+answer for it: the grant binds `GrantedServerBinding::Package { definition,
+provenance }`, the handoff carries and round-trips `"package"`, the canonical
+grant digest labels it distinctly, `explain` says "a selected toolset's
+package", `trust`'s card labels it `[package, pinned]`, and `use_profile`'s
+lock write plus `package`'s override replacement refuse it outright rather than
+writing a second pin or a self-referential one. The servers then join
+`frozen_runtime_servers` — the one set a Protected run freezes, a sandbox
+classifies from, and an image is built from — through the same
+`package_runtime_servers`, appended after `verify_library_pin` for the reason
+the gateway already states, under the unchanged toolset fence. `image.rs`
+dropped its own extension, which is what makes its comment claiming "the SAME
+frozen, pin-verified set a sandbox run is assembled from" true rather than
+false. Policy is unaffected and was checked rather than assumed: `compile`
+folds an unnamed server through the `any` bucket identically to the named entry
+it would have built, and names any server a policy layer mentions, so the
+ruleset still only narrows and `verify_handoff_for`'s recompile from
+`m.servers.keys()` still matches. Witnesses:
+`package_layer::a_toolset_package_server_reaches_the_frozen_set_a_protected_run_freezes`
+(reverted: fails finding the server at all), `…is_fenced_to_the_toolset_that_selected_it`,
+`the_vendored_and_referenced_rails_freeze_the_same_server_definition` (equal
+definitions, equal digests, differing only in origin),
+`grant::tests::a_package_member_binds_as_package_and_keeps_its_provenance`
+(reverted: fails with `got Inline { .. }`), and
+`…the_grant_digest_distinguishes_a_package_binding_from_an_inline_one`.
+
+**2 — an import records the surface it actually granted.**
+`grant_trust_for_import` built its reviewed surface from `manifest.servers`,
+which library-first import leaves empty. The trust entry recorded **zero**
+server items while the consent digest blessed every one of them through the
+lock, so a re-gate diffed against `[]`: each server could only read `+ added`,
+never `~ changed`, which is the single thing the P14 diff exists to say. The
+surface now comes from `effective_runtime_servers`, the resolver `trust`'s own
+review walks and the gateway serves from, and a server that does not resolve
+withholds the grant rather than recording an incomplete one.
+`server_stdio_identity` / `server_http_identity` became `pub(crate)` and are
+now the single source of a server's identity string — two baselines built by
+two functions would mark every server changed on a formatting difference alone.
+The digest binding was not touched. Witnesses:
+`init_restore_onboarding::a_library_first_import_records_every_imported_server_in_its_reviewed_surface`
+and `…changing_a_library_servers_command_re_gates_as_changed_not_added`, which
+reads its verdict out of `trust::preview_value`, the real re-gate card
+(reverted: `left: "added"`, `right: "changed"`).
+
+**3 — `init` asks before it overwrites a shared library definition.** `init`
+called `lib::add_server_def` with `replace = true` while every other caller
+requires `--replace`, so a second project's import could rewrite
+`<lib>/servers/<name>.toml` and leave a first project — which had pinned the
+old digest — refusing its own server, with the undo record living only in the
+second project. Collisions are now found before any write, shown in the
+pre-write review with both sides and the cost, and answered one at a time; a
+name kept is not written and the project uses the library's definition, which
+is what the review said. Identical content is not a collision — a question with
+no consequence is how a person learns to answer without reading. `--dry-run`
+and `--yes` ask nothing and take the non-destructive answer out loud. Witness:
+`init_restore_onboarding::init_leaves_a_differing_library_definition_untouched_without_a_yes`
+(reverted: fails showing the clobber itself, `search-mcp-FORK` where
+`search-mcp` should be), plus the identical-content case and two rendering
+tests including hostile input on both sides.
+
+**4 — `pack.toml` refuses what it does not understand, and says what it did
+not check.** `refuse_executable_members` was correct on both rails, but
+`PackToml` had no `deny_unknown_fields`, so serde still silently dropped every
+key the refusal does not name: a plural `[[hooks]]`, or a future
+`[[workflow]]`, installed as though it declared nothing — the very failure the
+hook refusal was written for, surviving under another spelling.
+`deny_unknown_fields` now covers `PackToml`, `PackServerToml` and
+`PackMemberToml`. Separately, `read_and_gate` skips the boundary comparison
+when `LibraryPackage::checksum` is `None`, a shape a linked source can produce
+since that `library.toml` belongs to whoever owns the folder. Not an authority
+hole — members are digest-pinned into the lock and re-gated there — but it was
+invisible, so it is now **stated**: at the point the check would have run, in
+the function's doc, and in `docs/design/package-layer.md`. Requiring the
+checksum is deferred rather than forgotten, because there is no
+`lib add-package` writer to produce one and requiring it would refuse every
+hand-authored local package. Witness:
+`package::tests::an_unknown_pack_toml_key_refuses_and_names_it` — reverted, the
+load *succeeds* and the test fails unwrapping an error that is not there, which
+is the defect exactly.
+
+**5 — the grant binds the instruction body the run actually delivers.**
+`GrantedInstruction` recorded `base_source` unconditionally while a harness
+with a matching `(cli, model)` variant receives the variant's bytes, so an
+auditor reconciling agent context against the grant read a file the run never
+used. Content binding was never at risk (every variant is pinned, verification
+compares all of them, the lock is inside the consent digest), so this was an
+evidence defect and the fix is evidence-shaped: `freeze_grant` selects through
+`Bodies::choose` with the model from `instructions::model_for` — the one
+resolver every variant surface uses — and takes the digest from the chosen
+body's own lock pin. A selected variant with no pin **refuses** rather than
+falling back to the base checksum: a grant whose path and digest describe
+different files is worse than one that names the wrong file. Witnesses:
+`locked::tests::the_grant_binds_the_body_this_harness_actually_receives`
+(reverted: fails naming `house.md`) and
+`…a_harness_with_no_matching_variant_binds_the_base_body` — the fix selects, it
+does not simply prefer variants.
+
+**7 — the upgrade report states what the lock re-pin covered.**
+`record_instruction_pins` walks the whole manifest, so upgrading any pack
+re-pins every project-declared house rule. That is correct and the transaction
+is sound — both were left alone — but the count printed only from inside the
+rendered-lane block, which is empty when the pack carried no fragment of its
+own. The common case therefore re-pinned in silence, and where it did print, a
+bare "N pinned" read as "N of the pack's". One line, outside both lanes, states
+the scope in words.
+
+**Judgment calls.** `explain`'s new `ServerOrigin::Package` arm is currently
+**unreachable**: `server_lock_status` resolves from the manifest and library
+only, so no package member reaches that surface. The arm is written for the
+compiler-forced honesty the third variant buys, not because a test can drive it
+today — making `explain` describe package members is a surface change, not a
+defect fix, and was left out. Package servers stay out of an **unfenced**
+frozen set (`profile == None`), unchanged from the gateway's rule: an unfenced
+set already carries every manifest server, so unioning packages in would make
+membership a way to widen rather than something a toolset selects — which means
+a plain `agentstack run <cli>` with no `--profile` still serves no package
+server, by design rather than by omission. And finding 4's checksum half is
+**stated, not closed**; the note it prints is the honest negative, and closing
+it properly waits on a `lib add-package` writer.
