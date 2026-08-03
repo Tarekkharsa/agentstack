@@ -254,3 +254,119 @@ fn library_first_args() -> InitArgs {
         consented_plan: None,
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Review finding 3: the library is shared state.
+//
+// The defect: `init` called `lib::add_server_def` with `replace = true`, while
+// every other caller makes the user pass `--replace`. A second project's import
+// could rewrite `<lib>/servers/<name>.toml` and break a first project that had
+// pinned the old digest — with the undo record living only in the second
+// project.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A differing definition is left ALONE without an explicit yes, and the
+/// collision is named in the review.
+///
+/// Reverting the fix (calling `add_server_def` unconditionally again) fails
+/// this on the "the library's own definition survives" assertion.
+#[test]
+fn init_leaves_a_differing_library_definition_untouched_without_a_yes() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
+
+    // A first project already put `search` in the library and pinned it.
+    let lib_home = home.join(".agentstack/lib");
+    let existing: agentstack::manifest::Server =
+        toml::from_str("type = \"stdio\"\ncommand = \"npx\"\nargs = [\"-y\", \"search-mcp\"]\n")
+            .unwrap();
+    agentstack::commands::lib::add_server_def(
+        &lib_home,
+        "search",
+        &existing,
+        "test".into(),
+        false,
+        true,
+    )
+    .unwrap();
+    let before = fs::read_to_string(lib_home.join("servers/search.toml")).unwrap();
+
+    // A second project's machine config has the SAME NAME with a different
+    // command line.
+    fs::write(
+        home.join(".claude.json"),
+        r#"{"mcpServers":{"search":{"command":"npx","args":["-y","search-mcp-FORK"]}}}"#,
+    )
+    .unwrap();
+    let proj = tmp.path().join("proj2");
+    fs::create_dir_all(&proj).unwrap();
+    init::run(&library_first_args(), Some(&proj)).unwrap();
+
+    assert_eq!(
+        fs::read_to_string(lib_home.join("servers/search.toml")).unwrap(),
+        before,
+        "the library's own definition survives an import that did not get a yes"
+    );
+
+    // And the project uses what the review said it would: the library's
+    // version, not the imported one. The recorded reviewed surface is the
+    // honest record of that (finding 2's fix makes it so automatically).
+    let items = match agentstack::trust::prior_surface(&proj) {
+        agentstack::trust::PriorSurface::Recorded(items) => items,
+        other => panic!("expected a recorded surface, got {other:?}"),
+    };
+    let search = items
+        .iter()
+        .find(|i| i.kind == "server" && i.name == "search")
+        .expect("the project still references 'search'");
+    assert_eq!(
+        search.identity, "npx -y search-mcp",
+        "the surface names the definition that will actually run — the \
+         library's, not the one this import wanted to write"
+    );
+}
+
+/// Identical content is not a collision: re-importing the same machine config
+/// into a second project asks nothing and changes nothing.
+#[test]
+fn an_identical_library_definition_is_not_a_collision() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
+    fs::write(
+        home.join(".claude.json"),
+        r#"{"mcpServers":{"search":{"command":"npx","args":["-y","search-mcp"]}}}"#,
+    )
+    .unwrap();
+
+    let first = tmp.path().join("proj1");
+    fs::create_dir_all(&first).unwrap();
+    init::run(&library_first_args(), Some(&first)).unwrap();
+    let lib_def = home.join(".agentstack/lib/servers/search.toml");
+    let after_first = fs::read_to_string(&lib_def).unwrap();
+
+    // The same config, a second project: no question, no change, and the
+    // project still gets the server.
+    let second = tmp.path().join("proj2");
+    fs::create_dir_all(&second).unwrap();
+    init::run(&library_first_args(), Some(&second)).unwrap();
+
+    assert_eq!(fs::read_to_string(&lib_def).unwrap(), after_first);
+    let items = match agentstack::trust::prior_surface(&second) {
+        agentstack::trust::PriorSurface::Recorded(items) => items,
+        other => panic!("expected a recorded surface, got {other:?}"),
+    };
+    assert!(
+        items
+            .iter()
+            .any(|i| i.kind == "server" && i.name == "search"),
+        "an identical definition is still imported, silently: {items:?}"
+    );
+}

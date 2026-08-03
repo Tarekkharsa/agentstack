@@ -178,6 +178,112 @@ fn offer_env_schema(dir: &Path, names: &[String]) -> Result<Option<crate::histor
     Ok(Some(change))
 }
 
+/// One imported server whose name is already taken in the target library
+/// source by a DIFFERENT definition.
+struct LibraryCollision {
+    name: String,
+    /// What the library's existing definition runs or contacts.
+    existing: String,
+    /// What this import would write in its place.
+    incoming: String,
+}
+
+/// Imported servers whose name the library already holds with different bytes
+/// (review finding 3).
+///
+/// **Identical content is not a collision.** Re-importing the same machine
+/// config into a second project is the ordinary case, and asking a question
+/// with no consequence is how a person learns to answer without reading.
+///
+/// The comparison is over the NORMALIZED definition — `toml::to_string_pretty`
+/// of the `Server` table, which is exactly the byte string `lib::add_server_def`
+/// writes and digests. Comparing raw file bytes instead would report key order
+/// or whitespace as a difference and produce that meaningless question.
+fn library_collisions(
+    lib_root: &Path,
+    servers: &IndexMap<String, Server>,
+) -> Vec<LibraryCollision> {
+    let Ok(library) = crate::library::Library::load(lib_root) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (name, incoming) in servers {
+        if library.get_server(name).is_none() {
+            continue;
+        }
+        let path = crate::resolve::library_server_path(lib_root, name);
+        let Ok(text) = std::fs::read_to_string(&path) else {
+            continue; // an indexed server with no readable body is not a
+                      // definition this import can be said to overwrite
+        };
+        let Ok(existing) = toml::from_str::<Server>(&text) else {
+            continue;
+        };
+        let (Ok(a), Ok(b)) = (
+            toml::to_string_pretty(&existing),
+            toml::to_string_pretty(incoming),
+        ) else {
+            continue;
+        };
+        if a == b {
+            continue; // same definition — nothing is being replaced
+        }
+        out.push(LibraryCollision {
+            name: name.clone(),
+            existing: server_identity_line(&existing),
+            incoming: server_identity_line(incoming),
+        });
+    }
+    out
+}
+
+/// What a server does, in one line — the same two facts the import review and
+/// the trust card lead with.
+fn server_identity_line(server: &Server) -> String {
+    match server.server_type {
+        crate::manifest::ServerType::Stdio => {
+            format!("runs {}", super::trust::server_stdio_identity(server))
+        }
+        crate::manifest::ServerType::Http => {
+            format!("contacts {}", super::trust::server_http_identity(server))
+        }
+    }
+}
+
+/// The collision block, in the pre-write review: which name clashes, what the
+/// library has now, and what the import would put there instead.
+///
+/// Pure so its wording is unit-testable. Every value is hostile input (other
+/// CLIs' configs on one side, a possibly shared library folder on the other),
+/// so both sides are sanitized before display.
+fn render_library_collisions(source_name: &str, collisions: &[LibraryCollision]) -> String {
+    let mut out = format!(
+        "\n{}  {} in library source '{}' already {} a different definition:\n",
+        "⚠".yellow(),
+        super::count(collisions.len(), "name"),
+        crate::text::sanitize_line(source_name),
+        if collisions.len() == 1 {
+            "holds"
+        } else {
+            "hold"
+        }
+    );
+    for c in collisions {
+        out.push_str(&format!(
+            "      {}\n        in the library:  {}\n        this import:     {}\n",
+            crate::text::sanitize_line(&c.name),
+            crate::text::truncate_chars(&crate::text::sanitize_line(&c.existing), 64),
+            crate::text::truncate_chars(&crate::text::sanitize_line(&c.incoming), 64),
+        ));
+    }
+    out.push_str(
+        "      The library is shared: replacing a definition makes every other project \
+         that\n      pinned the old one report drift until it re-locks. Nothing is \
+         replaced without\n      a yes below.\n",
+    );
+    out
+}
+
 /// The names a schema may declare: sorted, de-duplicated, and restricted to
 /// well-formed reference names. The filter is not defensive decoration — these
 /// names come from imported third-party CLI configs, and anything that is not a
@@ -1413,6 +1519,53 @@ version = 1
     let library_import = !args.project_servers && !servers.is_empty();
     let library_source = crate::sources::Sources::load_or_warn().primary();
     let library_root_display = library_source.root.display().to_string();
+
+    // Review finding 3: the library is SHARED state, and a second project's
+    // import must not silently rewrite what a first project pinned. Collisions
+    // are found before anything is written, shown in the review, and answered
+    // by a person; `keep_library` names the servers whose existing definition
+    // wins. A non-interactive run answers "keep" without prompting, which is
+    // the safe default for automation — `confirm` returns false there.
+    let collisions = if library_import {
+        library_collisions(&library_source.root, &servers)
+    } else {
+        Vec::new()
+    };
+    let mut keep_library: Vec<String> = Vec::new();
+    if !collisions.is_empty() {
+        print!(
+            "{}",
+            render_library_collisions(&library_source.name, &collisions)
+        );
+        // A preview asks nothing, and `--yes` is a promise that this run does
+        // not stop to ask. Both therefore take the non-destructive answer, and
+        // say which answer they took — a scripted `init` must never be the
+        // thing that rewrites another project's pinned definition.
+        let ask = !args.dry_run && !args.yes;
+        for c in &collisions {
+            let replace = ask
+                && crate::util::confirm::confirm(&format!(
+                    "Replace the library's '{}' with the imported definition?",
+                    crate::text::sanitize_line(&c.name)
+                ))?;
+            if replace {
+                println!(
+                    "  {} '{}' will be replaced — other projects pinned to the old \
+                     definition will report drift until they re-lock.",
+                    "⚠".yellow(),
+                    crate::text::sanitize_line(&c.name)
+                );
+            } else {
+                println!(
+                    "  {} keeping the library's '{}' — this project will use it.",
+                    "·".dimmed(),
+                    crate::text::sanitize_line(&c.name)
+                );
+                keep_library.push(c.name.clone());
+            }
+        }
+    }
+
     let (manifest_servers, profiles) = if library_import {
         let default_toolset = crate::manifest::Profile {
             servers: servers.keys().cloned().collect(),
@@ -1605,6 +1758,13 @@ version = 1
                 "library · index",
             ));
             for (name, server) in &servers {
+                // Finding 3: a name the user chose to keep is NOT written. The
+                // project still references it, and resolution serves the
+                // library's existing definition — which is what the review said
+                // would happen.
+                if keep_library.contains(name) {
+                    continue;
+                }
                 let dest = crate::resolve::library_server_path(&library_source.root, name);
                 backups.push(crate::history::capture(&dest, format!("library · {name}")));
                 super::lib::add_server_def(
@@ -1612,6 +1772,10 @@ version = 1
                     name,
                     server,
                     format!("init:{}", crate::text::sanitize_line(&library_source.name)),
+                    // `replace` is now an ANSWERED question, not a default. A
+                    // differing definition reached this line only because a
+                    // person said yes to replacing it above; an identical one
+                    // is not a replacement at all.
                     true,
                     true,
                 )?;
@@ -2289,6 +2453,69 @@ mod tests {
             out.contains("binary on PATH — no config files found"),
             "a binary-only CLI states the honest fact:\n{out}"
         );
+    }
+
+    /// Review finding 3: the collision block names the clash, BOTH sides, and
+    /// what replacing costs. A block that named only the clash would leave the
+    /// person answering a yes/no with nothing to answer it from.
+    #[test]
+    fn the_collision_block_names_both_sides_and_the_cost() {
+        let out = render_library_collisions(
+            "local",
+            &[LibraryCollision {
+                name: "search".into(),
+                existing: "runs npx -y search-mcp".into(),
+                incoming: "runs npx -y search-FORK".into(),
+            }],
+        );
+        assert!(out.contains("search"), "{out}");
+        assert!(
+            out.contains("in the library:  runs npx -y search-mcp"),
+            "{out}"
+        );
+        assert!(
+            out.contains("this import:     runs npx -y search-FORK"),
+            "{out}"
+        );
+        assert!(
+            out.contains("report drift until it re-locks"),
+            "the cost of replacing is stated, not implied: {out}"
+        );
+    }
+
+    /// Hostile input on both sides: the library folder may be someone else's,
+    /// and the incoming definition came from another CLI's config file.
+    #[test]
+    fn the_collision_block_sanitizes_both_sides() {
+        let out = render_library_collisions(
+            "src\u{1b}[31m",
+            &[LibraryCollision {
+                name: "ev\u{1b}[2Kil".into(),
+                existing: "runs a\nb".into(),
+                incoming: "runs c\u{7}d".into(),
+            }],
+        );
+        // Every hostile value is neutralized. (The block's own `⚠` still
+        // carries this crate's colour codes — those are ours, not input.)
+        assert!(
+            out.contains("source 'src'"),
+            "the source name is stripped: {out:?}"
+        );
+        assert!(
+            out.contains("      evil\n"),
+            "the server name is stripped: {out:?}"
+        );
+        assert!(
+            !out.contains("\u{1b}[2K"),
+            "no cursor control from input: {out:?}"
+        );
+        assert!(
+            !out.contains("\u{1b}[31m"),
+            "no colour injection from input: {out:?}"
+        );
+        assert!(!out.contains('\u{7}'), "no bell from input: {out:?}");
+        // A newline inside a value cannot forge a line of its own.
+        assert!(out.contains("runs a b"), "{out:?}");
     }
 
     /// Stage 1.2: imported servers are listed BY NAME with what each runs or
