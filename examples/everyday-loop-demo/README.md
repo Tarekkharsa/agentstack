@@ -10,8 +10,15 @@ back, hand it to someone else, and have their machine come up on one command.
 1. **Start** from a project with one manifest and a `.mcp.json` it wrote by
    hand, months ago, outside AgentStack.
 2. **Drop** a skill folder into `.agentstack/skills/`, then activate it. The
-   skill is declared, pinned in `agentstack.lock`, and rendered into
-   `.claude/skills/` — where the CLI actually reads skills.
+   skill is declared, pinned in `agentstack.lock`, and — because this demo asks
+   for files with `use --write` — rendered into `.claude/skills/`, where the CLI
+   reads skills off disk. That render is the ask, not the automatic path:
+   delivery is routed, and on an MCP-capable tool skills are served live over a
+   lease instead (`agentstack delivery` prints the routing;
+   `examples/projects/skills-workout` proves both lanes deliver identical
+   bytes). The rendered lane is the right one here — `undo`, `share`,
+   `receive`, and `up` are all about files, and files are what this demo
+   compares byte-for-byte.
 3. **Undo** with `agentstack undo --to 1 --write`: `.mcp.json` returns
    byte-for-byte to where it started, hand-written server and all — while the
    dropped file itself is left alone.

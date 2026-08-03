@@ -4,9 +4,17 @@
 #
 # A small storefront web app whose team ships ONE agent setup across three CLIs.
 # The committed manifest declares one HTTP MCP server (secret as a ${REF}), one
-# house-rules instruction fragment, and a profile that pulls one skill BY NAME
-# from the central library. This script seeds an isolated library, activates the
-# profile, and ASSERTS the honest outcome on disk:
+# house-rules instruction fragment, and a toolset that pulls one skill BY NAME
+# from the central library.
+#
+# This is the RENDERED lane on purpose — the team commits its native configs, so
+# it asks for files with `use` + `apply`. On these MCP-capable tools the default
+# is the live lane (`agentstack delivery` shows the routing), and section 7 uses
+# that to place the one real gap: instructions have no live lane, so Cursor is
+# the target that genuinely cannot receive them.
+#
+# This script seeds an isolated library, activates the toolset, and ASSERTS the
+# honest outcome on disk:
 #
 #   1. the server lands in .mcp.json / .codex/config.toml / .cursor/mcp.json,
 #      each in its native shape, with the resolved token;
@@ -16,10 +24,10 @@
 #      .agents/skills with the right SKILL.md;
 #   4. the manifest and lockfile never hold the resolved token.
 #
-# It also probes the Cursor gap: Cursor's adapter supports MCP but NOT
-# instructions and NOT skills. Cursor is a declared target, so the probe
-# asserts AgentStack warns that the instruction/skill can't reach Cursor
-# (before v0.15.0 it was silently dropped). The script captures the warning
+# It also probes the Cursor gap: Cursor's adapter writes MCP config and nothing
+# else — no instructions file, no skills dir. Cursor is a declared target, so
+# the probe asserts AgentStack warns that the instruction fragment can't reach
+# it (before v0.15.0 it was silently dropped), and captures the warning
 # verbatim.
 #
 # Isolated: its own AGENTSTACK_HOME and HOME under a temp dir; nothing touches
@@ -95,15 +103,15 @@ fi
 say "Seed the isolated central library with the team's skill, then lock:"
 "$AS" lib add ./team-library/api-conventions --name api-conventions --write >/dev/null 2>&1
 if "$AS" lib list 2>&1 | nocolor | grep -q "api-conventions"; then
-  ok "api-conventions is in the central library (referenced by name from the profile)"
+  ok "api-conventions is in the central library (referenced by name from the toolset)"
 else
   bad "lib add did not register api-conventions"
 fi
 "$AS" lock >/dev/null 2>&1
 ok "locked the manifest (skill + server + instruction pinned)"
 
-# ── 2. activate the profile + render instructions ────────────────────────────
-say "Activate the profile (servers + skills), then render instructions:"
+# ── 2. activate the toolset + render instructions ────────────────────────────
+say "Activate the toolset (servers + skills), then render instructions:"
 "$AS" use team --scope project --write >/dev/null 2>&1
 "$AS" apply --scope project --write >/dev/null 2>&1
 ok "use team + apply completed"
@@ -170,20 +178,37 @@ else
   bad "manifest/lockfile leaked the resolved token"
 fi
 
-# ── 7. THE CURSOR GAP ────────────────────────────────────────────────────────
-# Cursor supports MCP but NOT instructions and NOT skills. It is a declared
-# target, and the instruction fragment's targets default to "*" (all three
-# CLIs). What does the user experience? First the disk reality:
-say "The Cursor gap — Cursor is a declared target with no instructions/skills support:"
+# ── 7. THE CURSOR GAP — narrower than it was ─────────────────────────────────
+# Cursor's adapter writes MCP config and nothing else: no instructions file, no
+# skills dir. It is a declared target and the instruction fragment's targets
+# default to "*" (all three CLIs). What does the user experience? First the
+# disk reality:
+say "The Cursor gap — a declared target whose adapter writes MCP config and nothing else:"
 if [ ! -e .cursor/skills ] && [ ! -f .cursor/CLAUDE.md ] && [ ! -f .cursor/AGENTS.md ]; then
   ok "Cursor got the MCP server but NO instruction file and NO skills dir (structural)"
 else
   bad "unexpected Cursor instruction/skills artifacts appeared"
 fi
 
-# Now: does AgentStack TELL the user the house-rules / api-conventions can't
-# reach Cursor, or silently drop them? Collect the surfaces a user would look
-# at and search for any warning that names Cursor alongside the dropped content.
+# The gap is now about the RENDERED lane only. Cursor speaks MCP, so delivery
+# routes skills and servers to it live — an agent in Cursor loads the same skill
+# through the gateway that Claude Code reads off disk. Instructions are the one
+# kind with no live lane at all, so they are what Cursor genuinely cannot get.
+delivery_out="$("$AS" delivery 2>&1 | nocolor)"
+if grep -q "Cursor.*skills.*served live" <<< "$delivery_out"; then
+  ok "delivery routes skills to Cursor LIVE — no skills dir needed, and none is missing"
+else
+  bad "expected delivery to route skills live on Cursor; got: $delivery_out"
+fi
+if ! grep -qE "Cursor.*(house rules|instructions)" <<< "$delivery_out"; then
+  ok "instructions have no live lane — Cursor is the target that cannot receive them at all"
+else
+  bad "delivery claims Cursor receives instructions: $delivery_out"
+fi
+
+# Now: does AgentStack TELL the user the house-rules fragment can't reach
+# Cursor, or silently drop it? Collect the surfaces a user would look at and
+# search for any warning that names Cursor alongside the dropped content.
 apply_out="$("$AS" apply --manifest-dir "$PROJECT" --scope project --target cursor 2>&1 | nocolor)"
 doctor_out="$("$AS" doctor 2>&1 | nocolor)"
 explain_instr="$("$AS" explain house-rules 2>&1 | nocolor)"
@@ -199,9 +224,9 @@ $explain_skill"
 drop_phrases='no instruction|no skill|unsupported|not supported|skipp|dropp|can.?t receive|will not'
 if printf '%s' "$combined" | grep -iqE "cursor.*($drop_phrases)|($drop_phrases).*cursor" \
    || printf '%s' "$apply_out" | grep -iqE "$drop_phrases"; then
-  ok "AgentStack warns that Cursor cannot receive the instruction/skill"
+  ok "AgentStack warns that Cursor cannot receive the instruction fragment"
 else
-  bad "regressed (issue #12): no surface warns that Cursor's instruction+skill are dropped"
+  bad "regressed (issue #12): no surface warns that Cursor's instruction is dropped"
   printf '  \033[33m→ apply --target cursor output:\033[0m\n'
   printf '%s\n' "$apply_out" | sed 's/^/      /'
   printf '  \033[33m→ explain house-rules Targets line:\033[0m\n'

@@ -8,11 +8,16 @@ the team authors **one** `.agentstack/agentstack.toml` and lets `agentstack`
 render it into each CLI's native format. This example is the runnable proof
 that the fan-out is faithful, secret-safe, and reproducible.
 
+It is the **rendered lane** on purpose: this team commits its native configs, so
+it asks for files with `use` + `apply`. Delivery is routed, and on these three
+MCP-capable tools the default is the live lane — `agentstack delivery` prints
+the routing, and the Cursor section below turns that into the point.
+
 The manifest declares one HTTP MCP server (the team's internal API, whose bearer
 token is a `${WEBAPP_API_TOKEN}` placeholder — never a literal), one house-rules
-instruction fragment, and a profile that pulls one skill **by name** from the
+instruction fragment, and a toolset that pulls one skill **by name** from the
 central library. `assert.sh` seeds an isolated library with that skill, activates
-the profile, and asserts the outcome on disk: the server lands in all three
+the toolset, and asserts the outcome on disk: the server lands in all three
 native configs in their own shapes (Claude tags `type:"http"`, Codex nests an
 `http_headers` sub-table, Cursor infers the transport), the house-rules marker
 lands inside the managed region of both `CLAUDE.md` and `AGENTS.md`, the library
@@ -21,16 +26,21 @@ the resolved token appears only in the native configs — never in the manifest 
 lockfile.
 
 This example also probes a deliberate rough edge: **Cursor**. Cursor's adapter
-supports MCP but has **no instructions and no skills** support. Cursor is a
-declared target, and the house-rules fragment targets `*` (all three CLIs), so
-the honest question is what the user experiences. The disk answer is clean —
-Cursor gets the server and nothing else — and, as of v0.15.0, the *communication*
-is now honest too: `agentstack` **warns** that the instruction and skill can't
-reach Cursor (issues [#12](https://github.com/Tarekkharsa/agentstack/issues/12)
-and [#13](https://github.com/Tarekkharsa/agentstack/issues/13)). `assert.sh`
-asserts this warning as a `PASS`. In the v0.10.1 baseline this was a documented
-defect (a `SKIP`) — the render was correct but the surfacing was silent; that
-gap is closed.
+writes MCP config and nothing else — no instructions file, no skills dir. Cursor
+is a declared target, and the house-rules fragment targets `*` (all three CLIs),
+so the honest question is what the user experiences.
+
+The gap is narrower than it looks, and the demo now says which half is real.
+Cursor speaks MCP, so `delivery` routes **skills** to it live: an agent in
+Cursor loads the same skill through the gateway that Claude Code reads off disk,
+and the missing `.cursor/skills` is not a hole. **Instructions** have no live
+lane at all, so they are what Cursor genuinely cannot receive — and as of
+v0.15.0 `agentstack` **warns** about that instead of dropping it silently
+(issues [#12](https://github.com/Tarekkharsa/agentstack/issues/12) and
+[#13](https://github.com/Tarekkharsa/agentstack/issues/13)). `assert.sh` asserts
+all three: the structural absence, the live routing, and the warning. In the
+v0.10.1 baseline the surfacing was a documented defect (a `SKIP`); that gap is
+closed.
 
 ## How to run
 
@@ -54,17 +64,18 @@ CLIs correctly and secret-safely:
 - **Portable instructions.** The `STOREFRONT-HOUSE-RULE-A7` marker sits inside
   the `<!-- agentstack:start -->` … `<!-- agentstack:end -->` region of both
   `CLAUDE.md` and `AGENTS.md`.
-- **Library skill by name.** The profile references `api-conventions` by name;
+- **Library skill by name.** The toolset references `api-conventions` by name;
   `assert.sh` seeds it into the central library, and it materializes as a symlink
   into `.claude/skills/api-conventions` and `.agents/skills/api-conventions` with
   the right `SKILL.md`.
 - **Secret placement.** The resolved token is present in the three native configs
   (their formats store plaintext) and absent from both the manifest and the
   lockfile.
-- **Honest surfacing of the Cursor gap.** Cursor receives no instruction and no
-  skill, and `agentstack` now warns about it — the run asserts that some surface
-  (`apply --target cursor` or `explain`) pairs "cursor" with the dropped content
-  instead of dropping it silently.
+- **Honest surfacing of the Cursor gap.** Cursor gets no instruction file and
+  no skills dir; `delivery` routes skills to it live anyway, instructions have
+  no live lane, and `agentstack` warns about the dropped fragment — the run
+  asserts that some surface (`apply --target cursor` or `explain`) pairs
+  "cursor" with the dropped content instead of dropping it silently.
 
 ## What it does not claim
 

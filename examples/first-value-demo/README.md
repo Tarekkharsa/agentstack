@@ -5,13 +5,22 @@ The fenced, reproducible proof of AgentStack's core promise (TODO §1.5):
 1. **Start** from two real native configs — Claude Code (`~/.claude.json`)
    knows a `github` MCP server with an inline token; Codex
    (`~/.codex/config.toml`) knows a `tldraw` server. Neither knows the other's.
-2. **Import** with `agentstack init --yes --secrets env`: one manifest, the
-   token lifted to `${GITHUB_TOKEN}` with its value in a gitignored `.env`.
-3. **Render** with `agentstack apply --scope global --write`: both native
-   configs now carry both servers, each in its own format.
+2. **Import** with `agentstack init --yes --secrets env`: the server
+   definitions land in the library, the manifest references them by name, the
+   inline token becomes `${GITHUB_TOKEN}` in the library definition, and its
+   value lands in a gitignored `.env`. The token is asserted in all three
+   places at once — no secret material in the manifest, the placeholder (never
+   the value) in the library entry, the value only in the ignored `.env`.
+3. **Route** with `agentstack delivery`: both tools are MCP-capable, so the
+   servers are served live and nothing is written for them.
 4. **Verify** with `agentstack doctor`: 0 errors, 0 warnings.
-5. **Undo** with `agentstack restore --last --write` (twice): every file is
-   byte-identical to where it started.
+5. **Render anyway** with `agentstack apply --toolset default --scope global
+   --write` — the lane for when you want the files: both native configs now
+   carry both servers, each in its own format. The toolset has to be named
+   because the definitions live in the library, not the manifest's `[servers]`.
+6. **Undo** with `agentstack restore --last --write` (twice): every file is
+   byte-identical to where it started, and the library entries the import
+   created are gone with it.
 
 ## Run it
 

@@ -1,7 +1,8 @@
 # locked-run — the Protected host tier, end-to-end
 
-`agentstack run <harness> --locked` promotes a host run to the Protected tier:
-it refuses to launch unless the project is explicitly trusted, every pinned
+`agentstack run <harness>` IS the Protected tier — it is the default, and
+`--locked` only asks for it out loud. A protected run refuses to launch
+unless the project is explicitly trusted, every pinned
 byte in the integrity surface still matches (manifest, lock, and D3-pinned
 local executables), and the declared capabilities fit under the machine
 policy ceiling. When every gate passes it freezes an `AuthorityGrant`, seals
@@ -10,6 +11,10 @@ launches the harness with a launch-scoped MCP config pointing at
 `agentstack mcp --grant <artifact>` — a bridge that consumes the frozen
 surface **verbatim** and never re-derives authority from disk.
 
+`--unprotected` is the way out: a plain host launch with none of those gates,
+labelled `HOST / ADVISORY` and naming everything it skipped. An escape hatch,
+not the daily path.
+
 This is pre-launch gating plus a frozen capability surface — not kernel
 isolation. `--lockdown` is the kernel fence.
 
@@ -17,10 +22,13 @@ isolation. `--lockdown` is the kernel fence.
 
 1. **`--plan`** prints the fully-assembled plan and mutates nothing — no run
    evidence, no harness launch.
-2. **A clean locked run** freezes the grant (digest printed), hands the sealed
+2. **A bare `run` is Protected**: the posture line reads `HOST / PROTECTED`
+   with no flag typed. It freezes the grant (digest printed), hands the sealed
    artifact to the bridge, spawns the harness **at the project root**, records
    `grant_frozen` → `completed` in the run's `events.jsonl`, and leaves no
-   bridge-config residue in the repo afterwards.
+   bridge-config residue in the repo afterwards. `--unprotected` drops the
+   posture to `HOST / ADVISORY`, freezes no grant, and names the gates it
+   turned off.
 3. **The frozen bridge refuses the mutating control plane**: under
    `mcp --grant`, `agentstack_session_start` (which resolves secrets into
    native configs), `agentstack_lease_open`, and `agentstack_add_server` are
@@ -33,7 +41,7 @@ isolation. `--lockdown` is the kernel fence.
 6. **D3 pins are load-bearing**: a one-byte edit to a pinned server executable
    (`opsbox.sh`) refuses the run; `lock` + `trust` readmit it — a consent
    re-gate, not a lockout.
-7. **`--profile` is a fence**: under `--locked --profile ci` the frozen grant
+7. **`--toolset` is a fence**: under `--toolset ci` the frozen grant
    names only the fenced subset (`opsbox`, never `scratchpad`), and the
    artifact carries `${REF}`-only definitions — no argv, no secret values.
 
@@ -52,7 +60,7 @@ nothing touches your real config, no network, no Docker.
 Three paced scenes ([`demo.sh`](demo.sh)) tell the same story `assert.sh`
 proves — real terminal output, no Docker. Each runs in a throwaway `HOME`:
 
-**Safe repo** — pin it, review it, trust it, launch it locked; the gates pass,
+**Safe repo** — pin it, review it, trust it, launch it; the gates pass,
 the grant freezes, the harness runs.
 
 **Policy violation** — the repo asks for egress your machine policy forbids;
