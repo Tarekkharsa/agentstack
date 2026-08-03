@@ -135,9 +135,23 @@ fn scripted_init_states_clis_configs_servers_and_destinations_before_writing() {
         text.contains("Codex CLI · MCP servers (this project)"),
         "{text}"
     );
+    // ...stated as a CHOICE, next to the routing that says what reaches each
+    // tool live instead. The block and the routing sat two lines apart with no
+    // relation between them, so a destination list and a "served live" claim
+    // read as a contradiction. `apply` still renders everything it is asked to
+    // (docs/design/automatic-delivery.md, "What 'default' means here") — the
+    // fix is that this block no longer implies the render is coming anyway.
+    assert!(
+        text.contains("none is written unless you ask"),
+        "the destination list must not read as an inevitability:\n{text}"
+    );
+    assert!(text.contains("MCP servers served live"), "{text}");
 
     // The review preceded a real write.
     assert!(proj.join(".agentstack/agentstack.toml").exists());
+    // ...and the import itself wrote no native config, as the block promised.
+    assert!(!proj.join(".mcp.json").exists());
+    assert!(!proj.join(".codex/config.toml").exists());
 }
 
 #[test]
@@ -202,7 +216,7 @@ fn plan_json_carries_configs_found_and_destinations() {
 }
 
 #[test]
-fn init_preserves_namespaced_server_names_inline_and_imports_safe_names_to_library() {
+fn init_imports_a_namespaced_server_name_into_the_library_unchanged() {
     let bin = env!("CARGO_BIN_EXE_agentstack");
     let tmp = assert_fs::TempDir::new().unwrap();
     let home = tmp.path().join("home");
@@ -225,20 +239,25 @@ fn init_preserves_namespaced_server_names_inline_and_imports_safe_names_to_libra
 
     let (text, ok) = run(bin, &["init", "--yes"], &home, &proj, &stub_bin);
     assert!(ok, "init failed after its pre-write review:\n{text}");
-    assert!(
-        text.contains("Kept inline in this manifest: upstash/context7"),
-        "the review must disclose the mixed placement before writing:\n{text}"
-    );
 
     let manifest_path = proj.join(".agentstack/agentstack.toml");
     let manifest_text = fs::read_to_string(&manifest_path).unwrap();
     let manifest: toml::Value = toml::from_str(&manifest_text).unwrap();
+    // Both take the library-first path now: the namespaced name is encoded
+    // into a file name rather than being kept inline, so the manifest holds
+    // names only — the shape a first project should have.
     assert!(
-        manifest["servers"].get("upstash/context7").is_some(),
-        "the namespaced server stays inline under its exact native name:\n{manifest_text}"
+        manifest
+            .get("servers")
+            .and_then(|s| s.get("upstash/context7"))
+            .is_none(),
+        "a namespaced server no longer needs an inline body:\n{manifest_text}"
     );
     assert!(
-        manifest["servers"].get("filesystem").is_none(),
+        manifest
+            .get("servers")
+            .and_then(|s| s.get("filesystem"))
+            .is_none(),
         "the filename-safe server should use the normal library-first path:\n{manifest_text}"
     );
 
@@ -249,7 +268,7 @@ fn init_preserves_namespaced_server_names_inline_and_imports_safe_names_to_libra
         default_servers
             .iter()
             .any(|name| name.as_str() == Some("upstash/context7")),
-        "the default toolset still activates the inline server"
+        "the default toolset activates it under its exact native name"
     );
     assert!(
         default_servers
@@ -264,9 +283,12 @@ fn init_preserves_namespaced_server_names_inline_and_imports_safe_names_to_libra
         "the safe server definition was imported to the library"
     );
     assert!(
-        !home
-            .join(".agentstack/lib/servers/upstash/context7.toml")
+        home.join(".agentstack/lib/servers/upstash%2Fcontext7.toml")
             .exists(),
+        "the namespaced definition is stored under an encoded file name"
+    );
+    assert!(
+        !home.join(".agentstack/lib/servers/upstash").exists(),
         "a namespaced identifier must never become a nested library path"
     );
 }

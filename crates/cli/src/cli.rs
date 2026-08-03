@@ -1672,6 +1672,13 @@ pub struct SetupArgs {
     /// manifest (~/.agentstack).
     #[arg(long, value_enum)]
     pub scope: Option<Scope>,
+
+    /// Write the imported MCP servers into this project's manifest as inline
+    /// `[servers.*]` entries instead of into your first linked library source.
+    /// Carried through to the wizard's import step, so `agentstack init
+    /// --project-servers` means the same thing on both routes.
+    #[arg(long)]
+    pub project_servers: bool,
 }
 
 #[derive(Args, Debug)]

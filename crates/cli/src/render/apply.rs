@@ -495,7 +495,13 @@ fn selected_servers(manifest: &Manifest, selection: &Selection) -> Result<Vec<St
 /// are kept so they can be resolved centrally by [`effective_servers`].
 fn selection_names(manifest: &Manifest, selection: &Selection) -> Result<Vec<String>> {
     match selection {
-        Selection::All => Ok(manifest.servers.keys().cloned().collect()),
+        // Every server the manifest NAMES, not only the ones it defines inline
+        // — see [`Manifest::declared_server_names`]. Reading `[servers]` alone
+        // made a bare `apply` a silent no-op on exactly the manifest `init`
+        // writes by default: everything in the library, `[servers]` empty, so
+        // the selection came out empty and the run reported "no servers
+        // selected" over six of them.
+        Selection::All => Ok(manifest.declared_server_names()),
         Selection::Profile(p) => {
             let profile = manifest
                 .profiles

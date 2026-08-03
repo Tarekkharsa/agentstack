@@ -308,7 +308,41 @@ pub enum ServerResolveError {
 /// parsed table) cannot disagree with [`resolve_server`] about which file it
 /// hashed.
 pub fn library_server_path(lib_home: &Path, name: &str) -> PathBuf {
-    lib_home.join("servers").join(format!("{name}.toml"))
+    lib_home
+        .join("servers")
+        .join(format!("{}.toml", library_file_stem(name)))
+}
+
+/// The file-name stem a library server definition is stored under.
+///
+/// A server's name is whatever the user's other CLIs call it, and those names
+/// are not path components: `upstash/context7` is a real MCP server name in six
+/// native config formats. The library still keeps one definition per file, so
+/// the name is mapped to a file name — here, in one place, so the writer and
+/// the reader can never disagree.
+///
+/// A plain name maps to itself, so every library written before this function
+/// existed still resolves. Any other name is percent-encoded byte-wise:
+/// everything outside `[A-Za-z0-9_-]` becomes `%XX`. In that branch `.` is
+/// encoded too, so `.` and `..` cannot survive as a component, and `%` is
+/// encoded so the mapping stays injective — `a/b` and the literal name `a%2Fb`
+/// must not claim the same file. That is why a name containing `%` always takes
+/// the encoding branch even when it is otherwise plain.
+pub fn library_file_stem(name: &str) -> String {
+    let plain =
+        !name.is_empty() && !name.contains(['/', '\\', '\0', '%']) && name != "." && name != "..";
+    if plain {
+        return name.to_string();
+    }
+    let mut out = String::with_capacity(name.len());
+    for b in name.bytes() {
+        if b.is_ascii_alphanumeric() || b == b'_' || b == b'-' {
+            out.push(b as char);
+        } else {
+            out.push_str(&format!("%{b:02X}"));
+        }
+    }
+    out
 }
 
 /// Resolve a single server name: inline `[servers.<name>]` wins, else the central
@@ -663,6 +697,53 @@ pub fn gateway_only_hosts(
     Ok(hosts)
 }
 
+/// Every `${REF}` this project actually references, with library-backed
+/// servers resolved.
+///
+/// [`Manifest::referenced_secrets`] reads the inline `[servers]` table, which
+/// is all `core` can see — it has no library. That was right while every server
+/// was inline; since the import writes definitions to the library and
+/// references them by name, the inline reading reports "no secrets referenced"
+/// for a project whose lifted `${TOKEN}` the same run just wrote to `.env`.
+///
+/// **Display surfaces only.** This is what `status`, `doctor`, and the setup
+/// wizard should count. It is deliberately not wired into the enforcement paths
+/// (`grant`, `locked`, the render-time scoping check): those already hold a
+/// *resolved* server and ask it directly, which is the stronger reading — they
+/// must never depend on a manifest-shaped guess.
+///
+/// A name that fails to resolve is skipped rather than fatal: a broken
+/// reference is `doctor`'s finding to report, not a reason for a status line to
+/// fail.
+pub fn effective_referenced_secrets(
+    manifest: &Manifest,
+    library: &crate::library::Library,
+    lib_home: &Path,
+) -> Vec<String> {
+    let mut refs: Vec<String> = Vec::new();
+    let push = |r: String, refs: &mut Vec<String>| {
+        if !refs.contains(&r) {
+            refs.push(r);
+        }
+    };
+    for name in runtime_server_names(manifest, None) {
+        let Ok(resolved) = resolve_server(manifest, library, lib_home, &name) else {
+            continue;
+        };
+        for r in resolved.server.referenced_secrets() {
+            push(r, &mut refs);
+        }
+    }
+    // Hooks are inline by definition, so the manifest's own answer already
+    // covers them; unioning it in also keeps this a superset of the old
+    // behaviour, which is what makes it safe to swap in at a display site.
+    for r in manifest.referenced_secrets() {
+        push(r, &mut refs);
+    }
+    refs.sort();
+    refs
+}
+
 /// The names of [`effective_runtime_servers`] without resolving them — for
 /// surfaces (doctor, say) that only need to know whether a runtime surface is
 /// declared, without touching the library on disk.
@@ -680,14 +761,14 @@ pub fn runtime_server_names(manifest: &Manifest, profile: Option<&str>) -> Vec<S
                 push(n, &mut names);
             }
         }
+        // Delegated rather than repeated: the render selection, the counters,
+        // and this runtime surface must name the same set, and they drifted
+        // once already — `apply` read `[servers]` alone while this function
+        // read the union, so a library-first manifest served six servers and
+        // rendered none.
         None => {
-            for n in manifest.servers.keys() {
-                push(n, &mut names);
-            }
-            for p in manifest.profiles.values() {
-                for n in &p.servers {
-                    push(n, &mut names);
-                }
+            for n in manifest.declared_server_names() {
+                push(&n, &mut names);
             }
         }
     }

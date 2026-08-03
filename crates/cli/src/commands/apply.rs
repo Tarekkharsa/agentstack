@@ -391,6 +391,10 @@ fn render(
             in_scope_targets.insert(desc.display.clone());
 
             if plan.managed.is_empty() && plan.removed.is_empty() && plan.skipped.is_empty() {
+                // Now truthful again: the selection this line reports on reads
+                // the toolsets too, so an empty plan means the manifest really
+                // does select nothing for this CLI rather than that `apply`
+                // could not see a library-first manifest's servers.
                 crate::outln!("  no servers selected");
             }
             removed_count += plan.removed.len();

@@ -95,6 +95,55 @@ fn apply_renders_library_server_ref() {
     std::env::remove_var("HOME");
 }
 
+/// The library-first manifest `init` writes by default renders on a BARE
+/// `apply` — no `--toolset`.
+///
+/// This is the regression that made the whole import inert: the default
+/// selection read `[servers]` alone, so a manifest that defines nothing inline
+/// and names everything in `[toolsets.default]` selected nothing. `apply
+/// --write` reported "no servers selected" and wrote an empty config, while
+/// `apply --toolset default --write` — the same manifest, the same servers —
+/// rendered them all. `init`'s own closing "Next" step was the one that did
+/// nothing.
+#[test]
+fn bare_apply_renders_a_library_first_manifest() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
+    std::env::set_var("KIBANA_TOKEN", "secret-value");
+
+    install_library_server(&home, "https://central-kibana/mcp");
+
+    // Exactly the shape `init` writes: an empty `[servers]` table, every server
+    // named by the default toolset, definitions in the library.
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [servers]\n\
+         [toolsets.default]\nservers = [\"kibana\"]\n",
+    )
+    .unwrap();
+
+    let mut bare = apply_args("default");
+    bare.profile = None; // the point of the test: no --toolset
+    apply::run(&bare, Some(&proj)).unwrap();
+
+    let cfg = fs::read_to_string(home.join(".claude.json")).unwrap();
+    assert!(
+        cfg.contains("kibana") && cfg.contains("central-kibana"),
+        "a bare apply must render what the toolset names: {cfg}"
+    );
+
+    std::env::remove_var("KIBANA_TOKEN");
+    std::env::remove_var("AGENTSTACK_HOME");
+    std::env::remove_var("HOME");
+}
+
 #[test]
 fn inline_server_overrides_library_in_apply() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());

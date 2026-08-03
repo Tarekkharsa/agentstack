@@ -454,7 +454,13 @@ impl Report {
                 "not ready",
                 "set up but never activated — `agentstack use --write` makes it live",
             ),
-            _ => ("ready", "trusted, activated, and verified"),
+            // "reviewed", not "trusted": the verdict WORD is what the JSON and
+            // this line must share, and it still does. The gloss is ordinary
+            // copy, and `trust` is a mechanism noun the ordinary journey may
+            // not print (`tests/ordinary_journey_vocab.rs`). This clause was
+            // simply unreachable there until the readiness fix: a library-first
+            // manifest always fell out at "empty" first.
+            _ => ("ready", "reviewed, activated, and verified"),
         };
         Some(format!("{}: {}", word, gloss).to_string())
     }
@@ -1150,14 +1156,7 @@ fn run_checks(
     // Coverage term for `readiness` (F11): does this project declare anything
     // at all? Every inert and executable kind counts — a project can be a pure
     // instruction or settings setup — so "ready" is never reported over a husk.
-    report.declares_anything = Some(
-        !manifest.skills.is_empty()
-            || !manifest.servers.is_empty()
-            || !manifest.instructions.is_empty()
-            || !manifest.settings.is_empty()
-            || !manifest.hooks.is_empty()
-            || !manifest.extensions.is_empty(),
-    );
+    report.declares_anything = Some(manifest.declares_anything());
     report.gitignore = Some(manifest.meta.manages_gitignore());
     let (detected, capable, incapable) =
         crate::commands::mode_switch::bridge_coverage(&ctx.registry);
@@ -1168,7 +1167,15 @@ fn run_checks(
     });
 
     report.section("Secrets");
-    let refs = manifest.referenced_secrets();
+    // Library-resolved, like the render is. The manifest's own answer sees
+    // `[servers]` only, so on a library-first project — every `init` import —
+    // this section reported "no secrets referenced" over a lifted `${TOKEN}`
+    // that had no value anywhere. "What still needs a value" is the question
+    // this section exists to answer, so it must not be blind to the servers the
+    // project actually uses.
+    let libctx = ctx.library_ctx();
+    let refs =
+        crate::resolve::effective_referenced_secrets(manifest, &libctx.library, &libctx.lib_home);
     // Varlock health belongs HERE, in the section that already owns secrets,
     // rather than in a check family of its own: it is one more fact about where
     // a `${REF}` comes from. It is also the one layer in the chain that can be
@@ -1365,8 +1372,27 @@ fn run_checks(
         // on-disk values, so an owned server that changed on disk is reported as
         // "refresh the manifest", never as a pending revert of what the app wrote
         // (see render::owned).
+        //
+        // Built through the SAME selection `apply` renders from, not from
+        // `[servers]` alone. Drift is a comparison between what `apply` would
+        // write and what is on disk, so the two must read the manifest
+        // identically or the report is about the difference between two readers
+        // rather than about the disk: with the inline reading, a library-first
+        // manifest made `apply --write` render a server and `doctor` then call
+        // that same server a pending REMOVAL.
+        //
+        // A reference that resolves nowhere falls back to the inline map rather
+        // than failing the run: `doctor` exists to report a broken manifest, and
+        // the reproducibility section below names the unresolvable entry.
+        let libctx = ctx.library_ctx();
         let mut server_map: indexmap::IndexMap<String, crate::manifest::Server> =
-            manifest.servers.clone();
+            crate::render::effective_servers(
+                manifest,
+                &libctx.library,
+                &libctx.lib_home,
+                &crate::render::Selection::All,
+            )
+            .unwrap_or_else(|_| manifest.servers.clone());
         let owned = crate::render::refresh_owned_servers(
             &mut server_map,
             &ctx.registry,

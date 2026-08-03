@@ -188,25 +188,76 @@ struct LibraryCollision {
     incoming: String,
 }
 
-/// Split imported native server names by whether the library can represent
-/// them as one definition file. Native MCP configs commonly use namespaced
-/// identifiers such as `upstash/context7`; changing that identifier during an
-/// import would break references, while treating it as a library path would
-/// escape the library's one-file-per-server contract. Those definitions stay
-/// inline in the project manifest under their original names.
+/// Split imported native server names by whether the library can store them.
+///
+/// Native MCP configs commonly use namespaced identifiers such as
+/// `upstash/context7`, and renaming one during an import would break every
+/// reference to it. The library keeps one definition file per server and now
+/// derives that file name through [`crate::resolve::library_file_stem`], which
+/// encodes anything a path cannot carry — so a namespaced name is stored under
+/// its own name like any other.
+///
+/// The split survives for what encoding cannot fix: a name with no printable
+/// form, or one whose encoded file name would not fit. Those definitions stay
+/// inline in the project manifest, under their original names, rather than
+/// failing the whole import.
 fn partition_library_servers(
     servers: &IndexMap<String, Server>,
 ) -> (IndexMap<String, Server>, IndexMap<String, Server>) {
     let mut library = IndexMap::new();
     let mut inline = IndexMap::new();
     for (name, server) in servers {
-        if super::lib::valid_lib_name(name) {
+        if super::lib::valid_lib_server_name(name).is_ok() {
             library.insert(name.clone(), server.clone());
         } else {
             inline.insert(name.clone(), server.clone());
         }
     }
     (library, inline)
+}
+
+/// AgentStack's own MCP server. It is the one import a fresh project almost
+/// certainly wants, so it is what the lean answer keeps.
+const SELF_SERVER: &str = "agentstack";
+
+/// Which imported servers this project's default toolset names.
+///
+/// The answer is the project's, not the machine's — see the call site for why
+/// the two were conflated. Returns every name unless a person chooses the lean
+/// set, which keeps the historical behaviour for scripts and CI.
+///
+/// The question is skipped where it cannot mean anything: `--project-servers`
+/// has no library to leave the rest in, a single server is not a choice, and an
+/// import without AgentStack's own server has no obvious lean set to offer.
+fn choose_toolset_servers(
+    servers: &IndexMap<String, Server>,
+    args: &InitArgs,
+) -> Result<Vec<String>> {
+    let all: Vec<String> = servers.keys().cloned().collect();
+    if args.project_servers || servers.len() < 2 || !servers.contains_key(SELF_SERVER) {
+        return Ok(all);
+    }
+    let lean_label = format!("just {SELF_SERVER} — add any of the others later");
+    let all_label = format!(
+        "all {} — this project declares the whole machine",
+        all.len()
+    );
+    let answer = crate::util::confirm::choose(
+        &format!(
+            "\n{}  Which of these does this project use?\n      {}\n      {}",
+            "🎯".dimmed(),
+            "All of them are imported either way — this sets the default toolset only.".dimmed(),
+            "What you leave out stays in your library and in each CLI's own config.".dimmed()
+        ),
+        &[("lean", lean_label.as_str()), ("all", all_label.as_str())],
+    )?;
+    // `choose` returns None for a bare Enter, an unreadable answer, and every
+    // non-interactive run alike, and its contract says None must leave existing
+    // behaviour untouched. Existing behaviour is the full set.
+    Ok(match answer.as_deref() {
+        Some("lean") => vec![SELF_SERVER.to_string()],
+        _ => all,
+    })
 }
 
 /// Explain the exceptional placement before the consent gate. The important
@@ -507,6 +558,10 @@ fn run_gated(args: &InitArgs, manifest_dir: Option<&Path>, interactive: bool) ->
                 targets: Vec::new(),
                 profile: None,
                 scope: None,
+                // `--project-servers` shapes the import, not the writing, so it
+                // does not make the run scripted (it is absent from `bare`
+                // above on purpose) — but the wizard must still honour it.
+                project_servers: args.project_servers,
             };
             return super::setup::run(&wizard, manifest_dir);
         }
@@ -1460,6 +1515,15 @@ version = 1
     } else {
         print!("{}", render_import_servers(&servers));
     }
+    // "What does this machine have?" and "what does this project use?" are two
+    // questions, and `init` used to answer only the first: every detected
+    // server went into the project's default toolset, so a first manifest read
+    // as a dump of the laptop rather than as this project. The definitions are
+    // imported either way — this choice sets the TOOLSET alone. What is left
+    // out stays in the library for any project to name, and stays in each CLI's
+    // own global config, which `apply` never writes. So a lean answer takes
+    // nothing away from the machine.
+    let toolset_servers = choose_toolset_servers(&servers, args)?;
     // Lossy imports are explained, never silent: name each entry the import
     // left behind, why, and that nothing was deleted. Names come from other
     // CLIs' config files — hostile input; sanitize before display.
@@ -1616,7 +1680,7 @@ version = 1
 
     let (manifest_servers, profiles) = if library_import {
         let default_toolset = crate::manifest::Profile {
-            servers: servers.keys().cloned().collect(),
+            servers: toolset_servers.clone(),
             ..Default::default()
         };
         let mut profiles = IndexMap::new();
@@ -2224,6 +2288,16 @@ fn render_import_summary(
         );
     }
     out.push_str("  Undo:      agentstack restore --last --write\n");
+    // `apply --write` stays the scripted close's next step, and it is now a real
+    // one: the default selection reads the toolsets, so the bare `apply` this
+    // line names renders the library-first manifest the import just wrote
+    // instead of reporting "no servers selected" over it.
+    //
+    // The live lane's own next step — registering the bridge — is deliberately
+    // NOT named here. `gateway` and `trust` are mechanism nouns the ordinary
+    // journey must not print (witnessed by `tests/ordinary_journey_vocab.rs`),
+    // and the offer belongs to the interactive wizard, which asks for it in
+    // plain words. `doctor` below is where an unfinished setup gets diagnosed.
     out.push_str("  Next:      agentstack apply --write   (write the files your tools read)\n");
     out.push_str("             agentstack doctor          (check the result)\n");
     // Toolsets are deliberately NOT offered here (review finding H3). Import is
@@ -2345,8 +2419,18 @@ fn render_managed_files(
         ));
     }
     if !destinations.is_empty() {
+        // "Will manage" is a claim about what `apply` renders, and the routing
+        // block printed straight after this one says several of these
+        // capabilities are served live instead. Both are true — `apply` is the
+        // rendered lane's command and renders everything it is asked to
+        // (docs/design/automatic-delivery.md, "What 'default' means here") — but
+        // side by side and unqualified they read as a contradiction. Naming
+        // `apply` as a choice rather than as an inevitability is what separates
+        // them.
         out.push_str(
-            "      Native files are written by the next `agentstack apply --write`, not now.\n",
+            "      None of these is written now, and none is written unless you ask:\n\
+             \x20     `agentstack apply --write` renders them; the routing below says what\n\
+             \x20     reaches each tool live instead.\n",
         );
     }
     out
@@ -2636,7 +2720,15 @@ mod tests {
         assert!(out.contains("Claude Code · MCP servers (this project)"));
         assert!(out.contains(".codex/config.toml"));
         assert!(out.contains("Codex CLI · MCP servers + settings (this project)"));
-        assert!(out.contains("written by the next `agentstack apply --write`"));
+        // The import writes none of them, and neither does anything else until
+        // the user asks. This block sits directly above the routing block that
+        // says what reaches each tool live instead, and the old wording ("Native
+        // files are written by the next `agentstack apply --write`") made the
+        // render read as scheduled — so the two blocks contradicted each other.
+        // `apply` is unchanged and still renders everything it is asked to; only
+        // the claim that it is coming anyway is gone.
+        assert!(out.contains("none is written unless you ask"));
+        assert!(out.contains("agentstack apply --write"));
     }
 
     /// Stage 1.2: the scripted import ends with ONE concise summary carrying

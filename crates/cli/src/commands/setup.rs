@@ -17,7 +17,7 @@ use owo_colors::OwoColorize;
 use crate::cli::{ApplyArgs, ConnectArgs, DoctorArgs, InitArgs, InstallArgs, LockArgs, SetupArgs};
 use crate::lock::Lock;
 use crate::manifest::load::MANIFEST_FILE;
-use crate::manifest::{validate_with_context, Manifest};
+use crate::manifest::validate_with_context;
 use crate::render::resolve_targets;
 use crate::scope::Scope;
 use crate::secret::SecretSources;
@@ -87,7 +87,10 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
                 // and the shell is interactive (P2); setup is interactive.
                 secrets: None,
                 no_keychain: false,
-                project_servers: false,
+                // Carried from the invocation, not hardcoded: a bare
+                // `agentstack init` routes here, so hardcoding `false` made
+                // `--project-servers` a flag that parsed and then did nothing.
+                project_servers: args.project_servers,
                 // The wizard's write gate lives inside `run_for_setup` (which
                 // never re-checks the TTY gate), so this field is irrelevant
                 // here.
@@ -1249,10 +1252,27 @@ fn run_automatic(
 /// this offer and one failure message.
 fn offer_bridge() -> Result<()> {
     const CONNECT_LATER: &str = "agentstack gateway connect --all --write";
+    // The consequence belongs IN the question. This prompt keeps `confirm`'s
+    // no-is-the-default contract — it is a machine-wide write, and the design
+    // law automates everything except the yes — but a bare Enter used to
+    // decline the one step the live lane depends on, with nothing on screen
+    // saying so, and the wizard then closed with "Setup complete".
+    println!(
+        "\n  {} Until this is registered, nothing is served live — the capabilities",
+        "·".dimmed()
+    );
+    println!(
+        "    {}",
+        "above stay pinned in the manifest and reach no CLI.".dimmed()
+    );
     let register = crate::util::confirm::is_interactive()
         && crate::util::confirm::confirm(
-            "\n  Register the agentstack bridge in your installed CLIs now?",
+            "  Register the agentstack bridge in your installed CLIs now?",
         )?;
+    // Whether the registration happened is deliberately NOT returned: the close
+    // asks the machine (`gateway_connected`) instead of remembering this
+    // answer, so a bridge registered earlier, or by `gateway connect` in
+    // another terminal, reads as done rather than as declined.
     if !register {
         println!("  {} register it later with:", "·".dimmed());
         println!("    {}", CONNECT_LATER.bold());
@@ -1327,12 +1347,22 @@ fn cli_config_touched(files: &[(String, String)]) -> bool {
 }
 
 fn is_cli_config_path(path: &str) -> bool {
+    // Everything under agentstack's own home is bookkeeping, whatever it is
+    // called: the library the import now writes into, the trust store, the
+    // history ledger, the backups. This clause is why the rule is not a
+    // filename denylist alone — the library inversion added a writer whose
+    // files are named `library.toml` and `<server>.toml`, so the close reported
+    // a CLI called "library" and told the user to restart CLIs that had not
+    // been touched.
+    if Path::new(path).starts_with(crate::util::paths::agentstack_home()) {
+        return false;
+    }
     let name = Path::new(path)
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("");
-    // agentstack's own artifacts are the exception; everything else written
-    // during setup is a CLI-side file the harness reads at startup.
+    // The project-side artifacts are the other exception; everything else
+    // written during setup is a CLI-side file the harness reads at startup.
     name != MANIFEST_FILE && name != ".env" && name != ".gitignore" && name != "agentstack.lock"
 }
 
@@ -1382,12 +1412,22 @@ fn print_change_summary(
     // Secrets: re-derive where each referenced ref resolves now (the resolver is
     // the source of truth; we never stored a value to echo).
     let sources = SecretSources::detect(&ctx.dir);
-    let secrets: Vec<(String, String)> = ctx
-        .loaded
-        .manifest
-        .referenced_secrets()
-        .into_iter()
-        .filter_map(|name| sources.source_of(&name).map(|s| (name, s.to_string())))
+    // Library-resolved: the import's lifted `${REF}`s live in the library
+    // definition, not in `[servers]`, so the manifest's own answer is empty for
+    // exactly the secrets this run just stored.
+    let libctx = ctx.library_ctx();
+    let referenced = crate::resolve::effective_referenced_secrets(
+        &ctx.loaded.manifest,
+        &libctx.library,
+        &libctx.lib_home,
+    );
+    let secrets: Vec<(String, String)> = referenced
+        .iter()
+        .filter_map(|name| {
+            sources
+                .source_of(name)
+                .map(|s| (name.clone(), s.to_string()))
+        })
         .collect();
     let keychain_secrets: Vec<String> = secrets
         .iter()
@@ -1407,10 +1447,7 @@ fn print_change_summary(
     // Referenced `${REF}`s that still resolve nowhere on this machine — the
     // skip store, a declined prompt, or an unreachable keychain. The close
     // must name them, or "what still needs a value" is buried in scrollback.
-    let still_needed: Vec<String> = ctx
-        .loaded
-        .manifest
-        .referenced_secrets()
+    let still_needed: Vec<String> = referenced
         .into_iter()
         .filter(|name| sources.source_of(name).is_none())
         .collect();
@@ -1422,13 +1459,38 @@ fn print_change_summary(
     // ledger — hence the explicit ORs).
     let cli_config_changed = cli_config_touched(&files) || seeded_house_rules || guard_wired;
 
-    println!("\n{} Setup complete.", "✓".green());
+    // "Complete" is a claim about delivery, not about files written. On the
+    // live lane nothing reaches a CLI until the bridge is registered, and the
+    // wizard used to close with `✓ Setup complete.` over a machine where the
+    // offer had just been declined with a bare Enter.
+    //
+    // Asked of the machine rather than of the answer given a moment ago, so a
+    // bridge registered earlier, or by `gateway connect`, reads as done.
+    let target_ids: Vec<String> = ctx.registry.ids().map(str::to_string).collect();
+    let plan =
+        crate::delivery::Plan::build(&ctx.loaded.manifest.delivery, &ctx.registry, &target_ids);
+    let live_lane_unwired =
+        plan.has_dynamic_lane() && !super::overview::gateway_connected(ctx, &target_ids);
+    if live_lane_unwired {
+        println!("\n{} Setup imported, not yet delivering.", "·".dimmed());
+        println!(
+            "  {}",
+            "The bridge is not registered, so nothing is served live yet:".dimmed()
+        );
+        println!("    {}", "agentstack gateway connect --all --write".bold());
+    } else {
+        println!("\n{} Setup complete.", "✓".green());
+    }
     print!(
         "{}",
         render_setup_facts(
             &ctx.loaded.manifest_path.display().to_string(),
             &clis_updated(&files),
-            ctx.loaded.manifest.servers.len(),
+            // Named, not defined-inline: the import writes its servers into the
+            // library and references them from `[toolsets.default]`, so reading
+            // `[servers]` closed the wizard with "0 MCP servers" over the six it
+            // had just pinned.
+            ctx.loaded.manifest.declared_server_names().len(),
             ctx.loaded.manifest.skills.len(),
             &still_needed,
         )
@@ -1572,11 +1634,10 @@ pub(crate) struct Preflight {
 /// returning a summary so the wizard can decide what to do next. Read-only —
 /// touches no config. (Moved here from the retired `bootstrap` command.)
 pub(crate) fn preflight(ctx: &super::Context, target_ids: &[String]) -> Result<Preflight> {
-    let manifest = &ctx.loaded.manifest;
     let validation_errors = print_validation(ctx);
     print_adapters(ctx, target_ids);
     print_skills(ctx)?;
-    let missing_secrets = print_secrets(manifest, &ctx.dir);
+    let missing_secrets = print_secrets(ctx);
     Ok(Preflight {
         validation_errors,
         missing_secrets,
@@ -1680,15 +1741,23 @@ fn print_skills(ctx: &super::Context) -> Result<usize> {
     Ok(issues)
 }
 
-fn print_secrets(manifest: &Manifest, dir: &Path) -> Vec<String> {
+fn print_secrets(ctx: &super::Context) -> Vec<String> {
     println!("\n{}", "Secrets".bold());
-    let refs = manifest.referenced_secrets();
+    // Library-resolved, for the reason in `effective_referenced_secrets`: the
+    // inline reading printed "no secrets referenced" in the same wizard run
+    // that had just lifted a live token into `.env`.
+    let libctx = ctx.library_ctx();
+    let refs = crate::resolve::effective_referenced_secrets(
+        &ctx.loaded.manifest,
+        &libctx.library,
+        &libctx.lib_home,
+    );
     if refs.is_empty() {
         println!("  {} no secrets referenced", "✓".green());
         return Vec::new();
     }
 
-    let sources = SecretSources::detect(dir);
+    let sources = SecretSources::detect(&ctx.dir);
     let mut missing = Vec::new();
     for name in refs {
         match sources.source_of(&name) {

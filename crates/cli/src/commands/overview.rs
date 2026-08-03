@@ -1057,7 +1057,7 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
     let mode = detect_mode(&ctx, &target_ids);
     let trust_relevant = gateway || matches!(mode, Mode::ZeroFiles | Mode::CleanAtRest);
 
-    let has_capabilities = !m.skills.is_empty() || !m.servers.is_empty();
+    let has_capabilities = !m.skills.is_empty() || !m.declared_server_names().is_empty();
     // "Is anything on disk for these targets?" — the signal that actually
     // distinguishes "imported but not applied" from "set up and resting".
     // `locked` does not: a static project stays unlocked until `use`/`lock` runs.
@@ -1145,7 +1145,10 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
         intake,
         manifest_path,
         manifest: ManifestState::Loaded(Box::new(ProjectFacts {
-            servers: m.servers.len(),
+            // Named, not defined-inline: a library-first manifest keeps its
+            // servers in `[toolsets.*]`, and counting `[servers]` reported
+            // "0 servers" one line under six pinned ones.
+            servers: m.declared_server_names().len(),
             skills: m.skills.len(),
             instructions: m.instructions.len(),
             settings: m.settings.len(),

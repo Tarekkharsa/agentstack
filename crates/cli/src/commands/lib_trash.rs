@@ -551,7 +551,16 @@ pub fn restore(lib_home: &Path, id: &str, replace: bool, write: bool) -> Result<
         .kind()
         .with_context(|| format!("trash entry '{id}' has an unknown kind"))?;
     let name = entry.record.name.clone();
-    plain_component(&name, "name")?;
+    // Server names are not path components (`upstash/context7` is a real one);
+    // their body path is derived through `library_server_path`, which encodes
+    // the name, so the plain-name rule would refuse a legitimate restore. Every
+    // other kind still derives a directory from the name verbatim and keeps it.
+    // Containment is re-checked below either way.
+    if kind != Kind::Server {
+        plain_component(&name, "name")?;
+    } else if name.is_empty() {
+        bail!("refusing to restore: the trash record has an empty name");
+    }
 
     // The body field names a fixed location inside the record directory. It is
     // an enum written by `stash`, not a path — treat anything else as a record
@@ -608,7 +617,7 @@ pub fn restore(lib_home: &Path, id: &str, replace: bool, write: bool) -> Result<
     let body_dest = entry.body_path().map(|_| match kind {
         Kind::Skill => lib_home.join("skills").join(&name),
         Kind::Extension => lib_home.join("extensions").join(&name),
-        Kind::Server => lib_home.join("servers").join(format!("{name}.toml")),
+        Kind::Server => crate::resolve::library_server_path(lib_home, &name),
         Kind::Hook => lib_home.join("hooks").join(format!("{name}.toml")),
     });
     if let Some(dest) = body_dest.as_ref() {
@@ -903,20 +912,19 @@ mod tests {
     /// path — but the record it leaves is inert, and `restore` refuses it by
     /// name rather than acting on it. The pair is what makes the entry safe:
     /// it can be listed and emptied, never put back.
+    ///
+    /// Stated with a SKILL, because a skill's body directory is still named
+    /// verbatim from the record. Servers took a different route — see
+    /// [`a_stashed_server_name_restores_inside_the_library`].
     #[test]
     fn a_stashed_unsafe_name_is_inert_and_never_restorable() {
         let tmp = assert_fs::TempDir::new().unwrap();
         let lib = tmp.path();
         let mut record = blank_record();
-        record.server = Some(LibraryServer {
-            name: "../../etc/x".into(),
-            checksum: None,
-            version: None,
-            provenance: None,
-        });
-        // No body: `valid_lib_name` refuses to target a file for such a name,
-        // so a removal never has bytes to move here.
-        let entry = stash(lib, Kind::Server, "../../etc/x", None, record).unwrap();
+        record.skill = Some(skill("../../etc/x"));
+        // No body: `valid_lib_name` refuses to target a directory for such a
+        // name, so a removal never has bytes to move here.
+        let entry = stash(lib, Kind::Skill, "../../etc/x", None, record).unwrap();
         assert!(!entry.id.contains('/'), "{}", entry.id);
         assert!(entry.dir.starts_with(trash_home(lib)));
 
@@ -927,6 +935,41 @@ mod tests {
         // And it can be cleared.
         empty(lib, Some(&entry.id), true).unwrap();
         assert!(!entry.dir.exists());
+    }
+
+    /// A server name is not a path component — `upstash/context7` is a real
+    /// one — so `restore` cannot refuse servers by the plain-name rule without
+    /// refusing legitimate entries. The safety it keeps instead is the one that
+    /// matters: the body path is derived by `library_server_path`, which
+    /// encodes the name, so even a traversal string lands inside `lib/servers`.
+    #[test]
+    fn a_stashed_server_name_restores_inside_the_library() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let lib = tmp.path();
+        for name in ["upstash/context7", "../../etc/x"] {
+            let mut record = blank_record();
+            record.server = Some(LibraryServer {
+                name: name.into(),
+                checksum: None,
+                version: None,
+                provenance: None,
+            });
+            let live = crate::resolve::library_server_path(lib, name);
+            std::fs::create_dir_all(live.parent().unwrap()).unwrap();
+            std::fs::write(&live, "type = \"http\"\nurl = \"https://k/mcp\"\n").unwrap();
+            assert!(
+                live.starts_with(lib.join("servers")),
+                "the derived path never leaves the library: {}",
+                live.display()
+            );
+
+            let entry = stash(lib, Kind::Server, name, Some(&live), record).unwrap();
+            let outcome = restore(lib, &entry.id, false, true).unwrap();
+            assert!(outcome.written, "'{name}' must be restorable");
+            assert_eq!(outcome.body_dest.as_deref(), Some(live.as_path()));
+            assert!(live.exists(), "'{name}' body is back in the library");
+            assert!(Library::load(lib).unwrap().get_server(name).is_some());
+        }
     }
 
     /// F22: the two name rules are ONE rule. A name the trash would refuse to
