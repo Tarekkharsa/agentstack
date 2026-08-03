@@ -452,7 +452,7 @@ args = ["-lc", "cd /path/to/project &amp;&amp; exec my-server"]</code></pre>
 <pre class="block"><code>error: manifest has validation errors — nothing was written; fix the ✗ above,
 then re-run `agentstack apply --write`</code></pre>
 <p>Structural problems, listed above the line with their own <code>↳</code> fixes. Nothing was written, and the command exits nonzero.</p>
-<pre class="block"><code>error: no profile 'dev' in manifest — check the `[profiles.*]` tables there for
+<pre class="block"><code>error: no profile 'dev' in manifest — check the `[toolsets.*]` tables there for
 the exact name</code></pre>
 <p>The toolset name does not exist. <code>agentstack use --list</code> prints the declared ones with a readiness flag for each.</p>
 <p><strong><code>⚠ server 'github' is defined differently by 1 other CLI — kept the first definition imported (the other stays in its CLI's own config)</code></strong></p>

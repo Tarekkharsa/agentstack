@@ -321,7 +321,7 @@ above is the checklist the change has to pass.
 The model is never sniffed, and never guessed. It comes from exactly two
 declarations, in this order:
 
-1. **An explicitly selected toolset's `model`.** `[profiles.<name>] model =
+1. **An explicitly selected toolset's `model`.** `[toolsets.<name>] model =
    "opus"`, when that toolset is the one the command names (`run <cli> --toolset
    backend`, `use backend`, `apply --profile backend`,
    `instructions --toolset backend`). *(The manifest key is still `profiles`;

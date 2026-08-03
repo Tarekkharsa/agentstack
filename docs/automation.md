@@ -126,7 +126,7 @@ the digest back to apply.
 | `agentstack edit-profile` | `profiles-edit-batch-v1` | one preview + one digest over a batch of membership edits |
 | `agentstack toolset rename` | `toolset-rename-v1` | renames the toolset everywhere it appears; memberships kept |
 | `agentstack toolset delete` | `toolset-delete-v1` | deletes the toolset; the servers and skills in it stay declared |
-| `agentstack set-mode` | `set-mode-v1` | switches the project's delivery mode behind the same preview → digest → apply shape |
+| `agentstack set-mode` | `set-mode-v1` — **superseded, refuses** | the Mode axis retired; delivery is routed, `agentstack status` reports it, and `agentstack uninstall` removes rendered files |
 | the managed-`.gitignore` prompt on `apply` / `use --write` | `gitignore-opt-out-v1` | records a durable per-project opt-out from the managed block |
 | `agentstack remove-from-library` | `library-remove-v1` | machine-wide, not project; recoverable from `lib/.trash` |
 | `agentstack remove-capability` | `manifest-remove-v1` | removes a project definition and memberships, then re-locks and re-renders; library untouched |

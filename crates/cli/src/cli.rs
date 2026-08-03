@@ -509,25 +509,21 @@ never strip a block a team may have committed."
     )]
     SetGitignore(PanelSetGitignoreArgs),
 
-    /// Switch this project's delivery mode (panel action; digest-bound).
+    /// Retired: delivery is routed, not a mode you pick.
     ///
-    /// Previews the real plan — what comes off disk, what is registered, who
-    /// stops being served — then applies it. The mode is derived from disk, so
-    /// the switch changes the facts the derivation reads; see the module doc.
+    /// It refuses and names the replacement. The Mode axis retired with
+    /// STRATEGY.md v3; `set-mode-v1` is in `ui_contract::SUPERSEDED` so a
+    /// panel can tell a retired picker from a binary too old to have one.
     #[command(
         name = "set-mode",
         hide = true,
         after_help = "\
-Machine surface. Changes how this project's capabilities reach your CLIs:
-`static` renders configs to disk, `clean-at-rest` keeps them only inside a
-session, `zero-files` serves them live through the gateway. The switch to a
-nothing-at-rest mode removes everything this manifest rendered (undo:
-`agentstack restore --last`); zero-files also registers the bridge machine-wide
-and requires the project to be trusted first — trust is never granted here.
+Retired. AgentStack routes each capability to its lane by kind and harness —
+there is no mode to choose, so this command changes nothing and refuses.
 
-  agentstack set-mode zero-files             review the plan, confirm at the prompt
-  agentstack set-mode static --preview       the JSON plan + consent digest
-  agentstack set-mode static --yes --consented <digest>   apply non-interactively"
+  agentstack status                          what delivery decided, per CLI
+  agentstack uninstall                       stop rendering files here
+  agentstack delivery render-locally         keep files where live would work"
     )]
     SetMode(PanelSetModeArgs),
 

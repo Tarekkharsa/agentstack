@@ -328,7 +328,7 @@ return keepUnrefuted(claims, checked)</code></pre>
 <p>The script runs inside a sandboxed interpreter with no filesystem, network, or environment access — the only thing it can do is request governed agent runs through <code>agent()</code>. Everything else is plain computation.</p>
 <h3 id="what-a-role-brings-harness-model-effort">What a role brings: harness, model, effort<a class="hlink" href="#what-a-role-brings-harness-model-effort" aria-label="Link to this section">#</a></h3>
 <p>A role is a toolset, and a toolset may declare <code>model</code> and <code>effort</code> alongside its <code>harness</code>:</p>
-<pre class="block"><code>[profiles.reader]
+<pre class="block"><code>[toolsets.reader]
 harness = "codex"
 model = "gpt-5.5"
 effort = "high"</code></pre>

@@ -16,9 +16,9 @@ happens when the image starts, or which of AgentStack's guarantees survive the
 trip. Those are the three questions here, and the honest answers are narrower
 than "your setup, containerized" would suggest.
 
-## What a package artifact is
+## What an image is
 
-**A package artifact is one container image: a runner base image plus exactly
+**An image is one container image: a runner base image plus exactly
 one added layer that carries one toolset's pinned capability bytes.**
 
 It is built by `agentstack image`, on the user's own machine, with the user's
@@ -308,7 +308,7 @@ Named here rather than discovered later.
   instruction members are still **carried** under `/agentstack/instructions/`
   and named in the descriptor, so nothing is silently dropped — they are
   present and uncompiled, which is exactly what the descriptor says.
-- **Hooks and extensions never enter a package artifact.** They are executable
+- **Hooks and extensions never enter an image.** They are executable
   kinds and keep the full consent ceremony in a package or out of one; an image
   is not a consent surface, and building one is not a review.
 - **No image is pushed, tagged remotely, signed, or registered.** `agentstack
@@ -321,10 +321,11 @@ Named here rather than discovered later.
 ## See also
 
 - [`../ENFORCEMENT.md`](../ENFORCEMENT.md) — the authoritative posture and
-  enforcement matrix, including the §"Packaged images" section this document
+  enforcement matrix, including the §"Images" section this document
   is the design behind.
 - [`pinned-serving-and-library-drift.md`](pinned-serving-and-library-drift.md)
   — the pinned-serving rule this feature applies to a third reader.
 - [`package-layer.md`](package-layer.md) — a *package* is a library
-  composition; a *package artifact* is the image built here. Two nouns, one
-  unfortunate word, kept distinct on purpose.
+  composition, and that is now the only thing the word means. The artifact
+  built here is only ever an **image** (TODO.md item 9): one word for one
+  thing, so a reader never has to work out which sense is meant.

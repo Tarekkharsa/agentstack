@@ -37,8 +37,8 @@ CLI's own behaviour. Switching it changes only *where the bytes go* — never wh
 you trust or what your policy allows.
 
 The older per-project delivery modes (`static`, `clean-at-rest`, `zero-files`)
-still exist behind `agentstack set-mode` and the wizard's "more control" path;
-they are no longer the way delivery is chosen. See
+are readings of a project's current shape, not choices: `agentstack set-mode`
+is retired and delivery is routed for you. See
 [delivery modes in concepts](concepts.md) for what each still means, and
 [ARCHITECTURE — operating model](ARCHITECTURE.md#operating-model--choose-the-boundary-you-need)
 for how delivery sits beside selection and isolation.

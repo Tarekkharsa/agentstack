@@ -33,7 +33,7 @@ use crate::resolve::FrozenServer;
 
 /// The one root every AgentStack-contributed byte lands under, inside the
 /// image. Everything below is relative to it — see `docs/design/packaging.md`
-/// §"What a package artifact is" for the layout.
+/// §"What an image is" for the layout.
 pub const PAYLOAD_ROOT: &str = "/agentstack";
 
 /// The payload's directory name inside the build context.
@@ -64,7 +64,7 @@ pub const ENTRYPOINT_SH: &str = r#"#!/bin/sh
 # interpolated into this script. See docs/design/packaging.md.
 #
 # Secrets are NEVER baked into an image. This checks that every ${REF} the
-# packaged toolset declares is present in THIS run's environment, and refuses
+# toolset in this image declares is present in THIS run's environment, and refuses
 # to start the harness if any is missing.
 set -eu
 
@@ -94,7 +94,7 @@ exec "$@"
 
 /// What kind of member this is. The three kinds a toolset can compose;
 /// executable kinds (hooks, extensions) never appear, by construction — they
-/// are not selectable by a toolset and never enter a package artifact.
+/// are not selectable by a toolset and never enter an image.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemberKind {
     Skill,
@@ -244,7 +244,7 @@ pub fn resolve_toolset(manifest: &Manifest, requested: Option<&str>) -> Result<S
             match (names.next(), names.next()) {
                 (Some(only), None) => Ok(only.clone()),
                 (Some(_), Some(_)) => anyhow::bail!(
-                    "this project declares several toolsets — name the one to package with \
+                    "this project declares several toolsets — name the one to build an image from, with \
                      `--toolset <name>`"
                 ),
                 _ => anyhow::bail!(
@@ -310,8 +310,12 @@ pub fn plan(
 ) -> Result<ImagePlan> {
     // The toolset name becomes a path segment (the context dir) and a label
     // value, so it passes the shipped name contract before either.
-    crate::text::validate_name(toolset)
-        .with_context(|| format!("refusing to package toolset '{}'", toolset.escape_debug()))?;
+    crate::text::validate_name(toolset).with_context(|| {
+        format!(
+            "refusing to build an image for toolset '{}'",
+            toolset.escape_debug()
+        )
+    })?;
 
     let desc = registry
         .get(harness)

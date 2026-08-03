@@ -592,8 +592,8 @@ kind and the CLI it is going to. What the lanes *are*:
   served live** — never "0 files": the manifest, the lockfile, and any managed
   house-rules region remain.
 
-The three older per-project modes still exist behind `agentstack set-mode` and
-the wizard's "more control" path, and are no longer how delivery is decided:
+The three older per-project modes are readings of a project's current shape,
+not settings. `agentstack set-mode` is retired and delivery is routed for you:
 
 - **static** — artifacts on disk, kept out of git by a managed
   `.gitignore` block; pass `--no-gitignore` to commit them instead.
@@ -627,8 +627,9 @@ older modes, unchanged — **static** takes the render path; **clean-at-rest**
 renders nothing and pins the lockfile, teaching the `session start`/`session
 end` rhythm; **zero-files** renders nothing and offers the bridge. A project
 that already has rendered files keeps its render path in a scripted run: the
-files are a fact, and un-rendering stays the explicit `set-mode` act. Bare
-`agentstack` reports the project's derived mode on its `Mode` line.
+files are a fact, and un-rendering stays the explicit `agentstack uninstall`
+act. Bare `agentstack` no longer prints a `Mode` line — the `Delivery` lines
+report what the planner actually did, per CLI.
 
 The managed `.gitignore` block is anchored to **outcomes, not declarations**: an
 entry exists only for a file agentstack actually wrote or still manages, so a
@@ -1826,7 +1827,7 @@ you need the exact verb, flag, or subcommand.
 - **`uninstall`** _(hidden)_ — Remove everything AgentStack manages, previewing first — flags `--scope/--write/--verbose/--keep-home`
 - **`create-profile`** _(hidden)_ — Fixed-argv alias of `agentstack toolset create` (panel action) — flags `--name/--skill/--server/--preview/--yes/--consented/--allow-unresolved`
 - **`set-gitignore`** _(hidden)_ — Record whether this project manages its `.gitignore` block (panel action; digest-bound) — flags `--enabled/--preview/--yes/--consented/--allow-unresolved`
-- **`set-mode`** _(hidden)_ — Switch this project's delivery mode (panel action; digest-bound) — flags `--preview/--yes/--consented/--allow-unresolved`
+- **`set-mode`** _(hidden)_ — Retired: delivery is routed, not a mode you pick — flags `--preview/--yes/--consented/--allow-unresolved`
 - **`edit-profile`** _(hidden)_ — Change one toolset's membership as a batch (panel action; digest-bound) — flags `--profile/--add-skill/--remove-skill/--add-server/--remove-server/--preview/--yes/--consented/--allow-unresolved`
 - **`rename-profile`** _(hidden)_ — Fixed-argv alias of `agentstack toolset rename` (panel action) — flags `--name/--to/--preview/--yes/--consented/--allow-unresolved`
 - **`delete-profile`** _(hidden)_ — Fixed-argv alias of `agentstack toolset delete` (panel action) — flags `--name/--preview/--yes/--consented/--allow-unresolved`

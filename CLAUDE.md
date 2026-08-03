@@ -2,27 +2,32 @@
 
 ## Where the product stands
 
-The maintainer deliberately reset the strategy on 2026-08-02 and is
-rebuilding the product definition through fresh discussions. Until a new
-strategy is adopted:
+The maintainer reset the strategy documents on 2026-08-02 and adopted a new
+strategy the same day. The operative direction is v3:
 
-- [`STRATEGY.md`](STRATEGY.md) (v2, adopted 2026-07-31) is the last adopted
-  direction and the only strategy reference.
-- [`TODO.md`](TODO.md) is the only ordered work queue; it is intentionally
-  near-empty.
-- `docs/archive/` and git history hold everything older. History, never
-  direction — do not resurrect plans or roadmaps from there.
-- The only live design contract is
-  [`docs/design/automatic-delivery.md`](docs/design/automatic-delivery.md);
-  [`docs/design/README.md`](docs/design/README.md) indexes it.
+- [`STRATEGY.md`](STRATEGY.md) (v3, adopted 2026-08-02) is the operative
+  product strategy and the only strategy reference. It carries the goal, the
+  shape, the invariants, the bar, and the named revisit triggers.
+- [`TODO.md`](TODO.md) is the only ordered work queue, re-seeded from v3's
+  plan. It is the sole sequencing authority; deviations edit the queue, never
+  the strategy.
+- `docs/archive/` and git history hold everything older, including v2.
+  History, never direction — do not resurrect plans or roadmaps from there.
+- The live design contracts are
+  [`docs/design/automatic-delivery.md`](docs/design/automatic-delivery.md)
+  (the delivery contract) and
+  [`docs/design/activation-study.md`](docs/design/activation-study.md) (the
+  instrument for the bar-met moment);
+  [`docs/design/README.md`](docs/design/README.md) indexes them.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and
   [`docs/ENFORCEMENT.md`](docs/ENFORCEMENT.md) describe the shipped system
   and remain authoritative for what the code does and enforces.
 
-Do not start new capability lanes. Propose, discuss, and let the maintainer
-adopt direction explicitly.
+Do not start capability lanes outside v3's shape. The shape is the committed
+set; nothing beyond it starts before the bar is met. Propose, discuss, and
+let the maintainer adopt direction explicitly.
 
-Two standing product constraints survive the reset: the AgentStack CLI is
+Two standing product constraints hold: the AgentStack CLI is
 the primary surface and source of authority (t3code is an optional graphical
 companion calling stable read APIs and fixed actions, never an enforcement
 boundary), and the old embedded dashboard stays removed — never recreate a

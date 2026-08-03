@@ -533,7 +533,7 @@ Structural problems, listed above the line with their own `↳` fixes. Nothing
 was written, and the command exits nonzero.
 
 ```text
-error: no profile 'dev' in manifest — check the `[profiles.*]` tables there for
+error: no profile 'dev' in manifest — check the `[toolsets.*]` tables there for
 the exact name
 ```
 

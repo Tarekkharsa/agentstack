@@ -162,7 +162,7 @@ A role is a toolset, and a toolset may declare `model` and `effort` alongside
 its `harness`:
 
 ```toml
-[profiles.reader]
+[toolsets.reader]
 harness = "codex"
 model = "gpt-5.5"
 effort = "high"

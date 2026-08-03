@@ -75,8 +75,9 @@ when you trust a project.
 **Toolset** — a named subset of the manifest ("backend", "design") you activate
 together. A manifest with no toolsets activates its whole inline set as the
 default, so you only name one when you have more than one. In the manifest file
-a toolset is a `[profiles.<name>]` table — the key kept its original spelling so
-existing manifests keep working.
+a toolset is a `[toolsets.<name>]` table. `[profiles.<name>]` is the older
+spelling and still works, so no existing manifest breaks; it is read, never
+written back.
 
 (The policy *presets* in `examples/policies/` are unrelated — starter
 machine-policy files you copy and edit, not toolsets.)
@@ -260,8 +261,12 @@ house-rules region are still there.
 
 ### The older delivery modes
 
-The three per-project modes below predate the routing and are still switchable
-with `agentstack set-mode`, but they are no longer how delivery is decided:
+The three per-project modes below predate the routing. They are no longer how
+delivery is decided, and they are no longer switchable: `agentstack set-mode`
+is retired. They survive only as *readings* of what a project currently looks
+like, which `doctor --json` still reports. To stop rendering files, use
+`agentstack uninstall`; to keep files where the live channel would have worked,
+use `agentstack delivery render-locally`.
 
 - **static** — rendered files sit on disk, kept out of git by a
   managed `.gitignore` block. Works however you launch your tools, since the

@@ -274,7 +274,8 @@ pub(crate) fn remove_entry(text: &str, kind: &str, name: &str) -> Result<String>
     if let Some(tbl) = doc.get_mut(kind).and_then(|i| i.as_table_mut()) {
         tbl.remove(name);
     }
-    if let Some(profiles) = doc.get_mut("profiles").and_then(|i| i.as_table_mut()) {
+    let key = super::add::toolsets_key(&doc);
+    if let Some(profiles) = doc.get_mut(key).and_then(|i| i.as_table_mut()) {
         for (_, item) in profiles.iter_mut() {
             if let Some(arr) = item
                 .as_table_mut()
@@ -363,7 +364,7 @@ mod tests {
     }
 }
 
-/// Delete a whole `[profiles.<name>]` table.
+/// Delete a whole `[toolsets.<name>]` table.
 ///
 /// Text-level like every other manifest mutation in this crate: the manifest is
 /// a file a human writes, so comments, key order and formatting outside the
@@ -371,8 +372,9 @@ mod tests {
 /// reformat the file.
 pub(crate) fn remove_profile_entry(text: &str, name: &str) -> Result<String> {
     let mut doc: DocumentMut = text.parse().context("parsing manifest as TOML")?;
+    let key = super::add::toolsets_key(&doc);
     let profiles = doc
-        .get_mut("profiles")
+        .get_mut(key)
         .and_then(|i| i.as_table_mut())
         .with_context(|| format!("no toolset '{name}' — this manifest declares none"))?;
     if profiles.remove(name).is_none() {
@@ -381,15 +383,16 @@ pub(crate) fn remove_profile_entry(text: &str, name: &str) -> Result<String> {
     Ok(doc.to_string())
 }
 
-/// Re-key `[profiles.<from>]` to `[profiles.<to>]`, keeping its position.
+/// Re-key `[toolsets.<from>]` to `[toolsets.<to>]`, keeping its position.
 ///
-/// `remove` + `insert` would move the table to the end of `[profiles]`, so the
+/// `remove` + `insert` would move the table to the end of `[toolsets]`, so the
 /// whole table is rebuilt in order with just the one key swapped — a rename
 /// should read as a rename in the diff, not as a delete plus an append.
 pub(crate) fn rename_profile_entry(text: &str, from: &str, to: &str) -> Result<String> {
     let mut doc: DocumentMut = text.parse().context("parsing manifest as TOML")?;
+    let key = super::add::toolsets_key(&doc);
     let profiles = doc
-        .get_mut("profiles")
+        .get_mut(key)
         .and_then(|i| i.as_table_mut())
         .with_context(|| format!("no toolset '{from}' — this manifest declares none"))?;
     if profiles.get(from).is_none() {
@@ -509,8 +512,9 @@ pub(crate) fn remove_from_profile(
     name: &str,
 ) -> Result<String> {
     let mut doc: DocumentMut = text.parse().context("parsing manifest as TOML")?;
+    let key = super::add::toolsets_key(&doc);
     let Some(ptable) = doc
-        .get_mut("profiles")
+        .get_mut(key)
         .and_then(|i| i.as_table_mut())
         .and_then(|t| t.get_mut(profile))
         .and_then(|i| i.as_table_mut())

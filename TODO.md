@@ -14,7 +14,7 @@
 6. [x] Workflows promotion — per-role model/effort, algorithm helpers, security findings closed, un-hidden
 7. [x] Packaging — toolset into a self-run image
 8. [x] The panel — the new surfaces over the existing ui-contract
-9. [ ] Vocabulary, settled 2026-08-02 — three renames before the bar is judged, so the surface being judged is the final one:
+9. [x] Vocabulary, settled 2026-08-02 — three renames before the bar is judged, so the surface being judged is the final one:
       - **`toolsets` becomes the manifest key.** `[toolsets.X]` is real; `[profiles.X]` keeps working as a silent alias so no existing manifest breaks. `--toolset` is primary, `--profile` an accepted older spelling (`run` already does this). Toolset is one of the four ideas; the mechanism noun must not outrank it in the file users read.
       - **"Package" means the library composition only.** The image artifact is only ever called an image (`agentstack image` already). A copy audit removes "package" wherever it means the artifact.
       - **The Mode axis retires.** `status` shows Delivery alone — what happened, per harness, and where. `set-mode` is retired and its ui-contract feature string marked superseded; the contract is versioned for exactly this. Keeping Mode would reintroduce the concept v3 deleted.
