@@ -339,7 +339,7 @@ $ echo $?
 <tr><td><code>agentstack edit-profile</code></td><td><code>profiles-edit-batch-v1</code></td><td>one preview + one digest over a batch of membership edits</td></tr>
 <tr><td><code>agentstack toolset rename</code></td><td><code>toolset-rename-v1</code></td><td>renames the toolset everywhere it appears; memberships kept</td></tr>
 <tr><td><code>agentstack toolset delete</code></td><td><code>toolset-delete-v1</code></td><td>deletes the toolset; the servers and skills in it stay declared</td></tr>
-<tr><td><code>agentstack set-mode</code></td><td><code>set-mode-v1</code></td><td>switches the project's delivery mode behind the same preview → digest → apply shape</td></tr>
+<tr><td><code>agentstack set-mode</code></td><td><code>set-mode-v1</code> — <strong>superseded, refuses</strong></td><td>the Mode axis retired; delivery is routed, <code>agentstack status</code> reports it, and <code>agentstack uninstall</code> removes rendered files</td></tr>
 <tr><td>the managed-<code>.gitignore</code> prompt on <code>apply</code> / <code>use --write</code></td><td><code>gitignore-opt-out-v1</code></td><td>records a durable per-project opt-out from the managed block</td></tr>
 <tr><td><code>agentstack remove-from-library</code></td><td><code>library-remove-v1</code></td><td>machine-wide, not project; recoverable from <code>lib/.trash</code></td></tr>
 <tr><td><code>agentstack remove-capability</code></td><td><code>manifest-remove-v1</code></td><td>removes a project definition and memberships, then re-locks and re-renders; library untouched</td></tr>

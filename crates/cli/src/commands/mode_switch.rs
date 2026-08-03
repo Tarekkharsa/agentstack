@@ -1,8 +1,26 @@
-//! `agentstack set-mode` — switch this project's delivery mode, previewing the
-//! real plan first (`set-mode-v1`).
+//! `agentstack set-mode` — **retired.** The verb refuses; what is left here is
+//! the plan builder and the bridge-coverage reading other commands use.
+//!
+//! The Mode axis retired with STRATEGY.md v3 (TODO.md item 9). Mode asked the
+//! user to choose between static, clean-at-rest and zero-files. v3 deleted the
+//! choice: the delivery planner routes each capability by kind and harness,
+//! and `status` reports what it decided. `set-mode-v1` is listed in
+//! [`crate::ui_contract::SUPERSEDED`], so a panel can tell a binary that
+//! retired the picker from one too old to have it.
+//!
+//! What survives, and why:
+//!
+//! - [`set_mode_preview`] — builds the un-render plan and writes nothing. The
+//!   panel-parity witness reads it, and it is the honest answer to "what would
+//!   come off disk here".
+//! - [`bridge_coverage`] — `doctor`'s `clis` field reads it. One definition,
+//!   so the count a UI shows and the set `gateway connect` reaches agree.
+//!
+//! The apply half is gone; `uninstall` reaches [`super::unrender`] directly.
+//! The description below is kept because the preview still computes it.
 //!
 //! The mode is DERIVED from disk (`overview::mode_from_signals`), never
-//! flagged — so "switching" means changing the facts the derivation reads:
+//! flagged — so a "switch" meant changing the facts the derivation reads:
 //!
 //! - **→ static**: render (the one activation path, `use --write`). The
 //!   gateway registration, if any, stays: it is machine-wide and other
@@ -19,17 +37,15 @@
 //!   READ as zero-files: the honest exit is `agentstack gateway disconnect`,
 //!   a machine-scope decision this project-scope verb must not make.
 //!
-//! Consent follows the house pipeline: `--preview` returns the plan and a
-//! digest over (action, params, manifest bytes); apply requires `--yes
-//! --consented <digest>` (or the interactive confirm) and refuses on drift.
-//! An active session blocks every direction — mid-session the repo's files
-//! belong to the session's revert snapshot.
+//! The preview still returns a `consent_digest` over (action, params,
+//! manifest bytes). Nothing consumes it now that the apply is gone, and it is
+//! kept rather than stripped: the digest is what makes the plan quotable, and
+//! a preview whose shape changed would break the parity witness for a reason
+//! unrelated to the retirement.
 
-use std::io::IsTerminal;
 use std::path::Path;
 
-use anyhow::{Context as _, Result};
-use owo_colors::OwoColorize;
+use anyhow::Result;
 use serde_json::{json, Map, Value};
 
 use crate::cli::PanelSetModeArgs;
@@ -239,300 +255,36 @@ pub fn set_mode_preview(args: &PanelSetModeArgs, dir: Option<&Path>) -> Result<V
     Ok(super::panel_edit::build_preview("set-mode", &digest, body))
 }
 
-pub fn set_mode(args: &PanelSetModeArgs, dir: Option<&Path>) -> Result<()> {
-    set_mode_gated(args, dir, std::io::stdin().is_terminal())
+/// `set-mode` — **retired.** It refuses, and names what replaced it.
+///
+/// The Mode axis retired with STRATEGY.md v3 (TODO.md item 9): delivery is
+/// routed by the planner, per kind and per harness, and is not a setting a
+/// user picks. A verb that still switched a mode would put back the concept
+/// v3 deleted, and the picker it feeds is retired in the ui-contract as
+/// `set-mode-v1`.
+///
+/// It refuses rather than disappearing because a scripted caller deserves a
+/// sentence naming the replacement, not a clap usage error. The machinery
+/// below stays: `set_mode_preview` is still the un-render plan builder, and
+/// the leg that removes rendered files is shared with `uninstall`, which is
+/// where a user who wants files gone now goes.
+pub fn set_mode(_args: &PanelSetModeArgs, _dir: Option<&Path>) -> Result<()> {
+    anyhow::bail!(
+        "nothing was changed — `set-mode` is retired, and delivery is no longer a mode you pick.\n\
+         AgentStack routes each capability to its lane by kind and harness. \
+         `agentstack status` says what it decided, per CLI, and where.\n\
+         To stop rendering files for this project: `agentstack uninstall`.\n\
+         To keep one project or harness on rendered files: `agentstack delivery render-locally`."
+    )
 }
 
-fn set_mode_gated(args: &PanelSetModeArgs, dir: Option<&Path>, interactive: bool) -> Result<()> {
-    let preview = set_mode_preview(args, dir)?;
-    if !args.consent.yes {
-        if args.consent.preview {
-            return super::panel_edit::emit(&preview);
-        }
-        if !interactive {
-            anyhow::bail!(
-                "nothing was changed — this is not a terminal, so there is no one to ask.\n\
-                 Run it at a terminal, or pass --preview to get the plan and its consent \
-                 digest, then re-run with --yes --consented <digest>."
-            );
-        }
-        print_review(&preview);
-        if !super::panel_edit::confirm("Switch?")? {
-            println!("cancelled — nothing was written.");
-            return Ok(());
-        }
-        let fresh = set_mode_preview(args, dir)?;
-        super::panel_edit::verify_consent(
-            Some(super::panel_edit::preview_digest(&preview)?),
-            super::panel_edit::preview_digest(&fresh)?,
-        )
-        .context("the project changed while you were reviewing")?;
-    } else {
-        super::panel_edit::verify_consent(
-            args.consent.consented.as_deref(),
-            super::panel_edit::preview_digest(&preview)?,
-        )?;
-    }
-
-    apply(args, dir)
-}
-
-/// Perform the consented switch. Every blocker is recomputed HERE from live
-/// state — the preview names them for the user, the apply enforces them.
-fn apply(args: &PanelSetModeArgs, dir: Option<&Path>) -> Result<()> {
-    let ctx = super::load(dir)?;
-    let target = parse_mode(&args.mode)?;
-    let signals = read_signals(&ctx);
-
-    if let Some(profile) = &signals.session {
-        anyhow::bail!(
-            "'{profile}' is in use here (a session is active) — `agentstack session end` \
-             puts its files back first, then switch modes."
-        );
-    }
-    if target == signals.current {
-        anyhow::bail!(
-            "this project already delivers as {} — nothing to switch.",
-            target.label()
-        );
-    }
-
-    match target {
-        Mode::Static => {
-            // The one activation path renders, records state, and re-pins.
-            // An unresolved ${REF} fails it closed unless --allow-unresolved.
-            let use_args = crate::cli::UseArgs {
-                profile: signals.active_profile.clone(),
-                targets: vec![],
-                scope: None,
-                write: true,
-                allow_unresolved: args.consent.allow_unresolved,
-                prune_foreign: false,
-                no_gitignore: false,
-                list: false,
-                json: false,
-                quiet: false,
-            };
-            super::use_profile::run(&use_args, dir)?;
-            println!(
-                "\n{} delivery is on disk again — configs rendered, kept out of git.",
-                "✓".green()
-            );
-        }
-        Mode::ZeroFiles => {
-            // Trust is the per-repo gate the gateway serves through. Granting
-            // it is a human review (never done here); refusing early keeps
-            // the panel from applying a switch whose derived mode would still
-            // read something else.
-            anyhow::ensure!(
-                signals.trusted,
-                "this project is not trusted at its current bytes, so the gateway would \
-                 serve it control-plane tools only. Review it first (`agentstack trust .`), \
-                 then switch."
-            );
-            // Bridge first: if registration fails, nothing has been removed
-            // and the project still works exactly as before.
-            super::connect::run_connect(&crate::cli::ConnectArgs {
-                harnesses: Vec::new(),
-                all: true,
-                transparent: false,
-                write: true,
-                command: None,
-            })
-            .context("registering the gateway failed; nothing was removed from this project")?;
-            unrender_leg(&ctx, "set-mode zero-files")?;
-            println!(
-                "\n{} served live — nothing of this project's setup is rendered on disk; \
-                 your CLIs fetch its capabilities from agentstack.",
-                "✓".green()
-            );
-        }
-        Mode::CleanAtRest => {
-            anyhow::ensure!(
-                !(signals.gateway_connected && signals.trusted),
-                "this trusted project is served live by the machine-wide bridge, and those \
-                 two facts read as zero-files whatever is removed here. \
-                 `agentstack gateway disconnect --all` is the machine-scope exit — run it \
-                 first if you want session-based delivery."
-            );
-            // Pin the lock so `session start` has a reviewed surface to
-            // activate from; validates every ref before anything is removed.
-            super::lock::run(
-                &crate::cli::LockArgs {
-                    profile: None,
-                    update: None,
-                    upgrade: None,
-                    all: false,
-                    with_instructions: false,
-                    yes: false,
-                    write: false,
-                    quiet: false,
-                },
-                dir,
-            )?;
-            unrender_leg(&ctx, "set-mode clean-at-rest")?;
-            println!(
-                "\n{} nothing stays rendered between sessions now. `agentstack session start \
-                 <toolset>` materializes one while you work; `agentstack session end` puts \
-                 every file back.",
-                "✓".green()
-            );
-        }
-    }
-    Ok(())
-}
-
-/// The shared removal half: everything this manifest rendered comes off disk,
-/// captured into ONE history entry so `agentstack restore --last` undoes it,
-/// and the state ledger stops claiming the renders (or the derived mode would
-/// keep reading "static" over files that no longer exist).
-fn unrender_leg(ctx: &super::Context, operation: &str) -> Result<()> {
-    let root = crate::manifest::project_root_of(&ctx.dir);
-    let state = State::load()?;
-    let plan = unrender::plan(
-        ctx,
-        &state,
-        &[Scope::Project, Scope::Global],
-        /*own_global_only=*/ true,
-    )?;
-    let mut removals = plan.removals;
-    if let Some(removal) = unrender::plan_gitignore_removal(&root) {
-        removals.push(removal);
-    }
-
-    if removals.is_empty() {
-        println!(
-            "  {} nothing was rendered here — nothing to remove",
-            "·".dimmed()
-        );
-        return Ok(());
-    }
-
-    let mut backups = Vec::new();
-    let mut labels = Vec::new();
-    for r in removals {
-        let capture = r
-            .capture
-            .then(|| crate::history::capture(&r.path, r.label.clone()));
-        (r.write)()?;
-        println!(
-            "  {} {} {}",
-            "✓".green(),
-            "removed".dimmed(),
-            super::init::display_path(&r.path, &root)
-        );
-        if let Some(capture) = capture {
-            backups.push(capture);
-            labels.push(r.label);
-        }
-    }
-    crate::history::record("project", operation.to_string(), labels, backups)?;
-    unrender::clear_managed_state(&plan.touched_keys)?;
-    Ok(())
-}
-
-/// The terminal review — the same plan the JSON carries, drawn for a human.
-fn print_review(preview: &Value) {
-    let body = |ptr: &str| preview.pointer(ptr);
-    let s = |ptr: &str| body(ptr).and_then(Value::as_str).unwrap_or("");
-    let b = |ptr: &str| body(ptr).and_then(Value::as_bool).unwrap_or(false);
-
-    println!(
-        "\nSwitching delivery mode: {} → {}",
-        s("/current_mode").bold(),
-        s("/mode").bold()
-    );
-    if !b("/changed") {
-        println!(
-            "  {} already in that mode — applying will refuse",
-            "·".dimmed()
-        );
-    }
-    println!("\nThis would:");
-    if let Some(removes) = body("/removes").and_then(Value::as_array) {
-        for r in removes {
-            println!(
-                "  {} remove {}  {}",
-                "−".red(),
-                r["label"].as_str().unwrap_or(""),
-                r["path"].as_str().unwrap_or("").dimmed()
-            );
-        }
-    }
-    if b("/removes_gitignore_block") {
-        println!("  {} remove the managed .gitignore block", "−".red());
-    }
-    if b("/locks") {
-        println!(
-            "  {} pin agentstack.lock (sessions activate from it)",
-            "+".green()
-        );
-    }
-    if let Some(renders) = body("/renders").filter(|v| !v.is_null()) {
-        println!(
-            "  {} render configs for '{}' into your CLIs",
-            "+".green(),
-            renders["profile"].as_str().unwrap_or("")
-        );
-    }
-    if let Some(blocker) = body("/render_blocker").and_then(Value::as_str) {
-        println!("  {} {}", "!".yellow(), blocker);
-    }
-    if let Some(bridge) = body("/bridge").filter(|v| !v.is_null()) {
-        let detected = bridge["detected"].as_u64().unwrap_or(0);
-        let capable = bridge["capable"].as_u64().unwrap_or(0);
-        if bridge["registers"].as_bool().unwrap_or(false) {
-            println!(
-                "  {} register the agentstack bridge in your CLI configs ({capable} of \
-                 {detected} installed CLIs can host it)",
-                "+".green()
-            );
-        } else {
-            println!("  {} the bridge is already registered", "·".dimmed());
-        }
-        if let Some(incapable) = bridge["incapable"].as_array() {
-            if !incapable.is_empty() {
-                let names: Vec<&str> = incapable.iter().filter_map(Value::as_str).collect();
-                println!(
-                    "  {} {} can't consume live delivery: {}",
-                    "!".yellow(),
-                    super::count(names.len(), "CLI"),
-                    names.join(", ")
-                );
-            }
-        }
-    }
-    if b("/removes_instructions") {
-        println!(
-            "  {} compiled CLAUDE.md / AGENTS.md instructions are not delivered live",
-            "!".yellow()
-        );
-    }
-    println!("  {} undo: {}", "↺".dimmed(), s("/undo").bold());
-
-    if b("/requires_trust") {
-        println!(
-            "\n{} this project is not trusted at its current bytes — review it first \
-             (`agentstack trust .`); applying will refuse until then.",
-            "⚠".yellow()
-        );
-    }
-    if let Some(blocker) = body("/mode_blocker").and_then(Value::as_str) {
-        println!("\n{} {}", "⚠".yellow(), blocker);
-    }
-    if let Some(session) = body("/session_active").and_then(Value::as_str) {
-        println!(
-            "\n{} '{session}' is in use here — `agentstack session end` first.",
-            "⚠".yellow()
-        );
-    }
-    if b("/machine_scope") {
-        println!(
-            "\n{} Machine-wide: registering the bridge changes every CLI's config on this \
-             machine, not just this project. Switching this project back later does not \
-             unregister it.",
-            "⚠".yellow()
-        );
-    }
-    println!();
-}
+// The apply half — `set_mode_gated`, `apply`, `unrender_leg` and
+// `print_review` — was deleted when the Mode axis retired (STRATEGY.md v3,
+// TODO.md item 9). It had no caller left once `set_mode` began refusing, and
+// a retired verb keeping a live switch path is exactly the second authority
+// this codebase does not allow. Its removal leg was never unique to it:
+// `uninstall` reaches the same `super::unrender::plan` directly, and that is
+// where a user who wants rendered files gone now goes.
+//
+// `set_mode_preview` above is kept: it is the un-render PLAN builder, it
+// writes nothing, and `bridge_coverage` below it is what `doctor` reads.

@@ -755,7 +755,7 @@ paragraph above exists to prevent.
   machine-policy tightening mid-run takes effect at the next run, matching
   the in-process gateway's snapshot-at-start semantics.
 
-### Packaged images (`agentstack image`)
+### Images (`agentstack image`)
 
 **What ships:** one toolset and its pinned members composed into a container
 image the user builds locally and runs themselves

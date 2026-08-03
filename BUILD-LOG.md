@@ -996,3 +996,77 @@ a plain `agentstack run <cli>` with no `--profile` still serves no package
 server, by design rather than by omission. And finding 4's checksum half is
 **stated, not closed**; the note it prints is the honest negative, and closing
 it properly waits on a `lib add-package` writer.
+
+## Item 9 — vocabulary (branch `vocabulary`)
+
+Three renames, one theme: the surface the maintainer is about to judge should
+be the final one, so no word in it is a mechanism noun outranking a user idea.
+
+**`toolsets` is the manifest key.** One serde attribute on
+`Manifest::profiles` — `rename = "toolsets", alias = "profiles"` — so
+`[toolsets.X]` is what serialization emits and `[profiles.X]` is still
+accepted. The Rust field keeps its old name: renaming it reaches ~30 files for
+no user-visible gain, and the internals genuinely still think "profile". The
+real work was the `toml_edit` writers, which hardcoded `"profiles"` and now
+ask `add::toolsets_key(&doc)` first: an edit to a pre-rename manifest EXTENDS
+the table it already has instead of adding a second one beside it. That is not
+cosmetic — a manifest carrying both keys is a serde duplicate-field error, so
+a second table would have turned an ordinary `agentstack add` into a file that
+no longer parses, from an edit that looked innocent. The JSON keys stay
+`profiles`: those are the versioned ui-contract, and this item is about the
+file users read.
+
+**"Package" means the library composition only.** The artifact is only ever an
+image, in `image.rs`, `docs/design/packaging.md`, `docs/design/README.md`, and
+ENFORCEMENT's §"Images". `PackageMemberKind` and "package members" are
+untouched — they are the surviving sense. `packaging.md` closed with a note
+admitting "two nouns, one unfortunate word, kept distinct on purpose"; that
+note is now the record of the word having one sense.
+
+**The Mode axis retires.** The `Mode` row is gone from `status`, which leaves
+Delivery alone — the row said what a project IS where Delivery says what
+actually HAPPENED, and it taught a choice v3 had deleted. `set-mode` refuses
+with a sentence naming `status`, `uninstall`, and `delivery render-locally`
+rather than disappearing into a clap usage error. Its apply half —
+`set_mode_gated`, `apply`, `unrender_leg`, `print_review`, ~250 lines — was
+deleted rather than left dead: a retired verb keeping a live switch path is
+the second authority this codebase does not allow. `set_mode_preview` and
+`bridge_coverage` survive because `doctor` and the parity witness read them,
+and the removal leg was never unique to the verb — `uninstall` reaches
+`unrender::plan` directly. `Mode` itself survives as an internal reading; it
+still decides the clean-at-rest next step and `doctor --json` still carries it
+under `doctor-mode-v1`, which this item did not touch.
+
+`ui_contract` gained **`SUPERSEDED`**, and the envelope now carries it beside
+`features`. `features.includes(name)` alone conflates two different noes — a
+binary too old to have a contract, and one that retired it. The first is fixed
+by upgrading and the second never will be, so a panel that cannot tell them
+apart shows an "update AgentStack" prompt no update satisfies. `set-mode-v1`
+moved from `FEATURES` to `SUPERSEDED`, and the `set-mode` `PanelAction` went
+with it: a digest-bound action a panel may still call is an offer, whatever
+the feature list says. The existing never-drop-a-name guard did not fire —
+`set-mode-v1` was not in its protected list — so the removal is deliberate,
+not a hole in that test.
+
+Witnesses: `an_older_manifest_keeps_its_own_spelling` (the compatibility half
+and the two-tables trap, ending in a parse through the alias);
+`creates_profile_array_when_absent`, tightened to assert the older spelling is
+read and never written; `superseded_is_disjoint_from_features_and_advertised`;
+and `set_mode_is_retired_and_says_so` in `t3code_parity`, which drives the
+strongest form a caller can send (`--yes --consented <digest>`) and checks all
+three ways a retirement can fail — it still switches, it says nothing useful,
+or the panel still believes the picker is offered. It replaced
+`set_mode_switch_unrenders_rerenders_and_fails_closed`, whose subject was
+deleted with the verb.
+
+Two failures were the renames working: a t3code parity assertion on
+`[profiles.web]` and a workflow error-text assertion on "profiles". Both were
+old expectations, corrected.
+
+Debts: the Rust field, the JSON keys, and the `*-profile` fixed-argv panel
+commands still say "profile" — the panel action names are the digest-bound
+contract and must not be re-spelled on a whim. `set_mode_preview` still builds
+a `consent_digest` nothing consumes; it is kept so the preview's shape (and
+the parity witness) does not change for a reason unrelated to the retirement.
+And the module doc in `mode_switch.rs` still describes what each mode meant,
+because the preview still computes it.

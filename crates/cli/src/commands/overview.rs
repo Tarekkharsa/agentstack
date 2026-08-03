@@ -1363,13 +1363,15 @@ fn print_orientation(o: &Orientation, status: bool) {
                 );
             }
 
-            // Which delivery mode this project is in — a glance, not a guess.
-            println!(
-                "  {}  {} {}",
-                "Mode    ".bold(),
-                f.mode.label(),
-                format!("— {}", f.mode.short()).dimmed()
-            );
+            // The Mode row used to sit here. It retired with STRATEGY.md v3
+            // (TODO.md item 9): Mode named a choice — static, clean-at-rest,
+            // zero-files — that the user no longer makes, so printing it
+            // taught a concept the product had deleted, and it said what the
+            // project IS where Delivery below says what actually HAPPENED.
+            // `Mode` survives as an internal reading (it still decides the
+            // clean-at-rest next step, and `doctor --json` still carries it
+            // under `doctor-mode-v1`); it is only no longer a thing this
+            // screen asks a person to hold in their head.
 
             // W4: the planner routes silently, so this is where a person finds
             // out what it decided — per CLI, both lanes, in plain language.

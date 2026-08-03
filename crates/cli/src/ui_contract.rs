@@ -306,7 +306,10 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   `null` when doctor ran with no project. Its own name for the usual
 ///   reason: a binary predating the field legitimately advertises
 ///   `doctor-mode-v1` without it.
-/// - `set-mode-v1`: `set-mode <static|clean-at-rest|zero-files>` switches the
+/// - `set-mode-v1` — **SUPERSEDED, see [`SUPERSEDED`]. Not served.** The Mode
+///   axis retired with STRATEGY.md v3; the record of what it did is kept
+///   because a panel reading an older binary still meets it. It was:
+///   `set-mode <static|clean-at-rest|zero-files>` switches the
 ///   project's delivery mode with the full house consent pipeline —
 ///   `--preview` returns the REAL transition plan (every file the un-render
 ///   removes, whether the bridge is registered and its machine-wide scope,
@@ -604,7 +607,6 @@ pub const FEATURES: &[&str] = &[
     "json-reads-v1",
     "gitignore-opt-out-v1",
     "doctor-cli-coverage-v1",
-    "set-mode-v1",
     "status-honesty-v1",
     "needs-your-yes-v1",
     "update-offer-v1",
@@ -780,12 +782,27 @@ pub const PANEL_ACTIONS: &[PanelAction] = &[
         verb: &["set-gitignore"],
         consent: Consent::Digest("consented"),
     },
-    PanelAction {
-        name: "set-mode",
-        verb: &["set-mode"],
-        consent: Consent::Digest("consented"),
-    },
 ];
+
+/// Contract names this binary KNOWS and deliberately no longer serves.
+///
+/// A panel gates an affordance on `features.includes(name)`. That answers one
+/// question — can I call it? — and conflates two very different noes: a binary
+/// too old to have the contract, and a binary that retired it. The first will
+/// gain the affordance on upgrade; the second never will. A UI that cannot
+/// tell them apart shows an "update AgentStack" prompt that no update fixes.
+///
+/// So a retired name moves from [`FEATURES`] to here and stays here. The
+/// envelope carries both lists, and a name may never appear in both.
+///
+/// - `set-mode-v1`: the Mode axis retired (STRATEGY.md v3, TODO.md item 9).
+///   Mode asked the user to choose between static, clean-at-rest and
+///   zero-files. v3 deleted that choice: the delivery planner routes each
+///   capability by kind and harness, and `status` reports what it decided.
+///   A mode picker is therefore a control over something the user no longer
+///   decides, so the command refuses rather than switching. The un-render leg
+///   it shared with `uninstall` is unchanged and still reachable there.
+pub const SUPERSEDED: &[&str] = &["set-mode-v1"];
 
 /// Wrap a response body in the envelope. The two envelope keys are injected
 /// into the body object so existing consumers keep their field paths; a
@@ -804,6 +821,10 @@ pub fn envelope(body: serde_json::Value) -> serde_json::Value {
     map.insert(
         "features".into(),
         serde_json::Value::Array(FEATURES.iter().map(|f| (*f).into()).collect()),
+    );
+    map.insert(
+        "superseded".into(),
+        serde_json::Value::Array(SUPERSEDED.iter().map(|f| (*f).into()).collect()),
     );
     serde_json::Value::Object(map)
 }
@@ -872,5 +893,30 @@ mod tests {
         let before = sorted.len();
         sorted.dedup();
         assert_eq!(before, sorted.len(), "FEATURES contains a duplicate name");
+    }
+
+    /// A retired name is advertised as retired, and never as both. The two
+    /// lists together are what lets a panel say "this will never come back"
+    /// instead of "try updating".
+    #[test]
+    fn superseded_is_disjoint_from_features_and_advertised() {
+        for name in SUPERSEDED {
+            assert!(
+                !FEATURES.contains(name),
+                "'{name}' is in FEATURES and SUPERSEDED — a UI cannot tell whether it is served"
+            );
+        }
+        let out = envelope(serde_json::json!({}));
+        let advertised: Vec<&str> = out["superseded"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(advertised, SUPERSEDED);
+        assert!(
+            advertised.contains(&"set-mode-v1"),
+            "the Mode axis retired in v3; a panel still offering a mode picker must be able to see that"
+        );
     }
 }
