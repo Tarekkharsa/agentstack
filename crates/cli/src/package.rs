@@ -142,6 +142,25 @@ pub fn load_from_library(library: &Library, lib_home: &Path, name: &str) -> Resu
 
 /// Read `pack.toml` (bounded — it is remote content, rule 7), verify it against
 /// the index pin, and run both intake gates.
+///
+/// # What the index pin does NOT cover (review finding 4)
+///
+/// `LibraryPackage::checksum` is `Option`, and an entry carrying `None` skips
+/// the boundary comparison below entirely. That shape is reachable: a linked
+/// library source supplies its own `library.toml`, and that file belongs to
+/// whoever owns the folder — so "the index pinned this package's boundary" is
+/// NOT true of every package, and no surface may claim it is.
+///
+/// This is not an authority hole. Every member is digest-pinned into the lock
+/// by [`expand_selected`], the lock is inside the trust digest, and no serving
+/// path reads `pack.toml` again. What is missing is one *intake* check: with no
+/// index pin, a `pack.toml` edited between install and lock is expanded as
+/// though it were the installed one, and the person consents to the result at
+/// the trust gate rather than being told the boundary moved.
+///
+/// The gap is made loud rather than closed by requiring a checksum, because
+/// there is no `lib add-package` writer yet — requiring it would refuse every
+/// hand-authored local package, which is a supported way to work.
 fn read_and_gate(root: &Path, name: &str, entry: &LibraryPackage) -> Result<PackToml> {
     let manifest_path = root.join(PACK_FILE);
     let text = crate::util::read_to_string_bounded(&manifest_path, crate::util::MAX_CONFIG_BYTES)
@@ -151,15 +170,28 @@ fn read_and_gate(root: &Path, name: &str, entry: &LibraryPackage) -> Result<Pack
     // that exemption is scoped to the MCP serve path and to skills that already
     // carry a project pin. This is the intake gate, and an intake gate that
     // accepted unverified bytes would be pinning a member set nobody reviewed.
-    if let Some(pinned) = &entry.checksum {
-        let live = Sha256Hex::of(text.as_bytes());
-        anyhow::ensure!(
-            &live == pinned,
-            "package '{}' no longer matches its library index pin — its {PACK_FILE} has \
-             changed since it was installed. Re-install or re-sync the package; nothing was \
-             pinned.",
+    match &entry.checksum {
+        Some(pinned) => {
+            let live = Sha256Hex::of(text.as_bytes());
+            anyhow::ensure!(
+                &live == pinned,
+                "package '{}' no longer matches its library index pin — its {PACK_FILE} has \
+                 changed since it was installed. Re-install or re-sync the package; nothing was \
+                 pinned.",
+                crate::text::sanitize_line(name)
+            );
+        }
+        // The honest negative. Silence here would let every surface downstream
+        // imply a boundary check that did not happen; saying it once, at the
+        // one place the check would have run, is what keeps claims matched to
+        // enforcement (invariant 8). The members below are still digest-pinned
+        // into the lock, which is what the sentence says.
+        None => eprintln!(
+            "note: package '{}' has no boundary pin in the library index, so its \
+             {PACK_FILE} was not checked against an installed version — its members are \
+             still pinned individually in agentstack.lock and re-gated there",
             crate::text::sanitize_line(name)
-        );
+        ),
     }
     let parsed: PackToml =
         toml::from_str(&text).with_context(|| format!("parsing {}", manifest_path.display()))?;
@@ -490,6 +522,17 @@ fn pin_replacement(
             // fail-closed miss at serve time, never a wrong definition served.
             let definition = match resolved.origin {
                 crate::resolve::ServerOrigin::Inline => toml::to_string(&resolved.server).ok(),
+                // Unreachable by construction: the ensure above proved
+                // `replacement` is a `[servers.<name>]` key, and
+                // `resolve_server` reads only the manifest and the library. An
+                // explicit refusal rather than a silent deposit, because a
+                // package member replacing a package member would be a
+                // self-referential pin nobody could re-verify.
+                crate::resolve::ServerOrigin::Package => anyhow::bail!(
+                    "override replaces {kind_word} '{}' with a package-carried server — a \
+                     replacement must be a capability this project declares",
+                    crate::text::sanitize_line(&member.name)
+                ),
                 // The definition file lives under whichever linked source
                 // satisfied the name, which is what `source_root` answers.
                 crate::resolve::ServerOrigin::Library => {
@@ -727,6 +770,112 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("index pin"), "{err}");
+    }
+
+    /// **Review finding 4, first half.** An unknown key in `pack.toml` refuses
+    /// the package and NAMES the key.
+    ///
+    /// The defect this pins: serde's default drops unknown keys, so a pack
+    /// declaring `[[hooks]]` (the plural spelling of the refused `[[hook]]`)
+    /// parsed clean and installed as though it declared nothing — the exact
+    /// failure `refuse_executable_members` was written for, surviving under a
+    /// different spelling. Removing `deny_unknown_fields` from `PackToml` makes
+    /// this test go green-on-nothing: the load succeeds and no hook is seen.
+    #[test]
+    fn an_unknown_pack_toml_key_refuses_and_names_it() {
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        // The plural misspelling: what a publisher would plausibly write, and
+        // what used to install as a package with no hooks in it.
+        let library = library_with_package(
+            &lib_home,
+            "p",
+            "name = \"p\"\n\n[[hooks]]\nname = \"pre\"\npath = \"hooks/pre.sh\"\n",
+        );
+        let err = format!(
+            "{:#}",
+            load_from_library(&library, lib_home.path(), "p").unwrap_err()
+        );
+        assert!(
+            err.contains("hooks"),
+            "the refusal names the key it did not understand: {err}"
+        );
+
+        // The same rule on the member and server tables, so the fix is not
+        // only skin-deep on the top level.
+        let library = library_with_package(
+            &lib_home,
+            "p",
+            "name = \"p\"\n\n[[skill]]\nname = \"s\"\npath = \"skills/s\"\nrun = \"rm -rf /\"\n",
+        );
+        let err = format!(
+            "{:#}",
+            load_from_library(&library, lib_home.path(), "p").unwrap_err()
+        );
+        assert!(err.contains("run"), "{err}");
+
+        let library = library_with_package(
+            &lib_home,
+            "p",
+            "name = \"p\"\n\n[server]\ntype = \"http\"\nurl = \"https://x/mcp\"\nsudo = true\n",
+        );
+        let err = format!(
+            "{:#}",
+            load_from_library(&library, lib_home.path(), "p").unwrap_err()
+        );
+        assert!(err.contains("sudo"), "{err}");
+    }
+
+    /// A `pack.toml` declaring only what v1 knows still loads — the refusal
+    /// above is about UNKNOWN keys, not about strictness for its own sake.
+    #[test]
+    fn a_well_formed_pack_toml_still_loads() {
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let library = library_with_package(
+            &lib_home,
+            "p",
+            "name = \"p\"\ndescription = \"d\"\ntargets = [\"claude-code\"]\n\n\
+             [server]\ntype = \"http\"\nurl = \"https://x/mcp\"\nsecret_headers = [\"Authorization\"]\n\n\
+             [[skill]]\nname = \"s\"\npath = \"skills/s\"\n\n\
+             [[instruction]]\nname = \"i\"\npath = \"instructions/i.md\"\n",
+        );
+        let loaded = load_from_library(&library, lib_home.path(), "p").unwrap();
+        assert_eq!(loaded.toml.name, "p");
+        assert_eq!(loaded.toml.skills.len(), 1);
+        assert_eq!(loaded.toml.instructions.len(), 1);
+    }
+
+    /// **Review finding 4, second half.** The checksum-`None` path is a stated
+    /// behaviour, not a silent one.
+    ///
+    /// `LibraryPackage::checksum` is optional and a linked source supplies its
+    /// own `library.toml`, so the boundary check is skippable by an entry this
+    /// machine did not write. The package still loads — refusing would block
+    /// every hand-authored local package, and there is no `lib add-package`
+    /// writer to guarantee a checksum yet — but nothing may claim its boundary
+    /// was verified. This test is the record of that decision; the note it
+    /// documents is emitted where the check would have run.
+    #[test]
+    fn a_package_with_no_index_pin_loads_and_the_gap_is_stated() {
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let library = library_with_package(&lib_home, "p", "name = \"p\"\n");
+        assert!(
+            library.get_package("p").unwrap().checksum.is_none(),
+            "the fixture is the unpinned shape under test"
+        );
+        // It loads: the members are pinned individually by `expand_selected`
+        // and re-gated through the lock, which is what makes this safe.
+        assert!(load_from_library(&library, lib_home.path(), "p").is_ok());
+
+        // And a pinned entry still refuses on drift, so the branch above is a
+        // real distinction rather than the check having been removed.
+        let mut library = library;
+        let mut entry = library.get_package("p").unwrap().clone();
+        entry.checksum = Some(Sha256Hex::of(b"some other bytes"));
+        library.upsert_package(entry);
+        assert!(load_from_library(&library, lib_home.path(), "p")
+            .unwrap_err()
+            .to_string()
+            .contains("index pin"));
     }
 
     #[test]

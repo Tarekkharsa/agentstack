@@ -264,6 +264,17 @@ pub enum ServerOrigin {
     Inline,
     /// Resolved from the central library (`[[server]]` + `servers/<name>.toml`).
     Library,
+    /// Carried by a package a toolset selected, read back from the content
+    /// store by the digest the lock pins (`[[package.member]]`).
+    ///
+    /// A third variant rather than a reuse of [`ServerOrigin::Inline`]: a
+    /// package member is content from OUTSIDE this project, and every surface
+    /// that answers "where did this definition come from?" must be able to say
+    /// so. Reusing `Inline` made `explain` print "inline (this project)" for a
+    /// package's bytes and made the frozen grant record them under a binding
+    /// with no provenance field at all. The compiler now forces each of those
+    /// sites to answer for this case.
+    Package,
 }
 
 /// A server name resolved to its **definition** — the `manifest::Server` with
@@ -514,19 +525,16 @@ fn resolve_package_server(
         )
     })?;
     Ok(ResolvedServer {
+        // `Package`, not `Inline`. The integrity question these two share —
+        // "does this need `verify_library_pin`'s extra lock check?" — has the
+        // same answer for both (no: the digest that binds it is in the lock,
+        // the lock is inside the trust digest, and the bytes were re-verified
+        // against that digest a few lines above). But integrity is not the only
+        // question `origin` is asked. Display and evidence surfaces ask where
+        // the bytes came from, and for a package member "this project" is a
+        // false answer.
         name: member.name.clone(),
-        // `origin` answers exactly one operational question — does this
-        // definition live OUTSIDE the project's consented bytes, and therefore
-        // need `verify_library_pin`'s extra lock check? For a package member
-        // the answer is no, for the same reason it is no for an inline table:
-        // the digest that binds it is in the lock, and the lock is inside the
-        // trust digest. (Stronger, in fact — the bytes were re-verified against
-        // that digest a few lines above, which is a check an inline table does
-        // not get.) A third variant would force an arm at six display and
-        // lock-writing sites a package member provably never reaches; the
-        // provenance string below is what tells a human where these bytes came
-        // from.
-        origin: ServerOrigin::Inline,
+        origin: ServerOrigin::Package,
         server,
         checksum: hex.to_string(),
         provenance: Some(member.provenance.clone()),
@@ -548,6 +556,20 @@ fn resolve_package_server(
 /// Per-server errors are preserved rather than dropped: the gateway skips them
 /// (host-proxy semantics), while a lockdown classification fails the whole run
 /// rather than leave a selected endpoint reachable.
+///
+/// **Package members are part of the frozen set** (review finding 1). They used
+/// to be added by the gateway and the image builder only, which meant a
+/// Protected run — the default for a plain `agentstack run <cli>` — silently
+/// omitted every server a toolset's package carried, while `status --json`
+/// listed it as an effective member. Adding them HERE, rather than at each
+/// consumer, is what makes "one frozen set feeds classification, dispatch, the
+/// grant and the image" true by construction instead of by care (invariant 6).
+///
+/// The toolset fence is unchanged and is the reason this cannot widen anything:
+/// `package_runtime_servers` contributes nothing when `profile` is `None`,
+/// because an unfenced set already carries every manifest server and unioning
+/// every package's servers on top of that would make package membership a way
+/// to widen rather than something a toolset selects.
 pub fn frozen_runtime_servers(
     manifest: &Manifest,
     library: &Library,
@@ -564,7 +586,7 @@ pub fn frozen_runtime_servers(
         }
     }
     let lock = Lock::load(dir).ok();
-    Ok(
+    let mut out: Vec<FrozenServer> =
         effective_runtime_servers(manifest, library, lib_home, profile)
             .into_iter()
             .map(|(name, resolved)| {
@@ -574,8 +596,23 @@ pub fn frozen_runtime_servers(
                 };
                 (name, out)
             })
-            .collect(),
-    )
+            .collect();
+    // Appended AFTER `verify_library_pin`, for the reason the gateway states:
+    // a package member is not library-referenced, and its bytes were already
+    // re-verified against the digest the lock pins — a stricter check than
+    // `verify_library_pin`'s, applied to the definition itself rather than to a
+    // name. A name collision with an already-resolved server becomes a per-member
+    // `Err` inside `package_runtime_servers`, never a silent replacement.
+    if let Some(lock) = lock.as_ref() {
+        let taken: Vec<String> = out.iter().map(|(n, _)| n.clone()).collect();
+        out.extend(package_runtime_servers(
+            lock,
+            &crate::store::Store::default_store(),
+            profile,
+            &taken,
+        ));
+    }
+    Ok(out)
 }
 
 /// Derive the D4 gateway-only host set for a **lockdown** run from a

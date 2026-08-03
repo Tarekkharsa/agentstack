@@ -424,21 +424,17 @@ pub fn plan(
 
     // ── servers ───────────────────────────────────────────────────────────
     // The SAME frozen, pin-verified set a sandbox run is assembled from, so an
-    // image can never carry a server a run would have refused.
-    let mut servers = crate::resolve::frozen_runtime_servers(
+    // image can never carry a server a run would have refused — and, since
+    // review finding 1, that set includes the toolset's package members, so the
+    // claim is now true of packages too. This used to append them here, which
+    // made the sentence above false: the image carried servers no run served.
+    let servers = crate::resolve::frozen_runtime_servers(
         manifest,
         &libctx.library,
         &libctx.lib_home,
         dir,
         Some(toolset),
     )?;
-    let already: Vec<String> = servers.iter().map(|(n, _)| n.clone()).collect();
-    servers.extend(crate::resolve::package_runtime_servers(
-        &lock,
-        store,
-        Some(toolset),
-        &already,
-    ));
 
     let mut required: BTreeSet<String> = BTreeSet::new();
     for (name, resolved) in &servers {

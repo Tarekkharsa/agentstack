@@ -26,6 +26,20 @@ root. `library.toml` gains a `[[package]]` index entry recording name,
 version, checksum over `pack.toml`, provenance, and (for a git-sourced
 package) url and rev.
 
+The index checksum is **optional**, and where it is absent the boundary is not
+checked. An entry with no `checksum` skips the comparison in
+`package::read_and_gate` entirely, and that shape is reachable: a linked
+library source supplies its own `library.toml`, owned by whoever owns the
+folder. So "the index pinned this package's boundary" is not true of every
+package, and no surface may say it is — `read_and_gate` prints the honest
+negative where the check would have run. This is not an authority hole: every
+member is digest-pinned into the lock by `expand_selected`, the lock is inside
+the trust digest, and no serving path reads `pack.toml` again. What is missing
+is the intake check that would have told the person the boundary moved between
+install and lock. Requiring the checksum is deferred only because there is no
+`lib add-package` writer yet to produce one, so requiring it would refuse every
+hand-authored local package.
+
 Three reasons, in order of weight:
 
 1. **It is the same artifact `pack.toml` already describes.** The git pack rail
@@ -252,14 +266,21 @@ Four properties, each load-bearing:
   surface; reading which servers are proxied names them. Neither starts a stdio
   child or dials an HTTP endpoint. Only calling one of its tools does.
 
-One boundary is deliberately not crossed: a **sandboxed or lockdown run**
-(`Gateway::from_frozen`) consumes the frozen server set its execution plan
-already classified, and that set is still built from `[servers.*]` and a
-toolset's `servers` list alone. Package-carried servers therefore reach the
-live host gateway (session, lease) and not a sandboxed run. Extending them into
-a run requires giving the run-grant artifact a binding for a package-carried
-definition — a change to authority construction, which is a decision to take
-deliberately rather than a wiring detail to add here.
+**Package-carried servers reach every run** (corrected by review finding 1;
+they previously reached the live host gateway only). `resolve::
+frozen_runtime_servers` — the one set a Protected run freezes into its
+authority grant, a sandboxed run classifies from, and an image is built from —
+now includes the members of the toolset's packages, under the same toolset
+fence. The authority-construction change this needed was made first and
+deliberately: `GrantedServerBinding::Package { definition, provenance }` binds
+a package member by the digest the lock pins and keeps its provenance, so the
+grant can say these bytes came from outside the project. Mapping them onto the
+existing `Inline` binding, which has no provenance field, would have recorded
+every package server as the project's own.
+
+The fence is what keeps this from widening anything: an unfenced set already
+carries every manifest server, so `package_runtime_servers` contributes nothing
+when no toolset is named.
 
 ## The rendered-lane compile of an instruction member
 

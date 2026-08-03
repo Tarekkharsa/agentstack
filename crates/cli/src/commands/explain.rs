@@ -1082,6 +1082,10 @@ fn explain_server_lock(
             match origin {
                 ServerOrigin::Inline => "inline (this project)",
                 ServerOrigin::Library => "central library",
+                // NEVER "this project": these bytes came from a package a
+                // toolset selected. The `Provenance` line below names which
+                // package, at which version.
+                ServerOrigin::Package => "a selected toolset's package",
             },
         );
         // P21: the same mental-model line skills get — library reference by
