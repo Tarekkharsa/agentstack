@@ -759,13 +759,83 @@ pub fn instruction_lock_status(
     manifest_dir: &Path,
     lock: &Lock,
 ) -> InstructionLockStatus {
-    let src = crate::render::instructions::fragment_source(manifest_dir, &instr.path);
-    match std::fs::read(&src) {
-        Ok(bytes) => classify_instruction(name, &agentstack_core::digest::sha256_hex(&bytes), lock),
-        Err(e) => InstructionLockStatus::ResolveFailed {
-            error: format!("reading {}: {e}", src.display()),
-        },
+    instruction_lock_status_with(
+        name,
+        instr,
+        manifest_dir,
+        lock,
+        &crate::library::Library::default(),
+    )
+}
+
+/// [`instruction_lock_status`] with the linked library view in hand — needed to
+/// resolve a **sourceless** fragment's bodies, and to see its variants.
+///
+/// Every declared body is compared, base and variants alike: a variant nothing
+/// currently selects is still content the consent digest covers, so its bytes
+/// moving must read as drift rather than pass unnoticed until the day some
+/// toolset selects it. The first mismatch wins — one drifted body is enough to
+/// mark the fragment changed, and naming more than one would not change the
+/// single fix (`agentstack lock`).
+pub fn instruction_lock_status_with(
+    name: &str,
+    instr: &crate::manifest::Instruction,
+    manifest_dir: &Path,
+    lock: &Lock,
+    library: &crate::library::Library,
+) -> InstructionLockStatus {
+    let bodies = match crate::instructions::bodies(name, instr, manifest_dir, library) {
+        Ok(b) => b,
+        Err(e) => {
+            return InstructionLockStatus::ResolveFailed {
+                error: format!("{e:#}"),
+            };
+        }
+    };
+
+    let entry = lock.get_instruction(name);
+    for (variant, declared, src) in bodies.all() {
+        let bytes = match std::fs::read(&src) {
+            Ok(b) => b,
+            Err(e) => {
+                return InstructionLockStatus::ResolveFailed {
+                    error: format!("reading {}: {e}", src.display()),
+                };
+            }
+        };
+        let current = agentstack_core::digest::sha256_hex(&bytes);
+        match variant {
+            None => match entry {
+                None => return InstructionLockStatus::MissingLockEntry,
+                Some(e) if e.checksum.hex() != current => {
+                    return InstructionLockStatus::ChecksumDrift {
+                        locked: e.checksum.hex().to_string(),
+                        current,
+                    };
+                }
+                Some(_) => {}
+            },
+            Some(v) => {
+                // A variant with no pin is the same state an unpinned fragment
+                // is in — `agentstack lock` is the fix, and the caller's
+                // existing MissingLockEntry handling already says so.
+                let Some(pin) = entry.and_then(|e| {
+                    e.variants
+                        .iter()
+                        .find(|p| p.cli == v.cli && p.model == v.model && p.path == declared)
+                }) else {
+                    return InstructionLockStatus::MissingLockEntry;
+                };
+                if pin.checksum.hex() != current {
+                    return InstructionLockStatus::ChecksumDrift {
+                        locked: pin.checksum.hex().to_string(),
+                        current,
+                    };
+                }
+            }
+        }
     }
+    InstructionLockStatus::Matches
 }
 
 /// Where a resolved native extension came from — mirrors [`SkillOrigin`].
@@ -1600,6 +1670,7 @@ mod tests {
             name: "house".into(),
             path: "./instructions/house.md".into(),
             checksum: Sha256Hex::of(b"aaaa"),
+            variants: Vec::new(),
         });
         assert_eq!(
             classify_instruction("house", Sha256Hex::of(b"aaaa").hex(), &lock),
@@ -1632,6 +1703,7 @@ mod tests {
             name: "house".into(),
             path: "./instructions/house.md".into(),
             checksum,
+            variants: Vec::new(),
         });
 
         assert_eq!(

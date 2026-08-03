@@ -32,6 +32,7 @@ pub mod gitx;
 pub mod grant;
 pub mod guard;
 pub mod history;
+pub mod instructions;
 pub mod intake;
 pub mod lease_registry;
 pub mod library;

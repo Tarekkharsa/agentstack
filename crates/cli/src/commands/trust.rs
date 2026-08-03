@@ -1553,7 +1553,7 @@ pub(crate) fn grant_probed(
                 lock.get_instruction(name)
                     .map(|e| e.checksum.hex().to_string()),
             );
-            match crate::resolve::instruction_lock_status(name, instr, &dir, &lock) {
+            match crate::resolve::instruction_lock_status_with(name, instr, &dir, &lock, &library) {
                 InstructionLockStatus::Matches => say!("{mk}· {disp}   [pinned]"),
                 InstructionLockStatus::ChecksumDrift { .. } => {
                     // Instructions now deposit their bytes at pin time
@@ -1564,7 +1564,8 @@ pub(crate) fn grant_probed(
                         lock.get_instruction(name)
                             .map(|e| e.checksum.hex().to_string())
                     });
-                    let live = crate::render::instructions::fragment_source(&dir, &instr.path);
+                    let live = crate::instructions::base_source(name, instr, &dir, &library)
+                        .unwrap_or_else(|| dir.join(name));
                     // F5, instruction flavor: one read, hashed before the
                     // diff renders — the digest `accept` is allowed to pin.
                     let displayed = std::fs::read(&live)

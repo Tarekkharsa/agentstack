@@ -342,6 +342,34 @@ pub struct LockedInstruction {
     pub name: String,
     pub path: String,
     pub checksum: Sha256Hex,
+    /// One pin per declared per-(CLI, model) variant body
+    /// (`docs/design/instruction-variants.md` §"Every variant body is
+    /// pinned"). A variant is content, and content is pinned — including a
+    /// variant nothing currently selects, because consent is over content and
+    /// not over what happened to be chosen today.
+    ///
+    /// Additive `#[serde(default)]` at version 2, on the same justification as
+    /// the executable, extension, workflow and package pins above: a lock
+    /// written before this parses unchanged, and an older binary that rewrote
+    /// these away would change the lock bytes, which flips the trust digest and
+    /// forces a review rather than losing the pins silently. An empty list
+    /// serializes to nothing, so a project with no variants keeps a
+    /// byte-identical lock.
+    #[serde(default, rename = "variant", skip_serializing_if = "Vec::is_empty")]
+    pub variants: Vec<LockedInstructionVariant>,
+}
+
+/// A pinned instruction **variant** body: its selector plus the SHA-256 of the
+/// file's raw bytes, produced by the same `Store::pin_instruction` act as the
+/// base fragment. No second digest path exists, and none may be added.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LockedInstructionVariant {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cli: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    pub path: String,
+    pub checksum: Sha256Hex,
 }
 
 /// How a D3 executable pin's digest was computed — the two families are not
@@ -1102,11 +1130,18 @@ mod tests {
             name: "style".into(),
             path: "./instructions/style.md".into(),
             checksum: Sha256Hex::of(b"cafe"),
+            variants: Vec::new(),
         });
         lock.upsert_instruction(LockedInstruction {
             name: "house".into(),
             path: "./instructions/house.md".into(),
             checksum: Sha256Hex::of(b"beef"),
+            variants: vec![LockedInstructionVariant {
+                cli: Some("claude-code".into()),
+                model: Some("opus".into()),
+                path: "./instructions/house.opus.md".into(),
+                checksum: Sha256Hex::of(b"0p05"),
+            }],
         });
         assert_eq!(lock.instructions[0].name, "house", "sorted by name");
 
@@ -1115,6 +1150,7 @@ mod tests {
             name: "house".into(),
             path: "./instructions/house.md".into(),
             checksum: Sha256Hex::of(b"f00d"),
+            variants: Vec::new(),
         });
         assert_eq!(
             lock.get_instruction("house").unwrap().checksum,

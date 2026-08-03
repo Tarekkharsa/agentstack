@@ -274,7 +274,9 @@ fn resolve_inputs(ctx: &Context, profile: Option<&str>) -> Result<LockedInputs> 
         .map(|(name, instr)| {
             (
                 name.clone(),
-                crate::resolve::instruction_lock_status(name, instr, &ctx.dir, &lock),
+                crate::resolve::instruction_lock_status_with(
+                    name, instr, &ctx.dir, &lock, &library,
+                ),
             )
         })
         .collect();
@@ -603,7 +605,11 @@ fn freeze_grant(
         let entry = inputs.lock.get_instruction(name).with_context(|| {
             format!("instruction '{name}' lost its lock pin after verification")
         })?;
-        let src = crate::render::instructions::fragment_source(&ctx.dir, &instr.path);
+        // The fragment's base body — its identity file. Every variant body is
+        // pinned in the lock too, and strict verification above compared all of
+        // them, so a drifted variant never reaches this point.
+        let src = crate::instructions::base_source(name, instr, &ctx.dir, &inputs.library)
+            .with_context(|| format!("resolving instruction '{name}' after verification"))?;
         b.add_instruction(
             name,
             GrantedInstruction::project_pinned(

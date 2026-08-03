@@ -542,7 +542,15 @@ fn instructions_compile_shared_and_harness_specific_blocks() {
     let codex = reg.get("codex").unwrap();
 
     // Claude (global scope) gets both fragments.
-    let cp = plan_instructions(&m, claude, Scope::Global, tmp.path(), &[]).unwrap();
+    let cp = plan_instructions(
+        &m,
+        claude,
+        Scope::Global,
+        tmp.path(),
+        &[],
+        &agentstack::instructions::Selecting::none(),
+    )
+    .unwrap();
     assert_eq!(
         cp.fragments,
         vec!["shared".to_string(), "claudeonly".to_string()]
@@ -552,7 +560,15 @@ fn instructions_compile_shared_and_harness_specific_blocks() {
     assert!(cp.proposed.contains("<!-- agentstack:start -->"));
 
     // Codex gets only the shared fragment.
-    let xp = plan_instructions(&m, codex, Scope::Global, tmp.path(), &[]).unwrap();
+    let xp = plan_instructions(
+        &m,
+        codex,
+        Scope::Global,
+        tmp.path(),
+        &[],
+        &agentstack::instructions::Selecting::none(),
+    )
+    .unwrap();
     assert_eq!(xp.fragments, vec!["shared".to_string()]);
     assert!(xp.proposed.contains("Shared rule."));
     assert!(!xp.proposed.contains("Claude only."));

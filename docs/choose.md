@@ -21,7 +21,7 @@ for your project.
 | Capability | Where it goes | Why |
 |---|---|---|
 | Skills · MCP servers, on a CLI that speaks MCP | served live, on demand | brokered, policy-checked, digest-verified, recorded — and nothing generated lands in your repo for them |
-| House rules · settings | written into native files | MCP cannot inject them; only a file carries them |
+| House rules · settings | written into native files | a setting only a file carries; house rules because no live channel a CLI is *known* to consume varies by model |
 | Hooks · extensions | written into native files, reviewed in full every time | they run code |
 | Anything, on a CLI that reads files only | written into native files | that CLI has no live channel |
 

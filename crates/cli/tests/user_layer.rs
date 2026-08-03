@@ -62,7 +62,7 @@ fn machine_instructions_merge_beneath_project_loads_global_scope_only() {
     let names: Vec<&String> = m.instructions.keys().collect();
     assert_eq!(names, ["style", "house"]);
     assert!(m.instructions["style"].from_user_layer);
-    assert!(std::path::Path::new(&m.instructions["style"].path).is_absolute());
+    assert!(std::path::Path::new(m.instructions["style"].path.as_deref().unwrap()).is_absolute());
     assert!(!m.instructions["house"].from_user_layer);
     assert_eq!(
         ctx.loaded.user_path.as_deref(),
@@ -78,11 +78,27 @@ fn machine_instructions_merge_beneath_project_loads_global_scope_only() {
     // Global scope compiles both; project scope only the project's own.
     let reg = agentstack::adapter::Registry::load().unwrap();
     let desc = reg.get("claude-code").unwrap();
-    let gp = plan_instructions(m, desc, Scope::Global, &ctx.dir, &[]).unwrap();
+    let gp = plan_instructions(
+        m,
+        desc,
+        Scope::Global,
+        &ctx.dir,
+        &[],
+        &agentstack::instructions::Selecting::none(),
+    )
+    .unwrap();
     assert_eq!(gp.fragments, ["style", "house"]);
     assert!(gp.proposed.contains("Machine style."));
     assert!(gp.proposed.contains("Project rule."));
-    let pp = plan_instructions(m, desc, Scope::Project, &ctx.dir, &[]).unwrap();
+    let pp = plan_instructions(
+        m,
+        desc,
+        Scope::Project,
+        &ctx.dir,
+        &[],
+        &agentstack::instructions::Selecting::none(),
+    )
+    .unwrap();
     assert_eq!(pp.fragments, ["house"]);
     assert!(
         !pp.proposed.contains("Machine style."),
@@ -116,7 +132,7 @@ fn project_definition_wins_and_the_layer_never_merges_into_itself() {
     let ctx = agentstack::commands::load(Some(&proj)).unwrap();
     let style = &ctx.loaded.manifest.instructions["style"];
     assert!(!style.from_user_layer);
-    assert_eq!(style.path, "./instructions/mine.md");
+    assert_eq!(style.path.as_deref(), Some("./instructions/mine.md"));
     assert!(
         ctx.loaded.user_path.is_none(),
         "nothing merged → no user layer recorded"

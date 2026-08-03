@@ -54,6 +54,20 @@ headless:
 instructions:
   global: ~/.claude/CLAUDE.md
   project: CLAUDE.md
+  # The one CONFIRMED live instruction channel among the registered adapters:
+  # MCP's `initialize` result carries a purpose-built `instructions` string,
+  # and Claude Code was observed surfacing agentstack's own gateway text to the
+  # agent as an MCP-server instruction block. House rules still render to the
+  # file above — a channel that cannot know the model and fires before any
+  # toolset is leased cannot carry a per-(CLI, model) variant
+  # (docs/design/instruction-variants.md).
+  live:
+    channel: mcp-instructions
+    display: MCP initialize instructions
+    confirmation: confirmed
+    note: >-
+      Observed live 2026-08-02 — the gateway's own initialize `instructions`
+      reached the agent (docs/design/research/dynamic-instructions-2026-08.md).
 # Native settings file: permissions, hooks, feature flags. Separate from the
 # MCP config (~/.claude.json); agentstack owns only the top-level keys you
 # declare under [settings.claude-code] and leaves the rest untouched.

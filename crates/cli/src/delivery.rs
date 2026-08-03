@@ -4,16 +4,26 @@
 //! For each capability, AgentStack chooses a **delivery lane** from two facts:
 //! the capability's *kind*, and the *harness* it is going to. That is the whole
 //! decision, and it is routing — **not** a mode switch. Static rendering is not
-//! being removed by any of this; it stays the only correct answer for what MCP
-//! cannot inject (instructions, settings) and for harnesses that cannot take a
-//! live channel at all. A project can be, and normally will be, in both lanes
-//! at once.
+//! being removed by any of this; it stays the only correct answer for what no
+//! live channel can carry correctly and for harnesses that cannot take a live
+//! channel at all. A project can be, and normally will be, in both lanes at
+//! once.
+//!
+//! **Corrected 2026-08-03.** Instructions used to route here with the reason
+//! *"MCP cannot inject these"*, which is false: MCP's `initialize` result has a
+//! purpose-built `instructions` field, AgentStack's own gateway populates it,
+//! and Claude Code is confirmed to consume it. The lane is unchanged and the
+//! reason is now the accurate one — **no live channel a harness is known to
+//! consume can carry an instruction per model or behind a lease**; `initialize`
+//! carries a client name and version and fires before any toolset is selected.
+//! The per-harness confirmation matrix lives on the adapter descriptors and is
+//! reported by [`crate::instructions`] (`docs/design/instruction-variants.md`).
 //!
 //! ```text
 //! kind                     lane        why
 //! skills                   dynamic     served on demand, digest-verified per load
 //! MCP servers              dynamic     brokered, policy-checked, recorded
-//! instructions             rendered    MCP cannot inject these
+//! instructions             rendered    no live channel varies by model (see below)
 //! settings                 rendered    native config file, nothing else reads it
 //! hooks · extensions       rendered    executable kinds — full consent ceremony, always
 //! any kind, non-MCP CLI    rendered    the CLI has no live channel
@@ -124,8 +134,14 @@ pub enum Reason {
     /// This kind is executable — hooks and extensions never leave the rendered
     /// lane, override or not.
     ExecutableKind,
-    /// MCP cannot inject this kind; it only exists as a file the CLI reads.
+    /// This kind only exists as a file the CLI reads — a native settings file
+    /// is read by that CLI and by nothing else.
     FileOnlyKind,
+    /// Instructions: a live channel could carry *text*, but none a harness is
+    /// known to consume can carry it **per model** or behind a lease, which is
+    /// what a house rule with per-(CLI, model) variants needs
+    /// (`docs/design/instruction-variants.md`).
+    NoModelAwareChannel,
     /// The routed default: served live.
     Routed,
 }
@@ -140,6 +156,7 @@ impl Reason {
             Reason::NoLiveChannel => "this tool reads files only",
             Reason::ExecutableKind => "it runs code, so it is always reviewed and written",
             Reason::FileOnlyKind => "only a file can carry it",
+            Reason::NoModelAwareChannel => "no live channel here can vary it by model",
             Reason::Routed => "served live, on demand",
         }
     }
@@ -175,7 +192,8 @@ impl Route {
 ///
 /// 1. A harness with no MCP channel renders everything, automatically.
 /// 2. Executable kinds (hooks, extensions) render, always.
-/// 3. File-only kinds (instructions, settings) render — MCP cannot inject them.
+/// 3. Instructions render (no live channel varies by model) and settings render
+///    (only their own file is read).
 /// 4. **Render locally** pulls what is left back to files.
 /// 5. Everything remaining — skills and servers on an MCP-capable harness with
 ///    no override — is served live. **This is the default** (the flip,
@@ -185,7 +203,9 @@ pub fn route(kind: Kind, mcp_capable: bool, render_locally: bool) -> Route {
         (Lane::Rendered, Reason::NoLiveChannel)
     } else if kind.is_executable() {
         (Lane::Rendered, Reason::ExecutableKind)
-    } else if matches!(kind, Kind::Instruction | Kind::Setting) {
+    } else if kind == Kind::Instruction {
+        (Lane::Rendered, Reason::NoModelAwareChannel)
+    } else if kind == Kind::Setting {
         (Lane::Rendered, Reason::FileOnlyKind)
     } else if render_locally {
         (Lane::Rendered, Reason::RenderLocally)
@@ -449,6 +469,19 @@ mod tests {
         assert_eq!(route(Kind::Setting, true, false).lane, Lane::Rendered);
         assert_eq!(route(Kind::Hook, true, false).lane, Lane::Rendered);
         assert_eq!(route(Kind::Extension, true, false).lane, Lane::Rendered);
+
+        // The instruction reason is its own, and it is the corrected one: a
+        // live channel exists and is even confirmed for Claude Code — it just
+        // cannot vary by model or sit behind a lease.
+        assert_eq!(
+            route(Kind::Instruction, true, false).reason,
+            Reason::NoModelAwareChannel
+        );
+        assert!(!Reason::NoModelAwareChannel.why().contains("cannot inject"));
+        assert_eq!(
+            route(Kind::Setting, true, false).reason,
+            Reason::FileOnlyKind
+        );
 
         // Non-MCP harness: every kind renders, automatically.
         for kind in Kind::ALL {

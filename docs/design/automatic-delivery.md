@@ -34,6 +34,22 @@
 > routing is read through `agentstack delivery [--json]`
 > (`delivery-routing-v1`). Everything below this line is the decision as
 > adopted; the flip did not amend any of it.
+>
+> **Corrected 2026-08-03 (item 4, instruction variants): "MCP cannot inject
+> these" was not true.** The delivery matrix below justified routing
+> instructions to the rendered lane with a claim about the MCP protocol. The
+> protocol has a purpose-built `initialize` `instructions` field, AgentStack's
+> own gateway already populates it, and Claude Code is confirmed to consume it
+> ([`research/dynamic-instructions-2026-08.md`](research/dynamic-instructions-2026-08.md)).
+> **The lane is unchanged; the justification is replaced** with the accurate,
+> narrower, per-harness one: no live channel a harness is *known* to consume
+> can carry an instruction **per model** or **behind a lease** — `initialize`
+> carries only a client name and version, and it fires before any toolset is
+> selected. The full argument, the per-harness confirmation matrix, and the
+> variant schema are in
+> [`instruction-variants.md`](instruction-variants.md). Nothing else here
+> changes: instructions still render, and no surface describes one as going
+> live "via gateway".
 
 ## The decision
 
@@ -48,9 +64,10 @@ delivery lane from the capability's *kind* and the *harness* it is going to.
   today.
 
 This is **not a mode switch, and static rendering is not being removed** — it
-is being *routed*. It stays the only correct answer for what MCP cannot inject
-and for harnesses that cannot take a gateway. A project can be, and normally
-will be, in both lanes at once.
+is being *routed*. It stays the only correct answer for what no live channel
+can carry correctly (corrected 2026-08-03 — see the amendment above) and for
+harnesses that cannot take a gateway. A project can be, and normally will be,
+in both lanes at once.
 
 The user setting is **Automatic** by default; the planner runs silently and
 status names what happened. One advanced override exists (amended 2026-08-02)
@@ -71,7 +88,7 @@ would make the system harder to recover when automatic routing is wrong.
 |---|---|---|
 | Skills | dynamic | Gateway, on demand — digest-verified per load |
 | MCP servers | dynamic | Gateway lease — brokered, policy-checked, recorded |
-| Instructions (managed `CLAUDE.md` / `AGENTS.md` region) | rendered | Rendered file — MCP cannot inject these |
+| Instructions (managed `CLAUDE.md` / `AGENTS.md` region) | rendered | Rendered file — no live channel a harness is *known* to consume can carry one per model or behind a lease (corrected 2026-08-03; the original "MCP cannot inject these" was disproven — see the amendment above and [`instruction-variants.md`](instruction-variants.md)) |
 | Settings | rendered | Rendered into native config |
 | Hooks · Extensions | rendered | Rendered; full consent ceremony always (executable kinds) |
 | Any kind, non-MCP harness | rendered | Full static delivery, automatically |

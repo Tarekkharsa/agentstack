@@ -511,8 +511,9 @@ fn add_pack(
                 .with_context(|| format!("pack instruction '{}'", instr.name.escape_debug()))?;
             let dest = format!("instructions/{}.md", instr.name);
             let entry = crate::manifest::Instruction {
-                path: format!("./{dest}"),
+                path: Some(format!("./{dest}")),
                 targets: vec!["*".into()],
+                variants: Vec::new(),
                 from_user_layer: false,
             };
             text = build_manifest_with(

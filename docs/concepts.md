@@ -231,7 +231,7 @@ routing:
 | Capability kind | Lane |
 |---|---|
 | Skills · MCP servers, on a CLI with MCP | **dynamic** — served live, on demand, digest-verified per load |
-| House rules (`CLAUDE.md` / `AGENTS.md` region) · settings | **rendered** — MCP cannot inject these |
+| House rules (`CLAUDE.md` / `AGENTS.md` region) · settings | **rendered** — a setting only a file carries; house rules because no live channel a CLI is *known* to consume can vary them by model |
 | Hooks · extensions | **rendered**, with the full consent ceremony every time (they run code) |
 | Any kind, on a CLI without MCP | **rendered** — that CLI has no live channel |
 

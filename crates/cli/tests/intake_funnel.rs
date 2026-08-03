@@ -498,7 +498,7 @@ fn adopt_declares_the_dropped_file_and_nothing_more() {
             .manifest
             .instructions
             .get("house")
-            .map(|i| i.path.as_str()),
+            .and_then(|i| i.path.as_deref()),
         Some("./instructions/house.md"),
         "the instruction is declared at its real path"
     );

@@ -130,6 +130,18 @@ pub struct Library {
     /// like a git skill or extension).
     #[serde(default, rename = "package")]
     pub packages: Vec<LibraryPackage>,
+    /// House-rule fragments available in a linked source
+    /// (`docs/design/instruction-variants.md`), keyed by unique `name`. The
+    /// body is a **directory** at `<source>/instructions/<name>/` holding an
+    /// `instruction.toml` plus its markdown bodies — a directory because a
+    /// fragment with per-(CLI, model) variants is several files, and the folder
+    /// taxonomy already spells "has members" as a directory.
+    ///
+    /// Like servers and hooks, the entry carries no `path`: the body is always
+    /// at the name, so [`Library::source_root`] is all a resolver needs and
+    /// there is nothing for [`Library::absolutize_paths`] to rewrite.
+    #[serde(default, rename = "instruction")]
+    pub instructions: Vec<LibraryInstruction>,
     /// The linked sources this index was merged from, in precedence order
     /// (`docs/design/linked-library-sources.md`). In-memory only — it is a view
     /// over several `library.toml` files, never a field any of them carries.
@@ -150,8 +162,51 @@ impl Default for Library {
             extensions: Vec::new(),
             hooks: Vec::new(),
             packages: Vec::new(),
+            instructions: Vec::new(),
             linked: LinkedView::default(),
         }
+    }
+}
+
+/// The directory every library instruction body lives under, in every source.
+pub const INSTRUCTIONS_DIR: &str = "instructions";
+
+/// The declaration file at the root of one library instruction body. Carries
+/// the base `path` and the `[[variant]]` array — the SAME grammar the manifest
+/// uses, parsed by the same serde types, so there is one grammar, one
+/// hostile-input gate and one precedence function.
+pub const INSTRUCTION_FILE: &str = "instruction.toml";
+
+/// One house-rule fragment installed in a linked library source.
+///
+/// Deliberately thin, mirroring [`LibraryHook`]: the body is addressed by name
+/// (`<source>/instructions/<name>/`), so there is no source/path/git axis to
+/// record — a fragment is prose, not a fetchable artifact.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LibraryInstruction {
+    /// The name a project references this fragment by. Unique within a source.
+    pub name: String,
+    /// One-line human description for `lib list`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Where the entry came from (`"manual"`, `"init"`, …). Informational.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<String>,
+}
+
+impl LibraryInstruction {
+    /// The directory holding this fragment's bodies under `root` (a source
+    /// root, not the `instructions/` subdir — the subdir is this kind's own
+    /// constant and never a caller's to remember).
+    pub fn body_dir(&self, root: &Path) -> PathBuf {
+        root.join(INSTRUCTIONS_DIR).join(&self.name)
+    }
+
+    /// One-line description for display. Signature mirrors
+    /// [`LibrarySkill::description`] so `lib list` renders every kind through
+    /// the same row shape.
+    pub fn description(&self, _lib_home: &Path) -> Option<String> {
+        self.description.clone()
     }
 }
 
@@ -164,6 +219,7 @@ pub enum Kind {
     Extension,
     Hook,
     Package,
+    Instruction,
 }
 
 impl Kind {
@@ -175,6 +231,7 @@ impl Kind {
             Kind::Extension => "extension",
             Kind::Hook => "hook",
             Kind::Package => "package",
+            Kind::Instruction => "house rule",
         }
     }
 }
@@ -201,6 +258,7 @@ impl SourceIndex {
             Kind::Extension => self.library.extensions.iter().any(|e| e.name == name),
             Kind::Hook => self.library.hooks.iter().any(|e| e.name == name),
             Kind::Package => self.library.packages.iter().any(|e| e.name == name),
+            Kind::Instruction => self.library.instructions.iter().any(|e| e.name == name),
         }
     }
 }
@@ -680,6 +738,13 @@ impl Library {
                     merged.packages.push(entry.clone());
                 }
             }
+            for entry in &index.library.instructions {
+                if merged.instructions.iter().any(|e| e.name == entry.name) {
+                    note_collision(&mut collisions, &indexes, Kind::Instruction, &entry.name);
+                } else {
+                    merged.instructions.push(entry.clone());
+                }
+            }
         }
         merged.linked = LinkedView {
             sources: indexes,
@@ -907,6 +972,37 @@ impl Library {
         let before = self.packages.len();
         self.packages.retain(|p| p.name != name);
         self.packages.len() != before
+    }
+
+    /// Look up a house-rule fragment by reference. Same shape as
+    /// [`Self::get_package`]: a linked view resolves through the ordered
+    /// sources (first match wins, a qualified reference only in its own
+    /// source), and a bare single-file index falls back to its own list.
+    pub fn get_instruction(&self, reference: &str) -> Option<&LibraryInstruction> {
+        if let Some((index, name)) = self.linked.find(Kind::Instruction, reference) {
+            return index.library.instructions.iter().find(|i| i.name == name);
+        }
+        self.linked
+            .is_empty()
+            .then(|| self.instructions.iter().find(|i| i.name == reference))
+            .flatten()
+    }
+
+    /// Insert or replace a house-rule entry, keeping entries sorted by name.
+    pub fn upsert_instruction(&mut self, entry: LibraryInstruction) {
+        if let Some(existing) = self.instructions.iter_mut().find(|i| i.name == entry.name) {
+            *existing = entry;
+        } else {
+            self.instructions.push(entry);
+        }
+        self.instructions.sort_by(|a, b| a.name.cmp(&b.name));
+    }
+
+    /// Remove a house-rule entry by name. Returns whether anything was removed.
+    pub fn remove_instruction(&mut self, name: &str) -> bool {
+        let before = self.instructions.len();
+        self.instructions.retain(|i| i.name != name);
+        self.instructions.len() != before
     }
 }
 

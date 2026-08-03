@@ -384,6 +384,7 @@ fn standalone_instructions_write_blocks_on_missing_fragment_sources() {
     )
     .unwrap();
     let iargs = agentstack::cli::InstructionsArgs {
+        toolset: None,
         targets: vec!["claude-code".into()],
         scope: Some(Scope::Global),
         write: true,

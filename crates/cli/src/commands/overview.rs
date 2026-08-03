@@ -435,6 +435,14 @@ pub(crate) struct ProjectFacts {
     /// The delivery planner's routing, one plain-language line per CLI (W4).
     /// The planner runs silently; this is where `status` names what it did.
     delivery: Vec<String>,
+    /// The per-harness house-rules honesty matrix (item 4): which channel
+    /// actually carries instructions to each CLI, whether that CLI's live
+    /// channel is confirmed or merely declared, and which variant it receives.
+    /// Present for every targeted harness — including the ones with no
+    /// instruction channel at all, because an adapter that quietly disappears
+    /// from a coverage list reads as covered
+    /// (`docs/design/instruction-variants.md`).
+    instruction_channels: Vec<crate::instructions::HarnessChannel>,
     /// The `rendered lane:` line, present only when something is actually
     /// written — an empty lane line is its own small lie.
     delivery_rendered_lane: Option<String>,
@@ -595,6 +603,15 @@ pub fn run_status(manifest_dir: Option<&Path>, json: bool) -> Result<()> {
     Ok(())
 }
 
+/// The `status --json` body for a project, without the envelope.
+///
+/// The one public seam onto the same reading `agentstack status --json` prints,
+/// so a witness can assert the shipped sentences rather than a paraphrase of
+/// them. Read-only, like the command.
+pub fn status_body(manifest_dir: Option<&Path>) -> Result<serde_json::Value> {
+    Ok(status_json(&collect(manifest_dir, true)?))
+}
+
 pub fn run(manifest_dir: Option<&Path>) -> Result<()> {
     let orientation = collect(manifest_dir, false)?;
     print_orientation(&orientation, false);
@@ -699,6 +716,12 @@ fn project_json(f: &ProjectFacts) -> serde_json::Value {
             }))
             .collect::<Vec<_>>(),
         "shadowed_names": f.shadowed_names,
+        // `instruction-channels-v1`. Always present (`[]` when the project
+        // targets nothing), so a panel can tell "checked, nothing to say" from
+        // an older binary that has no such key.
+        "instruction_channels": f.instruction_channels.iter()
+            .map(|c| c.to_json())
+            .collect::<Vec<_>>(),
         "rendered": f.rendered,
         // Names of unresolved refs, never values (invariant 5). `null` when
         // the caller did not ask for the reading at all — distinct from an
@@ -1141,6 +1164,17 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
             gateway_outages: crate::commands::connect::gateway_outages(&ctx.registry, &target_ids),
             shadowed_names: shadowed_name_lines(),
             delivery: crate::commands::delivery::summary_lines(&delivery_plan),
+            instruction_channels: crate::instructions::channels(
+                m,
+                &ctx.registry,
+                &delivery_targets,
+                crate::scope::Scope::default_for(&ctx.dir),
+                &ctx.dir,
+                &crate::library::Library::load_default_or_warn(),
+                // `status` names no toolset, so the model comes from
+                // `[settings.<cli>] model` or is honestly unknown.
+                None,
+            ),
             delivery_rendered_lane: crate::delivery::rendered_lane_line(&delivery_plan),
             delivery_has_live: delivery_plan.has_dynamic_lane(),
             rendered,
@@ -1355,6 +1389,17 @@ fn print_orientation(o: &Orientation, status: bool) {
             // "hidden" would look like.
             for line in &f.shadowed_names {
                 println!("  {}  {}", "Library ".bold(), line);
+            }
+
+            // The house-rules honesty matrix. Printed only when this project
+            // actually has house rules — an orientation screen stays four ideas
+            // wide until there is something to say — but then it names EVERY
+            // targeted harness, including the ones that cannot receive them.
+            if f.instructions > 0 {
+                for (i, row) in f.instruction_channels.iter().enumerate() {
+                    let label = if i == 0 { "House   " } else { "        " };
+                    println!("  {}  {}", label.bold(), row.sentence());
+                }
             }
 
             if status {
@@ -1773,6 +1818,7 @@ mod tests {
                 gateway_connected: false,
                 gateway_outages: Vec::new(),
                 shadowed_names: Vec::new(),
+                instruction_channels: Vec::new(),
                 delivery: Vec::new(),
                 delivery_rendered_lane: None,
                 delivery_has_live: false,

@@ -545,7 +545,7 @@ kind and the CLI it is going to. What the lanes *are*:
 | Capability kind | Lane |
 |---|---|
 | Skills · MCP servers, on a CLI with MCP | dynamic — served live, digest-verified per load |
-| House rules · settings | rendered — MCP cannot inject them |
+| House rules · settings | rendered — settings only a file carries; house rules because no live channel a CLI is *known* to consume varies by model |
 | Hooks · extensions | rendered, full consent ceremony always |
 | Any kind, on a CLI without MCP | rendered |
 
@@ -1354,6 +1354,53 @@ owns — and `doctor` flags a stale managed region (warn ↳ `instructions --wri
 or a missing fragment source (error, gates `--ci`). Installing a pack's house
 rules prints the exact compile command.
 
+#### Variants: one fragment, per CLI and per model
+
+A fragment can carry alternative bodies selected by `cli`, by `model`, or by
+both. `targets` decides *whether* a fragment reaches a CLI; `variant` decides
+*which bytes* it sends once it does.
+
+```toml
+[instructions.house]
+path = "./instructions/house.md"
+
+  [[instructions.house.variant]]
+  cli = "claude-code"
+  model = "opus"
+  path = "./instructions/house.claude-opus.md"
+
+  [[instructions.house.variant]]
+  cli = "codex"
+  path = "./instructions/house.codex.md"
+```
+
+**Most specific wins:** exact `(cli, model)` → `(cli)` → `(model)` → the base
+`path`. Two variants with the identical selector resolve to the first declared.
+A variant with neither selector is refused — it could never be chosen.
+
+**The model comes from a declaration, never a guess:** the `model` of a toolset
+a command explicitly names (`instructions --toolset backend`,
+`apply --profile backend`), else `[settings.<cli>] model` — the value agentstack
+itself writes into that CLI's config. With neither, the model is **unknown**,
+the least specific matching body is used, and every surface says so. No harness
+has native per-model instructions; the switch is agentstack's.
+
+**Every variant body is pinned** in `agentstack.lock`, including one nothing
+currently selects, so editing any of them re-gates review before delivery.
+
+A fragment with no `path` resolves its bodies — base and variants — from the
+[linked library sources](#the-library-linked-source-folders) by its own name,
+first match wins, as `<source>/instructions/<name>/instruction.toml`.
+
+**What carries them, per CLI.** `status` names, for each targeted CLI, the file
+that actually carries house rules there, which variant it receives and why, and
+whether that CLI's *live* channel (MCP's `initialize` `instructions` field) is
+**confirmed** or merely **unconfirmed**. No live channel carries house rules
+today, confirmed or not: none of them varies by model or sits behind a lease.
+Seven of the thirteen adapters have no instruction channel at all, and `status`
+says that plainly rather than omitting them. Design:
+[instruction-variants.md](design/instruction-variants.md).
+
 ### The machine layer
 
 The machine manifest is the personal, cross-project layer (concept:
@@ -1679,7 +1726,7 @@ you need the exact verb, flag, or subcommand.
 - **`set`** _(hidden)_ — Create or update a manifest entry in place (idempotent `add`) — subcommands `server`
 - **`search`** — Search the capability catalog (and mark what's already added) — flags `--all/--json`
 - **`apply`** — Write this setup into each CLI's own config — flags `--target/--toolset/--dry-run/--write/--scope/--allow-unresolved/--prune-foreign/--no-gitignore/--verbose`
-- **`instructions`** _(hidden)_ — Compile [instructions.*] into each CLI's CLAUDE.md / AGENTS.md — flags `--target/--scope/--write`
+- **`instructions`** _(hidden)_ — Compile [instructions.*] into each CLI's CLAUDE.md / AGENTS.md — flags `--target/--toolset/--scope/--write`
 - **`doctor`** — Check the setup in depth: what is wired up, what is missing, what changed — flags `--ci/--live/--probe/--fix/--deep/--all/--json`
 - **`remove`** _(hidden)_ — Remove a server or skill from the manifest (and lockfile) — flags `--write`
 - **`install`** _(hidden)_ — Fetch skill sources into the store and write the lockfile — flags `--locked/--allow-flagged`

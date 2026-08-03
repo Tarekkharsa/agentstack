@@ -109,7 +109,7 @@ fn house_rules_seed_is_idempotent_and_compiles() {
         .instructions
         .get(init::HOUSE_RULES_NAME)
         .expect("[instructions.agentstack] declared");
-    assert_eq!(instr.path, "./instructions/agentstack.md");
+    assert_eq!(instr.path.as_deref(), Some("./instructions/agentstack.md"));
     let body = fs::read_to_string(home.join("instructions/agentstack.md")).unwrap();
     assert!(body.contains("agentstack house rules"));
     assert!(body.contains("do not create one")); // clean-at-rest lesson
@@ -123,6 +123,7 @@ fn house_rules_seed_is_idempotent_and_compiles() {
         agentstack::scope::Scope::Global,
         &home,
         &[],
+        &agentstack::instructions::Selecting::none(),
     )
     .unwrap();
     assert_eq!(plan.fragments, vec![init::HOUSE_RULES_NAME.to_string()]);

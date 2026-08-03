@@ -925,6 +925,7 @@ fn offer_house_rules_inner(ctx: &super::Context, target_ids: &[String]) -> Resul
                 &home,
                 // The machine layer: no project lock, so no package members.
                 &[],
+                &crate::instructions::Selecting::for_command(None),
             ) else {
                 continue;
             };

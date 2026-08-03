@@ -17,7 +17,7 @@ use owo_colors::OwoColorize;
 
 use crate::cli::LockArgs;
 use crate::library::Library;
-use crate::lock::Lock;
+use crate::lock::{Lock, LockedInstructionVariant};
 use crate::manifest::Manifest;
 use crate::render::{resolve_active_servers, Selection};
 use crate::resolve::{ResolveMode, ResolvedServer, ResolvedSkill};
@@ -313,6 +313,9 @@ pub(crate) fn record_instruction_pins(
     // absorb the declined live bytes into the lock with no consent moment.
     // It stays in `declared`, so strict pruning keeps its existing pin.
     let decided = super::use_profile::decided_names(dir, "instruction");
+    // Sourceless fragments resolve their bodies from the linked sources; one
+    // read serves the whole pass.
+    let library = crate::library::Library::load_default_or_warn();
     let mut declared: Vec<String> = Vec::new();
     let mut pinned = 0usize;
     for (name, instr) in &manifest.instructions {
@@ -323,7 +326,18 @@ pub(crate) fn record_instruction_pins(
         if decided.contains(name) {
             continue;
         }
-        let src = crate::render::instructions::fragment_source(dir, &instr.path);
+        // Every body this fragment declares — the base and each per-(CLI, model)
+        // variant. Pinning only the currently-selected one would leave the
+        // others unpinned content the consent digest never covers, which is the
+        // hole `docs/design/instruction-variants.md` §"Every variant body is
+        // pinned" exists to close.
+        let bodies = match crate::instructions::bodies(name, instr, dir, &library) {
+            Ok(b) => b,
+            Err(e) if strict => {
+                return Err(e).context(format!("pinning instruction '{name}'"));
+            }
+            Err(_) => continue,
+        };
         // The pin comes from `Store::pin_instruction`, which deposits the bytes
         // it hashes into the content store as part of producing the checksum —
         // so a later re-gate can show WHICH LINES of this fragment moved
@@ -331,18 +345,48 @@ pub(crate) fn record_instruction_pins(
         // that builds a LockedInstruction, so routing it here makes the
         // deposit a property of pinning rather than of call-site discipline,
         // exactly as `Store::pin` does for skills.
-        match crate::store::Store::default_store().pin_instruction(&src) {
+        let store = crate::store::Store::default_store();
+        let base_src = bodies.source_of(&bodies.base);
+        match store.pin_instruction(&base_src) {
             Ok(checksum) => {
+                // A variant that cannot be pinned is an error in strict mode and
+                // skipped otherwise — the same posture the base body takes, so
+                // one unreadable variant never silently drops the whole entry.
+                let mut variants = Vec::new();
+                for v in &bodies.variants {
+                    let src = bodies.source_of(&v.path);
+                    match store.pin_instruction(&src) {
+                        Ok(checksum) => variants.push(LockedInstructionVariant {
+                            cli: v.cli.clone(),
+                            model: v.model.clone(),
+                            path: v.path.clone(),
+                            checksum,
+                        }),
+                        Err(e) if strict => {
+                            return Err(e).with_context(|| {
+                                format!(
+                                    "pinning instruction '{name}' variant: reading {}",
+                                    src.display()
+                                )
+                            });
+                        }
+                        Err(_) => {}
+                    }
+                }
                 lock.upsert_instruction(agentstack_core::lock::LockedInstruction {
                     name: name.clone(),
-                    path: instr.path.clone(),
+                    path: bodies.base.clone(),
                     checksum,
+                    variants,
                 });
                 pinned += 1;
             }
             Err(e) if strict => {
                 return Err(e).with_context(|| {
-                    format!("pinning instruction '{name}': reading {}", src.display())
+                    format!(
+                        "pinning instruction '{name}': reading {}",
+                        base_src.display()
+                    )
                 });
             }
             Err(_) => {}
@@ -620,6 +664,7 @@ fn render_package_instructions(ctx: &super::Context) -> Result<Vec<String>> {
     let scope = crate::scope::Scope::default_for(&ctx.dir);
     let target_ids = crate::render::resolve_targets(manifest, &ctx.registry, &[], &ctx.dir)?;
 
+    let sel = crate::instructions::Selecting::for_command(None);
     let mut written: Vec<String> = Vec::new();
     let mut unverifiable: Vec<String> = Vec::new();
     for id in &target_ids {
@@ -627,7 +672,7 @@ fn render_package_instructions(ctx: &super::Context) -> Result<Vec<String>> {
             continue;
         };
         let Some(plan) = crate::render::instructions::plan_instructions(
-            manifest, desc, scope, &ctx.dir, packages,
+            manifest, desc, scope, &ctx.dir, packages, &sel,
         ) else {
             continue;
         };

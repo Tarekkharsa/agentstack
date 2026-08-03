@@ -315,15 +315,38 @@ fn explain_instruction(name: &str, ctx: &crate::commands::Context) -> String {
     } else {
         out.push_str("Origin: this project's setup.\n");
     }
-    out.push_str(&format!("Source: {}\n", instr.path));
-    let src = Path::new(&instr.path);
-    let resolved = if src.is_absolute() {
-        src.to_path_buf()
-    } else {
-        ctx.dir.join(src)
-    };
-    if !resolved.exists() {
-        out.push_str("  ✗ source file missing\n");
+    out.push_str(&format!(
+        "Source: {}\n",
+        crate::instructions::declared_label(name, instr)
+    ));
+    // A sourceless fragment's body lives in a linked library source; resolving
+    // it here is what lets this line say whether the file is actually there.
+    let library = crate::library::Library::load_default_or_warn();
+    match crate::instructions::base_source(name, instr, &ctx.dir, &library) {
+        Some(resolved) => {
+            out.push_str(&format!("  ↳ {}\n", resolved.display()));
+            if !resolved.exists() {
+                out.push_str("  ✗ source file missing\n");
+            }
+        }
+        None => out.push_str("  ✗ source could not be resolved\n"),
+    }
+    if !instr.variants.is_empty() {
+        // Every variant, so a reader can see which CLI or model gets which
+        // body without opening the manifest.
+        out.push_str(&format!(
+            "Variants: {} — most specific (CLI + model) wins, then CLI, then model, then the base body.\n",
+            instr.variants.len()
+        ));
+        for v in &instr.variants {
+            let selector = match (v.cli.as_deref(), v.model.as_deref()) {
+                (Some(c), Some(m)) => format!("{c} + {m}"),
+                (Some(c), None) => c.to_string(),
+                (None, Some(m)) => m.to_string(),
+                (None, None) => "(no selector — never matches)".to_string(),
+            };
+            out.push_str(&format!("  · {selector} → {}\n", v.path));
+        }
     }
     // Phase 3 item 5: the two rows every other kind answers. Instructions had
     // origin and source but never said whether these were the approved bytes,

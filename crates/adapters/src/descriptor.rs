@@ -643,6 +643,52 @@ pub struct InstructionsSpec {
     /// Project instruction file relative to the repo (e.g. `CLAUDE.md`).
     #[serde(default)]
     pub project: Option<String>,
+    /// A **live** (non-file) channel this harness can take instruction content
+    /// through, and how well that is actually known
+    /// (`docs/design/instruction-variants.md` §"Channels: confirmation-gated").
+    ///
+    /// Absent means no live channel is claimed at all. This lives on the
+    /// descriptor so that adding a harness — or upgrading a channel from
+    /// `unconfirmed` to `confirmed` — is a YAML edit plus a line of evidence,
+    /// with no branch anywhere in the delivery path that names a CLI.
+    #[serde(default)]
+    pub live: Option<LiveInstructionChannel>,
+}
+
+/// How well a harness is known to consume a live instruction channel.
+///
+/// Two states, and the difference is the whole honesty rule: `Confirmed` means
+/// somebody observed it working; `Unconfirmed` means documented or
+/// protocol-level and never verified here. An unconfirmed channel is never used
+/// as though it worked, and no surface may present it as confirmed.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum Confirmation {
+    Confirmed,
+    Unconfirmed,
+}
+
+impl Confirmation {
+    pub fn slug(self) -> &'static str {
+        match self {
+            Confirmation::Confirmed => "confirmed",
+            Confirmation::Unconfirmed => "unconfirmed",
+        }
+    }
+}
+
+/// One live instruction channel a harness declares.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LiveInstructionChannel {
+    /// Machine id of the channel (`mcp-instructions`).
+    pub channel: String,
+    /// Human name of the channel, for the sentences surfaces print.
+    pub display: String,
+    pub confirmation: Confirmation,
+    /// Why the confirmation state is what it is — the evidence, in one line.
+    #[serde(default)]
+    pub note: Option<String>,
 }
 
 impl InstructionsSpec {

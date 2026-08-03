@@ -12,7 +12,9 @@ pub mod import;
 pub mod registry;
 pub mod render;
 
-pub use descriptor::{AdapterDescriptor, AdapterSource, Format};
+pub use descriptor::{
+    AdapterDescriptor, AdapterSource, Confirmation, Format, LiveInstructionChannel,
+};
 pub use import::{extract_servers, extract_servers_with_skips, extract_settings, SkippedImport};
 pub use registry::Registry;
 pub use render::{render_server, Rendered};

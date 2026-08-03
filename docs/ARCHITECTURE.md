@@ -111,7 +111,7 @@ The recommended default and its exceptions:
 | Situation | Use | Why |
 |---|---|---|
 | MCP-capable interactive work | Toolset lease | Smallest live surface, no project-native cleanup; policy and audit stay on the path. |
-| Native skills or instruction files | `use --write` | The harness reads those files itself; MCP cannot inject native files. |
+| Native skills or instruction files | `use --write` | The harness reads those files itself, and no live channel it is *known* to consume carries house rules per model or behind a lease (`docs/design/instruction-variants.md`). |
 | Native, but clean between sessions | `session start`/`end` | Temporary compatibility with an explicit restore contract. |
 | Stable offline launches | Static render | No live gateway dependency; native config is ready at startup. |
 | Unfamiliar repository | Trust gate first | Selection must never grant consent; unreviewed auto-project bundles stay inert. |

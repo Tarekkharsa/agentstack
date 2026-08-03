@@ -76,6 +76,16 @@ headless:
 instructions:
   global: ~/.codex/AGENTS.md
   project: AGENTS.md
+  # Codex is an MCP client, so the protocol field reaches it — but no source
+  # confirms Codex surfaces it into the model's context. Unconfirmed is never
+  # used as though it worked.
+  live:
+    channel: mcp-instructions
+    display: MCP initialize instructions
+    confirmation: unconfirmed
+    note: >-
+      MCP client, but consumption of the initialize `instructions` field is
+      unverified (docs/design/research/dynamic-instructions-2026-08.md).
 # Codex supports lifecycle hooks from config.toml. The schema matches the
 # Claude-style hooks object: event → [{matcher?, hooks:[{type, command, …}]}].
 # Hooks are trust-gated by Codex itself; agentstack only renders the config.

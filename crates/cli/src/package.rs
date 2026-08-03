@@ -516,7 +516,17 @@ fn pin_replacement(
                     crate::text::sanitize_line(replacement)
                 )
             })?;
-            let src = crate::render::instructions::fragment_source(dir, &instr.path);
+            // The replacement's BASE body: a package member is one fragment,
+            // and the override swaps which fragment it is, not which variant of
+            // it a harness gets. The replacement's own variants pin through the
+            // ordinary instruction path.
+            let src = crate::instructions::base_source(replacement, instr, dir, library)
+                .with_context(|| {
+                    format!(
+                        "resolving the replacement fragment '{}'",
+                        crate::text::sanitize_line(replacement)
+                    )
+                })?;
             store
                 .pin_instruction(&src)
                 .with_context(|| format!("pinning the replacement fragment at {}", src.display()))?

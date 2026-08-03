@@ -381,10 +381,21 @@ pub fn merge_user_layer(loaded: &mut LoadedManifest) {
         if loaded.manifest.instructions.contains_key(&name) {
             continue; // the project's definition wins
         }
-        let p = Path::new(&instr.path);
-        if !p.is_absolute() {
+        // Anchor every body this fragment can compile from — the base and each
+        // per-(CLI, model) variant. Missing a variant here would leave it
+        // anchored at the PROJECT, so a personal fragment's variant would read
+        // a repo file, which is the one thing the user layer must never do.
+        let anchor = |declared: &str| -> String {
+            let p = Path::new(declared);
+            if p.is_absolute() {
+                return declared.to_string();
+            }
             let rel = p.strip_prefix("./").unwrap_or(p);
-            instr.path = home.join(rel).display().to_string();
+            home.join(rel).display().to_string()
+        };
+        instr.path = instr.path.as_deref().map(anchor);
+        for variant in &mut instr.variants {
+            variant.path = anchor(&variant.path);
         }
         instr.from_user_layer = true;
         merged.insert(name, instr);

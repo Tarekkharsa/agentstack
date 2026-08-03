@@ -238,7 +238,12 @@ pub(crate) fn safe_instruction_files(
     let marker = format!("agentstack:vendor {pack}");
     let mut out = Vec::new();
     for name in &recipe.instructions {
-        let Some(Instruction { path, .. }) = manifest.instructions.get(name) else {
+        // A vendor pack always writes a path-declared fragment; a sourceless
+        // (library-resolved) one is not this pack's file to delete.
+        let Some(Instruction {
+            path: Some(path), ..
+        }) = manifest.instructions.get(name)
+        else {
             continue;
         };
         let rel = Path::new(path.trim_start_matches("./"));

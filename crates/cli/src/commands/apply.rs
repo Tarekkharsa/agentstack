@@ -148,6 +148,9 @@ fn render(
         Some(p) => Selection::Profile(p.clone()),
         None => Selection::All,
     };
+    // House-rule variant selection: an explicitly named toolset carries the
+    // model, and one library read serves every target below.
+    let sel = crate::instructions::Selecting::for_command(args.profile.as_deref());
     // Named once for the history ledger below — `restore`'s listing renders
     // this so an `apply --profile backend` entry reads differently from a
     // plain `apply` (both otherwise touch the same files).
@@ -221,7 +224,13 @@ fn render(
             .iter()
             .filter(|(n, i)| !i.from_user_layer && !decided.contains(*n))
             .map(|(n, i)| {
-                let status = crate::resolve::instruction_lock_status(n, i, &ctx.dir, &lock);
+                let status = crate::resolve::instruction_lock_status_with(
+                    n,
+                    i,
+                    &ctx.dir,
+                    &lock,
+                    &sel.library,
+                );
                 (n.clone(), status)
             })
             .filter(|(_, s)| {
@@ -681,6 +690,7 @@ fn render(
                     scope,
                     &ctx.dir,
                     crate::package::effective_members(&pinned),
+                    &sel,
                 )
                 // An excluded-only plan still compiles (to a region without
                 // the refused fragment): skipping it would leave a blocked

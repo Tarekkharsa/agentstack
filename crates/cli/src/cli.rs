@@ -2703,6 +2703,12 @@ pub struct InstructionsArgs {
     #[arg(long = "target", value_name = "CLI")]
     pub targets: Vec<String>,
 
+    /// Compile the house rules this toolset selects — its `model` picks the
+    /// per-(CLI, model) variant. Without it the model is unknown and the least
+    /// specific matching body is used, which the output states.
+    #[arg(long = "toolset", alias = "profile", value_name = "NAME")]
+    pub toolset: Option<String>,
+
     /// Where writes land: global (each CLI user-level config) or project
     /// (repo-local). Defaults to the manifest home.
     #[arg(long, value_enum)]

@@ -448,6 +448,34 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   about which sources are linked, in what order, or where they live — that
 ///   is `agentstack lib sources`, deliberately not a panel surface, because
 ///   the link list is personal-layer machine state and never project state.
+/// - `instruction-channels-v1`: `status --json` gains an `instruction_channels`
+///   array — one row per targeted CLI with `id`, `display`, the `file` that
+///   actually carries house rules there (`null` when the CLI has none), the
+///   `live_channel` its adapter descriptor declares (`id`, `display`,
+///   `confirmation` = `confirmed` / `unconfirmed`, and `used`), the `selection`
+///   (`fragment`, `variant`, `model`, `model_source`), and the one `sentence`
+///   the terminal prints (`docs/design/instruction-variants.md`).
+///
+///   **What it promises.** The array names EVERY targeted CLI, including the
+///   ones with no instruction channel at all — a `file` of `null` is the
+///   honest "house rules do not reach this tool", and an adapter that silently
+///   disappeared from a coverage list would read as covered. `confirmation`
+///   distinguishes "observed consuming this channel" from "documented or
+///   protocol-level and never verified here", and the two are never collapsed.
+///   `model_source` is always one of `toolset:<name>`, `settings`, or
+///   `unknown`, so a panel can show *why* a variant was chosen rather than only
+///   which.
+///
+///   **What it does not promise.** `used` is `false` on every live channel and
+///   is a field rather than an omission for exactly that reason: no live
+///   channel carries house rules today, confirmed or not, because none of them
+///   varies by model or sits behind a lease. A `confirmed` channel is therefore
+///   **not** an activation reading and never means instructions are being
+///   served live — nothing is, and no surface may say otherwise. `selection`
+///   reports the FIRST fragment that compiles for that CLI, not every one;
+///   `agentstack instructions` is the per-fragment surface. And a `file` path
+///   is a destination, not proof anything has been written to it — `rendered`
+///   and `agentstack diff` answer that.
 pub const FEATURES: &[&str] = &[
     "init-plan",
     "apply-setup",
@@ -487,6 +515,7 @@ pub const FEATURES: &[&str] = &[
     "lease-status-v1",
     "delivery-routing-v1",
     "library-sources-v1",
+    "instruction-channels-v1",
 ];
 
 /// Wrap a response body in the envelope. The two envelope keys are injected
@@ -558,6 +587,7 @@ mod tests {
             "package-members-v1",
             "lease-status-v1",
             "library-sources-v1",
+            "instruction-channels-v1",
         ] {
             assert!(
                 features.contains(&shipped),

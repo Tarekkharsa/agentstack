@@ -40,6 +40,13 @@ mcp:
 instructions:
   global: ~/.config/opencode/AGENTS.md
   project: AGENTS.md
+  live:
+    channel: mcp-instructions
+    display: MCP initialize instructions
+    confirmation: unconfirmed
+    note: >-
+      MCP client, but consumption of the initialize `instructions` field is
+      unverified (docs/design/research/dynamic-instructions-2026-08.md).
 # OpenCode plugins: JS add-ons loaded from ~/.config/opencode/plugins — the same
 # directory the host guard authors agentstack-guard.js into (see
 # commands/guard.rs). OpenCode exposes no project-scoped plugin directory, so

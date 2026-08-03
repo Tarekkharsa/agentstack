@@ -446,3 +446,76 @@ unpopulated central library, which is honest but may read as a fault on a first
 run; and the pre-existing copy debt — `use`/`doctor`/`trust` describing a
 moved-ahead library as "drift" in wording that can read as breakage — is now
 slightly easier to reach, since reordering is a new route to that state.
+
+## Item 4 — instructions target CLI and model (branch `instructions-variants`)
+
+Shipped: `[[instructions.<name>.variant]]` — an ordered list of bodies selected
+by `cli`, `model`, or both, resolved most-specific-first (exact `(cli, model)` >
+`(cli)` > `(model)` > the base `path`) with identical selectors breaking to the
+first declared, the same first-match rule linked sources use. `targets` keeps
+its own job — *whether* a fragment reaches a CLI — and `variant` decides *which
+bytes* once it does. The precedence function is a pure `select_variant` in core,
+shared by the manifest's variants and a library body's, which are the same
+grammar in two homes: a sourceless `[instructions.<name>]` now resolves through
+the ordered linked sources to `<source>/instructions/<name>/instruction.toml`,
+containment-checked before any body is read. Every declared body is pinned —
+`[[instruction.variant]]` in the lock, from the same `Store::pin_instruction`
+act, including variants nothing currently selects, because consent is over
+content and not over what happened to be chosen today.
+
+The model is never sniffed. It comes from an explicitly named toolset's `model`
+or from `[settings.<cli>] model` (the value we compile into that CLI's own
+config), and is otherwise **unknown** — a first-class answer that uses the least
+specific matching body and says so, with the source of the model reported beside
+every selection. Deliberately not read: a default toolset nobody named, trailing
+`run` argv, and Claude Code's undocumented `SessionStart` `model` field.
+
+The research the item rests on
+(`docs/design/research/dynamic-instructions-2026-08.md`) disproved the delivery
+contract's "MCP cannot inject these": the protocol has a purpose-built
+`initialize` `instructions` field and our own gateway already uses it. **The
+lane did not change and the justification did** — in `automatic-delivery.md`'s
+own amendment style, in the planner (`Reason::NoModelAwareChannel`), and in
+`docs/{concepts,choose,reference,ARCHITECTURE}.md`. Instructions stay rendered
+for a reason that is a property of the channel, not caution: `initialize`
+carries a client name and version and nothing about the model, so routing there
+would force every fragment to the least specific match — defeating the feature —
+and it fires before any lease names a toolset, which would put selected content
+in agent context with no lease behind it (the fence W4 closed). Channel
+confirmation is descriptor data, not a branch: `instructions.live` carries
+`channel`/`display`/`confirmation`/`note`, confirmed for Claude Code and
+unconfirmed for Codex, Copilot CLI, OpenCode and Junie, absent for Pi and for
+the seven adapters with no instruction channel at all. `status` prints one row
+per targeted harness — the file that carries house rules, the variant and why,
+and the live channel's confirmation with "not used" attached in both states —
+and `status --json` carries the same rows under the new `instruction-channels-v1`
+feature, whose `used: false` is a field rather than an omission precisely so a
+`confirmed` channel can never be read as a serving claim.
+
+Witnesses: `instruction_variants` (6) — all four precedence levels plus a
+deterministic tie, the unknown-model fallback asserted against real `status`
+output, every variant pinned with a *deselected* one still failing closed at the
+`ensure_instructions_compilable` gate, an unconfirmed channel never borrowing the
+confirmed wording, the seven channel-less adapters named rather than omitted,
+and variants resolving across two linked sources including a reorder flipping
+which source's variant compiles.
+
+Judgment calls and debts, named rather than guessed through: **instructions did
+not move to the dynamic lane** (argued above; the day a channel is both
+confirmed and model-aware, the descriptor gains it and that argument is the
+checklist). A toolset's `model` is *intent* while `[settings.<cli>] model` is a
+*fact we write*; the toolset wins as the narrower act and the reported source is
+how a user sees that it did — AgentStack does **not** reconcile them, because
+that would mean a toolset selection silently rewriting a harness's native
+config. No qualified `<source>:<name>` spelling for a library house rule, the
+same debt extensions and hooks carry: these kinds are declared by manifest key,
+not selected from a reference list. A locked run's grant still binds the
+fragment's **base** body path and digest; every variant is pinned in the lock and
+strict verification compares all of them, so a drifted variant never reaches
+grant construction — but the grant's own record is the base. Gemini CLI and
+Cursor stayed channel-less: both have documented global-file channels, and
+wiring them up means AgentStack starting to write two files it has never
+written, which is an intake decision with its own consent surface. And a
+vocabulary gap surfaced rather than papered over: the design docs say
+`[toolsets.<name>]` while the manifest key is still `profiles` — the CLI's
+`--toolset`/`--profile` alias is the same split, and it predates this item.

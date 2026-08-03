@@ -310,7 +310,7 @@
 <div class="tblwrap"><table>
 <thead><tr><th>Situation</th><th>Use</th><th>Why</th></tr></thead><tbody>
 <tr><td>MCP-capable interactive work</td><td>Toolset lease</td><td>Smallest live surface, no project-native cleanup; policy and audit stay on the path.</td></tr>
-<tr><td>Native skills or instruction files</td><td><code>use --write</code></td><td>The harness reads those files itself; MCP cannot inject native files.</td></tr>
+<tr><td>Native skills or instruction files</td><td><code>use --write</code></td><td>The harness reads those files itself, and no live channel it is <em>known</em> to consume carries house rules per model or behind a lease (<code>docs/design/instruction-variants.md</code>).</td></tr>
 <tr><td>Native, but clean between sessions</td><td><code>session start</code>/<code>end</code></td><td>Temporary compatibility with an explicit restore contract.</td></tr>
 <tr><td>Stable offline launches</td><td>Static render</td><td>No live gateway dependency; native config is ready at startup.</td></tr>
 <tr><td>Unfamiliar repository</td><td>Trust gate first</td><td>Selection must never grant consent; unreviewed auto-project bundles stay inert.</td></tr>

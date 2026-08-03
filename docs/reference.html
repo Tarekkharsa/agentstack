@@ -424,7 +424,7 @@ cwd = "/path/to/tldraw-mcp-server"   # supports ${REF}/path expansion</code></pr
 <div class="tblwrap"><table>
 <thead><tr><th>Capability kind</th><th>Lane</th></tr></thead><tbody>
 <tr><td>Skills · MCP servers, on a CLI with MCP</td><td>dynamic — served live, digest-verified per load</td></tr>
-<tr><td>House rules · settings</td><td>rendered — MCP cannot inject them</td></tr>
+<tr><td>House rules · settings</td><td>rendered — settings only a file carries; house rules because no live channel a CLI is <em>known</em> to consume varies by model</td></tr>
 <tr><td>Hooks · extensions</td><td>rendered, full consent ceremony always</td></tr>
 <tr><td>Any kind, on a CLI without MCP</td><td>rendered</td></tr>
 </tbody></table></div>
@@ -675,6 +675,24 @@ agentstack add skill ./my-skill --name code-review</code></pre>
 <p>Compile shared + harness-specific <code>[instructions.*]</code> fragments into each CLI's <code>CLAUDE.md</code> / <code>AGENTS.md</code>, inside a managed <code>&lt;!-- agentstack --&gt;</code> region that preserves surrounding hand-written prose.</p>
 <pre class="block"><code>agentstack instructions --write   # compile [instructions.*] into CLAUDE.md / AGENTS.md</code></pre>
 <p>Dry-run by default. Part of the mainstream lifecycle: <code>apply</code> (so <code>init</code> too) compiles the region alongside servers/settings/hooks behind the same <code>--write</code> gate — a manifest with no <code>[instructions.*]</code> never touches a region another layer owns — and <code>doctor</code> flags a stale managed region (warn ↳ <code>instructions --write</code>) or a missing fragment source (error, gates <code>--ci</code>). Installing a pack's house rules prints the exact compile command.</p>
+<h4 id="variants-one-fragment-per-cli-and-per-model">Variants: one fragment, per CLI and per model<a class="hlink" href="#variants-one-fragment-per-cli-and-per-model" aria-label="Link to this section">#</a></h4>
+<p>A fragment can carry alternative bodies selected by <code>cli</code>, by <code>model</code>, or by both. <code>targets</code> decides <em>whether</em> a fragment reaches a CLI; <code>variant</code> decides <em>which bytes</em> it sends once it does.</p>
+<pre class="block"><code>[instructions.house]
+path = "./instructions/house.md"
+
+  [[instructions.house.variant]]
+  cli = "claude-code"
+  model = "opus"
+  path = "./instructions/house.claude-opus.md"
+
+  [[instructions.house.variant]]
+  cli = "codex"
+  path = "./instructions/house.codex.md"</code></pre>
+<p><strong>Most specific wins:</strong> exact <code>(cli, model)</code> → <code>(cli)</code> → <code>(model)</code> → the base <code>path</code>. Two variants with the identical selector resolve to the first declared. A variant with neither selector is refused — it could never be chosen.</p>
+<p><strong>The model comes from a declaration, never a guess:</strong> the <code>model</code> of a toolset a command explicitly names (<code>instructions --toolset backend</code>, <code>apply --profile backend</code>), else <code>[settings.&lt;cli&gt;] model</code> — the value agentstack itself writes into that CLI's config. With neither, the model is <strong>unknown</strong>, the least specific matching body is used, and every surface says so. No harness has native per-model instructions; the switch is agentstack's.</p>
+<p><strong>Every variant body is pinned</strong> in <code>agentstack.lock</code>, including one nothing currently selects, so editing any of them re-gates review before delivery.</p>
+<p>A fragment with no <code>path</code> resolves its bodies — base and variants — from the <a href="#the-library-linked-source-folders">linked library sources</a> by its own name, first match wins, as <code>&lt;source&gt;/instructions/&lt;name&gt;/instruction.toml</code>.</p>
+<p><strong>What carries them, per CLI.</strong> <code>status</code> names, for each targeted CLI, the file that actually carries house rules there, which variant it receives and why, and whether that CLI's <em>live</em> channel (MCP's <code>initialize</code> <code>instructions</code> field) is <strong>confirmed</strong> or merely <strong>unconfirmed</strong>. No live channel carries house rules today, confirmed or not: none of them varies by model or sits behind a lease. Seven of the thirteen adapters have no instruction channel at all, and <code>status</code> says that plainly rather than omitting them. Design: <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/design/instruction-variants.md">instruction-variants.md</a>.</p>
 <h3 id="the-machine-layer">The machine layer<a class="hlink" href="#the-machine-layer" aria-label="Link to this section">#</a></h3>
 <p>The machine manifest is the personal, cross-project layer (concept: <a href="concepts.html#machine-manifest-and-machine-policy">concepts.md</a>).</p>
 <pre class="block"><code>agentstack init --global                            # seed ~/.agentstack/agentstack.toml + instructions/
@@ -797,7 +815,7 @@ agentstack completions fish &gt; ~/.config/fish/completions/agentstack.fish</cod
 <li><strong><code>set</code></strong> _(hidden)_ — Create or update a manifest entry in place (idempotent <code>add</code>) — subcommands <code>server</code></li>
 <li><strong><code>search</code></strong> — Search the capability catalog (and mark what's already added) — flags <code>--all/--json</code></li>
 <li><strong><code>apply</code></strong> — Write this setup into each CLI's own config — flags <code>--target/--toolset/--dry-run/--write/--scope/--allow-unresolved/--prune-foreign/--no-gitignore/--verbose</code></li>
-<li><strong><code>instructions</code></strong> _(hidden)_ — Compile [instructions.*] into each CLI's CLAUDE.md / AGENTS.md — flags <code>--target/--scope/--write</code></li>
+<li><strong><code>instructions</code></strong> _(hidden)_ — Compile [instructions.*] into each CLI's CLAUDE.md / AGENTS.md — flags <code>--target/--toolset/--scope/--write</code></li>
 <li><strong><code>doctor</code></strong> — Check the setup in depth: what is wired up, what is missing, what changed — flags <code>--ci/--live/--probe/--fix/--deep/--all/--json</code></li>
 <li><strong><code>remove</code></strong> _(hidden)_ — Remove a server or skill from the manifest (and lockfile) — flags <code>--write</code></li>
 <li><strong><code>install</code></strong> _(hidden)_ — Fetch skill sources into the store and write the lockfile — flags <code>--locked/--allow-flagged</code></li>

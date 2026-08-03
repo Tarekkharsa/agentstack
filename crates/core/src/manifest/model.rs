@@ -771,10 +771,25 @@ pub fn glob_match(pattern: &str, text: &str) -> bool {
 /// One instruction fragment: a markdown file applied to some/all harnesses.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
 pub struct Instruction {
-    pub path: String,
+    /// The fragment's own file, relative to the manifest dir or absolute.
+    ///
+    /// `None` means **sourceless**: the body resolves from the linked library
+    /// sources by this entry's manifest key, exactly as a sourceless
+    /// `[extensions.<name>]` resolves from the library
+    /// (`docs/design/instruction-variants.md` §"The same schema in a library
+    /// source"). Optional rather than required so the two cases are one kind
+    /// of declaration; `skip_serializing_if` keeps every existing manifest
+    /// round-tripping byte-identically.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
     /// Adapter ids this fragment applies to; `["*"]` (the default) = all.
     #[serde(default = "all_targets")]
     pub targets: Vec<String>,
+    /// Per-(CLI, model) bodies for this fragment, most specific winning
+    /// ([`select_variant`]). `targets` decides WHETHER this fragment reaches a
+    /// CLI; `variant` decides WHICH BYTES it sends once it does.
+    #[serde(default, rename = "variant", skip_serializing_if = "Vec::is_empty")]
+    pub variants: Vec<InstructionVariant>,
     /// True when this fragment was inherited from the machine-level manifest
     /// (`~/.agentstack/agentstack.toml`, see [`super::merge_user_layer`])
     /// rather than declared by this project or its local overlay. Inherited
@@ -884,6 +899,91 @@ impl PackageOverride {
     pub fn is_empty(&self) -> bool {
         self.remove.is_empty() && self.replace.is_empty()
     }
+}
+
+/// One per-(CLI, model) body of an instruction fragment.
+///
+/// Both selector keys are optional and at least one must be present — a
+/// variant with neither would be a second base body with no rule to choose
+/// between them, which validation refuses.
+///
+/// `deny_unknown_fields`: a brand-new table with no legacy manifests to stay
+/// lenient for, so a typo (`clis`, `models`) is rejected outright instead of
+/// silently widening the selector to "matches everything".
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct InstructionVariant {
+    /// Adapter id this body is for (`claude-code`, `codex`, …).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cli: Option<String>,
+    /// Model this body is for, as the project spells it (`opus`, `gpt-5.5`).
+    /// Compared literally: AgentStack never normalizes or aliases a model
+    /// name, because guessing that two spellings mean one model is exactly the
+    /// guess this feature refuses to make.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// This variant's body, anchored exactly like the base `path`.
+    pub path: String,
+}
+
+impl InstructionVariant {
+    /// How specific this variant's selector is, as the precedence rank the
+    /// resolver sorts on: 3 = `(cli, model)`, 2 = `(cli)`, 1 = `(model)`,
+    /// 0 = neither (refused by validation, and never selected here).
+    pub fn specificity(&self) -> u8 {
+        match (self.cli.is_some(), self.model.is_some()) {
+            (true, true) => 3,
+            (true, false) => 2,
+            (false, true) => 1,
+            (false, false) => 0,
+        }
+    }
+
+    /// Does this selector match a CLI and a (possibly unknown) model?
+    ///
+    /// An unknown model (`None`) never matches a `model` selector. That is the
+    /// whole of the never-guess rule: without a model we cannot claim a
+    /// model-specific body applies, so the resolver falls to the most specific
+    /// variant that matches on `cli` alone, and to the base body if there is
+    /// none.
+    pub fn matches(&self, cli: &str, model: Option<&str>) -> bool {
+        if self.specificity() == 0 {
+            return false;
+        }
+        if self.cli.as_deref().is_some_and(|c| c != cli) {
+            return false;
+        }
+        match self.model.as_deref() {
+            Some(want) => model == Some(want),
+            None => true,
+        }
+    }
+}
+
+/// Pick the winning variant for `(cli, model)` — most specific wins, ties
+/// broken by declaration order.
+///
+/// Returns the index into `variants`, or `None` for "use the base body".
+/// Free function over a slice rather than a method so the manifest's variants
+/// and a library body's variants — the same grammar, two homes — resolve
+/// through one implementation.
+pub fn select_variant(
+    variants: &[InstructionVariant],
+    cli: &str,
+    model: Option<&str>,
+) -> Option<usize> {
+    variants
+        .iter()
+        .enumerate()
+        .filter(|(_, v)| v.matches(cli, model))
+        // `max_by_key` keeps the LAST maximum, so iterate reversed to make the
+        // FIRST-declared winner the one that survives a tie. Declaration order
+        // is the tie-break the design doc fixes (the same first-match rule
+        // linked library sources use), and it must not depend on which
+        // std adapter happens to be used here.
+        .rev()
+        .max_by_key(|(_, v)| v.specificity())
+        .map(|(i, _)| i)
 }
 
 impl Instruction {
@@ -1254,6 +1354,16 @@ pub struct Profile {
     /// profile paths. Absent = the engine's default harness (claude-code).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub harness: Option<String>,
+    /// Which model this toolset selects, for instruction-variant resolution
+    /// (`docs/design/instruction-variants.md` §"How the model is determined").
+    ///
+    /// Read ONLY when this toolset is the one a command explicitly named — a
+    /// default toolset nobody selected contributes no model, because a default
+    /// is not a selection. It is a declaration of intent, not a setting
+    /// AgentStack writes into a harness: choosing a toolset never rewrites a
+    /// CLI's native config.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
@@ -1359,6 +1469,85 @@ fn json_strings(v: &serde_json::Value) -> Vec<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The precedence table from `docs/design/instruction-variants.md`, in one
+    /// place: exact `(cli, model)` > `(cli)` > `(model)` > the base body, with
+    /// an unknown model never matching a `model` selector.
+    #[test]
+    fn variant_selection_is_most_specific_wins_and_never_guesses_a_model() {
+        let m: Manifest = toml::from_str(
+            r#"
+            version = 1
+            [instructions.house]
+            path = "./house.md"
+            [[instructions.house.variant]]
+            cli = "claude-code"
+            model = "opus"
+            path = "./house.claude-opus.md"
+            [[instructions.house.variant]]
+            cli = "codex"
+            path = "./house.codex.md"
+            [[instructions.house.variant]]
+            model = "opus"
+            path = "./house.opus.md"
+            "#,
+        )
+        .unwrap();
+        let v = &m.instructions["house"].variants;
+        let pick = |cli: &str, model: Option<&str>| {
+            select_variant(v, cli, model).map(|i| v[i].path.as_str())
+        };
+
+        assert_eq!(
+            pick("claude-code", Some("opus")),
+            Some("./house.claude-opus.md")
+        );
+        // No `(claude-code)`-only variant and no `(sonnet)` variant: base body.
+        assert_eq!(pick("claude-code", Some("sonnet")), None);
+        // `(cli)` outranks `(model)` even when both match.
+        assert_eq!(pick("codex", Some("opus")), Some("./house.codex.md"));
+        // A `cli` variant still matches when the model is unknown.
+        assert_eq!(pick("codex", None), Some("./house.codex.md"));
+        // No cli match; the model selector carries it.
+        assert_eq!(pick("gemini", Some("opus")), Some("./house.opus.md"));
+        // Unknown model: never guessed into a model selector — the base body.
+        assert_eq!(pick("gemini", None), None);
+        // The manifest round-trips its variants.
+        let text = toml::to_string(&m).unwrap();
+        assert!(text.contains("[[instructions.house.variant]]"), "{text}");
+    }
+
+    /// Two variants with the IDENTICAL selector resolve to the first declared —
+    /// the same first-match rule linked library sources use. A typo either way,
+    /// but one with a single deterministic answer.
+    #[test]
+    fn an_exact_selector_tie_resolves_to_the_first_declared_variant() {
+        let variants = vec![
+            InstructionVariant {
+                cli: Some("codex".into()),
+                model: None,
+                path: "first.md".into(),
+            },
+            InstructionVariant {
+                cli: Some("codex".into()),
+                model: None,
+                path: "second.md".into(),
+            },
+        ];
+        assert_eq!(select_variant(&variants, "codex", None), Some(0));
+    }
+
+    /// A selectorless variant can never win — it is refused by validation, and
+    /// the resolver must not fall back to it even if one reaches this far.
+    #[test]
+    fn a_selectorless_variant_never_matches() {
+        let variants = vec![InstructionVariant {
+            cli: None,
+            model: None,
+            path: "nowhere.md".into(),
+        }];
+        assert_eq!(select_variant(&variants, "codex", Some("opus")), None);
+    }
 
     #[test]
     fn tool_policy_allow_and_deny() {

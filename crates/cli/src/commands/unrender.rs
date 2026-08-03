@@ -226,7 +226,16 @@ pub(crate) fn plan(
             // Empty manifest AND no package members: un-rendering plans the
             // whole region away, and a package's instruction members are part
             // of that region like any other fragment.
-            if let Some(plan) = plan_instructions(&empty, desc, scope, &ctx.dir, &[]) {
+            if let Some(plan) = plan_instructions(
+                &empty,
+                desc,
+                scope,
+                &ctx.dir,
+                &[],
+                // Planning the region AWAY: nothing to select, so no library
+                // read and no toolset.
+                &crate::instructions::Selecting::none(),
+            ) {
                 if plan.changed() {
                     out.removes_instructions = true;
                     out.removals.push(Removal {

@@ -9,7 +9,7 @@
 1. [x] W2 — trust checked at dispatch (security first; hardens the shipped lease path)
 2. [x] The delivery arc — W1, W3, W5, then W4 last; dynamic becomes the default at arc-end
 3. [x] Library inversion — link-your-folders onboarding (multiple sources), library-first authoring, `init` imports into a linked folder
-4. [ ] Instructions — per-(CLI, model) variants over the injection channels, with the per-harness honesty matrix
+4. [x] Instructions — per-(CLI, model) variants over the injection channels, with the per-harness honesty matrix
 5. [ ] Surface finish — grouped review card; `run` locked by default; Varlock productization
 6. [ ] Workflows promotion — per-role model/effort, algorithm helpers, security findings closed, un-hidden
 7. [ ] Packaging — toolset into a self-run image

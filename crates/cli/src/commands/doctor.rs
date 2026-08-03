@@ -708,19 +708,40 @@ pub fn collect_content_units(
         };
         units.push(unit);
     }
+    // Every body a fragment declares is scanned, base and per-(CLI, model)
+    // variants alike: a variant is content that reaches agent context, so
+    // scanning only the selected one would leave the others unexamined until
+    // the day a toolset selects them. Findings merge into the fragment's one
+    // unit — the fragment is what a reader acts on.
+    let library = crate::library::Library::load_default_or_warn();
     for (name, instr) in &manifest.instructions {
-        let path = resolve_scan_path(dir, &instr.path);
-        let unit = if !path.exists() {
-            skipped_unit("instruction", name, format!("missing file {}", instr.path))
-        } else {
-            match scan::scan_file(&path, &instr.path) {
-                Ok(findings) => Unit {
-                    kind: "instruction",
-                    name: name.clone(),
-                    skipped: None,
-                    findings,
-                },
-                Err(e) => skipped_unit("instruction", name, format!("scan failed: {e}")),
+        let unit = match crate::instructions::bodies(name, instr, dir, &library) {
+            Err(e) => skipped_unit("instruction", name, format!("unresolved: {e:#}")),
+            Ok(bodies) => {
+                let mut findings = Vec::new();
+                let mut skipped: Option<String> = None;
+                for (_, declared, src) in bodies.all() {
+                    if !src.exists() {
+                        skipped = Some(format!("missing file {declared}"));
+                        break;
+                    }
+                    match scan::scan_file(&src, declared) {
+                        Ok(mut f) => findings.append(&mut f),
+                        Err(e) => {
+                            skipped = Some(format!("scan failed: {e}"));
+                            break;
+                        }
+                    }
+                }
+                match skipped {
+                    Some(reason) => skipped_unit("instruction", name, reason),
+                    None => Unit {
+                        kind: "instruction",
+                        name: name.clone(),
+                        skipped: None,
+                        findings,
+                    },
+                }
             }
         };
         units.push(unit);
@@ -734,15 +755,6 @@ fn skipped_unit(kind: &'static str, name: &str, reason: String) -> Unit {
         name: name.to_string(),
         skipped: Some(reason),
         findings: Vec::new(),
-    }
-}
-
-fn resolve_scan_path(dir: &Path, p: &str) -> std::path::PathBuf {
-    let pb = std::path::PathBuf::from(p);
-    if pb.is_absolute() {
-        pb
-    } else {
-        dir.join(pb)
     }
 }
 
@@ -1665,12 +1677,14 @@ fn run_checks(
             // doctor's drift/missing view has to see them too.
             let pinned = crate::lock::Lock::load(&ctx.dir).unwrap_or_default();
             let packages = crate::package::effective_members(&pinned);
+            let sel = crate::instructions::Selecting::for_command(None);
             let global = crate::render::instructions::plan_instructions(
                 manifest,
                 desc,
                 Scope::Global,
                 &ctx.dir,
                 packages,
+                &sel,
             );
             let project = crate::render::instructions::plan_instructions(
                 manifest,
@@ -1678,6 +1692,7 @@ fn run_checks(
                 Scope::Project,
                 &ctx.dir,
                 packages,
+                &sel,
             );
             // Missing sources are scope-independent; the global plan sees
             // every declared fragment (project scope filters out inherited
@@ -2693,14 +2708,17 @@ fn check_reproducibility(
 /// gates on them); an unpinned fragment is a warning. Machine-layer fragments
 /// are the user's own content and are never pinned — skipped.
 fn check_instruction_reproducibility(manifest: &Manifest, dir: &Path, report: &mut Report) {
-    use crate::resolve::{instruction_lock_status, InstructionLockStatus};
+    use crate::resolve::{instruction_lock_status_with, InstructionLockStatus};
     let lock = crate::lock::Lock::load(dir).unwrap_or_default();
+    // Library-aware: a sourceless fragment's bodies live in a linked source, and
+    // reporting one as a broken ref would be a fault doctor invented.
+    let library = crate::library::Library::load_default_or_warn();
     for (name, instr) in manifest
         .instructions
         .iter()
         .filter(|(_, i)| !i.from_user_layer)
     {
-        match instruction_lock_status(name, instr, dir, &lock) {
+        match instruction_lock_status_with(name, instr, dir, &lock, &library) {
             InstructionLockStatus::ResolveFailed { error } => report.line(
                 Level::Error,
                 format!("{name:<20} broken instruction ref — {error}"),

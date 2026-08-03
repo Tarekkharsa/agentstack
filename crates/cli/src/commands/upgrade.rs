@@ -495,8 +495,9 @@ fn build_upgraded_manifest(
     if want_instructions {
         for instr in &spec.instructions {
             let entry = Instruction {
-                path: format!("./instructions/{}.md", instr.name),
+                path: Some(format!("./instructions/{}.md", instr.name)),
                 targets: vec!["*".into()],
+                variants: Vec::new(),
                 from_user_layer: false,
             };
             text = add::build_manifest_with(
@@ -788,12 +789,13 @@ fn rerender_managed_regions(ctx: &super::Context) -> Result<Vec<PathBuf>> {
     }
     let scope = Scope::default_for(&ctx.dir);
     let target_ids = resolve_targets(manifest, &ctx.registry, &[], &ctx.dir)?;
+    let sel = crate::instructions::Selecting::for_command(None);
     let mut written = Vec::new();
     for id in &target_ids {
         let Some(desc) = ctx.registry.get(id) else {
             continue;
         };
-        let Some(plan) = plan_instructions(manifest, desc, scope, &ctx.dir, packages) else {
+        let Some(plan) = plan_instructions(manifest, desc, scope, &ctx.dir, packages, &sel) else {
             continue;
         };
         if !manages_file(&plan.path) {
