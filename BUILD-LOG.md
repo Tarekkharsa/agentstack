@@ -615,3 +615,63 @@ selection of an existing kind's members, the other steers how already-declared
 capabilities are delivered — so both were declared in `CONFIG_ALLOWLIST`. The
 lint exists to force exactly this decision deliberately rather than letting a
 new field drift in unclassified; it now reports zero findings.
+
+## Item 6 — workflows promotion (branch `workflows-promotion`)
+
+Shipped: `Profile.effort` beside item 4's `Profile.model`, both carried onto
+each `RoleBinding` at admission and spliced into the harness launch as argv
+fragments ahead of the `--` guard, in fixed order, so argv and the grant digest
+stay a function of inputs alone — and never written into any harness's
+persistent settings file. An adapter that cannot take a value reports which of
+two distinct things is true: it has no notion of that dimension at all, or it
+has the setting but no confirmed way to select it for a single headless launch
+(Claude Code's `effortLevel`). Both warn per child and the run proceeds; a
+value the adapter's own catalog rejects is a manifest error that refuses the
+child before launch. Five named algorithm helpers joined the prelude —
+`mapReduce`, `reduceByKey`, `combine`, `verify`, `keepUnrefuted` — and the
+argument that none can widen a role is structural: **not one calls `agent()`**,
+so a run happens only when the caller's own callback asks for it, through the
+same bridge a hand-written script uses, leaving the role-admission check and
+`max_agents` the sole authority path.
+
+All six open security-review findings closed with named witnesses: the
+watchdog's exit is now armed ahead of all four blocking reporting operations;
+interpreter memory is bounded at every untrusted ingress via
+`HostHooks::max_buffer_size` (64 MiB against Boa's 1.5 GiB default); every
+native enters through one guard whose RAII release covers `?` and unwind paths;
+a **run-total** native-call budget exists because Boa's own loop limit lives on
+the `CallFrame` and therefore bounds one frame rather than the run;
+locale-sensitive APIs are poisoned non-configurable so a replayed journal
+cannot re-derive a different ordering on another host; and `boa_engine` is
+test-confined to the `workflow` crate, which itself takes no agentstack
+dependency.
+
+Two witnesses were verified by construction rather than assertion. Disabling
+the re-entrancy guard turned its witness **red on the right thing** — the
+getter's nested `agent()` produced a genuine second spawn request, ordered
+first, because the getter runs during the outer call's own argument conversion.
+Adding `boa_engine` to another crate's manifest turned the boundary witness red
+with the right message. Both were restored and re-verified green.
+
+**The command tree is un-hidden.** Per the ruling, the six findings were the
+gate; the repeated-use criterion predates the 2026-08-02 reset and was rewritten
+in `docs/workflows.md` as an honest maturity note — 1 of 3 occasions, the
+2026-07-23 acceptance run — explicitly a signal to weigh rather than a gate
+anything waits on. Every *Honest limits* claim survives verbatim, and the new
+copy states in three places that un-hiding moved discoverability only, not
+enforcement, and that a host-tier step is still cooperative-guard only. Both
+partial bounds are stated where the claims are made, guarded by a witness that
+fails if either residual disappears from `POSTURE_LABEL` or the docs: a trusted,
+reviewed script can still allocate on purpose, and Boa's own built-ins tick no
+counter at any setting.
+
+Judgment calls and debts: `cli.rs` justified hiding the tree "until the
+repeated-use gate in `TODO.md` closes", but post-reset `TODO.md` contains no
+such gate — the code cited a source that no longer said what it claimed, so the
+citation was removed rather than preserved as a dangling reference.
+`docs/workflows.md`'s own worked example had always called `keepUnrefuted`,
+which never existed in the prelude, so anyone who copied it got a
+`ReferenceError`; that is closed by shipping the helper and saying so, not by
+editing the example to hide it. `selection_for`'s doc comment claimed every
+surface routes through it, which is false — a workflow child runs quiet, so the
+drive loop is the surface that speaks per child — and was corrected.

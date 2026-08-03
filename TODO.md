@@ -11,7 +11,7 @@
 3. [x] Library inversion — link-your-folders onboarding (multiple sources), library-first authoring, `init` imports into a linked folder
 4. [x] Instructions — per-(CLI, model) variants over the injection channels, with the per-harness honesty matrix
 5. [x] Surface finish — grouped review card; `run` locked by default; Varlock productization
-6. [ ] Workflows promotion — per-role model/effort, algorithm helpers, security findings closed, un-hidden
+6. [x] Workflows promotion — per-role model/effort, algorithm helpers, security findings closed, un-hidden
 7. [ ] Packaging — toolset into a self-run image
 8. [ ] The panel — the new surfaces over the existing ui-contract
 9. [ ] When the bar is met — re-pin the study kit, run it, fix its three blockers, publish, launch

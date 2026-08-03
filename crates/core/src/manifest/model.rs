@@ -1355,15 +1355,30 @@ pub struct Profile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub harness: Option<String>,
     /// Which model this toolset selects, for instruction-variant resolution
-    /// (`docs/design/instruction-variants.md` §"How the model is determined").
+    /// (`docs/design/instruction-variants.md` §"How the model is determined")
+    /// and — since workflows became a headline capability — for the child a
+    /// workflow role bound to this toolset launches.
     ///
     /// Read ONLY when this toolset is the one a command explicitly named — a
     /// default toolset nobody selected contributes no model, because a default
     /// is not a selection. It is a declaration of intent, not a setting
     /// AgentStack writes into a harness: choosing a toolset never rewrites a
-    /// CLI's native config.
+    /// CLI's native config. The workflow consumer honors that literally — it
+    /// delivers the value as launch FLAGS on the child's argv and never writes
+    /// it into the harness's persistent settings file — and reports honestly
+    /// when the bound harness has no way to carry it per launch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
+    /// How much reasoning effort this toolset asks for (`low`/`high`,
+    /// `minimal`…`high` — the vocabulary is the harness's own, checked against
+    /// that adapter's settings catalog, never a vocabulary AgentStack invents).
+    ///
+    /// Same contract as [`Self::model`] in every respect: a declaration of
+    /// intent, read only for a toolset something explicitly selected,
+    /// delivered as launch flags to a workflow child, and reported rather than
+    /// silently dropped when the bound harness cannot select it per launch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]

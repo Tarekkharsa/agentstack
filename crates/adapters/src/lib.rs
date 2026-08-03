@@ -13,7 +13,8 @@ pub mod registry;
 pub mod render;
 
 pub use descriptor::{
-    AdapterDescriptor, AdapterSource, Confirmation, Format, LiveInstructionChannel,
+    AdapterDescriptor, AdapterSource, Confirmation, Dimension, Format, LiveInstructionChannel,
+    Selection,
 };
 pub use import::{extract_servers, extract_servers_with_skips, extract_settings, SkippedImport};
 pub use registry::Registry;

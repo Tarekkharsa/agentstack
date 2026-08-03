@@ -1714,6 +1714,8 @@ mod tests {
             sandbox: true,
             lockdown: false,
             plan,
+            model: None,
+            effort: None,
             args: Vec::new(),
         };
 

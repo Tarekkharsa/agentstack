@@ -232,15 +232,20 @@ pub enum Command {
 
     /// Run a reviewed multi-agent task using toolsets you already approved.
     ///
-    /// Hidden from the everyday list, not from the CLI: the interpreter
-    /// boundary passed its review (so the `(preview)` label is gone), but
-    /// workflows stay an advanced lane until the repeated-use gate in
-    /// `TODO.md` closes — and their vocabulary (admission, ceilings, locked
-    /// child runs) is the densest in the product. Full detail lives in
-    /// `agentstack workflow --help`: each `agent()` call is admitted against
-    /// the trust gate, verified against a strict lock, capped by the machine
-    /// ceiling, and spawned as its own locked child run.
-    #[command(subcommand, hide = true)]
+    /// Visible since the six interpreter-boundary review findings closed, each
+    /// with its own witness (the watchdog's no-I/O exit, interpreter memory
+    /// bounds, host-native re-entrancy, a run-total native call budget,
+    /// cross-host resume determinism, and the crate boundary). Un-hiding
+    /// changed DISCOVERABILITY only — not one enforcement boundary moved with
+    /// it, and `docs/workflows.md`'s *Honest limits* still hold in full: a
+    /// host-tier step is cooperative-guard only, step outputs are untrusted
+    /// model data, and the interpreter's residual bounds are stated in
+    /// `agentstack workflow report`'s posture block rather than papered over.
+    ///
+    /// Full detail lives in `agentstack workflow --help`: each `agent()` call
+    /// is admitted against the trust gate, verified against a strict lock,
+    /// capped by the machine ceiling, and spawned as its own locked child run.
+    #[command(subcommand)]
     Workflow(WorkflowCmd),
 
     /// Every "what happened" view in one place.
@@ -1080,8 +1085,16 @@ pub struct WorkflowDeclareArgs {
     pub blueprint: Option<PathBuf>,
 
     /// A role the script's `agent()` calls may name (repeatable). Every role
-    /// must already exist as a `[profiles.<role>]` table — this command
-    /// declares a workflow, it never mints authority.
+    /// must already be a declared toolset — this command declares a workflow,
+    /// it never mints authority.
+    //
+    // The manifest key behind a toolset is still spelled `[profiles.<name>]`,
+    // and this help used to say so. It cannot now that `workflow` is visible:
+    // `visible_help_says_toolset` reserves the word "profile" for the manifest
+    // key, the wire contract, and the frozen panel argv, and clap help is
+    // prose a beginner reads. The key name is not lost — `docs/workflows.md`
+    // and `agentstack toolset --help` both carry it, in places that can put it
+    // in a code span.
     #[arg(long = "role")]
     pub roles: Vec<String>,
 
@@ -1339,6 +1352,24 @@ pub struct RunArgs {
     /// Works without Docker or the `sandbox` feature.
     #[arg(long)]
     pub plan: bool,
+
+    /// Which model this run's child should use, and how much reasoning effort
+    /// it should spend. INTERNAL PLUMBING, not user-facing flags — hence
+    /// `#[arg(skip)]`: the only producer is the workflow drive loop, which
+    /// copies them from the role's toolset (`[profiles.<role>] model/effort`),
+    /// and the only consumer is the headless launch path, which asks the
+    /// adapter's descriptor how (or whether) to carry them.
+    ///
+    /// Deliberately NOT exposed as `agentstack run --model`. Two reasons, both
+    /// already in this file's grain: `launch_argv`'s doc comment explains why a
+    /// user-typed harness flag on `run` is a misparse hazard once `--prompt`'s
+    /// `--` terminator is in play, and a user-facing selection flag is product
+    /// surface this item did not ask for. The manifest is where a model is
+    /// declared; the flag would be a second, undeclared authority for it.
+    #[arg(skip)]
+    pub model: Option<String>,
+    #[arg(skip)]
+    pub effort: Option<String>,
 
     /// Extra arguments passed through to the CLI (after `--`).
     #[arg(

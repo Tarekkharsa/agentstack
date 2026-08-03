@@ -194,6 +194,8 @@ mod tests {
             sandbox: false,
             lockdown: false,
             plan: false,
+            model: None,
+            effort: None,
             args: Vec::new(),
         }
     }
