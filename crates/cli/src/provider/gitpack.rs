@@ -78,7 +78,23 @@ impl GitPackRef {
 }
 
 /// `pack.toml` — the pack manifest a repo publishes.
+///
+/// `deny_unknown_fields`, and it is load-bearing (review finding 4). This file
+/// is somebody else's bytes (invariant 7: all repository content is hostile
+/// input), and serde's default is to DROP every key it does not know. That is
+/// how a pack declaring hooks installed as though it had none — the bug
+/// [`Self::hooks`] exists to fix. Naming two more keys fixed two spellings and
+/// left the failure mode intact for every other: a plural `[[hooks]]`, a
+/// future `[[workflow]]`, a typo. A publisher would ship a package believing a
+/// capability was in it, a consumer would install one silently missing that
+/// capability, and no surface anywhere would say so.
+///
+/// Refusing an unknown key by name is the fail-closed reading: it costs a
+/// publisher one clear error and it costs a consumer nothing.
+/// `LibraryInstructionToml` already takes this posture over the same class of
+/// input, for the same reason.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PackToml {
     pub name: String,
     #[serde(default)]
@@ -104,7 +120,11 @@ pub struct PackToml {
     pub targets: Vec<String>,
 }
 
+/// Same posture as [`PackToml`], and for the same reason: a dropped key here
+/// is a server that contacts or runs something other than what its author
+/// declared.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PackServerToml {
     #[serde(rename = "type")]
     pub server_type: String,
@@ -149,7 +169,11 @@ impl PackServerToml {
     }
 }
 
+/// Same posture as [`PackToml`]: a member's unknown key is a member declaring
+/// something this version does not honour, and silence about it is what
+/// finding 4 is.
 #[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PackMemberToml {
     pub name: String,
     /// Path relative to the pack root.
