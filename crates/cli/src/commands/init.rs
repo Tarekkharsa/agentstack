@@ -1826,29 +1826,51 @@ fn grant_trust_for_import(
     // baseline: per-server identity is the command line for stdio (what
     // actually runs) or the URL for http, plus one aggregate line for the
     // secret refs.
-    let mut surface: Vec<crate::trust::SurfaceItem> = manifest
-        .servers
-        .iter()
-        .map(|(name, server)| crate::trust::SurfaceItem {
+    //
+    // Resolved, not read off `manifest.servers` (review finding 2). Library-first
+    // import moves every imported server OUT of `[servers.*]` and into a linked
+    // library source, leaving the default toolset to reference them by name — so
+    // reading the manifest map here recorded an EMPTY surface on the default
+    // path, while the digest above blessed every one of those servers through
+    // the lock. A re-gate then had nothing to diff against: each server could
+    // only ever read `+ added`, never `~ changed`, which is the one thing the
+    // diff exists to say. `effective_runtime_servers` is the resolver `trust`'s
+    // own review walks and the gateway serves from, so this surface names the
+    // definitions that will actually run.
+    let library = crate::library::Library::load_default_or_warn();
+    let lib_home = crate::util::paths::lib_home();
+    let resolved = crate::resolve::effective_runtime_servers(manifest, &library, &lib_home, None);
+    let mut surface: Vec<crate::trust::SurfaceItem> = Vec::with_capacity(resolved.len());
+    for (name, r) in resolved {
+        // Fail closed. A server that does not resolve is a server this grant
+        // cannot describe, and recording a surface that is missing an entry the
+        // digest blesses is exactly the defect above. Withhold the grant and
+        // let the ordinary `agentstack trust` review ask the question — the
+        // documented cost of not granting is one prompt.
+        let Ok(r) = r else {
+            return false;
+        };
+        surface.push(crate::trust::SurfaceItem {
             kind: "server".to_string(),
-            name: name.clone(),
-            identity: match server.server_type {
-                crate::manifest::ServerType::Stdio => format!(
-                    "{} {}",
-                    server.command.as_deref().unwrap_or("?"),
-                    server.args.join(" ")
-                ),
+            name,
+            // The SAME two helpers `trust`'s review marks with, so the baseline
+            // recorded here and the identity computed at the next re-gate are
+            // byte-identical by construction.
+            identity: match r.server.server_type {
+                crate::manifest::ServerType::Stdio => {
+                    super::trust::server_stdio_identity(&r.server)
+                }
                 crate::manifest::ServerType::Http => {
-                    server.url.as_deref().unwrap_or("?").to_string()
+                    super::trust::server_http_identity(&r.server).to_string()
                 }
             },
-            // Servers are pinned through the lock's own server entries, not
-            // through a content snapshot — a server has no body of bytes for a
-            // re-gate to diff, only a command line, which `identity` already
-            // carries.
+            // `None`, matching what `trust`'s review records for a server:
+            // `identity` is the diff key, and a server has no body of bytes for
+            // a re-gate to diff. Recording a pin here that the review does not
+            // would make every server read `~ changed` on the first re-trust.
             pin: None,
-        })
-        .collect();
+        });
+    }
     let refs = manifest.referenced_secrets();
     if !refs.is_empty() {
         surface.push(crate::trust::SurfaceItem {

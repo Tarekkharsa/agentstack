@@ -225,7 +225,12 @@ const INSTRUCTION_IDENTITY: &str = "";
 /// A stdio server's identity is the command line it runs — the thing the trust
 /// gate exists for. Not the pin or origin annotation: pin drift is a hard
 /// blocker of its own.
-fn server_stdio_identity(server: &crate::manifest::Server) -> String {
+///
+/// `pub(crate)` for `init`, which records a reviewed surface of its own: the
+/// two baselines must be built by the SAME function, or the first `agentstack
+/// trust` after an import would mark every server `~ changed` on a formatting
+/// difference alone.
+pub(crate) fn server_stdio_identity(server: &crate::manifest::Server) -> String {
     format!(
         "{} {}",
         server.command.as_deref().unwrap_or("?"),
@@ -238,7 +243,8 @@ fn server_stdio_identity(server: &crate::manifest::Server) -> String {
 /// Borrowed from `server` rather than cloned so a caller prints exactly the
 /// string it marks; the returned `&str` lives as long as the borrow of the
 /// server it came from, which outlasts every use in both walks.
-fn server_http_identity(server: &crate::manifest::Server) -> &str {
+/// Shared with `init` for the reason [`server_stdio_identity`] gives.
+pub(crate) fn server_http_identity(server: &crate::manifest::Server) -> &str {
     server.url.as_deref().unwrap_or("?")
 }
 
