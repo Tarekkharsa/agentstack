@@ -921,6 +921,11 @@ fn print_result_report(
     for line in rendered_lane_result(&ctx.dir, d, out) {
         println!("  {line}");
     }
+    // Outside both lane blocks on purpose: the re-pin is neither lane's news,
+    // and it happens whether or not this pack carried a fragment.
+    if let Some(line) = repin_scope_line(out) {
+        println!("  {line}");
+    }
 }
 
 /// The dynamic-lane result line, or `None` when the lane had no members.
@@ -1017,13 +1022,33 @@ fn rendered_lane_result(dir: &Path, d: &PackDiff, out: &LaneOutcome) -> Vec<Stri
             list(&out.rendered)
         ));
     }
-    if out.instr_pinned > 0 {
-        lines.push(format!(
-            "  ↳ {} pinned in the lock",
-            super::count(out.instr_pinned, "instruction fragment")
-        ));
-    }
     lines
+}
+
+/// What the lock re-pin actually covered (review finding 7).
+///
+/// `record_instruction_pins` walks the WHOLE manifest, not the upgraded pack's
+/// fragments — it is the single pinning path, and scoping it to one pack would
+/// mean a second one. So an `agentstack upgrade <pack>` re-pins every
+/// project-declared fragment from its bytes on disk, including fragments the
+/// pack never touched. That is correct (any resulting lock change re-gates the
+/// project through the trust digest, and a fragment under a standing re-gate
+/// answer keeps the pin that answer named), but the report used to print the
+/// count only when the pack itself carried fragments — so the common case, a
+/// pack with none, re-pinned the project's own house rules and said nothing at
+/// all.
+///
+/// This line always prints when something was pinned, and states the scope
+/// rather than leaving "N pinned" to be read as "N of the pack's".
+fn repin_scope_line(out: &LaneOutcome) -> Option<String> {
+    if out.instr_pinned == 0 {
+        return None;
+    }
+    Some(format!(
+        "lock: {} re-pinned from its current bytes — every house rule this project \
+         declares, not only this pack's",
+        super::count(out.instr_pinned, "instruction fragment")
+    ))
 }
 
 /// A path shown relative to the manifest dir when it lives under it, absolute
@@ -1037,4 +1062,44 @@ fn sanitize(name: &str) -> String {
     name.chars()
         .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// **Review finding 7.** The re-pin's SCOPE is stated, and it is stated in
+    /// the common case: a pack that carries no house-rule fragment of its own.
+    ///
+    /// `record_instruction_pins` walks the whole manifest — it is the single
+    /// pinning path — so upgrading any pack re-pins every project-declared
+    /// fragment. The old report printed the count only from inside the
+    /// rendered-lane block, which returns nothing at all when the pack carried
+    /// no fragment, so that re-pin happened silently.
+    #[test]
+    fn the_report_states_the_repin_scope_even_when_the_pack_carried_no_fragment() {
+        let out = LaneOutcome {
+            skills_repinned: 2,
+            instr_pinned: 3,
+            fragments: Vec::new(), // this pack carried no house rule
+            rendered: Vec::new(),
+        };
+        let line = repin_scope_line(&out).expect("a re-pin that happened is reported");
+        assert!(line.contains("3 instruction fragments"), "{line}");
+        assert!(
+            line.contains("not only this pack's"),
+            "the scope is stated, not left to be inferred from a bare count: {line}"
+        );
+
+        // The rendered-lane block is still silent here — which is correct, and
+        // is exactly why the line above cannot live inside it.
+        let d = PackDiff::default();
+        assert!(rendered_lane_result(Path::new("/p"), &d, &out).is_empty());
+    }
+
+    /// No pin, no line: the report never claims an act that did not happen.
+    #[test]
+    fn nothing_repinned_reports_nothing() {
+        assert!(repin_scope_line(&LaneOutcome::default()).is_none());
+    }
 }
