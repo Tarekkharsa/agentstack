@@ -32,7 +32,13 @@ fn apply_write() -> ApplyArgs {
     }
 }
 
+// `render_locally` is the subject's precondition, not decoration: `apply`
+// honours the delivery planner, so a server reaches a native file only when
+// the routing sends it there. This test is about WHICH file (project vs
+// machine-global) a rendered artifact lands in, so it asks for the rendered
+// lane explicitly.
 const MANIFEST: &str = "version = 1\n\
+    [delivery]\nrender_locally = true\n\
     [servers.demo]\ntype = \"http\"\nurl = \"https://demo/mcp\"\n\
     [targets]\ndefault = [\"claude-code\"]\n";
 

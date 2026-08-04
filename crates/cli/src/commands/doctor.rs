@@ -15,7 +15,8 @@ use owo_colors::OwoColorize;
 use crate::cli::DoctorArgs;
 use crate::manifest::{validate_with_context, Manifest, Server, ServerType};
 use crate::render::{
-    declared_host, plan_hooks, plan_target_with_servers, resolve_targets, ruleset_for,
+    declared_host, plan_hooks, plan_settings, plan_target_with_servers, resolve_targets,
+    ruleset_for,
 };
 use crate::scope::Scope;
 use crate::secret::Resolver;
@@ -1743,10 +1744,66 @@ fn run_checks(
                 None
             }
         };
+        // The delivery planner's routing for exactly these targets — the SAME
+        // source `apply` reads (`commands::apply::render`), never a second
+        // opinion. This section compares "what `apply` would write" against
+        // disk, so it must skip the harnesses whose MCP servers `apply`
+        // deliberately does not write: without this, a live-routed project
+        // warned "1 change pending ↳ agentstack apply --write" forever, and
+        // running that command changed nothing (rule (c): every suggested
+        // command must make progress).
+        let plan_delivery =
+            crate::delivery::Plan::build(&manifest.delivery, &ctx.registry, &target_ids);
+        let servers_route_live = |id: &str| -> bool {
+            plan_delivery
+                .harnesses
+                .iter()
+                .find(|h| h.id == id)
+                .is_some_and(|h| {
+                    h.kinds_in(crate::delivery::Lane::Dynamic)
+                        .contains(&crate::delivery::Kind::Server)
+                })
+        };
+        // Harnesses whose servers are on the live lane: named once, together,
+        // below — one Ok line rather than a repeated per-target refrain.
+        // Split by the harness's OWN bridge state. "Served live" is a claim
+        // that the capability reaches the tool; with no gateway registered
+        // nothing does, and `status`, `delivery` and `why` all say "planned
+        // live (not connected)" about the same harness at the same moment.
+        let mut live_targets: Vec<String> = Vec::new();
+        let mut live_unconnected: Vec<String> = Vec::new();
+        // Files a rendered-lane write left behind for a now-live harness. The
+        // routing alone cannot see them — only the state ledger plus disk can
+        // — and reporting "nothing rendered to compare" over one of them would
+        // be a green tick on a live unmanaged file (invariant 8).
+        let mut abandoned: Vec<crate::commands::apply::AbandonedRender> = Vec::new();
         for id in &target_ids {
             let Some(desc) = ctx.registry.get(id) else {
                 continue;
             };
+            if servers_route_live(id) {
+                // Nothing NEW is expected on disk for this harness — but a file
+                // an earlier apply wrote is still there and still read.
+                //
+                // Both kinds are named, recorded or not: the harness reads the
+                // file either way, so staying silent about one of them would
+                // be the "checked and clean" claim invariant 8 forbids. What
+                // differs is the REMEDY, and that comes from the find itself
+                // (`remedy_command`), never from a single hardcoded command.
+                for probe in [Scope::Global, Scope::Project] {
+                    if let Some(found) =
+                        crate::commands::apply::abandoned_at(desc, probe, &ctx.dir, &state)
+                    {
+                        abandoned.push(found);
+                    }
+                }
+                if crate::commands::overview::bridge_registered(&ctx.registry, id) {
+                    live_targets.push(desc.display.clone());
+                } else {
+                    live_unconnected.push(desc.display.clone());
+                }
+                continue;
+            }
             // Which scopes to check for this target: every scope a previous write
             // recorded state at — a deliberate `--scope` choice keeps being
             // honored, never second-guessed — falling back to the context default
@@ -2020,13 +2077,73 @@ fn run_checks(
         if fixed > 0 {
             state.save()?;
         }
+        // Say why some harnesses were not compared at all. Silence here would
+        // read as "checked and clean", which is a different claim (invariant 8).
+        // Order matters: the leftover files are named BEFORE the "nothing
+        // rendered to compare" line, so the Ok line can never be read as
+        // covering them.
+        for found in &abandoned {
+            // A warning, and one that counts: it is a live config file the
+            // harness still reads while nothing NEW is written there.
+            // `any_drift` also keeps the section from being marked irrelevant
+            // below.
+            any_drift = true;
+            report.line(
+                Level::Warn,
+                // The `↳` slot carries the COMMAND and nothing else: it is what
+                // `fix_at` lifts into the terminal's `next:` line and into
+                // `next_action`, so a prose prefix ("remove it: …") made the
+                // one next step unrunnable verbatim. The verb lives in the
+                // sentence, which already says the file is still on disk. The
+                // command comes from the find, so a file AgentStack never
+                // wrote is not offered a removal `x unrender` would refuse.
+                format!(
+                    "{:<14} {} ↳ {}",
+                    found.display,
+                    found.sentence(),
+                    found.remedy_command()
+                ),
+            );
+            if !found.foreign.is_empty() {
+                report.line(
+                    Level::Warn,
+                    format!(
+                        "{:<14} keeping {} in that file — applied by another manifest ↳ keep: \
+                         agentstack adopt · prune: agentstack apply --prune-foreign",
+                        found.display,
+                        found.foreign.join(", ")
+                    ),
+                );
+            }
+        }
+        if !live_targets.is_empty() {
+            report.line(
+                Level::Ok,
+                format!(
+                    "{} — MCP servers served live, nothing NEW rendered to compare",
+                    live_targets.join(", ")
+                ),
+            );
+        }
+        if !live_unconnected.is_empty() {
+            report.line(
+                Level::Ok,
+                format!(
+                    "{} — MCP servers planned live (not connected), nothing NEW rendered to \
+                     compare ↳ {}",
+                    live_unconnected.join(", "),
+                    crate::commands::delivery::CONNECT_THE_BRIDGE
+                ),
+            );
+        }
         if !any_drift {
             report.line(Level::Ok, "all targets in sync");
         }
         // No servers declared and nothing drifting: there is nothing to fall out
         // of sync (any leftover prune/foreign findings above are warn lines, which
-        // keep the section visible on their own).
-        if manifest.servers.is_empty() && !any_drift {
+        // keep the section visible on their own). A project whose every target
+        // routes servers live has nothing rendered to compare either.
+        if (manifest.servers.is_empty() || live_targets.len() == target_ids.len()) && !any_drift {
             report.mark_irrelevant();
         }
     } // end else (drift comparison ran: not skip_drift, not zero-files)
@@ -2279,14 +2396,58 @@ fn run_checks(
                         }
                     ),
                 ),
-                Some(desc) => report.line(
-                    Level::Ok,
-                    format!(
-                        "{:<14} {} merged into its settings",
-                        desc.display,
-                        super::count(value.as_object().map(|o| o.len()).unwrap_or(0), "key")
-                    ),
-                ),
+                // The claim "merged" is about a file on disk, so it is read
+                // from that file — not from the manifest table that asked for
+                // the merge. `plan_settings` recomputes what the file would
+                // become and compares it with what it is; equal means the keys
+                // are really there, different means they are not yet, and no
+                // settings file for this CLI means there is nowhere to put
+                // them at all. Same reality-derived shape as the hooks check
+                // below.
+                Some(desc) => {
+                    let keys = super::count(
+                        value.as_object().map(|o| o.len()).unwrap_or(0),
+                        "key",
+                    );
+                    // The scope `agentstack apply --write` would use with no
+                    // flag — project for a repo manifest, global for the
+                    // machine one. Judging the GLOBAL file for a repo project
+                    // would report a repo-scoped merge as pending forever and
+                    // name a command that never touches the file it named:
+                    // the reproduced-loop shape rule (f) catches, and it did.
+                    let scope = Scope::default_for(&ctx.dir);
+                    let prev = state.managed_settings(&target_key(id, scope, &ctx.dir));
+                    match plan_settings(manifest, desc, &ctx.resolver, &prev, scope, &ctx.dir) {
+                        Ok(None) => report.line(
+                            Level::Warn,
+                            format!(
+                                "{:<14} no settings file is known for this CLI — these {keys} \
+                                 reach nothing ↳ edit [settings.{id}] in the manifest",
+                                desc.display
+                            ),
+                        ),
+                        Ok(Some(plan)) if plan.changed() => report.line(
+                            Level::Warn,
+                            format!(
+                                "{:<14} {keys} not yet in {} ↳ agentstack apply --write",
+                                desc.display,
+                                tidy_path(&plan.settings_path)
+                            ),
+                        ),
+                        Ok(Some(plan)) => report.line(
+                            Level::Ok,
+                            format!(
+                                "{:<14} {keys} merged into {}",
+                                desc.display,
+                                tidy_path(&plan.settings_path)
+                            ),
+                        ),
+                        Err(e) => report.line(
+                            Level::Error,
+                            format!("{}: settings plan failed — {e:#}", desc.display),
+                        ),
+                    }
+                }
             }
         }
     }

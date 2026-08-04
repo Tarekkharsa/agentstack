@@ -39,7 +39,14 @@ fn write_manifest(proj: &std::path::Path) {
     fs::create_dir_all(proj).unwrap();
     fs::write(
         proj.join("agentstack.toml"),
+        // `render_locally` is what puts this project's servers in the
+        // rendered lane. Without it the planner routes an MCP-capable
+        // harness's servers live, `diff` compares no file for it, and
+        // `existed_before` — a fact ABOUT a rendered file — would have nothing
+        // to describe. The field is still the thing under test; this line only
+        // makes sure there is a rendered lane for it to report on.
         "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [delivery]\nrender_locally = true\n\
          [servers.docs]\ntype = \"http\"\nurl = \"https://docs/mcp\"\n",
     )
     .unwrap();

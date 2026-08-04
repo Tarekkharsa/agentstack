@@ -20,7 +20,11 @@ const REF_NAME: &str = "GUMLET_TOKEN";
 fn write_manifest(proj: &std::path::Path) {
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        // The rendered lane, explicitly: `apply` honours the delivery planner, so a
+        // server reaches a native config only when the routing sends it to files —
+        // and masking is a property of the bytes that get written.
+        "version = 1\n[delivery]\nrender_locally = true\n\
+         [targets]\ndefault = [\"claude-code\"]\n\
          [servers.gumlet]\ntype = \"http\"\nurl = \"https://gumlet/mcp\"\n\
          headers = { Authorization = \"Bearer ${GUMLET_TOKEN}\" }\n",
     )
@@ -147,7 +151,11 @@ fn diff_masks_secret_on_context_and_changed_lines() {
     run(&proj, &home, &["apply", "--write", "--no-gitignore"]);
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        // The rendered lane, explicitly: `apply` honours the delivery planner, so a
+        // server reaches a native config only when the routing sends it to files —
+        // and masking is a property of the bytes that get written.
+        "version = 1\n[delivery]\nrender_locally = true\n\
+         [targets]\ndefault = [\"claude-code\"]\n\
          [servers.gumlet]\ntype = \"http\"\nurl = \"https://gumlet/mcp/v2\"\n\
          headers = { Authorization = \"Bearer ${GUMLET_TOKEN}\" }\n",
     )

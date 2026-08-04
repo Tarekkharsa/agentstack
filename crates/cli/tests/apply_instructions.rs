@@ -7,6 +7,13 @@
 //! `[instructions.*]` into each CLI's instruction file, a manifest WITHOUT
 //! instructions never touches a region another layer owns, and `doctor`
 //! reports stale regions / missing fragment sources.
+//!
+//! Several fixtures below carry `[delivery] render_locally = true`. That is not
+//! decoration: `apply` honours the delivery planner, so MCP servers reach a
+//! native file only when the routing sends them there. These cases are about
+//! what a SERVER-writing apply does to an instruction region (and to the
+//! managed .gitignore block), so they ask for the rendered lane explicitly —
+//! the same escape hatch a user takes when they want files.
 
 use std::fs;
 use std::sync::Mutex;
@@ -199,6 +206,7 @@ fn apply_without_instructions_leaves_a_foreign_region_alone() {
     fs::write(
         proj.join("agentstack.toml"),
         "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [delivery]\nrender_locally = true\n\
          [servers.demo]\ntype = \"http\"\nurl = \"https://demo/mcp\"\n",
     )
     .unwrap();
@@ -239,6 +247,7 @@ fn project_scope_apply_never_empties_a_region_over_inherited_fragments() {
     fs::write(
         proj.join("agentstack.toml"),
         "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [delivery]\nrender_locally = true\n\
          [servers.demo]\ntype = \"http\"\nurl = \"https://demo/mcp\"\n",
     )
     .unwrap();
@@ -439,6 +448,7 @@ fn machine_layer_instructions_do_not_gitignore_a_project_instruction_file() {
     fs::write(
         proj.join("agentstack.toml"),
         "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [delivery]\nrender_locally = true\n\
          [servers.demo]\ntype = \"http\"\nurl = \"https://x/mcp\"\n",
     )
     .unwrap();

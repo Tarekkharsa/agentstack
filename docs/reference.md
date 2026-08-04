@@ -1797,7 +1797,7 @@ you need the exact verb, flag, or subcommand.
 - **`publisher`** _(hidden)_ — Your publishing key, and the publishers you recognize — subcommands `show/trust`
 - **`lock`** — Resolve each toolset's skill + server refs and pin `agentstack.lock` — flags `--toolset/--update/--upgrade/--all/--with-instructions/--yes/--write`
 - **`try`** _(hidden)_ — Try a skill without installing anything: stage, scan, and emit a wrapper prompt on stdout for piping into any agent CLI — flags `--skill/--rev/--subpath/--allow-flagged`
-- **`lib`** _(hidden)_ — Manage your linked capability library sources — subcommands `new/add/add-server/add-extension/add-hook/list/remove/remove-server/remove-extension/remove-hook/trash/sync/pack-init/link/unlink/sources/reorder`
+- **`lib`** — The central library: the capabilities you keep, ready for any project — subcommands `new/add/add-server/add-extension/add-hook/list/remove/remove-server/remove-extension/remove-hook/trash/sync/pack-init/link/unlink/sources/reorder`
 - **`toolset`** — Work with toolsets: name one that bundles what you already have — subcommands `create/rename/delete/list`
 - **`use`** — Toolset: switch to one — its servers and skills go live in your CLIs — flags `--target/--scope/--write/--allow-unresolved/--prune-foreign/--no-gitignore/--list/--json`
 - **`yes`** — Review and activate the files you dropped into this project — one step — flags `--yes`
@@ -1821,6 +1821,7 @@ you need the exact verb, flag, or subcommand.
 - **`mcp`** _(hidden)_ — Run agentstack as an MCP server over stdio (for an agent to call) — flags `--auto-project/--transparent`
 - **`diff`** _(hidden)_ — Show drift between the manifest and the on-disk configs — flags `--target/--profile/--scope/--json`
 - **`explain`** _(hidden)_ — Explain a server, skill, or instruction before you rely on it — flags `--json`
+- **`why`** — Where did this come from, and where is it live right now? — flags `--json`
 - **`optimize`** _(hidden)_ — Turn agentstack's collected signals into concrete recommendations — flags `--json/--write/--since`
 - **`proxy`** _(hidden)_ — Start the wire relay: a localhost proxy in front of the Anthropic API — flags `--port/--upstream`
 - **`secret`** — Manage secrets in the OS keychain — subcommands `set/get/rm/list`
@@ -1833,6 +1834,7 @@ you need the exact verb, flag, or subcommand.
 - **`add-skill-to-profile`** _(hidden)_ — Add a skill to a toolset and activate it (panel action; digest-bound) — flags `--profile/--name/--git/--rev/--subpath/--path/--preview/--yes/--consented/--allow-unresolved`
 - **`add-server-to-profile`** _(hidden)_ — Add a server to a toolset and activate it (panel action; digest-bound) — flags `--profile/--name/--type/--url/--header/--command/--arg/--cwd/--env/--preview/--yes/--consented/--allow-unresolved`
 - **`uninstall`** _(hidden)_ — Remove everything AgentStack manages, previewing first — flags `--scope/--write/--verbose/--keep-home`
+- **`unrender`** _(hidden)_ — Remove a server config `apply` no longer writes but once did — flags `--target/--write/--verbose`
 - **`create-profile`** _(hidden)_ — Fixed-argv alias of `agentstack toolset create` (panel action) — flags `--name/--skill/--server/--preview/--yes/--consented/--allow-unresolved`
 - **`set-gitignore`** _(hidden)_ — Record whether this project manages its `.gitignore` block (panel action; digest-bound) — flags `--enabled/--preview/--yes/--consented/--allow-unresolved`
 - **`set-mode`** _(hidden)_ — Retired: delivery is routed, not a mode you pick — flags `--preview/--yes/--consented/--allow-unresolved`

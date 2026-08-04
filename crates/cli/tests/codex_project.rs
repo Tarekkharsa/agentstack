@@ -73,6 +73,11 @@ fn project_config_hosts_servers_hooks_and_settings_together() {
     fs::write(
         proj.join("agentstack.toml"),
         r#"version = 1
+# `apply` honours the delivery planner; this test is about what lands in the
+# project's own config.toml, so it asks for the rendered lane explicitly.
+[delivery]
+render_locally = true
+
 [targets]
 default = ["codex"]
 

@@ -89,6 +89,7 @@ fn run(argv: Vec<String>) -> Result<()> {
         Command::Apply(args) => commands::apply::run(args, dir),
         Command::Diff(args) => commands::diff::run(args, dir),
         Command::Explain(args) => commands::explain::run(args, dir),
+        Command::Why(args) => commands::why::run(args, dir),
         // `toolset create` and the frozen `create-profile` argv are the same
         // action under two names — one authority path, one consent digest.
         Command::Toolset(agentstack::cli::ToolsetCmd::Create(args)) => {
@@ -117,6 +118,7 @@ fn run(argv: Vec<String>) -> Result<()> {
         Command::Restore(args) => commands::restore::run(args, dir),
         Command::Undo(args) => commands::undo::run(args, dir),
         Command::Uninstall(args) => commands::uninstall::run(args, dir),
+        Command::Unrender(args) => commands::apply::run_unrender(args, dir),
         Command::Doctor(args) => commands::doctor::run(args, dir),
         Command::Search(args) => commands::search::run(args, dir),
         Command::Proxy(args) => commands::proxy::run(args, dir),

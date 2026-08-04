@@ -9,6 +9,11 @@
 //! `[servers.<name>]` still wins over the library. Serialized because these
 //! mutate the process-global `HOME`/`AGENTSTACK_HOME` and secret env vars.
 
+// Every fixture manifest here sets `[delivery] render_locally = true`. `apply`
+// honours the delivery planner, so MCP servers reach a native config only when
+// the routing sends them to files; these tests are about what a server-writing
+// apply does, so they ask for the rendered lane explicitly — the same escape
+// hatch a user takes when they want files.
 use std::fs;
 use std::sync::Mutex;
 
@@ -70,7 +75,7 @@ fn apply_renders_library_server_ref() {
     fs::create_dir_all(&proj).unwrap();
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        "version = 1\n[delivery]\nrender_locally = true\n[targets]\ndefault = [\"claude-code\"]\n\
          [profiles.design]\nservers = [\"kibana\"]\n",
     )
     .unwrap();
@@ -123,7 +128,7 @@ fn bare_apply_renders_a_library_first_manifest() {
     fs::create_dir_all(&proj).unwrap();
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        "version = 1\n[delivery]\nrender_locally = true\n[targets]\ndefault = [\"claude-code\"]\n\
          [servers]\n\
          [toolsets.default]\nservers = [\"kibana\"]\n",
     )
@@ -161,7 +166,7 @@ fn inline_server_overrides_library_in_apply() {
     fs::create_dir_all(&proj).unwrap();
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        "version = 1\n[delivery]\nrender_locally = true\n[targets]\ndefault = [\"claude-code\"]\n\
          [servers.kibana]\ntype = \"http\"\nurl = \"https://inline-kibana/mcp\"\n\
          headers = { Authorization = \"Bearer ${KIBANA_TOKEN}\" }\n\
          [profiles.design]\nservers = [\"kibana\"]\n",

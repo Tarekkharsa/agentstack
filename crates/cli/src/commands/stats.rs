@@ -189,6 +189,16 @@ fn print_human(report: &Value) {
             );
         }
     }
+    // Rule 2 of `context-cost-v1`: `status` prints a short estimate and points
+    // here, so this is where the blind spots are named in full. Naming them
+    // beside the numbers is what keeps the estimate from being read as a bill.
+    println!(
+        "\n{}",
+        "Context cost is an ESTIMATE: ~4 characters per token over each server's tools/list \
+         payload. Real tokenizers differ per model; a harness's own system prompt, its built-in \
+         tools, conversation history and any skill body loaded on demand are NOT counted here."
+            .dimmed()
+    );
     if !report["anyMeasured"].as_bool().unwrap_or(false) {
         println!(
             "\n{}",

@@ -21,7 +21,12 @@ static ENV_LOCK: Mutex<()> = Mutex::new(());
 fn write_unresolved_manifest(proj: &std::path::Path) {
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        // The subject is the unresolved-secret gate on RENDERED server configs,
+        // so this project opts into local rendering: under the default routing
+        // MCP servers travel the live lane and `apply` writes no server file
+        // for the gate to block.
+        "version = 1\n[delivery]\nrender_locally = true\n\
+         [targets]\ndefault = [\"claude-code\"]\n\
          [servers.kibana]\ntype = \"http\"\nurl = \"https://k/mcp\"\n\
          headers = { Authorization = \"Bearer ${NOPE_TOKEN}\" }\n",
     )
@@ -128,7 +133,10 @@ fn blocked_write_summary_counts_written_targets() {
     fs::create_dir_all(&proj).unwrap();
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\", \"cursor\"]\n\
+        // Same reason as `write_unresolved_manifest`: the rendered lane is the
+        // subject, so this project opts into it explicitly.
+        "version = 1\n[delivery]\nrender_locally = true\n\
+         [targets]\ndefault = [\"claude-code\", \"cursor\"]\n\
          [servers.kibana]\ntype = \"http\"\nurl = \"https://k/mcp\"\n\
          headers = { Authorization = \"Bearer ${SOME_UNSET_SECRET}\" }\n",
     )
@@ -191,7 +199,11 @@ fn partially_blocked_apply_counts_once_and_exits_nonzero() {
     fs::write(proj.join("instructions/house.md"), "House rule one.\n").unwrap();
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        // Same reason as `write_unresolved_manifest`: this test asserts a
+        // blocked SERVER render does not also count as a written target, which
+        // needs servers on the rendered lane.
+        "version = 1\n[delivery]\nrender_locally = true\n\
+         [targets]\ndefault = [\"claude-code\"]\n\
          [servers.demo]\ntype = \"http\"\nurl = \"https://d/mcp\"\n\
          headers = { Authorization = \"Bearer ${DEMO_TOKEN}\" }\n\
          [instructions.house]\npath = \"./instructions/house.md\"\n",
@@ -250,7 +262,11 @@ fn use_write_errors_when_all_targets_blocked() {
     fs::create_dir_all(&proj).unwrap();
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        // The unresolved-secret block is a RENDERED-lane gate: it fires when
+        // a server config is about to be written. `render_locally` keeps this
+        // project in that lane, so the gate has something to refuse.
+        "version = 1\n[delivery]\nrender_locally = true\n\
+         [targets]\ndefault = [\"claude-code\"]\n\
          [servers.kibana]\ntype = \"http\"\nurl = \"https://k/mcp\"\n\
          headers = { Authorization = \"Bearer ${NOPE_TOKEN}\" }\n\
          [profiles.p]\nservers = [\"kibana\"]\nskills = []\n",
@@ -310,7 +326,9 @@ fn partially_blocked_use_still_pins_the_lock() {
     // is a partial success, not a total failure.
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        // Rendered lane, same reason as above.
+        "version = 1\n[delivery]\nrender_locally = true\n\
+         [targets]\ndefault = [\"claude-code\"]\n\
          [servers.kibana]\ntype = \"http\"\nurl = \"https://k/mcp\"\n\
          headers = { Authorization = \"Bearer ${NOPE_TOKEN}\" }\n\
          [skills.demo]\npath = \"./skills/demo\"\n\

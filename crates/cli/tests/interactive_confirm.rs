@@ -22,7 +22,12 @@ static ENV_LOCK: Mutex<()> = Mutex::new(());
 fn write_manifest(proj: &std::path::Path) {
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        // The subject is the interactive/non-interactive confirmation of a
+        // WRITE, asserted through a rendered `.claude.json`. Under the default
+        // routing MCP servers travel the live lane and `apply` writes no server
+        // config, so this project opts into local rendering.
+        "version = 1\n[delivery]\nrender_locally = true\n\
+         [targets]\ndefault = [\"claude-code\"]\n\
          [servers.demo]\ntype = \"http\"\nurl = \"https://demo/mcp\"\n",
     )
     .unwrap();

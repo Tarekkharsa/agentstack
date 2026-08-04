@@ -7,6 +7,8 @@
 //! the `report` umbrella, `gateway`, `lib pack-init`), retired top-level names
 //! are really gone, and clap's own debug assertions hold for the whole tree.
 
+use std::collections::BTreeSet;
+
 use agentstack::cli::{Cli, Command, SessionCmd};
 use clap::{CommandFactory, Parser};
 
@@ -45,8 +47,8 @@ fn status_parses_and_help_maps_every_command() {
     assert_eq!(
         visible,
         [
-            "init", "status", "add", "search", "apply", "doctor", "lock", "toolset", "use", "yes",
-            "run", "trust", "undo", "adopt", "secret"
+            "init", "status", "add", "search", "apply", "doctor", "lock", "lib", "toolset", "use",
+            "yes", "run", "trust", "undo", "adopt", "why", "secret"
         ],
         "the visible list is DERIVED, not curated by taste: a command is here \
          because the product tells someone to run it — the first-run ladder in \
@@ -60,9 +62,15 @@ fn status_parses_and_help_maps_every_command() {
          find is the exact defect this list exists to prevent. `adopt` stays for \
          the same reason (doctor names it for a server found in a CLI config but \
          not in the manifest, which is a FIRST-RUN state). `toolset`, `status`, \
-         `undo` and `init` cover Toolset · Status · Undo · Setup. The honest \
-         count is fifteen, not ten: hiding one of the forced three to reach a \
-         rounder number would trade a real guarantee for a tidier screen. \
+         `undo` and `init` cover Toolset · Status · Undo · Setup. `lib` and \
+         `why` are the two the same rule adds once delivery is dynamic by \
+         default: the central library is where capabilities are KEPT, so it is \
+         the daily spine rather than an advanced tool, and with nothing written \
+         to disk `agentstack why <name>` is the only answer left to \"where did \
+         this come from?\" — a question whose answer may not itself be hidden. \
+         The honest count is seventeen, not ten: hiding one of the forced \
+         commands to reach a rounder number would trade a real guarantee for a \
+         tidier screen. \
          `up`, `share`, `receive`, `workflow` and `restore` moved behind \
          `agentstack x` — none is named by any fix or ladder rung, STRATEGY.md \
          v3 puts share/receive quiet until team features arrive, and `undo` is \
@@ -105,16 +113,28 @@ fn status_parses_and_help_maps_every_command() {
     // `agentstack x` is the home of everything not visible, and it must actually
     // list them — an escape hatch that names nothing is a dead end.
     let listing = agentstack::cli::namespace_listing();
-    // The eight verbs guidance names by a `↳ fix` line or a ladder rung. They
-    // used to be repeated on the plain help screen; the toolbox is now their
-    // only listing, so this is where the "guidance never names an unfindable
-    // command" guarantee is anchored on this side.
+    // `lib` was one of these eight until it became a visible verb. The
+    // guarantee did not weaken — it strengthened: a command listed by plain
+    // `agentstack --help` is findable in ZERO hops, not one, so asserting its
+    // visibility is strictly stronger than asserting the toolbox lists it. It
+    // is checked against the derived `visible` list above rather than typed
+    // into a second place.
+    assert!(
+        visible.contains(&"lib"),
+        "`lib` is named by guidance and is now a visible verb — the toolbox \
+         listing is no longer where it is found, so the visible list must \
+         carry it or the guarantee has a hole"
+    );
+    // The seven verbs guidance names by a `↳ fix` line or a ladder rung and
+    // that are still hidden. They used to be repeated on the plain help
+    // screen; the toolbox is now their only listing, so this is where the
+    // "guidance never names an unfindable command" guarantee is anchored on
+    // this side.
     for named_by_guidance in [
         "gateway",
         "guard",
         "install",
         "instructions",
-        "lib",
         "self",
         "session",
         "up",
@@ -212,6 +232,100 @@ fn full_inventory_differs_from_short_help_and_covers_hidden_commands() {
     assert!(!leaks_p_number(&short_after_help), "P-number in --help");
 }
 
+/// The closure arithmetic, recomputed from the real binary rather than typed:
+/// **visible ∪ namespaced ∪ panel = every top-level command, and the three sets
+/// do not overlap.** Promoting a verb (here `lib`) or adding one (`why`) is
+/// exactly the change that can break it — a promoted command left in the
+/// toolbox listing appears twice, and a new one left out of both appears
+/// nowhere. Names are read off the `·`-separated group lines, never by
+/// substring: `run` occurs inside the toolbox's own prose.
+#[test]
+fn visible_namespaced_and_panel_partition_the_whole_surface() {
+    /// The task headings both grouped screens use. Matching on them — rather
+    /// than on "contains a `·`" — is what makes `Undo   restore`, a group of
+    /// one with no separator in it, count.
+    const HEADINGS: &[&str] = &[
+        "Set up", "Edit", "Share", "Render", "Undo", "Protect", "Run", "Inspect",
+    ];
+
+    fn grouped_names(screen: &str) -> BTreeSet<String> {
+        screen
+            .lines()
+            .map(str::trim_start)
+            .filter_map(|l| {
+                let heading = HEADINGS.iter().find(|h| l.starts_with(*h))?;
+                Some(l[heading.len()..].trim())
+            })
+            .flat_map(|rest| rest.split('·').map(|t| t.trim().to_string()))
+            .filter(|t| !t.is_empty())
+            .collect()
+    }
+
+    let cmd = Cli::command();
+    let all: BTreeSet<String> = cmd
+        .get_subcommands()
+        .map(|c| c.get_name().to_string())
+        .filter(|n| n != "help")
+        .collect();
+
+    let visible: BTreeSet<String> = cmd
+        .get_subcommands()
+        .filter(|c| !c.is_hide_set() && c.get_name() != "help")
+        .map(|c| c.get_name().to_string())
+        .collect();
+    let namespaced = grouped_names(&agentstack::cli::namespace_listing());
+    let contract = inventory_contract_section();
+    let panel: BTreeSet<String> = all
+        .iter()
+        .filter(|n| contract.contains(&format!("\n  {n} ")))
+        .cloned()
+        .collect();
+
+    // Nothing lands in two places.
+    for (a, an, b, bn) in [
+        (
+            &visible,
+            "visible",
+            &namespaced,
+            "the `agentstack x` toolbox",
+        ),
+        (&visible, "visible", &panel, "the panel contract"),
+        (
+            &namespaced,
+            "the `agentstack x` toolbox",
+            &panel,
+            "the panel contract",
+        ),
+    ] {
+        let both: Vec<&String> = a.intersection(b).collect();
+        assert!(
+            both.is_empty(),
+            "{both:?} appear in BOTH {an} and {bn} — the three sets partition the surface"
+        );
+    }
+
+    // And together they cover it.
+    let covered: BTreeSet<String> = visible
+        .union(&namespaced)
+        .cloned()
+        .collect::<BTreeSet<_>>()
+        .union(&panel)
+        .cloned()
+        .collect();
+    let missing: Vec<&String> = all.difference(&covered).collect();
+    assert!(
+        missing.is_empty(),
+        "{missing:?} are in neither the visible list, the `agentstack x` toolbox, \
+         nor the panel contract — they would be reachable only by already \
+         knowing the name"
+    );
+    let invented: Vec<&String> = covered.difference(&all).collect();
+    assert!(
+        invented.is_empty(),
+        "{invented:?} are listed but are not real top-level commands"
+    );
+}
+
 #[test]
 fn consolidated_verbs_parse() {
     for argv in [
@@ -236,6 +350,11 @@ fn consolidated_verbs_parse() {
         vec!["agentstack", "report", "calls", "--since", "7"],
         vec!["agentstack", "diff", "--json"],
         vec!["agentstack", "explain", "github", "--json"],
+        vec!["agentstack", "why", "github"],
+        vec!["agentstack", "why", "sql-review", "--json"],
+        // `lib` is visible now; the whole subcommand tree must still parse at
+        // the direct spelling, not just the promoted parent.
+        vec!["agentstack", "lib", "list"],
         // The machine-invoked entrypoint written into harness configs must
         // keep parsing exactly as `connect` renders it.
         vec!["agentstack", "mcp", "--auto-project"],

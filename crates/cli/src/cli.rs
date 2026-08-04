@@ -11,9 +11,15 @@
 //! each of the four ideas the help already promises — Setup · Toolset · Status
 //! · Undo.
 //!
-//! That derivation yields fifteen, not ten. It is the honest number: `lock`,
+//! That derivation yields seventeen, not ten. It is the honest number: `lock`,
 //! `secret` and `adopt` are here because guidance names them, and hiding one to
 //! reach a rounder count would trade a real guarantee for a tidier screen.
+//!
+//! `lib` and `why` are the two the same rule adds under dynamic delivery.
+//! The central library is where capabilities are kept, so `lib` is the spine a
+//! reader reaches for daily, not an advanced tool; and once nothing is written
+//! to disk, `why <name>` is the ONLY answer to "where did this come from?" —
+//! a question a hidden command cannot be the answer to.
 //!
 //! Everything else moves behind `agentstack x <command>` — the same commands,
 //! one hop away, listed and grouped by [`namespace_listing`]. Nothing is
@@ -210,11 +216,11 @@ pub enum Command {
     #[command(hide = true)]
     Try(TryArgs),
 
-    /// Manage your linked capability library sources.
+    /// The central library: the capabilities you keep, ready for any project.
     ///
     /// Any folder can be linked as a source, several at once; the first source
     /// holding a name wins. `~/.agentstack/lib/` is the one you start with.
-    #[command(hide = true)]
+    /// `agentstack lib list` shows what is in it.
     Lib(LibArgs),
 
     // ── Activate & run ───────────────────────────────────────────────────
@@ -414,6 +420,21 @@ Examples:
     )]
     Explain(ExplainArgs),
 
+    /// Where did this come from, and where is it live right now?
+    ///
+    /// Nothing is written to disk for a capability served live, so this is the
+    /// one place that answers it: origin, pin, who said yes, which tools have
+    /// it live, which get it written, and what it reaches.
+    ///
+    /// Takes the NAME of a server, skill, house rule, hook, extension, or
+    /// setting. Not a tool name — mapping a tool back to its server needs a
+    /// live connection to that server, so `why` will not guess one.
+    #[command(after_help = "\
+Examples:
+  agentstack why github
+  agentstack why sql-review --json")]
+    Why(WhyArgs),
+
     /// Turn agentstack's collected signals into concrete recommendations.
     ///
     /// Usage, call audit log, context costs, and trust ledger feed
@@ -504,6 +525,20 @@ added to those files are left alone. Every file edit is captured first, so
 `agentstack restore` still works afterwards unless you also removed ~/.agentstack."
     )]
     Uninstall(UninstallArgs),
+
+    /// Remove a server config `apply` no longer writes but once did.
+    ///
+    /// When a harness's MCP servers move to the live lane, `apply` stops
+    /// writing its config — but the file it wrote earlier stays on disk and
+    /// the harness keeps reading it at startup. This takes exactly those
+    /// files back off. Nothing else is touched: settings, hooks and
+    /// instructions are still rendered for those harnesses, and the whole
+    /// machine exit is still `agentstack x uninstall`.
+    ///
+    /// Dry-run by default; `--write` removes. Every removal is snapshotted
+    /// first, so `agentstack x restore --last --write` puts it back.
+    #[command(hide = true)]
+    Unrender(UnrenderArgs),
 
     /// Fixed-argv alias of `agentstack toolset create` (panel action).
     ///
@@ -2215,6 +2250,22 @@ pub struct UninstallArgs {
     pub keep_home: bool,
 }
 
+/// `unrender` — remove the server configs the live lane left behind.
+#[derive(Args, Debug)]
+pub struct UnrenderArgs {
+    /// Limit to these adapter ids (default: the manifest's targets).
+    #[arg(long = "target", value_name = "ID")]
+    pub targets: Vec<String>,
+
+    /// Actually remove. Without it this only shows what would be removed.
+    #[arg(long)]
+    pub write: bool,
+
+    /// Show the full diff of every file, not just its name.
+    #[arg(long, short)]
+    pub verbose: bool,
+}
+
 /// `set-gitignore` — this project's durable answer to whether agentstack
 /// maintains its managed `.gitignore` block.
 ///
@@ -2420,6 +2471,16 @@ pub struct ExplainArgs {
     pub name: String,
 
     /// Emit provenance and safety signals as machine-readable JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct WhyArgs {
+    /// Name of a server, skill, house rule, hook, extension, or setting.
+    pub name: String,
+
+    /// Emit the same facts as machine-readable JSON.
     #[arg(long)]
     pub json: bool,
 }
@@ -3141,9 +3202,9 @@ pub const NAMESPACE: &str = "x";
 
 /// What `agentstack x` prints: the rest of the toolbox, grouped by task.
 ///
-/// Grouped by the same headings as `--help --all`, minus the fifteen commands
-/// the default help already lists — this screen is the complement of that one,
-/// not a second copy of it.
+/// Grouped by the same headings as `--help --all`, minus the seventeen
+/// commands the default help already lists — this screen is the complement of
+/// that one, not a second copy of it.
 pub fn namespace_listing() -> String {
     String::from(
         "agentstack x — the rest of the toolbox. Every one of these also runs at its\n\
@@ -3151,15 +3212,15 @@ pub fn namespace_listing() -> String {
          same command. Run `agentstack x <command> --help` for flags and details.\n\
          \n  \
          Set up      up · adapters · settings · self · completions\n  \
-         Edit        set · remove · install · lib · export · import\n  \
+         Edit        set · remove · install · export · import\n  \
          Share       share · receive · publisher\n  \
-         Render      instructions · session · diff · uninstall · delivery\n  \
+         Render      instructions · session · diff · unrender · uninstall · delivery\n  \
          Undo        restore\n  \
          Protect     explain · guard · sign · verify\n  \
          Run         kill · shim · workflow · image · gateway · mcp · try\n  \
          Inspect     report · lease · optimize · proxy\n\
          \n\
-         The everyday fifteen are on `agentstack --help`. For all of it at once,\n\
+         The everyday seventeen are on `agentstack --help`. For all of it at once,\n\
          including the fixed actions a graphical panel invokes:\n  \
          agentstack --help --all\n",
     )
@@ -3254,9 +3315,9 @@ pub fn full_command_inventory() -> String {
          Set up      init · up · status · adapters · settings · self · completions\n  \
          Edit        add · set · search · remove · install · lib · toolset · adopt · export · import\n  \
          Share       share · receive · publisher\n  \
-         Render      apply · use · yes · instructions · lock · session · diff · uninstall · delivery\n  \
+         Render      apply · use · yes · instructions · lock · session · diff · unrender · uninstall · delivery\n  \
          Undo        undo · restore\n  \
-         Protect     trust · explain · secret · guard · sign · verify\n  \
+         Protect     trust · explain · why · secret · guard · sign · verify\n  \
          Run         run · kill · shim · workflow · image · gateway · mcp · try\n  \
          Inspect     doctor · report · lease · optimize · proxy\n\
          \n\

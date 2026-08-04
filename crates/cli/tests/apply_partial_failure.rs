@@ -55,6 +55,13 @@ fn one_failed_target_reports_continues_and_keeps_successes_undoable() {
         proj.join("agentstack.toml"),
         r#"version = 1
 
+# The subject here is a failed SERVER write, and servers only reach a native
+# file when the delivery planner routes them there. `apply` honours that
+# routing, so the project asks for the rendered lane explicitly — the same
+# escape hatch a user takes when they want files.
+[delivery]
+render_locally = true
+
 [servers.srv]
 type = "stdio"
 command = "npx"

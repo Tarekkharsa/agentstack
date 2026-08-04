@@ -711,6 +711,13 @@ fn an_unresolved_ref_still_fails_closed() {
         proj.join(".agentstack/agentstack.toml"),
         r#"version = 1
 
+# The secret gate under test runs on the RENDERED lane, and `apply` honours the
+# delivery planner — so this fixture asks for that lane explicitly. Without it
+# the server travels live, no write is attempted, and the test would witness
+# nothing.
+[delivery]
+render_locally = true
+
 [servers.search]
 type = "stdio"
 command = "npx"

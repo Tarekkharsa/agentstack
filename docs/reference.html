@@ -832,7 +832,7 @@ agentstack x completions fish &gt; ~/.config/fish/completions/agentstack.fish</c
 <li><strong><code>publisher</code></strong> _(hidden)_ — Your publishing key, and the publishers you recognize — subcommands <code>show/trust</code></li>
 <li><strong><code>lock</code></strong> — Resolve each toolset's skill + server refs and pin <code>agentstack.lock</code> — flags <code>--toolset/--update/--upgrade/--all/--with-instructions/--yes/--write</code></li>
 <li><strong><code>try</code></strong> _(hidden)_ — Try a skill without installing anything: stage, scan, and emit a wrapper prompt on stdout for piping into any agent CLI — flags <code>--skill/--rev/--subpath/--allow-flagged</code></li>
-<li><strong><code>lib</code></strong> _(hidden)_ — Manage your linked capability library sources — subcommands <code>new/add/add-server/add-extension/add-hook/list/remove/remove-server/remove-extension/remove-hook/trash/sync/pack-init/link/unlink/sources/reorder</code></li>
+<li><strong><code>lib</code></strong> — The central library: the capabilities you keep, ready for any project — subcommands <code>new/add/add-server/add-extension/add-hook/list/remove/remove-server/remove-extension/remove-hook/trash/sync/pack-init/link/unlink/sources/reorder</code></li>
 <li><strong><code>toolset</code></strong> — Work with toolsets: name one that bundles what you already have — subcommands <code>create/rename/delete/list</code></li>
 <li><strong><code>use</code></strong> — Toolset: switch to one — its servers and skills go live in your CLIs — flags <code>--target/--scope/--write/--allow-unresolved/--prune-foreign/--no-gitignore/--list/--json</code></li>
 <li><strong><code>yes</code></strong> — Review and activate the files you dropped into this project — one step — flags <code>--yes</code></li>
@@ -856,6 +856,7 @@ agentstack x completions fish &gt; ~/.config/fish/completions/agentstack.fish</c
 <li><strong><code>mcp</code></strong> _(hidden)_ — Run agentstack as an MCP server over stdio (for an agent to call) — flags <code>--auto-project/--transparent</code></li>
 <li><strong><code>diff</code></strong> _(hidden)_ — Show drift between the manifest and the on-disk configs — flags <code>--target/--profile/--scope/--json</code></li>
 <li><strong><code>explain</code></strong> _(hidden)_ — Explain a server, skill, or instruction before you rely on it — flags <code>--json</code></li>
+<li><strong><code>why</code></strong> — Where did this come from, and where is it live right now? — flags <code>--json</code></li>
 <li><strong><code>optimize</code></strong> _(hidden)_ — Turn agentstack's collected signals into concrete recommendations — flags <code>--json/--write/--since</code></li>
 <li><strong><code>proxy</code></strong> _(hidden)_ — Start the wire relay: a localhost proxy in front of the Anthropic API — flags <code>--port/--upstream</code></li>
 <li><strong><code>secret</code></strong> — Manage secrets in the OS keychain — subcommands <code>set/get/rm/list</code></li>
@@ -868,6 +869,7 @@ agentstack x completions fish &gt; ~/.config/fish/completions/agentstack.fish</c
 <li><strong><code>add-skill-to-profile</code></strong> _(hidden)_ — Add a skill to a toolset and activate it (panel action; digest-bound) — flags <code>--profile/--name/--git/--rev/--subpath/--path/--preview/--yes/--consented/--allow-unresolved</code></li>
 <li><strong><code>add-server-to-profile</code></strong> _(hidden)_ — Add a server to a toolset and activate it (panel action; digest-bound) — flags <code>--profile/--name/--type/--url/--header/--command/--arg/--cwd/--env/--preview/--yes/--consented/--allow-unresolved</code></li>
 <li><strong><code>uninstall</code></strong> _(hidden)_ — Remove everything AgentStack manages, previewing first — flags <code>--scope/--write/--verbose/--keep-home</code></li>
+<li><strong><code>unrender</code></strong> _(hidden)_ — Remove a server config <code>apply</code> no longer writes but once did — flags <code>--target/--write/--verbose</code></li>
 <li><strong><code>create-profile</code></strong> _(hidden)_ — Fixed-argv alias of <code>agentstack toolset create</code> (panel action) — flags <code>--name/--skill/--server/--preview/--yes/--consented/--allow-unresolved</code></li>
 <li><strong><code>set-gitignore</code></strong> _(hidden)_ — Record whether this project manages its <code>.gitignore</code> block (panel action; digest-bound) — flags <code>--enabled/--preview/--yes/--consented/--allow-unresolved</code></li>
 <li><strong><code>set-mode</code></strong> _(hidden)_ — Retired: delivery is routed, not a mode you pick — flags <code>--preview/--yes/--consented/--allow-unresolved</code></li>

@@ -125,26 +125,12 @@ fn scripted_init_states_clis_configs_servers_and_destinations_before_writing() {
         text.contains("the manifest — written by this import"),
         "{text}"
     );
-    assert!(text.contains(".mcp.json"), "{text}");
-    assert!(
-        text.contains("Claude Code · MCP servers (this project)"),
-        "{text}"
-    );
-    assert!(text.contains(".codex/config.toml"), "{text}");
-    assert!(
-        text.contains("Codex CLI · MCP servers (this project)"),
-        "{text}"
-    );
-    // ...stated as a CHOICE, next to the routing that says what reaches each
-    // tool live instead. The block and the routing sat two lines apart with no
-    // relation between them, so a destination list and a "served live" claim
-    // read as a contradiction. `apply` still renders everything it is asked to
-    // (docs/design/automatic-delivery.md, "What 'default' means here") — the
-    // fix is that this block no longer implies the render is coming anyway.
-    assert!(
-        text.contains("none is written unless you ask"),
-        "the destination list must not read as an inevitability:\n{text}"
-    );
+    // The imported servers travel the LIVE lane, so `apply` will never write a
+    // `.mcp.json` or a `.codex/config.toml` for them — and this block no longer
+    // names those files. Promising a file that nothing writes is the
+    // double-delivery defect stated as a plan.
+    assert!(!text.contains("Claude Code \u{b7} MCP servers"), "{text}");
+    assert!(!text.contains("Codex CLI \u{b7} MCP servers"), "{text}");
     // No bridge is registered in this scripted run, so the routing states the
     // live lane as a PLAN (invariant 8). The claim under test is that the row
     // names the live lane at all, not that it promises delivery.
@@ -198,23 +184,24 @@ fn plan_json_carries_configs_found_and_destinations() {
         "configs name the file detection read: {configs:?}"
     );
 
-    // destinations[]: full path, plain scope, and what renders there.
+    // destinations[]: what the RENDERED lane will manage. The imported servers
+    // route live on both of these CLIs, so no destination promises an MCP
+    // server file — `apply` honours the delivery planner and would never write
+    // one. A destination here is a promise, and this is the promise that used
+    // to be broken.
     let dests = v["destinations"].as_array().unwrap();
-    let claude_dest = dests
-        .iter()
-        .find(|d| d["id"] == "claude-code")
-        .expect("claude-code destination");
-    assert_eq!(claude_dest["scope"], "project");
-    assert!(claude_dest["path"].as_str().unwrap().ends_with(".mcp.json"));
-    assert_eq!(claude_dest["writes"][0], "MCP servers");
-    let codex_dest = dests
-        .iter()
-        .find(|d| d["id"] == "codex")
-        .expect("codex destination");
-    assert!(codex_dest["path"]
-        .as_str()
-        .unwrap()
-        .ends_with(".codex/config.toml"));
+    for d in dests {
+        let writes: Vec<&str> = d["writes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|w| w.as_str().unwrap())
+            .collect();
+        assert!(
+            !writes.contains(&"MCP servers"),
+            "no destination may promise MCP servers under live routing: {d}"
+        );
+    }
 
     // Planning wrote nothing.
     assert!(!proj.join(".agentstack").exists());

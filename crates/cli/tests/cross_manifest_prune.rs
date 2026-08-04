@@ -10,6 +10,11 @@
 //! by a different manifest is kept (and reported) unless `--prune-foreign`,
 //! while the recording manifest itself still prunes freely.
 
+// Every fixture manifest here sets `[delivery] render_locally = true`. `apply`
+// honours the delivery planner, so MCP servers reach a native config only when
+// the routing sends them to files; these tests are about what a server-writing
+// apply does, so they ask for the rendered lane explicitly — the same escape
+// hatch a user takes when they want files.
 use std::fs;
 use std::sync::Mutex;
 
@@ -57,7 +62,7 @@ fn seed_state_from_manifest_a(tmp: &std::path::Path, home: &std::path::Path) {
     fs::create_dir_all(&proj_a).unwrap();
     fs::write(
         proj_a.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        "version = 1\n[delivery]\nrender_locally = true\n[targets]\ndefault = [\"claude-code\"]\n\
          [servers.kibana_mcp]\ntype = \"http\"\nurl = \"https://kibana/mcp\"\n",
     )
     .unwrap();
@@ -78,7 +83,7 @@ fn write_manifest_b(tmp: &std::path::Path) -> std::path::PathBuf {
     fs::create_dir_all(&proj_b).unwrap();
     fs::write(
         proj_b.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        "version = 1\n[delivery]\nrender_locally = true\n[targets]\ndefault = [\"claude-code\"]\n\
          [servers.beta]\ntype = \"http\"\nurl = \"https://beta/mcp\"\n",
     )
     .unwrap();
@@ -228,7 +233,7 @@ fn use_prune_foreign_still_works_after_guarded_use() {
     fs::create_dir_all(&proj_b).unwrap();
     fs::write(
         proj_b.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        "version = 1\n[delivery]\nrender_locally = true\n[targets]\ndefault = [\"claude-code\"]\n\
          [servers.beta]\ntype = \"http\"\nurl = \"https://beta/mcp\"\n\
          [profiles.p]\nservers = [\"beta\"]\n",
     )
@@ -291,7 +296,7 @@ fn diff_does_not_preview_foreign_prunes() {
     fs::create_dir_all(&proj_a).unwrap();
     fs::write(
         proj_a.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        "version = 1\n[delivery]\nrender_locally = true\n[targets]\ndefault = [\"claude-code\"]\n\
          [servers.kibana_mcp]\ntype = \"http\"\nurl = \"https://kibana/mcp\"\n",
     )
     .unwrap();
@@ -303,7 +308,7 @@ fn diff_does_not_preview_foreign_prunes() {
     fs::create_dir_all(&proj_b).unwrap();
     fs::write(
         proj_b.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n",
+        "version = 1\n[delivery]\nrender_locally = true\n[targets]\ndefault = [\"claude-code\"]\n",
     )
     .unwrap();
 
@@ -352,7 +357,7 @@ fn same_manifest_still_prunes_its_own_removals() {
     // The manifest no longer defines kibana_mcp…
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n",
+        "version = 1\n[delivery]\nrender_locally = true\n[targets]\ndefault = [\"claude-code\"]\n",
     )
     .unwrap();
     // …but the same manifest recorded it on a previous apply.

@@ -66,7 +66,13 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
             );
             println!("  For scripts/CI, use:");
             println!("    agentstack init");
-            println!("    agentstack apply --write");
+            // The bridge comes first: skills and MCP servers travel the live
+            // lane by default, so this is the step that makes a scripted setup
+            // actually deliver anything. `apply` writes the rendered lane only
+            // — house rules, settings, hooks — and a project with none of them
+            // has nothing for it to do.
+            println!("    agentstack x gateway connect --all --write   # serve what routes live");
+            println!("    agentstack apply --write           # write the rendered lane, if any");
             println!("    agentstack use <toolset> --write   # if the manifest has skills");
             return Ok(());
         }
@@ -1198,7 +1204,17 @@ fn run_automatic(
         .max()
         .unwrap_or(0);
     for h in &plan.harnesses {
-        println!("  {:width$}   {}", h.display, h.sentence());
+        // Per-harness bridge reading, never the raw routing sentence: with no
+        // gateway registered nothing reaches this tool, and `status`, `doctor`
+        // and `delivery` all say "planned live (not connected)" here.
+        println!(
+            "  {:width$}   {}",
+            h.display,
+            crate::commands::delivery::harness_sentence(
+                h,
+                super::overview::bridge_registered(&ctx.registry, &h.id)
+            )
+        );
     }
     // The two binding honesty rules, each on its own line.
     if plan.has_dynamic_lane() {

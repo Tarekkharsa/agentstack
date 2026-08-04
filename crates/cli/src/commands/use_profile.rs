@@ -721,6 +721,22 @@ pub fn activate(
 
     let target_ids = resolve_targets(manifest, &ctx.registry, &args.targets, &ctx.dir)?;
     let ruleset = crate::render::ruleset_for(manifest)?;
+    // `use` ACTIVATES a toolset; it is not a second writer with its own idea
+    // of where capabilities go. Under the default routing an MCP-capable
+    // harness's servers travel the live lane, so activation must not also
+    // write a server config — that would put the same servers in two places,
+    // one of them direct and unbrokered, while every reading surface reports
+    // the live lane. Same `delivery::Plan` reading `apply` uses; everything
+    // else this command does (skills, extensions, the .gitignore block) is
+    // untouched, and servers are still written when `[delivery]
+    // render_locally` is set or the harness has no live channel.
+    let plan_delivery =
+        crate::delivery::Plan::build(&manifest.delivery, &ctx.registry, &target_ids);
+    // Harnesses whose servers this activation deliberately did not write, and
+    // the subset whose bridge is not registered — named at the end in the
+    // same voice `apply` uses.
+    let mut live_withheld: std::collections::BTreeSet<String> = Default::default();
+    let mut live_unconnected: std::collections::BTreeSet<String> = Default::default();
     if !args.quiet {
         println!(
             "Activating toolset '{}' (scope: {scope}) — {}, {}",
@@ -813,141 +829,177 @@ pub fn activate(
         let mut would_manage_skills = false;
 
         // --- servers ---
-        let mut previously = state.managed_servers(&key);
-        // Names an earlier guarded write kept on disk (state bookkeeping —
-        // they left `managed_servers` when this manifest recorded its own
-        // set). Ones the profile now selects become managed again below.
-        let kept_before: Vec<String> = state
-            .kept_foreign(&key)
-            .into_iter()
-            .filter(|n| !server_map.contains_key(n))
-            .collect();
-        // Guard cross-manifest global prunes: entries another manifest applied
-        // are kept (and reported below), not deleted, unless --prune-foreign.
-        let foreign = if args.prune_foreign {
-            // Fold previously-kept names into the prune set — the escape
-            // hatch must still reach them after a guarded write re-recorded
-            // this key with only our own managed set.
-            for n in &kept_before {
-                if !previously.contains(n) {
-                    previously.push(n.clone());
-                }
+        // Route servers through the same delivery plan `apply` reads.
+        let servers_live = plan_delivery.servers_route_live(id);
+        if servers_live {
+            // No config path is named on purpose: naming the file is what made
+            // this read as "these servers are about to be written here".
+            // The verb comes from this harness's own bridge state, never from
+            // the routing alone: with no gateway registered nothing is served,
+            // and `status`, `doctor`, `delivery` and `apply` all say "planned
+            // live (not connected)" about this harness at this moment.
+            let bridged = super::overview::bridge_registered(&ctx.registry, id);
+            let lane = if bridged {
+                "are served live"
+            } else {
+                "are planned live (not connected)"
+            };
+            println!(
+                "  {} MCP servers {lane}, not written — nothing for `use` to render here",
+                "·".dimmed()
+            );
+            live_withheld.insert(desc.display.clone());
+            if !bridged {
+                live_unconnected.insert(desc.display.clone());
             }
-            Vec::new()
+            // This target IS covered by the activation — its servers travel
+            // the live lane. Counting it keeps the closing summary from
+            // reading "0 target(s)" for a project that is fully activated.
+            if args.write {
+                covered_targets.insert(desc.display.clone());
+            }
         } else {
-            let mut f = state.foreign_prunes(&key, scope, &ctx.dir, &mut previously, |n| {
-                server_map.contains_key(n)
-            });
-            // Keep surfacing (and tracking) what earlier runs kept.
-            for n in &kept_before {
-                if !f.contains(n) {
-                    f.push(n.clone());
+            let mut previously = state.managed_servers(&key);
+            // Names an earlier guarded write kept on disk (state bookkeeping —
+            // they left `managed_servers` when this manifest recorded its own
+            // set). Ones the profile now selects become managed again below.
+            let kept_before: Vec<String> = state
+                .kept_foreign(&key)
+                .into_iter()
+                .filter(|n| !server_map.contains_key(n))
+                .collect();
+            // Guard cross-manifest global prunes: entries another manifest applied
+            // are kept (and reported below), not deleted, unless --prune-foreign.
+            let foreign = if args.prune_foreign {
+                // Fold previously-kept names into the prune set — the escape
+                // hatch must still reach them after a guarded write re-recorded
+                // this key with only our own managed set.
+                for n in &kept_before {
+                    if !previously.contains(n) {
+                        previously.push(n.clone());
+                    }
                 }
-            }
-            f
-        };
-        match crate::render::plan_target_with_servers(
-            desc,
-            &ctx.resolver,
-            &ruleset,
-            server_map,
-            &previously,
-            scope,
-            &ctx.dir,
-        )? {
-            None => println!("  servers: no {scope} scope"),
-            Some(plan) => {
-                if !foreign.is_empty() {
-                    println!(
-                        "  {} keeping {} — applied by another manifest ↳ keep: agentstack adopt · \
-                         prune: agentstack use {}--prune-foreign",
-                        "⚠".yellow(),
-                        foreign.join(", "),
-                        use_cmd_profile
-                    );
+                Vec::new()
+            } else {
+                let mut f = state.foreign_prunes(&key, scope, &ctx.dir, &mut previously, |n| {
+                    server_map.contains_key(n)
+                });
+                // Keep surfacing (and tracking) what earlier runs kept.
+                for n in &kept_before {
+                    if !f.contains(n) {
+                        f.push(n.clone());
+                    }
                 }
-                for u in &plan.unresolved {
-                    // Same ↳ fix convention as doctor: the entry reads
-                    // "NAME (server 'x')", so the first token is the ref name.
-                    let name = u.split_whitespace().next().unwrap_or(u.as_str());
-                    println!(
-                        "  {} unresolved secret {u} ↳ agentstack secret set {name}",
-                        "✗".red()
-                    );
-                    missing_secrets.insert(name.to_string());
-                }
-                for d in &plan.denied {
-                    println!("  {} blocked by policy: {}", "✗".red(), d);
-                }
-                for f in &plan.failed {
-                    println!("  {} {}", "✗".red(), crate::render::failed_secret_line(f));
-                    // Same `secret set` fix whether missing or unreadable —
-                    // keep the closing tail copy-pasteable in both cases.
-                    let name = f.split_whitespace().next().unwrap_or(f.as_str());
-                    missing_secrets.insert(name.to_string());
-                }
-                let blocked = ((!plan.unresolved.is_empty() || !plan.failed.is_empty())
-                    && !args.allow_unresolved)
-                    || !plan.denied.is_empty();
-                // What a write WOULD leave managed here. `blocked` gates it
-                // exactly as it gates the write below: an activation that
-                // writes nothing must not preview hiding a hand-maintained
-                // config.
-                would_manage_config = !blocked && (!plan.managed.is_empty() || !foreign.is_empty());
-                if plan.changed() {
-                    if args.write && blocked {
-                        blocked_targets.push(desc.display.clone());
-                        let reason = if plan.unresolved.is_empty() {
-                            "secret read failures; set them"
-                        } else {
-                            "unresolved secrets; set them"
-                        };
+                f
+            };
+            match crate::render::plan_target_with_servers(
+                desc,
+                &ctx.resolver,
+                &ruleset,
+                server_map,
+                &previously,
+                scope,
+                &ctx.dir,
+            )? {
+                None => println!("  servers: no {scope} scope"),
+                Some(plan) => {
+                    if !foreign.is_empty() {
                         println!(
-                            "  {} not written — {reason} or pass --allow-unresolved",
+                            "  {} keeping {} — applied by another manifest ↳ keep: agentstack adopt · \
+                             prune: agentstack use {}--prune-foreign",
+                            "⚠".yellow(),
+                            foreign.join(", "),
+                            use_cmd_profile
+                        );
+                    }
+                    for u in &plan.unresolved {
+                        // Same ↳ fix convention as doctor: the entry reads
+                        // "NAME (server 'x')", so the first token is the ref name.
+                        let name = u.split_whitespace().next().unwrap_or(u.as_str());
+                        println!(
+                            "  {} unresolved secret {u} ↳ agentstack secret set {name}",
                             "✗".red()
                         );
-                    } else if args.write {
-                        backups.push(crate::history::capture(
-                            &plan.config_path,
-                            format!("{} · servers", desc.display),
-                        ));
-                        history_targets.push(desc.display.clone());
-                        plan.write()?;
-                        state.record(&key, plan.managed.clone(), &plan.proposed, &identity);
-                        state.record_active_profile(&key, prepared.profile.clone());
-                        // Track what this guarded write kept on disk (empty
-                        // after a --prune-foreign actually pruned them).
-                        state.record_kept_foreign(&key, foreign.clone());
-                        crate::usage::bump(&plan.managed);
-                        wrote += 1;
-                        covered_targets.insert(desc.display.clone());
-                        if plan.remove_if_empty_shell(desc) {
+                        missing_secrets.insert(name.to_string());
+                    }
+                    for d in &plan.denied {
+                        println!("  {} blocked by policy: {}", "✗".red(), d);
+                    }
+                    for f in &plan.failed {
+                        println!("  {} {}", "✗".red(), crate::render::failed_secret_line(f));
+                        // Same `secret set` fix whether missing or unreadable —
+                        // keep the closing tail copy-pasteable in both cases.
+                        let name = f.split_whitespace().next().unwrap_or(f.as_str());
+                        missing_secrets.insert(name.to_string());
+                    }
+                    let blocked = ((!plan.unresolved.is_empty() || !plan.failed.is_empty())
+                        && !args.allow_unresolved)
+                        || !plan.denied.is_empty();
+                    // What a write WOULD leave managed here. `blocked` gates it
+                    // exactly as it gates the write below: an activation that
+                    // writes nothing must not preview hiding a hand-maintained
+                    // config.
+                    would_manage_config =
+                        !blocked && (!plan.managed.is_empty() || !foreign.is_empty());
+                    if plan.changed() {
+                        if args.write && blocked {
+                            blocked_targets.push(desc.display.clone());
+                            let reason = if plan.unresolved.is_empty() {
+                                "secret read failures; set them"
+                            } else {
+                                "unresolved secrets; set them"
+                            };
                             println!(
-                                "  {} removed empty {}",
-                                "−".yellow(),
-                                plan.config_path.display()
+                                "  {} not written — {reason} or pass --allow-unresolved",
+                                "✗".red()
                             );
+                        } else if args.write {
+                            backups.push(crate::history::capture(
+                                &plan.config_path,
+                                format!("{} · servers", desc.display),
+                            ));
+                            history_targets.push(desc.display.clone());
+                            plan.write()?;
+                            state.record(&key, plan.managed.clone(), &plan.proposed, &identity);
+                            state.record_active_profile(&key, prepared.profile.clone());
+                            // Track what this guarded write kept on disk (empty
+                            // after a --prune-foreign actually pruned them).
+                            state.record_kept_foreign(&key, foreign.clone());
+                            crate::usage::bump(&plan.managed);
+                            wrote += 1;
+                            covered_targets.insert(desc.display.clone());
+                            if plan.remove_if_empty_shell(desc) {
+                                println!(
+                                    "  {} removed empty {}",
+                                    "−".yellow(),
+                                    plan.config_path.display()
+                                );
+                            } else {
+                                println!(
+                                    "  {} servers → {}",
+                                    "✓".green(),
+                                    plan.config_path.display()
+                                );
+                            }
                         } else {
-                            println!("  {} servers → {}", "✓".green(), plan.config_path.display());
+                            println!(
+                                "  {} {} to write",
+                                "→".cyan(),
+                                super::count(plan.managed.len(), "server")
+                            );
                         }
                     } else {
-                        println!(
-                            "  {} {} to write",
-                            "→".cyan(),
-                            super::count(plan.managed.len(), "server")
-                        );
+                        // Even with no file change, keep state in sync with
+                        // reality (mirrors `apply`) — prune tracking and the
+                        // .gitignore block depend on it.
+                        if args.write && !blocked {
+                            state.record(&key, plan.managed.clone(), &plan.proposed, &identity);
+                            state.record_active_profile(&key, prepared.profile.clone());
+                            state.record_kept_foreign(&key, foreign.clone());
+                            covered_targets.insert(desc.display.clone());
+                        }
+                        println!("  {} servers up to date", "✓".green());
                     }
-                } else {
-                    // Even with no file change, keep state in sync with
-                    // reality (mirrors `apply`) — prune tracking and the
-                    // .gitignore block depend on it.
-                    if args.write && !blocked {
-                        state.record(&key, plan.managed.clone(), &plan.proposed, &identity);
-                        state.record_active_profile(&key, prepared.profile.clone());
-                        state.record_kept_foreign(&key, foreign.clone());
-                        covered_targets.insert(desc.display.clone());
-                    }
-                    println!("  {} servers up to date", "✓".green());
                 }
             }
         }
@@ -1109,6 +1161,45 @@ pub fn activate(
              delete the marked lines to un-hide the generated files",
             "·".dimmed()
         );
+    }
+
+    // What this activation deliberately did NOT write, said plainly, with both
+    // ways forward — the same voice and the same shared recovery constant
+    // `apply`, `status`, `doctor` and `delivery` use. A user who ran
+    // `use --write` expecting `.mcp.json` learns here why it is not there.
+    if !live_withheld.is_empty() && !args.quiet {
+        let names: Vec<&str> = live_withheld.iter().map(String::as_str).collect();
+        println!(
+            "\n{} MCP servers for {} are routed to the live lane — `use` does not write them.",
+            "ℹ".cyan(),
+            names.join(", ")
+        );
+        if live_unconnected.is_empty() {
+            println!(
+                "  {} they are served on demand through the registered bridge.",
+                "·".dimmed()
+            );
+        } else {
+            println!(
+                "  {} nothing is being served yet — {} {} no bridge registered.",
+                "·".dimmed(),
+                live_unconnected
+                    .iter()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                if live_unconnected.len() == 1 {
+                    "has"
+                } else {
+                    "have"
+                }
+            );
+            println!("  {} {}", "→".cyan(), super::delivery::CONNECT_THE_BRIDGE);
+            println!(
+                "  {} or write files anyway: agentstack x delivery render-locally --write",
+                "→".cyan()
+            );
+        }
     }
 
     if args.write {

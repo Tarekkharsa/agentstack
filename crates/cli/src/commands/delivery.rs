@@ -47,7 +47,9 @@ fn show(json: bool, manifest_dir: Option<&Path>) -> Result<()> {
     if json {
         println!(
             "{}",
-            serde_json::to_string_pretty(&crate::ui_contract::envelope(plan.to_json()))?
+            serde_json::to_string_pretty(&crate::ui_contract::envelope(
+                plan.to_json(&|id: &str| super::overview::bridge_registered(&ctx.registry, id))
+            ))?
         );
         return Ok(());
     }
@@ -111,7 +113,27 @@ fn show(json: bool, manifest_dir: Option<&Path>) -> Result<()> {
         println!("  {} {}", "·".dimmed(), CONNECT_THE_BRIDGE);
     }
     if plan.has_dynamic_lane() {
-        println!("  {} {}", "·".dimmed(), crate::delivery::ZERO_ARTIFACTS);
+        // Disk, not routing. A failed state read leaves the list empty, which
+        // is the same fallback `status` takes: the ledger's own health is
+        // `doctor`'s finding, not this screen's.
+        let abandoned = crate::state::State::load()
+            .map(|state| {
+                super::apply::abandoned_live_renders(
+                    &ctx,
+                    &plan,
+                    &state,
+                    &[crate::scope::Scope::Project, crate::scope::Scope::Global],
+                )
+            })
+            .unwrap_or_default();
+        println!(
+            "  {} {}",
+            "·".dimmed(),
+            super::apply::live_lane_artifacts_line(&abandoned)
+        );
+        for found in &abandoned {
+            println!("  {}  {}", "⚠".yellow(), found.sentence());
+        }
     }
     if let Some(line) = crate::delivery::rendered_lane_line(&plan) {
         println!("  {} {line}", "·".dimmed());

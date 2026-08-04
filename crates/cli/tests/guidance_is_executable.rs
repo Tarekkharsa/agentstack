@@ -51,6 +51,14 @@
 //!   tree sails straight through the defect. The discoverable set is DERIVED
 //!   from the real binary's help output on every run — never hardcoded here, or
 //!   the rule would rot the moment the visible set changed.
+//! * **(f) THE DELIVERY CLAIMS AGREE, AND MATCH THE DISK** — rules (a)–(e)
+//!   judge the COMMANDS a surface names and nothing else, so the guard passed
+//!   green through three separate findings of one shape: a delivery claim
+//!   computed from `delivery::Plan` alone, without the per-harness bridge
+//!   reading and without looking at disk. `use --write` wrote a server config
+//!   while four surfaces said nothing was on disk, and `why` reported "live"
+//!   where `doctor` reported "no bridge". Rule (f) lives in its own sweep at
+//!   the bottom of this file, over the four states this matrix does not have.
 //! * **(d) THE SURFACES AGREE** — `doctor --json`, `status --json` and
 //!   `trust --preview` describe ONE project, so their machine fields may not
 //!   contradict each other. This is the general form of the last two rounds of
@@ -2651,4 +2659,953 @@ fn report(
         let _ = writeln!(s, "  {k}");
     }
     println!("{s}");
+}
+
+// ---------------------------------------------------------------------------
+// (f) DELIVERY CLAIMS MUST AGREE, AND MUST MATCH THE DISK
+// ---------------------------------------------------------------------------
+//
+// WHY THIS RULE EXISTS. Rules (a)–(e) judge the COMMANDS a surface names:
+// every one parses, writes where a write is required, carries no placeholder,
+// and can be found from `--help`. Not one of them looks at what a surface
+// CLAIMS ABOUT DELIVERY — whether a capability is served live, whether a file
+// was written, whether anything is on disk at all. So the guard passed green
+// through three separate findings of one shape, the shape
+// `crates/cli/src/commands/delivery.rs` already warns about in prose:
+//
+//     **a delivery claim computed from `delivery::Plan` alone**, without the
+//     per-harness bridge reading and without looking at the disk.
+//
+// `Plan` describes ROUTING. It knows which lane a capability would travel. It
+// does not know whether a bridge is registered (so "served live" may be false)
+// and it does not know what is on disk (so "0 project artifacts" may be false).
+// A claim derived from it alone is a claim the product cannot back — invariant
+// 8, "claims match enforcement", one level up from enforcement into reporting.
+//
+// The three clauses, each stated as the defect it would have caught:
+//
+// 1. NO CONTRADICTION. Two surfaces describing ONE project may not make
+//    opposite claims about the same harness: one "served live" while another
+//    says "planned live (not connected)".
+// 2. CLAIMS MATCH THE FILESYSTEM. This is the clause that would have caught
+//    finding 1. After each state is built the project is WALKED, and the file
+//    list is derived from that walk — never from a set written down here, which
+//    would rot the moment a new adapter landed. If a server config is on disk,
+//    no surface may say there are no project artifacts. If none is, no surface
+//    may name one as written.
+// 3. "LIVE" REQUIRES A BRIDGE. A harness with no bridge registered is not being
+//    served. `planned live (not connected)` is the product's own correct
+//    wording for that state and it must be used consistently.
+//
+// The four states below are the ones the (a)–(e) matrix does not have, and
+// their absence is why the class escaped: the reviewer's exact `use --write`
+// reproduction, a config left behind by an earlier render, a live route WITH a
+// bridge, and `render_locally` set so that files are expected and their ABSENCE
+// would be the defect.
+
+/// Servers and a toolset, nothing else: the default routing sends MCP servers
+/// down the live lane for every MCP-capable harness, so this manifest IS the
+/// live-routed shape with no override anywhere.
+const LIVE_SERVERS_MANIFEST: &str = r#"version = 1
+
+[servers.filesystem]
+type = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "."]
+
+[toolsets.dev]
+servers = ["filesystem"]
+"#;
+
+/// The same project with `[delivery] render_locally` set. Files are EXPECTED
+/// here, which is the direction clause 2 cannot otherwise test: in every other
+/// state a missing file is correct, so a rule that only ever checked "no file"
+/// would pass by doing nothing.
+const RENDER_LOCALLY_MANIFEST: &str = r#"version = 1
+
+[delivery]
+render_locally = true
+
+[servers.filesystem]
+type = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "."]
+
+[toolsets.dev]
+servers = ["filesystem"]
+"#;
+
+/// The one server every delivery state declares. Used to recognise a server
+/// artifact on disk BY ITS CONTENT rather than by a table of file names.
+const DECLARED_SERVER: &str = "filesystem";
+
+/// A bridge entry in a harness's own global config, written by the fixture.
+///
+/// This is what `overview::bridge_registered` reads: the harness config file
+/// exists (so the harness is *detected* under an isolated HOME) and carries an
+/// `agentstack` entry at the descriptor's MCP location. It is written directly
+/// rather than through `agentstack x gateway connect`, which refuses under this
+/// file's `env_clear` spawn — see the skip record.
+const CLAUDE_BRIDGE_CONFIG: &str =
+    r#"{"mcpServers":{"agentstack":{"type":"stdio","command":"agentstack","args":["gateway"]}}}"#;
+
+/// The display name of the one harness whose bridge this file can register.
+const BRIDGED_HARNESS: &str = "Claude Code";
+
+struct DeliveryState {
+    name: &'static str,
+    home: PathBuf,
+    proj: PathBuf,
+    /// Did the FIXTURE register a bridge for [`BRIDGED_HARNESS`]? Confirmed
+    /// against the harness config on disk before it is used, so the ground
+    /// truth is a filesystem reading and never a surface's own word.
+    bridged: bool,
+}
+
+/// Every file under `dir`, walked. Symlinks are recorded but not followed —
+/// a rendered skill is a symlink, and following it would leave the project.
+fn walk_files(dir: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(meta) = fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if meta.is_dir() {
+            walk_files(&path, out);
+        } else {
+            out.push(path);
+        }
+    }
+}
+
+/// The server-config files a project actually has, DERIVED BY WALKING IT.
+///
+/// Deliberately not a list of known adapter file names. A hardcoded set is the
+/// same mistake as a delivery claim computed from `Plan` alone: it describes
+/// what the test expects rather than what is there, and it goes stale on the
+/// day an adapter is added. A file outside `.agentstack/` whose bytes name a
+/// server this project declares is a server artifact, whichever adapter wrote
+/// it and whatever it is called.
+fn server_artifacts(proj: &Path) -> Vec<PathBuf> {
+    let mut all = Vec::new();
+    walk_files(proj, &mut all);
+    all.retain(|p| {
+        !p.starts_with(proj.join(".agentstack"))
+            && fs::read_to_string(p).is_ok_and(|t| t.contains(DECLARED_SERVER))
+    });
+    all.sort();
+    all
+}
+
+/// Is a bridge registered on disk for [`BRIDGED_HARNESS`]?
+///
+/// Read from the harness's own config file, which is where the product reads
+/// it. Independent of every surface under test, so it can serve as ground
+/// truth for clause 3.
+fn bridge_on_disk(home: &Path) -> bool {
+    fs::read_to_string(home.join(".claude.json"))
+        .ok()
+        .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+        .is_some_and(|v| v.pointer("/mcpServers/agentstack").is_some())
+}
+
+/// One delivery claim a surface made, with everything needed to judge it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Claim {
+    /// "served live" — a present-tense claim that the capability is reaching
+    /// the harness right now.
+    ServedLive,
+    /// "planned live (not connected)" — the honest form of the same routing.
+    PlannedLive,
+    /// "0 project artifacts" / "no project artifacts".
+    NoArtifacts,
+    /// A path named as being on disk.
+    OnDisk(String),
+}
+
+#[derive(Debug, Clone)]
+struct Said {
+    surface: String,
+    /// The line, or the JSON pointer, the claim was read from.
+    origin: String,
+    /// The harness the claim is ABOUT, when it names one.
+    harness: Option<String>,
+    claim: Claim,
+    /// The text verbatim, so a failure quotes what the product really said.
+    text: String,
+}
+
+/// The zero-artifacts phrase, READ OFF THE PRODUCT'S OWN CONSTANT.
+///
+/// `agentstack::delivery::ZERO_ARTIFACTS` is the sentence every surface prints
+/// for that state. A copy of its wording here is a claim computed from a
+/// RECORD of the product instead of from the product: reword the constant and
+/// a hardcoded copy silently stops matching, clause 2 goes quiet, and the run
+/// still passes on other claims — the guard would report coverage it no longer
+/// has. So the phrase is derived: the constant's leading clause, up to the
+/// qualifier, which is the part any surface prints verbatim.
+fn zero_artifacts_phrase() -> &'static str {
+    agentstack::delivery::ZERO_ARTIFACTS
+        .split(" for the")
+        .next()
+        .expect("split always yields a first element")
+        .trim()
+}
+
+/// The claims one line of surface output carries.
+///
+/// Order matters in one place: `planned live (not connected)` contains the word
+/// "live" and must be recognised as the QUALIFIED form before the unqualified
+/// one, or the correct wording would be flagged as the defect.
+fn claims_in(line: &str) -> Vec<Claim> {
+    let mut out = Vec::new();
+    if line.contains("planned live") {
+        out.push(Claim::PlannedLive);
+    } else if line.contains("served live") || line.contains("serving live") {
+        out.push(Claim::ServedLive);
+    }
+    // The product's phrase, plus the negated prose form the same sentence is
+    // written in elsewhere ("no project artifacts").
+    let zero = zero_artifacts_phrase();
+    if line.contains(zero) || line.contains(&zero.replacen('0', "no", 1)) {
+        out.push(Claim::NoArtifacts);
+    }
+    if line.contains("on disk") || line.contains("still on disk") {
+        for tok in line.split_whitespace() {
+            let tok = tok.trim_matches(|c: char| !c.is_ascii_graphic() || "().,;:`\"'".contains(c));
+            if tok.len() > 1 && tok.starts_with('/') {
+                out.push(Claim::OnDisk(tok.to_string()));
+            }
+        }
+    }
+    out
+}
+
+/// Which harnesses a line is about. Empty means a project-wide statement.
+///
+/// EVERY name on the line, not just one: the product legitimately prints a
+/// single claim over a list of twelve harnesses, and attributing it to one of
+/// them would leave eleven claims unjudged — a silent narrowing exactly where
+/// the class lives.
+///
+/// The display names are read off `delivery --json` on every run, so a new
+/// adapter is covered the day it lands and no name is written down here. Two
+/// tools sharing a prefix are safe: "Claude Desktop" does not contain the
+/// string "Claude Code", so each is matched only by its own full name.
+fn harnesses_named(line: &str, displays: &[String]) -> Vec<String> {
+    displays
+        .iter()
+        .filter(|d| contains_word(line, d))
+        .cloned()
+        .collect()
+}
+
+/// Does `line` contain `name` as a whole word (not inside a longer word)?
+///
+/// A bare substring test matched the display name "Pi" inside "Pinned", so an
+/// unrelated line was attributed to a harness — and, worse, a JSON string
+/// carrying an enclosing `display` subject had that correct subject DISCARDED
+/// in favour of the false match. The neighbours are checked instead: a match
+/// counts only where it is not glued to an alphanumeric character on either
+/// side.
+fn contains_word(line: &str, name: &str) -> bool {
+    if name.is_empty() {
+        return false;
+    }
+    let glue = |c: char| c.is_alphanumeric();
+    line.match_indices(name).any(|(i, _)| {
+        let before = line[..i].chars().next_back().is_some_and(glue);
+        let after = line[i + name.len()..].chars().next().is_some_and(glue);
+        !before && !after
+    })
+}
+
+/// The read-only surfaces rule (f) sweeps. `(label, argv, is_json)`.
+///
+/// Every surface named in the rule, plus `why <server> --json`, which is the
+/// per-capability answer and the one that carries `live_unconnected` and
+/// `abandoned`.
+const DELIVERY_SURFACES: &[(&str, &[&str], bool)] = &[
+    ("status", &["status"], false),
+    ("status --json", &["status", "--json"], true),
+    ("doctor", &["doctor"], false),
+    ("doctor --json", &["doctor", "--json"], true),
+    ("delivery", &["delivery"], false),
+    ("delivery --json", &["delivery", "--json"], true),
+    ("why --json", &["why", DECLARED_SERVER, "--json"], true),
+    ("trust --preview", &["trust", "--preview"], true),
+];
+
+/// Walk a JSON body, carrying the harness an enclosing object is ABOUT.
+///
+/// The subject of a claim is not always inside the claim. `delivery --json`
+/// emits `{"display": "Claude Code", "summary": "… served live"}`: the sentence
+/// names no harness, and reading it in isolation leaves the product's most
+/// machine-readable delivery claim attributed to nobody and judged by nothing.
+/// So an object carrying a `display` string sets the subject for everything
+/// beneath it, and a name inside the string itself still wins where there is
+/// one.
+fn json_delivery_strings(
+    v: &serde_json::Value,
+    ptr: &str,
+    subject: Option<&str>,
+    out: &mut Vec<(String, Option<String>, String)>,
+) {
+    match v {
+        serde_json::Value::Object(map) => {
+            let here = map
+                .get("display")
+                .and_then(serde_json::Value::as_str)
+                .or(subject);
+            for (k, child) in map {
+                json_delivery_strings(child, &format!("{ptr}/{k}"), here, out);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for (ix, child) in items.iter().enumerate() {
+                json_delivery_strings(child, &format!("{ptr}/{ix}"), subject, out);
+            }
+        }
+        serde_json::Value::String(s) => {
+            out.push((ptr.to_string(), subject.map(str::to_string), s.clone()))
+        }
+        _ => {}
+    }
+}
+
+/// Sweep every delivery surface in one state and collect what it claimed.
+fn delivery_claims(state: &DeliveryState, displays: &[String], skips: &mut Skips) -> Vec<Said> {
+    let mut said = Vec::new();
+    for (label, argv, is_json) in DELIVERY_SURFACES {
+        let out = run(argv, &state.home, &state.proj);
+        let text = strip_ansi(&out.text);
+        let mut push = |origin: String, line: &str, subject: Option<String>| {
+            let mut about = harnesses_named(line, displays);
+            if about.is_empty() {
+                about.extend(subject);
+            }
+            for claim in claims_in(line) {
+                // One record PER HARNESS the claim covers: a single sentence
+                // over twelve harnesses is twelve claims, and judging one of
+                // them would leave eleven unjudged.
+                if about.is_empty() {
+                    said.push(Said {
+                        surface: (*label).to_string(),
+                        origin: origin.clone(),
+                        harness: None,
+                        claim: claim.clone(),
+                        text: line.trim().to_string(),
+                    });
+                }
+                for h in &about {
+                    said.push(Said {
+                        surface: (*label).to_string(),
+                        origin: origin.clone(),
+                        harness: Some(h.clone()),
+                        claim: claim.clone(),
+                        text: line.trim().to_string(),
+                    });
+                }
+            }
+        };
+        if *is_json {
+            match serde_json::from_str::<serde_json::Value>(&text) {
+                Ok(v) => {
+                    let mut found = Vec::new();
+                    json_delivery_strings(&v, "", None, &mut found);
+                    for (ptr, subject, value) in found {
+                        // A `why` field is the RATIONALE printed beside a claim,
+                        // prose by the same contract rule (a0) already applies
+                        // to `next_action.why`. It is recorded rather than
+                        // judged — and the subtraction is safe only because the
+                        // `summary` sibling in the very same object IS judged,
+                        // so no harness loses its claim. A skip, never a
+                        // silence.
+                        if ptr.ends_with("/why") {
+                            if !claims_in(&value).is_empty() {
+                                skips.note(format!(
+                                    "[{}] {label} {ptr}: a delivery-shaped phrase in a `why` \
+                                     rationale field, not judged as a claim — the same prose \
+                                     contract rule (a0) applies to `next_action.why`. Its \
+                                     `summary` sibling in the same object carries the harness's \
+                                     real claim and IS judged. Value: {value:?}",
+                                    state.name
+                                ));
+                            }
+                            continue;
+                        }
+                        push(ptr, &value, subject);
+                    }
+                }
+                Err(e) => skips.note(format!(
+                    "[{}] {label}: emitted no JSON ({e}), so rule (f) read no delivery claim from \
+                     it in this state; exit_ok={}",
+                    state.name, out.ok
+                )),
+            }
+        } else {
+            for line in text.lines() {
+                push(line.trim().to_string(), line, None);
+            }
+        }
+    }
+    said
+}
+
+/// The three clauses, as one pure function over what was said and what is
+/// really there — so the guard can be pointed at itself (see
+/// `the_guard_catches_a_delivery_claim_that_does_not_match_the_disk`).
+///
+/// `bridged` answers "is a bridge registered for this harness", read from the
+/// harness config on disk, never from a surface.
+fn delivery_violations(
+    state: &str,
+    said: &[Said],
+    artifacts: &[PathBuf],
+    bridged: &dyn Fn(&str) -> bool,
+    skips: &mut Skips,
+) -> Vec<String> {
+    let mut out = Vec::new();
+
+    // ── clause 1: NO CONTRADICTION ────────────────────────────────────────
+    let harnesses: BTreeSet<&str> = said.iter().filter_map(|s| s.harness.as_deref()).collect();
+    for h in &harnesses {
+        let live: Vec<&Said> = said
+            .iter()
+            .filter(|s| s.harness.as_deref() == Some(*h) && s.claim == Claim::ServedLive)
+            .collect();
+        let planned: Vec<&Said> = said
+            .iter()
+            .filter(|s| s.harness.as_deref() == Some(*h) && s.claim == Claim::PlannedLive)
+            .collect();
+        if let (Some(a), Some(b)) = (live.first(), planned.first()) {
+            out.push(format!(
+                "\n  state    : {state}\n  harness  : {h}\n  \
+                 surface A: {} {}\n             says {:?}\n  \
+                 surface B: {} {}\n             says {:?}\n  \
+                 why      : ONE project, one harness, two opposite delivery claims. `served live` \
+                 asserts the capability is reaching the tool right now; `planned live (not \
+                 connected)` asserts it is not. Whichever surface a reader or a driver happens to \
+                 poll decides which of the two it believes.",
+                a.surface, a.origin, a.text, b.surface, b.origin, b.text,
+            ));
+        }
+    }
+
+    // ── clause 2: CLAIMS MATCH THE FILESYSTEM ─────────────────────────────
+    //
+    // The file list is walked, so this clause is judged against the project as
+    // it really is. Both directions are checked: a "nothing on disk" claim
+    // beside a file, and an "on disk" claim beside nothing.
+    //
+    // THE CAP IS DECLARED, not implied. `server_artifacts` keeps only files
+    // whose bytes name a declared SERVER, so every claim about instructions,
+    // settings, skills or extensions passes this clause untested. A guard that
+    // stays silent about its own blind spot reads as coverage it does not
+    // have — the exact shape it exists to catch — so the limit is recorded on
+    // every run beside the states it did judge.
+    skips.note(format!(
+        "[{state}] clause 2 judges SERVER artifacts only — `server_artifacts` keeps files whose \
+         bytes name the declared server, so claims about instructions, settings, skills and \
+         extensions are outside its walk and are NOT checked against the disk here. Widening it \
+         needs a per-kind ground truth (a settings claim is judged against the CLI's own settings \
+         file, not against a name in the bytes)."
+    ));
+    for s in said.iter().filter(|s| s.claim == Claim::NoArtifacts) {
+        if !artifacts.is_empty() {
+            out.push(format!(
+                "\n  state    : {state}\n  surface  : {} {}\n  claim    : {:?}\n  \
+                 on disk  : {}\n  \
+                 why      : the project WAS WALKED and those file(s) hold the declared server. A \
+                 surface saying there are no project artifacts for a capability whose config file \
+                 is sitting in the repository is a claim computed from `delivery::Plan` alone — \
+                 the plan knows the routing and has never looked at the disk. The harness may \
+                 still be reading that file.",
+                s.surface,
+                s.origin,
+                s.text,
+                artifacts
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ));
+        }
+    }
+    for s in said {
+        let Claim::OnDisk(path) = &s.claim else {
+            continue;
+        };
+        if !Path::new(path).exists() {
+            out.push(format!(
+                "\n  state    : {state}\n  surface  : {} {}\n  claim    : {:?}\n  \
+                 why      : the surface names `{path}` as being on disk and the walk did not find \
+                 it. A reader is sent to remove, inspect or trust a file that is not there.",
+                s.surface, s.origin, s.text,
+            ));
+        }
+    }
+
+    // ── clause 3: "LIVE" REQUIRES A BRIDGE ────────────────────────────────
+    for s in said.iter().filter(|s| s.claim == Claim::ServedLive) {
+        let Some(h) = s.harness.as_deref() else {
+            // A project-wide sentence names no harness, so there is no bridge
+            // reading to compare it against. Clause 2 is what judges those.
+            skips.note(format!(
+                "[{state}] {} {}: a `served live` claim naming no harness — clause 3 needs a \
+                 per-harness bridge reading and has none, so this string is judged by clause 2 \
+                 only. Value: {:?}",
+                s.surface, s.origin, s.text
+            ));
+            continue;
+        };
+        if !bridged(h) {
+            out.push(format!(
+                "\n  state    : {state}\n  harness  : {h}\n  surface  : {} {}\n  claim    : {:?}\n  \
+                 bridge   : NOT registered (read from the harness's own config file on disk)\n  \
+                 why      : nothing is reaching {h}. `served live` is a present-tense claim of \
+                 delivery that no bridge backs — invariant 8 at the reporting layer. The product's \
+                 own correct wording for this state is `planned live (not connected)`, and other \
+                 surfaces already use it.",
+                s.surface, s.origin, s.text,
+            ));
+        }
+    }
+    out
+}
+
+/// Rule (f), over the four states the (a)–(e) matrix does not have.
+#[test]
+fn delivery_claims_agree_and_match_the_disk() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut skips = Skips::default();
+    // Seeded, for the same reason the main guard seeds one: a structural limit
+    // that holds on EVERY run belongs in the record on every run, or the report
+    // can print a short list while a known blind spot stands.
+    skips.note(
+        "rule (f) clause 3 reaches a REGISTERED bridge for `Claude Code` only. `agentstack x \
+         gateway connect --all --write` refuses under this file's `env_clear` spawn (`no \
+         installed harness with MCP support detected`), so the bridge is written directly into \
+         the harness config the product reads — and `~/.claude.json` is the one harness config \
+         path that lands inside an isolated HOME. The other twelve harnesses are covered in the \
+         NOT-connected direction only."
+            .to_string(),
+    );
+    skips.note(
+        "rule (f) sweeps read-only surfaces. `apply`, `use` and `session start` also make \
+         delivery claims while writing; those are pinned by \
+         `tests/abandoned_render_is_named.rs` and `tests/use_honours_delivery.rs` instead, \
+         because harvesting them here would mutate the state mid-sweep."
+            .to_string(),
+    );
+
+    let mut states: Vec<DeliveryState> = Vec::new();
+
+    // 1. THE REVIEWER'S EXACT REPRODUCTION. A live-routed project, pinned,
+    //    consented, and then `use <toolset> --write` — the verb that wrote a
+    //    server config while four surfaces said nothing was on disk.
+    {
+        let dir = tmp.path().join("use-write-live");
+        fs::create_dir_all(&dir).unwrap();
+        let (home, proj) = write_project_with_skill(&dir, LIVE_SERVERS_MANIFEST, SKILL_DESCRIBED);
+        lock(&home, &proj);
+        grant(&home, &proj);
+        let out = run(&["use", "dev", "--write"], &home, &proj);
+        assert!(out.ok, "fixture: `use dev --write` failed:\n{}", out.text);
+        states.push(DeliveryState {
+            name: "use-write-live",
+            home,
+            proj,
+            bridged: false,
+        });
+    }
+
+    // 2. AN ABANDONED RENDER. `render_locally` was set, the files were written,
+    //    and the override was then removed — so the project is routed live with
+    //    a config AgentStack wrote still sitting in it. No claim of "nothing on
+    //    disk" is true here, and `Plan` alone cannot know that.
+    {
+        let dir = tmp.path().join("abandoned-render");
+        fs::create_dir_all(&dir).unwrap();
+        let (home, proj) = write_project_with_skill(&dir, RENDER_LOCALLY_MANIFEST, SKILL_DESCRIBED);
+        lock(&home, &proj);
+        grant(&home, &proj);
+        apply(&home, &proj);
+        let manifest = proj.join(".agentstack/agentstack.toml");
+        let text = fs::read_to_string(&manifest).unwrap();
+        fs::write(
+            &manifest,
+            text.replace("[delivery]\nrender_locally = true\n\n", ""),
+        )
+        .unwrap();
+        assert!(
+            !server_artifacts(&proj).is_empty(),
+            "fixture: the abandoned state must actually leave a server config on disk, or clause \
+             2 has nothing to judge"
+        );
+        states.push(DeliveryState {
+            name: "abandoned-render",
+            home,
+            proj,
+            bridged: false,
+        });
+    }
+
+    // 3. ROUTED LIVE, WITH THE BRIDGE REGISTERED. The positive side of clause
+    //    3: here `served live` is TRUE, and a rule that flagged it anyway would
+    //    be a rule that fires on everything.
+    {
+        let dir = tmp.path().join("live-with-bridge");
+        fs::create_dir_all(&dir).unwrap();
+        let (home, proj) = write_project_with_skill(&dir, LIVE_SERVERS_MANIFEST, SKILL_DESCRIBED);
+        fs::write(home.join(".claude.json"), CLAUDE_BRIDGE_CONFIG).unwrap();
+        assert!(
+            bridge_on_disk(&home),
+            "fixture: the bridge entry must be readable back off disk, or clause 3's positive \
+             side is untested"
+        );
+        lock(&home, &proj);
+        grant(&home, &proj);
+        states.push(DeliveryState {
+            name: "live-with-bridge",
+            home,
+            proj,
+            bridged: true,
+        });
+    }
+
+    // 4. `render_locally` SET. Files are EXPECTED, so their absence would be
+    //    the defect — the direction clause 2 can not otherwise reach, since
+    //    everywhere else "no file" is the correct answer.
+    {
+        let dir = tmp.path().join("render-locally");
+        fs::create_dir_all(&dir).unwrap();
+        let (home, proj) = write_project_with_skill(&dir, RENDER_LOCALLY_MANIFEST, SKILL_DESCRIBED);
+        lock(&home, &proj);
+        grant(&home, &proj);
+        apply(&home, &proj);
+        assert!(
+            !server_artifacts(&proj).is_empty(),
+            "fixture: `render_locally` plus `apply --write` must put a server config on disk, or \
+             the state under test does not exist"
+        );
+        states.push(DeliveryState {
+            name: "render-locally",
+            home,
+            proj,
+            bridged: false,
+        });
+    }
+
+    // The harness display names, read off the real binary rather than written
+    // down, so a new adapter is attributed correctly on the day it lands.
+    let displays: Vec<String> = {
+        let s = &states[0];
+        let text = strip_ansi(&run(&["delivery", "--json"], &s.home, &s.proj).text);
+        let v: serde_json::Value = serde_json::from_str(&text).expect("delivery --json is JSON");
+        v["harnesses"]
+            .as_array()
+            .expect("delivery --json carries a harness list")
+            .iter()
+            .filter_map(|h| h["display"].as_str().map(str::to_string))
+            .collect()
+    };
+    assert!(
+        !displays.is_empty(),
+        "read no harness display names at all — the extraction broke, not the product"
+    );
+
+    let mut violations: Vec<String> = Vec::new();
+    let mut per_state: Vec<String> = Vec::new();
+    for state in &states {
+        assert_eq!(
+            bridge_on_disk(&state.home),
+            state.bridged,
+            "[{}] fixture: the bridge ground truth must be confirmed against the harness config \
+             on disk, never assumed",
+            state.name
+        );
+        let artifacts = server_artifacts(&state.proj);
+        let said = delivery_claims(state, &displays, &mut skips);
+        if said.is_empty() {
+            // Legitimate, and recorded rather than asserted away: a project
+            // with `render_locally` set has NO live lane at all, so no surface
+            // makes a live claim and none of the three clauses has anything to
+            // judge. What that state proves is the fixture assertion above —
+            // the files really are written — plus the fact that no surface
+            // claims otherwise. The whole-run assertion below is what keeps a
+            // broken extraction from passing as "nothing to say".
+            skips.note(format!(
+                "[{}] no delivery claim of any kind was read: this state has no live lane, so \
+                 clauses 1 and 3 have no subject and clause 2 is satisfied by silence. The state \
+                 is kept because the ABSENCE of a file would be the defect here, and the fixture \
+                 asserts the files exist.",
+                state.name
+            ));
+        }
+        let bridged = |h: &str| state.bridged && h == BRIDGED_HARNESS;
+        violations.extend(delivery_violations(
+            state.name, &said, &artifacts, &bridged, &mut skips,
+        ));
+        per_state.push(format!(
+            "  {:<18} {:>3} claim(s), {} server config(s) on disk, bridge={}",
+            state.name,
+            said.len(),
+            artifacts.len(),
+            state.bridged
+        ));
+    }
+    // A broken extraction reads as "every surface agreed". This is the one
+    // guard against that: over the whole run, delivery claims MUST have been
+    // read, or nothing above was judged at all.
+    assert!(
+        per_state.iter().any(|l| !l.contains("  0 claim(s)")),
+        "no delivery claim was read in ANY state — the extraction broke, not the product:\n{}",
+        per_state.join("\n")
+    );
+
+    let mut s = String::new();
+    let _ = writeln!(s, "\n── rule (f): delivery claims ──");
+    for line in &per_state {
+        let _ = writeln!(s, "{line}");
+    }
+    let _ = writeln!(
+        s,
+        "harnesses read off `delivery --json` ({}): {}",
+        displays.len(),
+        displays.join(", ")
+    );
+    let _ = writeln!(s, "NOT COVERED ({}):", skips.0.len());
+    for k in &skips.0 {
+        let _ = writeln!(s, "  {k}");
+    }
+    println!("{s}");
+
+    assert!(
+        violations.is_empty(),
+        "{} delivery claim(s) contradict another surface, the filesystem, or the bridge:{}\n\n\
+         Every one of these is the shape `crates/cli/src/commands/delivery.rs` warns about in \
+         prose: a delivery claim computed from `delivery::Plan` alone. The plan knows the ROUTING. \
+         It does not know whether a bridge is registered and it has never looked at the disk, so a \
+         claim derived from it alone is one the product cannot back.",
+        violations.len(),
+        violations.join("\n")
+    );
+}
+
+/// Rule (f), pointed at itself — two-sided, all three clauses.
+///
+/// Same construction as every other self-check in this file, and for the same
+/// reason: the rule is enforced through the SAME function the sweep calls, so
+/// it cannot rot into a no-op while still "passing". Each clause is asserted in
+/// both directions, because a rule that fires on everything is as useless as
+/// one that fires on nothing — and clause 3 in particular has to accept
+/// `served live` where a bridge really is registered, or the correct wording
+/// for a connected project would be flagged as the defect.
+#[test]
+fn the_guard_catches_a_delivery_claim_that_does_not_match_the_disk() {
+    let mut sink = Skips::default();
+    let no_bridge = |_: &str| false;
+    let bridged = |h: &str| h == BRIDGED_HARNESS;
+    let said =
+        |surface: &str, origin: &str, harness: Option<&str>, claim: Claim, text: &str| Said {
+            surface: surface.to_string(),
+            origin: origin.to_string(),
+            harness: harness.map(str::to_string),
+            claim,
+            text: text.to_string(),
+        };
+
+    // Clause 1 — the contradiction. `delivery --json` says one thing about
+    // Claude Code, `delivery` says the opposite, in one project at one moment.
+    let contradiction = vec![
+        said(
+            "delivery --json",
+            "/harnesses/1/summary",
+            Some(BRIDGED_HARNESS),
+            Claim::ServedLive,
+            "Claude Code: skills + MCP servers served live",
+        ),
+        said(
+            "delivery",
+            "Claude Code   skills + MCP servers planned live (not connected)",
+            Some(BRIDGED_HARNESS),
+            Claim::PlannedLive,
+            "Claude Code   skills + MCP servers planned live (not connected)",
+        ),
+    ];
+    let msgs = delivery_violations("live-no-bridge", &contradiction, &[], &no_bridge, &mut sink);
+    assert!(
+        msgs.iter().any(|m| m.contains("delivery --json")
+            && m.contains("served live")
+            && m.contains("planned live (not connected)")
+            && m.contains(BRIDGED_HARNESS)),
+        "clause 1 must name BOTH surfaces and BOTH values:\n{msgs:#?}"
+    );
+    println!(
+        "guard self-check — two surfaces, one harness, opposite claims:{}",
+        msgs.join("")
+    );
+    // …and the corrected shape — both surfaces on the honest wording — passes.
+    let agreed: Vec<Said> = contradiction
+        .iter()
+        .map(|s| Said {
+            claim: Claim::PlannedLive,
+            ..s.clone()
+        })
+        .collect();
+    assert!(
+        delivery_violations("live-no-bridge", &agreed, &[], &no_bridge, &mut sink).is_empty(),
+        "two surfaces using the same honest wording is the corrected shape and must pass"
+    );
+
+    // Clause 2 — THE FINDING-1 SHAPE. A surface claims nothing is on disk while
+    // the walk found a config file holding the declared server.
+    let claim_none = vec![said(
+        "delivery",
+        "· 0 project artifacts for the capabilities served live",
+        None,
+        Claim::NoArtifacts,
+        "· 0 project artifacts for the capabilities served live",
+    )];
+    let on_disk = vec![PathBuf::from("/tmp/p/.mcp.json")];
+    let msgs = delivery_violations("abandoned", &claim_none, &on_disk, &no_bridge, &mut sink);
+    assert!(
+        msgs.iter()
+            .any(|m| m.contains("0 project artifacts") && m.contains("/tmp/p/.mcp.json")),
+        "clause 2 must quote the false claim AND the file the walk found:\n{msgs:#?}"
+    );
+    println!(
+        "guard self-check — a `nothing on disk` claim beside a file:{}",
+        msgs.join("")
+    );
+    // …and the same claim over an empty project is TRUE and must pass.
+    assert!(
+        delivery_violations("live", &claim_none, &[], &no_bridge, &mut sink).is_empty(),
+        "`0 project artifacts` over a project with none is correct and must pass"
+    );
+    // The other direction: a file named as on disk that is not there.
+    let ghost = vec![said(
+        "doctor",
+        "⚠ Claude Code /tmp/p/.mcp.json is still on disk",
+        Some(BRIDGED_HARNESS),
+        Claim::OnDisk("/tmp/definitely/not/here.json".into()),
+        "⚠ Claude Code /tmp/definitely/not/here.json is still on disk",
+    )];
+    assert!(
+        !delivery_violations("live", &ghost, &[], &bridged, &mut sink).is_empty(),
+        "a surface naming a file that is not on disk must be flagged"
+    );
+
+    // Clause 3 — `served live` with no bridge.
+    let unbacked = vec![said(
+        "delivery --json",
+        "/harnesses/1/summary",
+        Some(BRIDGED_HARNESS),
+        Claim::ServedLive,
+        "skills + MCP servers served live",
+    )];
+    let msgs = delivery_violations("live-no-bridge", &unbacked, &[], &no_bridge, &mut sink);
+    assert!(
+        msgs.iter().any(|m| m.contains("NOT registered")
+            && m.contains("planned live (not connected)")
+            && m.contains(BRIDGED_HARNESS)),
+        "clause 3 must name the harness, the missing bridge, and the correct wording:\n{msgs:#?}"
+    );
+    println!(
+        "guard self-check — `served live` with no bridge:{}",
+        msgs.join("")
+    );
+    // …and the SAME claim with a bridge registered must pass, or the rule would
+    // forbid the product ever reporting a connected project honestly.
+    assert!(
+        delivery_violations("live-with-bridge", &unbacked, &[], &bridged, &mut sink).is_empty(),
+        "`served live` where a bridge IS registered is a true claim and must pass"
+    );
+}
+
+/// The claim reader, pinned two-sided.
+///
+/// Rule (f) is only as strong as what [`claims_in`] recognises, and a narrowing
+/// here is the one edit that could switch the rule off without touching an
+/// assertion. So the qualified wording must NOT read as a live claim, the
+/// unqualified one must, and the harness attribution must not confuse two tools
+/// that share a prefix.
+#[test]
+fn the_claim_reader_separates_planned_from_served() {
+    assert_eq!(
+        claims_in("Claude Code   skills + MCP servers planned live (not connected)"),
+        vec![Claim::PlannedLive],
+        "the honest wording must never be read as a `served live` claim, or the correct product \
+         behaviour would be reported as the defect"
+    );
+    assert_eq!(
+        claims_in("Claude Code: skills + MCP servers served live"),
+        vec![Claim::ServedLive],
+    );
+    assert_eq!(
+        claims_in("· 0 project artifacts for the capabilities served live"),
+        vec![Claim::ServedLive, Claim::NoArtifacts],
+        "a project-wide sentence can carry two claims at once; both must be read"
+    );
+    assert_eq!(
+        claims_in("no house rules here"),
+        Vec::new(),
+        "an ordinary line carries no delivery claim"
+    );
+    assert!(
+        claims_in("VS Code /tmp/p/.vscode/mcp.json is still on disk (it holds filesystem)")
+            .contains(&Claim::OnDisk("/tmp/p/.vscode/mcp.json".to_string())),
+        "a path named as on disk must be lifted so clause 2 can check it exists"
+    );
+
+    let displays = vec![
+        "Claude Code".to_string(),
+        "Claude Desktop".to_string(),
+        "VS Code".to_string(),
+    ];
+    assert_eq!(
+        harnesses_named("Claude Desktop — planned live (not connected)", &displays),
+        vec!["Claude Desktop".to_string()],
+        "two harnesses sharing a prefix must not be confused, or a claim is judged against the \
+         wrong tool's bridge"
+    );
+    assert_eq!(
+        harnesses_named(
+            "Claude Code, VS Code — MCP servers served live, nothing NEW rendered to compare",
+            &displays
+        ),
+        vec!["Claude Code".to_string(), "VS Code".to_string()],
+        "one sentence over several harnesses is a claim about EVERY one of them; attributing it \
+         to a single tool would leave the rest unjudged"
+    );
+    assert_eq!(
+        harnesses_named(
+            "0 project artifacts for the capabilities served live",
+            &displays
+        ),
+        Vec::<String>::new(),
+        "a project-wide sentence names no harness and must not be attributed to one"
+    );
+
+    // The JSON subject rule: a claim whose harness is a SIBLING field, which is
+    // the shape `delivery --json` emits and the one an isolated reading misses.
+    let body = serde_json::json!({
+        "harnesses": [{ "display": "Claude Code", "summary": "MCP servers served live" }]
+    });
+    let mut found = Vec::new();
+    json_delivery_strings(&body, "", None, &mut found);
+    let summary = found
+        .iter()
+        .find(|(ptr, _, _)| ptr == "/harnesses/0/summary")
+        .expect("the walk must reach the summary");
+    assert_eq!(
+        summary.1.as_deref(),
+        Some("Claude Code"),
+        "a delivery claim whose subject is a sibling `display` field must be attributed to that \
+         harness, or the most machine-readable claim the product makes is judged by nothing"
+    );
 }

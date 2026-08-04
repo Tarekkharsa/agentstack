@@ -365,7 +365,11 @@ fn panel_remove_capability_updates_manifest_and_rendered_config() {
     fs::create_dir_all(&proj).unwrap();
     fs::write(
         proj.join("agentstack.toml"),
+        // The rendered lane, explicitly: `apply` honours the delivery planner,
+        // so a server reaches `.mcp.json` only when the routing sends it there,
+        // and these fixtures need the file to exist to have anything to assert.
         "version = 1\n\
+         [delivery]\nrender_locally = true\n\
          [targets]\ndefault = [\"claude-code\"]\n\
          [servers.keep]\ntype = \"http\"\nurl = \"https://keep.example/mcp\"\n\
          [servers.remove-me]\ntype = \"http\"\nurl = \"https://remove.example/mcp\"\n",
@@ -463,7 +467,11 @@ fn set_mode_is_retired_and_says_so() {
     fs::create_dir_all(proj.join(".git")).unwrap();
     fs::write(
         proj.join("agentstack.toml"),
+        // The rendered lane, explicitly: `apply` honours the delivery planner,
+        // so a server reaches `.mcp.json` only when the routing sends it there,
+        // and these fixtures need the file to exist to have anything to assert.
         "version = 1\n\
+         [delivery]\nrender_locally = true\n\
          [targets]\ndefault = [\"claude-code\"]\n\
          [servers.search]\ntype = \"http\"\nurl = \"https://search.example/mcp\"\n",
     )
@@ -590,7 +598,12 @@ fn panel_add_server_fails_closed_on_unresolved_ref() {
     // target to render into.
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        // `render_locally` keeps this project in the rendered lane. The
+        // fail-closed gate under test fires when a server config is about to
+        // be WRITTEN; under the default routing these servers travel live,
+        // nothing is written, and there is no write for the gate to refuse.
+        "version = 1\n[delivery]\nrender_locally = true\n\
+         [targets]\ndefault = [\"claude-code\"]\n\
          [profiles.web]\nservers = []\nskills = []\n",
     )
     .unwrap();

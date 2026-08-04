@@ -65,7 +65,17 @@ pub fn plan_settings(
     scope: Scope,
     project_dir: &Path,
 ) -> Result<Option<SettingsPlan>> {
-    let Some((settings_path, format)) = desc.settings_for(scope, project_dir) else {
+    // The scope a CLI keeps its settings in is the CLI's choice, not ours.
+    // Most declare one file and it is the global one; asking for the project
+    // scope there used to return `None`, so a manifest's `[settings.<id>]`
+    // was silently dropped and `apply` still reported the target in sync.
+    // Fall back to the place the descriptor DOES declare: the keys reach the
+    // file the CLI actually reads, and every surface prints that path, so the
+    // wider scope is stated rather than assumed.
+    let Some((settings_path, format)) = desc
+        .settings_for(scope, project_dir)
+        .or_else(|| desc.settings_for(Scope::Global, project_dir))
+    else {
         return Ok(None);
     };
     // Nothing declared for this target and nothing previously managed → no-op.

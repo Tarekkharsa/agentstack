@@ -321,6 +321,22 @@ impl Plan {
         Plan { harnesses }
     }
 
+    /// Do this harness's MCP servers travel the dynamic lane?
+    ///
+    /// The single reading every server-writing command shares. It existed as a
+    /// closure inside `apply` and `doctor`; `use`, `session`, `adopt` and
+    /// `diff` need the same answer, and four more copies of a two-line closure
+    /// is exactly how a second routing opinion gets born
+    /// (`docs/design/automatic-delivery.md` §"The decision"). An id with no
+    /// entry in the plan is NOT live: it is a harness the planner never
+    /// described, and the fail-safe answer for a writer is to keep writing.
+    pub fn servers_route_live(&self, id: &str) -> bool {
+        self.harnesses
+            .iter()
+            .find(|h| h.id == id)
+            .is_some_and(|h| h.kinds_in(Lane::Dynamic).contains(&Kind::Server))
+    }
+
     /// Is any capability actually served live in this project?
     pub fn has_dynamic_lane(&self) -> bool {
         self.harnesses
@@ -344,7 +360,17 @@ impl Plan {
             .collect()
     }
 
-    pub fn to_json(&self) -> serde_json::Value {
+    /// The machine form of the plan.
+    ///
+    /// `is_bridged` is the caller's PER-HARNESS bridge reading — the same one
+    /// `delivery`, `status`, `doctor` and `why` print from. It is a parameter
+    /// rather than something computed here because the plan knows only the
+    /// routing, and `summary` is a delivery CLAIM: saying "served live" for a
+    /// harness with no gateway registered is invariant 8 in machine form, and
+    /// worse than in text because a consumer has no prose to correct against.
+    /// `bridge_registered` is emitted beside it so a consumer can tell the two
+    /// states apart without parsing the sentence.
+    pub fn to_json(&self, is_bridged: &dyn Fn(&str) -> bool) -> serde_json::Value {
         serde_json::json!({
             "default": "automatic",
             "harnesses": self.harnesses.iter().map(|h| serde_json::json!({
@@ -353,7 +379,8 @@ impl Plan {
                 "mcp_capable": h.mcp_capable,
                 "render_locally": h.render_locally,
                 "override": h.override_source.slug(),
-                "summary": h.sentence(),
+                "bridge_registered": is_bridged(&h.id),
+                "summary": crate::commands::delivery::harness_sentence(h, is_bridged(&h.id)),
                 "routes": h.routes.iter().map(|r| serde_json::json!({
                     "kind": r.kind.slug(),
                     "lane": r.lane.slug(),

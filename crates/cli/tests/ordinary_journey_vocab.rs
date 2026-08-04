@@ -92,7 +92,20 @@ fn scripted_init_apply_doctor_needs_no_advanced_vocabulary() {
         vec!["doctor"],
     ] {
         let (text, ok) = run(bin, &args, &home, &proj, &stub_bin);
-        assert!(ok, "`agentstack {}` failed:\n{text}", args.join(" "));
+        // `apply` honours the delivery planner, so this journey's one server
+        // travels the live lane and no config file is written for it. With no
+        // bridge registered, `apply --write` therefore delivers nothing and
+        // exits nonzero on purpose — reporting success there would be the same
+        // false success invariant 8 forbids everywhere else. The step is kept
+        // (its output is exactly the vocabulary this file judges); only the
+        // exit status is allowed to be the honest one, and only when the
+        // transcript carries the disclosure that explains it.
+        let routed_live_nothing_delivered = text.contains("routed to the live lane");
+        assert!(
+            ok || routed_live_nothing_delivered,
+            "`agentstack {}` failed:\n{text}",
+            args.join(" ")
+        );
         transcript.push_str(&text);
     }
 
@@ -140,9 +153,20 @@ fn scripted_init_apply_doctor_needs_no_advanced_vocabulary() {
     // be the dishonest outcome: capabilities route to the live lane and reach
     // nothing. Invariant 8 makes that one error the correct close.
     assert!(proj.join(".agentstack/agentstack.toml").exists());
+    // Two findings, and both are the honest ones. The error is the
+    // un-registered bridge. The warning is the file this journey imported
+    // FROM: `~/.claude.json` still holds `search`, the harness still reads it,
+    // and the live lane writes nothing there — so reporting a clean drift
+    // section over it would be the "checked and clean" claim invariant 8
+    // forbids. AgentStack did not write that file, so the step named next is
+    // `agentstack adopt`, not a removal `x unrender` would refuse.
     assert!(
-        transcript.contains("1 error, 0 warnings"),
-        "expected exactly the un-registered-bridge finding:\n{transcript}"
+        transcript.contains("1 error, 1 warning"),
+        "expected the bridge finding and the still-read imported config:\n{transcript}"
+    );
+    assert!(
+        transcript.contains("AgentStack did not write it"),
+        "the warning must be the still-read imported config:\n{transcript}"
     );
     assert!(
         transcript.contains("nothing routed live is reaching it"),

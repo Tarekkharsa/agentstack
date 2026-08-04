@@ -73,6 +73,17 @@ pub fn run(args: &AdoptArgs, manifest_dir: Option<&Path>) -> Result<()> {
         })?;
         // What the manifest would put on this target's disk, read back through
         // the same adapter lens as the on-disk entries — the drift baseline.
+        //
+        // Deliberately NOT routed through `delivery::Plan`. `adopt` reads a
+        // hand-edit back INTO the manifest: the only file it writes is
+        // `agentstack.toml` (see the single `atomic::write` below), never a
+        // rendered server config. So there is no lane for it to switch and no
+        // write for the planner to withhold. The baseline here is a
+        // comparison value, not an intent to render, so it stays the manifest's
+        // full form under either lane: narrowing it by delivery would change
+        // which hand-edits `adopt` can SEE, and a verb whose job is to notice
+        // a user's edit must not go blind because the servers also travel
+        // live.
         let rendered_by_name: IndexMap<String, Server> = plan_target_with_servers(
             desc,
             &ctx.resolver,

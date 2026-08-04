@@ -54,6 +54,7 @@ pub mod updates;
 pub mod upgrade;
 pub mod use_profile;
 pub mod verify_cmd;
+pub mod why;
 pub mod workflow;
 pub mod workflow_declare;
 pub mod workflow_dispatch;

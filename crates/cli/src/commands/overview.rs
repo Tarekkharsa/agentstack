@@ -266,6 +266,13 @@ pub(crate) fn detect_mode(ctx: &super::Context, target_ids: &[String]) -> Mode {
 pub(crate) const EMPTY_PROJECT_NEXT: (&str, &str) =
     ("agentstack search <query>", "find a server or skill to add");
 
+/// Why the abandoned-render rung is the one next action when it fires.
+///
+/// One string, so `status` and `doctor` cannot describe the same rung
+/// differently.
+pub(crate) const ABANDONED_RENDER_WHY: &str =
+    "a config file AgentStack no longer maintains is still being read by that tool";
+
 /// The machine `next_action` for a human next step — the one command a PROGRAM
 /// is contracted to execute verbatim, or `None`.
 ///
@@ -750,6 +757,13 @@ pub(crate) struct ProjectFacts {
     /// per-harness reading: the "register the bridge" hint appears while any
     /// one of them is unconnected, not only when all are.
     delivery_bridge_gaps: Vec<String>,
+    /// Server configs an earlier rendered-lane `apply` wrote for a harness
+    /// that now routes live. They are still on disk and the harness still
+    /// reads them, so `status` names them rather than reporting a project
+    /// that delivers nothing to files (invariant 8). Read from the state
+    /// ledger plus disk — never from the routing plan, which only says what
+    /// `apply` WOULD write.
+    delivery_abandoned: Vec<crate::commands::apply::AbandonedRender>,
     rendered: bool,
     /// `None` when the caller did not ask for the secrets reading — bare
     /// `agentstack` never does, and asking is not free (it consults every
@@ -771,6 +785,79 @@ pub(crate) struct ProjectFacts {
     /// whole purpose is to be free to move ahead. Empty for a project that
     /// selects no package, and for one that has never been locked.
     packages: Vec<agentstack_core::lock::LockedPackage>,
+    /// `context-cost-v1`. Deep reads only — it opens SKILL.md frontmatter and
+    /// stats house-rule bodies, which bare `agentstack` does not pay for.
+    /// Default (all zeroes) means "not asked", and renders as nothing, which is
+    /// the same thing an unmeasurable project renders as.
+    context: ContextCost,
+}
+
+/// `context-cost-v1` — what this project costs a harness in context-window
+/// tokens, per session.
+///
+/// Every number here is an **estimate**, and every renderer says so. Two
+/// deliberate constraints:
+///
+/// * There is exactly ONE token estimator in this binary
+///   ([`crate::footprint::estimate_tokens`], the ~4-chars-per-token
+///   heuristic), and this reading calls it rather than growing a second one.
+///   Server costs are not re-derived at all: they are read from the measured
+///   cache `footprint.json` that `agentstack x report usage --live` writes, so
+///   `status` and `report usage` cannot disagree about a server's cost.
+/// * **No data is not zero.** A server that has never been measured is counted
+///   in `servers_unmeasured`, never as `0` tokens, and a project with nothing
+///   measurable prints no line at all.
+#[derive(Default)]
+pub(crate) struct ContextCost {
+    /// Measured servers this project declares, name → estimated tokens.
+    servers: Vec<(String, u64)>,
+    /// Declared servers with no measurement in the cache. Their cost is
+    /// unknown, so it is reported as unknown — not folded into the total.
+    servers_unmeasured: usize,
+    /// (how many skill descriptions were readable, their estimated tokens).
+    /// A harness injects every available skill's frontmatter `description`
+    /// into context; the bodies load on demand and are not counted.
+    skills: (usize, u64),
+    /// (how many house-rule bodies were readable, their estimated tokens).
+    house_rules: (usize, u64),
+}
+
+impl ContextCost {
+    /// Only what was actually measured or read. Never a floor, never a claim
+    /// about the unmeasured servers.
+    pub(crate) fn total(&self) -> u64 {
+        self.servers.iter().map(|(_, t)| t).sum::<u64>() + self.skills.1 + self.house_rules.1
+    }
+
+    /// Nothing to say at all: nothing measurable, and nothing missing either.
+    pub(crate) fn is_silent(&self) -> bool {
+        self.total() == 0 && self.servers_unmeasured == 0
+    }
+
+    /// The breakdown rows, largest first: measured servers one by one, then
+    /// the two aggregate rows. Rows with no tokens never appear.
+    fn rows(&self) -> Vec<(u64, String)> {
+        let mut rows: Vec<(u64, String)> = self
+            .servers
+            .iter()
+            .map(|(n, t)| (*t, n.clone()))
+            .filter(|(t, _)| *t > 0)
+            .collect();
+        if self.skills.1 > 0 {
+            rows.push((
+                self.skills.1,
+                super::count(self.skills.0, "skill description"),
+            ));
+        }
+        if self.house_rules.1 > 0 {
+            rows.push((
+                self.house_rules.1,
+                super::count(self.house_rules.0, "house rule"),
+            ));
+        }
+        rows.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+        rows
+    }
 }
 
 pub(crate) struct SessionFacts {
@@ -1090,6 +1177,33 @@ fn project_json(f: &ProjectFacts) -> serde_json::Value {
         });
     }
 
+    // `context-cost-v1`. The per-session context tax, ESTIMATED. Inserted only
+    // when there is something to say, for the reason the update offer is:
+    // absence must never be readable as "this project is free". Every number is
+    // flagged `"estimate": true` at the top of the object so no consumer can
+    // render it as a measurement, and `servers_unmeasured` is what a server
+    // with no measurement contributes — never a zero in `servers`.
+    if !f.context.is_silent() {
+        body["context_cost"] = serde_json::json!({
+            "estimate": true,
+            "total_est_tokens": f.context.total(),
+            "servers": f.context.servers.iter().map(|(n, t)| serde_json::json!({
+                "name": crate::text::sanitize_line(n),
+                "est_tokens": t,
+            })).collect::<Vec<_>>(),
+            "servers_unmeasured": f.context.servers_unmeasured,
+            "skills": {
+                "described": f.context.skills.0,
+                "est_tokens": f.context.skills.1,
+            },
+            "house_rules": {
+                "counted": f.context.house_rules.0,
+                "est_tokens": f.context.house_rules.1,
+            },
+            "detail": "agentstack x report usage",
+        });
+    }
+
     // `package-members-v1`. The effective member set, straight from the lock.
     // Inserted rather than emitted as an empty list, on the same reasoning as
     // `updates` below: a project that selects no package must read exactly as
@@ -1184,6 +1298,102 @@ fn secret_facts(ctx: &super::Context) -> Option<SecretFacts> {
     })
 }
 
+/// The per-session context cost of this project, from the readings that
+/// already exist (`context-cost-v1`).
+///
+/// Servers come from the measured cache only. Skills and house rules are
+/// estimated from the bytes a harness actually injects, through the one shared
+/// [`crate::footprint::estimate_tokens`] heuristic — this function derives no
+/// token count of its own.
+///
+/// Best-effort throughout: anything unreadable is left out of the count rather
+/// than guessed at, which is why a `0` from here always means "nothing to
+/// measure" and never "measured, and it is free".
+fn context_cost(ctx: &super::Context) -> ContextCost {
+    use crate::footprint::estimate_tokens;
+
+    let m = &ctx.loaded.manifest;
+    let mut cost = ContextCost::default();
+
+    // Servers: the measured cache, never a re-derivation. A declared server
+    // with no entry is UNKNOWN, and is reported as such.
+    let footprints = crate::footprint::Footprints::load().unwrap_or_default();
+    for name in m.declared_server_names() {
+        match footprints.get(&name) {
+            Some(f) => cost.servers.push((name, f.est_tokens)),
+            None => cost.servers_unmeasured += 1,
+        }
+    }
+    cost.servers
+        .sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+
+    // Skills: the frontmatter `description` of every skill this project can
+    // activate — inline blocks and toolset references alike. That one line per
+    // skill is what a harness puts in front of the model; the body is loaded on
+    // demand and deliberately not counted here.
+    let library = crate::library::Library::load_default_or_warn();
+    let lib_home = crate::util::paths::lib_home();
+    let mut names: Vec<String> = m.skills.keys().cloned().collect();
+    for profile in m.profiles.values() {
+        for s in &profile.skills {
+            // `"*"` means "the inline skills already declared", which are
+            // in the list already.
+            if s != "*" && !names.contains(s) {
+                names.push(s.clone());
+            }
+        }
+    }
+    for name in &names {
+        // Inline declaration first, then the library — the same order
+        // `explain` and `why` use, so the three cannot disagree about which
+        // copy of a name they are describing.
+        let inline = m
+            .skills
+            .get(name)
+            .and_then(|s| s.path.as_deref())
+            .and_then(|p| {
+                let p = Path::new(p);
+                let dir = if p.is_absolute() {
+                    p.to_path_buf()
+                } else {
+                    ctx.dir.join(p)
+                };
+                crate::util::read_to_string_bounded(&dir.join("SKILL.md"), MAX_SKILL_MD).ok()
+            })
+            .and_then(|text| crate::library::parse_frontmatter_description(&text));
+        let description = match inline {
+            Some(d) => Some(d),
+            None => library.get(name).and_then(|e| e.description(&lib_home)),
+        };
+        if let Some(d) = description {
+            cost.skills.0 += 1;
+            cost.skills.1 += estimate_tokens(d.chars().count());
+        }
+    }
+
+    // House rules: the base body of every declared fragment. Size on disk, not
+    // a read — the file is copied into the harness's instruction file whole, so
+    // its length IS the cost, and a manifest can point at a large one. Bytes
+    // stand in for characters here; for the ASCII-ish prose these files hold
+    // the difference is far below the heuristic's own error.
+    for (name, instr) in &m.instructions {
+        let Ok(bodies) = crate::instructions::bodies(name, instr, &ctx.dir, &library) else {
+            continue;
+        };
+        let path = bodies.source_of(&bodies.base);
+        if let Ok(meta) = std::fs::metadata(&path) {
+            cost.house_rules.0 += 1;
+            cost.house_rules.1 += estimate_tokens(meta.len() as usize);
+        }
+    }
+
+    cost
+}
+
+/// Bound on a `SKILL.md` we open only to read its frontmatter description
+/// (invariant 7: repository content is hostile input, and is read bounded).
+const MAX_SKILL_MD: u64 = 256 * 1024;
+
 /// The update **offer** (design §Update model rule 2): name that newer
 /// versions exist and the one command that takes them. Nothing is printed when
 /// there is no offer — deliberately not a green "up to date", because the
@@ -1215,6 +1425,90 @@ fn print_updates_line(updates: &[crate::commands::updates::PackUpdate]) {
         )
         .dimmed()
     );
+}
+
+/// `context-cost-v1` — the per-session context tax, on the existing
+/// label-and-value grid.
+///
+/// Four rules decide whether this line is honest or harmful, and all four are
+/// enforced here:
+///
+/// 1. **It is an estimate**, and says so in the line itself. No rendering of
+///    this reading may read as a measurement of a specific model's tokenizer.
+/// 2. **No data is not zero.** Nothing measurable and nothing missing prints
+///    nothing at all. Declared servers that were never measured print as
+///    unmeasured, and are never counted as free.
+/// 3. **Information, not a rung.** It prints below the state rows and above the
+///    `Next:` line, it names no fix, and it never touches `next_action`.
+/// 4. **Quiet when boring.** One contributor gets the total only; the breakdown
+///    appears when there is genuinely something to compare. The full per-server
+///    detail lives in `agentstack x report usage`.
+fn print_context_line(c: &ContextCost) {
+    if c.is_silent() {
+        return;
+    }
+    let total = c.total();
+    if total == 0 {
+        // Only unmeasured servers: say that, rather than printing a total of 0
+        // for a project whose servers are usually the whole bill.
+        println!(
+            "  {}  {} not measured — context cost unknown, not zero",
+            "Context ".bold(),
+            super::count(c.servers_unmeasured, "declared server")
+        );
+        // Deliberately not "measure it with …": the measuring pass is a live
+        // connection behind a flag, and naming the read-only command as though
+        // it measured would be a claim the command does not meet. The read-only
+        // command is named, and it is the one that explains the measurement.
+        println!("            {}", "see `agentstack x report usage`".dimmed());
+        return;
+    }
+
+    println!(
+        "  {}  ~{} per session (estimate)",
+        "Context ".bold(),
+        fmt_tokens_per_session(total)
+    );
+
+    let rows = c.rows();
+    if rows.len() > 1 {
+        for (tokens, label) in &rows {
+            // A row that rounds to 0% is still not free — say `<1%` rather
+            // than printing a zero share beside a non-zero cost.
+            let share = (*tokens as f64 / total as f64 * 100.0).round() as u64;
+            let share = if share == 0 {
+                "<1%".to_string()
+            } else {
+                format!("{share}%")
+            };
+            println!(
+                "            {:>8}  {label} ({share})",
+                crate::footprint::fmt_tokens(*tokens)
+            );
+        }
+    }
+    if c.servers_unmeasured > 0 {
+        println!(
+            "            {}",
+            format!(
+                "plus {} never measured — the total above excludes them",
+                super::count(c.servers_unmeasured, "declared server")
+            )
+            .dimmed()
+        );
+    }
+    println!(
+        "            {}",
+        "detail: `agentstack x report usage`".dimmed()
+    );
+}
+
+/// The headline total, in the same units the rest of the binary prints token
+/// counts in — [`crate::footprint::fmt_tokens`], spelled out as `tokens`
+/// because this line is read by a person deciding what to keep, not scanned in
+/// a table.
+fn fmt_tokens_per_session(t: u64) -> String {
+    crate::footprint::fmt_tokens(t).replace(" tok", " tokens")
 }
 
 /// One aligned line when everything resolves; one line per missing secret,
@@ -1538,6 +1832,48 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
             })
             .collect();
 
+    // Routing says what `apply` writes from now on; the state ledger plus disk
+    // say what an earlier apply already wrote and left. A failed state read is
+    // no reason to claim there is nothing there — but there is also nothing
+    // honest to report from it, so an empty list is the only safe fallback and
+    // the ledger's own health is `doctor`'s finding, not this screen's.
+    let delivery_abandoned = crate::state::State::load()
+        .map(|state| {
+            crate::commands::apply::abandoned_live_renders(
+                &ctx,
+                &delivery_plan,
+                &state,
+                &[crate::scope::Scope::Project, crate::scope::Scope::Global],
+            )
+        })
+        .unwrap_or_default();
+
+    // An abandoned render IS a rung, not a footnote. `doctor` already ends on
+    // it (its `↳` fix is the first warning-level command in the report), while
+    // `status` used to print the warning and then recommend
+    // `toolset create …` — two surfaces, one state, two different "one next
+    // action"s. The file is live: a config a harness reads that AgentStack no
+    // longer maintains outranks anything about growing the project. Consent
+    // and the waiting-drop funnel still outrank it, and the bridge ERROR below
+    // overrides it, matching doctor's error-over-warning order.
+    // Only the RECORDED ones. `recorded == false` means the file is on disk
+    // and AgentStack did not write it — a clone, a hand edit, or the gateway's
+    // own bridge registration. Those are reported (they are live files), but
+    // `x unrender --write` is a removal, and putting a removal of somebody
+    // else's file at the top of the screen as THE next action is a worse claim
+    // than the one this rung fixes.
+    let next = if delivery_abandoned.iter().any(|a| a.recorded)
+        && !next.0.starts_with("agentstack trust")
+        && next.0 != "agentstack yes"
+    {
+        (
+            crate::commands::apply::AbandonedRender::REMOVE_IT.to_string(),
+            ABANDONED_RENDER_WHY,
+        )
+    } else {
+        next
+    };
+
     // An unregistered bridge over declared live-lane capabilities is doctor's
     // one ERROR-level finding, and `doctor`'s ladder ranks it directly below
     // consent. `status` must rank it the same way or the two surfaces name
@@ -1643,6 +1979,7 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
             // finding uses is the one answer.
             delivery_has_live,
             delivery_bridge_gaps,
+            delivery_abandoned,
             rendered,
             secrets: if deep_reads { secret_facts(&ctx) } else { None },
             updates: if deep_reads {
@@ -1657,6 +1994,13 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
             packages: crate::lock::Lock::load(&ctx.dir)
                 .map(|lock| crate::package::effective_members(&lock).to_vec())
                 .unwrap_or_default(),
+            // Deep reads only, on the same budget as secrets and updates: this
+            // opens one small file per skill and stats one per house rule.
+            context: if deep_reads {
+                context_cost(&ctx)
+            } else {
+                ContextCost::default()
+            },
         })),
         next,
     })
@@ -1856,10 +2200,30 @@ fn print_orientation(o: &Orientation, status: bool) {
                     );
                 }
                 if f.delivery_has_live {
-                    println!("            {}", crate::delivery::ZERO_ARTIFACTS.dimmed());
+                    // Disk-checked: the "0 project artifacts" wording is only
+                    // true when the walk found nothing an earlier render left.
+                    println!(
+                        "            {}",
+                        crate::commands::apply::live_lane_artifacts_line(&f.delivery_abandoned)
+                            .dimmed()
+                    );
                 }
                 if let Some(lane) = &f.delivery_rendered_lane {
                     println!("            {}", lane.dimmed());
+                }
+                // Directly under the zero-artifacts sentence, which is true of
+                // the routing and false of the machine while one of these
+                // exists. Not dimmed: a config file the harness reads that
+                // AgentStack no longer maintains is not a footnote.
+                for found in &f.delivery_abandoned {
+                    println!("            {}  {}", "⚠".yellow(), found.sentence());
+                    // The remedy comes from the find, exactly as `apply` and
+                    // `why` print it: "remove it: x unrender --write" only for
+                    // a file the ledger records as ours. `status` used to
+                    // promise that removal for every find, including files
+                    // AgentStack never wrote, where the command answers
+                    // "nothing in 1 file is ours to remove".
+                    println!("            {}  {}", "→".cyan(), found.remedy());
                 }
             }
 
@@ -1892,6 +2256,7 @@ fn print_orientation(o: &Orientation, status: bool) {
             }
 
             if status {
+                print_context_line(&f.context);
                 print_updates_line(&f.updates);
                 if let Some(secrets) = &f.secrets {
                     print_secrets_line(secrets);
@@ -2375,13 +2740,78 @@ mod tests {
                 delivery_rendered_lane: None,
                 delivery_has_live: false,
                 delivery_bridge_gaps: Vec::new(),
+                delivery_abandoned: Vec::new(),
                 rendered: false,
                 secrets,
                 needs_your_yes: None,
                 updates: Vec::new(),
+                context: ContextCost::default(),
             })),
             next: ("agentstack trust .".into(), "review and re-trust"),
         }
+    }
+
+    /// `context-cost-v1` rule 3, at the serializer: no data is not zero.
+    ///
+    /// A project with nothing measurable carries no `context_cost` key at all
+    /// — absence is the only reading that cannot be rendered as "this project
+    /// is free". A project whose servers were never measured DOES carry the
+    /// key, with the count of unmeasured servers and a total that excludes
+    /// them, because "unknown" and "zero" are different answers.
+    #[test]
+    fn context_cost_is_absent_rather_than_zero_and_never_counts_the_unmeasured() {
+        let silent = status_json(&loaded_orientation(None));
+        assert!(
+            silent["project"].get("context_cost").is_none(),
+            "nothing to measure must print no key: {silent}"
+        );
+
+        let mut o = loaded_orientation(None);
+        if let ManifestState::Loaded(f) = &mut o.manifest {
+            f.context = ContextCost {
+                servers: vec![("github".into(), 9_100)],
+                servers_unmeasured: 2,
+                skills: (12, 3_000),
+                house_rules: (1, 2_100),
+            };
+        }
+        let out = status_json(&o);
+        let c = &out["project"]["context_cost"];
+        assert_eq!(c["estimate"], true, "never presented as measured");
+        assert_eq!(c["total_est_tokens"], 14_200, "measured parts only");
+        assert_eq!(c["servers_unmeasured"], 2);
+        assert_eq!(c["servers"].as_array().unwrap().len(), 1);
+        assert_eq!(c["servers"][0]["name"], "github");
+        // The ladder is untouched: context cost is information, never a rung.
+        assert_eq!(out["next_action"]["command"], "agentstack trust .");
+    }
+
+    /// Rule 4: quiet when boring. One contributor gets the headline only; the
+    /// breakdown appears when there is something to compare, largest first.
+    #[test]
+    fn context_rows_stay_quiet_for_one_contributor_and_rank_by_cost() {
+        let one = ContextCost {
+            skills: (3, 400),
+            ..ContextCost::default()
+        };
+        assert_eq!(one.rows().len(), 1, "one row is not a breakdown");
+        assert_eq!(one.total(), 400);
+
+        let many = ContextCost {
+            servers: vec![("github".into(), 9_100)],
+            servers_unmeasured: 0,
+            skills: (12, 3_000),
+            house_rules: (2, 2_100),
+        };
+        let labels: Vec<String> = many.rows().into_iter().map(|(_, l)| l).collect();
+        assert_eq!(
+            labels,
+            vec![
+                "github".to_string(),
+                "12 skill descriptions".to_string(),
+                "2 house rules".to_string(),
+            ]
+        );
     }
 
     /// `needs-your-yes-v1`, at the serializer: the key appears only when

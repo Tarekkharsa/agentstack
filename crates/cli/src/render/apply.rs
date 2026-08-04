@@ -258,6 +258,66 @@ pub fn plan_target(
     )
 }
 
+/// Why a harness has no MCP **server destination** in a given scope.
+///
+/// [`plan_target_with_servers`] answers `Ok(None)` for two structurally
+/// different situations, and collapsing them is what let `apply` throw a whole
+/// harness away. A harness can lack a place to write SERVERS while still
+/// declaring instructions, settings, hooks, skills and extensions — those route
+/// rendered and have no other way to arrive. "No server destination" is
+/// therefore never "nothing to do": it skips the servers leg only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoServerLane {
+    /// The harness has no MCP channel at all, in any scope — it is a file-only
+    /// tool by design (Pi). Every other lane still applies, in both scopes its
+    /// descriptor declares.
+    NoMcpChannel,
+    /// The harness DOES speak MCP but declares no server config file for this
+    /// particular scope (e.g. Claude Desktop has no project config). Only this
+    /// scope's servers leg is absent.
+    NoConfigInScope,
+}
+
+impl NoServerLane {
+    /// A truthful one-line reason, for the message a command prints when it
+    /// skips the servers leg. Deliberately states what is skipped (servers) and
+    /// what is not (everything else), so the line can never again read as
+    /// "this harness gets nothing".
+    pub fn sentence(self, display: &str, scope: Scope) -> String {
+        match self {
+            NoServerLane::NoMcpChannel => format!(
+                "{display} has no MCP channel — no servers to write; \
+                 instructions, settings, hooks, skills and extensions still apply"
+            ),
+            NoServerLane::NoConfigInScope => format!(
+                "{display} declares no {scope}-scope server config — no servers to write here; \
+                 its other {scope}-scope files still apply"
+            ),
+        }
+    }
+}
+
+/// Whether this harness has somewhere to write MCP servers in `scope`, and if
+/// not, the true reason. `None` means a server destination exists (the normal
+/// case) — mirroring exactly the condition under which
+/// [`plan_target_with_servers`] returns `Ok(Some(_))` for a well-formed
+/// descriptor, so a caller can branch on the reason instead of guessing one.
+pub fn no_server_lane(
+    desc: &AdapterDescriptor,
+    scope: Scope,
+    project_dir: &Path,
+) -> Option<NoServerLane> {
+    // Order matters: a harness with no `mcp` block has no MCP channel at all,
+    // which is a stronger and more useful statement than "not in this scope".
+    if desc.mcp.is_none() {
+        return Some(NoServerLane::NoMcpChannel);
+    }
+    if desc.config_for(scope, project_dir).is_none() {
+        return Some(NoServerLane::NoConfigInScope);
+    }
+    None
+}
+
 /// Build the plan for one target from an already-resolved **effective server
 /// map** (`name -> Server`, `${REF}` placeholders intact). This is the core
 /// renderer: secret resolution happens *here*, via `render_server` + `resolver`,
@@ -1225,6 +1285,68 @@ startup_timeout_sec = 20
             Format::Toml,
         );
         assert_eq!(toml_keys, vec!["postgres".to_string()]);
+    }
+
+    // Invariant 8 witness: "no server destination" and "nothing to do" are
+    // different facts, and the reason a command prints must be the true one.
+    // Pi has no MCP channel BY DESIGN and still declares instructions,
+    // settings, skills and extensions in BOTH scopes — so the servers leg is
+    // the only thing absent, and the old "no global scope" line was false.
+    #[test]
+    fn no_mcp_channel_is_not_no_scope_and_never_means_nothing_to_do() {
+        let reg = Registry::load().unwrap();
+        let pi = reg.get("pi").expect("pi adapter is registered");
+        let proj = assert_fs::TempDir::new().unwrap();
+
+        for scope in [Scope::Global, Scope::Project] {
+            assert_eq!(
+                no_server_lane(pi, scope, proj.path()),
+                Some(NoServerLane::NoMcpChannel),
+                "pi has no MCP channel in {scope} scope"
+            );
+            let msg = NoServerLane::NoMcpChannel.sentence(&pi.display, scope);
+            assert!(msg.contains("no MCP channel"), "{msg}");
+            assert!(msg.contains("still apply"), "{msg}");
+            assert!(
+                !msg.contains("skipping"),
+                "the harness is not skipped: {msg}"
+            );
+        }
+
+        // …and the descriptor really does declare the other lanes in both
+        // scopes, which is what makes the old message a false claim.
+        assert!(pi.settings_for(Scope::Global, proj.path()).is_some());
+        assert!(pi.instructions.is_some());
+        assert!(pi.skills.is_some());
+    }
+
+    // A harness that DOES have an mcp block is unaffected — and the
+    // scope-specific absence keeps its own, still-true reason.
+    #[test]
+    fn mcp_harness_has_a_server_lane_and_scope_absence_says_so() {
+        let _g = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("HOME", home.path());
+        let reg = Registry::load().unwrap();
+        let proj = assert_fs::TempDir::new().unwrap();
+
+        let claude = reg.get("claude-code").unwrap();
+        assert_eq!(no_server_lane(claude, Scope::Global, proj.path()), None);
+        assert_eq!(no_server_lane(claude, Scope::Project, proj.path()), None);
+
+        // Claude Desktop speaks MCP but declares no project config file.
+        let desktop = reg.get("claude-desktop").unwrap();
+        assert_eq!(no_server_lane(desktop, Scope::Global, proj.path()), None);
+        assert_eq!(
+            no_server_lane(desktop, Scope::Project, proj.path()),
+            Some(NoServerLane::NoConfigInScope)
+        );
+        let msg = NoServerLane::NoConfigInScope.sentence(&desktop.display, Scope::Project);
+        assert!(msg.contains("project-scope server config"), "{msg}");
+
+        std::env::remove_var("HOME");
     }
 
     #[test]
