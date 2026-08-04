@@ -96,7 +96,7 @@ fn apply_write_compiles_instructions_into_the_global_file() {
             && l["msg"]
                 .as_str()
                 .unwrap()
-                .contains("agentstack instructions --write")
+                .contains("agentstack x instructions --write")
     });
     assert!(stale, "stale managed region should warn: {report}");
 
@@ -319,7 +319,7 @@ fn doctor_accepts_a_project_compiled_at_project_scope() {
             && l["msg"]
                 .as_str()
                 .unwrap()
-                .contains("agentstack instructions --write")
+                .contains("agentstack x instructions --write")
     });
     assert!(
         stale,

@@ -83,7 +83,7 @@ pub fn run(args: &ImageArgs, manifest_dir: Option<&Path>) -> Result<()> {
             println!(
                 "  {} nothing has been written and Docker has not been contacted — {} builds it.",
                 "·".dimmed(),
-                "agentstack image --write".bold()
+                "agentstack x image --write".bold()
             );
         }
         return Ok(());

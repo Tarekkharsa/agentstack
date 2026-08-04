@@ -19,7 +19,7 @@ layer `~/.agentstack/agentstack.toml`).
 
 ## Delivery is routed — read it before "fixing" a missing file
 
-`agentstack delivery` prints, per tool, which kinds are served live and which
+`agentstack x delivery` prints, per tool, which kinds are served live and which
 are written to files. Check it first.
 
 - On an MCP-capable tool, **skills and MCP servers are served live** over that
@@ -31,18 +31,18 @@ are written to files. Check it first.
   and on a tool that reads files only, so is everything else.
 - Live serving requires an open lease naming a toolset (the manifest's
   `profiles` table). Without one the gateway offers control-plane tools only —
-  nothing is served implicitly. `agentstack lease status` shows what is open.
-- The single override is `agentstack delivery render-locally --write` (add
+  nothing is served implicitly. `agentstack x lease status` shows what is open.
+- The single override is `agentstack x delivery render-locally --write` (add
   `--harness <id>` for one tool, `--off` to undo). It records
   `[delivery] render_locally`, so every clone answers the same way.
 
 ## Authoring: library first, dropping a file second
 
-The library is one or more **linked folders**. `agentstack lib sources` shows
+The library is one or more **linked folders**. `agentstack x lib sources` shows
 them in precedence order and names what shadows what; the first source holding
-a name wins. Author there — `agentstack lib new <name>` scaffolds
-`./<name>/SKILL.md`, `agentstack lib add <source> --write` takes a skill in,
-`agentstack lib link <folder> --write` links another folder as a source.
+a name wins. Author there — `agentstack x lib new <name>` scaffolds
+`./<name>/SKILL.md`, `agentstack x lib add <source> --write` takes a skill in,
+`agentstack x lib link <folder> --write` links another folder as a source.
 
 Dropping a file into the project stays the quick capture. Write it and stop:
 
@@ -67,8 +67,8 @@ eligible for that path and takes the full staged review
 
 Servers are different: they carry commands, env, and secrets, so there is no
 file to drop — declare them (`agentstack add server …`). Hooks and extensions
-are executable: they are declared (`agentstack lib add-hook`,
-`agentstack lib add-extension`), never dropped, and always get the full
+are executable: they are declared (`agentstack x lib add-hook`,
+`agentstack x lib add-extension`), never dropped, and always get the full
 ceremony.
 
 ## Running
@@ -79,25 +79,26 @@ plain host launch with none of those gates: an escape hatch, not the daily
 path. Name the toolset with `--toolset <name>` (`--profile` is the older
 spelling); an unfenced run contributes no package servers at all.
 
-`agentstack workflow run <name>` drives a reviewed multi-agent task, each role
+`agentstack x workflow run <name>` drives a reviewed multi-agent task, each role
 bound to a toolset that may set its own `model` and `effort`.
-`agentstack image --toolset <name>` composes one toolset's pinned bytes into a
+`agentstack x image --toolset <name>` composes one toolset's pinned bytes into a
 container image locally — nothing resolved into it, nothing pushed.
 
 ## Keep the loop closed
 
 - After editing a toolset's `skills`/`servers`/`packages`, re-pin:
-  `agentstack lock`, or `agentstack use <toolset> --write` which also renders.
+  `agentstack lock --write`, or `agentstack use <toolset> --write` which also
+  renders. A bare `agentstack lock` only previews the change; `--write` pins it.
   `doctor` treats lock drift as an error until you do. A selected package
   expands in the lock to its exact pinned members.
 - Drift decision rule: a hand-added server you want to keep →
   `agentstack adopt --write` (pull it into the manifest); the manifest is the
   truth → `agentstack apply --write` (re-render). Never edit a rendered file
   to "fix" drift.
-- After changing `[instructions.*]`, recompile: `agentstack instructions
+- After changing `[instructions.*]`, recompile: `agentstack x instructions
   --write`. A fragment may carry per-(CLI, model) bodies under
   `[[instructions.<name>.variant]]`; the model is known only from an
   explicitly named toolset's `model` or `[settings.<cli>] model`, and an
   unknown model never matches a `model` selector.
-- Verify with `agentstack doctor`; undo a bad write with `agentstack restore`
+- Verify with `agentstack doctor`; undo a bad write with `agentstack x restore`
   or `agentstack undo`.

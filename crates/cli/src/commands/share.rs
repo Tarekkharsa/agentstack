@@ -366,9 +366,11 @@ pub fn run_receive(args: &ReceiveArgs, manifest_dir: Option<&Path>) -> Result<()
         count(landed, "file")
     );
     // Ends through the same seam everything else does: whatever is honestly
-    // next, not a verdict minted here.
+    // next, not a verdict minted here. `next_step` is the human sentence and
+    // is always present; `next_action` is the machine field and is null when
+    // the honest next step is not runnable verbatim.
     let report = super::doctor::collect(Some(&dir))?;
-    if let Some(next) = report["next_action"].as_str() {
+    if let Some(next) = report["next_step"].as_str() {
         crate::outln!("{} {}", "next:".bold(), next.bold());
     }
     Ok(())

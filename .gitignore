@@ -30,13 +30,21 @@ __pycache__/
 examples/workflow-scale/results.jsonl
 
 # >>> agentstack — generated project artifacts (machine-local) >>>
-/.agents/skills/
-/.claude/skills/
-/.gemini/skills/
-/.pi/skills/
+/.agents/mcp_config.json
+/.codex/config.toml
+/.cursor/mcp.json
+/.gemini/settings.json
+/.junie/mcp/mcp.json
+/.kiro/settings/mcp.json
+/.mcp.json
+/.vscode/mcp.json
+/opencode.json
 # <<< agentstack >>>
 
 # local playwright install for tools/site-smoke.mjs
 /node_modules/
 /package.json
 /package-lock.json
+
+# review scratch space (handoff notes, throwaway fixtures) — never committed
+/.scratch/

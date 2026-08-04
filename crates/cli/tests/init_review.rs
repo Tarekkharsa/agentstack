@@ -145,7 +145,13 @@ fn scripted_init_states_clis_configs_servers_and_destinations_before_writing() {
         text.contains("none is written unless you ask"),
         "the destination list must not read as an inevitability:\n{text}"
     );
-    assert!(text.contains("MCP servers served live"), "{text}");
+    // No bridge is registered in this scripted run, so the routing states the
+    // live lane as a PLAN (invariant 8). The claim under test is that the row
+    // names the live lane at all, not that it promises delivery.
+    assert!(
+        text.contains("MCP servers planned live (not connected)"),
+        "{text}"
+    );
 
     // The review preceded a real write.
     assert!(proj.join(".agentstack/agentstack.toml").exists());

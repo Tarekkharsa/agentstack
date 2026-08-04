@@ -132,6 +132,88 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   capability reaches a harness through is informational
 ///   (`delivery-routing-v1`), decided by the planner, and never something the
 ///   consent moment asks about.
+/// - `trust-content-drift-v1`: the machine surfaces stop reporting a healthy
+///   project over content that has drifted from its pin, and carry the command
+///   that fixes it.
+///
+///   The consent digest covers the manifest, the local overlay, and the
+///   lockfile — not the BODIES those bytes pin. Editing an approved skill in
+///   place therefore left `trust --preview` reporting `state: "trusted"` with
+///   an empty blocker list and the edited item marked `change: "unchanged"`
+///   (its identity — where the body comes from — genuinely had not moved),
+///   and `status --json` reporting `trust: "trusted"`, while `doctor` errored
+///   and `agentstack trust` refused. Two machine surfaces disagreed with the
+///   gate, and a driver polling them reported the project healthy.
+///
+///   The drift reading itself is NOT new: it is the shared
+///   `resolve::*_lock_status` seam the grant walk and `doctor` already read,
+///   called once per surface. Nothing about how trust is granted, how digests
+///   are computed, or what the gate decides changes — only what the reporting
+///   projection says about a state the gate already refuses.
+///
+///   `trust --preview` gains `content_drift[]` (`{kind, name, reason, fix}`
+///   per drifted item), `blockers[]` (the server blockers, kind `server`, plus
+///   the content drift, each with its `fix`), `grantable`, `fix`, and
+///   `next_step` `{command, why}`; each `review.items[]` entry gains `drifted`
+///   and `fix`, and each `review.groups[].counts` gains `drifted` (a subset of
+///   `changed`). `status --json` gains `project.content_drift[]`.
+///
+///   Three existing VALUES change, deliberately, because they were lying:
+///   `trust --preview`'s `state` and `status --json`'s `project.trust` read
+///   `drifted` over drifted content (`untrusted` still wins — never reviewed
+///   is the stronger statement), and a drifted item's `change` reads
+///   `drifted` where it would have read `unchanged`. `change` stays
+///   identity-keyed otherwise: `added` and `changed` keep their word, because
+///   they already say the item is not clean and they carry the identity answer
+///   a source flip depends on. A consumer that switches on the three old words
+///   must add a fourth arm; `review.groups[].counts.drifted` is tallied off the
+///   per-item boolean, so an item that both flipped source and drifted is
+///   counted there while still reading `changed`.
+///
+///   The same flag also covers NEVER-PINNED items, which are a separate claim
+///   from drift — nothing about them was ever approved, so calling them drift
+///   would misreport what the user is being asked about. `trust --preview`
+///   gains `surface_unpinned[]` (`{kind, name, reason, fix}`, same shape as
+///   `content_drift[]`) and `status --json` gains
+///   `project.surface_unpinned[]`; `blockers[]` is the ONE list to read and
+///   concatenates server blockers, then `content_drift[]`, then
+///   `surface_unpinned[]`; and `grantable`, `fix` and `next_step` account for
+///   never-pinned items exactly as they account for drift.
+///
+///   **`fix` is nullable** — on every `blockers[]` / `content_drift[]` /
+///   `surface_unpinned[]` entry and on the top-level `fix`. `null` means no
+///   single command repairs that condition, and today it has one cause: a
+///   declared body that is not present on disk. `agentstack lock --write`
+///   resolves before it pins, so it exits non-zero and changes nothing there,
+///   and no other verb re-creates the body either. Naming a command anyway is
+///   how a poll-and-run driver spins forever, so the field says nothing and
+///   `reason` carries the condition. A decoder must treat `fix` as
+///   `string | null`.
+///
+///   `surface_unpinned[]` mirrors the GRANT WALK'S BLOCKER SET, kind by kind
+///   — not "everything unpinned". A LIBRARY-origin skill with no pin is a
+///   yellow advisory at the gate and is therefore absent here; an INLINE one
+///   blocks and is present. It is also NARROWER than the gate: the gate also
+///   refuses over library servers, unpinned repo-relative local executables,
+///   and unpinned or drifted blueprints, which this projection does not read.
+///   So an empty `surface_unpinned[]` does not mean the grant will succeed.
+///
+///   `next_action` / `next_step` name `agentstack lock --write`, not
+///   `agentstack trust .`: the grant REFUSES over drift and over the
+///   never-pinned items reported here, so re-pinning is the step that makes
+///   progress, and re-pinning flips the lockfile bytes and hence the trust
+///   digest, which is what puts the review next. A driver can read one field,
+///   run it verbatim, and converge. When no reported blocker carries a fix,
+///   `fix` and `next_step` are `null` rather than a command that cannot work.
+///
+///   `grantable: false` means THIS PROJECTION can already see a reason the
+///   grant refuses, and it is checked against the gate's own blocker
+///   construction kind by kind. It is not an independent verdict: `agentstack
+///   trust` stays authoritative in both directions, and `grantable: true` is
+///   not a promise the grant succeeds. A surface that gates a human Approve
+///   control on this field should treat it as advice, never as the refusal —
+///   an earlier build reported `false` over a library-origin unpinned skill
+///   the gate accepts, and blocked the one answer only a human may give.
 /// - `activity-skill-load-v1`: a successful on-demand skill load over MCP
 ///   (`agentstack_load`) is recorded as first-class activity. Each one appends
 ///   to the machine-global `~/.agentstack/audit/loads.jsonl`
@@ -153,6 +235,15 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   stream means "did not happen", not "was allowed". Nothing reads it to
 ///   make a decision.
 /// - `status-v1`: `doctor --json` carries `state` + `next_action`.
+///
+///   `next_action` is NULLABLE, and a consumer must handle null. It is the
+///   MACHINE field: either a command that can be executed verbatim and will
+///   make progress, or `null` when there is nothing to run — a healthy setup,
+///   or a state whose only honest answer is a shape (`toolset create <name>
+///   …`) or a prose remedy. The human sentence the terminal prints always
+///   lives beside it in `next_step`, which is text for a UI to render and
+///   never something to exec. `status --json`'s `next_action` object splits
+///   the same pair: `command` (runnable or null) and `sentence` (prose).
 /// - `status-honesty-v1`: `doctor --json` carries `readiness`, and
 ///   `snapshot --json` carries a singular `nextAction`. Both are ADDITIVE:
 ///   `state` and `nextActions` keep their `status-v1` meanings byte for byte,
@@ -617,6 +708,7 @@ pub const FEATURES: &[&str] = &[
     "instruction-channels-v1",
     "image-plan-v1",
     "workflow-role-selection-v1",
+    "trust-content-drift-v1",
 ];
 
 /// How one panel action's apply is bound.

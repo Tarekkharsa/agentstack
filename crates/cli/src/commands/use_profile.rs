@@ -265,8 +265,10 @@ pub fn list_json_value(manifest_dir: Option<&Path>) -> Result<serde_json::Value>
                     );
                     match crate::verify::skill_verdict(&status) {
                         crate::verify::Verdict::Ok => {}
-                        crate::verify::Verdict::Unpinned => blockers
-                            .push((r.name.clone(), "unpinned — run `agentstack lock`".into())),
+                        crate::verify::Verdict::Unpinned => blockers.push((
+                            r.name.clone(),
+                            "unpinned — run `agentstack lock --write`".into(),
+                        )),
                         crate::verify::Verdict::Block(why) => blockers.push((r.name.clone(), why)),
                     }
                 }
@@ -288,8 +290,10 @@ pub fn list_json_value(manifest_dir: Option<&Path>) -> Result<serde_json::Value>
                     let status = crate::resolve::classify_server(&r.name, &r.checksum, &lock);
                     match crate::verify::server_verdict(&status) {
                         crate::verify::Verdict::Ok => {}
-                        crate::verify::Verdict::Unpinned => blockers
-                            .push((r.name.clone(), "unpinned — run `agentstack lock`".into())),
+                        crate::verify::Verdict::Unpinned => blockers.push((
+                            r.name.clone(),
+                            "unpinned — run `agentstack lock --write`".into(),
+                        )),
                         crate::verify::Verdict::Block(why) => blockers.push((r.name.clone(), why)),
                     }
                 }
@@ -376,7 +380,7 @@ fn print_profile_listing(out: &serde_json::Value) {
             super::count(p["blockers"].as_array().map_or(0, Vec::len), "blocker")
         };
         let in_use = if p["active"].as_bool().unwrap_or(false) {
-            "  · in use (agentstack session end reverts it)"
+            "  · in use (agentstack x session end reverts it)"
         } else {
             ""
         };
@@ -708,7 +712,7 @@ pub fn activate(
                     // produce verified bytes refuses the whole activation.
                     anyhow::anyhow!(
                         "refusing to render skill '{name}': its approved bytes could not be \
-                         served from the content store ({e}) — run `agentstack lock` to \
+                         served from the content store ({e}) — run `agentstack lock --write` to \
                          re-pin and review it"
                     )
                 })?;
@@ -738,7 +742,7 @@ pub fn activate(
         // the way back at the top of the write phase, not by inventing a gate.
         if args.write {
             println!(
-                "  {} undo: `agentstack restore --last --write`",
+                "  {} undo: `agentstack x restore --last --write`",
                 "↩".dimmed()
             );
         }
@@ -1181,7 +1185,7 @@ pub fn activate(
             // Name the exact command — bare `agentstack restore` lists the
             // ledger instead of undoing, so it read as a broken instruction.
             if wrote > 0 {
-                println!("  {}", "undo: agentstack restore --last --write".dimmed());
+                println!("  {}", "undo: agentstack x restore --last --write".dimmed());
             }
         } else {
             // A blocked target is a failure, not a footnote: report it in the
@@ -1281,7 +1285,12 @@ fn resolve_active_skills_with_pins(
             }
         },
     };
-    let plabel = profile_name.unwrap_or("default");
+    // `None` is NOT a toolset named "default" — it is the whole declared
+    // `[skills]` table. Saying "toolset 'default'" in an error was a false
+    // statement in a consent-pipeline error path (a project can have no such
+    // toolset, and the user may have typed `--profile docs`), so the label
+    // names what was actually walked.
+    let plabel = profile_name.unwrap_or("declared");
 
     let mut out = Vec::new();
     for name in names {

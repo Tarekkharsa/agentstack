@@ -89,7 +89,7 @@ fn agentstack(
 
 /// `lock` then `trust` — the admission prerequisites every workflow run has.
 fn lock_and_trust(home: &Path, path: &std::ffi::OsString, proj: &Path) {
-    let lock = agentstack(home, path, proj, &["lock"]);
+    let lock = agentstack(home, path, proj, &["lock", "--write"]);
     assert!(
         lock.status.success(),
         "lock failed: {}",

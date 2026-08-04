@@ -28,9 +28,9 @@ headers = { Authorization = "Bearer ${WEBAPP_API_TOKEN}" }
 [instructions.house-rules]
 path = "./instructions/house-rules.md"
 
-# The profile activated in a working repo. The `api-conventions` skill is NOT
+# The toolset activated in a working repo. The `api-conventions` skill is NOT
 # defined inline here — it is referenced BY NAME and resolved from the central
 # library (`agentstack lib`). assert.sh seeds that library first.
-[profiles.team]
+[toolsets.team]
 servers = ["storefront-api"]
 skills = ["api-conventions"]

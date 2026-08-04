@@ -1,4 +1,4 @@
-//! `agentstack uninstall` — take everything AgentStack put on this machine
+//! `agentstack x uninstall` — take everything AgentStack put on this machine
 //! back off it, previewing first.
 //!
 //! Reversibility is the product's central promise, and until this existed the
@@ -218,7 +218,7 @@ fn machine_state_only(args: &UninstallArgs, no_manifest: anyhow::Error) -> Resul
         );
         println!(
             "{}",
-            "Rendered native config in a project is removed by running `agentstack uninstall` \
+            "Rendered native config in a project is removed by running `agentstack x uninstall` \
              in that project, which needs its manifest."
                 .dimmed()
         );
@@ -232,7 +232,7 @@ fn machine_state_only(args: &UninstallArgs, no_manifest: anyhow::Error) -> Resul
     println!("\n{}", "AgentStack's machine state is gone.".bold());
     println!(
         "  {}",
-        "Any rendered config still in a project is untouched — run `agentstack uninstall` \
+        "Any rendered config still in a project is untouched — run `agentstack x uninstall` \
          there, with its manifest, to take that back too."
             .dimmed()
     );

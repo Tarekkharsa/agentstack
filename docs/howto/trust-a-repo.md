@@ -9,8 +9,8 @@ them inert until reviewed. Prerequisite: the CLIs you use, installed on this
 machine.
 
 ```bash
-# Once per machine: register the agentstack gateway in your CLIs
-agentstack gateway connect --all --write
+# Once per machine: register the AgentStack gateway in your CLIs
+agentstack x gateway connect --all --write
 
 # Clone a repo and enter it
 git clone <some-repo> && cd <some-repo>
@@ -30,10 +30,10 @@ repo you just cloned is **inert**: none of its servers run or are contacted, and
 no secrets resolve, until you run `agentstack trust .`. Trust shows exactly what
 the manifest runs and contacts, then pins the [consent digest](../concepts.md)
 of the [manifest](../concepts.md), its local overlay, and the
-[lockfile](../concepts.md). Any edit — a `git pull`, an `agentstack lock` —
+[lockfile](../concepts.md). Any edit — a `git pull`, an `agentstack lock --write` —
 drops the repo back to inert until you trust it again. To vet one server or
 skill in depth first — its provenance, effective policy, and context cost — run
-`agentstack explain <name>`; see [see what your agents did](see-what-happened.md).
+`agentstack x explain <name>`; see [see what your agents did](see-what-happened.md).
 
 **What trust covers, and what it doesn't.** Trust pins those three files and
 gates whether the declared servers may run; it does **not** vouch for the code

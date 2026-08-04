@@ -188,7 +188,7 @@ if "$AS" instructions --scope project --write > "$SBX/drift.txt" 2>&1; then
   sed 's/^/  /' "$SBX/drift.txt"
 else
   if grep -qi 'drift\|lock' "$SBX/drift.txt"; then
-    ok "editing a pinned fragment is refused until 'agentstack lock' (trust gate held)"
+    ok "editing a pinned fragment is refused until 'agentstack lock --write' (trust gate held)"
   else
     bad "refusal did not mention lock drift"
     sed 's/^/  /' "$SBX/drift.txt"
@@ -196,7 +196,7 @@ else
 fi
 
 # Accept the edit, then recompile.
-"$AS" lock > "$SBX/relock.txt" 2>&1
+"$AS" lock --write > "$SBX/relock.txt" 2>&1
 "$AS" instructions --scope project --write > "$SBX/rewrite.txt" 2>&1
 sed 's/^/  /' "$SBX/rewrite.txt"
 

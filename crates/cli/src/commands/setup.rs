@@ -587,7 +587,7 @@ fn run_zero_files(ctx: &super::Context, manifest_dir: Option<&Path>) -> Result<(
 
     // cmds[0] = "agentstack trust .", cmds[1] = "agentstack set-mode zero-files"
     let (cmds, what) = mode_switch_plan(Mode::ZeroFiles, None);
-    const CONNECT_LATER: &str = "agentstack gateway connect --all --write";
+    const CONNECT_LATER: &str = "agentstack x gateway connect --all --write";
 
     let register = crate::util::confirm::is_interactive()
         && crate::util::confirm::confirm(
@@ -637,15 +637,13 @@ fn print_switch_pointer(ctx: &super::Context, mode: super::overview::Mode) {
     }
     println!(
         "\n  {} this project still has rendered config on disk, so it will keep\n\
-         \x20   reading as \"static\" until that comes off. Complete the switch with:",
-        "·".dimmed()
+         \x20   reading as \"static\" until that comes off. Complete the {} switch with:",
+        "·".dimmed(),
+        mode.label()
     );
+    println!("    {}", "agentstack x uninstall".bold());
     println!(
-        "    {}",
-        format!("agentstack set-mode {}", mode.label()).bold()
-    );
-    println!(
-        "  {} it previews every removal first and undoes with `agentstack restore --last`.",
+        "  {} it previews every removal first and undoes with `agentstack x restore --last`.",
         "·".dimmed()
     );
 }
@@ -1004,16 +1002,13 @@ fn mode_switch_plan(
         ),
         Mode::CleanAtRest => (
             vec![
-                format!("agentstack session start {p}"),
-                "agentstack session end".into(),
+                format!("agentstack x session start {p}"),
+                "agentstack x session end".into(),
             ],
             "Materialize your toolset for a session, then revert it so the repo stays clean.",
         ),
         Mode::ZeroFiles => (
-            vec![
-                "agentstack trust .".into(),
-                "agentstack set-mode zero-files".into(),
-            ],
+            vec!["agentstack trust .".into(), "agentstack x uninstall".into()],
             "Review this repo once, then switch: the switch registers the gateway in your CLIs \
              and removes anything this project rendered, so its capabilities serve live.",
         ),
@@ -1251,7 +1246,7 @@ fn run_automatic(
 /// the automatic fork and the legacy zero-files fork, so there is one copy of
 /// this offer and one failure message.
 fn offer_bridge() -> Result<()> {
-    const CONNECT_LATER: &str = "agentstack gateway connect --all --write";
+    const CONNECT_LATER: &str = "agentstack x gateway connect --all --write";
     // The consequence belongs IN the question. This prompt keeps `confirm`'s
     // no-is-the-default contract — it is a machine-wide write, and the design
     // law automates everything except the yes — but a bare Enter used to
@@ -1390,7 +1385,7 @@ fn render_stop_summary(files: &[(String, String)]) -> String {
     for (path, label) in files {
         out.push_str(&format!("    {path}  ({label})\n"));
     }
-    out.push_str("  Undo recorded files:  agentstack restore --last --write\n");
+    out.push_str("  Undo recorded files:  agentstack x restore --last --write\n");
     out.push_str(
         "  Keychain values are outside file history; inspect with `agentstack secret list` and remove with `agentstack secret rm <NAME>`.\n",
     );
@@ -1477,7 +1472,10 @@ fn print_change_summary(
             "  {}",
             "The bridge is not registered, so nothing is served live yet:".dimmed()
         );
-        println!("    {}", "agentstack gateway connect --all --write".bold());
+        println!(
+            "    {}",
+            "agentstack x gateway connect --all --write".bold()
+        );
     } else {
         println!("\n{} Setup complete.", "✓".green());
     }
@@ -1534,6 +1532,12 @@ fn render_setup_facts(
         caps.push_str(&format!(" · {}", super::count(skill_count, "skill")));
     }
     out.push_str(&format!("  Capabilities:  {caps}\n"));
+    // Undo is one of the product's four ideas, and the guided first-timer is
+    // exactly the person who needs to know the way back. The scripted primitive
+    // names it in its own close; the wizard used to leave it to the detailed
+    // block far below, so it gets the same at-a-glance label line here.
+    out.push_str("  Undo:          agentstack x restore --last --write\n");
+    out.push_str("  Check:         agentstack doctor\n");
     if !still_needed.is_empty() {
         out.push_str(&format!(
             "  Still needed:  {} before this setup can run:\n",
@@ -1583,7 +1587,7 @@ fn render_change_summary(
         }
     }
     out.push_str(
-        "  Undo recorded file writes from this setup:  agentstack restore --last --write\n",
+        "  Undo recorded file writes from this setup:  agentstack x restore --last --write\n",
     );
     // The guard manages its own install/uninstall (its hook writes are outside
     // the apply history `restore` reads), so it carries its own undo line. The
@@ -1917,12 +1921,12 @@ mod tests {
         assert_eq!(cmds, vec!["agentstack apply --write".to_string()]);
 
         let (cmds, _) = mode_switch_plan(Mode::CleanAtRest, Some("dev"));
-        assert_eq!(cmds[0], "agentstack session start dev");
-        assert_eq!(cmds[1], "agentstack session end");
+        assert_eq!(cmds[0], "agentstack x session start dev");
+        assert_eq!(cmds[1], "agentstack x session end");
 
         // No profile declared → a visible placeholder, not a panic.
         let (cmds, _) = mode_switch_plan(Mode::CleanAtRest, None);
-        assert_eq!(cmds[0], "agentstack session start <toolset>");
+        assert_eq!(cmds[0], "agentstack x session start <toolset>");
 
         // Zero-files: trust FIRST (set-mode refuses an untrusted project so
         // the derived mode can't disagree with the choice), then the switch
@@ -1931,7 +1935,7 @@ mod tests {
         // deriving — and displaying — static.
         let (cmds, _) = mode_switch_plan(Mode::ZeroFiles, None);
         assert_eq!(cmds[0], "agentstack trust .");
-        assert_eq!(cmds[1], "agentstack set-mode zero-files");
+        assert_eq!(cmds[1], "agentstack x uninstall");
     }
 
     // Stage 1.2: the close leads with the concise facts — manifest path, CLIs
@@ -2011,7 +2015,7 @@ mod tests {
         assert!(out.contains("~/.claude.json  (Claude Code · servers)"));
         assert!(out.contains("API_TOKEN  resolved from keychain"));
         assert!(out.contains("house rules"));
-        assert!(out.contains("agentstack restore --last --write"));
+        assert!(out.contains("agentstack x restore --last --write"));
         assert!(out.contains("agentstack doctor"));
         assert!(out.contains("agentstack secret rm API_TOKEN"));
         // A CLI config changed → the restart advice is present.
@@ -2026,7 +2030,7 @@ mod tests {
     fn change_summary_with_no_writes_still_offers_undo() {
         let out = render_change_summary(&[], &[], &[], false, &[], false);
         assert!(out.contains("No files were written"));
-        assert!(out.contains("agentstack restore --last --write"));
+        assert!(out.contains("agentstack x restore --last --write"));
     }
 
     // P30: the restart-CLIs advice appears ONLY when a native CLI config
@@ -2099,7 +2103,7 @@ mod tests {
         assert!(out.contains("The import already wrote 2 files"));
         assert!(out.contains(".agentstack/agentstack.toml  (manifest · import)"));
         assert!(out.contains(".env  (.env · lifted secrets)"));
-        assert!(out.contains("agentstack restore --last --write"));
+        assert!(out.contains("agentstack x restore --last --write"));
     }
 
     // P29.1: the summary's FINAL line is the start-page doorway, present on

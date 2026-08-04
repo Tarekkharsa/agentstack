@@ -583,7 +583,7 @@ fn a_drop_routes_status_and_doctor_to_yes() {
     );
 
     // `lock`: the in-passing notice (the renderer `use` shares).
-    let lock = run(&["lock"]);
+    let lock = run(&["lock", "--write"]);
     assert!(
         lock.contains("`agentstack yes` to review and take live"),
         "the lock/use notice routes to the funnel:\n{lock}"

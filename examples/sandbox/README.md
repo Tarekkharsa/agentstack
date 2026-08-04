@@ -20,9 +20,9 @@ fixtures/               # demo INPUT — not owned by any project, not the libra
     kibana.toml         #   a server definition (${REF} secret only)
     sql-review/SKILL.md #   a skill
 projects/
-  web-app/              # frontend: figma + github servers, review skills, [profiles.review]
-  api-service/          # backend:  postgres + github servers, api skills, [profiles.backend]
-  data-pipeline/        # analytics: snowflake server, sql-review skill, [profiles.analytics]
+  web-app/              # frontend: figma + github servers, review skills, [toolsets.review]
+  api-service/          # backend:  postgres + github servers, api skills, [toolsets.backend]
+  data-pipeline/        # analytics: snowflake server, sql-review skill, [toolsets.analytics]
   central-demo/         # ONLY agentstack.toml — references a server + skill BY NAME
 runtime/                # (gitignored) simulated machine — created on first run
   home/.claude.json     #   a global `github` MCP server, shared by every project

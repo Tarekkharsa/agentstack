@@ -1,6 +1,6 @@
 //! `agentstack session` — CLI control for ephemeral sessions, mirroring the
 //! t3code's Start/End. A safety hatch: if t3code dies mid-session,
-//! `agentstack session end` (or `--all`) still reverts it.
+//! `agentstack x session end` (or `--all`) still reverts it.
 
 use std::path::Path;
 
@@ -40,7 +40,9 @@ fn render_start_report(
             names.join(", ")
         ));
     }
-    out.push_str("  End it with `agentstack session end` — every file above goes back exactly.\n");
+    out.push_str(
+        "  End it with `agentstack x session end` — every file above goes back exactly.\n",
+    );
     out
 }
 
@@ -140,7 +142,7 @@ fn render_session_list(rows: &[SessionRow]) -> String {
         ));
         if r.abandoned {
             out.push_str(
-                "      recover: run `agentstack session end` in that project (or `session end --all`) — it restores your files\n",
+                "      recover: run `agentstack x session end` in that project (or `session end --all`) — it restores your files\n",
             );
         }
     }
@@ -164,7 +166,7 @@ pub fn run(args: &SessionArgs, dir: Option<&Path>) -> Result<()> {
             // rule here. The report below still repeats it, because by then it
             // can name the exact files.
             println!(
-                "  {} temporary: `agentstack session end` (or `agentstack restore --last --write`) puts every file back.",
+                "  {} temporary: `agentstack x session end` (or `agentstack x restore --last --write`) puts every file back.",
                 "↩".dimmed()
             );
             let report = crate::session::start(dir, profile, scope)?;
@@ -188,7 +190,7 @@ pub fn run(args: &SessionArgs, dir: Option<&Path>) -> Result<()> {
         SessionCmd::Freeze { name } => {
             let created = crate::session::freeze(dir, name.as_deref())?;
             println!(
-                "{} froze the session into toolset '{}' — replay it deterministically with `agentstack session start {}`",
+                "{} froze the session into toolset '{}' — replay it deterministically with `agentstack x session start {}`",
                 "✓".green(),
                 created.bold(),
                 created
@@ -251,7 +253,7 @@ mod tests {
         assert!(out.contains("Claude Code · servers → .mcp.json"));
         assert!(out.contains("Codex CLI · servers → .codex/config.toml"));
         assert!(out.contains("skills → .claude/skills: helper"));
-        assert!(out.contains("agentstack session end"));
+        assert!(out.contains("agentstack x session end"));
     }
 
     /// Stage 2.2: `session end` reports exactly what it restored, and an
@@ -290,7 +292,7 @@ mod tests {
         assert!(out.contains("/repo/a"));
         assert!(out.contains("'ops' (project) · started 14h 0m ago · looks abandoned"));
         // Recovery is offered for the abandoned session only.
-        assert!(out.contains("recover: run `agentstack session end`"));
+        assert!(out.contains("recover: run `agentstack x session end`"));
         let recover_lines = out.matches("recover:").count();
         assert_eq!(recover_lines, 1, "only the abandoned row offers recovery");
     }

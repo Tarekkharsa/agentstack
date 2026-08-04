@@ -57,7 +57,7 @@ fn preview(bin: &str, home: &Path, proj: &Path) -> serde_json::Value {
 }
 
 fn lock(bin: &str, home: &Path, proj: &Path) {
-    let (text, ok) = run(bin, &["lock"], home, proj);
+    let (text, ok) = run(bin, &["lock", "--write"], home, proj);
     assert!(ok, "lock failed:\n{text}");
 }
 
@@ -372,9 +372,9 @@ fn a_shipped_card_payload_still_serves_its_old_shape() {
         );
     }
 
-    // Item shape is EXACT: an added field would be a new fact a strict decoder
-    // has never seen, and a removed one would be a field a panel renders today.
-    let expected = vec![
+    // Every field `trust-card-diff-v1` shipped with is still served: removing
+    // one would break a panel that renders it today.
+    let shipped_fields = vec![
         "change",
         "contacts",
         "diff",
@@ -387,6 +387,23 @@ fn a_shipped_card_payload_still_serves_its_old_shape() {
         "recognized_other_projects",
         "runs",
     ];
+    // A field may be ADDED only when a feature name announces it, which is the
+    // flag a strict decoder gates on (`ui_contract.rs`: adding a read or a
+    // feature is backward-compatible and does not bump `SCHEMA_VERSION`). So
+    // this is not a free-for-all: every extra key must be listed here, and
+    // adding one to this list is the reviewable moment.
+    //
+    // `drifted` / `fix` — announced by `trust-content-drift-v1`: whether this
+    // item's approved bytes moved, and the one command that re-pins them.
+    let announced_additions = ["drifted", "fix"];
+    let mut expected = shipped_fields.clone();
+    expected.extend(announced_additions.iter().copied());
+    expected.sort_unstable();
+    assert!(
+        features.contains(&"trust-content-drift-v1"),
+        "the added item fields must be announced by a feature name a decoder can gate on: \
+         {features:?}"
+    );
     let items = v["review"]["items"].as_array().unwrap();
     assert!(!items.is_empty());
     for item in items {

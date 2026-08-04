@@ -81,7 +81,7 @@ fn make(args: &ShimMakeArgs) -> Result<()> {
     println!();
     println!(
         "Each session it starts then records per-run evidence; inspect with \
-         `agentstack report runs` / `agentstack report run <id>`."
+         `agentstack x report runs` / `agentstack x report run <id>`."
     );
     Ok(())
 }
@@ -101,7 +101,7 @@ fn shim_script(agentstack: &Path, real: &Path) -> String {
     format!(
         "#!/bin/sh\n\
          # agentstack shim — mints a per-run identity, then becomes the real CLI.\n\
-         # Regenerate with: agentstack shim make (do not edit)\n\
+         # Regenerate with: agentstack x shim make (do not edit)\n\
          exec \"{}\" shim exec \"{}\" -- \"$@\"\n",
         agentstack.display(),
         real.display()

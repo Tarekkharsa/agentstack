@@ -16,7 +16,7 @@ path = "./skills/api-design"
 [skills.openapi-lint]
 path = "./skills/openapi-lint"
 
-[profiles.backend]
+[toolsets.backend]
 servers = ["postgres"]
 skills = ["api-design", "openapi-lint"]
 

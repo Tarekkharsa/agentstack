@@ -258,7 +258,7 @@ fn trusted_bundle_routes_denied_tool_and_records_it() {
             strip_ansi(&String::from_utf8_lossy(&s.stderr))
         );
     };
-    run_as(&["lock"]);
+    run_as(&["lock", "--write"]);
     // §7.2: the non-interactive grant presents the previewed surface digest.
     let consent = agentstack::trust::digest_for(&proj).unwrap();
     run_as(&["trust", "--yes", "--consented-digest", &consent]);
@@ -352,7 +352,7 @@ fn lockdown_routes_denied_tool_through_the_sidecar_relay() {
             .unwrap();
         assert!(s.status.success(), "`agentstack {}` failed", step[0]);
     };
-    run_as(&["lock"]);
+    run_as(&["lock", "--write"]);
     // §7.2: the non-interactive grant presents the previewed surface digest.
     let consent = agentstack::trust::digest_for(&proj).unwrap();
     run_as(&["trust", "--yes", "--consented-digest", &consent]);

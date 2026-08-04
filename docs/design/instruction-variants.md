@@ -324,8 +324,8 @@ declarations, in this order:
 1. **An explicitly selected toolset's `model`.** `[toolsets.<name>] model =
    "opus"`, when that toolset is the one the command names (`run <cli> --toolset
    backend`, `use backend`, `apply --profile backend`,
-   `instructions --toolset backend`). *(The manifest key is still `profiles`;
-   `toolset` is the CLI's vocabulary for the same noun, with `--profile` kept as
+   `instructions --toolset backend`). *(The manifest key is `toolsets`; `profiles`
+   is still parsed as a silent alias, and `--profile` is kept as
    the alias. That gap predates this document and is not resolved here.)* This
    is the selection act the strategy names — *"the model switch is AgentStack's own
    orchestration: automatic where the harness exposes model identity, explicit

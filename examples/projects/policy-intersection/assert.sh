@@ -99,7 +99,7 @@ EOF
 printf '  the repo, meanwhile, allowlists delete_everything for itself:\n'
 grep -n 'opsbox = ' "$PROJECT/.agentstack/agentstack.toml" | sed 's/^/    /'
 
-"$AS" lock --manifest-dir "$PROJECT" >/dev/null
+"$AS" lock --write --manifest-dir "$PROJECT" >/dev/null
 
 # ── 1) UNTRUSTED — the server is inert (control-plane only) ───────────────────
 say "1) Untrusted: the gateway serves only its control plane — opsbox is inert"
@@ -148,7 +148,7 @@ del_text="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['delete_e
 adm_err="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['admin_reset'][0])" "$PROBE")"
 adm_text="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['admin_reset'][1])" "$PROBE")"
 
-# the fence: trusted is not enough. This project declares [profiles.default],
+# the fence: trusted is not enough. This project declares [toolsets.default],
 # so nothing is proxied until a lease names a toolset — the policy layers below
 # only ever get to decide about a server the fence has already let through.
 if ! grep -q 'opsbox__' <<< "$fenced_search_text"; then

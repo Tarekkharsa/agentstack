@@ -74,8 +74,8 @@ process start time).
 | --- | --- | --- |
 | `agentstack status --json` | `json-reads-v1` | `version`, `clis_detected`, `manifest`, `project`, `next_action` |
 | `agentstack search <q> --json` | `json-reads-v1` | `query`, `results[]` |
-| `agentstack adapters list --json` | `json-reads-v1` | `adapters[]` |
-| `agentstack session list --json` | `json-reads-v1` | `sessions[]` |
+| `agentstack x adapters list --json` | `json-reads-v1` | `adapters[]` |
+| `agentstack x session list --json` | `json-reads-v1` | `sessions[]` |
 | `agentstack doctor --json` | `status-v1` | `state`, `next_action`, `sections`, `errors`, `warnings`, `trust`, `protection` |
 | `agentstack doctor --json` | `doctor-advisories-v1` | top-level `advisories` count; section lines may carry `level: "advisory"` |
 | `agentstack doctor --json` | `doctor-mode-v1` | top-level `mode` (`static` / `clean-at-rest` / `zero-files`) and `activation` (`locked` / `never_activated`) — the same derived readings `status` prints, so no prose-matching |
@@ -84,18 +84,18 @@ process start time).
 | `agentstack doctor --probe --json` | `doctor-probe-v1` | top-level `probe` object. **This one spawns**: it starts each stdio server, speaks the MCP `initialize` handshake, and stops it again |
 | `agentstack use --list --json` | `profiles-v1` | `path`, `trust`, `profiles[]` with readiness |
 | `agentstack use --list --json` | `sessions-v1` | per-entry `active`, plus the top-level `session` object |
-| `agentstack diff --json` | `diff-v1` | `targets[]`, `drifted`, `kept`, `owner_refreshes`, `scope`, `warnings` |
-| `agentstack diff --json` | `diff-ownership-v1` | per-target `managed`, `hand_edited`, `foreign_untracked` |
-| `agentstack diff --json` | `diff-existence-v1` | per-target `existed_before` — splits "never rendered here / file absent" from "the manifest moved ahead of a rendered file" |
-| `agentstack restore --json` | `restore-last` | `entries` (newest first) and `adapter_backups` |
+| `agentstack x diff --json` | `diff-v1` | `targets[]`, `drifted`, `kept`, `owner_refreshes`, `scope`, `warnings` |
+| `agentstack x diff --json` | `diff-ownership-v1` | per-target `managed`, `hand_edited`, `foreign_untracked` |
+| `agentstack x diff --json` | `diff-existence-v1` | per-target `existed_before` — splits "never rendered here / file absent" from "the manifest moved ahead of a rendered file" |
+| `agentstack x restore --json` | `restore-last` | `entries` (newest first) and `adapter_backups` |
 | `agentstack undo --json` | `json-reads-v1` | `entries[]` (newest first) — the same recorded writes `restore --json` lists, keyed for timeline display |
-| `agentstack workflow list --json` | `workflow-observe-v1` | `workflows[]` with per-entry trust and lock state |
-| `agentstack workflow list --json` | `workflow-serial-roles-v1` | per-entry `serial_roles` |
-| `agentstack workflow list --json` / `workflow explain --json` | `workflow-role-selection-v1` | per-entry `role_details[]` — each role's `harness`, `model`, `effort`, `serial`, and any declared value that would not reach the child. `explain` carries the envelope too; it is the deeper per-workflow read and **re-gates on trust** |
-| `agentstack workflow runs --json` | `workflow-observe-v1` | `runs[]` from the machine-global runs directory |
-| `agentstack lease status --json` | `lease-status-v1` | `leases[]` — the machine-level runtime lease registry, each row's `liveness` derived at read time from the PID and that process's start time. `unknown` never means live. Writes nothing; on macOS it does run `/bin/ps` per recorded PID to read a start time, because there is no `/proc` to read instead |
-| `agentstack delivery --json` | `delivery-routing-v1` | `default` plus one `harnesses[]` row per targeted CLI with its per-kind `routes[]` — where bytes go, never whether anything is live |
-| `agentstack image --json` | `image-plan-v1` | the packaging plan: every pinned `members[]` entry, `required_secrets` (names only), `blockers`, `buildable` |
+| `agentstack x workflow list --json` | `workflow-observe-v1` | `workflows[]` with per-entry trust and lock state |
+| `agentstack x workflow list --json` | `workflow-serial-roles-v1` | per-entry `serial_roles` |
+| `agentstack x workflow list --json` / `workflow explain --json` | `workflow-role-selection-v1` | per-entry `role_details[]` — each role's `harness`, `model`, `effort`, `serial`, and any declared value that would not reach the child. `explain` carries the envelope too; it is the deeper per-workflow read and **re-gates on trust** |
+| `agentstack x workflow runs --json` | `workflow-observe-v1` | `runs[]` from the machine-global runs directory |
+| `agentstack x lease status --json` | `lease-status-v1` | `leases[]` — the machine-level runtime lease registry, each row's `liveness` derived at read time from the PID and that process's start time. `unknown` never means live. Writes nothing; on macOS it does run `/bin/ps` per recorded PID to read a start time, because there is no `/proc` to read instead |
+| `agentstack x delivery --json` | `delivery-routing-v1` | `default` plus one `harnesses[]` row per targeted CLI with its per-kind `routes[]` — where bytes go, never whether anything is live |
+| `agentstack x image --json` | `image-plan-v1` | the packaging plan: every pinned `members[]` entry, `required_secrets` (names only), `blockers`, `buildable` |
 | `agentstack status --json` | `library-sources-v1` | `project.shadowed_names[]` — one sentence per capability name more than one linked library source holds. Always present, `[]` when nothing collides |
 | `agentstack status --json` | `instruction-channels-v1` | `project.instruction_channels[]` — one row per targeted CLI, including the ones with no instruction channel at all |
 | `agentstack status --json` | `package-members-v1` | `project.packages[]` — the effective member set this project pinned, after its overrides. Inserted only when a package is selected |
@@ -103,7 +103,7 @@ process start time).
 | `agentstack status --json` | `update-offer-v1` | `project.updates` — an offer, never a currency claim: the check is offline, so a missing key is not "up to date" |
 | `agentstack init --plan` | `init-plan` | the detection plan, with `plan_digest` |
 | `agentstack trust --preview` | `trust-preview` | the full reviewed surface, with `surface_digest` |
-| `agentstack trust --preview` | `trust-server-blockers-v1` | known server/executable blockers, each with a `fix` of `agentstack lock` or `edit-manifest` |
+| `agentstack trust --preview` | `trust-server-blockers-v1` | known server/executable blockers, each with a `fix` of `agentstack lock --write` or `edit-manifest` |
 | `agentstack trust --preview` | `trust-review-card-v1` | the per-item review card a graphical client renders — the first-time surface and, on a re-gate, the changed-lines diff |
 | `agentstack trust --preview` | `trust-card-diff-v1` | `review.items[]` and `review.removed[]` — the card itself, structured, with a `change` marker per item |
 | `agentstack trust --preview` | `trust-card-groups-v1` | `review.groups[]`, holding **indices** into `review.items`, plus `review.question` — the one closing question. There is no per-group or per-item question, accept, or block, and there never will be |
@@ -126,11 +126,11 @@ the digest back to apply.
 | `agentstack edit-profile` | `profiles-edit-batch-v1` | one preview + one digest over a batch of membership edits |
 | `agentstack toolset rename` | `toolset-rename-v1` | renames the toolset everywhere it appears; memberships kept |
 | `agentstack toolset delete` | `toolset-delete-v1` | deletes the toolset; the servers and skills in it stay declared |
-| `agentstack set-mode` | `set-mode-v1` — **superseded, refuses** | the Mode axis retired; delivery is routed, `agentstack status` reports it, and `agentstack uninstall` removes rendered files |
+| `agentstack set-mode` | `set-mode-v1` — **superseded, refuses** | the Mode axis retired; delivery is routed, `agentstack status` reports it, and `agentstack x uninstall` removes rendered files |
 | the managed-`.gitignore` prompt on `apply` / `use --write` | `gitignore-opt-out-v1` | records a durable per-project opt-out from the managed block |
 | `agentstack remove-from-library` | `library-remove-v1` | machine-wide, not project; recoverable from `lib/.trash` |
 | `agentstack remove-capability` | `manifest-remove-v1` | removes a project definition and memberships, then re-locks and re-renders; library untouched |
-| `agentstack restore --last --write` | `restore-last` | undoes the newest recorded write |
+| `agentstack x restore --last --write` | `restore-last` | undoes the newest recorded write |
 
 ## Payload shapes
 
@@ -190,7 +190,9 @@ Field notes:
 - `secrets` carries a **count** and the **names** that resolve from no layer.
   A value never appears. `null` means the reading was not taken.
 - `next_action` is the one step to surface. It is never a command that would
-  refuse.
+  refuse. On `status --json` it is an object; on `doctor --json` it is a bare
+  command string **or `null`** when no step is runnable verbatim, so a consumer
+  must handle null there.
 
 ### `search --json`
 
@@ -278,7 +280,7 @@ Field notes:
 Field notes:
 
 - `abandoned` is the CLI's judgment, not a threshold to re-invent. It is the
-  state a supervising UI died in — offer `agentstack session end`, which
+  state a supervising UI died in — offer `agentstack x session end`, which
   restores every file the session touched.
 - Both `started_unix` and `age_seconds` ship: a poller wants the stable start
   time, a one-shot caller wants the age.
@@ -289,11 +291,11 @@ Some commands emit JSON that is evidence or analysis rather than control-plane
 state. These carry **no envelope** and **no feature name**, and their shape may
 change without a `schema_version` bump. Treat them as reports, not APIs:
 
-- `agentstack explain <name> --json`
-- `agentstack report run --json`, `report runs --json`, `report calls --json`,
+- `agentstack x explain <name> --json`
+- `agentstack x report run --json`, `report runs --json`, `report calls --json`,
   `report wire --json`
-- `agentstack optimize --json`
-- `agentstack workflow report --json` (`workflow explain --json` left this list
+- `agentstack x optimize --json`
+- `agentstack x workflow report --json` (`workflow explain --json` left this list
   when it gained the envelope and `workflow-role-selection-v1`)
 
 ## Guarantees

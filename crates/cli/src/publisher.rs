@@ -210,7 +210,7 @@ impl Provenance {
             }
             Provenance::Verified { key, known: None } => format!(
                 "signed by {} — a publisher you have not recognized before. \
-                 If you know whose key this is: agentstack publisher trust {} --label <name>",
+                 If you know whose key this is: agentstack x publisher trust {} --label <name>",
                 fingerprint(key),
                 key.to_hex()
             ),

@@ -25,7 +25,21 @@ fn main() {
         print!("{}", agentstack::cli::full_command_inventory());
         return;
     }
-    if let Err(err) = run() {
+    // `agentstack x …` — the namespace that holds every command outside the
+    // fifteen on the default help screen. Bare `x` (or `x --help`) lists what
+    // lives there; `x <cmd> …` is rewritten to `<cmd> …` before clap parses, so
+    // the two spellings share one parse tree and one dispatch path below.
+    let mut argv_full: Vec<String> = std::env::args().collect();
+    if argv.first().map(String::as_str) == Some(agentstack::cli::NAMESPACE) {
+        if argv.len() == 1 || argv[1..].iter().all(|a| a == "--help" || a == "-h") {
+            print!("{}", agentstack::cli::namespace_listing());
+            return;
+        }
+        if let Some(stripped) = agentstack::cli::strip_namespace(&argv_full) {
+            argv_full = stripped;
+        }
+    }
+    if let Err(err) = run(argv_full) {
         // Flush buffered narrative BEFORE the error: stdout is block-buffered
         // when piped, so without this the unbuffered stderr line could print
         // above output that explains it (remediation after the refusal).
@@ -50,8 +64,8 @@ fn main() {
     }
 }
 
-fn run() -> Result<()> {
-    let matches = agentstack::cli::runtime_command().get_matches();
+fn run(argv: Vec<String>) -> Result<()> {
+    let matches = agentstack::cli::runtime_command().get_matches_from(argv);
     let cli = Cli::from_arg_matches(&matches)
         .map_err(|e| anyhow::anyhow!("could not decode parsed CLI arguments: {e}"))?;
     let dir = cli.manifest_dir.as_deref();

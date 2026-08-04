@@ -99,7 +99,7 @@ pub fn run_answered(
         anyhow::bail!(
             "`agentstack yes` needs a terminal — it is a review you read and answer. \
              Headlessly, use the explicit path: `agentstack adopt --write`, \
-             `agentstack lock`, then `agentstack trust --yes --consented-digest <digest>` \
+             `agentstack lock --write`, then `agentstack trust --yes --consented-digest <digest>` \
              (from `agentstack trust --preview`), then `agentstack use --write`."
         );
     }
@@ -154,7 +154,7 @@ pub fn run_answered(
     println!(
         "\n{}",
         "This declares them in the manifest and pins their bytes, then shows you the \
-         full review below. Undo the declaration and pin with `agentstack restore \
+         full review below. Undo the declaration and pin with `agentstack x restore \
          --last --write`; `agentstack use --write` then reconciles what each CLI holds."
             .dimmed()
     );
@@ -251,7 +251,7 @@ pub fn run_answered(
     println!(
         "\n{} live. {}",
         "✓".green(),
-        "Undo the declaration and pin: `agentstack restore --last --write`".dimmed()
+        "Undo the declaration and pin: `agentstack x restore --last --write`".dimmed()
     );
     Ok(())
 }
@@ -383,7 +383,7 @@ fn print_held(plan: &Plan) {
     }
     println!(
         "  {}",
-        "review them with `agentstack adopt` → `agentstack lock` → `agentstack trust .`".dimmed()
+        "review them with `agentstack adopt`, then `agentstack adopt --write` → `agentstack lock --write` → `agentstack trust .`".dimmed()
     );
 }
 
@@ -403,7 +403,7 @@ fn report_nothing_to_do(plan: &Plan, base: &Path) {
     println!(
         "\n{}",
         format!(
-            "Review them: `agentstack adopt` → `agentstack lock` → `agentstack trust {}`",
+            "Review them: `agentstack adopt`, then `agentstack adopt --write` → `agentstack lock --write` → `agentstack trust {}`",
             base.display()
         )
         .dimmed()

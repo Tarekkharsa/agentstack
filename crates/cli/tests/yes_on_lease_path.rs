@@ -545,13 +545,40 @@ fn status_names_needs_your_yes_after_a_refusal() {
             .starts_with("agentstack trust"),
         "the pending yes must name the one command: {out}"
     );
-    // The two surfaces must not disagree about what to do next.
+    // The headline must be the first step toward the pending yes that can
+    // ACTUALLY RUN.
+    //
+    // This fixture never pins: it writes a manifest with an inline skill and
+    // no lockfile. `agentstack trust` refuses outright on an unpinned loadable
+    // surface ("its loadable surface isn't fully pinned"), so asserting that
+    // the headline is `agentstack trust …` here asserted a dead end — a driver
+    // executing the machine field gets a non-zero exit, an unchanged state,
+    // and the same string on the next poll. The repair is two rungs, in order:
+    // pin, then review. `needs_your_yes.fix` above still names the review, so
+    // the pending yes is not hidden — only the headline is honest about which
+    // rung comes first.
+    //
+    // Both halves are asserted unconditionally, and that is the point: reading
+    // the expected headline out of the same payload being judged would let a
+    // regression normalise itself (empty `surface_unpinned` + an `agentstack
+    // trust` headline is exactly the old dead end, and would have passed).
+    // This fixture writes `[skills.helper] path = "skills/helper"` — an INLINE
+    // skill — with no lockfile, so an unpinned surface is a fact of the
+    // fixture, not a variable.
+    let headline = out["next_action"]["command"].as_str().unwrap_or_default();
+    let unpinned = out["project"]["surface_unpinned"]
+        .as_array()
+        .expect("status must carry the unpinned surface as an array");
     assert!(
-        out["next_action"]["command"]
-            .as_str()
-            .unwrap_or_default()
-            .starts_with("agentstack trust"),
-        "next_action must agree with the pending yes: {out}"
+        !unpinned.is_empty(),
+        "this fixture declares an inline skill with no lockfile, so the unpinned \
+         surface must be reported: {out}"
+    );
+    let want = "agentstack lock --write";
+    assert!(
+        headline.starts_with(want),
+        "next_action must name the first runnable rung toward the pending yes \
+         (expected it to start with `{want}`): {out}"
     );
     // Still no card here: the fix names the command that renders it.
     assert!(

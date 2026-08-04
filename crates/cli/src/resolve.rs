@@ -460,12 +460,12 @@ pub fn verify_library_pin(
     match lock.get_server(name) {
         Some(entry) if entry.checksum.hex() != resolved.checksum => Err(format!(
             "library definition drifted from agentstack.lock (locked {}, current {}) — \
-             review it and re-run `agentstack lock`",
+             review it, then re-pin with `agentstack lock --write`",
             entry.checksum, resolved.checksum
         )),
         Some(_) => Ok(()),
         None => Err(
-            "library server is not pinned in agentstack.lock — pin it with `agentstack lock`"
+            "library server is not pinned in agentstack.lock — pin it with `agentstack lock --write`"
                 .to_string(),
         ),
     }
@@ -545,7 +545,7 @@ fn resolve_package_server(
     let text = store.pinned_definition(hex).map_err(|_| {
         format!(
             "its pinned definition is not in the content store, or no longer verifies against \
-             the digest package '{}' pins — re-pin with `agentstack lock`",
+             the digest package '{}' pins — re-pin with `agentstack lock --write`",
             crate::text::sanitize_line(&pkg.name)
         )
     })?;
@@ -554,7 +554,7 @@ fn resolve_package_server(
     let server: Server = toml::from_str(&text).map_err(|_| {
         format!(
             "its pinned definition is not a readable server table — re-pin package '{}' with \
-             `agentstack lock`",
+             `agentstack lock --write`",
             crate::text::sanitize_line(&pkg.name)
         )
     })?;

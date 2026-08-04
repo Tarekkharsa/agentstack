@@ -26,7 +26,7 @@ The important split is:
 
 - `agentstack_lease_open` and `agentstack_lease_close` are MCP tool calls made
   by an agent through one live connection; they are not shell commands.
-- `agentstack lock` is a human-side shell command. Run it after reviewing a
+- `agentstack lock --write` is a human-side shell command. Run it after reviewing a
   profile created by `agentstack_lease_freeze` so `agentstack.lock` follows the
   manifest change.
 - A lease is process-local. Another terminal cannot inspect it, and process

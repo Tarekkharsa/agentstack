@@ -582,10 +582,10 @@ var MODE={
     lines:[['Preview: 1 server → 4 targets  (.mcp.json, .codex/config.toml, .gemini/settings.json, opencode.json)','w'],['Proceed? [Y/n] y','a'],['✓ apply --write — rendered to 4 target(s)','g'],['✓ skills activated · doctor: all green','g']],
     note:'The render path: preview → confirm → apply --write → activate skills → doctor. Files sit ready on disk the moment a CLI starts.'},
   clean:{name:'clean-at-rest',desc:'repo stays pristine between sessions — files exist only inside session start / session end',
-    lines:[['✓ agentstack lock — name refs pinned, nothing rendered','g'],['git status → clean','w'],['next: agentstack session start <toolset>   # renders for one session','d'],['      agentstack session end             # reverts every file','d']],
+    lines:[['✓ agentstack lock --write — name refs pinned, nothing rendered','g'],['git status → clean','w'],['next: agentstack session start <toolset>   # renders for one session','d'],['      agentstack session end             # reverts every file','d']],
     note:'Nothing is rendered now. The wizard teaches the session rhythm instead: capabilities arrive with session start and revert on session end.'},
   zero:{name:'zero-files',desc:'nothing on disk — the gateway serves each trusted repo’s stack live (CLI must speak MCP)',
-    lines:[['✓ agentstack lock — pinned, nothing rendered','g'],['Register the gateway in your CLIs? [Y/n] y','a'],['✓ gateway connect --all --write — 4 CLIs registered','g'],['→ finish with:  agentstack trust .','w']],
+    lines:[['✓ agentstack lock --write — pinned, nothing rendered','g'],['Register the gateway in your CLIs? [Y/n] y','a'],['✓ gateway connect --all --write — 4 CLIs registered','g'],['→ finish with:  agentstack trust .','w']],
     note:'The wizard never runs trust for you — trust is human consent. Until you review and trust the repo, its stack stays inert.'}};
 function wizColor(k){return {w:'var(--term-text)',g:'var(--term-ok)',a:'var(--term-warn)',d:'var(--term-muted)'}[k];}
 function renderWiz(){

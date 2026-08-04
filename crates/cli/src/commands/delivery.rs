@@ -1,4 +1,4 @@
-//! `agentstack delivery` — state the routing, and set the one override.
+//! `agentstack x delivery` — state the routing, and set the one override.
 //!
 //! The read half prints what [`crate::delivery::Plan`] decided, per harness, in
 //! plain language. The write half records **Render locally** in the manifest —
@@ -16,7 +16,7 @@ use owo_colors::OwoColorize;
 use std::path::Path;
 
 use crate::cli::{DeliveryArgs, DeliveryCmd};
-use crate::delivery::{Lane, Plan};
+use crate::delivery::{HarnessPlan, Lane, Plan};
 use crate::render::resolve_targets;
 
 pub fn run(args: &DeliveryArgs, manifest_dir: Option<&Path>) -> Result<()> {
@@ -58,6 +58,12 @@ fn show(json: bool, manifest_dir: Option<&Path>) -> Result<()> {
         return Ok(());
     }
 
+    // The same probe doctor's zero-files section runs — one definition of
+    // "is the bridge registered?", read PER HARNESS so a single connected CLI
+    // cannot make the others claim live delivery.
+    let unconnected = unconnected_live(&plan, &ctx.registry);
+    let declares_live = declares_something_live(&ctx.loaded.manifest, &plan);
+
     let width = plan
         .harnesses
         .iter()
@@ -65,7 +71,11 @@ fn show(json: bool, manifest_dir: Option<&Path>) -> Result<()> {
         .max()
         .unwrap_or(0);
     for h in &plan.harnesses {
-        println!("  {:width$}   {}", h.display, h.sentence());
+        println!(
+            "  {:width$}   {}",
+            h.display,
+            harness_sentence(h, super::overview::bridge_registered(&ctx.registry, &h.id))
+        );
         if h.render_locally {
             println!(
                 "  {:width$}   {}",
@@ -95,6 +105,11 @@ fn show(json: bool, manifest_dir: Option<&Path>) -> Result<()> {
     }
 
     // The honesty rules, both of them, on their own lines.
+    // Only when something DECLARED travels live and some live harness has no
+    // bridge: a project of pure instructions/settings needs no bridge at all.
+    if declares_live && !unconnected.is_empty() {
+        println!("  {} {}", "·".dimmed(), CONNECT_THE_BRIDGE);
+    }
     if plan.has_dynamic_lane() {
         println!("  {} {}", "·".dimmed(), crate::delivery::ZERO_ARTIFACTS);
     }
@@ -104,7 +119,7 @@ fn show(json: bool, manifest_dir: Option<&Path>) -> Result<()> {
     println!(
         "  {} {}",
         "·".dimmed(),
-        "write files anyway: agentstack delivery render-locally --write".dimmed()
+        "write files anyway: agentstack x delivery render-locally --write".dimmed()
     );
     Ok(())
 }
@@ -123,7 +138,7 @@ fn render_locally(
     if let Some(id) = harness {
         anyhow::ensure!(
             ctx.registry.get(id).is_some(),
-            "no such tool: {id} — `agentstack adapters list` names the ones this build knows"
+            "no such tool: {id} — `agentstack x adapters list` names the ones this build knows"
         );
     }
 
@@ -258,13 +273,112 @@ pub fn set_render_locally(text: &str, harness: Option<&str>, on: bool) -> Result
     Ok(doc.to_string())
 }
 
+/// The one recovery command for a plan that routes live with no bridge
+/// registered. Shared so `status`, `delivery`, and `doctor`'s finding cannot
+/// name three different commands for one state.
+pub const CONNECT_THE_BRIDGE: &str =
+    "register the bridge: agentstack x gateway connect --all --write";
+
+/// `HarnessPlan::sentence` states the routing as if it were already happening.
+/// That is true only once a CLI has the gateway registered: with no bridge,
+/// nothing in the dynamic lane reaches any tool. Invariant 8 — a surface may
+/// not claim a capability is delivered when it is not — so the live clause is
+/// restated as a PLAN, and the rendered clause (which really is on disk) is
+/// left exactly as it was.
+///
+/// Takes `&HarnessPlan` and returns an owned `String` for the same reason
+/// `sentence` does: the text is assembled here, so there is nothing to borrow.
+///
+/// `bridge_registered` is **this harness's own** bridge state, never a
+/// project-wide any-of reading: one connected CLI does not deliver anything to
+/// the four that have no bridge, and saying so was an invariant-8 breach.
+pub fn harness_sentence(h: &HarnessPlan, bridge_registered: bool) -> String {
+    let live = h.kinds_in(Lane::Dynamic);
+    if bridge_registered || live.is_empty() {
+        return h.sentence();
+    }
+    let names = |kinds: &[crate::delivery::Kind]| -> String {
+        kinds
+            .iter()
+            .map(|k| k.label())
+            .collect::<Vec<_>>()
+            .join(" + ")
+    };
+    let files = h.kinds_in(Lane::Rendered);
+    if files.is_empty() {
+        format!("{} planned live (not connected)", names(&live))
+    } else {
+        format!(
+            "{} planned live (not connected) · {} written to files",
+            names(&live),
+            names(&files)
+        )
+    }
+}
+
 /// One line for surfaces that already print a per-harness list and only need
 /// the lane summary appended (`init`'s plan screen, `status`).
+///
+/// Each harness's bridge state is read individually through
+/// [`super::overview::bridge_registered`], the one definition every surface
+/// shares.
+pub fn summary_lines_for(plan: &Plan, registry: &crate::adapter::Registry) -> Vec<String> {
+    plan.harnesses
+        .iter()
+        .map(|h| {
+            format!(
+                "{} — {}",
+                h.display,
+                harness_sentence(h, super::overview::bridge_registered(registry, &h.id))
+            )
+        })
+        .collect()
+}
+
+/// The plan stated as if every bridge were registered. For surfaces describing
+/// a plan that has deliberately not been carried out yet (`init`'s preview),
+/// where the un-registered state is disclosed separately and in full.
 pub fn summary_lines(plan: &Plan) -> Vec<String> {
     plan.harnesses
         .iter()
-        .map(|h| format!("{} — {}", h.display, h.sentence()))
+        .map(|h| format!("{} — {}", h.display, harness_sentence(h, true)))
         .collect()
+}
+
+/// Display names of the harnesses this plan routes to the LIVE lane that have
+/// no bridge registered. Empty means every live harness can actually receive
+/// what the plan promises it.
+pub fn unconnected_live(plan: &Plan, registry: &crate::adapter::Registry) -> Vec<String> {
+    plan.live_harnesses()
+        .iter()
+        .filter(|h| !super::overview::bridge_registered(registry, &h.id))
+        .map(|h| h.display.clone())
+        .collect()
+}
+
+/// Does this manifest declare anything the LIVE lane actually carries?
+///
+/// [`Plan`] routes by what each harness *can* take, so it reports a dynamic
+/// lane even over an empty manifest, and even for a project whose only
+/// capabilities are instructions and settings — both served entirely from
+/// files. The bridge question is only real when something declared would
+/// travel live, so this is the single predicate `status`, `doctor`, and
+/// `delivery` all gate the "register the bridge" hint on.
+pub fn declares_something_live(
+    manifest: &agentstack_core::manifest::Manifest,
+    plan: &Plan,
+) -> bool {
+    plan.harnesses
+        .iter()
+        .flat_map(|h| h.kinds_in(Lane::Dynamic))
+        .any(|k| match k {
+            crate::delivery::Kind::Skill => !manifest.skills.is_empty(),
+            crate::delivery::Kind::Server => !manifest.declared_server_names().is_empty(),
+            crate::delivery::Kind::Instruction => !manifest.instructions.is_empty(),
+            crate::delivery::Kind::Setting => !manifest.settings.is_empty(),
+            crate::delivery::Kind::Hook => !manifest.hooks.is_empty(),
+            crate::delivery::Kind::Extension => !manifest.extensions.is_empty(),
+        })
 }
 
 /// Does this plan put anything in the dynamic lane? Convenience for callers

@@ -11,7 +11,7 @@ Prerequisite: a committed [manifest](../concepts.md) and
 
 ```bash
 # Reproducible install, then a gate that fails on any problem
-agentstack install --locked   # fetch pinned skills; fail if the lockfile would change
+agentstack x install --locked   # fetch pinned skills; fail if the lockfile would change
 agentstack doctor --ci        # exit nonzero on errors, drift, policy, or unsafe content
 
 # Building the manifest fresh in a job? Write only the manifest, no prompts:
@@ -23,7 +23,7 @@ Or use the one-line GitHub Action, which wraps the same gate:
 ```yaml
 steps:
   - uses: actions/checkout@v4
-  - uses: Tarekkharsa/agentstack@v0.17.1  # pin a release tag, not @main
+  - uses: Tarekkharsa/agentstack@v0.17.1  # pin the release tag you use, never @main
 ```
 
 `install --locked` fetches skill sources into the store and **fails if resolving

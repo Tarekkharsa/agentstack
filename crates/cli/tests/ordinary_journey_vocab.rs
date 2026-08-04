@@ -96,7 +96,35 @@ fn scripted_init_apply_doctor_needs_no_advanced_vocabulary() {
         transcript.push_str(&text);
     }
 
-    let lower = transcript.to_lowercase();
+    // One carve-out, and it is invariant 8 ("claims match enforcement") beating
+    // the vocabulary rule rather than an exception to it: when capabilities
+    // route to the live lane and no CLI has the bridge registered, the scripted
+    // import must say so and name the one command that fixes it. Staying silent
+    // to protect the word "gateway" would leave the summary claiming delivery
+    // that does not happen. Only that disclosure's own lines are exempt.
+    let disclosure = |line: &str| {
+        line.contains("NOT YET CONNECTED")
+            || line.contains("register the bridge")
+            || line.contains("gateway connect")
+            // `doctor`'s half of the same disclosure, for the same reason.
+            || line.contains("Zero-files gateway")
+            || line.contains("nothing routed live is reaching it")
+    };
+    // The gateway section is hidden while it is all-clean, so this trust-state
+    // phrase only reaches the screen because the honest bridge finding un-hides
+    // the section it sits in. It is collateral of the same disclosure, not
+    // vocabulary the journey reaches for — so exempt THE PHRASE, never the whole
+    // line: any other advanced word sharing that line must still fail the test.
+    let lower = transcript
+        .lines()
+        .filter(|l| !disclosure(l))
+        .map(|l| {
+            l.to_lowercase()
+                .replace("this project is trusted for auto mode", "")
+                .replace("not trusted for auto mode", "")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
     for word in ADVANCED_VOCAB {
         assert!(
             !lower.contains(word),
@@ -105,10 +133,21 @@ fn scripted_init_apply_doctor_needs_no_advanced_vocabulary() {
     }
 
     // The journey really happened: the manifest exists, the render landed, and
-    // doctor closed clean — so the vocabulary claim covers a working flow, not
-    // an early exit.
+    // doctor's only finding is the honest un-registered-bridge one — so the
+    // vocabulary claim covers a working flow, not an early exit.
+    //
+    // This scripted journey never registers the bridge, so a clean doctor would
+    // be the dishonest outcome: capabilities route to the live lane and reach
+    // nothing. Invariant 8 makes that one error the correct close.
     assert!(proj.join(".agentstack/agentstack.toml").exists());
-    assert!(transcript.contains("0 errors, 0 warnings"));
+    assert!(
+        transcript.contains("1 error, 0 warnings"),
+        "expected exactly the un-registered-bridge finding:\n{transcript}"
+    );
+    assert!(
+        transcript.contains("nothing routed live is reaching it"),
+        "the one error must be the bridge finding:\n{transcript}"
+    );
 }
 
 /// Mechanism nouns: the names of the parts, as opposed to the names of the

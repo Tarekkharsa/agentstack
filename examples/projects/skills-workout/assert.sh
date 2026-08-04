@@ -103,7 +103,7 @@ SRC_SQL="$AGENTSTACK_HOME/lib/skills/sql-review/SKILL.md"
 # ─────────────────────────────────────────────────────────────────────────────
 say "LANE A (on request) — the rendered lane via 'use <toolset> --write'"
 # ─────────────────────────────────────────────────────────────────────────────
-"$AS" lock >/dev/null
+"$AS" lock --write >/dev/null
 "$AS" use docs --scope project --write >/dev/null
 
 # docs = api-conventions (inline) + sql-review (library), and EXACTLY those two.

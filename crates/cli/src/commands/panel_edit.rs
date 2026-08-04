@@ -583,7 +583,7 @@ fn print_created(name: &str) {
     println!("  Switch to it:  agentstack use {name} --write");
     println!(
         "  {}",
-        format!("(or only for now: agentstack session start {name})").dimmed()
+        format!("(or only for now: agentstack x session start {name})").dimmed()
     );
     println!(
         "  {}",
@@ -1361,7 +1361,7 @@ fn profile_blockers(manifest: &Manifest, name: &str, dir: Option<&Path>) -> Vec<
         if crate::session::active(&ctx.dir).is_some_and(|s| s.profile == name) {
             out.push((
                 "a session is using it".to_string(),
-                "agentstack session end".to_string(),
+                "agentstack x session end".to_string(),
             ));
         }
     }
@@ -1370,7 +1370,7 @@ fn profile_blockers(manifest: &Manifest, name: &str, dir: Option<&Path>) -> Vec<
         if wf.roles.iter().any(|r| r == name) {
             out.push((
                 format!("workflow '{wf_name}' declares it as a role"),
-                format!("edit [workflows.{wf_name}] roles, then re-run `agentstack lock`"),
+                format!("edit [workflows.{wf_name}] roles, then re-run `agentstack lock --write`"),
             ));
         }
     }

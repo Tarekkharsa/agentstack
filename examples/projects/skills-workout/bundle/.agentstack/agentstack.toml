@@ -10,13 +10,13 @@ path = "./skills/api-conventions"
 [skills.release-checklist]
 path = "./skills/release-checklist"
 
-# The `docs` profile mixes one inline skill and one that lives only in the
+# The `docs` toolset mixes one inline skill and one that lives only in the
 # machine's central library (sql-review, seeded by `agentstack lib add`).
-[profiles.docs]
+[toolsets.docs]
 skills = ["api-conventions", "sql-review"]
 
-# The `all` profile uses the "*" wildcard. Note the semantics proved by the
+# The `all` toolset uses the "*" wildcard. Note the semantics proved by the
 # assertions: "*" expands to the manifest's own inline skills only — it does
 # NOT sweep in library skills (sql-review / incident-runbook).
-[profiles.all]
+[toolsets.all]
 skills = ["*"]

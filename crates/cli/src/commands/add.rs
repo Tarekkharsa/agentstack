@@ -90,7 +90,7 @@ fn add_from(a: &AddFromArgs, manifest_dir: Option<&Path>) -> Result<()> {
         CandidateKind::Extension(ext) => anyhow::bail!(
             "'{}' is a native extension — executable in-process code that `add from` does not \
              install. Reference it in [extensions.{}] with target = \"{}\", then run \
-             `agentstack lock` so the code is pinned and re-gates trust.",
+             `agentstack lock --write` so the code is pinned and re-gates trust.",
             candidate.name,
             candidate.name,
             ext.target
@@ -149,7 +149,7 @@ pub(crate) fn resolve_git_pack_gated(
 fn add_from_server(a: &AddFromArgs, ctx: &super::Context, candidate: &Candidate) -> Result<()> {
     if ctx.loaded.manifest.servers.contains_key(&candidate.name) {
         anyhow::bail!(
-            "server '{}' already exists in the manifest — run `agentstack remove {}` first, or rename it",
+            "server '{}' already exists in the manifest — run `agentstack x remove {}` first, or rename it",
             candidate.name,
             candidate.name
         );
@@ -214,7 +214,7 @@ fn add_from_skill(
 ) -> Result<()> {
     if ctx.loaded.manifest.skills.contains_key(&candidate.name) {
         anyhow::bail!(
-            "skill '{}' already exists in the manifest — run `agentstack remove {}` first, or rename it",
+            "skill '{}' already exists in the manifest — run `agentstack x remove {}` first, or rename it",
             candidate.name,
             candidate.name
         );
@@ -406,7 +406,7 @@ fn add_pack(
     }
     if manifest.packs.contains_key(pack) {
         anyhow::bail!(
-            "a pack '{pack}' is already installed in the manifest — run `agentstack remove {pack}` first to reinstall"
+            "a pack '{pack}' is already installed in the manifest — run `agentstack x remove {pack}` first to reinstall"
         );
     }
 
@@ -761,7 +761,7 @@ fn upsert_server(a: &AddServerArgs, manifest_dir: Option<&Path>, allow_update: b
     let exists = ctx.loaded.manifest.servers.contains_key(&a.name);
     if exists && !allow_update {
         anyhow::bail!(
-            "server '{name}' already exists in the manifest — update it in place: `agentstack set server {name} …` · or remove it first: `agentstack remove {name}`",
+            "server '{name}' already exists in the manifest — update it in place: `agentstack x set server {name} …` · or remove it first: `agentstack x remove {name}`",
             name = a.name
         );
     }
@@ -800,13 +800,13 @@ fn upsert_server(a: &AddServerArgs, manifest_dir: Option<&Path>, allow_update: b
     match a.transport {
         ServerType::Http if server.url.is_none() => {
             anyhow::bail!(
-                "http server needs --url\n  fix: agentstack set server {} --url <URL> --write",
+                "http server needs --url\n  fix: agentstack x set server {} --url <URL> --write",
                 a.name
             )
         }
         ServerType::Stdio if server.command.is_none() => {
             anyhow::bail!(
-                "stdio server needs --command\n  fix: agentstack set server {} --type stdio --command <CMD> --write",
+                "stdio server needs --command\n  fix: agentstack x set server {} --type stdio --command <CMD> --write",
                 a.name
             )
         }
@@ -1270,7 +1270,7 @@ fn final_names(
         })?;
         if ctx.loaded.manifest.skills.contains_key(&name) {
             anyhow::bail!(
-                "skill '{name}' already exists in the manifest — run `agentstack remove {name}` first, or rename it"
+                "skill '{name}' already exists in the manifest — run `agentstack x remove {name}` first, or rename it"
             );
         }
         names.push(name);
@@ -1465,7 +1465,7 @@ fn preview_and_commit(
     lock.save(&ctx.dir).with_context(|| {
         format!(
             "the manifest was written but the lockfile at {} could not be — \
-             run `agentstack lock` to reconcile",
+             run `agentstack lock --write` to reconcile",
             crate::lock::Lock::path(&ctx.dir).display()
         )
     })?;
@@ -1543,7 +1543,7 @@ fn print_activation_footer(act: &ActivationCtx, profile: Option<&str>) {
         ),
         Mode::CleanAtRest => {
             println!(
-                "{} next session picks this up: `agentstack session start{}`",
+                "{} next session picks this up: `agentstack x session start{}`",
                 "·".dimmed(),
                 profile
                     .map(|p| format!(" {p}"))
@@ -1592,7 +1592,15 @@ fn write_manifest(
     if write {
         crate::util::atomic::write(&ctx.loaded.manifest_path, &new_text)
             .with_context(|| format!("writing {}", ctx.loaded.manifest_path.display()))?;
-        println!("{} {verb}d '{name}'.", "✓".green());
+        // Past tense by rule, not by appending "d": "add" + "d" printed the
+        // typo "addd". A verb already ending in "e" ("update") only needs the
+        // "d"; anything else needs "ed".
+        let past = if verb.ends_with('e') {
+            format!("{verb}d")
+        } else {
+            format!("{verb}ed")
+        };
+        println!("{} {past} '{name}'.", "✓".green());
     } else {
         println!(
             "\nDry run. Re-run with {} to update the manifest.",
@@ -1658,7 +1666,7 @@ pub fn write_from_provider(dir: &Path, id: &str, profile: Option<&str>) -> Resul
             let manifest = &ctx.loaded.manifest;
             if manifest.servers.contains_key(&candidate.name) {
                 anyhow::bail!(
-                    "server '{}' already exists — run `agentstack remove {}` first, or rename it",
+                    "server '{}' already exists — run `agentstack x remove {}` first, or rename it",
                     candidate.name,
                     candidate.name
                 );
@@ -1678,7 +1686,7 @@ pub fn write_from_provider(dir: &Path, id: &str, profile: Option<&str>) -> Resul
             let manifest = &ctx.loaded.manifest;
             if manifest.skills.contains_key(&candidate.name) {
                 anyhow::bail!(
-                    "skill '{}' already exists — run `agentstack remove {}` first, or rename it",
+                    "skill '{}' already exists — run `agentstack x remove {}` first, or rename it",
                     candidate.name,
                     candidate.name
                 );
@@ -1753,7 +1761,7 @@ pub fn write_from_provider(dir: &Path, id: &str, profile: Option<&str>) -> Resul
         CandidateKind::Extension(ext) => anyhow::bail!(
             "'{}' is a native extension — executable in-process code that `add from` does not \
              install. Reference it in [extensions.{}] with target = \"{}\", then run \
-             `agentstack lock`.",
+             `agentstack lock --write`.",
             candidate.name,
             candidate.name,
             ext.target
@@ -2169,7 +2177,10 @@ mod tests {
         };
 
         let err = add_server(&args, Some(tmp.path())).unwrap_err();
-        assert!(err.to_string().contains("agentstack set server"), "{err:#}");
+        assert!(
+            err.to_string().contains("agentstack x set server"),
+            "{err:#}"
+        );
 
         upsert_server(&args, Some(tmp.path()), true).unwrap();
         let m: Manifest =

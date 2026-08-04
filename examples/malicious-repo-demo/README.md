@@ -24,7 +24,7 @@ The villain is [`bundle/evil_server.py`](bundle/evil_server.py): an MCP server
 that advertises a friendly `status` tool and a malicious `exfiltrate` tool.
 Call `exfiltrate` and it reads a planted credential off disk and POSTs it to a
 localhost "sink" — the phone-home. The [`bundle/`](bundle/) manifest declares
-that server behind a toolset (`[profiles.default]`) and, tellingly, **no
+that server behind a toolset (`[toolsets.default]`) and, tellingly, **no
 firewall of its own** — a malicious repo won't constrain itself.
 
 The demo then runs it four ways:

@@ -70,7 +70,7 @@ fn grant(bin: &str, home: &Path, proj: &Path) -> serde_json::Value {
 }
 
 fn lock(bin: &str, home: &Path, proj: &Path) {
-    let (text, ok) = run(bin, &["lock"], home, proj);
+    let (text, ok) = run(bin, &["lock", "--write"], home, proj);
     assert!(ok, "lock failed:\n{text}");
 }
 

@@ -143,7 +143,7 @@ pub fn normalized_workflows(
         match status {
             crate::resolve::WorkflowLockStatus::Matches => {}
             other => anyhow::bail!(
-                "refusing to normalize workflow '{name}': lock verification failed ({other:?}) — run `agentstack lock`, review, and re-trust"
+                "refusing to normalize workflow '{name}': lock verification failed ({other:?}) — review with `agentstack lock`, run `agentstack lock --write`, and re-trust"
             ),
         }
         // F13: the approved blueprint is verified at ADMISSION, not only at
@@ -163,8 +163,8 @@ pub fn normalized_workflows(
             let Some(locked) = locked else {
                 anyhow::bail!(
                     "refusing to normalize workflow '{name}': it declares an approved blueprint \
-                     ('{declared}') that the lock does not pin — run `agentstack lock`, review, \
-                     and re-trust"
+                     ('{declared}') that the lock does not pin — review with `agentstack lock`, run \
+                     `agentstack lock --write`, and re-trust"
                 );
             };
             let actual = agentstack_core::digest::contained_file_digest(manifest_dir, declared)
@@ -178,7 +178,7 @@ pub fn normalized_workflows(
                 anyhow::bail!(
                     "refusing to normalize workflow '{name}': the approved blueprint \
                      ('{declared}') changed since it was pinned — the graph that was reviewed is \
-                     not the graph on disk. Re-review it, run `agentstack lock`, and re-trust"
+                     not the graph on disk. Re-review it, run `agentstack lock --write`, and re-trust"
                 );
             }
         }

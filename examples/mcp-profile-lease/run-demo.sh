@@ -17,12 +17,12 @@ mkdir -p "$AGENTSTACK_HOME" "$PROJECT"
 cp -R "$HERE/bundle/." "$PROJECT/"
 
 printf '\nMCP profile lease demo\n\n'
-"$AS" lock --manifest-dir "$PROJECT"
+"$AS" lock --write --manifest-dir "$PROJECT"
 python3 "$HERE/lease_demo.py" "$AS" "$PROJECT"
 
 # lease_freeze changed the manifest. Review would happen here; this demo owns
 # its temporary fixture, so accepting the changed profile is safe.
-"$AS" lock --manifest-dir "$PROJECT" >/dev/null
+"$AS" lock --write --manifest-dir "$PROJECT" >/dev/null
 
 test ! -e "$PROJECT/.mcp.json"
 test ! -e "$PROJECT/.claude/skills"

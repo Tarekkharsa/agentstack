@@ -274,7 +274,7 @@ agentstack run claude-code --sandbox --lockdown  # container, no route out</code
 <li><code>run --sandbox --lockdown</code> puts the container on an internal-only network whose sole peer is the egress sidecar — no host route, no internet. Posture: <code>LOCKDOWN / ENFORCED · NO DIRECT ROUTE</code>.</li>
 </ul>
 <p>Point <code>AGENTSTACK_SANDBOX_IMAGE</code> at an image that carries your agent CLI. The lockdown egress sidecar is pulled from GHCR automatically, pinned per release (override with <code>AGENTSTACK_EGRESS_IMAGE</code>).</p>
-<p>After a run, <code>agentstack report run &lt;id&gt;</code> replays its posture label and every egress and tool-call decision — see <a href="../howto/see-what-happened.html">see what your agents did</a>.</p>
+<p>After a run, <code>agentstack x report run &lt;id&gt;</code> replays its posture label and every egress and tool-call decision — see <a href="../howto/see-what-happened.html">see what your agents did</a>.</p>
 <p><strong>Limits.</strong> The posture labels name each mode's ceiling honestly: the protected default is pre-launch gating plus a frozen surface, not a kernel fence — the harness still runs as you, on the host — and only <code>--lockdown</code> is topologically confined. What each mode actually enforces per dimension, with every strength caveat, is the <a href="../enforcement.html#the-matrix">enforcement matrix</a>.</p>
 <ul>
 <li><a href="../concepts.html">Concepts</a> — sandbox vs lockdown vs the protected run, posture</li>

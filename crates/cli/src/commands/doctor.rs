@@ -22,6 +22,18 @@ use crate::secret::Resolver;
 use crate::state::{self, target_key, State};
 use crate::util::paths;
 
+/// The one command that registers the bridge. The same command
+/// [`super::delivery::CONNECT_THE_BRIDGE`] names, so `status`, `delivery`, and
+/// this finding cannot name three different fixes for one state.
+const BRIDGE_FIX: &str = "agentstack x gateway connect --all --write";
+
+/// Is this finding the unconnected-bridge one? Recognized by its fix, so the
+/// next-step ladder can hold it below the consent rung without a second flag
+/// travelling beside the finding.
+fn is_bridge_finding(msg: &str) -> bool {
+    msg.contains(BRIDGE_FIX)
+}
+
 #[derive(PartialEq)]
 enum Level {
     Ok,
@@ -99,6 +111,53 @@ struct Report {
     /// "ready" over nothing to be ready with. Set in `run_checks`; `None`
     /// when doctor ran with no project.
     declares_anything: Option<bool>,
+    /// Whether the manifest declares at least one server (inline or by name
+    /// from a toolset). Separate from `declares_anything` because the next-step
+    /// ladder's last rung names `toolset create … --server <server>`, which
+    /// cannot run without one — a skills-only project declares something and
+    /// still has no server to group.
+    declares_a_server: Option<bool>,
+    /// Is anything on disk for this project's targets? The same reading
+    /// `status` calls `rendered` (`overview::has_rendered_artifacts`), carried
+    /// here so both surfaces stand on the same rung of the setup ladder.
+    rendered: Option<bool>,
+    /// Does `apply` render anything this manifest declares? The shared
+    /// predicate `overview::apply_renders_something`, carried here so the
+    /// Apply rung's command is corrected identically on both surfaces.
+    /// `None` reads as `true` — the behaviour a report that never set it had.
+    apply_renders: Option<bool>,
+    /// Does the manifest name no toolset yet? `None`/`Some(true)` both read as
+    /// "ungrouped", so a report that never set it behaves as it did before.
+    no_toolsets: Option<bool>,
+    /// Have bytes this project already pinned moved since? The SAME shared
+    /// reading `status` and `trust --preview` use
+    /// ([`crate::commands::trust::content_drift`]) — not a second detector.
+    ///
+    /// It exists here only so [`next_action`](Report::next_action) can rank
+    /// the re-pin rung above the consent rung. Without it doctor named
+    /// `agentstack trust .` on a drifted-but-pinned surface, and the grant
+    /// REFUSES there — guidance that names step 2 while step 1 is still
+    /// outstanding, which breaks doctor's own "never a command that would
+    /// refuse" contract and disagrees with `status`. Reporting only: nothing
+    /// about how trust is granted changes.
+    content_drift: bool,
+    /// Is anything this project declares NOT pinned at all? The SAME shared
+    /// reading the grant itself refuses on
+    /// ([`crate::commands::trust::unpinned_surface`]) — not a second detector.
+    ///
+    /// The sibling of [`content_drift`] one step earlier in the same story: a
+    /// never-pinned surface also makes `agentstack trust .` refuse, so naming
+    /// the review here would hand a program a command that can never make
+    /// progress. Reporting and ranking only.
+    ///
+    /// The FINDINGS, not a bool. Each carries its own `fix: Option<&str>`, and
+    /// `None` — a declared body that is absent from disk — is the answer that
+    /// must survive to the machine field. Collapsing to `!is_empty()` here
+    /// discarded it and made `doctor` name `agentstack lock --write` over a
+    /// state that command cannot repair, contradicting `trust --preview`'s
+    /// `fix: null` on the same project. See
+    /// [`super::overview::unpinned_next_action`].
+    surface_unpinned: Vec<crate::commands::trust::ContentDrift>,
 }
 
 /// The machine's bridge coverage, from the ONE definition `gateway connect`
@@ -149,6 +208,12 @@ impl Report {
             clis: None,
             probe: None,
             declares_anything: None,
+            declares_a_server: None,
+            rendered: None,
+            apply_renders: None,
+            no_toolsets: None,
+            content_drift: false,
+            surface_unpinned: Vec::new(),
         }
     }
 
@@ -282,11 +347,24 @@ impl Report {
     /// Advisories are never candidates: they have nothing to converge on.
     fn first_fix(&self) -> Option<&str> {
         let want = if self.errors > 0 { "error" } else { "warn" };
+        self.fix_at(want, false)
+    }
+
+    /// [`first_fix`](Self::first_fix), with the option to skip the
+    /// unconnected-bridge finding.
+    ///
+    /// That finding is a real error and stays one in the list, but it must not
+    /// outrank the consent rung in [`next_action`](Self::next_action): on an
+    /// untrusted or drifted project nothing would be served live *even with* a
+    /// bridge, so naming the bridge there contradicts `status` and asks for a
+    /// step that fixes nothing yet.
+    fn fix_at(&self, want: &str, skip_bridge: bool) -> Option<&str> {
         let candidates: Vec<&str> = self
             .sections
             .iter()
             .flat_map(|s| &s.lines)
             .filter(|(tag, _)| *tag == want)
+            .filter(|(_, msg)| !(skip_bridge && is_bridge_finding(msg)))
             .filter_map(|(_, msg)| msg.split_once("↳ ").map(|(_, fix)| fix.trim()))
             .collect();
         candidates
@@ -296,13 +374,36 @@ impl Report {
             .copied()
     }
 
-    /// Exactly one recommended command, always — the Phase-3 "status as one
-    /// next action" rule. [`first_fix`](Self::first_fix) answers "what should
-    /// I repair?", which is `None` for a healthy setup and for findings whose
-    /// remedy is prose; this answers the strictly broader "what do I do now?",
-    /// which always has an answer. A report that ends in findings-without-a-
-    /// path, or in nothing at all, makes the user invent the next step — the
-    /// one thing a status surface exists to remove.
+    /// Is there an error finding that is *not* the unconnected-bridge one?
+    fn has_non_bridge_error(&self) -> bool {
+        self.sections
+            .iter()
+            .flat_map(|s| &s.lines)
+            .any(|(tag, msg)| *tag == "error" && !is_bridge_finding(msg))
+    }
+
+    fn has_bridge_error(&self) -> bool {
+        self.sections
+            .iter()
+            .flat_map(|s| &s.lines)
+            .any(|(tag, msg)| *tag == "error" && is_bridge_finding(msg))
+    }
+
+    /// Exactly one recommended step for the HUMAN reading the terminal, always
+    /// — the Phase-3 "status as one next action" rule.
+    /// [`first_fix`](Self::first_fix) answers "what should I repair?", which is
+    /// `None` for a healthy setup; this answers the strictly broader "what do I
+    /// do now?", which always has an answer. A report that ends in
+    /// findings-without-a-path, or in nothing at all, makes the user invent the
+    /// next step — the one thing a status surface exists to remove.
+    ///
+    /// Some of those answers are deliberately not runnable: a shape to fill in
+    /// (`toolset create <name> --server <server>`), a prose remedy from a
+    /// finding (`open Codex once`), or a pointer at the report itself. That is
+    /// right for a person and wrong for a program, so the JSON `next_action`
+    /// passes this string through
+    /// [`super::overview::machine_command`](super::overview::machine_command)
+    /// and emits `null` when it is not executable. Nothing on screen changes.
     ///
     /// The ladder below is ordered by what blocks what: an error first (it
     /// blocks the commands every other rung would name), then the review that
@@ -311,18 +412,37 @@ impl Report {
     ///
     /// Consent outranks warning-level repairs on purpose. `status`'s own
     /// ladder ([`super::overview::next_step`]) puts a pending or stale review
-    /// above every setup step, and the two surfaces answering "the one next
-    /// action" differently is the disagreement this order removes: a project
+    /// above every setup step, and the two surfaces handing a program different
+    /// commands is the disagreement this order removes: a project
     /// that is both drifted and missing, say, the t3code guard used to hear
     /// `agentstack trust .` from `status` and `agentstack guard install` from
     /// `doctor`, purely because of which section registered first. Nothing
     /// below trust is reordered — [`first_fix`](Self::first_fix) keeps its
     /// documented section-order tie-break.
+    ///
+    /// Two limits on that claim, stated because a comment that overstates a
+    /// guarantee is how the next reader gets misled:
+    ///
+    /// - It binds the rungs the two surfaces SHARE — the drift and
+    ///   never-pinned rungs (both computed from the SAME detectors
+    ///   `trust --preview` reads, and the never-pinned one through the shared
+    ///   [`super::overview::unpinned_next_action`], so all three surfaces name
+    ///   a command exactly when a reported blocker carries one), the consent
+    ///   rungs above, and [`super::overview::ladder_rung`] below, all filtered
+    ///   through `machine_command`. Above them, `doctor` may name a repair for
+    ///   a finding `status` never ran the check for; that is more knowledge,
+    ///   not disagreement.
+    /// - It binds the machine field. The human "why" still differs on purpose
+    ///   (doctor arrives having checked everything), and so can the human
+    ///   sentence at a terminal rung, where neither surface has a command to
+    ///   offer at all.
     fn next_action(&self) -> (String, &'static str) {
         // Errors stay on top: an outstanding error usually blocks the very
-        // command the review or a warning fix would name.
-        if self.errors > 0 {
-            if let Some(fix) = self.first_fix() {
+        // command the review or a warning fix would name. The one exception is
+        // the unconnected-bridge error, which is held back below the consent
+        // rung — see `fix_at`.
+        if self.has_non_bridge_error() {
+            if let Some(fix) = self.fix_at("error", true) {
                 return (fix.to_string(), "the finding to start with");
             }
             // A finding with no parseable `↳ fix` still needs a real next step
@@ -336,6 +456,27 @@ impl Report {
                 "each is a problem this project has to fix before it is ready",
             );
         }
+        // Drifted content outranks BOTH consent rungs below, for the reason
+        // `status` already ranks it that way
+        // (`super::overview::collect`): the grant refuses while approved bytes
+        // are unpinned, so `agentstack trust .` here would name step 2 while
+        // step 1 is outstanding — the dead-end class the guidance guard
+        // (`tests/guidance_is_executable.rs`) exists to catch. Same command and
+        // same reason string as `status`, so the two surfaces cannot disagree.
+        if self.content_drift {
+            return (
+                crate::commands::trust::DRIFT_FIX.to_string(),
+                crate::commands::trust::DRIFT_WHY,
+            );
+        }
+        // A never-pinned surface outranks the consent rungs for exactly the
+        // reason drift does, one step earlier: `grant_gated` refuses with
+        // "its loadable surface isn't fully pinned", so `agentstack trust .`
+        // here is step 2 named while step 1 is outstanding. Same command and
+        // same reason string as `status`.
+        if let Some(rung) = super::overview::unpinned_next_action(&self.surface_unpinned) {
+            return rung;
+        }
         if self.trust == Some("untrusted") {
             return (
                 "agentstack trust .".to_string(),
@@ -346,6 +487,14 @@ impl Report {
             return (
                 "agentstack trust .".to_string(),
                 "the content changed since you last said yes — review what moved",
+            );
+        }
+        // Consent is settled. NOW the unconnected bridge is the top repair: it
+        // is an error, so it outranks every warning-level fix below.
+        if self.has_bridge_error() {
+            return (
+                BRIDGE_FIX.to_string(),
+                "nothing routed live is reaching those tools until the bridge is registered",
             );
         }
         // Trusted (or trust is not this report's concern): the warning-level
@@ -359,15 +508,93 @@ impl Report {
                 "none blocks activation, but each names something worth knowing",
             );
         }
-        // Nothing to repair, trusted, no findings. This used to name
-        // `agentstack status`, which names `agentstack doctor` right back —
-        // the A↔B dead end the pilot hit (F21). The honest terminal is the
-        // next RUNG, not a lateral hop to the other summary: the wiring is
-        // verified, so the journey continues at Switch.
-        (
-            "agentstack toolset create <name> --server <server>".to_string(),
-            "nothing to repair — group these for a task, then switch between toolsets",
-        )
+        // Nothing to repair — but a manifest with no declared server has
+        // nothing to group, so `toolset create … --server <server>` below would
+        // refuse. A next step must never name a command that cannot run in the
+        // current state; the empty project's real step is finding something to
+        // add. Shared with `status` (`super::overview::EMPTY_PROJECT_NEXT`) so
+        // the two surfaces cannot answer this state differently.
+        // The SAME predicate `status` uses (`Manifest::declares_anything`, via
+        // `super::overview::declares_capabilities`). It used to be
+        // `declares_a_server`, so a healthy skills-only project — declared,
+        // pinned, trusted, no server — got doctor's "add a server or skill"
+        // terminal while `status` answered from a different rung entirely.
+        //
+        // The rung itself comes from `super::overview::ladder_rung` — the same
+        // function `status`'s ladder ends in, so the two surfaces answer this
+        // state with the same command. Only the "why" clause differs, because
+        // doctor arrives here having checked everything and `status` has not.
+        match super::overview::ladder_rung(
+            self.declares_anything == Some(true),
+            // Unset reads as "already rendered / ungrouped": that is the rung
+            // this terminal always stood on before the ladder was shared, so a
+            // report that never set the field behaves exactly as it did.
+            //
+            // Zero-files delivery renders nothing ON PURPOSE — the gateway
+            // serves the project live. Reading it as "not rendered" would put
+            // the Apply rung on top and recommend `agentstack apply --write`,
+            // the exact render this mode opts out of (the 2026-07-30 panel
+            // finding). It stands on the same rung as an already-rendered
+            // project.
+            self.mode == Some("zero-files") || self.rendered.unwrap_or(true),
+            self.no_toolsets.unwrap_or(true),
+            self.declares_a_server == Some(true),
+        ) {
+            super::overview::Rung::Empty => {
+                let (cmd, why) = super::overview::EMPTY_PROJECT_NEXT;
+                (cmd.to_string(), why)
+            }
+            super::overview::Rung::Apply => {
+                // `apply` never renders skills, so a skills-only manifest here
+                // would be told to run a render that reports "already in sync"
+                // and leaves this rung unchanged — the ladder then asks for it
+                // again, forever. The SAME correction `status` applies to the
+                // SAME rung (`overview::correct_apply_rung`).
+                let (cmd, why) = super::overview::correct_apply_rung(
+                    (
+                        super::overview::APPLY_RUNG_RENDER,
+                        "nothing to repair — render this setup into your CLIs",
+                    ),
+                    self.apply_renders.unwrap_or(true),
+                );
+                (cmd.to_string(), why)
+            }
+            // Nothing to repair, trusted, no findings. This used to name
+            // `agentstack status`, which names `agentstack doctor` right back
+            // — the A↔B dead end the pilot hit (F21). The honest terminal is
+            // the next RUNG, not a lateral hop to the other summary: the
+            // wiring is verified, so the journey continues at Switch.
+            super::overview::Rung::Group => (
+                "agentstack toolset create <name> --server <server>".to_string(),
+                "nothing to repair — group these for a task, then switch between toolsets",
+            ),
+            // Verified means the project is ALREADY grouped (a toolset is
+            // named) or has no server to group. Both used to answer
+            // `agentstack toolset create <name> --server <server>` — the Group
+            // rung's sentence, one rung too high. A user who did exactly what
+            // was asked, `toolset create dev --server filesystem`, saw
+            // `toolset list` report `dev` and was then asked to group again.
+            // The honest terminal for a verified setup names nothing to do;
+            // the grouping verb moves into the "why", where it reads as
+            // something available rather than something outstanding. The
+            // machine field was already `null` here (`machine_command` filters
+            // the placeholder), so this changes the human sentence only, and
+            // the two surfaces still agree where it counts.
+            super::overview::Rung::Verified if self.declares_a_server == Some(true) => (
+                "nothing to repair — this setup is verified".to_string(),
+                "group servers for a task with `agentstack toolset create <name> --server <server>`, then switch between toolsets",
+            ),
+            // Verified with no server to group at all: `toolset create …
+            // --server` would refuse outright. It must NOT borrow
+            // `EMPTY_PROJECT_NEXT`'s reason either — a healthy skills-only
+            // project (declared, pinned, trusted, delivered) was told to "find
+            // a server or skill to add", which describes it as empty when the
+            // report directly above had just verified everything it delivers.
+            super::overview::Rung::Verified => (
+                "nothing to repair — this setup is verified".to_string(),
+                "search with `agentstack search <query>` when you want to add a server to group",
+            ),
+        }
     }
 
     /// The one-word answer an external status surface leads with (UI
@@ -494,6 +721,9 @@ impl Report {
             crate::machine_policy::inspect().status,
             crate::machine_policy::Status::Unconfigured
         );
+        // Computed once and borrowed by two keys below: the human sentence and
+        // the machine command are the same answer at two levels of strictness.
+        let next_cmd = self.next_action().0;
         serde_json::json!({
             "state": self.state(),
             // The honest readiness (`status-honesty-v1`). `state` above stays
@@ -501,13 +731,25 @@ impl Report {
             // render, because it does not call an untrusted, never-activated
             // project ready. See `Report::readiness`.
             "readiness": self.readiness(),
-            // The same line the text report prints ("next: …") — exactly one
-            // recommended command, always. It was previously null whenever
-            // there was nothing to *repair*, which left a consumer with a
-            // healthy report and no step to offer; `state` already carries
-            // "is anything wrong?", so this key is free to answer the broader
-            // "what now?" without ambiguity. Never a command that would refuse.
-            "next_action": self.next_action().0,
+            // What a driver may run VERBATIM — or `null`. `next_action` is a
+            // machine field, so it carries only commands that can actually make
+            // progress; the honest human answers that are a shape
+            // (`toolset create <name> --server <server>`), a prose remedy
+            // ("add `description:` …"), or a pointer at the report ("review the
+            // errors above") are filtered out by
+            // `super::overview::machine_command`, which `status` applies to the
+            // same ladder — so the two surfaces cannot hand a program different
+            // commands for one state.
+            //
+            // Null is not a gap: over a ready project "there is nothing to run"
+            // is the true answer, and inventing a command to fill the field is
+            // how the placeholder loop was born (a driver ran
+            // `--server <server>`, got `no server '<server>'`, and re-polled
+            // forever). `state`/`readiness` already answer "is anything wrong?".
+            "next_action": super::overview::machine_command(&next_cmd),
+            // The sentence the terminal prints, always present — guidance for a
+            // UI that renders text, never something to exec.
+            "next_step": next_cmd,
             "protection": { "guard": guard, "machine_policy": machine_policy },
             "errors": self.errors,
             "warnings": self.warnings,
@@ -562,6 +804,7 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
                 // guess. `needs_setup` is a readiness like any other.
                 "readiness": "needs_setup",
                 "next_action": "agentstack init",
+                "next_step": "agentstack init",
                 "protection": serde_json::Value::Null,
                 "errors": 0,
                 "warnings": 0,
@@ -700,7 +943,7 @@ pub fn collect_content_units(
             None => skipped_unit(
                 "skill",
                 name,
-                "not materialized ↳ agentstack install".into(),
+                "not materialized ↳ agentstack x install".into(),
             ),
             Some(src) => match scan::scan_tree(&src) {
                 Ok(findings) => Unit {
@@ -984,7 +1227,7 @@ fn run_checks(
                 report.line(
                     Level::Warn,
                     format!(
-                        "{:<14} linked folder not found: {} ↳ agentstack lib unlink {} --write",
+                        "{:<14} linked folder not found: {} ↳ agentstack x lib unlink {} --write",
                         source.name,
                         tidy_path(&source.root),
                         source.name
@@ -1017,31 +1260,84 @@ fn run_checks(
     // the trust gate. Not being connected is a choice, not a fault — only a
     // stale trust digest warns.
     report.section("Zero-files gateway");
+    // The plan is built here rather than earlier because this is the only
+    // place in `run_checks` that needs it; `Plan::build` borrows the
+    // manifest's `[delivery]` table and the registry, so it holds no state.
+    let plan = crate::delivery::Plan::build(&manifest.delivery, &ctx.registry, &target_ids);
     let mut connected = 0;
     for id in &target_ids {
-        let Some(desc) = ctx.registry.get(id) else {
-            continue;
-        };
-        let (Some(cfg), Some(mcp)) = (desc.config.as_ref(), desc.mcp.as_ref()) else {
-            continue;
-        };
-        if !desc.detected() {
-            continue;
-        }
-        let path = paths::expand_tilde(&cfg.path);
-        let existing = std::fs::read_to_string(&path).unwrap_or_default();
-        if crate::commands::connect::has_bridge_entry(&existing, &mcp.location, cfg.format) {
+        if super::overview::bridge_registered(&ctx.registry, id) {
             connected += 1;
+            let display = ctx
+                .registry
+                .get(id)
+                .map(|d| d.display.to_string())
+                .unwrap_or_else(|| id.clone());
             report.line(
                 Level::Ok,
-                format!("{:<14} gateway registered (agentstack mcp)", desc.display),
+                format!("{display:<14} gateway registered (agentstack mcp)"),
             );
         }
     }
-    if connected == 0 {
+    // Invariant 8, "claims match enforcement". `status` and `delivery` read
+    // this project's routing from the SAME planner; when anything is routed to
+    // the live lane, an unregistered bridge means those surfaces are promising
+    // delivery that is not happening. That is a finding, not an optional
+    // extra. Only when nothing routes live is an unconnected gateway genuinely
+    // a choice — and that case keeps its friendly note.
+    //
+    // The reading is PER HARNESS, and the finding NAMES the harnesses without
+    // a bridge: with five CLIs detected and one connected, the four that
+    // receive nothing are the whole point of the finding, and a project-wide
+    // "any CLI connected?" test hid them completely.
+    let unconnected: Vec<String> = super::delivery::unconnected_live(&plan, &ctx.registry)
+        .into_iter()
+        .filter(|display| {
+            // Only harnesses that could host a bridge here. Naming one that is
+            // not even installed would be an instruction the user cannot obey.
+            plan.live_harnesses().iter().any(|h| {
+                &h.display == display && super::overview::bridge_capable_here(&ctx.registry, &h.id)
+            })
+        })
+        .collect();
+    if !unconnected.is_empty() {
+        // `Plan` routes by what each harness CAN take, so it reports a live
+        // lane even for a manifest that declares nothing, and for a project
+        // whose only capabilities are instructions or settings — served
+        // entirely from files. The finding needs something DECLARED of a kind
+        // the live lane carries.
+        if super::delivery::declares_something_live(manifest, &plan) {
+            report.line(
+                Level::Error,
+                format!(
+                    // "any tool" was a project-wide claim on a per-harness
+                    // finding: with one CLI connected and one not, it told the
+                    // user nothing was reaching ANYTHING, which is false and
+                    // the mirror image of the invariant-8 breach this finding
+                    // exists to prevent. The claim is scoped to the harnesses
+                    // actually named.
+                    "no bridge for {} — nothing routed live is reaching {} ↳ {}",
+                    unconnected.join(", "),
+                    if unconnected.len() == 1 { "it" } else { "them" },
+                    BRIDGE_FIX
+                ),
+            );
+        } else {
+            report.line(
+                Level::Ok,
+                "no CLI connected — optional ↳ agentstack x gateway connect --all",
+            );
+        }
+    } else if connected == 0 {
+        // Nothing connected AND nothing connectable: no harness on this
+        // machine can host the bridge for what this project routes live. The
+        // finding above cannot speak (it would name a CLI the user cannot
+        // obey) and the friendly line above never runs, so without this the
+        // whole section renders empty and the check looks like it did not run.
+        // `Unchecked`, not `Ok`: nothing was verified here.
         report.line(
-            Level::Ok,
-            "no CLI connected — optional ↳ agentstack gateway connect --all",
+            Level::Unchecked,
+            "no CLI here can host the gateway — nothing to connect",
         );
     }
     // W4 precondition 6 — gateway unavailable. A registered bridge whose
@@ -1054,11 +1350,29 @@ fn run_checks(
     }
     let base = crate::manifest::project_root_of(&ctx.dir);
     let trust_state = crate::trust::check(&base);
+    // The second half of the trust reading, from the one shared detector (no
+    // fetch, the same mode every other surface reads in): bytes this project
+    // pinned that have since moved. Read BEFORE the word below, because it is
+    // half of what that word has to say — see `Report::content_drift`.
+    report.content_drift = !crate::commands::trust::content_drift_at(&base).is_empty();
     report.trust = Some(match trust_state {
+        // `trust-content-drift-v1`, the SAME rule `status` applies
+        // (`project_json`) and for the same reason: "drifted" means approved
+        // bytes moved, and that is true whether the manifest/lock bytes moved
+        // or the bodies they pin did. The gate refuses both. Reading only the
+        // grant record here let `doctor --json` answer `trusted` over content
+        // `trust --yes` was about to reject and `status` already called
+        // `drifted` — one project, two words, and the healthy-looking one was
+        // the lie. `untrusted` still wins: never reviewed is a stronger
+        // statement than reviewed-then-changed.
+        _ if report.content_drift && trust_state != crate::trust::TrustState::Untrusted => {
+            "drifted"
+        }
         crate::trust::TrustState::Trusted => "trusted",
         crate::trust::TrustState::Changed => "drifted",
         crate::trust::TrustState::Untrusted => "untrusted",
     });
+    report.surface_unpinned = crate::commands::trust::unpinned_surface_at(&base);
     // W1: what this state has already cost. An advisory clause on the existing
     // findings rather than a check of its own — the condition is the same one
     // the trust findings already report, and a second finding would make one
@@ -1157,6 +1471,13 @@ fn run_checks(
     // at all? Every inert and executable kind counts — a project can be a pure
     // instruction or settings setup — so "ready" is never reported over a husk.
     report.declares_anything = Some(manifest.declares_anything());
+    report.declares_a_server = Some(!manifest.declared_server_names().is_empty());
+    // The setup-ladder inputs `status` uses, read the same way, so the two
+    // surfaces stand on the same rung. `has_rendered_artifacts` is the write
+    // ledger, not the lockfile — the same distinction `status` documents.
+    report.rendered = Some(super::overview::has_rendered_artifacts(&ctx, &all_ids));
+    report.apply_renders = Some(super::overview::apply_renders_something(manifest));
+    report.no_toolsets = Some(manifest.profiles.is_empty());
     report.gitignore = Some(manifest.meta.manages_gitignore());
     let (detected, capable, incapable) =
         crate::commands::mode_switch::bridge_coverage(&ctx.registry);
@@ -1802,7 +2123,7 @@ fn run_checks(
                 report.line(
                     Level::Warn,
                     format!(
-                        "{:<14} managed region stale ({} scope) ↳ agentstack instructions --write",
+                        "{:<14} managed region stale ({} scope) ↳ agentstack x instructions --write",
                         desc.display,
                         stale_scopes.join("/")
                     ),
@@ -1935,7 +2256,15 @@ fn run_checks(
                 None => report.line(
                     Level::Warn,
                     format!(
-                        "{id}: unknown CLI — these settings reach nothing ↳ agentstack doctor --all"
+                        // `doctor --all` used to sit in the `↳` slot, but it
+                        // only un-hides sections — it cannot make an unknown
+                        // CLI id known, so the finding survived its own fix.
+                        // The only thing that clears it is editing the id (or
+                        // dropping the table), same voice as the sibling
+                        // error below.
+                        "{id}: unknown CLI — these settings reach nothing; \
+                         `agentstack x adapters list` shows the valid ids \
+                         ↳ edit [settings.{id}] in the manifest"
                     ),
                 ),
                 Some(desc) if !value.is_object() => report.line(
@@ -2076,11 +2405,24 @@ fn run_checks(
         match dir {
             None => report.line(
                 Level::Warn,
-                format!("{name:<20} not installed ↳ agentstack install"),
+                format!("{name:<20} not installed ↳ agentstack x install"),
             ),
+            // ERROR, not a warning: the source resolved, so this is not a
+            // missing fetch (`not installed` above covers that, with the
+            // command that repairs it). The declared body simply is not on
+            // disk, and NO command repairs it — `lock --write` resolves before
+            // it pins and exits non-zero unchanged; `install` exits 1 for an
+            // inline body and does nothing for a library one. A declared skill
+            // that can never be delivered is a broken setup, and reporting it
+            // as advisory let `doctor` answer `errors: 0` over it (invariant 8
+            // — claims match enforcement). It carries no `↳` fix, precisely
+            // because naming one would be naming a command that cannot work.
             Some(dir) if !dir.join("SKILL.md").exists() => report.line(
-                Level::Warn,
-                format!("{name:<20} no SKILL.md in {}", dir.display()),
+                Level::Error,
+                format!(
+                    "{name:<20} no SKILL.md in {} — declared, but its body is not on disk",
+                    dir.display()
+                ),
             ),
             // A described skill is a discoverable skill: search matching and
             // the loadable index an agent sees both come from this one line.
@@ -2110,8 +2452,17 @@ fn run_checks(
                 report.line(
                     Level::Error,
                     format!(
+                        // The fix must be the command that can actually run in
+                        // THIS state. `agentstack trust .` refuses on a
+                        // drifted-but-pinned surface — the pin has to move
+                        // first — so the `↳` slot names the re-pin and the
+                        // message text carries the re-review that follows it.
+                        // Everything after `↳ ` is parsed as the one next
+                        // action (see `fix_at`), so the second step cannot
+                        // live there.
                         "{name:<20} content changed since you approved it — the pinned bytes \
-                         and the files on disk differ ↳ agentstack trust ."
+                         and the files on disk differ; re-pin it, then review and re-trust \
+                         with `agentstack trust .` ↳ agentstack lock --write"
                     ),
                 );
             }
@@ -2320,7 +2671,7 @@ fn run_checks(
     if drifted {
         report.line(
             Level::Warn,
-            "lock drift is an error until you re-lock; `agentstack lock` re-pins and re-gates trust (new pins = new consent → re-run `agentstack trust .`)",
+            "lock drift is an error until you re-lock; `agentstack lock --write` re-pins and re-gates trust (new pins = new consent → re-run `agentstack trust .`)",
         );
     }
 
@@ -2737,7 +3088,7 @@ fn check_reproducibility(
                 SkillLockStatus::ChecksumDrift { .. } => {
                     report.line(
                         Level::Error,
-                        format!("{name:<20} content drifted from lock ↳ agentstack lock"),
+                        format!("{name:<20} content drifted from lock ↳ agentstack lock --write"),
                     );
                     emitted += 1;
                 }
@@ -2754,7 +3105,9 @@ fn check_reproducibility(
                     if r.origin == Some(SkillOrigin::Library) {
                         report.line(
                             Level::Warn,
-                            format!("{name:<20} from library, not locked ↳ agentstack lock"),
+                            format!(
+                                "{name:<20} from library, not locked ↳ agentstack lock --write"
+                            ),
                         );
                         emitted += 1;
                     }
@@ -2798,11 +3151,13 @@ fn check_instruction_reproducibility(manifest: &Manifest, dir: &Path, report: &m
             ),
             InstructionLockStatus::ChecksumDrift { .. } => report.line(
                 Level::Error,
-                format!("{name:<20} instruction content drifted from lock ↳ agentstack lock"),
+                format!(
+                    "{name:<20} instruction content drifted from lock ↳ agentstack lock --write"
+                ),
             ),
             InstructionLockStatus::MissingLockEntry => report.line(
                 Level::Warn,
-                format!("{name:<20} instruction not locked ↳ agentstack lock"),
+                format!("{name:<20} instruction not locked ↳ agentstack lock --write"),
             ),
             InstructionLockStatus::Matches => {
                 report.line(Level::Ok, format!("{name:<20} instruction · matches lock"))
@@ -2837,13 +3192,17 @@ fn check_server_reproducibility(manifest: &Manifest, dir: &Path, report: &mut Re
                 }
                 ServerLockStatus::ChecksumDrift { .. } => report.line(
                     Level::Error,
-                    format!("{name:<20} server definition drifted from lock ↳ agentstack lock"),
+                    format!(
+                        "{name:<20} server definition drifted from lock ↳ agentstack lock --write"
+                    ),
                 ),
                 ServerLockStatus::MissingLockEntry => {
                     if r.origin == Some(ServerOrigin::Library) {
                         report.line(
                             Level::Warn,
-                            format!("{name:<20} library server, not locked ↳ agentstack lock"),
+                            format!(
+                                "{name:<20} library server, not locked ↳ agentstack lock --write"
+                            ),
                         );
                     }
                 }
@@ -2893,20 +3252,20 @@ fn check_extension_reproducibility(manifest: &Manifest, dir: &Path, report: &mut
             ExtensionLockStatus::ChecksumDrift { .. } | ExtensionLockStatus::RevDrift { .. } => {
                 report.line(
                     Level::Error,
-                    format!("{name:<20} extension drifted from lock ↳ agentstack lock"),
+                    format!("{name:<20} extension drifted from lock ↳ agentstack lock --write"),
                 );
             }
             ExtensionLockStatus::TargetDrift { .. } => report.line(
                 Level::Error,
-                format!("{name:<20} extension retargeted since locked ↳ agentstack lock"),
+                format!("{name:<20} extension retargeted since locked ↳ agentstack lock --write"),
             ),
             ExtensionLockStatus::MissingLockEntry => report.line(
                 Level::Warn,
-                format!("{name:<20} extension not locked ↳ agentstack lock"),
+                format!("{name:<20} extension not locked ↳ agentstack lock --write"),
             ),
             ExtensionLockStatus::NotAvailableOffline { .. } => report.line(
                 Level::Warn,
-                format!("{name:<20} git extension not cached — can't verify offline ↳ agentstack install"),
+                format!("{name:<20} git extension not cached — can't verify offline ↳ agentstack x install"),
             ),
             ExtensionLockStatus::Matches => {
                 report.line(Level::Ok, format!("{name:<20} extension · matches lock"));
@@ -2943,20 +3302,20 @@ fn check_workflow_reproducibility(manifest: &Manifest, dir: &Path, report: &mut 
             WorkflowLockStatus::ChecksumDrift { .. } | WorkflowLockStatus::RevDrift { .. } => {
                 report.line(
                     Level::Error,
-                    format!("{name:<20} workflow drifted from lock ↳ agentstack lock"),
+                    format!("{name:<20} workflow drifted from lock ↳ agentstack lock --write"),
                 );
             }
             WorkflowLockStatus::RolesDrift { .. } => report.line(
                 Level::Error,
-                format!("{name:<20} workflow roles changed since locked ↳ agentstack lock"),
+                format!("{name:<20} workflow roles changed since locked ↳ agentstack lock --write"),
             ),
             WorkflowLockStatus::MissingLockEntry => report.line(
                 Level::Warn,
-                format!("{name:<20} workflow not locked ↳ agentstack lock"),
+                format!("{name:<20} workflow not locked ↳ agentstack lock --write"),
             ),
             WorkflowLockStatus::NotAvailableOffline { .. } => report.line(
                 Level::Info,
-                format!("{name:<20} git workflow not cached — can't verify offline ↳ agentstack install"),
+                format!("{name:<20} git workflow not cached — can't verify offline ↳ agentstack x install"),
             ),
             WorkflowLockStatus::Matches => {
                 report.line(Level::Ok, format!("{name:<20} workflow · matches lock"));
@@ -3119,11 +3478,11 @@ fn check_executable_integrity(manifest: &Manifest, dir: &Path, report: &mut Repo
             }
             ExecutableLockStatus::ChecksumDrift { .. } => report.line(
                 Level::Error,
-                format!("{label} content drifted from lock ↳ agentstack lock"),
+                format!("{label} content drifted from lock ↳ agentstack lock --write"),
             ),
             ExecutableLockStatus::MissingLockEntry => report.line(
                 Level::Warn,
-                format!("{label} executable local code not pinned ↳ agentstack lock"),
+                format!("{label} executable local code not pinned ↳ agentstack lock --write"),
             ),
             ExecutableLockStatus::Matches => {}
         }
@@ -3779,7 +4138,7 @@ fn check_t3code(report: &mut Report) {
             Level::Warn,
             "guard not enabled — t3code's Full-access mode disables the providers' own \
              approval prompts, so those sessions run with no pre-tool-use gate at all \
-             ↳ agentstack guard install",
+             ↳ agentstack x guard install",
         );
     } else {
         let coverage = crate::commands::guard::coverage();
@@ -3801,7 +4160,7 @@ fn check_t3code(report: &mut Report) {
                     Level::Warn,
                     format!(
                         "{provider}: guard hook missing — t3code Full-access sessions on \
-                         this provider run ungated ↳ agentstack guard install"
+                         this provider run ungated ↳ agentstack x guard install"
                     ),
                 );
             }
@@ -3864,7 +4223,7 @@ fn check_t3code(report: &mut Report) {
                 report.line(
                     Level::Ok,
                     format!(
-                        "instance '{instance}' launches via the agentstack shim ({path}) — \
+                        "instance '{instance}' launches via the agentstack x shim ({path}) — \
                          its sessions record per-run evidence"
                     ),
                 );
@@ -3880,7 +4239,7 @@ fn check_t3code(report: &mut Report) {
                 report.line(
                     Level::Info,
                     "sessions attribute to the global audit only — for per-run evidence: \
-                     agentstack shim make <cli>, then point the instance's binary path at it",
+                     agentstack x shim make <cli>, then point the instance's binary path at it",
                 );
             }
         }
@@ -4142,7 +4501,7 @@ mod tests {
         r.section("T3 Code");
         r.line(
             Level::Warn,
-            "the guard is missing\n  ↳ agentstack guard install",
+            "the guard is missing\n  ↳ agentstack x guard install",
         );
         r.section("Trust");
         r.line(Level::Warn, "the content changed since you said yes");
@@ -4153,7 +4512,7 @@ mod tests {
         // section-order tie-break below trust is untouched.
         r.trust = Some("trusted");
         let (cmd, _) = r.next_action();
-        assert_eq!(cmd, "agentstack guard install", "{cmd}");
+        assert_eq!(cmd, "agentstack x guard install", "{cmd}");
 
         // An error still outranks the review: its command blocks the rest.
         r.trust = Some("drifted");
@@ -4964,8 +5323,8 @@ mod tests {
         report.section("Manifest");
         report.line(Level::Error, "unreadable ↳ open it and fix the syntax");
         assert_eq!(report.first_fix(), Some("open it and fix the syntax"));
-        report.line(Level::Error, "unpinned ↳ agentstack lock");
-        assert_eq!(report.first_fix(), Some("agentstack lock"));
+        report.line(Level::Error, "unpinned ↳ agentstack lock --write");
+        assert_eq!(report.first_fix(), Some("agentstack lock --write"));
 
         // With no runnable command anywhere, the first candidate stands.
         let mut manual = Report::new();

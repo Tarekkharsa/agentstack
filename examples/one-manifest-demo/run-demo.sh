@@ -108,7 +108,7 @@ else
   bad "the manifest should hold only the placeholder, never the resolved token"
 fi
 
-"$AS" lock --manifest-dir "$PROJECT" >/dev/null
+"$AS" lock --write --manifest-dir "$PROJECT" >/dev/null
 
 say "Ask for the files — preview first: one manifest, three CLIs, three paths:"
 run "agentstack apply --scope project        # read-only; writes nothing"

@@ -2,11 +2,13 @@
 
 > **One agent setup. Every coding CLI.**
 > AgentStack collects the MCP servers, skills, and instructions you already use
-> into one `.agentstack/` directory in your project, then renders them back as
-> native configuration for Claude Code, Codex, Cursor, Gemini CLI, OpenCode, and
-> [eight more](https://tarekkharsa.github.io/agentstack/adapters.html). Named toolsets
-> let you switch by project or task; doctor, diff, and restore keep every
-> change understandable and recoverable.
+> into one `.agentstack/` directory, then **serves them live** to Claude Code,
+> Codex, Cursor, Gemini CLI, OpenCode, and
+> [eight more](https://tarekkharsa.github.io/agentstack/adapters.html) — so the
+> project stays clean. What no live channel can carry, and every tool without
+> MCP, is written into native files instead. Named toolsets let you switch by
+> project or task; doctor, diff, and restore keep every change understandable
+> and recoverable.
 
 **[Website](https://tarekkharsa.github.io/agentstack/)** ·
 [Docs](https://tarekkharsa.github.io/agentstack/docs.html) ·
@@ -19,14 +21,15 @@
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh
-agentstack init      # finds what your CLIs already have and writes it into .agentstack/
-agentstack status    # is it ready — and if not, the one thing that fixes it
+agentstack init                          # finds what your CLIs already have, writes it into .agentstack/
+agentstack x gateway connect --all --write # register the bridge once, so live delivery reaches your CLIs
+agentstack status                        # is it ready — and if not, the one thing that fixes it
 ```
 
-> `agentstack yes`, `undo`, `up`, `share`, and `receive` are v0.18.0 and later;
-> the install line above serves the current stable release. `agentstack
-> --version` says which you have, and `agentstack self update --write` upgrades
-> once v0.18.0 is final.
+Every command above is in the release the install line serves. A few newer
+verbs shorten some of this; they are gathered in one place —
+[newer than the stable release](https://tarekkharsa.github.io/agentstack/start.html#newer-than-the-stable-release).
+`agentstack --version` says which release you have.
 
 That is the whole first run. Here is what it left in your project — plain files
 you can open, read, and commit:
@@ -35,18 +38,48 @@ you can open, read, and commit:
 your-project/
 ├── .agentstack/
 │   ├── agentstack.toml   # everything your tools may run: servers, skills, instructions
+│   ├── agentstack.lock   # the pins — exact commits and content digests (written by `agentstack lock --write`)
 │   └── .env              # token values lifted out of your configs (only when init found any)
 └── .gitignore            # one managed line, so that .env is never committed
 ```
 
+That is normally the whole footprint. On MCP-capable tools a project carries
+only `.agentstack/` — no `.mcp.json`, no `.claude/skills/`, no generated
+`CLAUDE.md`.
+
 `.agentstack/agentstack.toml` records your whole setup. It is called
 the **[manifest](https://tarekkharsa.github.io/agentstack/concepts.html)**, and
-every CLI-specific file AgentStack writes — `.mcp.json`, `.claude/skills/`, the
-compiled `AGENTS.md` — is rendered from it and can be regenerated, or taken back
-off, at any time. Mostly the system writes it for you: `init` and `add` fill it
-in, and so does
+everything AgentStack delivers is delivered from it. Mostly the system writes it
+for you: `init` and `add` fill it in, and so does
 [dropping a skill folder in](https://tarekkharsa.github.io/agentstack/howto/add-a-skill.html).
 It holds `${GITHUB_TOKEN}`-style placeholders, never the token values.
+
+### How it reaches your tools
+
+Delivery is **routed, not chosen** — AgentStack picks the lane per capability
+and per tool, and `agentstack x delivery` prints the routing:
+
+- **Served live.** Skills and MCP servers go to MCP-capable tools through one
+  gateway, brokered, policy-checked, digest-verified, and recorded. Nothing is
+  written into the project for them.
+- **rendered lane:** instructions, settings, hooks, and extensions are written
+  into native files — always, because no live channel a tool is known to
+  consume can carry them correctly — and so is *every* capability on a tool
+  without MCP. Those files are regenerable and can be taken back off at any
+  time.
+
+Live delivery needs the bridge registered once per tool:
+
+```sh
+agentstack x gateway connect --all           # preview which CLIs would be registered
+agentstack x gateway connect --all --write   # register it
+```
+
+Until that registration exists, nothing is served live: `status` and `delivery`
+both say `planned live (not connected)`, and `doctor` reports the gap as an
+error — `no bridge for <the CLIs missing it> — nothing routed live is reaching
+them` — naming the command above.
+Files in the rendered lane are written either way.
 
 That same directory arriving in a repository you *cloned* behaves differently: it
 stays inert until you review it — no server spawns, no skill enters an agent's
@@ -66,14 +99,14 @@ Here is the whole loop, condensed from a real run of the current binary:
    is copied to a gitignored `.env` and referenced as `${GITHUB_TOKEN}` (your
    CLI's own config keeps its copy until you apply at global scope).
 3. **Render** — `agentstack apply --scope global --write`: both CLIs now carry
-   both servers, each in its own format.
+   both servers, each in its own format. (This walkthrough uses the rendered
+   lane throughout, so every step is a file you can diff.)
 4. **Verify** — `agentstack doctor`: 0 errors. On your own machine expect a
    note or two — advisories like "these servers launch via bare `npx`" are
    stated once and do not count against readiness; a first Codex project also
    warns until you open Codex there once and accept its trust prompt.
-5. **Undo** — `agentstack restore --last --write`, twice: every file
-   byte-identical to where it started. (`agentstack undo` shows the same
-   recorded changes as a timeline and reverts to the point you pick.)
+5. **Undo** — `agentstack x restore --last --write`, twice: every file
+   byte-identical to where it started.
 
 Reproduce it yourself, fenced (an isolated temp `HOME` — it never touches your
 real configs, and it asserts every step, so it doubles as the witness that this
@@ -86,8 +119,9 @@ Every agent CLI has its own configuration format, file locations, and way to
 install the same underlying capabilities. AgentStack gives the whole lifecycle
 one source of truth:
 
-- **Stop repeating configuration.** Import what you already have, then render
-  that one manifest into every supported CLI's native format.
+- **Stop repeating configuration.** Import what you already have; one manifest
+  then reaches every supported CLI — served live where it can be, rendered into
+  that CLI's native format where it cannot.
 - **Switch by project or task.** A toolset is a named subset of your setup;
   temporary sessions activate it and restore the previous native files afterward.
 - **Understand and repair drift.** `doctor` finds the problem, `diff` shows the
@@ -110,15 +144,15 @@ each release. Or build from a checkout:
 
 ```sh
 cargo build --release                  # add --features sandbox for `run --sandbox`
-./target/release/agentstack self link  # symlink onto your PATH
+./target/release/agentstack x self link  # symlink onto your PATH
 ```
 
 Release binaries ship with sandbox support compiled in; a bare `cargo build` does not — pass
 `--features sandbox` to get `run --sandbox` / `--lockdown`.
 
-Once installed, `agentstack self update` moves you to the latest release (it verifies the
-download against the release's published checksum before replacing anything, and defers to
-`brew upgrade` if Homebrew owns the binary).
+Once installed, `agentstack x self update` moves you to the latest release; it verifies the
+download against the release's published checksum before replacing anything. The installer
+and `cargo build` are the two supported install paths — there is no published Homebrew tap.
 
 **Supported platforms: macOS and Linux.** A Windows binary is published, but it is not
 exercised by CI and the codebase carries almost no Windows-specific handling — treat it as
@@ -127,8 +161,8 @@ evidence that would move it.
 
 ### Upgrading
 
-`agentstack self update` previews; `--write` verifies the sha256 before
-installing. Homebrew installs upgrade with `brew upgrade agentstack`.
+`agentstack x self update` previews; `--write` verifies the sha256 before
+installing.
 [Details](https://tarekkharsa.github.io/agentstack/reference.html).
 
 ## Grow into it
@@ -138,12 +172,28 @@ governance only when you need them:
 
 | Step | You run | You get |
 | --- | --- | --- |
-| [1 — Unify](https://tarekkharsa.github.io/agentstack/start.html) | `agentstack init` → `apply` | import once, render everywhere |
+| [1 — Unify](https://tarekkharsa.github.io/agentstack/start.html) | `agentstack init` → `gateway connect --all --write` | import once, delivered everywhere |
 | [2 — Switch](https://tarekkharsa.github.io/agentstack/howto/name-a-toolset.html) | toolsets · `session start/end` | toolsets and temporary sessions |
-| [3 — Diagnose](https://tarekkharsa.github.io/agentstack/start.html#s-verify) | `agentstack doctor` · `diff` | doctor and diff explain drift |
+| [3 — Diagnose](https://tarekkharsa.github.io/agentstack/start.html#verify-it) | `agentstack doctor` · `diff` | doctor and diff explain drift |
 | [4 — Recover](https://tarekkharsa.github.io/agentstack/howto/undo.html) | `adopt` · `apply` · `restore` · `uninstall` | keep an edit, or undo the write |
 | [5 — Share](https://tarekkharsa.github.io/agentstack/howto/team-setup.html) | manifest · lock · library | locked, secret-free setups |
 | [6 — Govern](https://tarekkharsa.github.io/agentstack/howto/trust-a-repo.html) | trust · policy · lockdown | trust, policy, confined runs |
+
+## The command surface
+
+`agentstack --help` lists the fifteen everyday verbs — `init`, `status`, `add`,
+`search`, `apply`, `doctor`, `lock`, `toolset`, `use`, `yes`, `run`, `trust`,
+`undo`, `adopt`, `secret`. Four ideas cover them: Setup, Toolset, Status, Undo.
+
+Everything else lives one hop away under `agentstack x`:
+
+```bash
+agentstack x                 # the rest of the toolbox, grouped by task
+agentstack x guard install   # same command as `agentstack guard install`
+```
+
+Nothing was removed. Every command still runs at its own name with its own
+`--help`, and `agentstack --help --all` prints the whole tree.
 
 ## Documentation
 
@@ -171,7 +221,7 @@ cargo clippy --all-targets
 cargo fmt --check
 ```
 
-Install your build with `agentstack self link`. Ground rules and the security invariants:
+Install your build with `agentstack x self link`. Ground rules and the security invariants:
 [CONTRIBUTING.md](CONTRIBUTING.md). Release history: [CHANGELOG.md](CHANGELOG.md).
 
 ## Community and support

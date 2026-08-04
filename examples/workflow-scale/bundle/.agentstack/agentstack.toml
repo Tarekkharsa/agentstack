@@ -23,20 +23,20 @@ roles = ["mapper", "verifier", "combiner", "reducer"]
 max_agents = 1000
 max_wall_seconds = 3600
 
-# Empty-surface role profiles: the children need nothing but a model, so the
+# Empty-surface role toolsets: the children need nothing but a model, so the
 # bench measures the drive loop and the child process cost, not server startup.
-[profiles.mapper]
+[toolsets.mapper]
 servers = []
 skills = []
 
-[profiles.verifier]
+[toolsets.verifier]
 servers = []
 skills = []
 
-[profiles.combiner]
+[toolsets.combiner]
 servers = []
 skills = []
 
-[profiles.reducer]
+[toolsets.reducer]
 servers = []
 skills = []

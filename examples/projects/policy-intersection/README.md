@@ -55,7 +55,7 @@ you can see all three policy dimensions compile through `explain`.
    stays empty — the server is never spawned or contacted.
 
 2. **Trusted is not enough — the toolset fence comes first.** This repo
-   declares `[profiles.default]`, so an unleased gateway over it still offers
+   declares `[toolsets.default]`, so an unleased gateway over it still offers
    its control plane only: `tools_search` surfaces no proxied tool, and a direct
    `opsbox__get_status` is refused with a message that names the missing lease.
    Opening a lease on `default` (`agentstack_lease_open`) is what puts the

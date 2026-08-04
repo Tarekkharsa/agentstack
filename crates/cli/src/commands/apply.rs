@@ -110,7 +110,7 @@ fn restart_hint(outcome: &Outcome) {
         // Name the exact command, not the bare verb: `agentstack restore` alone
         // lists the ledger, so a user following this line got a list to read
         // rather than the undo they were promised.
-        crate::outln!("  {}", "undo: agentstack restore --last --write".dimmed());
+        crate::outln!("  {}", "undo: agentstack x restore --last --write".dimmed());
     }
 }
 

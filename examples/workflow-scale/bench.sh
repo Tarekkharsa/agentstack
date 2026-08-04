@@ -42,7 +42,7 @@ echo "▶ bench workspace: $WORK"
 echo "▶ harness: mock (SCALE_FLAT=${SCALE_FLAT:-0}, fast=${SCALE_FAST_MS:-200}ms med=${SCALE_MED_MS:-800}ms slow=${SCALE_SLOW_MS:-4000}ms)"
 
 # --- admission: lock, then trust the pinned bytes -------------------------
-( cd "$PROJ" && "$BIN" lock >/dev/null )
+( cd "$PROJ" && "$BIN" lock --write >/dev/null )
 CONSENT="$(cd "$PROJ" && "$BIN" trust . --preview \
   | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p' | head -1)"
 [ -n "$CONSENT" ] || { echo "could not read the trust preview digest" >&2; exit 1; }

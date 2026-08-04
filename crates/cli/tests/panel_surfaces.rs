@@ -184,7 +184,7 @@ fn assert_negotiable(value: &Value, feature: &str) {
 /// panel's `trust-grant` action uses — never a test-only back door.
 fn lock_and_trust(proj: &Path, home: &Path) {
     let out = Command::new(BIN)
-        .args(["--manifest-dir", proj.to_str().unwrap(), "lock"])
+        .args(["--manifest-dir", proj.to_str().unwrap(), "lock", "--write"])
         .env("HOME", home.parent().unwrap())
         .env("AGENTSTACK_HOME", home)
         .current_dir(proj)

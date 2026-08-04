@@ -59,7 +59,7 @@ fn sync(
         };
         println!(
             "Manifest defines no inline skills; {} {} \
-             from the central library — pin {pronoun} with `agentstack lock`.",
+             from the central library — pin {pronoun} with `agentstack lock --write`.",
             super::count(profile_names.len(), "toolset-referenced skill"),
             if profile_names.len() == 1 {
                 "resolves"
@@ -135,6 +135,26 @@ fn sync(
             }
         }
 
+        // A declared body that is not on disk resolves to a path and then
+        // pins to nothing: `Store::pin` returned an empty digest and the `?`
+        // below aborted the whole run with `not a sha256 hex digest: ""` — a
+        // correct refusal with a message no one can act on, on the one state
+        // `lock --write` sends people here for. Say which skill, where its
+        // body was expected, and the two things a human can actually do.
+        // Nothing about what `install` DOES changes: this skill is still not
+        // installed and the run still ends non-zero.
+        if !resolved.path.exists() {
+            println!(
+                "  {} {name}: declared body at {} is not present on disk — \
+                 restore it, or remove `[skills.{name}]` from the manifest; \
+                 no command can install or pin a body that is not there",
+                "✗".red(),
+                resolved.path.display()
+            );
+            errors += 1;
+            continue;
+        }
+
         let entry = locked_entry(name, skill, &resolved)?;
         let fetched_note = if resolved.fetched { " (fetched)" } else { "" };
 
@@ -177,7 +197,7 @@ fn sync(
         }
         if relock_all || only == Some(name.as_str()) {
             println!(
-                "  {} {name} skipped (library-referenced — `agentstack lock` refreshes it)",
+                "  {} {name} skipped (library-referenced — `agentstack lock --write` refreshes it)",
                 "·".dimmed()
             );
         }

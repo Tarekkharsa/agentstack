@@ -931,7 +931,7 @@ fn a_package_instruction_member_renders_into_an_existing_managed_region_only() {
 
     // And the report says so, naming the command that WOULD render it.
     let out = std::process::Command::new(env!("CARGO_BIN_EXE_agentstack"))
-        .args(["lock", "--manifest-dir"])
+        .args(["lock", "--write", "--manifest-dir"])
         .arg(&proj)
         .env("HOME", tmp.path().join("home"))
         .env("AGENTSTACK_HOME", tmp.path().join("home/.agentstack"))
@@ -962,7 +962,7 @@ fn a_package_instruction_member_renders_into_an_existing_managed_region_only() {
     )
     .unwrap();
     let out = std::process::Command::new(env!("CARGO_BIN_EXE_agentstack"))
-        .args(["lock", "--manifest-dir"])
+        .args(["lock", "--write", "--manifest-dir"])
         .arg(&proj)
         .env("HOME", tmp.path().join("home"))
         .env("AGENTSTACK_HOME", tmp.path().join("home/.agentstack"))

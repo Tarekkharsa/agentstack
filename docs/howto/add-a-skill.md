@@ -9,41 +9,40 @@ For anyone giving their agent CLIs a skill — a portable directory with a
 `.agentstack/agentstack.toml` [manifest](../concepts.md) (run
 `agentstack init` if you don't have one).
 
-## Writing one yourself: drop the file, then say yes
+## Writing one yourself: write it, declare it, approve it
 
-Write the directory where skills live, then answer one question:
+Write the directory where skills live, then take it through the four steps that
+turn a file on disk into a capability your CLIs can use:
 
 ```bash
 mkdir -p .agentstack/skills/pdf-review
 $EDITOR .agentstack/skills/pdf-review/SKILL.md   # your instructions
 
-agentstack yes
+agentstack adopt --write     # declare it in the manifest
+agentstack lock --write      # pin its bytes in agentstack.lock
+agentstack trust .           # review the changed consent surface and approve it
+agentstack use --write       # activate it
 ```
 
-> `agentstack yes` is v0.18.0 and later; the current stable install serves
-> v0.17.1, where a skill has to be declared in the manifest before it renders.
-> `agentstack --version` says which you have.
+Until you approve it, the file is **inert** — nothing resolves, pins, renders,
+or reads it, and no agent sees it. `agentstack trust .` shows the review: what
+will run, what it will contact, what secrets it can read, and the bytes each
+item is pinned to. Undo any of it with `agentstack x restore --last --write`.
 
-Until you answer, the file is **inert** — nothing resolves, pins, renders, or
-reads it, and no agent sees it. `agentstack yes` shows one review: what will be
-declared, what will be pinned, what each CLI will get, and the full consent
-surface. One confirmation makes it live everywhere. Undo is
-`agentstack restore --last --write`, named in the preview before it runs.
+`agentstack x lib new <name>` scaffolds the template if you'd rather not start
+from an empty file.
 
-The short path is for content you demonstrably wrote here — untracked in git,
-or newer than this project's last review. A skill that **came with the
-repository** is somebody else's work and takes the full staged review instead;
-`agentstack yes` says so and names the commands (`agentstack adopt` →
-`agentstack lock` → `agentstack trust .`). `agentstack lib new <name>`
-scaffolds the template if you'd rather not start from an empty file.
+In v0.18.0 and later, `agentstack yes` performs the same four steps behind one
+review and one confirmation — through the same functions and the same gate. See
+[newer than the stable release](../start.md#newer-than-the-stable-release).
 
 ## Bringing in someone else's skill
 
 | You have | Use |
 | --- | --- |
 | Any skills repo (GitHub shorthand, git URL) or a local dir | `agentstack add skill <source>` |
-| A skill you want reusable across projects by name | `agentstack lib add <source>` + reference it from a [toolset](../concepts.md) |
-| Curiosity — run it once, install nothing | `agentstack try <source> \| <your agent CLI>` |
+| A skill you want reusable across projects by name | `agentstack x lib add <source>` + reference it from a [toolset](../concepts.md) |
+| Curiosity — run it once, install nothing | `agentstack x try <source> \| <your agent CLI>` |
 
 ```bash
 # 1. From the ecosystem: inspect, preview, then write
@@ -56,14 +55,14 @@ agentstack add skill https://github.com/o/r/tree/main/skills/pdf --write
 agentstack add skill ./my-skill --write
 
 # 2. Reusable across projects: into your first linked library source, then name it in a toolset
-agentstack lib add anthropics/skills --skill pdf --write
-#   then in any manifest:  [profiles.backend]  skills = ["pdf"]
+agentstack x lib add anthropics/skills --skill pdf --write
+#   then in any manifest:  [toolsets.backend]  skills = ["pdf"]
 
-# 3. Author one from scratch (see "drop the file, then say yes" above)
-agentstack lib new code-review        # scaffolds ./code-review/SKILL.md
+# 3. Author one from scratch (see "write it, declare it, approve it" above)
+agentstack x lib new code-review        # scaffolds ./code-review/SKILL.md
 
 # 4. Try before anything: ephemeral, manifest-free
-agentstack try anthropics/skills --skill pdf | claude
+agentstack x try anthropics/skills --skill pdf | claude
 ```
 
 Every source is content-scanned (hidden-unicode / prompt-injection) before
@@ -83,7 +82,7 @@ a decision for you, not a flag to reach for reflexively
 (`--allow-flagged` admits it with the warnings on record). Skill names obey
 one contract — lowercase `[a-z0-9._-]`, 64 chars — and a source directory
 that doesn't fit gets `--name` to choose. Update later with
-`agentstack lock --update` (branch and rev-less pins re-track their
+`agentstack lock --update --write` (branch and rev-less pins re-track their
 upstream; a vanished repo errors instead of pretending).
 
 - [Concepts](../concepts.md) — skill, toolset, library, lockfile

@@ -23,13 +23,13 @@ setup portable.
 
 ## What happens if I uninstall it?
 
-`agentstack uninstall` takes off every managed region it rendered, previewing
+`agentstack x uninstall` takes off every managed region it rendered, previewing
 first. Your `agentstack.toml` stays exactly where it is, so `agentstack apply
 --write` brings the whole setup back later. Entries you or another tool wrote
 into those same files are left alone.
 
 Because the removal runs through the same machinery as a normal write, the
-uninstall is itself undoable with `agentstack restore --last --write`. The
+uninstall is itself undoable with `agentstack x restore --last --write`. The
 binary is not removed — take that off the way you installed it. Details:
 [undo anything](howto/undo.md).
 
@@ -68,7 +68,7 @@ narrow that for their own machine.
 
 Thirteen adapters ship today: Antigravity, Claude Code, Claude Desktop, Codex
 CLI, GitHub Copilot CLI, Cursor, Gemini CLI, Junie, Kiro, OpenCode, Pi, VS
-Code, and Windsurf. `agentstack adapters list` shows which are installed here.
+Code, and Windsurf. `agentstack x adapters list` shows which are installed here.
 They are not equally verified — five get a nightly check against the real CLI
 and the rest are best-effort. The
 [adapter support matrix](adapters.md) says which is which, and what each one
@@ -136,8 +136,8 @@ launch, with `--unprotected` as the explicit way past them. The stronger
 
 `agentstack use <name> --write` activates a toolset persistently — it renders
 its servers and materializes its skills, and they stay until you change them.
-`agentstack session start <name>` is the temporary form: the same activation,
-but `agentstack session end` puts every file back.
+`agentstack x session start <name>` is the temporary form: the same activation,
+but `agentstack x session end` puts every file back.
 
 Naming a toolset does not activate it. `agentstack toolset create` writes the
 manifest entry and re-locks, and renders nothing at all — activation is always
@@ -157,7 +157,7 @@ Linux.
 Mostly. `doctor`, `diff`, `apply`, `use`, `restore` and toolset resolution are
 static and offline. Three things reach the network when you ask them to:
 `agentstack search` queries the MCP Registry alongside your local library,
-`agentstack install` fetches git-hosted skills into the store, and
+`agentstack x install` fetches git-hosted skills into the store, and
 `agentstack doctor --live` performs a real MCP handshake against HTTP servers.
 
 Everything fetched is pinned in `agentstack.lock`, so a later run verifies

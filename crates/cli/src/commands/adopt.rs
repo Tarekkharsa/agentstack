@@ -310,7 +310,7 @@ pub fn run(args: &AdoptArgs, manifest_dir: Option<&Path>) -> Result<()> {
             // Saying so is the honest version of "adopted".
             println!(
                 "  {}",
-                "next: `agentstack lock` to pin it, then `agentstack trust .` to review it"
+                "next: `agentstack lock --write` to pin it, then `agentstack trust .` to review it"
                     .dimmed()
             );
             // A skill that belongs to no toolset is declared but unreachable:

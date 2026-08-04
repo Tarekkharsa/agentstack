@@ -267,7 +267,7 @@ agentstack doctor    # every check, each finding followed by ↳ its fix</code><
 <h2 id="my-cli-doesnt-see-the-servers">My CLI doesn't see the servers<a class="hlink" href="#my-cli-doesnt-see-the-servers" aria-label="Link to this section">#</a></h2>
 <p>The most common cause is not an error at all: <strong>a harness reads its config at startup</strong>. After any write, <code>apply</code> says so itself.</p>
 <pre class="block"><code>→ Restart or reopen your agent CLIs so they pick up the new config.
-  undo: agentstack restore --last --write</code></pre>
+  undo: agentstack x restore --last --write</code></pre>
 <p>Restart the CLI first, then work down this list.</p>
 <p><strong><code>Claude Code    1 change pending ↳ agentstack apply --write</code></strong></p>
 <p>The manifest declares something the native config does not have yet. Nothing is written until you ask.</p>
@@ -285,14 +285,14 @@ agentstack doctor    # every check, each finding followed by ↳ its fix</code><
 <p>More: <a href="reference.html#scopes">reference — scopes</a>.</p>
 <p><strong>Nothing exists on disk at all, and that is deliberate</strong></p>
 <pre class="block"><code>not rendering configs — clean-at-rest keeps them off disk</code></pre>
-<p>In clean-at-rest mode nothing is generated between sessions; capabilities exist only inside <code>agentstack run</code> or between <code>agentstack session start</code> and <code>agentstack session end</code>. A missing <code>.mcp.json</code> here is the design. Do not create one. See <a href="concepts.html#delivery-modes">delivery modes</a>.</p>
+<p>In clean-at-rest mode nothing is generated between sessions; capabilities exist only inside <code>agentstack run</code> or between <code>agentstack x session start</code> and <code>agentstack x session end</code>. A missing <code>.mcp.json</code> here is the design. Do not create one. See <a href="concepts.html#delivery-modes">delivery modes</a>.</p>
 <p><strong><code>Codex will IGNORE {dir}/.codex/config.toml — the project is not trusted in ~/.codex/config.toml (projects."{dir}".trust_level) ↳ open Codex in this folder once and accept the trust prompt</code></strong></p>
 <p>This is Codex's own project-trust list, not agentstack's. agentstack rendered the file correctly; Codex refuses to read it until you have opened Codex in that folder once and accepted its prompt.</p>
 <p><strong><code>instruction '{fragment}' targets '{target}', which has no instructions file ↳ remove the target or use a supported CLI</code></strong></p>
 <p>An <code>[instructions.*]</code> fragment names a CLI that has no <code>CLAUDE.md</code>/<code>AGENTS.md</code> equivalent to compile into.</p>
-<p><strong><code>{cli}    managed region stale (project scope) ↳ agentstack instructions --write</code></strong></p>
+<p><strong><code>{cli}    managed region stale (project scope) ↳ agentstack x instructions --write</code></strong></p>
 <p>Instruction fragments changed in the manifest but the compiled block in the CLI's instructions file is old.</p>
-<pre class="block"><code>agentstack instructions --write</code></pre>
+<pre class="block"><code>agentstack x instructions --write</code></pre>
 <h2 id="a-secret-wont-resolve">A secret won't resolve<a class="hlink" href="#a-secret-wont-resolve" aria-label="Link to this section">#</a></h2>
 <p>agentstack never stores secret values in the manifest — only <code>${REF}</code> placeholders resolved per machine. An unresolved ref <strong>blocks the write</strong>; that is the intended behaviour, not a bug to route around.</p>
 <p><strong><code>✗ unresolved secret LINEAR_TOKEN (server 'linear') ↳ agentstack secret set LINEAR_TOKEN</code></strong></p>
@@ -325,12 +325,12 @@ agentstack apply --write</code></pre>
 <p>More: <a href="reference.html#secret-resolution">reference — secret resolution</a> and <a href="reference.html#unresolved-secrets-block-writes">unresolved secrets block writes</a>.</p>
 <h2 id="it-says-my-files-drifted">It says my files drifted<a class="hlink" href="#it-says-my-files-drifted" aria-label="Link to this section">#</a></h2>
 <p>Drift means the native config on disk no longer matches what the manifest would render. agentstack never silently reconciles it — you choose which side wins.</p>
-<pre class="block"><code>agentstack diff              # show exactly what differs, change nothing
+<pre class="block"><code>agentstack x diff              # show exactly what differs, change nothing
 agentstack adopt --write     # the disk is right: pull the edit into the manifest
 agentstack apply --write     # the manifest is right: re-render over the disk</code></pre>
 <p><code>diff</code> reports the same comparison <code>doctor</code> does, so the two never disagree.</p>
-<p><strong><code>Claude Code    no longer matches what agentstack last wrote ↳ review: agentstack diff · adopt the on-disk version: agentstack adopt</code></strong></p>
-<p>The region agentstack manages changed since its last write. <code>doctor</code> states the fact without guessing the cause — a hand-edit is the common one, but a session that ended onto a stale baseline reaches the same state, so it does not accuse you of editing. <code>agentstack diff</code> shows what moved and labels each entry <code>managed</code>, <code>foreign (kept)</code>, or <code>hand-edited</code>. Then pick a side: <code>adopt</code> pulls the on-disk version back into the manifest so it survives the next apply; <code>apply --write</code> throws it away and re-renders.</p>
+<p><strong><code>Claude Code    no longer matches what agentstack last wrote ↳ review: agentstack x diff · adopt the on-disk version: agentstack adopt</code></strong></p>
+<p>The region agentstack manages changed since its last write. <code>doctor</code> states the fact without guessing the cause — a hand-edit is the common one, but a session that ended onto a stale baseline reaches the same state, so it does not accuse you of editing. <code>agentstack x diff</code> shows what moved and labels each entry <code>managed</code>, <code>foreign (kept)</code>, or <code>hand-edited</code>. Then pick a side: <code>adopt</code> pulls the on-disk version back into the manifest so it survives the next apply; <code>apply --write</code> throws it away and re-renders.</p>
 <p><strong><code>Claude Code    kept &lt;names&gt; — applied by another manifest ↳ keep them: agentstack adopt · prune them: agentstack apply --prune-foreign</code></strong></p>
 <p><strong>Foreign</strong> entries: written by a <em>different</em> project's manifest into the same global file. <code>apply</code> keeps them by default — this is context, not a defect. Removing them takes the explicit flag, because they are somebody else's servers.</p>
 <p><strong><code>Claude Code    would REMOVE &lt;names&gt; ↳ keep them: agentstack adopt · prune them: agentstack apply --write</code></strong></p>
@@ -339,13 +339,13 @@ agentstack apply --write     # the manifest is right: re-render over the disk</c
 <p>An <strong>owned</strong> server — one whose defining app rewrites its own config by design. The app's copy is authoritative; <code>apply --write</code> refreshes the manifest from it and re-fans it out to the other CLIs.</p>
 <p><strong><code>Claude Code    rewritten by the app itself (owned server) — refresh the manifest: agentstack apply --write</code></strong></p>
 <p>Same situation, benign variant: the file changed but agentstack's managed region still matches. Live-state churn in configs a running session rewrites constantly (<code>~/.claude.json</code>) is ignored on purpose, so <code>doctor</code> does not flap.</p>
-<p><strong><code>{name}    content drifted from lock ↳ agentstack lock</code></strong></p>
+<p><strong><code>{name}    content drifted from lock ↳ agentstack lock --write</code></strong></p>
 <p>A different kind of drift: the <em>pinned bytes</em> of a skill, server, instruction, extension or workflow changed since <code>agentstack.lock</code> was written. Use sites fail closed until you re-pin.</p>
-<pre class="block"><code>agentstack lock</code></pre>
-<p><strong><code>{name}    not locked ↳ agentstack lock</code></strong> / <strong><code>{name}    from library, not locked ↳ agentstack lock</code></strong></p>
+<pre class="block"><code>agentstack lock --write</code></pre>
+<p><strong><code>{name}    not locked ↳ agentstack lock --write</code></strong> / <strong><code>{name}    from library, not locked ↳ agentstack lock --write</code></strong></p>
 <p>Something the manifest references has no lock entry at all. Same fix.</p>
 <p><strong><code>error: existing config is not valid JSON: expected ident at line 1 column 2</code></strong></p>
-<p>agentstack refuses to write into a file it cannot parse, because merging into broken JSON would destroy it. Open the named file, fix the syntax, re-run. If the file is unsalvageable, <code>agentstack restore &lt;adapter&gt;</code> puts back its single-slot backup.</p>
+<p>agentstack refuses to write into a file it cannot parse, because merging into broken JSON would destroy it. Open the named file, fix the syntax, re-run. If the file is unsalvageable, <code>agentstack x restore &lt;adapter&gt;</code> puts back its single-slot backup.</p>
 <p>More: <a href="reference.html#drift-adopt-or-apply">drift — adopt or apply?</a> and <a href="concepts.html#drift">concepts — drift</a>.</p>
 <h2 id="it-refuses-because-the-project-isnt-trusted">It refuses because the project isn't trusted<a class="hlink" href="#it-refuses-because-the-project-isnt-trusted" aria-label="Link to this section">#</a></h2>
 <p>Untrusted means <strong>inert</strong>: a cloned repository's declarations cannot spawn servers, enter agent context, or resolve secrets until a human has read them. A consented <code>agentstack init</code> records trust for you, so in practice this gate shows up in two places — a repo you cloned, and a manifest that changed since you approved it.</p>
@@ -374,7 +374,7 @@ trust --preview`, review the surface, and pass its `surface_digest` back</code><
 <p><code>--yes</code> alone would make "the user saw the review" the caller's claim rather than a checked fact.</p>
 <p><strong><code>cannot trust {path}: its loadable surface isn't fully pinned — N items need locking or review</code></strong></p>
 <p>Trust binds to bytes, so everything loadable must be pinned first.</p>
-<pre class="block"><code>agentstack lock     # pin whatever is unpinned
+<pre class="block"><code>agentstack lock --write   # pin whatever is unpinned
 agentstack trust .  # then review and approve the pinned surface</code></pre>
 <p><strong><code>error: refusing to apply without --consented &lt;digest&gt; — run --preview first, review, then pass the digest it printed</code></strong></p>
 <p>From the digest-bound panel actions (<code>create-profile</code>, <code>use-profile</code>, <code>add-server-to-profile</code>, <code>add-skill-to-profile</code>). Run the same command with <code>--preview</code>, read the JSON, then re-run with <code>--yes --consented &lt;digest&gt;</code>.</p>
@@ -384,21 +384,21 @@ agentstack trust .  # then review and approve the pinned surface</code></pre>
 <h2 id="i-want-to-undo-something">I want to undo something<a class="hlink" href="#i-want-to-undo-something" aria-label="Link to this section">#</a></h2>
 <p>Every write agentstack makes is recorded before it lands. <code>agentstack undo</code> (v0.18.0+) is the interactive front door — your recent changes newest-first, pick a point and revert; <code>restore</code> is the same record as a script-friendly command:</p>
 <pre class="block"><code>agentstack undo                     # timeline: pick a point, revert to it
-agentstack restore                  # list every undoable recorded write
-agentstack restore --last --write   # undo the most recent
-agentstack restore 18c634a4 --write # undo one by its id prefix</code></pre>
+agentstack x restore                  # list every undoable recorded write
+agentstack x restore --last --write   # undo the most recent
+agentstack x restore 18c634a4 --write # undo one by its id prefix</code></pre>
 <p>The ledger looks like this:</p>
 <pre class="block"><code>Recorded changes (newest first):
 
   18c6358f  20s ago  project  apply   1 file · Claude Code
 
-Undo one with: agentstack restore &lt;id&gt; --write (or --last for the newest)</code></pre>
+Undo one with: agentstack x restore &lt;id&gt; --write (or --last for the newest)</code></pre>
 <p>Each row names the operation that wrote it — <code>init</code>, <code>apply</code>, <code>session start 'backend'</code> — so three otherwise identical rows can be told apart. <code>agentstack restore --list</code> is an alias for the bare form, since that is what most people type.</p>
 <p><strong>Restoring a config that a tool broke, not agentstack</strong></p>
-<pre class="block"><code>agentstack restore claude-code</code></pre>
+<pre class="block"><code>agentstack x restore claude-code</code></pre>
 <p>That is the fallback path: one adapter's config from its single-slot backup, rather than a recorded change.</p>
 <p><strong>What <code>restore</code> does not cover.</strong> It reverts agentstack's own recorded config writes — not side effects a tool already had. A file a server deleted does not come back. Five actions are not file writes and have their own verb: <code>gateway disconnect</code>, <code>guard uninstall</code>, <code>trust --revoke</code>, <code>session end</code>, and <code>remove</code>. Replacing an already-managed skill with the same name is not snapshotted byte-exact, so its restore is not promised exact.</p>
-<p>To take everything back off at once, see <a href="howto/undo.html">undo anything</a> — <code>agentstack uninstall</code> previews first and is itself undoable.</p>
+<p>To take everything back off at once, see <a href="howto/undo.html">undo anything</a> — <code>agentstack x uninstall</code> previews first and is itself undoable.</p>
 <h2 id="a-server-wont-start">A server won't start<a class="hlink" href="#a-server-wont-start" aria-label="Link to this section">#</a></h2>
 <p><strong>Start here: <code>agentstack doctor --probe</code>.</strong></p>
 <p>Everything else on this page reads your configuration. <code>--probe</code> actually starts each stdio server, speaks the MCP <code>initialize</code> handshake, and stops it again — so instead of "your manifest is well-formed" you get a per-server answer to the question you actually have.</p>
@@ -436,9 +436,9 @@ server 'x': http transport ignores `command`</code></pre>
 <p>Not every native config format has a working-directory field.</p>
 <pre class="block"><code>command = "zsh"
 args = ["-lc", "cd /path/to/project &amp;&amp; exec my-server"]</code></pre>
-<p><strong><code>{name}    not installed ↳ agentstack install</code></strong> / <strong><code>not materialized ↳ agentstack install</code></strong></p>
+<p><strong><code>{name}    not installed ↳ agentstack x install</code></strong> / <strong><code>not materialized ↳ agentstack x install</code></strong></p>
 <p>A skill or git-hosted capability is referenced but its source was never fetched into the store.</p>
-<pre class="block"><code>agentstack install</code></pre>
+<pre class="block"><code>agentstack x install</code></pre>
 <p><strong><code>{cli}    broken skill link '&lt;name&gt;' → &lt;target&gt; (target missing) ↳ remove it: rm &lt;path&gt; · or reinstall the skill it points at</code></strong></p>
 <p>A materialized skill is a symlink whose target is gone — usually a store cleared or a skill removed outside agentstack.</p>
 <pre class="block"><code>{name}    no SKILL.md in &lt;dir&gt;
@@ -459,7 +459,7 @@ the exact name</code></pre>
 <p>From <code>agentstack init</code>. Two CLIs disagreed about the same server name, so the import kept the first one it read. Nothing is lost — the other definition is still in its own CLI's config until you apply. Open the manifest, check the entry that won, and fix it if the wrong one did.</p>
 <p><strong><code>{name}: unknown adapter</code></strong></p>
 <p><code>[targets].default</code> names a CLI agentstack has no adapter for.</p>
-<pre class="block"><code>agentstack adapters list</code></pre>
+<pre class="block"><code>agentstack x adapters list</code></pre>
 <p><strong><code>effective machine policy unavailable — drift rendering is BLOCKED</code></strong></p>
 <p>The machine-level manifest at <code>~/.agentstack/agentstack.toml</code> could not be read, and project policy can only narrow the machine ceiling — so with no ceiling there is nothing to narrow. Fix that file first.</p>
 <h2 id="still-stuck">Still stuck<a class="hlink" href="#still-stuck" aria-label="Link to this section">#</a></h2>
@@ -467,7 +467,7 @@ the exact name</code></pre>
 agentstack doctor --deep     # also scan every skill body for hidden-unicode / injection findings
 agentstack doctor --ci       # everything, plus a nonzero exit on any error
 agentstack doctor --json     # machine-readable, for a UI or a bug report
-agentstack explain &lt;name&gt;    # what one server, skill, or instruction actually is</code></pre>
+agentstack x explain &lt;name&gt;    # what one server, skill, or instruction actually is</code></pre>
 <p>By default <code>doctor</code> hides sections for features this project does not use and says how many it hid. <code>--all</code> shows them.</p>
 <ul>
 <li><a href="faq.html">FAQ</a> — the questions that come up in the first week</li>

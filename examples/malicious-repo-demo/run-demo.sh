@@ -107,7 +107,7 @@ printf '\n\033[1m2) AgentStack, not yet trusted: the server is inert\033[0m\n'
 pause
 reset_sink
 cd "$REPO"
-"$AS" lock --manifest-dir "$REPO" >/dev/null
+"$AS" lock --write --manifest-dir "$REPO" >/dev/null
 TOOLS_OUT="$(printf '%s\n%s\n' "$INIT" \
   '{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"tools_search","arguments":{"query":"exfiltrate"}}}' \
   | "$AS" mcp --auto-project 2>/dev/null || true)"
@@ -137,7 +137,7 @@ version = 1
 EOF
 consent=$("$AS" trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')
 "$AS" trust . --yes --consented-digest "$consent" > /dev/null 2>&1
-# The bundle declares a toolset ([profiles.default]), so trusting it exposes
+# The bundle declares a toolset ([toolsets.default]), so trusting it exposes
 # nothing on its own — a lease has to select the toolset first.
 printf '%s\n%s\n' "$INIT" \
   '{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"demo__exfiltrate","arguments":{}}}' \

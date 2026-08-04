@@ -582,7 +582,7 @@ pub fn resolve_targets(
                     .map(|c| format!(" — did you mean '{c}'?"))
                     .unwrap_or_default();
                 anyhow::bail!(
-                    "unknown CLI '{id}'{hint} (`agentstack adapters list` shows all ids)"
+                    "unknown CLI '{id}'{hint} (`agentstack x adapters list` shows all ids)"
                 );
             }
         }

@@ -262,32 +262,32 @@
 <p>For anyone who wants to inspect what their agent CLIs ran, called, and cost — and to vet a capability before relying on it. Prerequisite: none for <code>explain</code>; the run and call reports need activity AgentStack actually brokered (through the <a href="../concepts.html">gateway</a> or <code>agentstack run</code>) — a plain host run that talks to servers directly leaves nothing to report.</p>
 <div class="tblwrap"><table>
 <thead><tr><th>To see…</th><th>Run</th></tr></thead><tbody>
-<tr><td>Every tracked run, one line each</td><td><code>agentstack report runs</code></td></tr>
-<tr><td>One run in full — lifecycle, <a href="../concepts.html#egress">egress</a>, tool calls, secret refs, <a href="../concepts.html">posture</a></td><td><code>agentstack report run &lt;id&gt;</code></td></tr>
-<tr><td>What each capability costs you in context</td><td><code>agentstack report usage</code></td></tr>
-<tr><td>Every brokered tool call — ok, denied, errored</td><td><code>agentstack report calls</code></td></tr>
-<tr><td>What the <code>tools</code> block actually costs per turn, on the wire</td><td><code>agentstack report wire</code></td></tr>
-<tr><td>Concrete fixes from the signals already collected</td><td><code>agentstack optimize</code></td></tr>
-<tr><td>One server or skill, <strong>before</strong> you trust or rely on it</td><td><code>agentstack explain &lt;name&gt;</code></td></tr>
+<tr><td>Every tracked run, one line each</td><td><code>agentstack x report runs</code></td></tr>
+<tr><td>One run in full — lifecycle, <a href="../concepts.html#egress">egress</a>, tool calls, secret refs, <a href="../concepts.html">posture</a></td><td><code>agentstack x report run &lt;id&gt;</code></td></tr>
+<tr><td>What each capability costs you in context</td><td><code>agentstack x report usage</code></td></tr>
+<tr><td>Every brokered tool call — ok, denied, errored</td><td><code>agentstack x report calls</code></td></tr>
+<tr><td>What the <code>tools</code> block actually costs per turn, on the wire</td><td><code>agentstack x report wire</code></td></tr>
+<tr><td>Concrete fixes from the signals already collected</td><td><code>agentstack x optimize</code></td></tr>
+<tr><td>One server or skill, <strong>before</strong> you trust or rely on it</td><td><code>agentstack x explain &lt;name&gt;</code></td></tr>
 </tbody></table></div>
 <pre class="block"><code># What ran, and what one run did
-agentstack report runs                # table of tracked runs (--json to script)
-agentstack report run &lt;id&gt;            # one run's flight recorder + posture label
-agentstack kill &lt;id&gt;                  # stop a tracked run that's gone wrong
+agentstack x report runs                # table of tracked runs (--json to script)
+agentstack x report run &lt;id&gt;            # one run's flight recorder + posture label
+agentstack x kill &lt;id&gt;                  # stop a tracked run that's gone wrong
 
 # What your capabilities cost and call
-agentstack report usage               # per-capability context cost + activation counts
-agentstack report usage --live        # measure each server's tools/list on the wire
-agentstack report calls --since 7     # brokered tool calls, last 7 days (--json to script)
-agentstack report wire                # per-turn token weight of the tools block
+agentstack x report usage               # per-capability context cost + activation counts
+agentstack x report usage --live        # measure each server's tools/list on the wire
+agentstack x report calls --since 7     # brokered tool calls, last 7 days (--json to script)
+agentstack x report wire                # per-turn token weight of the tools block
 
 # Turn evidence into next actions
-agentstack optimize                   # evidence-backed recommendations (--write applies the safe class only)
+agentstack x optimize                   # evidence-backed recommendations (--write applies the safe class only)
 
 # Before you trust or rely on a capability
-agentstack explain &lt;name&gt;             # provenance, effective policy, and context cost, for one capability</code></pre>
-<p><strong>Start here:</strong> <code>agentstack report runs</code>. If it is empty, nothing has been brokered yet — runs are tracked when launched with <code>agentstack run</code>, and calls are brokered through the <a href="../howto/trust-a-repo.html">gateway</a>.</p>
-<p><strong>Before you trust.</strong> <code>agentstack explain &lt;name&gt;</code> is the vet-first command: it shows one server or skill's origin and provenance, whether it has drifted from its pin, its <a href="../reference.html#mcp-firewall-policytools">effective policy</a> (the tool, egress, and secret-access rules that will actually apply), and its per-session context cost. Run it before <code>agentstack trust .</code> (see <a href="../howto/trust-a-repo.html">trust a cloned repo</a>) or before adding a capability to a toolset.</p>
+agentstack x explain &lt;name&gt;             # provenance, effective policy, and context cost, for one capability</code></pre>
+<p><strong>Start here:</strong> <code>agentstack x report runs</code>. If it is empty, nothing has been brokered yet — runs are tracked when launched with <code>agentstack run</code>, and calls are brokered through the <a href="../howto/trust-a-repo.html">gateway</a>.</p>
+<p><strong>Before you trust.</strong> <code>agentstack x explain &lt;name&gt;</code> is the vet-first command: it shows one server or skill's origin and provenance, whether it has drifted from its pin, its <a href="../reference.html#mcp-firewall-policytools">effective policy</a> (the tool, egress, and secret-access rules that will actually apply), and its per-session context cost. Run it before <code>agentstack trust .</code> (see <a href="../howto/trust-a-repo.html">trust a cloned repo</a>) or before adding a capability to a toolset.</p>
 <p><strong>Limits.</strong> <code>report calls</code>, <code>report usage</code>, and <code>optimize</code> only see gateway-brokered calls — a server rendered into a native config is called by the harness directly, so it never appears in the audit log and is never auto-removed on "no calls" evidence alone. These records are best-effort local diagnostics, not tamper-evident forensics. What each mode actually enforces (and records) is the <a href="../enforcement.html#the-matrix">enforcement matrix</a>.</p>
 <ul>
 <li><a href="../concepts.html">Concepts</a> — flight recorder, call audit log, posture</li>

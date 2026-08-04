@@ -870,7 +870,7 @@ impl Gateway {
                                 attempted: "be served by the gateway",
                                 why: &reason,
                                 next_step: "run `agentstack trust .` to review what changed, \
-                                            or `agentstack lock` if you meant to update the pin",
+                                            or `agentstack lock --write` if you meant to update the pin",
                             },
                             project.clone(),
                             run_id.as_deref(),

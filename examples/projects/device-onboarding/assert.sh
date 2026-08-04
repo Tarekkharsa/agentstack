@@ -226,7 +226,7 @@ device "My Projects/app one"
 echo '{}' > "$H/.claude.json"
 seed_manifest
 "$AS" apply --scope project --write >/dev/null 2>&1 && grep -q docs .mcp.json && ok "apply in a spaced path" || bad "apply failed"
-"$AS" lock >/dev/null 2>&1 && "$AS" trust . --yes --consented-digest "$("$AS" trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')" >/dev/null 2>&1 && ok "lock + trust in a spaced path" || bad "lock/trust failed"
+"$AS" lock --write >/dev/null 2>&1 && "$AS" trust . --yes --consented-digest "$("$AS" trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')" >/dev/null 2>&1 && ok "lock + trust in a spaced path" || bad "lock/trust failed"
 "$AS" run claude-code --locked --plan 2>&1 | grep -q "would proceed" && ok "locked --plan green in a spaced path" || bad "locked plan failed"
 
 hdr "C2) unicode project path"
@@ -241,7 +241,7 @@ device "legacy"
 echo '{}' > "$H/.claude.json"
 printf 'version = 1\n[servers.docs]\ntype = "http"\nurl = "https://docs.example/mcp"\n[targets]\ndefault = ["claude-code"]\n' > agentstack.toml
 "$AS" apply --scope project --write >/dev/null 2>&1 && grep -q docs .mcp.json && ok "legacy layout applies" || bad "apply failed"
-"$AS" lock >/dev/null 2>&1 && [ -f agentstack.lock ] && ok "lock lands beside the legacy manifest" || bad "lock misplaced"
+"$AS" lock --write >/dev/null 2>&1 && [ -f agentstack.lock ] && ok "lock lands beside the legacy manifest" || bad "lock misplaced"
 consent=$("$AS" trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')
 "$AS" trust . --yes --consented-digest "$consent" >/dev/null 2>&1
 "$AS" run claude-code --locked --plan 2>&1 | grep -q "would proceed" && ok "locked --plan green on the legacy layout" || bad "legacy locked plan failed"
@@ -296,7 +296,7 @@ echo '{}' > "$H/.claude.json"
 mkdir -p .agentstack
 printf 'version = 1\n[servers.docs]\ntype = "http"\nurl = "https://docs.example/mcp"\n[targets]\ndefault = ["claude-code"]\n' \
   > .agentstack/agentstack.toml
-"$AS" lock >/dev/null 2>&1
+"$AS" lock --write >/dev/null 2>&1
 [ -f .agentstack/agentstack.lock ] && ok "the checkout carries a lockfile" || bad "nothing to land with — lock never written"
 OUT=$("$AS" up 2>&1) && ok "up exits 0 on a machine that has never seen this project" || bad "up failed: $OUT"
 grep -q "Claude Code" <<<"$OUT" && ok "up names the harnesses this machine actually has" || bad "no harness line: $OUT"
@@ -311,7 +311,7 @@ printf 'version = 1\n[servers.docs]\ntype = "http"\nurl = "https://docs.example/
   > .agentstack/agentstack.toml
 printf -- '---\nname: sql-review\ndescription: Review SQL migrations before they ship.\n---\nCheck every migration for missing indexes.\n' \
   > .agentstack/skills/sql-review/SKILL.md
-"$AS" lock >/dev/null 2>&1
+"$AS" lock --write >/dev/null 2>&1
 OUT=$("$AS" up 2>&1)
 grep -q 'DEVICE_UP_TOKEN' <<<"$OUT" && ok "up names the ref this machine cannot resolve" || bad "unresolvable ref went unmentioned: $OUT"
 grep -q 'agentstack secret set DEVICE_UP_TOKEN' <<<"$OUT" && ok "...alongside the exact command that stores it" || bad "no per-ref store command: $OUT"

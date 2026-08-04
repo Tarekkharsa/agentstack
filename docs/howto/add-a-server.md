@@ -16,7 +16,7 @@ Four verbs add a server. Pick by what you already have:
 | The server's config details (URL or command) | `agentstack add server` — or `set server` to overwrite one that exists |
 | Just a name — find it in the catalog or registry | `agentstack search` → `agentstack add from <id>` |
 | Already hand-added it to one CLI's config | `agentstack adopt --write` |
-| Want it reusable across projects by name | `agentstack lib add-server` + reference it from a [toolset](../concepts.md) |
+| Want it reusable across projects by name | `agentstack x lib add-server` + reference it from a [toolset](../concepts.md) |
 
 ```bash
 # 1. Have the details: add (or set, to overwrite) the server
@@ -32,11 +32,11 @@ agentstack add from github --write
 agentstack adopt --write
 
 # 4. Reusable across projects: store it in a linked library source, then name it in a toolset
-agentstack lib add-server kibana --file ./kibana.toml --write
-#   then in the manifest:  [profiles.backend]  servers = ["kibana"]
+agentstack x lib add-server kibana --file ./kibana.toml --write
+#   then in the manifest:  [toolsets.backend]  servers = ["kibana"]
 
 # After any of them: re-lock, then render into every CLI
-agentstack lock
+agentstack lock --write
 agentstack apply --write
 ```
 
@@ -46,7 +46,7 @@ first [linked library source](../concepts.md)) — commit-safe, with secrets kep
 Hand-edit `[servers.<name>]` in the manifest directly only when you need fields
 the flags don't cover — native per-adapter keys under `extra.<adapter>`, a
 launch `cwd`, `targets` scoping, or `owner`. Whenever you change a toolset's
-server list, re-lock with `agentstack lock` so the [lockfile](../concepts.md)
+server list, re-lock with `agentstack lock --write` so the [lockfile](../concepts.md)
 pins the new set, then `apply --write` to render.
 
 **Limits.** Adding a server does not store its secret, trust it, or run it.

@@ -460,7 +460,7 @@ fn status_offers_an_available_update_and_names_the_one_command() {
     assert_eq!(updates["packs"][0]["current"], "v0.1.0");
     assert_eq!(updates["packs"][0]["available"], "v0.2.0");
     assert_eq!(
-        updates["fix"], "agentstack lock --upgrade acme",
+        updates["fix"], "agentstack lock --upgrade acme --write",
         "the SHIPPED spelling, not the working name `upgrade`"
     );
     assert!(

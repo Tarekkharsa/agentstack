@@ -10,6 +10,18 @@
 use agentstack::cli::{Cli, Command, SessionCmd};
 use clap::{CommandFactory, Parser};
 
+/// The `--help --all` section that lists the fixed argv a graphical panel
+/// invokes. Those names are a machine contract, not human commands, so they are
+/// exempt from the "must be listed by `agentstack x`" rule below.
+fn inventory_contract_section() -> String {
+    let inventory = agentstack::cli::full_command_inventory();
+    inventory
+        .split_once("Integration contract (t3code)")
+        .expect("the inventory carries a labelled integration-contract section")
+        .1
+        .to_string()
+}
+
 #[test]
 fn command_tree_is_well_formed() {
     Cli::command().debug_assert();
@@ -33,50 +45,101 @@ fn status_parses_and_help_maps_every_command() {
     assert_eq!(
         visible,
         [
-            "init", "up", "status", "add", "search", "apply", "doctor", "share", "receive",
-            "toolset", "use", "yes", "run", "workflow", "trust", "restore", "undo", "adopt"
+            "init", "status", "add", "search", "apply", "doctor", "lock", "toolset", "use", "yes",
+            "run", "trust", "undo", "adopt", "secret"
         ],
-        "the visible list is the beginner loop, in task order. `workflow` joined \
-         it when the six interpreter-boundary review findings closed with \
-         witnesses, and it sits directly after `run` because that is what it \
-         is: one command that fans out into many governed runs. Un-hiding \
-         moved DISCOVERABILITY only — every *Honest limits* claim still \
-         holds, a host-tier step is still cooperative-guard only, and nothing \
-         in this list may be read as a containment promise. `up` is \
-         visible, and sits next to `init`, because the two are the same moment \
-         asked from opposite directions: `init` is for a setup that does not \
-         exist yet, `up` is for one that does and a machine that has not caught \
-         up. A user on a fresh laptop who cannot find `up` runs `init` instead \
-         and starts inventing a second setup beside the one they already have. \
-         `share` and `receive` are visible as a PAIR: a user who can send but \
-         cannot find how to review what arrives will open a teammate's bundle \
-         with something else, which is the one path around the review card. \
-         `publisher` stays hidden — key management is machinery you reach for \
-         once, and both visible verbs name it at the moment it becomes relevant. \
-         `undo` is \
-         visible because Undo is one of the four ideas and the one a person \
-         reaches for while something is already wrong — it must be findable \
-         without knowing that `restore` is its other name. `toolset` is \
-         visible because naming one is a step a person takes by hand (H2); the \
-         `create-profile` argv behind it stays hidden for t3code. `restore` and \
-         `adopt` close the loop: Undo is one of the four beginner concepts, so \
-         the recovery pair must be findable from plain `--help`."
+        "the visible list is DERIVED, not curated by taste: a command is here \
+         because the product tells someone to run it — the first-run ladder in \
+         `commands::overview`, doctor's `↳ fix` column, or a machine-readable \
+         `next_action` / `fix` field can emit it — or because it is the obvious \
+         verb for one of the four ideas the help itself promises. `lock` and \
+         `secret` are the two promotions that rule forced: both are named \
+         verbatim by doctor's fix column (`agentstack lock --write` is the most \
+         emitted fix in the product, `agentstack secret set <name>` the second), \
+         and both used to be hidden — guidance naming a command a reader cannot \
+         find is the exact defect this list exists to prevent. `adopt` stays for \
+         the same reason (doctor names it for a server found in a CLI config but \
+         not in the manifest, which is a FIRST-RUN state). `toolset`, `status`, \
+         `undo` and `init` cover Toolset · Status · Undo · Setup. The honest \
+         count is fifteen, not ten: hiding one of the forced three to reach a \
+         rounder number would trade a real guarantee for a tidier screen. \
+         `up`, `share`, `receive`, `workflow` and `restore` moved behind \
+         `agentstack x` — none is named by any fix or ladder rung, STRATEGY.md \
+         v3 puts share/receive quiet until team features arrive, and `undo` is \
+         the beginner spelling of `restore`. Nothing was removed: each still \
+         runs at its own name and is listed by `agentstack x`."
     );
 
-    // Review finding H5: the default help used to print all ~40 command names two
-    // lines under the curated list, undoing the curation on the same screen. The
-    // task-grouped map moved into `--help --all`, so `--help` must advertise the
-    // way in without listing what is behind it.
+    // Review finding H5 still holds — the default help must not re-dump the ~45
+    // names it just curated. It used to share this screen with an "Also named by
+    // guidance" line naming eight hidden verbs, kept there so guidance could
+    // never name a command a reader cannot find. That line is gone, and the
+    // guarantee did not move an inch: every one of those eight is listed by
+    // `agentstack x`, which rule (e) of `guidance_is_executable` counts as
+    // discoverable in one step. The line was a second, hand-maintained copy of a
+    // fact the toolbox already carried — the most rot-prone thing on the screen
+    // this curation exists to shorten. The guarantee itself is asserted where it
+    // can be derived rather than typed: rule (e) reads the discoverable set off
+    // the real binary every run.
     let after_help = cmd.get_after_help().expect("after_help exists").to_string();
     assert!(
         after_help.contains("--help --all"),
         "the short help must still name the way to the full map"
     );
-    for grouped_only in ["proxy", "shim", "sign", "gateway", "optimize", "kill"] {
+    assert!(
+        after_help.contains("agentstack x"),
+        "the short help must name the escape hatch to everything it hides"
+    );
+    // The eight guidance-named hidden verbs are no longer repeated here; they
+    // are discoverable one step away, under `agentstack x`, which the toolbox
+    // assertion below and rule (e) both check. Nothing that guidance never names
+    // may pad this screen (H5).
+    for grouped_only in ["proxy", "shim", "sign", "optimize", "kill"] {
         assert!(
             !after_help.contains(grouped_only),
             "'{grouped_only}' is back in the default --help, which re-dumps the \
              surface the visible list curates (H5)"
+        );
+    }
+
+    // `agentstack x` is the home of everything not visible, and it must actually
+    // list them — an escape hatch that names nothing is a dead end.
+    let listing = agentstack::cli::namespace_listing();
+    // The eight verbs guidance names by a `↳ fix` line or a ladder rung. They
+    // used to be repeated on the plain help screen; the toolbox is now their
+    // only listing, so this is where the "guidance never names an unfindable
+    // command" guarantee is anchored on this side.
+    for named_by_guidance in [
+        "gateway",
+        "guard",
+        "install",
+        "instructions",
+        "lib",
+        "self",
+        "session",
+        "up",
+    ] {
+        assert!(
+            listing.contains(named_by_guidance),
+            "guidance can print `agentstack {named_by_guidance} …`, so `agentstack x` \
+             must list it — it is the one screen a reader is pointed at that can \
+             still show them where the command lives"
+        );
+    }
+    for c in cmd.get_subcommands() {
+        let name = c.get_name();
+        if name == "help" || !c.is_hide_set() {
+            continue;
+        }
+        // Panel argv is a machine contract, not a human command; it stays in
+        // `--help --all` under its own heading (asserted below).
+        if inventory_contract_section().contains(name) {
+            continue;
+        }
+        assert!(
+            listing.contains(name),
+            "'{name}' is hidden and is not listed by `agentstack x` — it would be \
+             reachable only by already knowing its name"
         );
     }
 
@@ -304,5 +367,53 @@ fn secret_set_without_tty_names_value_flag() {
     assert!(
         !stderr.contains("os error"),
         "no raw OS error; got: {stderr}"
+    );
+}
+
+// `agentstack x <cmd>` is the SAME command, not a second one. The rewrite
+// happens before clap parses (`strip_namespace`), so there is one parse tree
+// and one dispatch arm per verb; this test pins that equivalence, and that the
+// direct spelling of a now-hidden command still parses.
+#[test]
+fn the_namespace_is_a_prefix_not_a_second_command() {
+    let argv = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+
+    for verb in [
+        vec!["secret", "list"],
+        vec!["gateway", "connect", "--all"],
+        vec!["guard", "install"],
+        vec!["restore", "--last", "--write"],
+        vec!["up"],
+        vec!["share", "team-setup"],
+        vec!["workflow", "list"],
+    ] {
+        let mut direct = vec!["agentstack".to_string()];
+        direct.extend(verb.iter().map(|s| s.to_string()));
+        let mut namespaced = vec!["agentstack".to_string(), "x".to_string()];
+        namespaced.extend(verb.iter().map(|s| s.to_string()));
+
+        // Hidden does not mean gone: the direct spelling still parses.
+        Cli::try_parse_from(&direct)
+            .unwrap_or_else(|e| panic!("`agentstack {}` must still run: {e}", verb.join(" ")));
+
+        let stripped = agentstack::cli::strip_namespace(&namespaced)
+            .expect("a leading `x` is the namespace and is stripped");
+        assert_eq!(
+            stripped,
+            direct,
+            "`agentstack x {0}` must become `agentstack {0}` verbatim",
+            verb.join(" ")
+        );
+    }
+
+    // `x` is only a namespace in first position — an argument that happens to
+    // be `x` belongs to the command that took it.
+    assert!(
+        agentstack::cli::strip_namespace(&argv(&["agentstack", "search", "x"])).is_none(),
+        "`x` after a verb is that verb's argument, not the namespace"
+    );
+    assert!(
+        agentstack::cli::strip_namespace(&argv(&["agentstack"])).is_none(),
+        "a bare invocation is not namespaced"
     );
 }

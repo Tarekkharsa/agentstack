@@ -178,7 +178,7 @@ pub fn run(args: &SearchArgs, manifest_dir: Option<&Path>) -> Result<()> {
             // Extensions aren't installed via `add from`; they are referenced by
             // name in the manifest, which re-gates trust + lock on the code.
             println!(
-                "    {} reference it in [extensions.{}] with target = \"{}\", then `agentstack lock`",
+                "    {} reference it in [extensions.{}] with target = \"{}\", then `agentstack lock --write`",
                 "↳".cyan(),
                 c.name,
                 ext.target
@@ -189,7 +189,7 @@ pub fn run(args: &SearchArgs, manifest_dir: Option<&Path>) -> Result<()> {
             // last week, and a result line with no next step reads as a dead
             // end — which is what sends people back to a browser tab.
             let cmd = if added {
-                format!("agentstack explain {}", c.name)
+                format!("agentstack x explain {}", c.name)
             } else if c.source == "catalog" {
                 format!("agentstack add from {}", c.name)
             } else {

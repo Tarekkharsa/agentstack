@@ -148,12 +148,30 @@ fn files_to_scan(root: &Path) -> Vec<(PathBuf, Kind)> {
         (root.join("CONTRIBUTING.md"), Kind::Markdown),
     ];
 
-    let docs_dir = root.join("docs");
-    for entry in std::fs::read_dir(&docs_dir).expect("docs/ dir readable") {
-        let path = entry.expect("readable dir entry").path();
-        if !path.is_file() {
-            continue; // skips docs/design/, docs/spikes/, docs/demos/ dirs
+    // docs/ itself, plus the reader-facing subdirectories. `howto/`,
+    // `tutorial/` and `panel/` are entry points a person actually reads, and
+    // two of them (`tutorial/index.html`, `panel/index.html`) are
+    // hand-authored with no Markdown source — so this scan is the only gate
+    // that ever reads the command names in them. Skipped on purpose:
+    // `docs/design/` (contracts for maintainers), `docs/archive/` (history,
+    // whose commands are allowed to be retired), and `spikes/`/`demos/`.
+    let mut docs_entries: Vec<PathBuf> = vec![root.join("docs")];
+    for sub in ["howto", "tutorial", "panel"] {
+        let dir = root.join("docs").join(sub);
+        if dir.is_dir() {
+            docs_entries.push(dir);
         }
+    }
+    let mut doc_files: Vec<PathBuf> = Vec::new();
+    for dir in docs_entries {
+        for entry in std::fs::read_dir(&dir).expect("docs dir readable") {
+            let path = entry.expect("readable dir entry").path();
+            if path.is_file() {
+                doc_files.push(path);
+            }
+        }
+    }
+    for path in doc_files {
         match path.extension().and_then(|e| e.to_str()) {
             Some("md") => files.push((path, Kind::Markdown)),
             Some("html") => {
