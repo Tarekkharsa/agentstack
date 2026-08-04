@@ -9,9 +9,11 @@ render it into each CLI's native format. This example is the runnable proof
 that the fan-out is faithful, secret-safe, and reproducible.
 
 It is the **rendered lane** on purpose: this team commits its native configs, so
-it asks for files with `use` + `apply`. Delivery is routed, and on these three
-MCP-capable tools the default is the live lane — `agentstack delivery` prints
-the routing, and the Cursor section below turns that into the point.
+its manifest sets `[delivery] render_locally = true` and then asks for files with
+`use` + `apply`. Delivery is routed, and on these three MCP-capable tools the
+default is the live lane — servers would be served through the gateway and no
+MCP config file written — so the files below exist because this project opted
+in. `agentstack delivery` prints the routing and names the override.
 
 The manifest declares one HTTP MCP server (the team's internal API, whose bearer
 token is a `${WEBAPP_API_TOKEN}` placeholder — never a literal), one house-rules
@@ -31,10 +33,11 @@ is a declared target, and the house-rules fragment targets `*` (all three CLIs),
 so the honest question is what the user experiences.
 
 The gap is narrower than it looks, and the demo now says which half is real.
-Cursor speaks MCP, so `delivery` routes **skills** to it live: an agent in
-Cursor loads the same skill through the gateway that Claude Code reads off disk,
-and the missing `.cursor/skills` is not a hole. **Instructions** have no live
-lane at all, so they are what Cursor genuinely cannot receive — and as of
+Cursor speaks MCP, so under the default routing `delivery` serves **skills** to
+it live through the gateway, and the missing `.cursor/skills` is not a hole —
+this project only sees files because it set `render_locally`. **Instructions**
+have no live lane at all, so they are what Cursor genuinely cannot receive —
+and as of
 v0.15.0 `agentstack` **warns** about that instead of dropping it silently
 (issues [#12](https://github.com/Tarekkharsa/agentstack/issues/12) and
 [#13](https://github.com/Tarekkharsa/agentstack/issues/13)). `assert.sh` asserts
@@ -72,8 +75,9 @@ CLIs correctly and secret-safely:
   (their formats store plaintext) and absent from both the manifest and the
   lockfile.
 - **Honest surfacing of the Cursor gap.** Cursor gets no instruction file and
-  no skills dir; `delivery` routes skills to it live anyway, instructions have
-  no live lane, and `agentstack` warns about the dropped fragment — the run
+  no skills dir; `delivery` reports Cursor on the rendered lane and names the
+  `render_locally` override, instructions have no live lane in either routing,
+  and `agentstack` warns about the dropped fragment — the run
   asserts that some surface (`apply --target cursor` or `explain`) pairs
   "cursor" with the dropped content instead of dropping it silently.
 

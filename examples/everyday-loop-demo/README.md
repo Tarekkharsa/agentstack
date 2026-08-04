@@ -18,7 +18,10 @@ back, hand it to someone else, and have their machine come up on one command.
    `examples/projects/skills-workout` proves both lanes deliver identical
    bytes). The rendered lane is the right one here — `undo`, `share`,
    `receive`, and `up` are all about files, and files are what this demo
-   compares byte-for-byte.
+   compares byte-for-byte. Both manifests in the script therefore carry
+   `[delivery] render_locally = true` — under the default routing an
+   MCP-capable tool is served live and no native server config is written at
+   all, and that key is how a project asks for the files instead.
 3. **Undo** with `agentstack undo --to 1 --write`: `.mcp.json` returns
    byte-for-byte to where it started, hand-written server and all — while the
    dropped file itself is left alone.

@@ -5,6 +5,34 @@ synthetic HOME, isolated AGENTSTACK_HOME) modeling a real user's starting
 point — which CLIs they have, what their native configs already hold, and how
 odd their environment is.
 
+## This fixture rides the RENDERED lane, on purpose
+
+Delivery is routed, not chosen. Under the default (Automatic) routing an
+MCP-capable harness is served its servers **live** through the gateway, so a
+project holds only `.agentstack/` and no native MCP file is written at all.
+That is the right default — and it is not what this fixture is for.
+
+Almost every assertion below reads a *rendered native file*: three native
+formats side by side, a render that must land at the project root and not in a
+nested subdirectory, a spaced path, a unicode path, the legacy root layout, a
+non-git project. So every manifest `assert.sh` writes carries the single
+supported override:
+
+```toml
+[delivery]
+render_locally = true
+```
+
+(`agentstack delivery render-locally --write` records the same block.) Without
+it these scenarios would not fail loudly — they would pass *vacuously*, because
+there would be no file to contradict them. The live lane has its own witnesses
+elsewhere; this one is the file-rendering matrix.
+
+One consequence worth knowing: on the default routing `doctor --ci` is red on a
+device with no bridge registered ("no bridge for Claude Code — nothing routed
+live is reaching it"). Opting into the rendered lane is what makes B6's
+`doctor --ci` green, because nothing is waiting on a bridge any more.
+
 ## What `assert.sh` proves
 
 **A. CLI presence.** A device with zero CLIs gets the honest fallback and a

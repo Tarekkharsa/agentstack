@@ -8,7 +8,9 @@ native config format — no hand-editing three files, no drift between them.
 what happens automatically. Delivery is routed: on an MCP-capable tool servers
 are served live and nothing is written for them (`agentstack delivery` prints
 the routing per tool). Files are the whole claim here, so this demo asks for
-them. The manifest also declares its server **inline**, the shape a repo
+them: its manifest sets `[delivery] render_locally = true`, a deliberate opt-in
+you should copy only when your project really needs bytes on disk. The manifest
+also declares its server **inline**, the shape a repo
 commits; an `init` import is library-first instead, and the `${REF}` then lives
 in the library definition — see `examples/first-value-demo/`.
 

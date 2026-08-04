@@ -23,6 +23,8 @@
 #      (see examples/projects/skills-workout for both lanes side by side). This
 #      demo takes the rendered lane deliberately — undo/share/receive/up are all
 #      about files on disk, and files are what it has to compare byte-for-byte.
+#      Both manifests below therefore carry `[delivery] render_locally = true`,
+#      which is how a project asks for files under the default routing.
 #   3. `agentstack undo --to 1 --write` puts the native config back BYTE FOR
 #      BYTE — including the hand-written server the render had merged with.
 #   4. `agentstack share` writes a signed .astack bundle.
@@ -123,8 +125,18 @@ printf '\033[1;36m  agentstack — the everyday loop: yes · undo · share · re
 cd "$PROJECT_A"
 git init -q .
 mkdir -p .agentstack
+# `[delivery] render_locally = true` is a deliberate opt-in, not a workaround.
+# Under the default routing an MCP-capable tool is served live and no native
+# server config is written at all — which is right for the first-value journey,
+# and useless here: undo/share/receive/up are verbs ABOUT files on disk, and
+# this demo's whole point is comparing those files byte-for-byte (step 3 reverts
+# a render that had merged with a hand-written server). The rendered lane is
+# routed, not removed; this is how a project asks for it.
 cat > .agentstack/agentstack.toml <<'EOF'
 version = 1
+
+[delivery]
+render_locally = true
 
 [servers.docs]
 type = "http"
@@ -285,8 +297,13 @@ say "A colleague's laptop — its own HOME, its own trust store, its own project
 cd "$PROJECT_B"
 git init -q .
 mkdir -p .agentstack
+# Machine B asks for the rendered lane too — same reason as machine A, and the
+# `up` step below is asserted on the native config it writes.
 cat > .agentstack/agentstack.toml <<'EOF'
 version = 1
+
+[delivery]
+render_locally = true
 
 [servers.docs]
 type = "http"

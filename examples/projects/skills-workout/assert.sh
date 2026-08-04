@@ -78,9 +78,13 @@ printf '\033[1;36m  skills-workout — the live lane vs the rendered lane, ident
 say "Delivery is routed — this project's only tool is MCP-capable:"
 DELIVERY="$("$AS" delivery 2>&1 | sed 's/\x1b\[[0-9;]*m//g')"
 printf '%s\n' "$DELIVERY" | sed 's/^/  /'
-if grep -q "Claude Code.*skills.*served live" <<< "$DELIVERY" \
+# The bridge is not registered in this sandbox, so the router reports the live
+# lane as PLANNED ("planned live (not connected)") rather than already served.
+# The routing decision is the same either way — skills do not become files — and
+# the demo drives the live lane directly over `agentstack mcp` further down.
+if grep -q "Claude Code.*skills.*planned live (not connected)" <<< "$DELIVERY" \
    && grep -q "0 project artifacts" <<< "$DELIVERY"; then
-  ok "skills route to the LIVE lane by default here — the render below is the ask, not the norm"
+  ok "skills route to the LIVE lane by default here (planned, bridge not yet connected) — the render below is the ask, not the norm"
 else
   bad "expected skills routed live on an MCP-capable tool; got: $DELIVERY"
 fi

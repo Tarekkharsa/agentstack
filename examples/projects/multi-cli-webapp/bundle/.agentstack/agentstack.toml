@@ -6,6 +6,14 @@
 # and let `agentstack` compile it into each CLI's native format.
 version = 1
 
+# This team commits its native configs, so it asks for the RENDERED lane. By
+# default an MCP-capable CLI is served its servers live through the gateway and
+# no MCP config file is written for it; this line makes the files real, which is
+# what the assertions below inspect. Set it only when a project genuinely needs
+# bytes on disk — not as a default habit.
+[delivery]
+render_locally = true
+
 # Fan-out targets. Everything below renders into these three CLIs by default.
 [targets]
 default = ["claude-code", "codex", "cursor"]

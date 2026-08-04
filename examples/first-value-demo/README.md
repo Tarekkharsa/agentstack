@@ -11,14 +11,24 @@ The fenced, reproducible proof of AgentStack's core promise (TODO §1.5):
    value lands in a gitignored `.env`. The token is asserted in all three
    places at once — no secret material in the manifest, the placeholder (never
    the value) in the library entry, the value only in the ignored `.env`.
-3. **Route** with `agentstack delivery`: both tools are MCP-capable, so the
-   servers are served live and nothing is written for them.
-4. **Verify** with `agentstack doctor`: 0 errors, 0 warnings.
-5. **Render anyway** with `agentstack apply --toolset default --scope global
-   --write` — the lane for when you want the files: both native configs now
-   carry both servers, each in its own format. The toolset has to be named
-   because the definitions live in the library, not the manifest's `[servers]`.
-6. **Undo** with `agentstack restore --last --write` (twice): every file is
+3. **Connect** with `agentstack x gateway connect --all --write`: the live lane
+   needs one bridge registered per MCP-capable tool. Before it runs, `delivery`
+   and `doctor` say "planned live (not connected)" — the demo resolves that
+   complaint rather than asserting less.
+4. **Route** with `agentstack delivery`: both tools are MCP-capable, so the
+   servers are served live and nothing is written for them. The project is
+   asserted clean on the tree itself — it holds `.agentstack/` and the
+   `.gitignore` that hides the lifted secret, and no native config at all.
+5. **Verify** with `agentstack doctor`: 0 errors, 0 warnings.
+6. **Render anyway** with `agentstack x delivery render-locally --write`, then
+   `agentstack apply --toolset default --scope global --write` — the lane for
+   when you want the files. Under the default routing, asking for files is an
+   explicit opt-in; the rendered lane is routed, not removed. Both native
+   configs then carry both servers, each in its own format. The toolset has to
+   be named because the definitions live in the library, not the manifest's
+   `[servers]`.
+7. **Undo** with `agentstack restore --last --write` (four times: the render,
+   the render-locally override, the bridge, the import): every file is
    byte-identical to where it started, and the library entries the import
    created are gone with it.
 

@@ -11,7 +11,8 @@
 # tool servers are served live instead (`agentstack delivery` prints the
 # routing per tool). Files are exactly what this demo is about, though: three
 # native formats at three paths from one source is a claim you can only make
-# about bytes on disk, so it asks for them.
+# about bytes on disk, so it asks for them: the manifest sets
+# `[delivery] render_locally = true`.
 #
 # This project declares its servers INLINE, in the manifest's own [servers] —
 # the shape a repo commits. An `init` import is library-first instead, and the
@@ -97,6 +98,9 @@ run "cat .agentstack/agentstack.toml"
 sed 's/^/  /' .agentstack/agentstack.toml
 note "It targets three CLIs, declares one MCP server INLINE, one instruction"
 note "fragment, and references the token only as \${GITHUB_TOKEN} — no value here."
+note "It also sets [delivery] render_locally = true: by DEFAULT these MCP-capable"
+note "CLIs are served their servers live through the gateway and no config file is"
+note "written for them. This demo compares native file formats, so it asks for files."
 
 say "Prove the portable artifact is secret-free before we render anything:"
 run "grep GITHUB_TOKEN .agentstack/agentstack.toml"

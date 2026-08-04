@@ -13,14 +13,21 @@
 #      DEFINITIONS land in the library; the manifest references them by name.
 #      The inline token is lifted to a `${GITHUB_TOKEN}` reference in the
 #      library definition, and its value lands in a gitignored .env.
-#   3. `agentstack delivery` — how each tool actually gets them: on an
-#      MCP-capable tool, servers are served live, so there is nothing on disk.
-#   4. `agentstack doctor` — a clean bill of health.
-#   5. `agentstack apply --toolset default --scope global --write` — the
-#      rendered lane, for when you want the files anyway: BOTH native formats
-#      end up with BOTH servers.
-#   6. `agentstack restore --last --write` (twice: render, then import) — the
-#      machine returns byte-for-byte to where it started, library included.
+#   3. `agentstack x gateway connect --all --write` — register the bridge each
+#      MCP-capable tool talks to. This is what makes the live lane real; until
+#      it runs, delivery and doctor both say so plainly.
+#   4. `agentstack delivery` — how each tool actually gets them: on an
+#      MCP-capable tool, servers are served live, so the project stays clean —
+#      it holds `.agentstack/` and nothing else.
+#   5. `agentstack doctor` — a clean bill of health.
+#   6. `agentstack x delivery render-locally --write`, then
+#      `agentstack apply --toolset default --scope global --write` — the
+#      rendered lane, for when you want the files anyway. Asking for files is
+#      now an explicit opt-in; the rendered lane is routed, not removed, and
+#      BOTH native formats end up with BOTH servers.
+#   7. `agentstack restore --last --write` (four times: render, the
+#      render-locally override, the bridge, then the import) — the machine
+#      returns byte-for-byte to where it started, library included.
 #
 # The secret claim is the one this demo exists to make, and after the library
 # inversion it lives in three places at once, so it is proven three times: the
@@ -167,6 +174,14 @@ else
   bad "the value must live only in the gitignored .env (also found in: ${LEAKS:-nowhere})"
 fi
 
+# The live lane needs one registration: each MCP-capable tool has to be told
+# about the bridge it will talk to. Until this runs, delivery and doctor both
+# report "planned live (not connected)" — honest, and the reason doctor is not
+# clean yet. The demo resolves the complaint rather than lowering the bar.
+say "The live lane needs one bridge registered — one command, both tools:"
+run "agentstack x gateway connect --all --write"
+as x gateway connect --all --write 2>&1 | tail -3 | sed 's/^/  /'
+
 say "How does each tool actually get them? Delivery is routed — ask it:"
 run "agentstack delivery"
 DELIVERY_OUT="$(as delivery 2>&1)"
@@ -179,10 +194,17 @@ if printf '%s' "$DELIVERY_OUT" | grep -q "Claude Code.*MCP servers served live" 
 else
   bad "delivery should route MCP servers live on both MCP-capable tools"
 fi
-if printf '%s' "$DELIVERY_OUT" | grep -q "0 project artifacts"; then
-  ok "0 project artifacts for the live lane — the import left the repo clean"
+# The claim "nothing on disk" is now checked where it is actually true: in the
+# project. Under the default routing the import writes no native server config
+# into the repo at all — only AgentStack's own `.agentstack/` directory and the
+# .gitignore that hides the lifted secret. Asserting on the delivery TEXT would
+# be weaker; this asserts on the tree itself.
+STRAY="$(find . -mindepth 1 -maxdepth 1 \
+          ! -name .agentstack ! -name .git ! -name .gitignore | sort || true)"
+if [ -z "$STRAY" ] && [ ! -e .mcp.json ] && [ ! -e .claude ] && [ ! -e .codex ]; then
+  ok "the project holds only .agentstack/ — the live lane wrote no config into the repo"
 else
-  bad "the live lane should report zero project artifacts"
+  bad "the live lane left files in the project: ${STRAY:-none at top level}"
 fi
 
 say "Is everything healthy? One status command:"
@@ -199,11 +221,16 @@ else
 fi
 
 # ── the rendered lane, on request ────────────────────────────────────────────
-# The live lane above is what happens automatically. `apply` is what happens
-# when you ASK for files — and it is the same one import fanning out, so the
-# toolset has to be named: the definitions are in the library now, not in the
-# manifest's own [servers].
-say "Want the files anyway? Ask for them — one import, both native formats:"
+# The live lane above is what happens automatically. Asking for files is now an
+# explicit opt-in: `delivery render-locally` records it for this project, and
+# `apply` then writes them. The rendered lane is routed, not removed. It is the
+# same one import fanning out, so the toolset has to be named: the definitions
+# are in the library now, not in the manifest's own [servers].
+say "Want the files anyway? Say so once — the rendered lane is routed, not gone:"
+run "agentstack x delivery render-locally --write"
+as x delivery render-locally --write 2>&1 | sed 's/^/  /'
+
+say "Now ask for them — one import, both native formats:"
 run "agentstack apply --toolset default --scope global --write"
 as apply --toolset default --scope global --write 2>&1 | tail -6 | sed 's/^/  /'
 
@@ -231,8 +258,12 @@ else
   bad "secret handling: value must reach native configs only, never the library"
 fi
 
-say "Changed your mind? Every write is recorded — undo the render, then the import:"
+say "Changed your mind? Every write is recorded — walk the timeline back:"
 run "agentstack restore --last --write   # undoes the apply"
+as restore --last --write 2>&1 | tail -2 | sed 's/^/  /'
+run "agentstack restore --last --write   # undoes the render-locally override"
+as restore --last --write 2>&1 | tail -2 | sed 's/^/  /'
+run "agentstack restore --last --write   # undoes the bridge registration"
 as restore --last --write 2>&1 | tail -2 | sed 's/^/  /'
 run "agentstack restore --last --write   # undoes the import"
 as restore --last --write 2>&1 | tail -2 | sed 's/^/  /'
@@ -261,6 +292,6 @@ else
   bad "restore left the imported library definitions behind"
 fi
 
-say "Import once → routed to both CLIs → clean doctor → fully reversible."
+say "Import once → served live to both CLIs → clean doctor → fully reversible."
 printf '\n\033[1mSummary:\033[0m %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

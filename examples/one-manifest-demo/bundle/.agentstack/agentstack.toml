@@ -9,6 +9,16 @@
 # placeholder; the real token is resolved per-machine at render time.
 version = 1
 
+# This demo's whole subject is the RENDERED lane: one server compared side by
+# side in three native file formats. Under the default routing an MCP-capable
+# CLI is served its servers LIVE through the gateway and no config file is
+# written for them — correct for most projects, but it would leave this demo
+# with nothing to show. So it asks for files deliberately. Copy this line only
+# if your project really needs bytes on disk (a policy that forbids a
+# persistent daemon, an offline machine, committed native configs).
+[delivery]
+render_locally = true
+
 # Fan-out targets: the same declarations below render into all three CLIs.
 [targets]
 default = ["claude-code", "codex", "cursor"]

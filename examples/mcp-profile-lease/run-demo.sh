@@ -27,7 +27,9 @@ python3 "$HERE/lease_demo.py" "$AS" "$PROJECT"
 test ! -e "$PROJECT/.mcp.json"
 test ! -e "$PROJECT/.claude/skills"
 test ! -e "$AGENTSTACK_HOME/sessions.json"
-grep -q '^\[profiles.backend-observed\]' "$PROJECT/.agentstack/agentstack.toml"
+# The frozen set lands under the manifest's `toolsets` key (the former
+# `profiles` spelling is only still parsed for old manifests).
+grep -q '^\[toolsets.backend-observed\]' "$PROJECT/.agentstack/agentstack.toml"
 
 printf 'PASS  refreshed agentstack.lock after reviewing the frozen profile\n'
 printf 'PASS  no .mcp.json, .claude/skills, or sessions.json was created\n'

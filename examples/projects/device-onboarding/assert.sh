@@ -8,6 +8,11 @@
 # Nothing touches your real machine. Asserting: PASS/FAIL, nonzero exit on
 # any failure — CI-grade.
 #
+# LANE: every manifest here sets `[delivery] render_locally = true`. The default
+# routing serves MCP servers LIVE through the gateway and writes no native MCP
+# file; this fixture is the file-rendering matrix, and nearly every assertion
+# below reads a rendered file. See the note beside seed_manifest().
+#
 #   A. CLI-presence matrix: zero CLIs (honest fallback), one CLI, three CLIs
 #      with servers in three native formats — imports counted, an inline
 #      bearer token lifted to a ${REF} in the LIBRARY definition the import
@@ -81,10 +86,31 @@ device() { # fresh fake device; $1 (optional): project dir name
   export HOME="$H" AGENTSTACK_HOME="$SBX/ashome" PATH="$SBX/bin:/usr/bin:/bin"
   cd "$P"
 }
+# Every manifest this fixture writes opts into the RENDERED lane.
+#
+# Under the default (Automatic) routing an MCP-capable harness is served its
+# servers live through the gateway, so a project holds only `.agentstack/` and
+# no native MCP file is ever written. That is the right default — and it is not
+# what this fixture is for. The onboarding matrix exists to prove that native
+# files appear, in the right place, with the right content, across many machine
+# shapes: three native formats, spaced and unicode paths, a legacy layout, a
+# non-git project, a nested subdirectory. Every one of those assertions reads a
+# rendered file. So each manifest here carries `[delivery] render_locally =
+# true`, which is the single supported override (`agentstack delivery
+# render-locally --write` writes the same block).
+DELIVERY_BLOCK='
+# This fixture asserts on rendered native files, so it opts out of the live
+# lane — see the note beside seed_manifest() in assert.sh.
+[delivery]
+render_locally = true
+'
+render_locally() { printf '%s' "$DELIVERY_BLOCK" >> "${1:-.agentstack/agentstack.toml}"; }
+
 seed_manifest() {
   mkdir -p .agentstack
   printf 'version = 1\n[servers.docs]\ntype = "http"\nurl = "https://docs.example/mcp"\n[targets]\ndefault = ["claude-code"]\n' \
     > .agentstack/agentstack.toml
+  render_locally
 }
 
 printf '\033[1;36m  agentstack — device onboarding matrix\033[0m\n'
@@ -97,6 +123,7 @@ rm -f "$SBX/bin/claude"   # truly zero CLIs
 OUT=$("$AS" init --yes 2>&1) && ok "init exits 0 on a CLI-less device" || bad "init failed: $OUT"
 grep -qi "No supported CLIs detected" <<<"$OUT" && ok "honest zero-CLI message + starter manifest" || bad "detection: $(grep -i detect <<<"$OUT")"
 [ -f .agentstack/agentstack.toml ] && ok "starter manifest written" || bad "no manifest"
+render_locally   # this fixture asserts on rendered files
 "$AS" apply --write >/dev/null 2>&1 && ok "apply graceful with zero targets" || bad "apply failed"
 "$AS" doctor >/dev/null 2>&1 && ok "doctor exits 0" || bad "doctor failed"
 
@@ -117,6 +144,7 @@ mkdir -p "$H/.codex" "$H/.cursor"
 printf '[mcp_servers.linear]\ncommand = "npx"\nargs = ["-y", "@linear/mcp"]\n' > "$H/.codex/config.toml"
 echo '{"mcpServers":{}}' > "$H/.cursor/mcp.json"
 OUT=$("$AS" init --no-keychain 2>&1)
+render_locally   # this fixture asserts on rendered files
 grep -qE "Found 3 coding tool" <<<"$OUT" && ok "detects 3 CLIs" || bad "detection line: $(grep -iE 'found|detect' <<<"$OUT" | head -1)"
 grep -qE "Imported: +3 MCP server" <<<"$OUT" && ok "imports 3 servers across json + toml" || bad "$(grep -i import <<<"$OUT")"
 M=.agentstack/agentstack.toml
@@ -169,6 +197,7 @@ echo '{"mcpServers":{"my-hand-server":{"type":"http","url":"https://hand.example
 printf '# My project\n\nHand-written intro prose.\n' > CLAUDE.md
 mkdir -p .agentstack
 printf 'version = 1\n[instructions.team]\npath = "./team.md"\n[targets]\ndefault = ["claude-code"]\n' > .agentstack/agentstack.toml
+render_locally   # this fixture asserts on rendered files
 printf 'Team rules from agentstack.\n' > .agentstack/team.md
 "$AS" apply --scope project --write >/dev/null 2>&1
 grep -q "my-hand-server" .mcp.json && ok "hand-written server survived apply" || bad "hand server gone"
@@ -195,6 +224,7 @@ git init -q .
 echo '{"mcpServers":{"my-hand-server":{"type":"http","url":"https://hand.example/mcp"}}}' > .mcp.json
 mkdir -p .agentstack
 printf 'version = 1\n[servers.managed-a]\ntype = "http"\nurl = "https://a.example/mcp"\n[servers.managed-b]\ntype = "http"\nurl = "https://b.example/mcp"\n[targets]\ndefault = ["claude-code"]\n' > .agentstack/agentstack.toml
+render_locally   # this fixture asserts on rendered files
 "$AS" apply --scope project --write >/dev/null 2>&1
 python3 - <<'EOF'
 text = open(".agentstack/agentstack.toml").read()
@@ -211,7 +241,9 @@ device
 echo '{"mcpServers":{"docs":{"type":"http","url":"https://docs.example/mcp"}}}' > "$H/.claude.json"
 # An imported server is a library server referenced by the toolset, so the
 # render is `use`, and so is the re-render this section round-trips.
-"$AS" init --yes >/dev/null 2>&1 && "$AS" use default --write >/dev/null 2>&1
+"$AS" init --yes >/dev/null 2>&1
+render_locally   # this fixture asserts on rendered files
+"$AS" use default --write >/dev/null 2>&1
 OUT=$("$AS" use default 2>&1)
 grep -qiE "up to date|no changes|0 target" <<<"$OUT" && ok "second use reports nothing to do" || bad "not idempotent: $(tail -2 <<<"$OUT")"
 "$AS" doctor --ci >/dev/null 2>&1 && ok "doctor --ci green after the render" || bad "doctor --ci red"
@@ -240,6 +272,7 @@ hdr "C3) legacy root agentstack.toml (no .agentstack/)"
 device "legacy"
 echo '{}' > "$H/.claude.json"
 printf 'version = 1\n[servers.docs]\ntype = "http"\nurl = "https://docs.example/mcp"\n[targets]\ndefault = ["claude-code"]\n' > agentstack.toml
+render_locally agentstack.toml   # this fixture asserts on rendered files
 "$AS" apply --scope project --write >/dev/null 2>&1 && grep -q docs .mcp.json && ok "legacy layout applies" || bad "apply failed"
 "$AS" lock --write >/dev/null 2>&1 && [ -f agentstack.lock ] && ok "lock lands beside the legacy manifest" || bad "lock misplaced"
 consent=$("$AS" trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')
@@ -296,6 +329,7 @@ echo '{}' > "$H/.claude.json"
 mkdir -p .agentstack
 printf 'version = 1\n[servers.docs]\ntype = "http"\nurl = "https://docs.example/mcp"\n[targets]\ndefault = ["claude-code"]\n' \
   > .agentstack/agentstack.toml
+render_locally   # this fixture asserts on rendered files
 "$AS" lock --write >/dev/null 2>&1
 [ -f .agentstack/agentstack.lock ] && ok "the checkout carries a lockfile" || bad "nothing to land with — lock never written"
 OUT=$("$AS" up 2>&1) && ok "up exits 0 on a machine that has never seen this project" || bad "up failed: $OUT"
@@ -309,6 +343,7 @@ echo '{}' > "$H/.claude.json"
 mkdir -p .agentstack/skills/sql-review
 printf 'version = 1\n[servers.docs]\ntype = "http"\nurl = "https://docs.example/mcp"\n[servers.api]\ntype = "http"\nurl = "https://api.example/mcp"\nheaders = { Authorization = "Bearer ${DEVICE_UP_TOKEN}" }\n[skills.sql-review]\npath = "./skills/sql-review"\n[targets]\ndefault = ["claude-code"]\n' \
   > .agentstack/agentstack.toml
+render_locally   # this fixture asserts on rendered files
 printf -- '---\nname: sql-review\ndescription: Review SQL migrations before they ship.\n---\nCheck every migration for missing indexes.\n' \
   > .agentstack/skills/sql-review/SKILL.md
 "$AS" lock --write >/dev/null 2>&1

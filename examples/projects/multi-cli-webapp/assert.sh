@@ -8,10 +8,12 @@
 # from the central library.
 #
 # This is the RENDERED lane on purpose — the team commits its native configs, so
-# it asks for files with `use` + `apply`. On these MCP-capable tools the default
-# is the live lane (`agentstack delivery` shows the routing), and section 7 uses
-# that to place the one real gap: instructions have no live lane, so Cursor is
-# the target that genuinely cannot receive them.
+# the manifest sets `[delivery] render_locally = true` and then asks for files
+# with `use` + `apply`. Without that line these MCP-capable tools would be served
+# their servers live and no MCP config file would be written. Section 7 checks
+# that `agentstack delivery` reports the override, and places the one real gap:
+# instructions have no live lane either way, so Cursor is the target that
+# genuinely cannot receive them.
 #
 # This script seeds an isolated library, activates the toolset, and ASSERTS the
 # honest outcome on disk:
@@ -190,15 +192,19 @@ else
   bad "unexpected Cursor instruction/skills artifacts appeared"
 fi
 
-# The gap is now about the RENDERED lane only. Cursor speaks MCP, so delivery
-# routes skills and servers to it live — an agent in Cursor loads the same skill
-# through the gateway that Claude Code reads off disk. Instructions are the one
-# kind with no live lane at all, so they are what Cursor genuinely cannot get.
+# This project sets [delivery] render_locally = true, so every capability that
+# CAN be a file is a file — that is why the native configs above exist to be
+# asserted at all. `delivery` must say so per tool, override and all: a reader
+# who copies this manifest has to see that the files are a deliberate opt-in and
+# not the default. Instructions are the one kind with no live lane in either
+# routing, so they are what Cursor genuinely cannot get.
 delivery_out="$("$AS" delivery 2>&1 | nocolor)"
-if grep -q "Cursor.*skills.*served live" <<< "$delivery_out"; then
-  ok "delivery routes skills to Cursor LIVE — no skills dir needed, and none is missing"
+if grep -qE "Cursor.*written to files" <<< "$delivery_out" \
+   && grep -qE "render local" <<< "$delivery_out" \
+   && ! grep -qE "Cursor.*served live" <<< "$delivery_out"; then
+  ok "delivery reports the rendered lane for Cursor and names the render-locally override"
 else
-  bad "expected delivery to route skills live on Cursor; got: $delivery_out"
+  bad "expected delivery to report Cursor on the rendered lane under the override; got: $delivery_out"
 fi
 if ! grep -qE "Cursor.*(house rules|instructions)" <<< "$delivery_out"; then
   ok "instructions have no live lane — Cursor is the target that cannot receive them at all"
