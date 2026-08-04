@@ -183,3 +183,52 @@ fn the_live_lane_refusal_and_its_two_ways_forward_are_unchanged() {
     // described as going live via the gateway.
     assert!(!text.contains("0 files"), "bare `0 files`:\n{text}");
 }
+
+/// The other half of reading the disk: AgentStack's OWN bridge registration is
+/// not a foreign render. `x gateway connect` is the step `init` recommends, and
+/// it writes one global entry per harness — control plane, never a project
+/// artifact, never in the render ledger. A detector that judged it by the
+/// ledger alone would tell the user, one command after following the product's
+/// own advice, that four files "AgentStack did not write" are on disk and offer
+/// `agentstack adopt` — which would pull the tool's registration into their
+/// manifest.
+#[test]
+fn the_gateways_own_registration_is_never_reported_as_a_foreign_file() {
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let proj = project(tmp.path());
+
+    // Named explicitly rather than `--all` so the test does not depend on which
+    // harnesses happen to be installed on the machine running it.
+    let connect = run(
+        &["x", "gateway", "connect", "claude-code", "--write"],
+        &proj,
+        &home,
+    );
+    assert!(
+        connect.contains("gateway registered"),
+        "the fixture must actually register the bridge:\n{connect}"
+    );
+    let global = home.join(".claude.json");
+    assert!(global.exists(), "the registration wrote the global config");
+
+    for (label, args) in [
+        ("doctor", &["doctor", "--all"][..]),
+        ("status", &["status"][..]),
+    ] {
+        let out = run(args, &proj, &home);
+        assert!(
+            !out.contains("AgentStack did not write it"),
+            "`{label}` called our own registration a foreign file:\n{out}"
+        );
+        assert!(
+            !out.contains("agentstack adopt"),
+            "`{label}` offered to adopt our own control plane:\n{out}"
+        );
+        assert!(
+            !out.contains(&global.display().to_string()),
+            "`{label}` named the global config the bridge lives in:\n{out}"
+        );
+    }
+}

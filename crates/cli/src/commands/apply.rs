@@ -284,9 +284,19 @@ pub(crate) fn abandoned_at(
     dir: &Path,
     state: &State,
 ) -> Option<AbandonedRender> {
-    let (path, servers) = servers_on_disk(desc, scope, dir)?;
-    // The file exists but declares no server: the harness reads nothing from
-    // it, so there is nothing to warn about.
+    let (path, mut servers) = servers_on_disk(desc, scope, dir)?;
+    // The bridge entry is AgentStack's OWN control plane, not a rendered
+    // project artifact: `x gateway connect` writes it globally, on purpose, and
+    // it is never in the render ledger — so the disk reading would report it as
+    // a file "AgentStack did not write" and send the user to `adopt`, which
+    // would pull the tool's own registration into their manifest. Filtered here,
+    // in the DETECTOR, rather than in `servers_on_disk`: that function's claim
+    // is "what the harness actually reads at startup", and the harness really
+    // does read the bridge. The name comes from the gateway's own constant so
+    // the two cannot drift apart.
+    servers.retain(|n| n != super::connect::BRIDGE_ENTRY);
+    // The file exists but declares no server we render: the harness reads
+    // nothing of ours from it, so there is nothing to warn about.
     if servers.is_empty() {
         return None;
     }
