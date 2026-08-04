@@ -138,6 +138,16 @@ fn collect(args: &DiffArgs, manifest_dir: Option<&Path>, print_text: bool) -> Re
     let mut any_ownership_notes = false;
 
     let ruleset = crate::render::ruleset_for(manifest)?;
+    // `diff` REPORTS drift between the manifest and disk. It may only claim
+    // "in sync" about a lane it actually compared: where the planner routes a
+    // harness's MCP servers live, `apply` writes no server config, so there is
+    // no rendered file to compare and a `✓ in sync` line here would be a claim
+    // about nothing (invariant 8). Same `delivery::Plan` reading `apply` uses.
+    let plan_delivery =
+        crate::delivery::Plan::build(&manifest.delivery, &ctx.registry, &target_ids);
+    // Harnesses this pass did not compare, named in the closing summary so the
+    // report says what it checked and what it did not.
+    let mut live_withheld: Vec<String> = Vec::new();
     for id in &target_ids {
         let Some(desc) = ctx.registry.get(id) else {
             let warning = format!("unknown CLI '{id}' — skipping");
@@ -147,6 +157,36 @@ fn collect(args: &DiffArgs, manifest_dir: Option<&Path>, print_text: bool) -> Re
             warnings.push(warning);
             continue;
         };
+        if plan_delivery.servers_route_live(id) {
+            // No `TargetOutcome` is pushed: `changed: false` is the wire form
+            // of "in sync", and a structured consumer must not read that about
+            // a comparison that never happened. The target is named in
+            // `warnings` instead — an existing free-text field, so no
+            // `diff-v1` consumer is broken by learning about the live lane.
+            live_withheld.push(desc.display.clone());
+            // Same per-harness bridge reading every other surface prints from:
+            // "served live" asserts delivery, and with no gateway registered
+            // there is none. `warnings` is free text, but a false claim in it
+            // is still a false claim (invariant 8).
+            let lane = if crate::commands::overview::bridge_registered(&ctx.registry, id) {
+                "are served live"
+            } else {
+                "are planned live (not connected)"
+            };
+            let note = format!(
+                "{} — MCP servers {lane}, not written; nothing rendered to compare",
+                desc.display
+            );
+            if print_text {
+                println!("\n{}", desc.display.bold());
+                println!(
+                    "  {} MCP servers {lane}, not written — nothing rendered to compare",
+                    "·".dimmed()
+                );
+            }
+            warnings.push(note);
+            continue;
+        }
         let key = target_key(id, scope, &ctx.dir);
         let mut previously = state.managed_servers(&key);
         // Same cross-manifest guard as apply: entries another manifest
@@ -340,7 +380,28 @@ fn collect(args: &DiffArgs, manifest_dir: Option<&Path>, print_text: bool) -> Re
         }
         println!();
         if drift == 0 {
-            println!("{} all targets in sync with the manifest.", "✓".green());
+            // The claim names its own denominator. With a live-routed harness
+            // in play, "all targets in sync" would cover targets this pass
+            // never compared.
+            if live_withheld.is_empty() {
+                println!("{} all targets in sync with the manifest.", "✓".green());
+            } else {
+                println!(
+                    "{} every target compared here is in sync with the manifest.",
+                    "✓".green()
+                );
+                println!(
+                    "  {} not compared: {} — their MCP servers are routed to the live lane and \
+                     nothing is written for them.",
+                    "·".dimmed(),
+                    live_withheld.join(", ")
+                );
+                println!(
+                    "  {} check that lane instead: agentstack x delivery · write files anyway: \
+                     agentstack x delivery render-locally --write",
+                    "→".cyan()
+                );
+            }
         } else {
             println!(
                 "{} drifted. Run {} to reconcile.",

@@ -36,6 +36,7 @@ SITE = "https://tarekkharsa.github.io/agentstack"
 
 # (markdown source relative to docs/, html output relative to docs/, sidebar key)
 PAGES = [
+    ("start.md", "start.html", "start"),
     ("concepts.md", "concepts.html", "concepts"),
     ("choose.md", "choose.html", "choose"),
     ("migrations.md", "migrations.html", "migrations"),

@@ -15,5 +15,5 @@ command = "python3"
 # run-demo.sh rewrites this to an absolute sandbox path at runtime.
 args = ["./evil_server.py"]
 
-[profiles.default]
+[toolsets.default]
 servers = ["demo"]

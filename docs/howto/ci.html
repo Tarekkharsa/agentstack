@@ -261,7 +261,7 @@
 <h1 id="use-it-in-ci">Use it in CI</h1>
 <p>For anyone gating a repo's agent setup in continuous integration. Prerequisite: a committed <a href="../concepts.html">manifest</a> and <a href="../concepts.html">lockfile</a> under <code>.agentstack/</code> (see <a href="../howto/team-setup.html">share a setup with your team</a>).</p>
 <pre class="block"><code># Reproducible install, then a gate that fails on any problem
-agentstack install --locked   # fetch pinned skills; fail if the lockfile would change
+agentstack x install --locked   # fetch pinned skills; fail if the lockfile would change
 agentstack doctor --ci        # exit nonzero on errors, drift, policy, or unsafe content
 
 # Building the manifest fresh in a job? Write only the manifest, no prompts:
@@ -269,7 +269,7 @@ agentstack init --secrets skip</code></pre>
 <p>Or use the one-line GitHub Action, which wraps the same gate:</p>
 <pre class="block"><code>steps:
   - uses: actions/checkout@v4
-  - uses: Tarekkharsa/agentstack@v0.17.1  # pin a release tag, not @main</code></pre>
+  - uses: Tarekkharsa/agentstack@v0.17.1  # pin the release tag you use, never @main</code></pre>
 <p><code>install --locked</code> fetches skill sources into the store and <strong>fails if resolving would change the lockfile</strong> — so CI installs the exact pinned bytes or stops. <code>doctor --ci</code> runs every check, prints the full report, and exits nonzero if anything fails: a check <strong>error</strong>, <strong>drift</strong> between the manifest and the rendered config, a <code>[policy]</code> violation (a <code>require</code>/<code>forbid</code> capability or an <code>allowed_sources</code> breach), or <strong>unsafe content</strong> — <code>--ci</code> always runs the deep supply-chain scan, so a high-severity hidden-Unicode or prompt-injection finding fails the gate. <code>init --secrets skip</code> writes only the manifest and <code>${REF}</code> placeholders — no prompts, no token values — for jobs that reverse-engineer a manifest from what's on disk.</p>
 <p><strong>Limits.</strong> <code>doctor --ci</code> gates config health and <em>declared</em> policy, not runtime enforcement — it checks what the manifest declares, not what a server does once it runs. Content scanning catches known hidden-Unicode and injection heuristics, not all malicious content. Pin the Action to a release tag so a change to the Action itself can't slip into your pipeline.</p>
 <ul>

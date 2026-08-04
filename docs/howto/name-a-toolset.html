@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Name a toolset — agentstack</title>
-<meta name="description" content="A toolset is a named subset of the setup you already have — &quot;backend&quot;, &quot;incident&quot;, &quot;design&quot; — that you activate together. In the manifest it is a profiles.">
+<meta name="description" content="A toolset is a named subset of the setup you already have — &quot;backend&quot;, &quot;incident&quot;, &quot;design&quot; — that you activate together. In the manifest it is a toolsets.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
 <link rel="canonical" href="https://tarekkharsa.github.io/agentstack/howto/name-a-toolset.html">
@@ -259,16 +259,16 @@
   <main id="main-content" tabindex="-1">
 <p class="versionbar">These pages describe <b>unreleased <code>main</code></b>, which is ahead of the latest release (<b>v0.18.0</b>) — and the release is what <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">the installer gives you</a>. Commands and flags documented here may not exist in your build; <code>agentstack --version</code> says which one you have.</p>
 <h1 id="name-a-toolset">Name a toolset</h1>
-<p>A <strong>toolset</strong> is a named subset of the setup you already have — "backend", "incident", "design" — that you activate together. In the manifest it is a <code>[profiles.&lt;name&gt;]</code> block — the manifest key kept its original spelling so existing manifests keep working, but everything you read and type says <em>toolset</em>. It names <em>which</em> of your servers and skills come along for a task; it is <strong>not</strong> a policy, a permission level, or a workflow role. A manifest with no toolset named activates its whole inline set, so you only name one once you want more than one.</p>
+<p>A <strong>toolset</strong> is a named subset of the setup you already have — "backend", "incident", "design" — that you activate together. In the manifest it is a <code>[toolsets.&lt;name&gt;]</code> block. (<code>[profiles.&lt;name&gt;]</code> is the older spelling; it is still parsed silently so existing manifests keep working, but everything you read, type, and write says <em>toolset</em>.) It names <em>which</em> of your servers and skills come along for a task; it is <strong>not</strong> a policy, a permission level, or a workflow role. A manifest with no toolset named activates its whole inline set, so you only name one once you want more than one.</p>
 <p>Prerequisite: a project with an <code>.agentstack/agentstack.toml</code> <a href="../concepts.html">manifest</a> (run <code>agentstack init</code> if you don't have one).</p>
 <h2 id="the-one-command-way">The one-command way<a class="hlink" href="#the-one-command-way" aria-label="Link to this section">#</a></h2>
 <p>The capabilities are already in your manifest. A toolset just <em>names a subset</em> of them — no re-import, no copying. The shortest path is one command:</p>
 <pre class="block"><code>agentstack toolset create --name backend --server postgres --server github --skill sql-review</code></pre>
-<p>At a terminal it shows what it will create, asks, and on yes writes the <code>[profiles.backend]</code> block and re-locks. <code>--skill '*'</code> means every inline skill.</p>
-<p><strong>Naming a toolset does not switch to it.</strong> Nothing is rendered and none of your CLIs change — you have defined a subset, not chosen it. Activate it when you want it, with <code>agentstack session start backend</code> (see <a href="#which-activation-session-or-apply">below</a>). To undo the creation itself, delete the <code>[profiles.backend]</code> block from the manifest.</p>
+<p>At a terminal it shows what it will create, asks, and on yes writes the <code>[toolsets.backend]</code> block and re-locks. <code>--skill '*'</code> means every inline skill.</p>
+<p><strong>Naming a toolset does not switch to it.</strong> Nothing is rendered and none of your CLIs change — you have defined a subset, not chosen it. Activate it when you want it, with <code>agentstack x session start backend</code> (see <a href="#which-activation-session-or-apply">below</a>). To undo the creation itself, delete the <code>[toolsets.backend]</code> block from the manifest.</p>
 <p>Scripts and graphical clients get a two-step consent contract instead — <a href="../reference.html#selective-skills-via-toolsets">reference: selective skills via toolsets</a>.</p>
 <h2 id="or-write-it-by-hand">Or write it by hand<a class="hlink" href="#or-write-it-by-hand" aria-label="Link to this section">#</a></h2>
-<p>A toolset is four lines of TOML, and reading it is often clearer than reading a command. Add one <code>[profiles.&lt;name&gt;]</code> block that lists the servers and skills that task needs:</p>
+<p>A toolset is four lines of TOML, and reading it is often clearer than reading a command. Add one <code>[toolsets.&lt;name&gt;]</code> block that lists the servers and skills that task needs:</p>
 <pre class="block"><code># .agentstack/agentstack.toml — you already have these servers and skills.
 [servers.postgres]      # ...
 [servers.github]        # ...
@@ -276,31 +276,31 @@
 [skills.oncall-runbook] # ...
 
 # A new toolset: name the subset "backend" needs. Nothing else changes.
-[profiles.backend]
+[toolsets.backend]
 servers = ["postgres", "github"]
 skills  = ["sql-review"]</code></pre>
 <p>Then activate it — temporarily for a task, or applied on disk:</p>
 <pre class="block"><code>agentstack use --list                 # see every toolset and its readiness
-agentstack session start backend      # use it for now; `session end` reverts
+agentstack x session start backend      # use it for now; `session end` reverts
 agentstack use backend --write        # or apply it on disk (stable/offline)</code></pre>
-<p>Prefer to <strong>capture what you actually used</strong> instead of writing the list by hand? During a session, <code>agentstack session freeze --name backend</code> pins the resolved set — the toolset's servers plus exactly the skills the agent loaded — into a new toolset you can replay deterministically.</p>
+<p>Prefer to <strong>capture what you actually used</strong> instead of writing the list by hand? During a session, <code>agentstack x session freeze --name backend</code> pins the resolved set — the toolset's servers plus exactly the skills the agent loaded — into a new toolset you can replay deterministically.</p>
 <h2 id="two-toolsets-two-tasks">Two toolsets, two tasks<a class="hlink" href="#two-toolsets-two-tasks" aria-label="Link to this section">#</a></h2>
 <p><strong>Backend development vs. incident response.</strong> Everyday coding wants your database and code servers and the review skills; a 2 a.m. page wants read-only observability and the runbook, and nothing that can write:</p>
-<pre class="block"><code>[profiles.backend]
+<pre class="block"><code>[toolsets.backend]
 servers = ["postgres", "github"]
 skills  = ["sql-review", "api-conventions"]
 
-[profiles.incident]
+[toolsets.incident]
 servers = ["grafana", "logs"]
 skills  = ["oncall-runbook"]</code></pre>
-<p><code>agentstack session start incident</code> for the duration of the page, then <code>agentstack session end</code> puts every file back exactly as it was — the incident tools never linger in your everyday setup.</p>
+<p><code>agentstack x session start incident</code> for the duration of the page, then <code>agentstack x session end</code> puts every file back exactly as it was — the incident tools never linger in your everyday setup.</p>
 <p>A project toolset can be committed and deliberately minimal while your machine manifest keeps a broader personal one — see <a href="../howto/team-setup.html">team setup</a>. Neither grants extra authority: a toolset only selects from capabilities that already passed review.</p>
 <h2 id="which-activation-session-or-apply">Which activation: session or apply<a class="hlink" href="#which-activation-session-or-apply" aria-label="Link to this section">#</a></h2>
 <ul>
-<li><strong>Beginner path — use it temporarily.</strong> <code>agentstack session start &lt;name&gt;</code> renders the toolset, and <code>agentstack session end</code> restores every native file to its pre-session bytes. Nothing lingers between tasks, and an interrupted session is always one <code>session end</code> from clean — this is the recommended way to switch toolsets.</li>
+<li><strong>Beginner path — use it temporarily.</strong> <code>agentstack x session start &lt;name&gt;</code> renders the toolset, and <code>agentstack x session end</code> restores every native file to its pre-session bytes. Nothing lingers between tasks, and an interrupted session is always one <code>session end</code> from clean — this is the recommended way to switch toolsets.</li>
 <li><strong>Stable / offline path — apply it.</strong> <code>agentstack use &lt;name&gt; --write</code> renders the toolset onto disk and leaves it there. Reach for this when you want the configuration to persist without a live agentstack around — a CI runner, an offline machine, a long-lived checkout.</li>
 </ul>
-<p>Both are reversible: a session reverts on <code>end</code>, and an applied toolset is undone with <a href="../howto/undo.html"><code>agentstack restore</code></a>.</p>
+<p>Both are reversible: a session reverts on <code>end</code>, and an applied toolset is undone with <a href="../howto/undo.html"><code>agentstack x restore</code></a>.</p>
 <ul>
 <li><a href="../concepts.html">Concepts</a> — toolset, manifest, delivery modes</li>
 <li><a href="../reference.html#selective-skills-via-toolsets">Reference: selective skills via toolsets</a></li>

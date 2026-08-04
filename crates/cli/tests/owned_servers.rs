@@ -45,6 +45,12 @@ fn apply_write() -> ApplyArgs {
 
 const STALE_MANIFEST: &str = r#"version = 1
 
+# `apply` honours the delivery planner, so an MCP server reaches a native
+# config only when the routing sends it to files. The owner-refresh behaviour
+# under test is a rendered-lane behaviour, so the fixture asks for that lane.
+[delivery]
+render_locally = true
+
 [targets]
 default = ["codex", "claude-code"]
 
@@ -150,6 +156,12 @@ NODE_REPL_TOKEN = "resolved-secret-123"
     fs::write(
         proj.join("agentstack.toml"),
         r#"version = 1
+
+# `apply` honours the delivery planner, so an MCP server reaches a native
+# config only when the routing sends it to files. The owner-refresh behaviour
+# under test is a rendered-lane behaviour, so the fixture asks for that lane.
+[delivery]
+render_locally = true
 
 [targets]
 default = ["codex"]

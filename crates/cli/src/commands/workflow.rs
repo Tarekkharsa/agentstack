@@ -722,7 +722,7 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
                             "workflow '{}' exceeded its effective wall-clock ceiling ({}s) — \
                              refusing the next batch and failing cleanly in-band (the \
                              out-of-thread watchdog at ceiling+{}s remains the stall backstop; \
-                             outcome recorded — see `agentstack workflow report {}`)",
+                             outcome recorded — see `agentstack x workflow report {}`)",
                             wf.name,
                             effective_wall,
                             WATCHDOG_GRACE_SECS,
@@ -1172,7 +1172,7 @@ fn resolve_bindings(
         let desc = ctx.registry.get(&harness).with_context(|| {
             format!(
                 "role '{role}' binds harness '{harness}', which is not a known adapter — \
-                 see `agentstack adapters list`"
+                 see `agentstack x adapters list`"
             )
         })?;
         anyhow::ensure!(
@@ -1217,7 +1217,7 @@ fn read_pinned_script(wf: &NormalizedWorkflow) -> Result<String> {
         anyhow::ensure!(
             digest == wf.checksum,
             "workflow '{}' drifted {when}: content digest no longer matches the admitted pin — \
-             run `agentstack lock`, review, and re-trust",
+             review with `agentstack lock`, pin with `agentstack lock --write`, and re-trust",
             wf.name
         );
         Ok(())
@@ -1311,7 +1311,7 @@ fn spawn_watchdog(
                  plus the {WATCHDOG_GRACE_SECS}s watchdog grace — force-exiting (out-of-thread \
                  watchdog: a stalled engine slice cannot be interrupted cooperatively). Live \
                  children receive SIGTERM; the outcome is recorded best-effort — see \
-                 `agentstack workflow report {run_id}`.",
+                 `agentstack x workflow report {run_id}`.",
             );
             // The ONE exception to the fail-closed recording gate: this
             // thread is already dying, so the append is BEST-EFFORT (the
@@ -2038,7 +2038,7 @@ fn collect_workflow_report(run_id: &str) -> Result<WorkflowReportEvidence> {
     else {
         anyhow::bail!(
             "run '{run_id}' is not a workflow run (no workflow_started event) — for a locked \
-             or sandboxed run, use `agentstack report run {run_id}`"
+             or sandboxed run, use `agentstack x report run {run_id}`"
         );
     };
 

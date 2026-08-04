@@ -819,12 +819,13 @@ fn push_drift_health(
 /// severe one, earliest-wins within a severity (the list is already built in
 /// what-blocks-what order).
 ///
-/// Null only when there is genuinely nothing to do. That differs from
-/// `doctor`'s never-null `next_action` on purpose: `doctor` is a command whose
-/// whole output is "what now?", so it always offers a rung even on a healthy
-/// setup, while this is one key of a dashboard payload where an invented
-/// suggestion would compete with the screen's real content. A consumer reads
-/// null as "nothing needs you".
+/// Null only when there is genuinely nothing to do — the same convention
+/// `doctor --json`'s `next_action` now follows. (This comment used to contrast
+/// the two, back when `doctor`'s field was never null: it always offered a
+/// rung, and on a healthy setup that rung was a shape a program could not run.
+/// Both fields are now "a runnable command, or null"; `doctor` keeps its
+/// always-present human sentence in `next_step`.) A consumer reads null as
+/// "nothing needs you".
 fn one_next_action(actions: &[Value]) -> Value {
     let by_level = |want: &str| {
         actions

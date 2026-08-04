@@ -10,6 +10,9 @@
 //! the fix: a pending prune names its victims and offers the keep path
 //! (`adopt`) next to the prune path; a hand-edit points at `diff`/`adopt`.
 
+// Fixtures that assert on a rendered `.mcp.json` set `[delivery]
+// render_locally = true`: `apply` honours the delivery planner, so MCP servers
+// reach a native config only when the routing sends them to files.
 use std::fs;
 use std::sync::Mutex;
 
@@ -67,7 +70,12 @@ fn pending_prune_names_victims_and_offers_adopt() {
     fs::create_dir_all(&proj).unwrap();
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n",
+        // The subject is the RENDERED lane's prune reporting, so this project
+        // opts into local rendering (the file header's rule): under the default
+        // routing Claude Code's MCP servers are served live, `apply` writes and
+        // prunes nothing there, and doctor rightly has no prune to report.
+        "version = 1\n[delivery]\nrender_locally = true\n\
+         [targets]\ndefault = [\"claude-code\"]\n",
     )
     .unwrap();
 
@@ -121,7 +129,12 @@ fn project_scope_pending_prune_names_victims() {
     // …that the current manifest no longer selects…
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n",
+        // The subject is the RENDERED lane's prune reporting, so this project
+        // opts into local rendering (the file header's rule): under the default
+        // routing Claude Code's MCP servers are served live, `apply` writes and
+        // prunes nothing there, and doctor rightly has no prune to report.
+        "version = 1\n[delivery]\nrender_locally = true\n\
+         [targets]\ndefault = [\"claude-code\"]\n",
     )
     .unwrap();
 
@@ -186,7 +199,12 @@ fn foreign_pending_prune_hints_prune_foreign() {
     fs::create_dir_all(&proj_b).unwrap();
     fs::write(
         proj_b.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n",
+        // The subject is the RENDERED lane's prune reporting, so this project
+        // opts into local rendering (the file header's rule): under the default
+        // routing Claude Code's MCP servers are served live, `apply` writes and
+        // prunes nothing there, and doctor rightly has no prune to report.
+        "version = 1\n[delivery]\nrender_locally = true\n\
+         [targets]\ndefault = [\"claude-code\"]\n",
     )
     .unwrap();
 
@@ -237,7 +255,8 @@ fn kept_foreign_stays_reported_after_guarded_apply() {
     fs::create_dir_all(&proj_b).unwrap();
     fs::write(
         proj_b.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        "version = 1\n[delivery]\nrender_locally = true\n\
+         [targets]\ndefault = [\"claude-code\"]\n\
          [servers.beta]\ntype = \"http\"\nurl = \"https://beta/mcp\"\n",
     )
     .unwrap();
@@ -298,7 +317,8 @@ fn hand_edit_hints_diff_and_adopt() {
     fs::create_dir_all(&proj).unwrap();
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        "version = 1\n[delivery]\nrender_locally = true\n\
+         [targets]\ndefault = [\"claude-code\"]\n\
          [servers.kibana_mcp]\ntype = \"http\"\nurl = \"https://kibana/mcp\"\n",
     )
     .unwrap();
@@ -344,7 +364,8 @@ fn unmanaged_churn_is_not_edited_on_disk() {
     fs::create_dir_all(&proj).unwrap();
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        "version = 1\n[delivery]\nrender_locally = true\n\
+         [targets]\ndefault = [\"claude-code\"]\n\
          [servers.kibana_mcp]\ntype = \"http\"\nurl = \"https://kibana/mcp\"\n",
     )
     .unwrap();

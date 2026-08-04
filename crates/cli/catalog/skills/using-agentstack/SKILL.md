@@ -15,7 +15,7 @@ auditing what an agent can access.
 agentstack is a **compiler and a runtime**. Compiler: intent lives in a
 commit-safe manifest (`.agentstack/agentstack.toml`, or legacy root
 `agentstack.toml`) and is rendered into each CLI's native config. Runtime: the
-same manifest can be served live through a **gateway** (`agentstack mcp`) that
+same manifest can be served live through a **gateway** (`agentstack x mcp`) that
 proxies the project's MCP servers to any harness — trust-gated per repo,
 firewalled by two policy layers, every call logged. Skills and server
 definitions can live in a machine-wide **central library** (`~/.agentstack/lib/`)
@@ -30,7 +30,7 @@ the gateway. Nothing touches disk without `--write`.
 agentstack is adopted in six steps; most projects sit partway up. Before
 proposing anything, detect the current step — bare `agentstack` reports the
 directory's state and next step, `agentstack doctor` names what's unwired,
-`agentstack guard status` shows hook coverage, and the trust state shows in
+`agentstack x guard status` shows hook coverage, and the trust state shows in
 `tools_search` / `agentstack_doctor`. Then propose the **next** step, not the
 whole ladder:
 
@@ -39,7 +39,7 @@ whole ladder:
 2. **Verify** — manifest exists but `doctor` complains? Surface its exact fix
    commands.
 3. **Guard** — CLIs unwired in `guard status`? Suggest
-   `agentstack guard install` (human decision, one command).
+   `agentstack x guard install` (human decision, one command).
 4. **Trust** — a cloned repo declares servers that stay inert? Explain the
    review, surface `agentstack trust .`, and stop — never run it yourself.
 5. **Scale** — the same skills/servers copied across projects? Propose the
@@ -60,7 +60,7 @@ solves the problem at hand, and note the rest only if asked.
 2. **Clean-at-rest** — nothing generated exists between sessions (the manifest
    has an empty `[profiles.off]`). Capabilities appear only during
    `agentstack run <cli> --profile <p>` or between
-   `agentstack session start <p> --scope project` and `agentstack session end`.
+   `agentstack x session start <p> --scope project` and `agentstack x session end`.
    A missing `.mcp.json` in such a project is **intentional — do not create one**.
 3. **Zero-files / MCP** — the agent pulls skills itself through the `agentstack`
    MCP server. Open a process-local fence with
@@ -70,7 +70,7 @@ solves the problem at hand, and note the rest only if asked.
    instructions. Loads are fenced to the leased profile and recorded in memory;
    inspect the trail with `agentstack_lease_status`. To preserve the observed
    set, `agentstack_lease_freeze(name)` proposes a manifest profile; tell the
-   human to review it and run `agentstack lock`. `agentstack_lease_close` or
+   human to review it and run `agentstack lock --write`. `agentstack_lease_close` or
    MCP-process exit drops the state without a file restore. MCP servers flow
    through the same profile fence with **no rendered
    files at all** — compact mode
@@ -138,18 +138,18 @@ agentstack search <query>        # your central library + catalog + official MCP
 agentstack add from <id>         # add a found server to the manifest (not applied)
 agentstack add skill <source>    # skills from any repo: owner/repo, git URL, ./dir — preview first
 agentstack add skill <src> --list  # inspect a source's skills without adding
-agentstack lib add <source> --skill <name>  # same grammar, into the central library
-agentstack lib list              # what the central library holds
-agentstack lib sync              # commit/pull/push the library across machines (secret gate enforced)
-agentstack explain <name>        # provenance, secrets, footprint of a capability
+agentstack x lib add <source> --skill <name>  # same grammar, into the central library
+agentstack x lib list              # what the central library holds
+agentstack x lib sync              # commit/pull/push the library across machines (secret gate enforced)
+agentstack x explain <name>        # provenance, secrets, footprint of a capability
 agentstack doctor --ci           # the full trust gate (validation, lock, policy, content scan)
 agentstack doctor --deep         # re-scan skills/instructions for hidden-unicode/injection (--json for machine output)
-agentstack report calls          # summarize the gateway call log (who called what, outcomes)
-agentstack guard status          # which CLIs have the destructive-command hook wired
-agentstack guard test <command>  # judge a shell command against guard policy (nonzero on deny)
-agentstack optimize              # usage analysis: unused servers, context cost, recommendations
+agentstack x report calls          # summarize the gateway call log (who called what, outcomes)
+agentstack x guard status          # which CLIs have the destructive-command hook wired
+agentstack x guard test <command>  # judge a shell command against guard policy (nonzero on deny)
+agentstack x optimize              # usage analysis: unused servers, context cost, recommendations
 agentstack secret set NAME       # store a secret in the OS keychain
-agentstack restore <target>      # undo a write from its pre-write backup
+agentstack x restore <target>      # undo a write from its pre-write backup
 ```
 
 ## Rules for agents
@@ -168,7 +168,7 @@ agentstack restore <target>      # undo a write from its pre-write backup
   around: surface which `${REF}` is missing.
 - A command the **host guard** blocks (`✗ blocked` from the pre-tool-use hook)
   is protecting the user from an accident — explain the denial, don't retry
-  variants or route around it. `agentstack guard test <command>` reproduces
+  variants or route around it. `agentstack x guard test <command>` reproduces
   the decision outside an agent session.
 - To give a project a new skill that exists in the library: add its name to the
   profile's `skills = [...]` list — no file copying.
@@ -187,4 +187,5 @@ agentstack restore <target>      # undo a write from its pre-write backup
   highest-risk kind: the code runs inside the harness process at full user
   permission, so an untrusted or drifted project renders zero extension bytes,
   and `run --locked` re-verifies each delivered copy before launch. Run
-  `agentstack lock` to pin or accept a change.
+  `agentstack lock --write` to pin or accept a change (a bare `agentstack lock`
+  only previews).

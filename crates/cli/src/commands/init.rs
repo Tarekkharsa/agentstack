@@ -112,13 +112,34 @@ fn resolve_secret_store(args: &InitArgs, allow_prompt: bool) -> Result<SecretSto
 /// fork). A non-TTY caller falls back to the numbered stdin prompt so a piped
 /// run never panics inside dialoguer — this function is only reached after the
 /// caller checked `is_interactive()`, so the fallback is belt-and-suspenders.
+// The credential store's user-facing NAME is platform-specific: on macOS it is
+// the Keychain, elsewhere it is the desktop keyring (Secret Service/libsecret).
+// Chosen with `cfg` at compile time rather than a run-time branch because a
+// given binary can only ever talk to the store it was built against — there is
+// no state to inspect later, so the label is a constant like any other.
+// Behaviour is identical on every platform; only these display strings change.
+#[cfg(target_os = "macos")]
+const KEYCHAIN_LABEL: &str = "macOS keychain";
+#[cfg(not(target_os = "macos"))]
+const KEYCHAIN_LABEL: &str = "system keyring";
+
+#[cfg(target_os = "macos")]
+const KEYCHAIN_VIEW_HINT: &str = "them in Keychain Access, or with `agentstack secret set <NAME>`.";
+#[cfg(not(target_os = "macos"))]
+const KEYCHAIN_VIEW_HINT: &str =
+    "them in your desktop keyring app, or with `agentstack secret set <NAME>`.";
+
 fn prompt_secret_store() -> Result<SecretStore> {
     print_secret_store_help();
     if crate::util::confirm::is_interactive() {
         // Each item carries the terse consequence; the full help is above.
+        // Owned, because the label is assembled from the platform constant.
+        let keychain_item = format!(
+            "{KEYCHAIN_LABEL} — migrated into the OS credential store (service `agentstack`)"
+        );
         let items = [
             "Project .env  (default) — plaintext file next to the manifest, gitignored, guard-blocked",
-            "macOS keychain — migrated into the system keychain (service `agentstack`)",
+            keychain_item.as_str(),
             "Skip / decide later — write only ${REF} placeholders; nothing runs until provided",
         ];
         let idx = dialoguer::Select::with_theme(&dialoguer::theme::ColorfulTheme::default())
@@ -188,25 +209,76 @@ struct LibraryCollision {
     incoming: String,
 }
 
-/// Split imported native server names by whether the library can represent
-/// them as one definition file. Native MCP configs commonly use namespaced
-/// identifiers such as `upstash/context7`; changing that identifier during an
-/// import would break references, while treating it as a library path would
-/// escape the library's one-file-per-server contract. Those definitions stay
-/// inline in the project manifest under their original names.
+/// Split imported native server names by whether the library can store them.
+///
+/// Native MCP configs commonly use namespaced identifiers such as
+/// `upstash/context7`, and renaming one during an import would break every
+/// reference to it. The library keeps one definition file per server and now
+/// derives that file name through [`crate::resolve::library_file_stem`], which
+/// encodes anything a path cannot carry — so a namespaced name is stored under
+/// its own name like any other.
+///
+/// The split survives for what encoding cannot fix: a name with no printable
+/// form, or one whose encoded file name would not fit. Those definitions stay
+/// inline in the project manifest, under their original names, rather than
+/// failing the whole import.
 fn partition_library_servers(
     servers: &IndexMap<String, Server>,
 ) -> (IndexMap<String, Server>, IndexMap<String, Server>) {
     let mut library = IndexMap::new();
     let mut inline = IndexMap::new();
     for (name, server) in servers {
-        if super::lib::valid_lib_name(name) {
+        if super::lib::valid_lib_server_name(name).is_ok() {
             library.insert(name.clone(), server.clone());
         } else {
             inline.insert(name.clone(), server.clone());
         }
     }
     (library, inline)
+}
+
+/// AgentStack's own MCP server. It is the one import a fresh project almost
+/// certainly wants, so it is what the lean answer keeps.
+const SELF_SERVER: &str = "agentstack";
+
+/// Which imported servers this project's default toolset names.
+///
+/// The answer is the project's, not the machine's — see the call site for why
+/// the two were conflated. Returns every name unless a person chooses the lean
+/// set, which keeps the historical behaviour for scripts and CI.
+///
+/// The question is skipped where it cannot mean anything: `--project-servers`
+/// has no library to leave the rest in, a single server is not a choice, and an
+/// import without AgentStack's own server has no obvious lean set to offer.
+fn choose_toolset_servers(
+    servers: &IndexMap<String, Server>,
+    args: &InitArgs,
+) -> Result<Vec<String>> {
+    let all: Vec<String> = servers.keys().cloned().collect();
+    if args.project_servers || servers.len() < 2 || !servers.contains_key(SELF_SERVER) {
+        return Ok(all);
+    }
+    let lean_label = format!("just {SELF_SERVER} — add any of the others later");
+    let all_label = format!(
+        "all {} — this project declares the whole machine",
+        all.len()
+    );
+    let answer = crate::util::confirm::choose(
+        &format!(
+            "\n{}  Which of these does this project use?\n      {}\n      {}",
+            "🎯".dimmed(),
+            "All of them are imported either way — this sets the default toolset only.".dimmed(),
+            "What you leave out stays in your library and in each CLI's own config.".dimmed()
+        ),
+        &[("lean", lean_label.as_str()), ("all", all_label.as_str())],
+    )?;
+    // `choose` returns None for a bare Enter, an unreadable answer, and every
+    // non-interactive run alike, and its contract says None must leave existing
+    // behaviour untouched. Existing behaviour is the full set.
+    Ok(match answer.as_deref() {
+        Some("lean") => vec![SELF_SERVER.to_string()],
+        _ => all,
+    })
 }
 
 /// Explain the exceptional placement before the consent gate. The important
@@ -369,11 +441,11 @@ fn print_secret_store_help() {
     println!("     manifest, in plain text. agentstack keeps this file out of git and its");
     println!("     guard blocks agents from reading it. Edit it with any editor.");
     println!(
-        "  {}) macOS keychain — Your tokens are migrated into the system keychain",
+        "  {}) {KEYCHAIN_LABEL} — Your tokens are migrated into the OS credential store",
         "2".bold()
     );
     println!("     (service `agentstack`). Nothing secret sits in a file. View or change");
-    println!("     them in Keychain Access, or with `agentstack secret set <NAME>`.");
+    println!("     {KEYCHAIN_VIEW_HINT}");
     println!(
         "  {}) Skip / decide later — Only ${{REF}} placeholders are written. Nothing runs",
         "3".bold()
@@ -507,6 +579,10 @@ fn run_gated(args: &InitArgs, manifest_dir: Option<&Path>, interactive: bool) ->
                 targets: Vec::new(),
                 profile: None,
                 scope: None,
+                // `--project-servers` shapes the import, not the writing, so it
+                // does not make the run scripted (it is absent from `bare`
+                // above on purpose) — but the wizard must still honour it.
+                project_servers: args.project_servers,
             };
             return super::setup::run(&wizard, manifest_dir);
         }
@@ -859,7 +935,21 @@ fn detect_import(dir: &Path) -> Result<DetectedImport> {
             continue;
         };
         let mut files: Vec<(PathBuf, Vec<&'static str>)> = Vec::new();
-        if !servers.is_empty() && desc.mcp.is_some() {
+        // Servers only appear here when the delivery planner routes them to
+        // FILES. `apply` honours that routing, so listing a `.mcp.json` for an
+        // MCP-capable CLI would promise a file nothing ever writes — and it sat
+        // one line above the routing block saying those servers are served
+        // live. The two blocks used to contradict each other; now they cannot,
+        // because both read the same planner. No manifest exists yet at import
+        // time, so the routing is the default one (no `[delivery]` override).
+        let servers_render = crate::delivery::route(
+            crate::delivery::Kind::Server,
+            desc.mcp.is_some(),
+            Delivery::default().renders_locally(&desc.id),
+        )
+        .lane
+            == crate::delivery::Lane::Rendered;
+        if !servers.is_empty() && desc.mcp.is_some() && servers_render {
             if let Some((path, _)) = desc.config_for(scope, dir) {
                 files.push((path, vec!["MCP servers"]));
             }
@@ -1408,7 +1498,7 @@ version = 1
 #   agentstack search <query>          find servers/skills in the catalog
 #   agentstack add from <id> --write   add one to this manifest
 #   agentstack apply                   preview what renders into each CLI
-#   agentstack gateway connect --all --write   or skip rendered files entirely:
+#   agentstack x gateway connect --all --write   or skip rendered files entirely:
 #   agentstack trust .                 serve this repo through the gateway
 ";
         if args.dry_run {
@@ -1460,6 +1550,15 @@ version = 1
     } else {
         print!("{}", render_import_servers(&servers));
     }
+    // "What does this machine have?" and "what does this project use?" are two
+    // questions, and `init` used to answer only the first: every detected
+    // server went into the project's default toolset, so a first manifest read
+    // as a dump of the laptop rather than as this project. The definitions are
+    // imported either way — this choice sets the TOOLSET alone. What is left
+    // out stays in the library for any project to name, and stays in each CLI's
+    // own global config, which `apply` never writes. So a lean answer takes
+    // nothing away from the machine.
+    let toolset_servers = choose_toolset_servers(&servers, args)?;
     // Lossy imports are explained, never silent: name each entry the import
     // left behind, why, and that nothing was deleted. Names come from other
     // CLIs' config files — hostile input; sanitize before display.
@@ -1540,7 +1639,17 @@ version = 1
     // in the same pre-write review. A fresh manifest carries no override, so
     // this is the Automatic answer — skills and MCP servers served live to the
     // tools that can take them, everything else written into files.
-    print!("{}", render_delivery_routing(&target_defaults));
+    // Invariant 8: the routing may only say "served live" when a bridge really
+    // is registered. `unconnected_live_harnesses` is empty in exactly the two
+    // honest cases (nothing routes live, or the bridge IS registered), so it
+    // doubles as the connection reading here.
+    print!(
+        "{}",
+        render_delivery_routing(
+            &target_defaults,
+            unconnected_live_harnesses(&target_defaults, None).is_empty()
+        )
+    );
 
     // Counts for the closing summary — `servers`/`settings` move into the
     // manifest below.
@@ -1616,7 +1725,7 @@ version = 1
 
     let (manifest_servers, profiles) = if library_import {
         let default_toolset = crate::manifest::Profile {
-            servers: servers.keys().cloned().collect(),
+            servers: toolset_servers.clone(),
             ..Default::default()
         };
         let mut profiles = IndexMap::new();
@@ -1966,12 +2075,15 @@ version = 1
                     .flat_map(|c| c.configs.iter())
                     .all(|p| p.starts_with(&project_root)),
                 &delivery_summary_lines(&target_defaults),
+                &unconnected_live_harnesses(&target_defaults, Some(&manifest)),
                 library_import.then_some((
                     library_source.name.as_str(),
                     library_root_display.as_str(),
                     library_servers.len(),
                     inline_servers.len(),
                 )),
+                renders_servers(&target_defaults, &manifest),
+                renders_anything(&target_defaults, &manifest, server_count),
             )
         );
     }
@@ -2126,9 +2238,20 @@ fn render_import_summary(
     // "<tool> — <what goes live> · <what is written>" lines. Empty when no tool
     // could be described, which is the only honest way to say nothing here.
     delivery_lines: &[String],
+    // Display names of harnesses the plan routes to the LIVE lane while the
+    // bridge is registered in no detected CLI. Non-empty means "planned live,
+    // delivering nothing" — invariant 8 forbids the ordinary "served live"
+    // wording there, so this replaces the routing lines above.
+    unconnected_live: &[String],
     // Where the imported servers landed: the linked library source's name and
     // folder, or `None` when `--project-servers` kept them inline.
     library_dest: Option<(&str, &str, usize, usize)>,
+    // Will `apply --write` write a server config anywhere? False for an
+    // ordinary project of MCP-capable tools, where the servers travel live.
+    servers_rendered: bool,
+    // Is there ANY rendered-lane work here? When false, `apply --write` writes
+    // nothing and must not be offered as the next step.
+    rendered_work: bool,
 ) -> String {
     let mut out = String::new();
     out.push_str("\nImport complete.\n");
@@ -2193,7 +2316,15 @@ fn render_import_summary(
     // described in two uncoordinated places — which is the exact problem this
     // product exists to remove, so it gets named here rather than discovered
     // later as drift.
-    if server_count > 0 && !sources_are_project_scope {
+    if server_count > 0 && !servers_rendered {
+        // The double-delivery note is false now: `apply` honours the delivery
+        // planner, so these servers are never copied into a native config
+        // again. The manifest is the one description of them.
+        out.push_str(
+            "  Note:      the CLI configs above are unchanged, and nothing copies these\n\
+             \x20            servers back into them — they are served from this manifest.\n",
+        );
+    } else if server_count > 0 && !sources_are_project_scope {
         out.push_str(
             "  Note:      the CLI configs above are unchanged — after `apply --write` these\n\
              \x20            servers are described in two places. To manage the originals from\n\
@@ -2209,7 +2340,22 @@ fn render_import_summary(
     // is read as the command for the rendered lane rather than as the command
     // for everything. Skills and MCP servers reach an MCP-capable tool live;
     // saying nothing here would let `apply --write` keep implying otherwise.
-    if !delivery_lines.is_empty() {
+    if !unconnected_live.is_empty() {
+        // The scripted path never offers the bridge, so this is the only place
+        // a non-TTY user learns that the live lane is planned but inert. It
+        // states the plan, the consequence, and the one deliberate command —
+        // and never the words "served live", which would be a false claim.
+        out.push_str(&format!(
+            "  Delivery:  planned live for {} — NOT YET CONNECTED\n",
+            unconnected_live.join(", ")
+        ));
+        out.push_str("             nothing is served until you register the bridge:\n");
+        out.push_str("             agentstack x gateway connect --all --write\n");
+        out.push_str(
+            "             agentstack x delivery   (the routing per tool, and how to write \
+             files instead)\n",
+        );
+    } else if !delivery_lines.is_empty() {
         out.push_str("  Delivery:  ");
         for (i, line) in delivery_lines.iter().enumerate() {
             if i > 0 {
@@ -2219,13 +2365,43 @@ fn render_import_summary(
             out.push('\n');
         }
         out.push_str(
-            "             agentstack delivery   (the routing per tool, and how to write \
+            "             agentstack x delivery   (the routing per tool, and how to write \
              files instead)\n",
         );
     }
-    out.push_str("  Undo:      agentstack restore --last --write\n");
-    out.push_str("  Next:      agentstack apply --write   (write the files your tools read)\n");
-    out.push_str("             agentstack doctor          (check the result)\n");
+    out.push_str("  Undo:      agentstack x restore --last --write\n");
+    // The scripted close now ends where the DEFAULT lane actually becomes live.
+    // `apply --write` used to be the only step named here, in a product whose
+    // default routing writes no server config at all — so the scripted path
+    // ended on a command that delivered nothing while the interactive wizard
+    // offered the bridge. The two paths say the same thing now.
+    //
+    // `gateway` is a mechanism noun the ordinary journey normally suppresses
+    // (`tests/ordinary_journey_vocab.rs`), and this is the same carve-out that
+    // file already makes for the "NOT YET CONNECTED" disclosure: invariant 8
+    // beats the vocabulary rule when silence would leave the summary claiming a
+    // delivery that does not happen.
+    let mut steps: Vec<String> = Vec::new();
+    if !unconnected_live.is_empty() {
+        steps.push(
+            "agentstack x gateway connect --all --write   (start serving what routes live)"
+                .to_string(),
+        );
+    }
+    // The rendered-lane step, only when this project genuinely has files to
+    // write. Offering it otherwise sends a user to a command that reports
+    // nothing to do.
+    if rendered_work {
+        steps.push("agentstack apply --write   (write the files your tools read)".to_string());
+    }
+    steps.push("agentstack doctor          (check the result)".to_string());
+    for (i, step) in steps.iter().enumerate() {
+        if i == 0 {
+            out.push_str(&format!("  Next:      {step}\n"));
+        } else {
+            out.push_str(&format!("             {step}\n"));
+        }
+    }
     // Toolsets are deliberately NOT offered here (review finding H3). Import is
     // the moment a user has just learned what the manifest is; a first-time user
     // with a handful of servers has nothing to subset yet, and naming a subset
@@ -2345,8 +2521,18 @@ fn render_managed_files(
         ));
     }
     if !destinations.is_empty() {
+        // "Will manage" is a claim about what `apply` renders, and the routing
+        // block printed straight after this one says several of these
+        // capabilities are served live instead. Both are true — `apply` is the
+        // rendered lane's command and renders everything it is asked to
+        // (docs/design/automatic-delivery.md, "What 'default' means here") — but
+        // side by side and unqualified they read as a contradiction. Naming
+        // `apply` as a choice rather than as an inevitability is what separates
+        // them.
         out.push_str(
-            "      Native files are written by the next `agentstack apply --write`, not now.\n",
+            "      None of these is written now, and none is written unless you ask:\n\
+             \x20     `agentstack apply --write` renders them; the routing below says what\n\
+             \x20     reaches each tool live instead.\n",
         );
     }
     out
@@ -2365,15 +2551,86 @@ fn render_managed_files(
 ///
 /// A fresh manifest carries no `[delivery]` override, so this is Automatic by
 /// construction; the override is something a person asks for later.
+/// The live-lane harnesses that can receive nothing yet, because THEY have no
+/// bridge registered.
+///
+/// Read per harness, not any-of: a bridge registered in one CLI delivers
+/// nothing to the others, and reporting an empty list because a fifth CLI is
+/// connected made the summary claim live delivery for four that had none.
+/// The one shared reading is `overview::bridge_registered`; only the registry
+/// load is here, because `init` has no `Context`.
+///
+/// `manifest` gates the finding on the same
+/// [`declares_something_live`](crate::commands::delivery::declares_something_live)
+/// predicate `status`, `doctor`, and `delivery` use: the plan reports a live
+/// lane for what a harness *can* take, so an import declaring only
+/// instructions was told to connect a bridge it does not need. Pass `None`
+/// where no manifest exists yet — the caller that asks "is the bridge
+/// connected?" must not have that answer softened by what is declared.
+fn unconnected_live_harnesses(target_ids: &[String], manifest: Option<&Manifest>) -> Vec<String> {
+    let Ok(registry) = Registry::load() else {
+        // A registry we cannot load is a reason to say nothing extra, never a
+        // reason to guess that delivery is broken.
+        return Vec::new();
+    };
+    let plan = crate::delivery::Plan::build(&Delivery::default(), &registry, target_ids);
+    if manifest.is_some_and(|m| !crate::commands::delivery::declares_something_live(m, &plan)) {
+        return Vec::new();
+    }
+    crate::commands::delivery::unconnected_live(&plan, &registry)
+}
+
+/// Do this project's MCP servers reach the RENDERED lane on any target — i.e.
+/// will `apply` ever write a server config for them?
+///
+/// Since `apply` honours the delivery planner, the answer is no for an ordinary
+/// project of MCP-capable tools, and every sentence that assumed a second copy
+/// of the servers on disk is false there.
+fn renders_servers(target_ids: &[String], manifest: &Manifest) -> bool {
+    let Ok(registry) = Registry::load() else {
+        return false;
+    };
+    let plan = crate::delivery::Plan::build(&manifest.delivery, &registry, target_ids);
+    plan.harnesses.iter().any(|h| {
+        h.kinds_in(crate::delivery::Lane::Rendered)
+            .contains(&crate::delivery::Kind::Server)
+    })
+}
+
+/// Is there any rendered-lane work at all — anything `apply --write` would
+/// actually write? Naming `apply` as a next step when the answer is no is how
+/// the default onboarding path came to recommend writing nine config files into
+/// a project the strategy says stays clean.
+fn renders_anything(target_ids: &[String], manifest: &Manifest, server_count: usize) -> bool {
+    if !manifest.settings.is_empty()
+        || !manifest.instructions.is_empty()
+        || !manifest.hooks.is_empty()
+        || !manifest.extensions.is_empty()
+    {
+        return true;
+    }
+    server_count > 0 && renders_servers(target_ids, manifest)
+}
+
 fn delivery_summary_lines(target_ids: &[String]) -> Vec<String> {
     let Ok(registry) = Registry::load() else {
         return Vec::new();
     };
     let plan = crate::delivery::Plan::build(&Delivery::default(), &registry, target_ids);
-    super::delivery::summary_lines(&plan)
+    // The real per-harness bridge reading, not `summary_lines`'s
+    // as-if-connected form. That form is only honest when the un-registered
+    // harnesses are disclosed on the same screen, and the disclosure branch
+    // above is gated on `declares_something_live` — so an import that declares
+    // nothing live suppressed the caveat and left "served live" standing alone,
+    // contradicting `status` and `doctor` about the very same harnesses.
+    super::delivery::summary_lines_for(&plan, &registry)
 }
 
-fn render_delivery_routing(target_ids: &[String]) -> String {
+/// `assume_connected` states the plan as if every bridge were registered — the
+/// honest reading for `init`'s preview only when the summary discloses the
+/// un-registered harnesses separately. Otherwise each harness's own bridge
+/// state is read.
+fn render_delivery_routing(target_ids: &[String], assume_connected: bool) -> String {
     let Ok(registry) = Registry::load() else {
         // The routing is a statement, not a gate: a registry we cannot load is
         // a reason to say nothing, never a reason to guess.
@@ -2393,7 +2650,14 @@ fn render_delivery_routing(target_ids: &[String]) -> String {
         .max()
         .unwrap_or(0);
     for h in &plan.harnesses {
-        out.push_str(&format!("      {:width$}   {}\n", h.display, h.sentence()));
+        out.push_str(&format!(
+            "      {:width$}   {}\n",
+            h.display,
+            crate::commands::delivery::harness_sentence(
+                h,
+                assume_connected || crate::commands::overview::bridge_registered(&registry, &h.id),
+            )
+        ));
     }
     if plan.has_dynamic_lane() {
         out.push_str(&format!("      {}\n", crate::delivery::ZERO_ARTIFACTS));
@@ -2412,7 +2676,10 @@ mod tests {
     /// written, and never degrades into a "0 files" claim.
     #[test]
     fn delivery_routing_states_both_lanes_and_never_claims_zero_files() {
-        let text = render_delivery_routing(&["claude-code".to_string()]);
+        // `true` = the bridge is registered; that is the case whose wording
+        // this test pins. The unconnected wording is covered by
+        // `delivery::harness_sentence`'s own tests.
+        let text = render_delivery_routing(&["claude-code".to_string()], true);
         assert!(text.contains("Claude Code"), "{text}");
         assert!(text.contains("served live"), "{text}");
         assert!(text.contains("rendered lane:"), "{text}");
@@ -2636,7 +2903,15 @@ mod tests {
         assert!(out.contains("Claude Code · MCP servers (this project)"));
         assert!(out.contains(".codex/config.toml"));
         assert!(out.contains("Codex CLI · MCP servers + settings (this project)"));
-        assert!(out.contains("written by the next `agentstack apply --write`"));
+        // The import writes none of them, and neither does anything else until
+        // the user asks. This block sits directly above the routing block that
+        // says what reaches each tool live instead, and the old wording ("Native
+        // files are written by the next `agentstack apply --write`") made the
+        // render read as scheduled — so the two blocks contradicted each other.
+        // `apply` is unchanged and still renders everything it is asked to; only
+        // the claim that it is coming anyway is gone.
+        assert!(out.contains("none is written unless you ask"));
+        assert!(out.contains("agentstack apply --write"));
     }
 
     /// Stage 1.2: the scripted import ends with ONE concise summary carrying
@@ -2657,14 +2932,17 @@ mod tests {
                 "Claude Code — skills + MCP servers served live · house rules written to files"
                     .to_string(),
             ],
+            &[],
             None,
+            false,
+            true,
         );
         assert!(out.contains("Manifest:  /tmp/proj/.agentstack/agentstack.toml"));
         assert!(out.contains("From:      Claude Code · Codex CLI"));
         assert!(out.contains("8 MCP servers · settings from 2 CLIs"));
         assert!(out.contains("1 still needs a value"));
         assert!(out.contains("agentstack secret set GITHUB_TOKEN"));
-        assert!(out.contains("agentstack restore --last --write"));
+        assert!(out.contains("agentstack x restore --last --write"));
         assert!(out.contains("agentstack apply --write"));
         assert!(out.contains("agentstack doctor"));
 
@@ -2673,7 +2951,7 @@ mod tests {
         // command for everything. A summary with no routing lines prints no
         // Delivery block at all — never an empty one.
         assert!(out.contains("Delivery:  Claude Code — skills + MCP servers served live"));
-        assert!(out.contains("agentstack delivery"));
+        assert!(out.contains("agentstack x delivery"));
         assert!(!render_import_summary(
             "/m",
             &["Claude Code".to_string()],
@@ -2683,14 +2961,20 @@ mod tests {
             &[],
             false,
             &[],
+            &[],
             None,
+            false,
+            false,
         )
         .contains("Delivery:"));
 
-        // F09: import copies, it does not move — say so, and name the command
-        // that brings the originals under the same manifest.
+        // F09: import copies, it does not move — say so. With the servers on
+        // the live lane, nothing ever copies them back into a native config, so
+        // the old "described in two places" note (and the `--scope global`
+        // command that answered it) would now be false.
         assert!(out.contains("the CLI configs above are unchanged"));
-        assert!(out.contains("agentstack apply --scope global --write"));
+        assert!(!out.contains("described in two places"), "{out}");
+        assert!(out.contains("they are served from this manifest"));
         // H3: the summary teaches `apply --write` → `doctor` and stops. No
         // toolset offer, in any shape — not the command, not a `[profiles.*]`
         // block to paste, not a forward reference to sessions. A first-time
@@ -2717,7 +3001,10 @@ mod tests {
             &[],
             false,
             &[],
+            &[],
             None,
+            false,
+            false,
         );
         assert!(!all_contributed.contains("Also seen:"));
 
@@ -2731,7 +3018,10 @@ mod tests {
             &[],
             false,
             &[],
+            &[],
             None,
+            false,
+            false,
         );
         assert!(!clean.contains("Secrets:"));
         assert!(!clean.contains("settings from"));
@@ -2748,7 +3038,10 @@ mod tests {
             &[],
             false,
             &[],
+            &[],
             None,
+            false,
+            true,
         );
         assert!(!empty.contains("the CLI configs above are unchanged"));
         assert!(!empty.contains("create-profile"));
@@ -2764,9 +3057,115 @@ mod tests {
             &[],
             false,
             &[],
+            &[],
             None,
+            false,
+            false,
         );
         assert!(!unnamed.contains("create-profile"));
+    }
+
+    /// Invariant 8 on the scripted path: the live lane with no CLI connected
+    /// delivers nothing, so the summary must not say "served live". It states
+    /// the plan, the consequence, and the one deliberate command instead —
+    /// `init --yes` never registers the bridge for anyone.
+    #[test]
+    fn import_summary_never_claims_live_delivery_without_a_connected_cli() {
+        let live = ["Claude Code — skills + MCP servers served live".to_string()];
+        let unwired = render_import_summary(
+            "/m",
+            &["Claude Code".to_string()],
+            3,
+            0,
+            &[],
+            &[],
+            false,
+            &live,
+            &["Claude Code".to_string(), "Codex CLI".to_string()],
+            None,
+            false,
+            false,
+        );
+        assert!(
+            unwired
+                .contains("Delivery:  planned live for Claude Code, Codex CLI — NOT YET CONNECTED"),
+            "{unwired}"
+        );
+        assert!(unwired.contains("nothing is served until you register the bridge:"));
+        assert!(unwired.contains("agentstack x gateway connect --all --write"));
+        assert!(!unwired.contains("served live"), "{unwired}");
+
+        // Connected → today's wording, unchanged.
+        let wired = render_import_summary(
+            "/m",
+            &["Claude Code".to_string()],
+            3,
+            0,
+            &[],
+            &[],
+            false,
+            &live,
+            &[],
+            None,
+            false,
+            false,
+        );
+        assert!(wired.contains("Delivery:  Claude Code — skills + MCP servers served live"));
+        assert!(!wired.contains("NOT YET CONNECTED"));
+    }
+
+    /// The scripted close ends on the step that makes the DEFAULT lane live.
+    ///
+    /// It used to end on `apply --write` in every case — in a product whose
+    /// default routing writes no server config at all, so the recommended next
+    /// command delivered nothing and left nine config files as the mental model
+    /// of what AgentStack does.
+    #[test]
+    fn the_scripted_close_ends_on_the_bridge_not_on_apply() {
+        // Servers only, routed live, no bridge: the bridge is the next step and
+        // `apply --write` is not offered at all — it would write nothing.
+        let live_only = render_import_summary(
+            "/m",
+            &["Claude Code".to_string()],
+            2,
+            0,
+            &[],
+            &[],
+            false,
+            &[],
+            &["Claude Code".to_string()],
+            None,
+            false,
+            false,
+        );
+        assert!(
+            live_only.contains("Next:      agentstack x gateway connect --all --write"),
+            "{live_only}"
+        );
+        assert!(
+            !live_only.contains("agentstack apply --write"),
+            "{live_only}"
+        );
+        assert!(live_only.contains("agentstack doctor"));
+
+        // Genuine rendered-lane work (settings) keeps the rendered step, after
+        // the bridge — both lanes are named, each with its own command.
+        let both = render_import_summary(
+            "/m",
+            &["Claude Code".to_string()],
+            2,
+            1,
+            &[],
+            &[],
+            false,
+            &[],
+            &["Claude Code".to_string()],
+            None,
+            false,
+            true,
+        );
+        assert!(both.contains("Next:      agentstack x gateway connect --all --write"));
+        assert!(both.contains("agentstack apply --write"), "{both}");
     }
 
     /// S1 witness (init-secrets design §7): a failing credential store must

@@ -354,7 +354,7 @@ const base = () => ({
   toolsets:[
     {name:'rust',    ready:true,  blocked:null, targets:'claude-code, codex', members:['rust-best-practices','rust-async-patterns','rust-mcp-server-generator']},
     {name:'backend', ready:true,  blocked:null, targets:'claude-code',        members:['github','postgres','sql-review']},
-    {name:'review',  ready:false, blocked:'not pinned — run agentstack lock', targets:'claude-code', members:['github','pr-checklist']},
+    {name:'review',  ready:false, blocked:'not pinned — run agentstack lock --write', targets:'claude-code', members:['github','pr-checklist']},
   ],
   manage:null, dialog:null, action:null, flow:null, draft:null, picker:null,
   query:'', undo:{phase:'idle'}, trustAct:null, driftAct:null, setupAct:null,
@@ -1085,7 +1085,7 @@ VS Code (/Users/tarek.k/Documents/GitHub/agentstack/.vscode/mcp.json)
 <span class="ok">✓</span> all targets in sync with the manifest.`},
  adopt:{cmd:'agentstack adopt --scope global --write', cwd:'~/Documents/GitHub/agentstack', recon:true,
   out:`<span class="ok">✓</span> adopted 6 servers.
-  <span class="dm">next: \`agentstack lock\` to pin it, then \`agentstack trust .\` to review it</span>
+  <span class="dm">next: \`agentstack lock --write\` to pin it, then \`agentstack trust .\` to review it</span>
 
 <span class="dm"># gha-search, figma, tldraw, miro, chrome-devtools, node_repl — pulled into
 # [servers.*] in .agentstack/agentstack.toml; the hand-edit is now the manifest's truth</span>`},
@@ -1724,7 +1724,7 @@ const SCEN = [
    contract:'trust state from the status envelope',
    advance:s=>s.dialog==='trust'},
   {name:'Review', component:'TrustReviewPanel', ui:'dialog', cli:'trust', setup:s=>{s.dialog='trust'},
-   how:[H('Trust is consent to bytes','Approving pins a digest of this exact content. Any later edit — a git pull, an agentstack lock — drops it back to inert.'),
+   how:[H('Trust is consent to bytes','Approving pins a digest of this exact content. Any later edit — a git pull, an agentstack lock --write — drops it back to inert.'),
         H('Not a sandbox','Trust gates activation; it does not confine a server once it is running. That is what locked runs, sandbox and lockdown are for.','rgba(248,113,113,.5)')],
    gtee:[Y('A change to any pinned file re-gates the repo automatically.'),
          N('Trusting does not review the scripts a server points at — read those the way you would read a .envrc.')],

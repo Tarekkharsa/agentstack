@@ -266,7 +266,7 @@
 <tr><td>The server's config details (URL or command)</td><td><code>agentstack add server</code> — or <code>set server</code> to overwrite one that exists</td></tr>
 <tr><td>Just a name — find it in the catalog or registry</td><td><code>agentstack search</code> → <code>agentstack add from &lt;id&gt;</code></td></tr>
 <tr><td>Already hand-added it to one CLI's config</td><td><code>agentstack adopt --write</code></td></tr>
-<tr><td>Want it reusable across projects by name</td><td><code>agentstack lib add-server</code> + reference it from a <a href="../concepts.html">toolset</a></td></tr>
+<tr><td>Want it reusable across projects by name</td><td><code>agentstack x lib add-server</code> + reference it from a <a href="../concepts.html">toolset</a></td></tr>
 </tbody></table></div>
 <pre class="block"><code># 1. Have the details: add (or set, to overwrite) the server
 agentstack add server github --type http \
@@ -281,13 +281,13 @@ agentstack add from github --write
 agentstack adopt --write
 
 # 4. Reusable across projects: store it in a linked library source, then name it in a toolset
-agentstack lib add-server kibana --file ./kibana.toml --write
-#   then in the manifest:  [profiles.backend]  servers = ["kibana"]
+agentstack x lib add-server kibana --file ./kibana.toml --write
+#   then in the manifest:  [toolsets.backend]  servers = ["kibana"]
 
 # After any of them: re-lock, then render into every CLI
-agentstack lock
+agentstack lock --write
 agentstack apply --write</code></pre>
-<p>Verbs 1–4 write only the <a href="../concepts.html">manifest</a> (verb 4 also writes your first <a href="../concepts.html">linked library source</a>) — commit-safe, with secrets kept as <code>${REF}</code> placeholders. Nothing reaches a CLI until <code>apply --write</code> renders it. Hand-edit <code>[servers.&lt;name&gt;]</code> in the manifest directly only when you need fields the flags don't cover — native per-adapter keys under <code>extra.&lt;adapter&gt;</code>, a launch <code>cwd</code>, <code>targets</code> scoping, or <code>owner</code>. Whenever you change a toolset's server list, re-lock with <code>agentstack lock</code> so the <a href="../concepts.html">lockfile</a> pins the new set, then <code>apply --write</code> to render.</p>
+<p>Verbs 1–4 write only the <a href="../concepts.html">manifest</a> (verb 4 also writes your first <a href="../concepts.html">linked library source</a>) — commit-safe, with secrets kept as <code>${REF}</code> placeholders. Nothing reaches a CLI until <code>apply --write</code> renders it. Hand-edit <code>[servers.&lt;name&gt;]</code> in the manifest directly only when you need fields the flags don't cover — native per-adapter keys under <code>extra.&lt;adapter&gt;</code>, a launch <code>cwd</code>, <code>targets</code> scoping, or <code>owner</code>. Whenever you change a toolset's server list, re-lock with <code>agentstack lock --write</code> so the <a href="../concepts.html">lockfile</a> pins the new set, then <code>apply --write</code> to render.</p>
 <p><strong>Limits.</strong> Adding a server does not store its secret, trust it, or run it. Store the value with <code>agentstack secret set GH_PAT</code> (it stays out of the manifest). In the <a href="../howto/trust-a-repo.html">zero-files delivery mode</a>, a new server also stays inert until you re-run <code>agentstack trust .</code>, because the edit changes the <a href="../concepts.html#trust-and-the-consent-digest">manifest digest</a>.</p>
 <ul>
 <li><a href="../concepts.html">Concepts</a> — server, toolset, library, secrets</li>

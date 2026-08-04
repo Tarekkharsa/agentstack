@@ -81,8 +81,8 @@ A toolset today selects servers and skills and nothing else, while
 package can carry instruction members, so the semantics have to be stated:
 
 - **Selection is toolset-scoped, at lock time.** Only packages named by a
-  toolset the lock run selects are expanded. `agentstack lock --profile backend`
-  expands `backend`'s packages; a bare `agentstack lock` expands every declared
+  toolset the lock run selects are expanded. `agentstack lock --write --profile backend`
+  expands `backend`'s packages; a bare `agentstack lock --write` expands every declared
   toolset's. A package nobody selects contributes no members and no pins.
 - **A package's instruction members are rendered-lane, always.** They compile
   into the managed instruction region of an instruction file, exactly like a
@@ -201,7 +201,7 @@ from the lock and from the pinned bytes in the content store, never from the
 library. A member's **body** enters agent context only when `agentstack_load`
 is called for that one member, and only after the store snapshot is re-verified
 against the digest the lock pins; a missing or tampered snapshot refuses and
-names `agentstack lock`. There is no path from the loader back to the package
+names `agentstack lock --write`. There is no path from the loader back to the package
 body in the library.
 
 Two consequences worth stating, because both are the point:
@@ -257,7 +257,7 @@ Four properties, each load-bearing:
 - **Unverifiable fails closed, and says so.** A member whose definition is
   absent from the store, no longer hashes to its pin, or no longer parses is
   not served, and the refusal takes the existing seatbelt path a drifted
-  library pin takes: it names the capability, the reason and `agentstack lock`,
+  library pin takes: it names the capability, the reason and `agentstack lock --write`,
   lands in the audit log, and puts the member on the gateway's skipped list. A
   name the project already serves from its manifest or the library is refused
   the same way rather than shadowing it — two upstreams under one name have no
@@ -297,10 +297,10 @@ Four properties, each load-bearing:
 - **Pinned bytes, always.** The prose comes from the content store, addressed
   by the member's digest and re-verified against it, exactly like a keep-pinned
   fragment. A library that moves ahead rewrites nobody's `CLAUDE.md`; taking a
-  newer version means running `agentstack lock`.
+  newer version means running `agentstack lock --write`.
 - **Still not an `[instructions.*]` entry.** Nothing is materialized into the
   manifest, so dropping the package leaves no orphaned declaration behind.
-- **Conservative scoping, on the automatic path.** `agentstack lock` — the
+- **Conservative scoping, on the automatic path.** `agentstack lock --write` — the
   command that re-pins members — refreshes the managed region only in a file
   that **already carries one**. It never creates an instruction file, and never
   adds a region to a file that had none: that is a decision a human makes by

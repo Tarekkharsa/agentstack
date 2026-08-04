@@ -100,7 +100,7 @@ pub fn list_value(registry: &Registry) -> serde_json::Value {
 fn show(registry: &Registry, id: &str) -> Result<()> {
     let desc = registry
         .get(id)
-        .with_context(|| format!("no adapter '{id}' (try `agentstack adapters list`)"))?;
+        .with_context(|| format!("no adapter '{id}' (try `agentstack x adapters list`)"))?;
     println!("id:      {}", desc.id);
     println!("display: {}", desc.display);
     match &desc.source {

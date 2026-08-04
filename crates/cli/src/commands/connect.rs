@@ -1,4 +1,4 @@
-//! `agentstack gateway connect` / `disconnect` — register the zero-files gateway.
+//! `agentstack x gateway connect` / `disconnect` — register the zero-files gateway.
 //!
 //! One tiny global entry per harness — `agentstack mcp --auto-project` — and
 //! every trusted repo brings its own servers, skills-over-MCP, firewall, and
@@ -87,7 +87,7 @@ pub fn run_connect(args: &ConnectArgs) -> Result<()> {
             touched.push(desc.display.clone());
             crate::util::atomic::write(&path, &proposed)?;
             println!(
-                "  {} gateway registered (agentstack mcp --auto-project)",
+                "  {} gateway registered (agentstack x mcp --auto-project)",
                 "✓".green()
             );
         } else {
@@ -193,7 +193,7 @@ fn select_targets<'r>(
         let mut out = Vec::new();
         for id in ids {
             let desc = registry.get(id).with_context(|| {
-                format!("unknown adapter '{id}' (see `agentstack adapters list`)")
+                format!("unknown adapter '{id}' (see `agentstack x adapters list`)")
             })?;
             if desc.mcp.is_none() || desc.config.is_none() {
                 anyhow::bail!("{id} has no MCP config — the gateway doesn't apply to it");
@@ -349,7 +349,7 @@ pub struct GatewayOutage {
 /// The one command that fixes a gateway outage: re-register the bridge at the
 /// binary's current location. One constant, so no surface can name a different
 /// recovery than another.
-pub const GATEWAY_RECOVERY: &str = "agentstack gateway connect --all";
+pub const GATEWAY_RECOVERY: &str = "agentstack x gateway connect --all";
 
 impl GatewayOutage {
     /// What happened, in one clause: the harness gets no tools, and AgentStack

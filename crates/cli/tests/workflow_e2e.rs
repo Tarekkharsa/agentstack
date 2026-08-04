@@ -97,7 +97,7 @@ fn acceptance_bundle_admits_and_runs_end_to_end() {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/workflow-acceptance/bundle");
     copy_tree(&bundle, proj.path());
 
-    let lock = agentstack(home.path(), &path, proj.path(), &["lock"]);
+    let lock = agentstack(home.path(), &path, proj.path(), &["lock", "--write"]);
     assert!(
         lock.status.success(),
         "lock failed: {}",
@@ -179,7 +179,7 @@ fn watchdog_force_exits_a_stalled_run_at_the_process_level() {
              max_wall_seconds = 1\n",
         )
         .unwrap();
-    let lock = agentstack(home.path(), &path, proj.path(), &["lock"]);
+    let lock = agentstack(home.path(), &path, proj.path(), &["lock", "--write"]);
     assert!(
         lock.status.success(),
         "lock failed: {}",
@@ -274,7 +274,7 @@ fn watchdog_force_exits_a_non_yielding_interpreter_slice() {
              max_wall_seconds = 1\n",
         )
         .unwrap();
-    let lock = agentstack(home.path(), &path, proj.path(), &["lock"]);
+    let lock = agentstack(home.path(), &path, proj.path(), &["lock", "--write"]);
     assert!(
         lock.status.success(),
         "lock failed: {}",

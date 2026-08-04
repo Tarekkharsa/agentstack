@@ -352,7 +352,7 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
                 impact,
                 title: format!("'{name}' is declared but shows no use at all"),
                 evidence: evidence.clone(),
-                action: format!("agentstack remove {name} --write"),
+                action: format!("agentstack x remove {name} --write"),
                 safe_auto: safe,
                 safety: if safe {
                     format!(
@@ -396,7 +396,7 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
                 },
                 title: format!("'{name}' costs context every session but shows no gateway use"),
                 evidence: evidence.clone(),
-                action: format!("agentstack remove {name} --write"),
+                action: format!("agentstack x remove {name} --write"),
                 safety: "manual: it has been rendered into native configs — the harness may call it directly there, which this log cannot see. Remove only if you know you don't use it.".into(),
                 safe_auto: false,
             });
@@ -453,7 +453,7 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
                             .join(", ")
                     ),
                     safe_auto: false,
-                    safety: "manual: an allowlist makes every other tool invisible to agents at the gateway — future workflows may legitimately need more. Denied tools show up in `agentstack report calls` if you cut too deep.".into(),
+                    safety: "manual: an allowlist makes every other tool invisible to agents at the gateway — future workflows may legitimately need more. Denied tools show up in `agentstack x report calls` if you cut too deep.".into(),
                 });
             }
         }
@@ -485,7 +485,7 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
                 ),
             ],
             action: format!(
-                "review `[policy.tools]` for '{server}' (agentstack report calls for the full log) — loosen the rule if these were legitimate, keep it if not"
+                "review `[policy.tools]` for '{server}' (agentstack x report calls for the full log) — loosen the rule if these were legitimate, keep it if not"
             ),
             safe_auto: false,
             safety: "manual: a denial is the firewall working as configured — only a human knows whether the agent should have been allowed".into(),
@@ -510,7 +510,7 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
                     super::count(s.total as usize, "call")
                 )],
                 action: format!(
-                    "agentstack explain {server}   # check its secrets, then: agentstack doctor --live"
+                    "agentstack x explain {server}   # check its secrets, then: agentstack doctor --live"
                 ),
                 safe_auto: false,
                 safety: "manual: the fix depends on the failure (secret, URL, upstream outage) — diagnose before changing anything".into(),
@@ -540,9 +540,13 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
                 evidence: vec![
                     "content digest no longer matches the trust grant — the gateway already dropped it to control-plane only (trust.json)".into(),
                 ],
-                action: format!("review the manifest, then: agentstack trust {path}"),
+                // The `action` field is a contract: it must be a command a
+                // caller can run verbatim, never prose. The "review first"
+                // instruction belongs in `safety`, which is where a reader
+                // (or a panel) looks before running a non-auto action.
+                action: format!("agentstack trust {path}"),
                 safe_auto: false,
-                safety: "manual: re-trusting is exactly the review the gate exists to force".into(),
+                safety: "manual: review the manifest first — re-trusting is exactly the review the gate exists to force".into(),
             });
         }
     }
@@ -566,7 +570,7 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
                     format!("0 activations since tracking began (usage.json, {span}d of runtime history)"),
                     "in no toolset's skill list".into(),
                 ],
-                action: format!("agentstack remove {name} --write   # or keep it in the central library only"),
+                action: format!("agentstack x remove {name} --write   # or keep it in the central library only"),
                 safe_auto: false,
                 safety: "manual: skill invocations inside a harness aren't logged — activation count only proves agentstack never rendered it, not that you never used a copy".into(),
             });
@@ -592,7 +596,7 @@ pub fn analyze(inp: &Inputs) -> Vec<Recommendation> {
                 super::count(server_total, "server")
             ),
             evidence: vec!["cost-based recommendations above are incomplete without it (footprint.json)".into()],
-            action: "agentstack report usage --live".into(),
+            action: "agentstack x report usage --live".into(),
             safe_auto: false,
             safety: "manual only because it spawns/contacts the manifest's servers once to measure them; the measurement itself is read-only".into(),
         });

@@ -376,7 +376,7 @@ const CARD_QUESTION: &str = "Trust this project — allow the capabilities above
 /// that definition no longer matches its lock pin. Shared by the `servers`
 /// entry and the card item so the redaction cannot drift into two wordings.
 const REDACTED_LIBRARY_SERVER: &str =
-    "library definition does not match the lockfile pin — run `agentstack lock`, review the change, and re-run the preview";
+    "library definition does not match the lockfile pin — review with `agentstack lock`, pin with `agentstack lock --write`, then re-run the preview";
 
 /// One row of the structured consent card (`trust-card-diff-v1`) before it
 /// becomes JSON.
@@ -408,6 +408,11 @@ struct CardItem<'a> {
     /// Whether this kind carries a pin-to-pin diff at all (skills and
     /// instructions do; everything else emits `null`).
     pinned_kind: bool,
+    /// `trust-content-drift-v1`: this item's on-disk bytes no longer match its
+    /// lock pin, as reported by the shared `resolve::*_lock_status` seam. It is
+    /// tracked per item rather than derived here so the ONE drift reading fills
+    /// the card, the blocker list, and the state chip alike.
+    drifted: bool,
 }
 
 impl<'a> CardItem<'a> {
@@ -422,6 +427,7 @@ impl<'a> CardItem<'a> {
             may_read: Vec::new(),
             pin: None,
             pinned_kind: false,
+            drifted: false,
         }
     }
 }
@@ -473,6 +479,19 @@ impl CardWalk {
             Some(p) if p.identity != item.identity => "changed",
             Some(_) => "unchanged",
         };
+        // `trust-content-drift-v1`: drift replaces `unchanged`, and only
+        // `unchanged`. A skill's identity is where its body comes from, and
+        // that is unmoved when someone edits the body in place — so this field
+        // said a literal `unchanged` over bytes that had changed, and a machine
+        // reading one word off it was told the item was fine while the gate
+        // refused it. `added` and `changed` already say the item is not clean,
+        // and they carry the identity answer a source flip depends on, so they
+        // keep their word; `drifted` is always available as its own boolean.
+        let change = if item.drifted && change == "unchanged" {
+            "drifted"
+        } else {
+            change
+        };
         let prior_pin = prior.and_then(|p| p.pin.clone());
         // Pin-to-pin, never pin-to-live: locating live bytes reaches git
         // worktree materialization, and this command must not write. See
@@ -514,6 +533,15 @@ impl CardWalk {
             "prior_pin": prior_pin,
             "recognized_other_projects": recognized,
             "diff": diff,
+            // `trust-content-drift-v1`. Always present, so a consumer reads a
+            // boolean instead of string-matching `change`; `fix` is null unless
+            // there is something to do.
+            "drifted": item.drifted,
+            "fix": if item.drifted {
+                serde_json::Value::String(DRIFT_FIX.to_string())
+            } else {
+                serde_json::Value::Null
+            },
         }));
     }
 
@@ -565,11 +593,24 @@ impl CardWalk {
                 removed: gone.len(),
                 ..GroupCounts::default()
             };
+            // `trust-content-drift-v1`: a drifted item counts toward `changed`
+            // for the group's marker — its bytes moved — and is ALSO tallied
+            // on its own, so a group header can say which of the two happened.
+            let mut drifted = 0usize;
             for ix in &items {
                 match self.items[*ix]["change"].as_str() {
                     Some("added") => counts.added += 1,
-                    Some("changed") => counts.changed += 1,
+                    // `drifted` is the `unchanged` slot's replacement, so it
+                    // folds into `changed` for the group's marker: its bytes
+                    // moved.
+                    Some("changed") | Some("drifted") => counts.changed += 1,
                     _ => counts.unchanged += 1,
+                }
+                // Counted off the boolean, not the word: an item that BOTH
+                // flipped source and drifted keeps `change: "changed"` and must
+                // still be tallied here.
+                if self.items[*ix]["drifted"] == serde_json::Value::Bool(true) {
+                    drifted += 1;
                 }
             }
             let label = CARD_GROUP_ORDER
@@ -587,6 +628,8 @@ impl CardWalk {
                     "unchanged": counts.unchanged,
                     "removed": counts.removed,
                     "total": counts.total(),
+                    // `trust-content-drift-v1`, additive: a subset of `changed`.
+                    "drifted": drifted,
                 },
                 "items": items,
                 "removed": gone,
@@ -642,6 +685,334 @@ fn declared_skill_origin(
         .map(|_| crate::resolve::SkillOrigin::Library)
 }
 
+/// One reviewed item whose PINNED bytes and the bytes on disk disagree.
+///
+/// `trust-content-drift-v1`. This is a REPORTING projection only: nothing here
+/// grants, refuses, or re-pins anything. The detection is not new — every
+/// variant below comes from the existing `resolve::*_lock_status` seam that the
+/// grant walk and `doctor` already read, so a second, divergent drift check
+/// cannot appear. Only the shape of the answer is new.
+#[derive(Debug, Clone)]
+pub struct ContentDrift {
+    /// The capability kind, in the same vocabulary the consent card uses.
+    pub kind: &'static str,
+    pub name: String,
+    /// The same sentence the grant walk pushes onto its blocker list.
+    pub reason: String,
+    /// The command that actually repairs THIS condition, or `None` when no
+    /// single command does.
+    ///
+    /// `None` is not a gap in the detector — it is the honest answer for a
+    /// declared body that is absent from disk. `agentstack lock --write`
+    /// cannot pin bytes that do not exist (it exits non-zero and changes
+    /// nothing), and neither `agentstack install` nor any other verb
+    /// re-creates a body the source folder no longer holds; both were measured
+    /// on that exact state. A machine field that named one of them anyway
+    /// would spin a driver forever, which is the defect this field exists to
+    /// end. `reason` carries the condition; a human restores the body.
+    pub fix: Option<&'static str>,
+}
+
+/// The command that makes progress on content drift, verbatim. An agent reads
+/// one field, runs exactly this, and re-reads.
+pub const DRIFT_FIX: &str = "agentstack lock --write";
+
+/// Why that command, and what follows it. Re-pinning changes the lockfile
+/// bytes, which flips the trust digest, so the review is the second step.
+pub const DRIFT_WHY: &str =
+    "content changed since you approved it — re-pin it, then review and re-trust with `agentstack trust .`";
+
+/// The command that makes progress on a NEVER-pinned surface. Same command as
+/// [`DRIFT_FIX`] and deliberately so — one verb pins, whether the bytes moved
+/// or were never pinned at all.
+pub const UNPINNED_FIX: &str = DRIFT_FIX;
+
+/// Why that command, and what follows it.
+pub const UNPINNED_WHY: &str =
+    "the loadable surface isn't pinned yet — the grant refuses until it is; pin it, then review with `agentstack trust .`";
+
+/// The never-pinned items the GRANT WALK REFUSES OVER — no more, and not
+/// every never-pinned item.
+///
+/// The sibling of [`content_drift`], and it exists for the same dead end one
+/// step earlier. `grant_gated` refuses an unpinned surface, so a surface that
+/// answered `agentstack trust .` here would name step 2 while step 1 is
+/// outstanding: a program that executes the machine field verbatim gets a
+/// non-zero exit, an unchanged state, and the identical instruction again —
+/// forever.
+///
+/// **This list mirrors the gate's blocker set, item kind by item kind — it is
+/// not "everything unpinned".** The gate treats a LIBRARY-origin skill's
+/// missing pin as a yellow advisory and grants anyway (its bytes are the
+/// user's own curated, scan-gated content), while it blocks on an INLINE
+/// skill, whose bytes are the repository under review. Reporting both as
+/// blockers made `grantable: false` over a consent `trust --yes` accepts —
+/// a panel gating its Approve control on that field refused the human yes,
+/// the one answer only a human may give. So the skill arm carries the gate's
+/// own `Some(SkillOrigin::Inline)` filter, read off the same
+/// `resolve::skill_lock_status` report the gate reads. Instructions,
+/// extensions and workflows need no filter: the gate blocks on every
+/// `MissingLockEntry` of those kinds.
+///
+/// **The set is deliberately narrower than the gate's, not wider.** The gate
+/// ALSO blocks on library servers, unpinned repo-relative local executables,
+/// and unpinned or drifted blueprints, none of which this function reads. So
+/// an empty return does NOT mean "the grant will not refuse"; it means "the
+/// kinds read here give it no reason to". Under-reporting is the safe
+/// direction for `grantable` — a false `false` blocks consent, a false `true`
+/// only costs a round trip against the authoritative gate — so the missing
+/// kinds are a documented limit, not a silent one.
+///
+/// Read-only, offline, and detection-free in the same sense as
+/// [`content_drift`]: every variant below is the existing
+/// `resolve::*_lock_status` seam's own `MissingLockEntry`, read through the
+/// same iteration and the same filters, so no second, divergent pin check can
+/// appear. A kind that cannot be resolved contributes nothing — "unresolvable"
+/// is a different finding with a different fix, and `doctor` owns it.
+pub fn unpinned_surface(
+    dir: &Path,
+    m: &crate::manifest::Manifest,
+    lock: &crate::lock::Lock,
+    library: &crate::library::Library,
+) -> Vec<ContentDrift> {
+    use crate::resolve::{
+        ExtensionLockStatus, InstructionLockStatus, ResolveMode, SkillLockStatus, SkillOrigin,
+        WorkflowLockStatus,
+    };
+    let lib_home = crate::util::paths::lib_home();
+    let store = crate::store::Store::default_store();
+    let mut out = Vec::new();
+    for name in review_skill_names(m) {
+        let report = crate::resolve::skill_lock_status(
+            &name,
+            m,
+            dir,
+            library,
+            &lib_home,
+            &store,
+            lock,
+            ResolveMode::NoFetch,
+        );
+        // The gate's own filter, verbatim: only an inline skill's missing pin
+        // pushes a blocker (`grant_probed`, the `SkillLockStatus::MissingLockEntry`
+        // arm). A library-origin one is a yellow advisory there and must be a
+        // yellow advisory here.
+        if matches!(report.status, SkillLockStatus::MissingLockEntry)
+            && matches!(report.origin, Some(SkillOrigin::Inline))
+        {
+            // `lock --write` resolves the body before it pins it, so a
+            // declared body that is not on disk makes that command exit
+            // non-zero and change nothing. Naming it anyway is a driver loop
+            // with no exit. Say which condition this is and carry no fix.
+            let body = live_skill_dir(&name, m, library, dir, &lib_home, &store);
+            let present = body.as_ref().is_some_and(|p| p.exists());
+            out.push(if present {
+                ContentDrift {
+                    kind: "skill",
+                    name,
+                    reason: "inline skill unpinned — run `agentstack lock --write`".to_string(),
+                    fix: Some(UNPINNED_FIX),
+                }
+            } else {
+                ContentDrift {
+                    kind: "skill",
+                    reason: format!(
+                        "inline skill '{name}' declares a body at {} that is not present on disk — it cannot be pinned until the body is restored",
+                        body.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "an unresolvable location".to_string())
+                    ),
+                    name,
+                    fix: None,
+                }
+            });
+        }
+    }
+    for (name, instr) in m.instructions.iter().filter(|(_, i)| !i.from_user_layer) {
+        if matches!(
+            crate::resolve::instruction_lock_status_with(name, instr, dir, lock, library),
+            InstructionLockStatus::MissingLockEntry
+        ) {
+            out.push(ContentDrift {
+                kind: "instruction",
+                name: name.clone(),
+                reason: "instruction unpinned — run `agentstack lock --write`".to_string(),
+                fix: Some(UNPINNED_FIX),
+            });
+        }
+    }
+    for (name, ext) in &m.extensions {
+        let report = crate::resolve::extension_lock_status(
+            name,
+            ext,
+            dir,
+            library,
+            &lib_home,
+            &store,
+            lock,
+            ResolveMode::NoFetch,
+        );
+        if matches!(report.status, ExtensionLockStatus::MissingLockEntry) {
+            out.push(ContentDrift {
+                kind: "extension",
+                name: name.clone(),
+                reason: "extension unpinned — run `agentstack lock --write`".to_string(),
+                fix: Some(UNPINNED_FIX),
+            });
+        }
+    }
+    for (name, wf) in &m.workflows {
+        if matches!(
+            crate::resolve::workflow_lock_status(name, wf, dir, &store, lock, ResolveMode::NoFetch),
+            WorkflowLockStatus::MissingLockEntry
+        ) {
+            out.push(ContentDrift {
+                kind: "workflow",
+                name: name.clone(),
+                reason: "workflow unpinned — run `agentstack lock --write`".to_string(),
+                fix: Some(UNPINNED_FIX),
+            });
+        }
+    }
+    out
+}
+
+/// The same reading for a project base. Best-effort exactly like
+/// [`content_drift_at`]: an unreadable project reports nothing, because "cannot
+/// read it" is not "it is unpinned".
+pub fn unpinned_surface_at(base: &Path) -> Vec<ContentDrift> {
+    let dir = crate::manifest::resolve_manifest_dir(base);
+    let Ok(loaded) = crate::manifest::load_from_dir(&dir) else {
+        return Vec::new();
+    };
+    let lock = crate::lock::Lock::load(&dir).unwrap_or_default();
+    let library = crate::library::Library::load_default_or_warn();
+    unpinned_surface(&dir, &loaded.manifest, &lock, &library)
+}
+
+impl ContentDrift {
+    /// The machine-readable blocker record: reason plus the executable fix.
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "kind": self.kind,
+            "name": crate::text::sanitize_line(&self.name),
+            "reason": crate::text::sanitize_line(&self.reason),
+            // Nullable since `trust-content-drift-v1`'s documented shape was
+            // extended for never-pinned items: a missing body has no repairing
+            // command, and naming one anyway is what made a driver loop.
+            "fix": self.fix,
+        })
+    }
+}
+
+/// Every pinned kind whose on-disk content no longer matches its lock pin.
+///
+/// Read-only and offline (`NoFetch`, exactly as `doctor` reads it): an uncached
+/// git source reports as unverifiable, not as drift, and is therefore NOT
+/// reported here — this function answers "did approved bytes move", nothing
+/// else. Best-effort by construction: a kind that cannot be resolved at all
+/// contributes nothing, because "unresolvable" is a different finding with a
+/// different fix and `doctor` owns it.
+pub fn content_drift(
+    dir: &Path,
+    m: &crate::manifest::Manifest,
+    lock: &crate::lock::Lock,
+    library: &crate::library::Library,
+) -> Vec<ContentDrift> {
+    use crate::resolve::{
+        ExtensionLockStatus, InstructionLockStatus, ResolveMode, SkillLockStatus,
+        WorkflowLockStatus,
+    };
+    let lib_home = crate::util::paths::lib_home();
+    let store = crate::store::Store::default_store();
+    let mut out = Vec::new();
+    for name in review_skill_names(m) {
+        let report = crate::resolve::skill_lock_status(
+            &name,
+            m,
+            dir,
+            library,
+            &lib_home,
+            &store,
+            lock,
+            ResolveMode::NoFetch,
+        );
+        if matches!(
+            report.status,
+            SkillLockStatus::ChecksumDrift { .. } | SkillLockStatus::RevDrift { .. }
+        ) {
+            out.push(ContentDrift {
+                kind: "skill",
+                name,
+                reason: "skill content drifted from lock".to_string(),
+                fix: Some(DRIFT_FIX),
+            });
+        }
+    }
+    for (name, instr) in m.instructions.iter().filter(|(_, i)| !i.from_user_layer) {
+        if matches!(
+            crate::resolve::instruction_lock_status_with(name, instr, dir, lock, library),
+            InstructionLockStatus::ChecksumDrift { .. }
+        ) {
+            out.push(ContentDrift {
+                kind: "instruction",
+                name: name.clone(),
+                reason: "instruction content drifted from lock".to_string(),
+                fix: Some(DRIFT_FIX),
+            });
+        }
+    }
+    for (name, ext) in &m.extensions {
+        let report = crate::resolve::extension_lock_status(
+            name,
+            ext,
+            dir,
+            library,
+            &lib_home,
+            &store,
+            lock,
+            ResolveMode::NoFetch,
+        );
+        if matches!(
+            report.status,
+            ExtensionLockStatus::ChecksumDrift { .. } | ExtensionLockStatus::RevDrift { .. }
+        ) {
+            out.push(ContentDrift {
+                kind: "extension",
+                name: name.clone(),
+                reason: "extension content drifted from lock".to_string(),
+                fix: Some(DRIFT_FIX),
+            });
+        }
+    }
+    for (name, wf) in &m.workflows {
+        if matches!(
+            crate::resolve::workflow_lock_status(name, wf, dir, &store, lock, ResolveMode::NoFetch),
+            WorkflowLockStatus::ChecksumDrift { .. } | WorkflowLockStatus::RevDrift { .. }
+        ) {
+            out.push(ContentDrift {
+                kind: "workflow",
+                name: name.clone(),
+                reason: "workflow content drifted from lock".to_string(),
+                fix: Some(DRIFT_FIX),
+            });
+        }
+    }
+    out
+}
+
+/// The same reading for a project base, loading the manifest and lock from
+/// disk. Best-effort: an unreadable project reports no drift, because "cannot
+/// read it" is not "its bytes moved" — the surfaces that call this already
+/// report the load failure themselves.
+pub fn content_drift_at(base: &Path) -> Vec<ContentDrift> {
+    let dir = crate::manifest::resolve_manifest_dir(base);
+    let Ok(loaded) = crate::manifest::load_from_dir(&dir) else {
+        return Vec::new();
+    };
+    let lock = crate::lock::Lock::load(&dir).unwrap_or_default();
+    let library = crate::library::Library::load_default_or_warn();
+    content_drift(&dir, &loaded.manifest, &lock, &library)
+}
+
 pub fn run(args: &TrustArgs) -> Result<()> {
     if args.list {
         return list();
@@ -693,7 +1064,7 @@ pub fn preview_value(base: &Path) -> Result<serde_json::Value> {
     // State is judged against the SNAPSHOT digest, not a fresh disk read, so
     // the state chip describes the same bytes as the display and the digest.
     let surface_digest = snapshot.digest();
-    let state = match trust::check_digest(base, Some(&surface_digest)) {
+    let digest_state = match trust::check_digest(base, Some(&surface_digest)) {
         trust::TrustState::Trusted => "trusted",
         trust::TrustState::Changed => "drifted",
         trust::TrustState::Untrusted => "untrusted",
@@ -715,6 +1086,28 @@ pub fn preview_value(base: &Path) -> Result<serde_json::Value> {
     // they will at gateway time. Display strings are sanitized (hostile input).
     let library = crate::library::Library::load_default_or_warn();
     let lib_home = crate::util::paths::lib_home();
+    // `trust-content-drift-v1`. The trust digest covers the manifest, local
+    // overlay, and lockfile bytes — NOT the bodies those bytes pin. So an
+    // edited-in-place skill leaves `digest_state` reading `trusted` while the
+    // grant refuses. Read the same drift the grant walk and `doctor` read, once,
+    // here, and let it colour the state, the card, and the blockers together.
+    let drift = content_drift(&dir, m, &lock, &library);
+    // The sibling reading, from the same shared detector: declared content
+    // with no pin at all. The grant refuses on it exactly as it refuses on
+    // drift, so a preview that omitted it answered `grantable: true` over a
+    // surface `trust --yes` was about to reject.
+    let unpinned = unpinned_surface(&dir, m, &lock, &library);
+    let drifted: HashSet<(&str, &str)> = drift.iter().map(|d| (d.kind, d.name.as_str())).collect();
+    // A project whose approved bytes moved is not "trusted" on any surface a
+    // machine reads: `trust` refuses it, `doctor` errors on it. Only the word
+    // reported here was ever disagreeing.
+    let state = if drift.is_empty() {
+        digest_state
+    } else if digest_state == "untrusted" {
+        "untrusted"
+    } else {
+        "drifted"
+    };
     let effective_servers = crate::resolve::effective_runtime_servers(m, &library, &lib_home, None);
     let mut server_blockers: Vec<serde_json::Value> = Vec::new();
     let mut servers: Vec<serde_json::Value> = Vec::new();
@@ -754,7 +1147,7 @@ pub fn preview_value(base: &Path) -> Result<serde_json::Value> {
                     server_blockers.push(serde_json::json!({
                         "name": crate::text::sanitize_line(name),
                         "reason": "library definition does not match the lockfile pin",
-                        "fix": "agentstack lock",
+                        "fix": "agentstack lock --write",
                     }));
                     servers.push(serde_json::json!({
                         "name": crate::text::sanitize_line(name),
@@ -842,7 +1235,7 @@ pub fn preview_value(base: &Path) -> Result<serde_json::Value> {
                 server_blockers.push(serde_json::json!({
                     "name": crate::text::sanitize_line(&name),
                     "reason": "local executable content is not pinned yet",
-                    "fix": "agentstack lock",
+                    "fix": "agentstack lock --write",
                 }));
             }
             crate::verify::Verdict::Block(reason) => {
@@ -945,10 +1338,14 @@ pub fn preview_value(base: &Path) -> Result<serde_json::Value> {
     // which is what keeps `trust --preview` read-only while still recomputing
     // the identities the grant persists.
     for (name, ext) in &m.extensions {
-        card.push(CardItem::new("extension", name, extension_identity(ext)));
+        let mut item = CardItem::new("extension", name, extension_identity(ext));
+        item.drifted = drifted.contains(&("extension", name.as_str()));
+        card.push(item);
     }
     for (name, wf) in &m.workflows {
-        card.push(CardItem::new("workflow", name, workflow_identity(wf)));
+        let mut item = CardItem::new("workflow", name, workflow_identity(wf));
+        item.drifted = drifted.contains(&("workflow", name.as_str()));
+        card.push(item);
     }
     for name in review_skill_names(m) {
         let mut item = CardItem::new(
@@ -958,6 +1355,7 @@ pub fn preview_value(base: &Path) -> Result<serde_json::Value> {
         );
         item.pin = lock.get(&name).map(|e| e.checksum.hex().to_string());
         item.pinned_kind = true;
+        item.drifted = drifted.contains(&("skill", name.as_str()));
         card.push(item);
     }
     for (name, _) in m.instructions.iter().filter(|(_, i)| !i.from_user_layer) {
@@ -966,6 +1364,7 @@ pub fn preview_value(base: &Path) -> Result<serde_json::Value> {
             .get_instruction(name)
             .map(|e| e.checksum.hex().to_string());
         item.pinned_kind = true;
+        item.drifted = drifted.contains(&("instruction", name.as_str()));
         card.push(item);
     }
     for (name, hook) in &m.hooks {
@@ -999,6 +1398,59 @@ pub fn preview_value(base: &Path) -> Result<serde_json::Value> {
         "surface_digest": surface_digest,
         "servers": servers,
         "server_blockers": server_blockers,
+        // `trust-content-drift-v1`. Additive and always present:
+        //
+        // - `content_drift[]` names each item whose approved bytes moved.
+        // - `blockers[]` is the ONE list to read: the server blockers above
+        //   (kind `server`) plus the content drift, in that order, each with
+        //   the `fix` that makes progress on it.
+        // - `grantable` is false when this projection can already see a reason
+        //   the grant refuses. True is NOT a promise the grant succeeds —
+        //   `agentstack trust` stays authoritative — but false is reliable.
+        // - `fix` / `next_step` carry the command to run VERBATIM, so a driver
+        //   converges without parsing prose.
+        "content_drift": drift.iter().map(|d| d.to_json()).collect::<Vec<_>>(),
+        // Declared but never pinned. A separate array from `content_drift`
+        // because it is a separate claim — nothing here was ever approved, so
+        // calling it drift would misreport what the user is being asked about.
+        "surface_unpinned": unpinned.iter().map(|d| d.to_json()).collect::<Vec<_>>(),
+        "blockers": server_blockers.iter().map(|b| serde_json::json!({
+                "kind": "server",
+                "name": b["name"],
+                "reason": b["reason"],
+                "fix": b["fix"],
+            }))
+            .chain(drift.iter().map(|d| d.to_json()))
+            .chain(unpinned.iter().map(|d| d.to_json()))
+            .collect::<Vec<_>>(),
+        "grantable": server_blockers.is_empty() && drift.is_empty() && unpinned.is_empty(),
+        // Drift and never-pinned name the SAME command, so `fix` answers for
+        // either; the `why` distinguishes them for the human. A blocker that
+        // carries NO fix (a declared body absent from disk) contributes
+        // nothing here: promoting a command that cannot succeed to the
+        // headline is exactly the non-converging loop this field must not
+        // create. `blockers[]` still names the condition.
+        "fix": drift.iter().chain(unpinned.iter()).find_map(|d| d.fix)
+            .map(|f| serde_json::Value::String(f.to_string()))
+            .unwrap_or(serde_json::Value::Null),
+        // Ordering, decided deliberately (F5): re-pinning outranks the consent
+        // rungs, and `lock --write` resolves with `ResolveMode::Fetch` over
+        // repository content nobody has reviewed yet. That is acceptable here
+        // and only here — fetching a declared source starts no server, puts
+        // nothing into agent context, resolves no secret, and the trust card
+        // rendered afterwards still shows every item, so invariant 3 holds.
+        // The alternative is worse: the gate genuinely refuses these items, so
+        // naming `agentstack trust .` first hands a driver a command that
+        // exits non-zero and leaves the state untouched, forever. The human
+        // prose under the same condition says the same two steps in the same
+        // order — pin, then review and trust.
+        "next_step": if drift.iter().any(|d| d.fix.is_some()) {
+            serde_json::json!({ "command": DRIFT_FIX, "why": DRIFT_WHY })
+        } else if unpinned.iter().any(|d| d.fix.is_some()) {
+            serde_json::json!({ "command": UNPINNED_FIX, "why": UNPINNED_WHY })
+        } else {
+            serde_json::Value::Null
+        },
         "secrets": secrets,
         "skills": skills,
         "workflows": workflows,
@@ -1353,7 +1805,7 @@ pub(crate) fn grant_probed(
                 None => {
                     blockers.push((
                         name.clone(),
-                        "library server unpinned — run `agentstack lock`".to_string(),
+                        "library server unpinned — run `agentstack lock --write`".to_string(),
                     ));
                     format!("   [library, {}]", "unpinned".red())
                 }
@@ -1424,7 +1876,7 @@ pub(crate) fn grant_probed(
                     say!("{mk}{} {disp}   [{}]", "✗".red(), "unpinned".red());
                     blockers.push((
                         label.clone(),
-                        "local executable unpinned — run `agentstack lock`".to_string(),
+                        "local executable unpinned — run `agentstack lock --write`".to_string(),
                     ));
                 }
                 crate::verify::Verdict::Block(why) => {
@@ -1487,7 +1939,7 @@ pub(crate) fn grant_probed(
                     );
                     blockers.push((
                         name.clone(),
-                        "extension unpinned — run `agentstack lock`".to_string(),
+                        "extension unpinned — run `agentstack lock --write`".to_string(),
                     ));
                 }
                 ExtensionLockStatus::ChecksumDrift { .. }
@@ -1514,7 +1966,8 @@ pub(crate) fn grant_probed(
                     );
                     blockers.push((
                         name.clone(),
-                        "extension target changed since locked — run `agentstack lock`".to_string(),
+                        "extension target changed since locked — run `agentstack lock --write`"
+                            .to_string(),
                     ));
                 }
                 // Reproducibility can't be checked offline; not a blocker —
@@ -1578,7 +2031,7 @@ pub(crate) fn grant_probed(
                     say!("{mk}{} {disp} {dest}   [{}]", "✗".red(), "unpinned".red());
                     blockers.push((
                         name.clone(),
-                        "workflow unpinned — run `agentstack lock`".to_string(),
+                        "workflow unpinned — run `agentstack lock --write`".to_string(),
                     ));
                 }
                 WorkflowLockStatus::ChecksumDrift { .. } | WorkflowLockStatus::RevDrift { .. } => {
@@ -1604,7 +2057,8 @@ pub(crate) fn grant_probed(
                     );
                     blockers.push((
                         name.clone(),
-                        "workflow roles changed since locked — run `agentstack lock`".to_string(),
+                        "workflow roles changed since locked — run `agentstack lock --write`"
+                            .to_string(),
                     ));
                 }
                 // Reproducibility can't be checked offline; not a blocker —
@@ -1742,14 +2196,14 @@ pub(crate) fn grant_probed(
                         say!("{mk}{} {disp}   [inline, {}]", "✗".red(), "unpinned".red());
                         blockers.push((
                             name.clone(),
-                            "inline skill unpinned — run `agentstack lock`".to_string(),
+                            "inline skill unpinned — run `agentstack lock --write`".to_string(),
                         ));
                     }
                     // A library skill's bytes are the user's own curated,
                     // scan-gated content — worth pinning, not worth blocking.
                     _ => say!(
                         "{mk}· {disp}   [{origin_word}, {}]",
-                        "unpinned — run `agentstack lock`".yellow()
+                        "unpinned — run `agentstack lock --write`".yellow()
                     ),
                 },
                 // Reproducibility can't be checked offline; not a blocker.
@@ -1850,7 +2304,7 @@ pub(crate) fn grant_probed(
                     say!("{mk}{} {disp}   [{}]", "✗".red(), "unpinned".red());
                     blockers.push((
                         name.clone(),
-                        "instruction unpinned — run `agentstack lock`".to_string(),
+                        "instruction unpinned — run `agentstack lock --write`".to_string(),
                     ));
                 }
                 InstructionLockStatus::ResolveFailed { error } => {
@@ -2089,10 +2543,15 @@ pub(crate) fn grant_probed(
             .iter()
             .all(|(_, why)| why.contains("agentstack lock"))
         {
-            "Run `agentstack lock`, review the result, then `agentstack trust` again."
+            // The SAME two steps, in the same order, as the machine
+            // `next_step` field: pin, then review and trust. The old wording
+            // named a third, earlier `agentstack lock` review step that no
+            // machine field carries — a human and a driver reading the same
+            // condition were told different sequences.
+            "Pin with `agentstack lock --write`, then review and trust with `agentstack trust .`."
         } else {
-            "Fix or remove the blocked declarations above. Then run `agentstack lock` for \
-             anything marked unpinned and review again."
+            "Fix or remove the blocked declarations above. Then run `agentstack lock --write` \
+             for anything marked unpinned and review again."
         };
         anyhow::bail!(
             "cannot trust {}: its loadable surface isn't fully pinned — {} {} locking or review:\n{}\n{}",
@@ -2639,7 +3098,7 @@ fn blueprint_review_lines(
         Some(_) => {
             blockers.push((
                 name.to_string(),
-                "approved blueprint drifted from lock — re-review and run `agentstack lock`"
+                "approved blueprint drifted from lock — re-review and run `agentstack lock --write`"
                     .to_string(),
             ));
             return vec![format!(
@@ -2651,7 +3110,7 @@ fn blueprint_review_lines(
         None => {
             blockers.push((
                 name.to_string(),
-                "approved blueprint unpinned — run `agentstack lock`".to_string(),
+                "approved blueprint unpinned — run `agentstack lock --write`".to_string(),
             ));
             return vec![format!(
                 "{} approved blueprint {shown} — {}",

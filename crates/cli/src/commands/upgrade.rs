@@ -947,7 +947,7 @@ fn print_result_report(
 /// member is not a running one.
 ///
 /// So the line states what is true in every case — the lock now names the new
-/// bytes — and `agentstack delivery` is where routing is read.
+/// bytes — and `agentstack x delivery` is where routing is read.
 fn dynamic_lane_result(d: &PackDiff, out: &LaneOutcome) -> Option<String> {
     let mut parts: Vec<String> = Vec::new();
     if out.skills_repinned > 0 {

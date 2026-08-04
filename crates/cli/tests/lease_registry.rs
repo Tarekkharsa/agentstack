@@ -649,7 +649,11 @@ fn an_unavailable_gateway_yields_no_tools_and_writes_no_file() {
         "status says what the harness gets: {status}"
     );
     assert!(
-        status.contains("agentstack gateway connect --all"),
+        // The namespaced spelling is the discoverable one — `gateway` is hidden,
+        // so `agentstack x gateway …` is the form every surface prints
+        // (`connect::GATEWAY_RECOVERY`). The bare spelling still parses, but the
+        // surfaces must name what `agentstack --help` can reach in one hop.
+        status.contains("agentstack x gateway connect --all"),
         "status names the one recovery command: {status}"
     );
 
@@ -659,7 +663,8 @@ fn an_unavailable_gateway_yields_no_tools_and_writes_no_file() {
         "doctor explains the outage: {doctor}"
     );
     assert!(
-        doctor.contains("agentstack gateway connect --all"),
+        // Same namespaced spelling as the status assertion above.
+        doctor.contains("agentstack x gateway connect --all"),
         "doctor names the one recovery command: {doctor}"
     );
 

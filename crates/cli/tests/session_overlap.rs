@@ -41,7 +41,14 @@ fn setup_project(root: &Path, name: &str) -> PathBuf {
     fs::create_dir_all(&proj).unwrap();
     fs::write(
         proj.join("agentstack.toml"),
+        // This file's contract is about server-config BYTES — whose file a
+        // session writes, and that it restores them exactly. That contract
+        // only has a subject in the rendered lane, so the project opts into
+        // it: under the default routing an MCP-capable harness's servers are
+        // served live and `session start` writes no config at all (which is
+        // the separate thing `use`/`session` routing tests pin).
         "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [delivery]\nrender_locally = true\n\
          [servers.srv]\ntype = \"stdio\"\ncommand = \"npx\"\nargs = [\"srv-mcp\"]\n\
          [profiles.p]\nservers = [\"srv\"]\n",
     )

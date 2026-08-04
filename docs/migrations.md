@@ -28,8 +28,8 @@ the targets that contributed configuration. Existing foreign entries are kept.
 To undo onboarding, list the labelled entries and restore them newest first:
 
 ```sh
-agentstack restore
-agentstack restore --last --write
+agentstack x restore
+agentstack x restore --last --write
 ```
 
 Repeat the last command for the preceding `init` entry if you also want to
@@ -50,7 +50,7 @@ agentstack doctor
 Choose `keychain` when you do not want resolved values in a project `.env`.
 AgentStack imports fields it can represent and explicitly lists anything lossy
 or unsupported; it does not delete the original Cursor or Gemini fields. Run
-`agentstack diff` after the write to see managed, foreign, and hand-edited
+`agentstack x diff` after the write to see managed, foreign, and hand-edited
 entries separately.
 
 ## From dotfiles
@@ -69,7 +69,7 @@ Do **not** copy machine trust, the keychain, resolved `.env` values, history, or
 On each machine:
 
 ```sh
-agentstack install --locked
+agentstack x install --locked
 agentstack apply               # preview
 agentstack apply --write
 agentstack doctor
@@ -79,7 +79,7 @@ If your dotfile manager currently owns native CLI files, choose one owner before
 the write. Keep AgentStack as source of truth and stop templating its managed
 entries, or keep the dotfile template and do not ask AgentStack to own the same
 region. A hand-added native entry you want to preserve can be pulled into the
-manifest with `agentstack adopt --write` after reviewing `agentstack diff`.
+manifest with `agentstack adopt --write` after reviewing `agentstack x diff`.
 
 ## A team without shared secrets
 
@@ -93,7 +93,7 @@ git commit -m "share agent toolset"
 A teammate then runs:
 
 ```sh
-agentstack install --locked
+agentstack x install --locked
 agentstack doctor              # list unresolved reference names
 agentstack secret set GITHUB_TOKEN   # repeat for each unresolved reference
 agentstack apply               # preview
@@ -113,8 +113,8 @@ where AgentStack can identify and remove just its managed entries from every
 native file:
 
 ```sh
-agentstack uninstall           # preview
-agentstack uninstall --write
+agentstack x uninstall           # preview
+agentstack x uninstall --write
 ```
 
 The summary names what it removed and what it deliberately retained. The
@@ -129,11 +129,11 @@ only; it does not guess which project files to edit.
 Finally remove the executable through the channel that installed it:
 
 - Homebrew: `brew uninstall agentstack`.
-- A source build linked with `agentstack self link`: run `agentstack self which`
+- A source build linked with `agentstack x self link`: run `agentstack x self which`
   to identify the link, then remove that link.
-- The curl installer: run `agentstack self which`, inspect the reported install
+- The curl installer: run `agentstack x self which`, inspect the reported install
   path, then remove that binary with the permissions used to install it.
 
-`agentstack uninstall` is itself recorded before machine history is removed
+`agentstack x uninstall` is itself recorded before machine history is removed
 when a manifest is available. If you may need its undo, pass `--keep-home` and
 verify the native files before deleting the retained home.

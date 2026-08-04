@@ -1,6 +1,6 @@
 ---
 name: propose-workflow
-description: Propose a reviewable multi-agent workflow as a blueprint — pick and name the pattern (map-reduce, pipeline, tournament, loop-until-dry, dag), emit its shape as an agentstack-blueprint JSON block, and WAIT for the user to approve / reject / edit before authoring and running it via agentstack workflow run.
+description: Propose a reviewable multi-agent workflow as a blueprint — pick and name the pattern (map-reduce, pipeline, tournament, loop-until-dry, dag), emit its shape as an agentstack-blueprint JSON block, and WAIT for the user to approve / reject / edit before authoring and running it via agentstack x workflow run.
 ---
 
 # Propose a reviewable workflow
@@ -201,7 +201,7 @@ difference between a workflow that demos and one that survives width.
   bytes, so it is pointless on short results. If a run fails with
   `resident_cap`, this is the remedy the error names.
 
-- **`agentstack workflow explain <name>`** after step 2 and before step 4. It
+- **`agentstack x workflow explain <name>`** after step 2 and before step 4. It
   reports the effective ceilings, which roles launch serially, and the
   `agent()` call sites — statically, spawning nothing. Cheap way to catch "this
   fans out wider than `max_agents` allows" before paying for the first N
@@ -223,7 +223,7 @@ Then run the governed pipeline `docs/workflows.md` specifies:
    blueprint to temp files, then:
 
    ```
-   agentstack workflow declare --name <name> \
+   agentstack x workflow declare --name <name> \
      --script /tmp/<name>.js --blueprint /tmp/<name>.blueprint.json \
      --role <role> [--role <role> …] \
      --max-agents <n> --max-wall-seconds <n> --write
@@ -239,15 +239,15 @@ Then run the governed pipeline `docs/workflows.md` specifies:
    Pass `--blueprint` whenever the workflow came from an approved graph. It
    pins the blueprint beside the script, so the trust review below shows the
    shape the user signed off on — see the F13 note after this list.
-2. *(folded into step 1 — `declare` re-locks for you.)* Run `agentstack lock`
+2. *(folded into step 1 — `declare` re-locks for you.)* Run `agentstack lock --write`
    by hand only when you edited a declared workflow afterwards.
 3. **Trust** the pinned bytes with `agentstack trust .` — review the declared
    roles/ceilings, then pin. Untrusted, the workflow never parses and its name
    is not invocable; a one-byte change re-gates.
-4. **Check the cost statically** with `agentstack workflow explain <name>` —
+4. **Check the cost statically** with `agentstack x workflow explain <name>` —
    ceilings, serial roles, call sites. Spawns nothing.
-5. **Run** with `agentstack workflow run <name>` (invoker input via
-   `--args-json '<json>'`); read the evidence tree with `agentstack workflow
+5. **Run** with `agentstack x workflow run <name>` (invoker input via
+   `--args-json '<json>'`); read the evidence tree with `agentstack x workflow
    report <run-id>`.
 
 ### The second gate shows the graph now — but it is still yours to frame (F13)
@@ -284,7 +284,7 @@ Report that message; do not attempt your own cleanup, and do not retry blindly
 
 `trust` and `run` come after, and neither writes project files, so a refusal
 there leaves nothing to undo. If you need to remove a *successful* declare,
-`agentstack restore --last --write` reverts it as one entry.
+`agentstack x restore --last --write` reverts it as one entry.
 3. Offer the next move: fix and retry, or re-open the blueprint for editing.
 
 A half-written manifest plus an orphan script is worse than a clean refusal —

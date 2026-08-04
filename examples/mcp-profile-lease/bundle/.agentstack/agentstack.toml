@@ -3,6 +3,6 @@ version = 1
 [skills.review-checklist]
 path = "./skills/review-checklist"
 
-[profiles.backend]
+[toolsets.backend]
 servers = []
 skills = ["review-checklist"]

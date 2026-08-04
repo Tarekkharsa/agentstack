@@ -15,7 +15,7 @@ rest.
 
 **You do not have to choose.** Since 2026-08-03 delivery is *routed*, not
 picked: AgentStack decides per capability, from what kind it is and which CLI it
-is going to, and says what it decided. `agentstack delivery` shows the routing
+is going to, and says what it decided. `agentstack x delivery` shows the routing
 for your project.
 
 | Capability | Where it goes | Why |
@@ -28,7 +28,7 @@ for your project.
 A project is normally in **both** lanes at once, and that is the ordinary case,
 not a compromise.
 
-**The one escape hatch: render locally.** `agentstack delivery render-locally
+**The one escape hatch: render locally.** `agentstack x delivery render-locally
 --write` (add `--harness <id>` for a single CLI) writes files even where the
 live channel would have worked. Pick it for offline work, deterministic native
 files, inspection with ordinary filesystem tools, a rule against a persistent

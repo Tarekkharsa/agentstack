@@ -13,13 +13,13 @@ this today; AgentStack's version pins the orchestration code and gives every
 step its own reviewed authority.
 
 **The full path ships today.** Declare, pin, and trust a
-workflow, run it end to end with `agentstack workflow run`, render its
-evidence tree with `agentstack workflow report`, and resume an interrupted
+workflow, run it end to end with `agentstack x workflow run`, render its
+evidence tree with `agentstack x workflow report`, and resume an interrupted
 run with `--resume` (replay from the recorded journal — byte-identical
 script and args, or it refuses). Every agent step runs as a governed
 [protected run](reference.html). The interpreter boundary was independently
 security-reviewed on 2026-07-23, and all six findings that review raised are
-now closed, each with its own witness. `agentstack workflow` is therefore a
+now closed, each with its own witness. `agentstack x workflow` is therefore a
 listed command rather than a hidden one.
 
 That change is **discoverability, not enforcement**. Not one boundary moved
@@ -85,7 +85,7 @@ report labels each step's posture rather than implying uniform containment.
 The orchestration script runs under host-set ceilings, and two of them are
 **partial on purpose**. A partial bound that reads as total is the failure
 this section exists to prevent, so both residuals are stated here and in the
-posture block `agentstack workflow report` prints verbatim:
+posture block `agentstack x workflow report` prints verbatim:
 
 - **There is no JS heap cap.** Every path by which *untrusted* input reaches
   the interpreter heap is bounded — the invoker's args and every child result
@@ -186,7 +186,7 @@ dimension and the reason, and **the run proceeds** on that harness's own
 default — an undeliverable model is a capability gap, not a manifest error. A
 value the adapter's own catalog *rejects* (an effort outside its enum) is a
 manifest error, and a run refuses that child before launch.
-`agentstack workflow explain <name>` reports the same facts statically,
+`agentstack x workflow explain <name>` reports the same facts statically,
 spawning nothing.
 
 ### Named algorithms
@@ -259,7 +259,7 @@ stages returning kilobytes — on short results they are simply pointless.
 
 ### Before you run it
 
-`agentstack workflow explain <name>` reports the effective ceilings, which
+`agentstack x workflow explain <name>` reports the effective ceilings, which
 roles launch serially, and how many `agent()` call **sites** the pinned
 script has — statically, spawning nothing. Sites are not calls: one site
 inside a loop runs once per item, so real fan-out is data-dependent. The

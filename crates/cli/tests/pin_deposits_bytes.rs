@@ -180,7 +180,7 @@ fn every_path_sourced_pin_in_the_lock_has_its_bytes_in_the_content_store() {
     write_project(&proj);
 
     // Path 1: `lock`.
-    let (out, ok) = run(bin, &["lock"], &home, &proj);
+    let (out, ok) = run(bin, &["lock", "--write"], &home, &proj);
     assert!(ok, "lock failed:\n{out}");
     assert_every_path_pin_has_bytes(&home, &proj, "`agentstack lock`");
 
@@ -200,7 +200,7 @@ fn every_path_sourced_pin_in_the_lock_has_its_bytes_in_the_content_store() {
         "---\ndescription: summarizes\n---\n# Summarize\nfirst body\nAND A NEW LINE\n",
     )
     .unwrap();
-    let (out, ok) = run(bin, &["lock"], &home, &proj);
+    let (out, ok) = run(bin, &["lock", "--write"], &home, &proj);
     assert!(ok, "re-lock failed:\n{out}");
     assert_every_path_pin_has_bytes(&home, &proj, "an edit + re-lock");
 

@@ -51,7 +51,7 @@ everything else byte-for-byte intact.
 
 4. **Edits flow through the trust gate.** Changing the `claude_only` fragment
    drifts the content lock, so the next `instructions --write` is **refused**
-   until you run `agentstack lock` to accept the change — content-pinning working
+   until you run `agentstack lock --write` to accept the change — content-pinning working
    as designed. After re-locking, the managed region updates in place (no
    duplicate region, prose still intact).
 

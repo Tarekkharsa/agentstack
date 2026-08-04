@@ -49,7 +49,7 @@ For a **library-sourced** skill that **carries a lock pin**, checksum
 divergence between the live library directory and the pin is an *update
 available*. The load serves the pinned bytes from the store and carries a
 one-line note naming that a newer version exists in the library and the one
-command that takes it (`agentstack lock`). Per §"Update model" rule 4,
+command that takes it (`agentstack lock --write`). Per §"Update model" rule 4,
 keep-pinned is the resting state: the note offers, and must never imply the
 project is broken or stale.
 
@@ -82,7 +82,7 @@ Narrow on purpose; everything outside it fails closed exactly as before.
   agent context is the verified snapshot of the bytes a human approved.
 - **Invariant 4 (pinned byte changes re-gate)** still holds. It binds what the
   **lock** pins, and the lock is unchanged by a sync. Taking the newer version
-  means running `agentstack lock`, which rewrites lock bytes, which flips the
+  means running `agentstack lock --write`, which rewrites lock bytes, which flips the
   trust digest, which re-gates through the ordinary review card. No cache and
   no partial-trust path is introduced: the store lookup is content-addressed
   and re-verified at read time.
@@ -120,7 +120,7 @@ unchanged — a path skill still records its declared directory.
 
 Fail-closed, as on the serve lane: a pin whose snapshot is missing and cannot be
 repaired, or present and not hashing to its own name, refuses the activation
-naming the skill and `agentstack lock`. There is deliberately no fallback to the
+naming the skill and `agentstack lock --write`. There is deliberately no fallback to the
 live directory; a silent fallback would restore the hole exactly.
 
 **Unpinned skills are untouched.** There is no digest to serve by, so they keep
@@ -166,6 +166,6 @@ same divergence in their own words, from before the distinction existed — as
 drift, in copy that can read as "your project is broken". Their **behaviour** is
 correct and deliberately untouched (they are consent and activation gates, not
 the serve path, and a project that wants the newer bytes really does have to run
-`agentstack lock`), but their **wording** should be reviewed against this
+`agentstack lock --write`), but their **wording** should be reviewed against this
 decision so a user is not told two different stories about one library that
 simply moved ahead.

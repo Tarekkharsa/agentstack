@@ -359,6 +359,15 @@ pub fn start(manifest_dir: Option<&Path>, profile: &str, scope: Scope) -> Result
     // records the session's own, and `end` restores these (see
     // `Session::prev_profiles`).
     let mut prev_profiles: BTreeMap<String, Option<String>> = BTreeMap::new();
+    // `session start` ACTIVATES a toolset: the activation itself is
+    // `use_profile::activate`, which now honours the delivery planner and
+    // writes no server config for a harness whose servers travel the live
+    // lane. This loop only snapshots files for undo, so it must read the SAME
+    // plan — capturing a backup of a file nothing will write would record a
+    // phantom entry in the history ledger and name a target in "session start"
+    // that the session never touched.
+    let plan_delivery =
+        crate::delivery::Plan::build(&manifest.delivery, &ctx.registry, &target_ids);
     for id in &target_ids {
         let Some(desc) = ctx.registry.get(id) else {
             continue;
@@ -366,21 +375,23 @@ pub fn start(manifest_dir: Option<&Path>, profile: &str, scope: Scope) -> Result
         let key = target_key(id, scope, &ctx.dir);
         prev_profiles.insert(key.clone(), state.active_profile(&key));
         let prev = state.managed_servers(&key);
-        if let Some(plan) = plan_target_with_servers(
-            desc,
-            &ctx.resolver,
-            &ruleset,
-            &prepared.server_map,
-            &prev,
-            scope,
-            &ctx.dir,
-        )? {
-            backups.push(crate::history::capture(
-                &plan.config_path,
-                format!("{} · servers", desc.display),
-            ));
-            touched.insert(desc.display.clone());
-            server_files.push((desc.display.clone(), plan.config_path.clone()));
+        if !plan_delivery.servers_route_live(id) {
+            if let Some(plan) = plan_target_with_servers(
+                desc,
+                &ctx.resolver,
+                &ruleset,
+                &prepared.server_map,
+                &prev,
+                scope,
+                &ctx.dir,
+            )? {
+                backups.push(crate::history::capture(
+                    &plan.config_path,
+                    format!("{} · servers", desc.display),
+                ));
+                touched.insert(desc.display.clone());
+                server_files.push((desc.display.clone(), plan.config_path.clone()));
+            }
         }
         if let Some(sd) = desc.skills_dir_for(scope, &ctx.dir) {
             skill_before.push((sd.clone(), sd.exists(), dir_entries(&sd)));

@@ -151,7 +151,10 @@ fn trust_grant_requires_a_pinned_matching_surface() {
     let err = trust_cmd::run(&grant_args(&proj)).unwrap_err().to_string();
     assert!(err.contains("isn't fully pinned"), "{err}");
     assert!(err.contains("helper"), "{err}");
-    assert!(err.contains("`agentstack lock`"), "{err}");
+    // The refusal names the command that actually pins. Bare `agentstack lock`
+    // writes nothing, so the old expectation here would have been satisfied by
+    // a sentence that cannot repair the state it describes.
+    assert!(err.contains("`agentstack lock --write`"), "{err}");
     assert_eq!(trust::check(&proj), TrustState::Untrusted);
 
     // Pin it → trust grants.

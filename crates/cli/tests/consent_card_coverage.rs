@@ -119,7 +119,7 @@ fn the_preview_json_carries_every_kind_the_card_discloses() {
     fs::create_dir_all(&proj).unwrap();
     write_fixture(&proj);
 
-    let (lock_out, ok) = run(bin, &["lock"], &home, &proj);
+    let (lock_out, ok) = run(bin, &["lock", "--write"], &home, &proj);
     assert!(ok, "lock failed:\n{lock_out}");
     let (preview, ok) = run(bin, &["trust", "--preview"], &home, &proj);
     assert!(ok, "preview failed:\n{preview}");
@@ -201,7 +201,7 @@ fn every_recorded_surface_item_appears_in_the_review_the_human_read() {
     fs::create_dir_all(&proj).unwrap();
     write_fixture(&proj);
 
-    let (lock_out, lock_ok) = run(bin, &["lock"], &home, &proj);
+    let (lock_out, lock_ok) = run(bin, &["lock", "--write"], &home, &proj);
     assert!(lock_ok, "lock failed:\n{lock_out}");
 
     // The digest the human would have reviewed, taken from the read-only

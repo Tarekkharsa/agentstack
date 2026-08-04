@@ -39,7 +39,7 @@ gates. (Do not benchmark children against in-process Workflow agents
 
 ```bash
 cp -r bundle /tmp/wf-acceptance && cd /tmp/wf-acceptance
-agentstack lock
+agentstack lock --write
 consent=$(agentstack trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')
 agentstack trust . --yes --consented-digest "$consent"
 ls ~/.agentstack/runs > /tmp/runs-before.txt

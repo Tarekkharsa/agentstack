@@ -330,7 +330,7 @@ fn run_lockdown_routed(shell_cmd: &str, server_url: &str) -> (bool, String, std:
             .unwrap();
         assert!(status.success(), "`agentstack {}` failed", args.join(" "));
     };
-    run_as(&["lock"]);
+    run_as(&["lock", "--write"]);
     // §7.2: the non-interactive grant presents the previewed surface digest,
     // computed after `lock` wrote the lockfile it pins.
     let consent = agentstack::trust::digest_for(&proj).unwrap();
@@ -559,7 +559,7 @@ fn lockdown_refuses_an_adapter_that_cannot_carry_the_gateway_token() {
             .unwrap();
         assert!(status.success(), "`agentstack {}` failed", args.join(" "));
     };
-    run_as(&["lock"]);
+    run_as(&["lock", "--write"]);
     // §7.2: the non-interactive grant presents the previewed surface digest,
     // computed after `lock` wrote the lockfile it pins.
     let consent = agentstack::trust::digest_for(&proj).unwrap();

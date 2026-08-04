@@ -120,7 +120,7 @@ pub fn extension_verdict(status: &ExtensionLockStatus) -> Verdict {
             short(current)
         )),
         ExtensionLockStatus::TargetDrift { locked, current } => Verdict::Block(format!(
-            "extension target changed since it was locked (locked '{locked}', now '{current}') — re-run `agentstack lock`"
+            "extension target changed since it was locked (locked '{locked}', now '{current}') — re-pin with `agentstack lock --write`"
         )),
         ExtensionLockStatus::RevDrift { locked, current } => Verdict::Block(format!(
             "extension git rev drifted from agentstack.lock (locked {}, current {})",
@@ -211,7 +211,7 @@ pub fn ensure_session_startable(
         ));
     }
     lines.push_str(
-        "Make it ready once: run `agentstack lock` (pins the new items and accepts reviewed changes), re-trust the project, then retry.",
+        "Make it ready once: run `agentstack lock --write` (pins the new items and accepts reviewed changes), re-trust the project, then retry.",
     );
     anyhow::bail!(lines)
 }
@@ -296,9 +296,9 @@ pub fn ensure_locked_inputs(
 fn locked_offender(verdict: Verdict) -> Option<String> {
     match verdict {
         Verdict::Ok => None,
-        Verdict::Unpinned => {
-            Some("not pinned in agentstack.lock — pin it with `agentstack lock`".to_string())
-        }
+        Verdict::Unpinned => Some(
+            "not pinned in agentstack.lock — pin it with `agentstack lock --write`".to_string(),
+        ),
         Verdict::Block(why) => Some(why),
     }
 }
@@ -321,7 +321,7 @@ fn bail_blocked(action: &str, blocked: Vec<(String, String)>) -> anyhow::Result<
         return Ok(());
     }
     anyhow::bail!(
-        "refusing to {action}: {} changed since agentstack.lock was written —\n{}\nReview the changes, then run `agentstack lock` to accept them (re-locking re-gates the project for auto mode).",
+        "refusing to {action}: {} changed since agentstack.lock was written —\n{}\nReview the changes with `agentstack lock`, then run `agentstack lock --write` to accept them (re-locking re-gates the project for auto mode).",
         crate::commands::count(blocked.len(), "pinned item"),
         offender_lines(&blocked)
     )
@@ -337,7 +337,7 @@ fn bail_locked(action: &str, blocked: Vec<(String, String)>) -> anyhow::Result<(
     }
     let pronoun = if blocked.len() == 1 { "it" } else { "them" };
     anyhow::bail!(
-        "refusing to {action}: {} failed locked integrity verification —\n{}\nLock-pinnable inputs must be pinned and matching, and every frozen server must resolve and pass its required integrity check; review {pronoun}, then run `agentstack lock`.",
+        "refusing to {action}: {} failed locked integrity verification —\n{}\nLock-pinnable inputs must be pinned and matching, and every frozen server must resolve and pass its required integrity check; review {pronoun} with `agentstack lock`, then pin with `agentstack lock --write`.",
         crate::commands::count(blocked.len(), "input"),
         offender_lines(&blocked)
     )
@@ -576,7 +576,7 @@ mod tests {
         let instructions = vec![("i".to_string(), InstructionLockStatus::MissingLockEntry)];
         let servers = vec![failed_server(
             "srv",
-            "library server is not pinned in agentstack.lock — pin it with `agentstack lock`",
+            "library server is not pinned in agentstack.lock — pin it with `agentstack lock --write`",
         )];
         let err = ensure_locked_inputs("claude-code", &skills, &instructions, &servers, &[], &[])
             .unwrap_err()

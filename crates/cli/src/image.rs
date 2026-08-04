@@ -276,7 +276,7 @@ pub fn resolve_harness(
     if let Some(id) = named {
         anyhow::ensure!(
             registry.get(&id).is_some(),
-            "unknown tool '{id}' — see `agentstack adapters list`"
+            "unknown tool '{id}' — see `agentstack x adapters list`"
         );
         return Ok(id);
     }
@@ -319,7 +319,7 @@ pub fn plan(
 
     let desc = registry
         .get(harness)
-        .with_context(|| format!("unknown tool '{harness}' — see `agentstack adapters list`"))?;
+        .with_context(|| format!("unknown tool '{harness}' — see `agentstack x adapters list`"))?;
     let bin = desc
         .detect
         .bin
@@ -350,7 +350,7 @@ pub fn plan(
                 kind: "skill",
                 name: name.clone(),
                 reason: "not pinned in agentstack.lock — an image is built from reviewed \
-                         digests, so run `agentstack lock` and review it first"
+                         digests, so review with `agentstack lock`, then pin with `agentstack lock --write`"
                     .into(),
             });
             continue;
@@ -400,7 +400,7 @@ pub fn plan(
                 name: m.name.clone(),
                 reason: format!(
                     "package '{}' pins this member at {hex}, which the content store cannot \
-                     verify — re-run `agentstack lock`",
+                     verify — re-pin with `agentstack lock --write`",
                     pkg.name
                 ),
             });
@@ -499,7 +499,7 @@ pub fn plan(
                 name: m.name.clone(),
                 reason: format!(
                     "package '{}' pins this member at {hex}, which the content store cannot \
-                     verify — re-run `agentstack lock`",
+                     verify — re-pin with `agentstack lock --write`",
                     pkg.name
                 ),
             }),

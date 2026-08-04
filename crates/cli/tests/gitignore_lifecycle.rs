@@ -103,7 +103,12 @@ fn apply_and_use_emit_an_identical_block() {
     fs::write(proj.join("instr/house.md"), "Be concise.\n").unwrap();
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\", \"cursor\"]\n\
+        // The managed block lists RENDERED artifacts. A server config is one
+        // only in the rendered lane, so this project opts in — otherwise the
+        // servers travel live, nothing is written, and the block correctly has
+        // no config line for `apply` and `use` to agree about.
+        "version = 1\n[delivery]\nrender_locally = true\n\
+         [targets]\ndefault = [\"claude-code\", \"cursor\"]\n\
          [servers.demo]\ntype = \"http\"\nurl = \"https://x/mcp\"\n\
          [skills.local]\npath = \"./skills/local\"\n\
          [instructions.house]\npath = \"./instr/house.md\"\n\
@@ -153,7 +158,10 @@ fn activation_writes_stable_entries_and_deactivation_keeps_the_block() {
     fs::write(proj.join("skills/local-notes/SKILL.md"), "# local\n").unwrap();
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        // Rendered lane: this test is about the config file entering the
+        // managed block and staying there across a deactivation.
+        "version = 1\n[delivery]\nrender_locally = true\n\
+         [targets]\ndefault = [\"claude-code\"]\n\
          [servers.kibana]\ntype = \"http\"\nurl = \"https://k/mcp\"\n\
          [skills.local-notes]\npath = \"./skills/local-notes\"\n\
          [profiles.p]\nservers = [\"kibana\"]\nskills = [\"local-notes\"]\n\
@@ -218,7 +226,10 @@ fn names_only_profile_ignores_the_resolved_mcp_config() {
     fs::create_dir_all(proj.join(".git")).unwrap();
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        // Rendered lane: the point is that a secret-carrying config lands on
+        // disk and is therefore hidden from git.
+        "version = 1\n[delivery]\nrender_locally = true\n\
+         [targets]\ndefault = [\"claude-code\"]\n\
          [profiles.dev]\nservers = [\"kibana\"]\n",
     )
     .unwrap();
@@ -303,7 +314,12 @@ fn apply_and_use_alternate_without_churn() {
     fs::write(proj.join("instr/house.md"), "Be concise.\n").unwrap();
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\", \"cursor\"]\n\
+        // The managed block lists RENDERED artifacts. A server config is one
+        // only in the rendered lane, so this project opts in — otherwise the
+        // servers travel live, nothing is written, and the block correctly has
+        // no config line for `apply` and `use` to agree about.
+        "version = 1\n[delivery]\nrender_locally = true\n\
+         [targets]\ndefault = [\"claude-code\", \"cursor\"]\n\
          [servers.demo]\ntype = \"http\"\nurl = \"https://x/mcp\"\n\
          [skills.local]\npath = \"./skills/local\"\n\
          [instructions.house]\npath = \"./instr/house.md\"\n\

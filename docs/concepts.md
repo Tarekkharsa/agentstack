@@ -89,7 +89,7 @@ on. Some flags and older output call it a *harness*; same thing, and this page
 uses **CLI**.
 
 **Adapter** — AgentStack's per-CLI compiler that turns one manifest into that
-CLI's own config format. `agentstack adapters list` shows their ids; there are
+CLI's own config format. `agentstack x adapters list` shows their ids; there are
 13 today, at three different levels of verification —
 [adapters.md](adapters.md) says what each one is tested against and what it
 manages.
@@ -106,7 +106,7 @@ the docs assume it.
 
 **Gateway** — AgentStack's in-process broker. Instead of each CLI talking to MCP
 servers directly, calls route through the gateway, where policy is checked and
-every call is logged. It is *not* the `agentstack proxy` command — an unrelated,
+every call is logged. It is *not* the `agentstack x proxy` command — an unrelated,
 observe-only relay that watches Anthropic-API token usage and enforces nothing.
 
 **Brokered call** — any tool call the gateway routes and records. Only brokered
@@ -241,13 +241,13 @@ routing:
 | Hooks · extensions | **rendered**, with the full consent ceremony every time (they run code) |
 | Any kind, on a CLI without MCP | **rendered** — that CLI has no live channel |
 
-A project is normally in both lanes at once. `agentstack delivery` shows the
-routing per CLI; `agentstack delivery --json` is the same reading for a UI
+A project is normally in both lanes at once. `agentstack x delivery` shows the
+routing per CLI; `agentstack x delivery --json` is the same reading for a UI
 (`delivery-routing-v1`).
 
 **The one override — render locally.** `[delivery] render_locally = true` in the
 manifest, per project or per harness (`[delivery.harness.<id>]`), set with
-`agentstack delivery render-locally [--harness <id>] --write`. It writes files
+`agentstack x delivery render-locally [--harness <id>] --write`. It writes files
 even where the live channel would have worked — for offline work, deterministic
 native files, inspection with ordinary filesystem tools, a rule against a
 persistent background process, debugging without another runtime dependency, or
@@ -265,14 +265,14 @@ The three per-project modes below predate the routing. They are no longer how
 delivery is decided, and they are no longer switchable: `agentstack set-mode`
 is retired. They survive only as *readings* of what a project currently looks
 like, which `doctor --json` still reports. To stop rendering files, use
-`agentstack uninstall`; to keep files where the live channel would have worked,
-use `agentstack delivery render-locally`.
+`agentstack x uninstall`; to keep files where the live channel would have worked,
+use `agentstack x delivery render-locally`.
 
 - **static** — rendered files sit on disk, kept out of git by a
   managed `.gitignore` block. Works however you launch your tools, since the
   capabilities are real files the CLI reads directly.
 - **clean-at-rest** — nothing generated persists between sessions. A toolset is
-  injected when a session or run starts and reverted on exit; `agentstack lock`
+  injected when a session or run starts and reverted on exit; `agentstack lock --write`
   pins the manifest's name refs *without rendering anything*, so `git status`
   stays silent.
 - **zero-files** — no *generated* per-project files. The gateway is registered
@@ -294,7 +294,7 @@ fence** (`run <cli> --toolset <name>`) narrows one run's frozen surface and ends
 when the process does. A
 lease and a session are mutually exclusive, and `freeze` on either promotes
 what was actually used into a new toolset — a proposal you review, then
-`agentstack lock`. Full comparison:
+`agentstack lock --write`. Full comparison:
 [reference.md — MCP toolset leases](reference.md#mcp-toolset-leases-one-connection-one-capability-fence).
 
 ## Secrets
@@ -357,7 +357,7 @@ Two separate records, easy to confuse:
 
 **Flight recorder** — a per-run, append-only log of one run's lifecycle, limits,
 egress decisions, brokered tool calls, and secret-reference names. Read it with
-`agentstack report run <id>`.
+`agentstack x report run <id>`.
 
 **Call audit log** — the single global log
 (`~/.agentstack/audit/calls.jsonl`) of every brokered tool call across all runs,

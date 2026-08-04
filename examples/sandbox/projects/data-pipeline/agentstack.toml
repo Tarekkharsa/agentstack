@@ -8,7 +8,7 @@ url = "https://mcp.snowflake.example/mcp"
 [skills.sql-review]
 path = "./skills/sql-review"
 
-[profiles.analytics]
+[toolsets.analytics]
 servers = ["snowflake"]
 skills = ["sql-review"]
 

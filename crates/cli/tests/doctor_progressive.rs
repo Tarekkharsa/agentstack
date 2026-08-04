@@ -115,7 +115,15 @@ fn used_features_stay_relevant() {
     fs::write(proj.join("skills/helper/SKILL.md"), "# helper\n").unwrap();
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        // `Drift` is a RENDERED-lane section: it compares what `apply` would
+        // write against disk. Under the default routing this project's MCP
+        // servers are served live, so there is nothing rendered to compare and
+        // the section is correctly irrelevant — the same rule the zero-files
+        // branch has always applied. This fixture's subject is "a feature in
+        // use keeps its section", so it opts into local rendering to put the
+        // feature genuinely in use.
+        "version = 1\n[delivery]\nrender_locally = true\n\
+         [targets]\ndefault = [\"claude-code\"]\n\
          [servers.demo]\ntype = \"http\"\nurl = \"https://demo.example/mcp\"\n\
          headers = { Authorization = \"Bearer ${DEMO_TOKEN}\" }\n\
          [skills.helper]\npath = \"./skills/helper\"\n\

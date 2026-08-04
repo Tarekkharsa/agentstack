@@ -24,7 +24,7 @@ agentstack add skill anthropics/skills --skill pdf   # preview one (dry run)
 agentstack add skill owner/repo@pdf                  # same, alias spelling
 agentstack add skill https://github.com/o/r/tree/main/skills/pdf
 agentstack add skill ./local-skill
-agentstack lib add owner/repo --skill pdf            # into the central library
+agentstack x lib add owner/repo --skill pdf            # into the central library
 ```
 
 Everything previews first. The dry run fetches into transient staging,
@@ -40,7 +40,7 @@ There are no install counts here, on purpose. The signals that matter:
   findings (hidden Unicode) block the add; warnings deserve a read before
   you recommend proceeding.
 - **Pin + provenance** — after a write, the lockfile pins the exact commit
-  and content checksum, and `agentstack explain <name>` shows where a skill
+  and content checksum, and `agentstack x explain <name>` shows where a skill
   came from and whether its content still matches its pin.
 - **Description quality** — a skill without a frontmatter description is
   invisible to search and to agents; treat that as a smell.
@@ -51,7 +51,7 @@ There are no install counts here, on purpose. The signals that matter:
   them re-run with `--write`. Never pass `--allow-flagged` yourself — a
   blocked scan finding is the user's decision.
 - Prefer the central library for skills the user will want across repos
-  (`agentstack lib add …`, then reference by name in profiles); prefer the
+  (`agentstack x lib add …`, then reference by name in profiles); prefer the
   project manifest for repo-specific skills.
 - After a write in a gateway-served (zero-files) project, remind the user
   that trust re-gates on the edit: they run `agentstack trust .` themselves

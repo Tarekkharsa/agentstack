@@ -269,8 +269,8 @@ agentstack apply --write
 agentstack doctor</code></pre>
 <p>The plan names the Claude Code and Codex files it read, every server it can map, unsupported fields it will leave alone, lifted secret reference <em>names</em>, and both native destinations. The write creates one manifest and renders only the targets that contributed configuration. Existing foreign entries are kept.</p>
 <p>To undo onboarding, list the labelled entries and restore them newest first:</p>
-<pre class="block"><code>agentstack restore
-agentstack restore --last --write</code></pre>
+<pre class="block"><code>agentstack x restore
+agentstack x restore --last --write</code></pre>
 <p>Repeat the last command for the preceding <code>init</code> entry if you also want to remove the imported manifest and its setup files.</p>
 <h2 id="cursor--gemini-cli">Cursor + Gemini CLI<a class="hlink" href="#cursor--gemini-cli" aria-label="Link to this section">#</a></h2>
 <p>The commands are the same because adapter selection comes from detection, not a migration-specific importer:</p>
@@ -278,7 +278,7 @@ agentstack restore --last --write</code></pre>
 agentstack init --secrets keychain
 agentstack apply --write
 agentstack doctor</code></pre>
-<p>Choose <code>keychain</code> when you do not want resolved values in a project <code>.env</code>. AgentStack imports fields it can represent and explicitly lists anything lossy or unsupported; it does not delete the original Cursor or Gemini fields. Run <code>agentstack diff</code> after the write to see managed, foreign, and hand-edited entries separately.</p>
+<p>Choose <code>keychain</code> when you do not want resolved values in a project <code>.env</code>. AgentStack imports fields it can represent and explicitly lists anything lossy or unsupported; it does not delete the original Cursor or Gemini fields. Run <code>agentstack x diff</code> after the write to see managed, foreign, and hand-edited entries separately.</p>
 <h2 id="from-dotfiles">From dotfiles<a class="hlink" href="#from-dotfiles" aria-label="Link to this section">#</a></h2>
 <p>Keep the portable inputs in dotfiles or the project repository:</p>
 <pre class="block"><code>.agentstack/agentstack.toml
@@ -286,17 +286,17 @@ agentstack doctor</code></pre>
 .agentstack/instructions/   # when used
 .agentstack/skills/         # when used</code></pre>
 <p>Do <strong>not</strong> copy machine trust, the keychain, resolved <code>.env</code> values, history, or <code>~/.agentstack/</code> between machines. Those records are machine-local by design. On each machine:</p>
-<pre class="block"><code>agentstack install --locked
+<pre class="block"><code>agentstack x install --locked
 agentstack apply               # preview
 agentstack apply --write
 agentstack doctor</code></pre>
-<p>If your dotfile manager currently owns native CLI files, choose one owner before the write. Keep AgentStack as source of truth and stop templating its managed entries, or keep the dotfile template and do not ask AgentStack to own the same region. A hand-added native entry you want to preserve can be pulled into the manifest with <code>agentstack adopt --write</code> after reviewing <code>agentstack diff</code>.</p>
+<p>If your dotfile manager currently owns native CLI files, choose one owner before the write. Keep AgentStack as source of truth and stop templating its managed entries, or keep the dotfile template and do not ask AgentStack to own the same region. A hand-added native entry you want to preserve can be pulled into the manifest with <code>agentstack adopt --write</code> after reviewing <code>agentstack x diff</code>.</p>
 <h2 id="a-team-without-shared-secrets">A team without shared secrets<a class="hlink" href="#a-team-without-shared-secrets" aria-label="Link to this section">#</a></h2>
 <p>Commit declarations and pins, never values:</p>
 <pre class="block"><code>git add .agentstack/agentstack.toml .agentstack/agentstack.lock
 git commit -m "share agent toolset"</code></pre>
 <p>A teammate then runs:</p>
-<pre class="block"><code>agentstack install --locked
+<pre class="block"><code>agentstack x install --locked
 agentstack doctor              # list unresolved reference names
 agentstack secret set GITHUB_TOKEN   # repeat for each unresolved reference
 agentstack apply               # preview
@@ -305,17 +305,17 @@ agentstack doctor</code></pre>
 <p>Each person supplies values on their own machine and reviews the cloned project before activation. Trust records are never copied. See <a href="howto/team-setup.html">share a setup with your team</a> for signatures, platform differences, and the full handoff checklist.</p>
 <h2 id="remove-agentstack-completely">Remove AgentStack completely<a class="hlink" href="#remove-agentstack-completely" aria-label="Link to this section">#</a></h2>
 <p>First preview removal while the manifest still exists. This is the only point where AgentStack can identify and remove just its managed entries from every native file:</p>
-<pre class="block"><code>agentstack uninstall           # preview
-agentstack uninstall --write</code></pre>
+<pre class="block"><code>agentstack x uninstall           # preview
+agentstack x uninstall --write</code></pre>
 <p>The summary names what it removed and what it deliberately retained. The manifest, local <code>.env</code>, and capability source files are your inputs, so they are not silently deleted. Review and delete those yourself only if you no longer want the setup.</p>
 <p>If the project is already gone but machine state remains, run the same command from a directory without a manifest. It previews and removes <code>~/.agentstack</code> only; it does not guess which project files to edit.</p>
 <p>Finally remove the executable through the channel that installed it:</p>
 <ul>
 <li>Homebrew: <code>brew uninstall agentstack</code>.</li>
-<li>A source build linked with <code>agentstack self link</code>: run <code>agentstack self which</code> to identify the link, then remove that link.</li>
-<li>The curl installer: run <code>agentstack self which</code>, inspect the reported install path, then remove that binary with the permissions used to install it.</li>
+<li>A source build linked with <code>agentstack x self link</code>: run <code>agentstack x self which</code> to identify the link, then remove that link.</li>
+<li>The curl installer: run <code>agentstack x self which</code>, inspect the reported install path, then remove that binary with the permissions used to install it.</li>
 </ul>
-<p><code>agentstack uninstall</code> is itself recorded before machine history is removed when a manifest is available. If you may need its undo, pass <code>--keep-home</code> and verify the native files before deleting the retained home.</p>
+<p><code>agentstack x uninstall</code> is itself recorded before machine history is removed when a manifest is available. If you may need its undo, pass <code>--keep-home</code> and verify the native files before deleting the retained home.</p>
   <p class="srcline">Source of truth: <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/migrations.md">docs/migrations.md</a> — this page is generated from it.</p>
   </main>
 </div>

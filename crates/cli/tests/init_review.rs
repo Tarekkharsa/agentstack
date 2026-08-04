@@ -125,19 +125,25 @@ fn scripted_init_states_clis_configs_servers_and_destinations_before_writing() {
         text.contains("the manifest — written by this import"),
         "{text}"
     );
-    assert!(text.contains(".mcp.json"), "{text}");
+    // The imported servers travel the LIVE lane, so `apply` will never write a
+    // `.mcp.json` or a `.codex/config.toml` for them — and this block no longer
+    // names those files. Promising a file that nothing writes is the
+    // double-delivery defect stated as a plan.
+    assert!(!text.contains("Claude Code \u{b7} MCP servers"), "{text}");
+    assert!(!text.contains("Codex CLI \u{b7} MCP servers"), "{text}");
+    // No bridge is registered in this scripted run, so the routing states the
+    // live lane as a PLAN (invariant 8). The claim under test is that the row
+    // names the live lane at all, not that it promises delivery.
     assert!(
-        text.contains("Claude Code · MCP servers (this project)"),
-        "{text}"
-    );
-    assert!(text.contains(".codex/config.toml"), "{text}");
-    assert!(
-        text.contains("Codex CLI · MCP servers (this project)"),
+        text.contains("MCP servers planned live (not connected)"),
         "{text}"
     );
 
     // The review preceded a real write.
     assert!(proj.join(".agentstack/agentstack.toml").exists());
+    // ...and the import itself wrote no native config, as the block promised.
+    assert!(!proj.join(".mcp.json").exists());
+    assert!(!proj.join(".codex/config.toml").exists());
 }
 
 #[test]
@@ -178,23 +184,24 @@ fn plan_json_carries_configs_found_and_destinations() {
         "configs name the file detection read: {configs:?}"
     );
 
-    // destinations[]: full path, plain scope, and what renders there.
+    // destinations[]: what the RENDERED lane will manage. The imported servers
+    // route live on both of these CLIs, so no destination promises an MCP
+    // server file — `apply` honours the delivery planner and would never write
+    // one. A destination here is a promise, and this is the promise that used
+    // to be broken.
     let dests = v["destinations"].as_array().unwrap();
-    let claude_dest = dests
-        .iter()
-        .find(|d| d["id"] == "claude-code")
-        .expect("claude-code destination");
-    assert_eq!(claude_dest["scope"], "project");
-    assert!(claude_dest["path"].as_str().unwrap().ends_with(".mcp.json"));
-    assert_eq!(claude_dest["writes"][0], "MCP servers");
-    let codex_dest = dests
-        .iter()
-        .find(|d| d["id"] == "codex")
-        .expect("codex destination");
-    assert!(codex_dest["path"]
-        .as_str()
-        .unwrap()
-        .ends_with(".codex/config.toml"));
+    for d in dests {
+        let writes: Vec<&str> = d["writes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|w| w.as_str().unwrap())
+            .collect();
+        assert!(
+            !writes.contains(&"MCP servers"),
+            "no destination may promise MCP servers under live routing: {d}"
+        );
+    }
 
     // Planning wrote nothing.
     assert!(!proj.join(".agentstack").exists());
@@ -202,7 +209,7 @@ fn plan_json_carries_configs_found_and_destinations() {
 }
 
 #[test]
-fn init_preserves_namespaced_server_names_inline_and_imports_safe_names_to_library() {
+fn init_imports_a_namespaced_server_name_into_the_library_unchanged() {
     let bin = env!("CARGO_BIN_EXE_agentstack");
     let tmp = assert_fs::TempDir::new().unwrap();
     let home = tmp.path().join("home");
@@ -225,20 +232,25 @@ fn init_preserves_namespaced_server_names_inline_and_imports_safe_names_to_libra
 
     let (text, ok) = run(bin, &["init", "--yes"], &home, &proj, &stub_bin);
     assert!(ok, "init failed after its pre-write review:\n{text}");
-    assert!(
-        text.contains("Kept inline in this manifest: upstash/context7"),
-        "the review must disclose the mixed placement before writing:\n{text}"
-    );
 
     let manifest_path = proj.join(".agentstack/agentstack.toml");
     let manifest_text = fs::read_to_string(&manifest_path).unwrap();
     let manifest: toml::Value = toml::from_str(&manifest_text).unwrap();
+    // Both take the library-first path now: the namespaced name is encoded
+    // into a file name rather than being kept inline, so the manifest holds
+    // names only — the shape a first project should have.
     assert!(
-        manifest["servers"].get("upstash/context7").is_some(),
-        "the namespaced server stays inline under its exact native name:\n{manifest_text}"
+        manifest
+            .get("servers")
+            .and_then(|s| s.get("upstash/context7"))
+            .is_none(),
+        "a namespaced server no longer needs an inline body:\n{manifest_text}"
     );
     assert!(
-        manifest["servers"].get("filesystem").is_none(),
+        manifest
+            .get("servers")
+            .and_then(|s| s.get("filesystem"))
+            .is_none(),
         "the filename-safe server should use the normal library-first path:\n{manifest_text}"
     );
 
@@ -249,7 +261,7 @@ fn init_preserves_namespaced_server_names_inline_and_imports_safe_names_to_libra
         default_servers
             .iter()
             .any(|name| name.as_str() == Some("upstash/context7")),
-        "the default toolset still activates the inline server"
+        "the default toolset activates it under its exact native name"
     );
     assert!(
         default_servers
@@ -264,9 +276,12 @@ fn init_preserves_namespaced_server_names_inline_and_imports_safe_names_to_libra
         "the safe server definition was imported to the library"
     );
     assert!(
-        !home
-            .join(".agentstack/lib/servers/upstash/context7.toml")
+        home.join(".agentstack/lib/servers/upstash%2Fcontext7.toml")
             .exists(),
+        "the namespaced definition is stored under an encoded file name"
+    );
+    assert!(
+        !home.join(".agentstack/lib/servers/upstash").exists(),
         "a namespaced identifier must never become a nested library path"
     );
 }

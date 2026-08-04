@@ -207,7 +207,7 @@ fn list(registry: &Registry, dir: &Path) -> Result<()> {
         }
         println!(
             "\nUndo one with: {} (or {} for the newest)",
-            "agentstack restore <id> --write".bold(),
+            "agentstack x restore <id> --write".bold(),
             "--last".bold()
         );
     }
@@ -234,7 +234,7 @@ fn list(registry: &Registry, dir: &Path) -> Result<()> {
         }
     }
     if found > 0 {
-        println!("\nRestore one with: agentstack restore <adapter> [--scope project] --write");
+        println!("\nRestore one with: agentstack x restore <adapter> [--scope project] --write");
     }
     Ok(())
 }
@@ -359,7 +359,7 @@ fn preview_entry(entry: &history::Entry, entries: &[history::Entry]) {
 fn restore_one(registry: &Registry, dir: &Path, id: &str, scope: Scope, write: bool) -> Result<()> {
     let desc = registry
         .get(id)
-        .with_context(|| format!("unknown adapter '{id}' (try `agentstack adapters list`)"))?;
+        .with_context(|| format!("unknown adapter '{id}' (try `agentstack x adapters list`)"))?;
     let (path, _) = desc
         .config_for(scope, dir)
         .with_context(|| format!("{} has no {scope} config", desc.display))?;

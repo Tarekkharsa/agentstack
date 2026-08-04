@@ -44,7 +44,7 @@ fn print_wire(report: &Report) {
     if report.requests == 0 {
         println!("No wire activity observed yet. Start the relay with `agentstack proxy`, point");
         println!(
-            "your harness at {}, then run `agentstack report wire`.",
+            "your harness at {}, then run `agentstack x report wire`.",
             "ANTHROPIC_BASE_URL=http://127.0.0.1:8787".bold()
         );
         return;

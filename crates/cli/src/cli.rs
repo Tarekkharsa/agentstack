@@ -1,11 +1,36 @@
-//! Command-line surface (clap derive). The visible set is the beginner loop —
-//! init/status/add/search/apply/doctor/toolset/use/run/trust — plus the
-//! recovery pair restore/adopt: Undo is one of the four beginner concepts, so
-//! the way back must be findable from plain `--help` (`setup` survives only as
-//! a hidden alias of init). EVERY command, visible or hidden, appears in
-//! the task-grouped map in `after_help` below, so `--help` is one complete
-//! screen: a short list to start from, a full map to grow into. Hidden
-//! commands still run and still have their own `--help`.
+//! Command-line surface (clap derive).
+//!
+//! The visible set is decided by ONE rule, and the rule is a guarantee, not a
+//! taste: **a command the product tells you to run must be findable from plain
+//! `agentstack --help`.** Guidance that names a command a reader cannot find is
+//! the defect this file exists to prevent — it is how `secret`, `gateway` and
+//! `lock` came to be printed in doctor's fix column while absent from the help
+//! screen. So the visible list is derived from the emitters (the first-run
+//! ladder in `commands::overview`, doctor's `↳ fix` column, and the
+//! machine-readable `next_action` / `fix` fields), plus one obvious verb for
+//! each of the four ideas the help already promises — Setup · Toolset · Status
+//! · Undo.
+//!
+//! That derivation yields seventeen, not ten. It is the honest number: `lock`,
+//! `secret` and `adopt` are here because guidance names them, and hiding one to
+//! reach a rounder count would trade a real guarantee for a tidier screen.
+//!
+//! `lib` and `why` are the two the same rule adds under dynamic delivery.
+//! The central library is where capabilities are kept, so `lib` is the spine a
+//! reader reaches for daily, not an advanced tool; and once nothing is written
+//! to disk, `why <name>` is the ONLY answer to "where did this come from?" —
+//! a question a hidden command cannot be the answer to.
+//!
+//! Everything else moves behind `agentstack x <command>` — the same commands,
+//! one hop away, listed and grouped by [`namespace_listing`]. Nothing is
+//! removed: every hidden command still runs at its own name, and `--help --all`
+//! still prints the complete map. `x` is display-only sugar — [`strip_namespace`]
+//! removes the `x` before clap parses, so dispatch has exactly one path.
+//!
+//! A guidance string may still name a command that lives behind `x`
+//! (`agentstack guard install`, `agentstack self link`, …). Those verbs are
+//! listed by name on the `--help` screen itself, under "Also named by
+//! guidance", so the guarantee at the top of this comment holds for them too.
 
 use std::path::PathBuf;
 
@@ -58,6 +83,9 @@ Start here:
 Four ideas cover the whole product: Setup (what you have) · Toolset (what this
 task needs) · Status (is it ready) · Undo (how to take it back).
 
+Everything else lives one hop away, grouped by task:
+  agentstack x                   the rest of the toolbox
+
 Every command, grouped by task — and what the pieces are called underneath:
   agentstack --help --all"
 )]
@@ -100,6 +128,7 @@ pub enum Command {
     /// config, and names what is left — which on a new machine is this
     /// machine's secrets. `init` is for a setup that does not exist yet; this
     /// is for one that does.
+    #[command(hide = true)]
     Up(UpArgs),
 
     /// Status: where this project stands, on one screen, and the one next step.
@@ -153,12 +182,14 @@ pub enum Command {
     /// Signing is not a flag: a bundle is signed as part of sharing, because
     /// an opt-in signature is one nobody opts into. Receivers review before
     /// anything activates.
+    #[command(hide = true)]
     Share(ShareArgs),
 
     /// Review a shared bundle, then decide.
     ///
     /// The bundle is staged inert and carded first. A signature from a
     /// publisher you recognize makes the card shorter — never optional.
+    #[command(hide = true)]
     Receive(ReceiveArgs),
 
     /// Your publishing key, and the publishers you recognize.
@@ -167,12 +198,14 @@ pub enum Command {
 
     /// Resolve each toolset's skill + server refs and pin `agentstack.lock`.
     ///
-    /// Library-aware resolution; no configs rendered, no skills
-    /// materialized — the lock-only counterpart of `use <toolset> --write`,
-    /// for clean-at-rest repos that keep no generated files. `--update`
-    /// re-resolves git skills to their latest first; `--upgrade` re-resolves
-    /// an installed vendor pack and applies its changes.
-    #[command(hide = true)]
+    /// Previews by default and shows the pins it would add, change, or
+    /// remove; `--write` pins them. Library-aware resolution; no configs
+    /// rendered, no skills materialized — the lock-only counterpart of
+    /// `use <toolset> --write`, for clean-at-rest repos that keep no generated
+    /// files. Computing the preview resolves sources, so git-backed sources are
+    /// fetched. Every write needs `--write`: `--update` re-resolves git skills
+    /// to their latest and `--upgrade` re-resolves an installed vendor pack —
+    /// `--update` has no preview and refuses without `--write`.
     Lock(LockArgs),
 
     /// Try a skill without installing anything: stage, scan, and emit a
@@ -183,11 +216,11 @@ pub enum Command {
     #[command(hide = true)]
     Try(TryArgs),
 
-    /// Manage your linked capability library sources.
+    /// The central library: the capabilities you keep, ready for any project.
     ///
     /// Any folder can be linked as a source, several at once; the first source
     /// holding a name wins. `~/.agentstack/lib/` is the one you start with.
-    #[command(hide = true)]
+    /// `agentstack lib list` shows what is in it.
     Lib(LibArgs),
 
     // ── Activate & run ───────────────────────────────────────────────────
@@ -260,7 +293,7 @@ pub enum Command {
     /// Full detail lives in `agentstack workflow --help`: each `agent()` call
     /// is admitted against the trust gate, verified against a strict lock,
     /// capped by the machine ceiling, and spawned as its own locked child run.
-    #[command(subcommand)]
+    #[command(subcommand, hide = true)]
     Workflow(WorkflowCmd),
 
     /// Every "what happened" view in one place.
@@ -339,10 +372,13 @@ pub enum Command {
     ///
     /// Reverts a history entry (servers, settings, hooks, instructions), or
     /// restores one adapter's config from its single-slot backup.
-    #[command(after_help = "\
+    #[command(
+        hide = true,
+        after_help = "\
 Examples:
   agentstack restore --last --write
-  agentstack restore claude-code --write")]
+  agentstack restore claude-code --write"
+    )]
     Restore(RestoreArgs),
 
     /// Take it back: pick a point from your recent changes and revert to it.
@@ -384,6 +420,21 @@ Examples:
     )]
     Explain(ExplainArgs),
 
+    /// Where did this come from, and where is it live right now?
+    ///
+    /// Nothing is written to disk for a capability served live, so this is the
+    /// one place that answers it: origin, pin, who said yes, which tools have
+    /// it live, which get it written, and what it reaches.
+    ///
+    /// Takes the NAME of a server, skill, house rule, hook, extension, or
+    /// setting. Not a tool name — mapping a tool back to its server needs a
+    /// live connection to that server, so `why` will not guess one.
+    #[command(after_help = "\
+Examples:
+  agentstack why github
+  agentstack why sql-review --json")]
+    Why(WhyArgs),
+
     /// Turn agentstack's collected signals into concrete recommendations.
     ///
     /// Usage, call audit log, context costs, and trust ledger feed
@@ -404,7 +455,6 @@ Examples:
     Proxy(ProxyStartArgs),
 
     /// Manage secrets in the OS keychain.
-    #[command(hide = true)]
     Secret(SecretArgs),
 
     /// Edit a target's native `[settings.<target>]` entries.
@@ -475,6 +525,20 @@ added to those files are left alone. Every file edit is captured first, so
 `agentstack restore` still works afterwards unless you also removed ~/.agentstack."
     )]
     Uninstall(UninstallArgs),
+
+    /// Remove a server config `apply` no longer writes but once did.
+    ///
+    /// When a harness's MCP servers move to the live lane, `apply` stops
+    /// writing its config — but the file it wrote earlier stays on disk and
+    /// the harness keeps reading it at startup. This takes exactly those
+    /// files back off. Nothing else is touched: settings, hooks and
+    /// instructions are still rendered for those harnesses, and the whole
+    /// machine exit is still `agentstack x uninstall`.
+    ///
+    /// Dry-run by default; `--write` removes. Every removal is snapshotted
+    /// first, so `agentstack x restore --last --write` puts it back.
+    #[command(hide = true)]
+    Unrender(UnrenderArgs),
 
     /// Fixed-argv alias of `agentstack toolset create` (panel action).
     ///
@@ -881,7 +945,7 @@ pub struct McpArgs {
     pub transparent: bool,
 
     /// Consume a frozen run-grant artifact written by `agentstack run
-    /// --locked` instead of re-deriving authority from disk (D2). Fail-closed:
+    /// --locked` instead of re-deriving authority from disk. Fail-closed:
     /// a missing, stale, wrong-project, or version-skewed artifact serves
     /// NOTHING — never a fallback to disk re-derivation. Not meant to be set
     /// by hand; the launch-scoped config written by `run --locked` carries it.
@@ -1066,15 +1130,16 @@ pub enum WorkflowCmd {
     /// entry, validate, and re-lock — or, on any failure, put everything back
     /// exactly as it was.
     ///
-    /// This exists because authoring a workflow by hand is six separate writes
-    /// (script, manifest entry, role toolsets, lock, trust, run), and a
-    /// failure at step four used to leave a half-written manifest behind a
-    /// button labelled "Approve" (review finding F14). One command, one
-    /// rollback, one `agentstack restore` entry.
+    /// Authoring a workflow by hand is six separate writes (script, manifest
+    /// entry, role toolsets, lock, trust, run); this is one command, one
+    /// rollback, and one `agentstack restore` entry.
     ///
     /// It stops before `trust` on purpose: consent is the human's step, and a
     /// command that granted it would be the second authority path this
     /// codebase refuses to grow.
+    // History: a failure at step four used to leave a half-written manifest
+    // behind a button labelled "Approve" (review finding F14) — the atomic
+    // transaction is the fix.
     Declare(WorkflowDeclareArgs),
 }
 
@@ -1091,7 +1156,7 @@ pub struct WorkflowDeclareArgs {
 
     /// Path to the `agentstack-blueprint` JSON this script was authored from.
     /// Staged beside the script and pinned with it, so the graph a user
-    /// approved and the bytes that run are one consent (F13).
+    /// approved and the bytes that run are one consent.
     #[arg(long)]
     pub blueprint: Option<PathBuf>,
 
@@ -1331,11 +1396,11 @@ pub struct RunArgs {
     #[arg(value_name = "CLI")]
     pub harness: String,
 
-    /// Ask for the Protected tier explicitly. This is the DEFAULT now — a
-    /// plain `agentstack run <cli>` is already protected — so the flag only
-    /// keeps working for the scripts, docs, and panels that already type it.
-    /// It still owns its combination rules: `--locked --sandbox/--lockdown` is
-    /// a named not-yet limitation and refuses, exactly as before.
+    /// Ask for the Protected tier explicitly (already the default; kept for
+    /// compatibility). `--locked --sandbox` and `--locked --lockdown` refuse.
+    // History: Protected became the default tier, so this flag stopped
+    // selecting anything. It survives for the scripts, docs, and panels that
+    // already type it, and it keeps its own combination rules.
     #[arg(long)]
     pub locked: bool,
 
@@ -1348,17 +1413,19 @@ pub struct RunArgs {
     #[arg(long)]
     pub unprotected: bool,
 
-    /// Run the harness headless with TEXT as its prompt (the Protected default;
-    /// cannot be combined with --unprotected, --sandbox, or --lockdown).
-    /// The prompt is delivered as one whole argv element via the adapter's
-    /// declared headless invocation (e.g. `claude -p`, `codex exec`) — never
-    /// through a shell — and is committed verbatim into the frozen grant's
-    /// argv, so the evidence binds what the agent was asked to do. Stdout is
-    /// captured (bounded), relayed to this process's stdout, and recorded by
-    /// digest + byte count only; all launcher banners go to stderr so stdout
-    /// carries the harness output and nothing else. Cannot be combined with
-    /// trailing harness arguments (they would land after the prompt's `--`
-    /// terminator and silently misparse as positionals).
+    /// Run the harness headless with TEXT as its prompt. Cannot be combined
+    /// with --unprotected, --sandbox, --lockdown, or trailing harness
+    /// arguments. Stdout carries the harness output; launcher banners go to
+    /// stderr.
+    // Why it works this way: the prompt is delivered as one whole argv element
+    // through the adapter's declared headless invocation (e.g. `claude -p`,
+    // `codex exec`) — never through a shell — and is committed verbatim into
+    // the frozen grant's argv, so the evidence binds what the agent was asked
+    // to do. Stdout is captured (bounded), relayed to this process's stdout,
+    // and recorded by digest + byte count only; banners are routed to stderr
+    // so stdout carries the harness output and nothing else. Trailing harness
+    // arguments are refused because they would land after the prompt's `--`
+    // terminator and silently misparse as positionals.
     #[arg(long, value_name = "TEXT")]
     pub prompt: Option<String>,
 
@@ -1379,8 +1446,8 @@ pub struct RunArgs {
     #[arg(long)]
     pub keep: bool,
 
-    /// Launch the CLI inside a sandbox container instead of on the host
-    /// (Phase 2). The container mounts the project as its workspace and points
+    /// Launch the CLI inside a sandbox container instead of on the host.
+    /// The container mounts the project as its workspace and points
     /// HTTPS traffic at the policy proxy, but its ordinary bridge still permits
     /// direct connections that ignore the proxy. Use `--lockdown` to remove that
     /// route. Requires a build with `--features sandbox` and a running Docker
@@ -1582,8 +1649,17 @@ pub struct LockArgs {
     #[arg(skip)]
     pub quiet: bool,
 
-    /// Only pin this toolset's refs (default: every toolset in the manifest).
-    #[arg(long, value_name = "NAME")]
+    /// Only pin this toolset's servers and packages (default: every toolset in
+    /// the manifest). Declared skills always pin manifest-wide: the trust gate
+    /// reviews the whole `[skills]` table, so a narrowed skill pin set would
+    /// leave the project un-trustable.
+    // Spelled `--toolset` since `lock` joined the visible list: everything a
+    // user can see says toolset, and the older noun survives only as the
+    // manifest key, the wire contract, and the frozen panel argv. The old
+    // spelling stays as a hidden alias so every existing invocation and script
+    // keeps working — a rename that breaks a working command line is not a
+    // rename, it is a removal.
+    #[arg(long = "toolset", alias = "profile", value_name = "NAME")]
     pub profile: Option<String>,
 
     /// Re-resolve git skills to their latest and rewrite the lockfile — all
@@ -1609,8 +1685,8 @@ pub struct LockArgs {
     #[arg(long, requires = "upgrade")]
     pub yes: bool,
 
-    /// With --upgrade: write the change (else preview).
-    #[arg(long, requires = "upgrade")]
+    /// Write the pins (else preview). With --upgrade, writes the upgrade.
+    #[arg(long)]
     pub write: bool,
 }
 
@@ -1672,6 +1748,13 @@ pub struct SetupArgs {
     /// manifest (~/.agentstack).
     #[arg(long, value_enum)]
     pub scope: Option<Scope>,
+
+    /// Write the imported MCP servers into this project's manifest as inline
+    /// `[servers.*]` entries instead of into your first linked library source.
+    /// Carried through to the wizard's import step, so `agentstack init
+    /// --project-servers` means the same thing on both routes.
+    #[arg(long)]
+    pub project_servers: bool,
 }
 
 #[derive(Args, Debug)]
@@ -2036,7 +2119,7 @@ pub struct UseArgs {
 /// default (nothing writes); applying requires `--yes` AND a `--consented`
 /// digest from a prior preview — the same non-interactive gate `apply-setup`
 /// and `trust-consent` enforce.
-/// `yes` — the Phase 1 funnel's single action: declare, pin, review, activate
+/// `yes` — the funnel's single action: declare, pin, review, activate
 /// the locally-authored files waiting in this project, behind one preview and
 /// one confirmation.
 #[derive(Args, Debug, Default)]
@@ -2165,6 +2248,22 @@ pub struct UninstallArgs {
     /// central library survive, so `agentstack restore` keeps working.
     #[arg(long)]
     pub keep_home: bool,
+}
+
+/// `unrender` — remove the server configs the live lane left behind.
+#[derive(Args, Debug)]
+pub struct UnrenderArgs {
+    /// Limit to these adapter ids (default: the manifest's targets).
+    #[arg(long = "target", value_name = "ID")]
+    pub targets: Vec<String>,
+
+    /// Actually remove. Without it this only shows what would be removed.
+    #[arg(long)]
+    pub write: bool,
+
+    /// Show the full diff of every file, not just its name.
+    #[arg(long, short)]
+    pub verbose: bool,
 }
 
 /// `set-gitignore` — this project's durable answer to whether agentstack
@@ -2372,6 +2471,16 @@ pub struct ExplainArgs {
     pub name: String,
 
     /// Emit provenance and safety signals as machine-readable JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct WhyArgs {
+    /// Name of a server, skill, house rule, hook, extension, or setting.
+    pub name: String,
+
+    /// Emit the same facts as machine-readable JSON.
     #[arg(long)]
     pub json: bool,
 }
@@ -3084,6 +3193,64 @@ pub enum SecretCommand {
     List,
 }
 
+/// The name of the namespace that holds everything outside the visible list.
+///
+/// One letter, because it is punctuation rather than vocabulary: `x` names no
+/// concept the product teaches, so it cannot compete with Setup, Toolset,
+/// Status and Undo for a reader's attention.
+pub const NAMESPACE: &str = "x";
+
+/// What `agentstack x` prints: the rest of the toolbox, grouped by task.
+///
+/// Grouped by the same headings as `--help --all`, minus the seventeen
+/// commands the default help already lists — this screen is the complement of
+/// that one, not a second copy of it.
+pub fn namespace_listing() -> String {
+    String::from(
+        "agentstack x — the rest of the toolbox. Every one of these also runs at its\n\
+         own name: `agentstack x guard install` and `agentstack guard install` are the\n\
+         same command. Run `agentstack x <command> --help` for flags and details.\n\
+         \n  \
+         Set up      up · adapters · settings · self · completions\n  \
+         Edit        set · remove · install · export · import\n  \
+         Share       share · receive · publisher\n  \
+         Render      instructions · session · diff · unrender · uninstall · delivery\n  \
+         Undo        restore\n  \
+         Protect     explain · guard · sign · verify\n  \
+         Run         kill · shim · workflow · image · gateway · mcp · try\n  \
+         Inspect     report · lease · optimize · proxy\n\
+         \n\
+         The everyday seventeen are on `agentstack --help`. For all of it at once,\n\
+         including the fixed actions a graphical panel invokes:\n  \
+         agentstack --help --all\n",
+    )
+}
+
+/// Strip a leading `x` so `agentstack x <cmd> …` parses as `agentstack <cmd> …`.
+///
+/// `argv` is the full command line including the binary name. Returns `None`
+/// when the namespace was not used, so the caller can pass the original
+/// through untouched.
+///
+/// Deliberately display-only: the `x` is removed BEFORE clap sees it, so there
+/// is exactly one parse tree and exactly one dispatch path in `main.rs`. A
+/// nested clap subcommand would need a second copy of the whole `Command` enum
+/// and a second dispatch arm for every verb — two places to forget.
+///
+/// Only the first argument is considered. `agentstack apply x` is an argument
+/// to `apply`, not a namespace, and stays that way.
+pub fn strip_namespace(argv: &[String]) -> Option<Vec<String>> {
+    let (bin, rest) = argv.split_first()?;
+    let (first, tail) = rest.split_first()?;
+    if first != NAMESPACE {
+        return None;
+    }
+    let mut out = Vec::with_capacity(argv.len() - 1);
+    out.push(bin.clone());
+    out.extend_from_slice(tail);
+    Some(out)
+}
+
 /// The `--help --all` view: every command — visible or hidden — with its
 /// one-line summary, subcommands indented under their parent. This is the
 /// "long" half of the progressive-disclosure pair; the default `--help` shows
@@ -3148,9 +3315,9 @@ pub fn full_command_inventory() -> String {
          Set up      init · up · status · adapters · settings · self · completions\n  \
          Edit        add · set · search · remove · install · lib · toolset · adopt · export · import\n  \
          Share       share · receive · publisher\n  \
-         Render      apply · use · yes · instructions · lock · session · diff · uninstall · delivery\n  \
+         Render      apply · use · yes · instructions · lock · session · diff · unrender · uninstall · delivery\n  \
          Undo        undo · restore\n  \
-         Protect     trust · explain · secret · guard · sign · verify\n  \
+         Protect     trust · explain · why · secret · guard · sign · verify\n  \
          Run         run · kill · shim · workflow · image · gateway · mcp · try\n  \
          Inspect     doctor · report · lease · optimize · proxy\n\
          \n\

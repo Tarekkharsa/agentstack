@@ -28,8 +28,31 @@ use super::use_profile::{record_lock, resolve_active_skills};
 /// first (the old `update` command), `--upgrade` re-resolves an installed
 /// vendor pack (the old `upgrade` command). The absorbed implementations are
 /// unchanged — this only routes.
+///
+/// This is the CLI entry point (the only caller is `main`), and it is where the
+/// house preview gate lives: every other mutating command previews by default
+/// and writes only with `--write`, and `lock` was the single exception. In-crate
+/// callers that mean to pin call [`run`] directly, so their deliberate writes
+/// are unaffected.
 pub fn dispatch(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
     if let Some(name) = &args.update {
+        // Every `lock` write requires `--write`, including this one. `--update`
+        // re-fetches git skills and re-pins them through `install::run_update`,
+        // which has no preview implementation — so rather than claim a dry run
+        // this path cannot perform, refuse honestly and name the command that
+        // works. An implied preview would be the false claim invariant 8 bars.
+        if !args.write {
+            // `--update` takes an optional name (bare `--update` means "all"),
+            // so echo back exactly what the user typed.
+            let named = match name {
+                Some(n) => format!(" {n}"),
+                None => String::new(),
+            };
+            anyhow::bail!(
+                "refusing to update pins: `--update` fetches and re-pins, and it has no \
+                 preview — re-run with `agentstack lock --update{named} --write`"
+            );
+        }
         return super::install::run_update(
             &crate::cli::UpdateArgs { name: name.clone() },
             manifest_dir,
@@ -48,7 +71,135 @@ pub fn dispatch(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
             manifest_dir,
         );
     }
-    run(args, manifest_dir)
+    if args.write {
+        run(args, manifest_dir)
+    } else {
+        preview(args, manifest_dir)
+    }
+}
+
+/// Restores `agentstack.lock` to a snapshot when it goes out of scope. The pin
+/// pipeline resolves and writes in one pass through helpers several other
+/// commands also call, so the honest way to preview it is to run it for real
+/// and put the file back byte-for-byte.
+///
+/// Rust note: this is the RAII/"scope guard" idiom — `Drop` runs on the normal
+/// path AND when a `?` unwinds out of the pin pipeline, so an error mid-way can
+/// no longer leave a half-written lock behind (today it can). `Drop` cannot
+/// return an error, so a failed restore is reported on stderr and nothing else.
+struct LockRollback<'a> {
+    path: &'a Path,
+    /// The bytes to restore; `None` means "the file did not exist".
+    snapshot: Option<Vec<u8>>,
+}
+
+impl<'a> LockRollback<'a> {
+    fn new(path: &'a Path, snapshot: Option<Vec<u8>>) -> Self {
+        Self { path, snapshot }
+    }
+}
+
+impl Drop for LockRollback<'_> {
+    fn drop(&mut self) {
+        let restored = match &self.snapshot {
+            Some(bytes) => std::fs::write(self.path, bytes),
+            None => match std::fs::remove_file(self.path) {
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+                other => other,
+            },
+        };
+        if let Err(e) = restored {
+            eprintln!(
+                "{} could not restore {} after the preview: {e}",
+                "⚠".yellow(),
+                self.path.display()
+            );
+        }
+    }
+}
+
+/// The preview half of the gate: resolve and pin exactly as a write would, show
+/// what WOULD move in the house diff style, then put the lockfile back.
+///
+/// The re-gate consequence is stated BEFORE the write, not after it — the
+/// lockfile bytes feed the trust digest, so a bare `lock` used to make a live
+/// grant stale with no warning the user could act on.
+pub fn preview(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
+    let ctx = super::load(manifest_dir)?;
+    refuse_invalid_manifest(&ctx)?;
+
+    let trust_base = crate::manifest::project_root_of(&ctx.dir);
+    crate::intake::print_notice(&ctx.dir, &trust_base, &ctx.loaded.manifest);
+    let was_trusted = crate::trust::check(&trust_base) == crate::trust::TrustState::Trusted;
+
+    let lock_path = Lock::path(&ctx.dir);
+    let before = std::fs::read(&lock_path).ok();
+    let existed = before.is_some();
+    // Armed for the whole of `pin_all`, including its error paths, and never
+    // committed — a preview always puts the file back.
+    //
+    // Honest about its limit: this is a restore, not a transaction. A SIGKILL
+    // (or a power loss) between `pin_all`'s write and this `Drop` leaves the
+    // freshly pinned lockfile on disk. That is fail-closed, not a hole: the
+    // lockfile feeds the trust digest, so unexpected bytes make the project
+    // untrusted/changed and every gated path refuses until the user re-reviews
+    // with `agentstack trust .`. Nothing activates off a lock nobody consented
+    // to.
+    let _guard = LockRollback::new(&lock_path, before.clone());
+    let pinned = pin_all(&ctx, args)?;
+    let after = std::fs::read(&lock_path).ok();
+    let changed = before != after;
+    // The rendered lane is deliberately NOT run here: it writes instruction
+    // files, and a preview writes nothing.
+    let before_text = before.map(|b| String::from_utf8_lossy(&b).into_owned());
+    let after_text = after.map(|b| String::from_utf8_lossy(&b).into_owned());
+
+    println!(
+        "{} lock preview: {} from {} in {}",
+        "→".cyan(),
+        pinned.summary,
+        pinned.from,
+        lock_path.display()
+    );
+    // Three states, three different truths. Saying "already matches this
+    // project" when there is no lockfile at all claims a file exists — the
+    // absent-file cases get their own words.
+    match (changed, existed) {
+        (true, existed) => {
+            if !existed {
+                println!("  agentstack.lock does not exist yet — these would be its first pins.");
+            }
+            let rendered = crate::util::diff::render(
+                before_text.as_deref().unwrap_or(""),
+                after_text.as_deref().unwrap_or(""),
+            );
+            for line in rendered.lines() {
+                println!("  {line}");
+            }
+        }
+        (false, true) => {
+            println!("  no pin changes — agentstack.lock already matches this project.");
+        }
+        (false, false) => {
+            println!(
+                "  nothing to pin — this project declares no skills, servers, instructions, \
+                 extensions, workflows, or packages, so no agentstack.lock would be written."
+            );
+        }
+    }
+    if let Some(notice) = relock_trust_preview_notice(was_trusted, changed) {
+        println!("{} {notice}", "⚠".yellow());
+    }
+    // Say the quiet part: computing this preview ran the real resolver, so git
+    // sources were fetched and their bytes deposited in the content store. Only
+    // `agentstack.lock` is left unchanged — calling that a pure "dry run"
+    // without this line would overclaim.
+    println!("  (resolved sources to compute this — git-backed sources were fetched.)");
+    println!(
+        "\nDry run: nothing was pinned. Re-run with {} to pin these.",
+        "--write".bold()
+    );
+    Ok(())
 }
 
 /// P9 heads-up: the lockfile is part of a project's consent surface (its bytes
@@ -68,21 +219,44 @@ pub(crate) fn relock_trust_notice(was_trusted: bool, pins_changed: bool) -> Opti
     }
 }
 
-pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
-    let ctx = super::load(manifest_dir)?;
-    let manifest = &ctx.loaded.manifest;
+/// The same P9 consequence as [`relock_trust_notice`], stated in the future
+/// tense for the preview — the whole point of the gate is that the user reads
+/// it while the grant is still live and can decide not to write.
+pub(crate) fn relock_trust_preview_notice(
+    was_trusted: bool,
+    pins_change: bool,
+) -> Option<&'static str> {
+    if was_trusted && pins_change {
+        Some(
+            "this project is trusted — new pins are new consent, so writing this will make \
+             its trust stale; re-review with `agentstack trust .` after",
+        )
+    } else {
+        None
+    }
+}
 
-    // N5: refuse a manifest that cannot validate, BEFORE pinning anything.
-    //
-    // The lockfile is part of the consent surface, so `lock` is followed by
-    // `trust .` — and without this gate an invalid manifest pinned cleanly,
-    // printed a green ✓, and sent the user into a consent ceremony for a
-    // bundle that could never be admitted; the refusal only surfaced later at
-    // `workflow run`. A trust prompt that turns out to have been pointless is
-    // exactly how a consent gate gets trained into a reflex click, so the
-    // failure moves to the cheapest correct place. Library-aware, and the same
-    // issue set / message / fix text `doctor` and `apply` already produce —
-    // one rule set, three call sites, no third dialect for the user to learn.
+/// What a pin pass moved, in the words the summary line uses.
+struct Pinned {
+    /// e.g. `2 skills + 1 server`, or `nothing new`.
+    summary: String,
+    /// e.g. `2 toolsets`, or the implicit-default phrasing.
+    from: String,
+}
+
+/// N5: refuse a manifest that cannot validate, BEFORE pinning anything.
+///
+/// The lockfile is part of the consent surface, so `lock` is followed by
+/// `trust .` — and without this gate an invalid manifest pinned cleanly,
+/// printed a green ✓, and sent the user into a consent ceremony for a
+/// bundle that could never be admitted; the refusal only surfaced later at
+/// `workflow run`. A trust prompt that turns out to have been pointless is
+/// exactly how a consent gate gets trained into a reflex click, so the
+/// failure moves to the cheapest correct place. Library-aware, and the same
+/// issue set / message / fix text `doctor` and `apply` already produce —
+/// one rule set, three call sites, no third dialect for the user to learn.
+fn refuse_invalid_manifest(ctx: &super::Context) -> Result<()> {
+    let manifest = &ctx.loaded.manifest;
     let libctx = ctx.library_ctx();
     let vctx = libctx.validate_ctx(&ctx.dir);
     let target_ids: Vec<&str> = ctx.registry.ids().collect();
@@ -106,19 +280,15 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
             super::count(errors.len(), "validation error")
         );
     }
+    Ok(())
+}
 
-    // P9: snapshot the consent state *before* pinning. If this project is
-    // currently trusted, changing its pins re-gates it — we surface that the
-    // moment the change is written, so the user is never silently left with
-    // stale trust. `check` recomputes the digest against the trust store; the
-    // lockfile bytes are what we compare afterward to know pins actually moved.
-    let trust_base = crate::manifest::project_root_of(&ctx.dir);
-    // `lock` pins what the manifest declares. Anything dropped into the intake
-    // dirs but not declared is NOT pinned by this run, so say so here rather
-    // than let the user infer that a green lock covered it.
-    crate::intake::print_notice(&ctx.dir, &trust_base, manifest);
-    let was_trusted = crate::trust::check(&trust_base) == crate::trust::TrustState::Trusted;
-    let lock_before = std::fs::read(Lock::path(&ctx.dir)).ok();
+/// Resolve and pin everything this project declares. Shared by the write path
+/// ([`run`]) and the preview path ([`preview`]) so the two can never disagree
+/// about what a write would do: the preview runs exactly this and then rolls
+/// the lockfile back.
+fn pin_all(ctx: &super::Context, args: &LockArgs) -> Result<Pinned> {
+    let manifest = &ctx.loaded.manifest;
 
     // Instructions are manifest-global, not profile-scoped: pin them
     // regardless of the profile selection (and even with zero profiles). The
@@ -189,20 +359,6 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
     };
     record_lock(&ctx.dir, &skills, &servers, manifest, &library)?;
 
-    // P9: did the pins actually move? Compare the lockfile bytes to the
-    // pre-pin snapshot (the record_* helpers only rewrite the lock when
-    // something changed, so this is an exact "pins changed" signal). When they
-    // did and the project was trusted, warn that trust is now stale.
-    let lock_after = std::fs::read(Lock::path(&ctx.dir)).ok();
-    if let Some(notice) = relock_trust_notice(was_trusted, lock_before != lock_after) {
-        println!("{} {notice}", "⚠".yellow());
-    }
-
-    // W5, the rendered lane. A package's instruction members are pinned above;
-    // this is where the pinned bytes reach a file. Deliberately BEFORE the
-    // `args.quiet` early return: quiet suppresses narration, never a write.
-    let rendered_lane = render_package_instructions(&ctx)?;
-
     let from = match &profiles {
         Some(p) => super::count(p.len(), "toolset"),
         None => "the implicit default (no toolsets declared)".to_string(),
@@ -228,6 +384,49 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
     } else {
         pinned_parts.join(" + ")
     };
+    Ok(Pinned {
+        summary: pinned_summary,
+        from,
+    })
+}
+
+pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
+    let ctx = super::load(manifest_dir)?;
+    let manifest = &ctx.loaded.manifest;
+    refuse_invalid_manifest(&ctx)?;
+
+    // P9: snapshot the consent state *before* pinning. If this project is
+    // currently trusted, changing its pins re-gates it — we surface that the
+    // moment the change is written, so the user is never silently left with
+    // stale trust. `check` recomputes the digest against the trust store; the
+    // lockfile bytes are what we compare afterward to know pins actually moved.
+    let trust_base = crate::manifest::project_root_of(&ctx.dir);
+    // `lock` pins what the manifest declares. Anything dropped into the intake
+    // dirs but not declared is NOT pinned by this run, so say so here rather
+    // than let the user infer that a green lock covered it.
+    crate::intake::print_notice(&ctx.dir, &trust_base, manifest);
+    let was_trusted = crate::trust::check(&trust_base) == crate::trust::TrustState::Trusted;
+    let lock_before = std::fs::read(Lock::path(&ctx.dir)).ok();
+
+    let Pinned {
+        summary: pinned_summary,
+        from,
+    } = pin_all(&ctx, args)?;
+
+    // P9: did the pins actually move? Compare the lockfile bytes to the
+    // pre-pin snapshot (the record_* helpers only rewrite the lock when
+    // something changed, so this is an exact "pins changed" signal). When they
+    // did and the project was trusted, warn that trust is now stale.
+    let lock_after = std::fs::read(Lock::path(&ctx.dir)).ok();
+    if let Some(notice) = relock_trust_notice(was_trusted, lock_before != lock_after) {
+        println!("{} {notice}", "⚠".yellow());
+    }
+
+    // W5, the rendered lane. A package's instruction members are pinned above;
+    // this is where the pinned bytes reach a file. Deliberately BEFORE the
+    // `args.quiet` early return: quiet suppresses narration, never a write.
+    let rendered_lane = render_package_instructions(&ctx)?;
+
     if args.quiet {
         // Composed into the funnel's single card: the pin happened, and the
         // card says so in its own words. A second summary plus a competing
@@ -280,7 +479,7 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
             } else {
                 "<toolset>"
             };
-            println!("\nNext: `agentstack session start {profile}` to load it for this session.");
+            println!("\nNext: `agentstack x session start {profile}` to load it for this session.");
         }
         (super::overview::Mode::ZeroFiles, crate::trust::TrustState::Trusted) => {
             println!("\nNext: `agentstack doctor` to verify the gateway wiring.");
@@ -723,7 +922,7 @@ fn render_package_instructions(ctx: &super::Context) -> Result<Vec<String>> {
     }
     if !unverifiable.is_empty() {
         lines.push(format!(
-            "  ↳ {} could not be served from the content store — re-run `agentstack lock`",
+            "  ↳ {} could not be served from the content store — re-run `agentstack lock --write`",
             unverifiable.join(", ")
         ));
     }
@@ -766,7 +965,100 @@ fn resolve_profiles(
             }
         }
     }
+    // Every DECLARED skill is pinned too, not only the ones a toolset names.
+    //
+    // The trust gate reviews `[skills]` in full — its card calls them "skills
+    // loadable over MCP", because loadability follows the declaration, not
+    // toolset membership — and it REFUSES while any inline one is unpinned.
+    // Pinning only the toolsets' selection left a manifest that declares a
+    // skill outside every toolset in a state no command could leave: `doctor`
+    // named `lock --write`, `lock --write` reported success while pinning
+    // nothing for it, and `trust` refused again on the same item. Adding the
+    // declared set here makes the pin set a SUPERSET of what it was: nothing
+    // that used to be pinned stops being pinned, and the gate's demand and the
+    // pinning verb now read one list.
+    //
+    // This pass is manifest-wide even under `--profile`. The flag narrows the
+    // toolset selection (servers and packages still narrow), but the trust gate
+    // reviews `[skills]` in full, so narrowing here would re-create exactly the
+    // stuck state above for anyone who pins with `--profile`. The flag's help
+    // says so; see `LockArgs::profile`.
+    //
+    // It is ADDITIVE and therefore LENIENT, unlike the strict toolset walk
+    // above. Running it strictly made `lock` fail harder than the bug it
+    // fixed: one unresolvable declared skill aborted the command before
+    // `record_lock`, so a toolset skill that resolved fine pinned NOTHING.
+    // Per-name recovery (rather than "run it after the write") keeps the
+    // lockfile a coherent whole: `record_lock` still writes one set, in one
+    // pass, all-or-nothing for the selection the user asked for, and the extra
+    // declared names either join that set or are reported as problems.
+    //
+    // Honest disclosure (E): resolution here is `ResolveMode::Fetch`, so `lock`
+    // may fetch a git source for a skill that no toolset selects — the
+    // declared `[skills]` table only, since that is precisely what this walk
+    // enumerates; a name that exists only inside a toolset is already covered
+    // by the per-toolset loop above. It is the same action `lock` already
+    // performs for selected skills, and the preview path runs the same
+    // pipeline and discloses it, but it does widen the set of URLs an
+    // untrusted manifest can make the host contact before the trust gate.
+    let mut problems: Vec<String> = Vec::new();
+    for name in manifest.skills.keys() {
+        if seen_skills.contains(name) {
+            continue;
+        }
+        match resolve_declared_skill(manifest, dir, library, lib_home, store, name) {
+            Ok(r) => {
+                seen_skills.insert(r.name.clone());
+                skills.push(r);
+            }
+            Err(e) => problems.push(format!("{name}: {e:#}")),
+        }
+    }
+    for p in &problems {
+        println!("{} declared skill not pinned — {p}", "⚠".yellow());
+    }
     Ok((skills, servers))
+}
+
+/// Resolve one declared `[skills.*]` entry the same way the shared walk does
+/// (library-aware, fetching, and requiring the body to be present on disk),
+/// but as a single fallible unit so one broken declaration cannot abort the
+/// pins its neighbours earned.
+fn resolve_declared_skill(
+    manifest: &Manifest,
+    dir: &Path,
+    library: &Library,
+    lib_home: &Path,
+    store: &crate::store::Store,
+    name: &str,
+) -> Result<ResolvedSkill> {
+    let resolved = crate::resolve::resolve_skill_with_pin(
+        manifest,
+        dir,
+        library,
+        lib_home,
+        store,
+        name,
+        ResolveMode::Fetch,
+        None,
+    )
+    .with_context(|| format!("resolving declared skill '{name}'"))?;
+    // This walk resolved in `ResolveMode::Fetch`, so a library or git body
+    // has already been materialised by the time we look. A path that still
+    // does not exist is genuinely absent, and `agentstack install` cannot
+    // conjure it — pointing there sent the reader to a command that refuses.
+    // Say the two things a human can actually do instead. (`use --write`
+    // keeps its own pointer: its resolve mode is a parameter and may be
+    // offline, where installing IS the fix.)
+    if !resolved.path.exists() {
+        anyhow::bail!(
+            "declared body at {} is not present on disk — restore it, or \
+             remove `[skills.{name}]` from the manifest; no command can \
+             install or pin a body that is not there",
+            resolved.path.display()
+        );
+    }
+    Ok(resolved)
 }
 
 /// The pin set for a profile-less manifest: every inline skill and server —
@@ -1100,6 +1392,39 @@ mod tests {
         assert!(relock_trust_notice(false, false).is_none());
     }
 
+    /// The preview states the SAME consequence before the write, in the future
+    /// tense, and under the same two conditions.
+    #[test]
+    fn preview_notice_warns_before_the_write() {
+        let notice = relock_trust_preview_notice(true, true).expect("warned");
+        assert!(notice.contains("writing this will make"), "{notice}");
+        assert!(notice.contains("agentstack trust ."), "{notice}");
+        assert!(relock_trust_preview_notice(true, false).is_none());
+        assert!(relock_trust_preview_notice(false, true).is_none());
+    }
+
+    /// The preview's rollback puts the lockfile back exactly as it was —
+    /// including the "there was no lockfile" case, which must not leave one.
+    #[test]
+    fn rollback_restores_the_lockfile_snapshot() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let path = proj.child("agentstack.lock").path().to_path_buf();
+
+        std::fs::write(&path, b"original").unwrap();
+        {
+            let _g = LockRollback::new(&path, Some(b"original".to_vec()));
+            std::fs::write(&path, b"rewritten by the pin pass").unwrap();
+        }
+        assert_eq!(std::fs::read(&path).unwrap(), b"original");
+
+        std::fs::remove_file(&path).unwrap();
+        {
+            let _g = LockRollback::new(&path, None);
+            std::fs::write(&path, b"first pin").unwrap();
+        }
+        assert!(!path.exists(), "a preview never leaves a first lockfile");
+    }
+
     #[test]
     fn single_profile_selection_locks_only_its_refs() {
         let proj = assert_fs::TempDir::new().unwrap();
@@ -1158,5 +1483,90 @@ mod tests {
         .unwrap_err();
         assert!(err.to_string().contains("nope"));
         assert!(!Lock::path(proj.path()).exists(), "no partial lock written");
+    }
+
+    /// A skill declared outside every toolset pins too, and it pins even when
+    /// `--profile` narrows the selection (the C decision: skills are
+    /// manifest-wide because the trust gate reviews `[skills]` in full). The
+    /// written order is by name, so the consent-material bytes are stable.
+    #[test]
+    fn declared_skill_outside_every_toolset_still_pins() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = Store::with_root(proj.child("store").path().to_path_buf());
+        let library = library_with(&lib_home);
+        proj.child("skills/zeta/SKILL.md")
+            .write_str("# z\n")
+            .unwrap();
+
+        let manifest: Manifest = toml::from_str(
+            r#"
+            version = 1
+            [profiles.review]
+            skills = ["sql-review"]
+            [skills.zeta]
+            path = "skills/zeta"
+            "#,
+        )
+        .unwrap();
+
+        let (skills, _servers) = resolve_profiles(
+            &manifest,
+            proj.path(),
+            &library,
+            lib_home.path(),
+            &store,
+            // Exactly what `lock --profile review` selects.
+            &["review".to_string()],
+        )
+        .unwrap();
+        let mut names: Vec<&str> = skills.iter().map(|s| s.name.as_str()).collect();
+        names.sort();
+        assert_eq!(names, vec!["sql-review", "zeta"]);
+
+        record_lock(proj.path(), &skills, &[], &manifest, &library).unwrap();
+        let lock = Lock::load(proj.path()).unwrap();
+        let written: Vec<String> = lock.skills.iter().map(|s| s.name.clone()).collect();
+        assert_eq!(written, vec!["sql-review".to_string(), "zeta".to_string()]);
+    }
+
+    /// Regression: the additive declared pass must never abort the pins the
+    /// toolset selection already earned.
+    #[test]
+    fn broken_declared_skill_does_not_abort_toolset_pins() {
+        let proj = assert_fs::TempDir::new().unwrap();
+        let lib_home = assert_fs::TempDir::new().unwrap();
+        let store = Store::with_root(proj.child("store").path().to_path_buf());
+        let library = library_with(&lib_home);
+
+        let manifest: Manifest = toml::from_str(
+            r#"
+            version = 1
+            [profiles.docs]
+            skills = ["sql-review"]
+            [skills.broken]
+            path = "skills/broken"
+            "#,
+        )
+        .unwrap();
+
+        let (skills, _servers) = resolve_profiles(
+            &manifest,
+            proj.path(),
+            &library,
+            lib_home.path(),
+            &store,
+            &["docs".to_string()],
+        )
+        .unwrap();
+        let names: Vec<&str> = skills.iter().map(|s| s.name.as_str()).collect();
+        assert_eq!(names, vec!["sql-review"], "broken one skipped, not fatal");
+
+        record_lock(proj.path(), &skills, &[], &manifest, &library).unwrap();
+        let lock = Lock::load(proj.path()).unwrap();
+        assert!(
+            lock.get("sql-review").is_some(),
+            "toolset skill still pinned"
+        );
     }
 }

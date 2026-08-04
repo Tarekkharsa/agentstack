@@ -346,11 +346,11 @@
         </div>
         <div style="background:var(--term-bg);border-radius:var(--radius-md,12px);overflow:hidden;margin-bottom:var(--space-2)">
           <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
-            <div style="white-space:pre"><span style="color:var(--term-text)">[profiles.backend]</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">[toolsets.backend]</span><span style="color:var(--term-muted)"></span></div>
             <div style="white-space:pre"><span style="color:var(--term-text)">servers = ["github", "kibana"]</span><span style="color:var(--term-muted)"></span></div>
             <div style="white-space:pre"><span style="color:var(--term-text)">skills  = ["sql-review"]</span><span style="color:var(--term-muted)"></span></div>
             <div style="white-space:pre"><span style="color:var(--term-text)"></span><span style="color:var(--term-muted)"></span></div>
-            <div style="white-space:pre"><span style="color:var(--term-text)">[profiles.docs]</span><span style="color:var(--term-muted)"></span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">[toolsets.docs]</span><span style="color:var(--term-muted)"></span></div>
             <div style="white-space:pre"><span style="color:var(--term-text)">servers = ["github"]</span><span style="color:var(--term-muted)"></span></div>
             <div style="white-space:pre"><span style="color:var(--term-text)">skills  = ["writing-style"]</span><span style="color:var(--term-muted)"></span></div>
           </div>
@@ -397,7 +397,7 @@
             <div style="white-space:pre"><span style="color:var(--term-text)">target = "pi"</span><span style="color:var(--term-muted)">   # exactly one adapter id — no targets list, no "*"</span></div>
           </div>
         </div>
-        <div style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700)"><strong style="color:var(--color-accent-700)">Result →</strong> Strictly pinned: a symlink is a hard error; unpinned executable content blocks until agentstack lock accepts it; an untrusted or drifted project renders zero extension bytes. Renders today for pi and OpenCode.</div>
+        <div style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700)"><strong style="color:var(--color-accent-700)">Result →</strong> Strictly pinned: a symlink is a hard error; unpinned executable content blocks until agentstack lock --write accepts it; an untrusted or drifted project renders zero extension bytes. Renders today for pi and OpenCode.</div>
       </div>
 
       <!-- Recipe 9 -->
@@ -456,7 +456,7 @@
           </div>
           <div style="padding:8px 18px 14px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.75;overflow-x:auto">
             <div style="white-space:pre"><span style="color:var(--term-warn)">$ agentstack lib add-server github --file github.toml --write</span><span style="color:var(--term-muted)">   # once, machine-wide, content-scanned</span></div>
-            <div style="white-space:pre"><span style="color:var(--term-text)">servers = ["github"]</span><span style="color:var(--term-muted)">   # any project: reference it by name in a toolset, then agentstack lock</span></div>
+            <div style="white-space:pre"><span style="color:var(--term-text)">servers = ["github"]</span><span style="color:var(--term-muted)">   # any project: reference it by name in a toolset, then agentstack lock --write</span></div>
           </div>
         </div>
       </div>

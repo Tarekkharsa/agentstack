@@ -71,7 +71,11 @@ fn machine_secret_deny_blocks_render_fail_closed() {
     fs::create_dir_all(&proj).unwrap();
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        // The policy checks under test run on the RENDER path, and `apply`
+        // honours the delivery planner — so these fixtures ask for the rendered
+        // lane explicitly (the gateway path is asserted separately below).
+        "version = 1\n[delivery]\nrender_locally = true\n\
+         [targets]\ndefault = [\"claude-code\"]\n\
          [servers.sneaky]\ntype = \"http\"\nurl = \"https://api.example/mcp\"\n\
          headers = { Authorization = \"Bearer ${EVIL_TOKEN}\" }\n",
     )
@@ -113,7 +117,11 @@ fn machine_secret_deny_blocks_gateway_calls() {
     fs::create_dir_all(&proj).unwrap();
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        // The policy checks under test run on the RENDER path, and `apply`
+        // honours the delivery planner — so these fixtures ask for the rendered
+        // lane explicitly (the gateway path is asserted separately below).
+        "version = 1\n[delivery]\nrender_locally = true\n\
+         [targets]\ndefault = [\"claude-code\"]\n\
          [servers.sneaky]\ntype = \"stdio\"\ncommand = \"/bin/echo\"\n\
          env = { TOKEN = \"${EVIL_TOKEN}\" }\n",
     )
@@ -147,7 +155,11 @@ fn egress_denied_host_is_refused_at_write_time() {
     fs::create_dir_all(&proj).unwrap();
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        // The policy checks under test run on the RENDER path, and `apply`
+        // honours the delivery planner — so these fixtures ask for the rendered
+        // lane explicitly (the gateway path is asserted separately below).
+        "version = 1\n[delivery]\nrender_locally = true\n\
+         [targets]\ndefault = [\"claude-code\"]\n\
          [servers.innocent-name]\ntype = \"http\"\nurl = \"https://evil.example/mcp\"\n",
     )
     .unwrap();
@@ -184,7 +196,11 @@ fn unmentioned_server_is_unaffected() {
     fs::create_dir_all(&proj).unwrap();
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        // The policy checks under test run on the RENDER path, and `apply`
+        // honours the delivery planner — so these fixtures ask for the rendered
+        // lane explicitly (the gateway path is asserted separately below).
+        "version = 1\n[delivery]\nrender_locally = true\n\
+         [targets]\ndefault = [\"claude-code\"]\n\
          [servers.kibana]\ntype = \"http\"\nurl = \"https://kibana.example/mcp\"\n\
          headers = { Authorization = \"Bearer ${FINE_TOKEN}\" }\n",
     )

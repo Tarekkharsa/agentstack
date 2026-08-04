@@ -21,7 +21,7 @@ command = "python3"
 # resolves. assert.sh copies bundle/ into an isolated sandbox and runs there.
 args = ["./server.py"]
 
-[profiles.default]
+[toolsets.default]
 servers = ["opsbox"]
 
 # The repo's own tool firewall. It allows the two read-only tools AND tries to

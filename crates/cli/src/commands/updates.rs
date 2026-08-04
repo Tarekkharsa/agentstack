@@ -80,8 +80,8 @@ pub(crate) fn available_updates(manifest: &Manifest) -> Vec<PackUpdate> {
 /// lie a user discovers at the prompt.
 pub(crate) fn fix_command(updates: &[PackUpdate]) -> String {
     match updates {
-        [only] => format!("agentstack lock --upgrade {}", only.name),
-        _ => "agentstack lock --upgrade --all".to_string(),
+        [only] => format!("agentstack lock --upgrade {} --write", only.name),
+        _ => "agentstack lock --upgrade --all --write".to_string(),
     }
 }
 
@@ -154,7 +154,7 @@ mod tests {
             current: "v0.1.0".into(),
             available: "v0.2.0".into(),
         }];
-        assert_eq!(fix_command(&one), "agentstack lock --upgrade acme");
+        assert_eq!(fix_command(&one), "agentstack lock --upgrade acme --write");
         let two = vec![
             PackUpdate {
                 name: "acme".into(),
@@ -167,6 +167,6 @@ mod tests {
                 available: "v1.1.0".into(),
             },
         ];
-        assert_eq!(fix_command(&two), "agentstack lock --upgrade --all");
+        assert_eq!(fix_command(&two), "agentstack lock --upgrade --all --write");
     }
 }

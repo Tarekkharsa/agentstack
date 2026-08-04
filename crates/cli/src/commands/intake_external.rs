@@ -418,8 +418,10 @@ fn stage_review_and_decide(
 
     let landed = crate::quarantine::adopt(&staged, dir)?;
     crate::outln!("\n{} {} file(s) into this project.", "✓".green(), landed);
+    // The human sentence (`next_step`), always present — not the machine
+    // `next_action`, which is null when the next step is not runnable verbatim.
     let report = super::doctor::collect(Some(dir))?;
-    if let Some(next) = report["next_action"].as_str() {
+    if let Some(next) = report["next_step"].as_str() {
         crate::outln!("{} {}", "next:".bold(), next.bold());
     }
     Ok(())

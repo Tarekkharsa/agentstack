@@ -111,7 +111,7 @@ asb() { env HOME="$HOME_B" AGENTSTACK_HOME="$ASHOME_B" PATH="$SBX/bin:/usr/bin:/
 activate() { # $1: the `as*` function to run it through
   local as="$1" digest
   "$as" adopt --write >/dev/null
-  "$as" lock >/dev/null
+  "$as" lock --write >/dev/null
   digest="$("$as" trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')"
   "$as" trust . --yes --consented-digest "$digest" >/dev/null
   "$as" use --write >/dev/null
@@ -190,7 +190,7 @@ else
 fi
 
 say "So we take the path it names: declare → pin → consent → render."
-run "agentstack adopt --write && agentstack lock && agentstack trust --yes ... && agentstack use --write"
+run "agentstack adopt --write && agentstack lock --write && agentstack trust --yes ... && agentstack use --write"
 activate asa
 
 # ── assertions: the drop actually went live ──────────────────────────────────
@@ -318,7 +318,7 @@ fi
 
 say "The colleague reviews it, then brings the whole machine up in one command:"
 asb adopt --write >/dev/null
-asb lock >/dev/null
+asb lock --write >/dev/null
 DIGEST_B="$(asb trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')"
 asb trust . --yes --consented-digest "$DIGEST_B" >/dev/null
 run "agentstack up"

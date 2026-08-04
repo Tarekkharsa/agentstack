@@ -1453,6 +1453,48 @@ impl Server {
 }
 
 impl Manifest {
+    /// Every server name this manifest names — inline definitions first, then
+    /// anything a toolset references, de-duplicated in first-seen order.
+    ///
+    /// The two tables answer different halves of one question. `[servers.*]`
+    /// holds servers this project *defines*; `[toolsets.*].servers` holds
+    /// servers it *selects*, which since the library inversion is where the
+    /// common manifest keeps everything — `init` writes an empty `[servers]`
+    /// and names each imported server in `[toolsets.default]`. Any surface that
+    /// read `servers` alone therefore reported zero over a manifest holding
+    /// six, and the render selected nothing. This is the union both need, in
+    /// one place so they cannot drift apart again.
+    ///
+    /// A name here is a *reference*, not a definition: resolving it to bytes is
+    /// the library resolver's job, and a toolset may legitimately name a server
+    /// this manifest never defines inline.
+    pub fn declared_server_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.servers.keys().cloned().collect();
+        for profile in self.profiles.values() {
+            for name in &profile.servers {
+                if !names.iter().any(|n| n == name) {
+                    names.push(name.clone());
+                }
+            }
+        }
+        names
+    }
+
+    /// Does this manifest declare any capability at all?
+    ///
+    /// The readiness question behind `doctor`'s verdict and `status`'s
+    /// footprint. It counts *named* servers rather than inline ones for the
+    /// reason in [`Manifest::declared_server_names`]: a library-first manifest
+    /// declares plenty and defines none.
+    pub fn declares_anything(&self) -> bool {
+        !self.skills.is_empty()
+            || !self.declared_server_names().is_empty()
+            || !self.instructions.is_empty()
+            || !self.settings.is_empty()
+            || !self.hooks.is_empty()
+            || !self.extensions.is_empty()
+    }
+
     /// Every `${REF}` secret name referenced by any server (see
     /// [`Server::referenced_secrets`]) or hook, de-duplicated and sorted. Used
     /// by `secret list` and `doctor`.
@@ -1496,6 +1538,44 @@ fn json_strings(v: &serde_json::Value) -> Vec<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A library-first manifest — the one `init` writes by default — declares
+    /// its servers in `[toolsets.*]` and defines none inline. Reading
+    /// `[servers]` alone made every surface report zero over it: `apply` said
+    /// "no servers selected" and rendered nothing, `status` said "0 servers",
+    /// and `doctor` said "declares nothing yet" beside six pinned servers.
+    #[test]
+    fn declared_servers_count_toolset_references_not_only_inline_definitions() {
+        let library_first: Manifest = toml::from_str(
+            "version = 1\n[servers]\n[toolsets.default]\nservers = [\"miro\", \"tldraw\"]\n",
+        )
+        .unwrap();
+        assert_eq!(
+            library_first.declared_server_names(),
+            vec!["miro".to_string(), "tldraw".to_string()]
+        );
+        assert!(library_first.declares_anything());
+
+        // Inline definitions come first and are never duplicated by a toolset
+        // that also selects them — the order the render walks, and one entry per
+        // server whether it is named once or twice.
+        let mixed: Manifest = toml::from_str(
+            "version = 1\n[servers.a]\ntype = \"http\"\nurl = \"https://a/mcp\"\n\
+             [toolsets.one]\nservers = [\"a\", \"b\"]\n\
+             [toolsets.two]\nservers = [\"b\", \"c\"]\n",
+        )
+        .unwrap();
+        assert_eq!(
+            mixed.declared_server_names(),
+            vec!["a".to_string(), "b".to_string(), "c".to_string()]
+        );
+
+        // A husk still declares nothing — the readiness verdict this feeds must
+        // not become "ready" for every manifest that merely parses.
+        let husk: Manifest = toml::from_str("version = 1\n").unwrap();
+        assert!(husk.declared_server_names().is_empty());
+        assert!(!husk.declares_anything());
+    }
 
     /// The precedence table from `docs/design/instruction-variants.md`, in one
     /// place: exact `(cli, model)` > `(cli)` > `(model)` > the base body, with

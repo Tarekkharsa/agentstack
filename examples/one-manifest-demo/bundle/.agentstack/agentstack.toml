@@ -31,5 +31,5 @@ env = { GITHUB_PERSONAL_ACCESS_TOKEN = "${GITHUB_TOKEN}" }
 [instructions.guardrails]
 path = "team-guardrails.md"
 
-[profiles.default]
+[toolsets.default]
 servers = ["github"]

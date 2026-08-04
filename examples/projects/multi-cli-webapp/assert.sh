@@ -107,7 +107,7 @@ if "$AS" lib list 2>&1 | nocolor | grep -q "api-conventions"; then
 else
   bad "lib add did not register api-conventions"
 fi
-"$AS" lock >/dev/null 2>&1
+"$AS" lock --write >/dev/null 2>&1
 ok "locked the manifest (skill + server + instruction pinned)"
 
 # ── 2. activate the toolset + render instructions ────────────────────────────

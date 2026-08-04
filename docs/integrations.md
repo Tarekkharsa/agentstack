@@ -89,11 +89,11 @@ from the configuration AgentStack manages.
 For per-session run identity, create a transparent launcher:
 
 ```bash
-agentstack shim make claude
+agentstack x shim make claude
 ```
 
 Point the matching t3code provider's binary-path setting at the generated shim.
-Each launched session then appears in `agentstack report runs` and receives its
+Each launched session then appears in `agentstack x report runs` and receives its
 own run report.
 
 ### Project actions: fresh worktrees set themselves up

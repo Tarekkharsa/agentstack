@@ -24,6 +24,7 @@ fn args() -> SetupArgs {
         targets: vec!["claude-code".into()],
         profile: None,
         scope: Some(Scope::Global),
+        project_servers: false,
     }
 }
 

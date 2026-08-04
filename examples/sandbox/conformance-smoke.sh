@@ -96,7 +96,7 @@ version = 1
 [skills.conformance-skill]
 path = "./skills/conformance-skill"
 
-[profiles.default]
+[toolsets.default]
 skills = ["conformance-skill"]
 
 [targets]

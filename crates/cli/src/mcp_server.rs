@@ -512,7 +512,7 @@ fn grant_refused_tool(req: &Value) -> Option<&str> {
         return None;
     }
     let name = req.pointer("/params/name").and_then(Value::as_str)?;
-    const REFUSED: [&str; 10] = [
+    const REFUSED: [&str; 11] = [
         "agentstack_lease_open",
         "agentstack_lease_close",
         "agentstack_lease_freeze",
@@ -522,6 +522,9 @@ fn grant_refused_tool(req: &Value) -> Option<&str> {
         "agentstack_add_skill",
         "agentstack_add_server",
         "agentstack_add_from",
+        "agentstack_create_toolset",
+        // Compatibility alias of `agentstack_create_toolset`; it must be
+        // refused under a grant for exactly the same reason as the new name.
         "agentstack_create_profile",
     ];
     REFUSED.contains(&name).then_some(name)
@@ -1334,7 +1337,7 @@ fn tool_defs() -> Value {
         },
         {
             "name": "agentstack_lease_freeze",
-            "description": "Freeze the leased profile's servers and the skills actually loaded through this MCP connection into a new manifest profile. Commit-safe; does not apply it. A human reviews the manifest edit, then runs `agentstack lock`.",
+            "description": "Freeze the leased profile's servers and the skills actually loaded through this MCP connection into a new manifest profile. Commit-safe; does not apply it. A human reviews the manifest edit, then runs `agentstack lock --write`.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -1375,8 +1378,11 @@ fn tool_defs() -> Value {
             }
         },
         {
-            "name": "agentstack_create_profile",
-            "description": "Create a profile — a named bundle of servers + skills you can later load as a session. Commit-safe (manifest only).",
+            // Advertised under the current vocabulary only. The older
+            // `agentstack_create_profile` spelling stays dispatchable (see
+            // `call_tool`) but is deliberately not advertised.
+            "name": "agentstack_create_toolset",
+            "description": "Create a toolset — a named bundle of servers + skills you can later load as a session. Commit-safe (manifest only).",
             "inputSchema": {
                 "type": "object",
                 "required": ["name"],
@@ -1738,7 +1744,7 @@ fn lease_freeze(args: &Value, dir: Option<&Path>, store: &LeaseStore) -> Result<
         &json!({ "name": name, "servers": profile.servers, "skills": skills }),
     )?;
     Ok(format!(
-        "Froze MCP lease '{}' into toolset '{created}'. The manifest changed; nothing was applied. Review it, then run `agentstack lock` to refresh agentstack.lock.",
+        "Froze MCP lease '{}' into toolset '{created}'. The manifest changed; nothing was applied. Review it, then run `agentstack lock --write` to refresh agentstack.lock.",
         lease.profile
     ))
 }
@@ -1799,7 +1805,10 @@ fn run_tool_with_lease(
                 "Added skill '{name}' to the manifest (not installed or activated). A human runs `agentstack use [<profile>] --write` to activate it."
             ))
         }
-        "agentstack_create_profile" => {
+        // `agentstack_create_profile` is a compatibility alias: it is no longer
+        // advertised, but existing callers keep working — same arguments, same
+        // handler, same single authority path.
+        "agentstack_create_toolset" | "agentstack_create_profile" => {
             let name = crate::commands::add::add_profile_json(dir, args)?;
             Ok(format!(
                 "Created toolset '{name}'. Load it for a session with agentstack_session_start."
@@ -2552,9 +2561,9 @@ fn list_loadable_with_lease(
             .root()
             .join("content")
             .join(member.checksum.hex());
-        let desc = read_skill_md(&snap)
-            .0
-            .unwrap_or_else(|| "(pinned bytes unavailable — run `agentstack lock`)".to_string());
+        let desc = read_skill_md(&snap).0.unwrap_or_else(|| {
+            "(pinned bytes unavailable — run `agentstack lock --write`)".to_string()
+        });
         entries.push(json!({
             "name": member.name,
             "description": desc,
@@ -2861,7 +2870,7 @@ fn load_capability_with_lease(
         if !crate::store::verified_snapshot(&snap, hex) {
             anyhow::bail!(
                 "refusing to load '{name}': its pinned bytes are missing from the content store \
-                 or failed verification — run `agentstack lock` to re-pin package '{package}'"
+                 or failed verification — run `agentstack lock --write` to re-pin package '{package}'"
             );
         }
         let (_, body) = read_skill_md(&snap);
@@ -2956,21 +2965,21 @@ fn load_capability_with_lease(
         crate::verify::Verdict::Block(_) if library_moved_ahead => {
             note = Some(format!(
                 "a newer version of '{name}' is available in your central library — \
-                 this project is serving the version it pinned; run `agentstack lock` to take it"
+                 this project is serving the version it pinned; run `agentstack lock --write` to take it"
             ));
         }
         crate::verify::Verdict::Block(why) => {
             anyhow::bail!(
-                "refusing to load '{name}': {why} — review the change, then run `agentstack lock` to accept it"
+                "refusing to load '{name}': {why} — review the change, then run `agentstack lock --write` to accept it"
             );
         }
         crate::verify::Verdict::Unpinned => match resolved.origin {
             crate::resolve::SkillOrigin::Inline => anyhow::bail!(
-                "refusing to load '{name}': inline skill not pinned in agentstack.lock — its body isn't covered by the trust digest until it is; run `agentstack lock`"
+                "refusing to load '{name}': inline skill not pinned in agentstack.lock — its body isn't covered by the trust digest until it is; run `agentstack lock --write`"
             ),
             crate::resolve::SkillOrigin::Library => {
                 warning = Some(format!(
-                    "library skill '{name}' is not pinned in agentstack.lock — run `agentstack lock` to pin it"
+                    "library skill '{name}' is not pinned in agentstack.lock — run `agentstack lock --write` to pin it"
                 ));
             }
         },
@@ -3006,7 +3015,7 @@ fn load_capability_with_lease(
             .map_err(|e| {
                 anyhow::anyhow!(
                     "refusing to load '{name}': its approved bytes could not be served from the \
-                     content store ({e}) — run `agentstack lock` to re-pin and review it"
+                     content store ({e}) — run `agentstack lock --write` to re-pin and review it"
                 )
             })?,
         // No pin: the unpinned library-skill path warned about above. There is
@@ -3188,6 +3197,7 @@ mod tests {
             "agentstack_add_skill",
             "agentstack_add_server",
             "agentstack_add_from",
+            "agentstack_create_toolset",
             "agentstack_create_profile",
         ] {
             assert_eq!(grant_refused_tool(&call(name)), Some(name));
@@ -3302,7 +3312,7 @@ mod tests {
         for t in [
             "agentstack_diff",
             "agentstack_add_skill",
-            "agentstack_create_profile",
+            "agentstack_create_toolset",
             "agentstack_session_start",
             "agentstack_session_end",
             "agentstack_session_list",
@@ -4037,7 +4047,7 @@ mod tests {
             &lease,
         )
         .unwrap();
-        assert!(frozen_message.contains("`agentstack lock`"));
+        assert!(frozen_message.contains("`agentstack lock --write`"));
         let reloaded = crate::commands::load(Some(proj.path())).unwrap();
         let frozen = &reloaded.loaded.manifest.profiles["backend-observed"];
         assert_eq!(frozen.servers, Vec::<String>::new());
@@ -4264,7 +4274,7 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("drifted"), "{err}");
-        assert!(err.contains("`agentstack lock`"), "{err}");
+        assert!(err.contains("`agentstack lock --write`"), "{err}");
 
         // Unpinned inline skill: also refused — its bytes are outside the
         // trust digest until pinned.

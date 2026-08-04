@@ -727,9 +727,7 @@ pub fn add_server_def(
     replace: bool,
     write: bool,
 ) -> Result<ServerAddOutcome> {
-    if !valid_lib_name(name) {
-        bail!("invalid library server name '{name}' — must be non-empty and contain no path separators");
-    }
+    valid_lib_server_name(name)?;
 
     let mut library = Library::load(lib_home)?;
     let replacing = library.get_server(name).is_some();
@@ -741,10 +739,10 @@ pub fn add_server_def(
     // Normalize: re-serialize so exactly a Server table is stored (drops junk).
     let normalized = toml::to_string_pretty(server).context("serializing server definition")?;
     let checksum = crate::resolve::sha256_hex(normalized.as_bytes());
-    let dest = lib_home.join("servers").join(format!("{name}.toml"));
+    let dest = crate::resolve::library_server_path(lib_home, name);
 
     if write {
-        // `dest` is always `lib_home/servers/<name>.toml`, so it has a parent.
+        // `dest` is always `lib_home/servers/<file>.toml`, so it has a parent.
         let dest_dir = dest
             .parent()
             .expect("lib server path always has a parent directory");
@@ -996,10 +994,12 @@ pub fn remove_server(lib_home: &Path, name: &str, write: bool) -> Result<ServerR
     let Some(entry) = library.get_server(name).cloned() else {
         bail!("'{name}' is not a server in the central library — run `agentstack lib list` to see what's there");
     };
-    // The definition file is always `lib/servers/<name>.toml`; only compute it
-    // for a safe name so a hand-edited index can never target an outside path.
-    let removed_file =
-        valid_lib_name(name).then(|| lib_home.join("servers").join(format!("{name}.toml")));
+    // The definition file is always `lib/servers/<file>.toml`, where `<file>` is
+    // the encoded stem — so it cannot escape `lib/servers` even for a name a
+    // hand-edited index invented. Only a storable name gets a file at all.
+    let removed_file = valid_lib_server_name(name)
+        .is_ok()
+        .then(|| crate::resolve::library_server_path(lib_home, name));
 
     let trashed_to = if write {
         let mut record = lib_trash::blank_record();
@@ -2320,6 +2320,45 @@ fn remove_as_transaction(
 /// this rejects is removed from the index alone, with nothing on disk touched.
 pub(crate) fn valid_lib_name(name: &str) -> bool {
     lib_trash::is_plain_component(name)
+}
+
+/// Whether a **server** name can be stored in the central library.
+///
+/// Servers are the one library kind whose names are not ours: they arrive from
+/// other CLIs' config files, where `upstash/context7` is an ordinary name. The
+/// file it lives in is derived by [`crate::resolve::library_file_stem`], which
+/// encodes anything unsafe, so a path separator is no longer a reason to
+/// refuse. Two limits remain, and both are about the file system rather than
+/// the name: a name must exist, and its encoded file name must fit.
+///
+/// Control characters are refused as well. They cannot escape the directory —
+/// they encode like everything else — but a name that cannot be printed cannot
+/// be typed back by the person who has to remove it later.
+///
+/// Skills, hooks and extensions keep the strict `valid_lib_name` rule: their
+/// names are authored here, not imported.
+pub(crate) fn valid_lib_server_name(name: &str) -> Result<()> {
+    if name.is_empty() {
+        bail!("invalid library server name — a server name cannot be empty");
+    }
+    if name.chars().any(|c| c.is_control()) {
+        bail!(
+            "invalid library server name '{}' — it contains a control character",
+            name.escape_debug()
+        );
+    }
+    // 255 bytes is the per-component limit on ext4, APFS and NTFS alike; the
+    // stem shares it with the `.toml` suffix.
+    let stem = crate::resolve::library_file_stem(name);
+    if stem.len() + ".toml".len() > 255 {
+        bail!(
+            "library server name '{name}' is too long — it maps to a {} byte file name, \
+             and the limit is 250 (rename it in the config it came from, or import it \
+             into the project with `agentstack init --project-servers`)",
+            stem.len()
+        );
+    }
+    Ok(())
 }
 
 /// Resolve a possibly-relative, possibly-`~` path to an absolute one.
@@ -3891,13 +3930,45 @@ mod tests {
         assert!(out.written);
     }
 
+    /// A server name arrives from other CLIs' configs, where `upstash/context7`
+    /// is ordinary, so the library encodes the name into a file name instead of
+    /// refusing it. The witness is therefore containment rather than rejection:
+    /// whatever the name, the bytes land inside `lib/servers`.
     #[test]
-    fn add_server_invalid_name_cannot_escape() {
+    fn add_server_name_is_encoded_and_cannot_escape() {
         let lib = assert_fs::TempDir::new().unwrap();
         let work = assert_fs::TempDir::new().unwrap();
         let f = server_file(&work, "x", "https://k/mcp");
-        let err = add_server(lib.path(), "../evil", &f, false, true).unwrap_err();
-        assert!(err.to_string().contains("invalid library server name"));
+        for name in ["../evil", "upstash/context7"] {
+            let out = add_server(lib.path(), name, &f, false, true).unwrap();
+            assert!(
+                out.dest.starts_with(lib.path().join("servers")),
+                "'{name}' escaped to {}",
+                out.dest.display()
+            );
+            assert!(out.dest.exists(), "'{name}' was written");
+            // The definition is found again under the name the user typed —
+            // one derivation, used by the writer and the reader alike.
+            assert_eq!(
+                out.dest,
+                crate::resolve::library_server_path(lib.path(), name)
+            );
+        }
+        // Nothing appeared where the traversal pointed.
+        assert!(!lib.path().join("evil.toml").exists());
+    }
+
+    /// The two limits that survive are about the file system, not the name.
+    #[test]
+    fn add_server_still_refuses_an_unstorable_name() {
+        let lib = assert_fs::TempDir::new().unwrap();
+        let work = assert_fs::TempDir::new().unwrap();
+        let f = server_file(&work, "x", "https://k/mcp");
+        let err = add_server(lib.path(), "", &f, false, true).unwrap_err();
+        assert!(err.to_string().contains("cannot be empty"), "{err:#}");
+        let long = "n".repeat(300);
+        let err = add_server(lib.path(), &long, &f, false, true).unwrap_err();
+        assert!(err.to_string().contains("too long"), "{err:#}");
     }
 
     #[test]
@@ -4045,7 +4116,14 @@ mod tests {
         library.save(lib.path()).unwrap();
 
         let out = remove_server(lib.path(), "../../../../etc", true).unwrap();
-        assert_eq!(out.removed_file, None, "unsafe name → no file targeted");
+        // The name is encoded into a file name, so a file IS targeted — but
+        // only ever inside `lib/servers`, which is what keeps `keep.txt` safe.
+        let targeted = out.removed_file.expect("an encoded name targets a file");
+        assert!(
+            targeted.starts_with(lib.path().join("servers")),
+            "escaped to {}",
+            targeted.display()
+        );
         assert!(outside.child("keep.txt").path().exists());
         assert!(Library::load(lib.path())
             .unwrap()

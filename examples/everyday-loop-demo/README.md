@@ -67,7 +67,7 @@ the error message itself names:
 
 ```sh
 agentstack adopt --write
-agentstack lock
+agentstack lock --write
 agentstack trust --yes --consented-digest "$(agentstack trust --preview | ...)"
 agentstack use --write
 ```

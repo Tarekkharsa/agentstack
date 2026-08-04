@@ -6,9 +6,9 @@
 
 A **toolset** is a named subset of the setup you already have — "backend",
 "incident", "design" — that you activate together. In the manifest it is a
-`[profiles.<name>]` block — the manifest key kept its original spelling so
-existing manifests keep working, but everything you read and type says
-*toolset*. It names *which* of your
+`[toolsets.<name>]` block. (`[profiles.<name>]` is the older spelling; it is
+still parsed silently so existing manifests keep working, but everything you
+read, type, and write says *toolset*.) It names *which* of your
 servers and skills come along for a task; it is **not** a policy, a permission
 level, or a workflow role. A manifest with no toolset named activates its whole
 inline set, so you only name one once you want more than one.
@@ -26,13 +26,13 @@ agentstack toolset create --name backend --server postgres --server github --ski
 ```
 
 At a terminal it shows what it will create, asks, and on yes writes the
-`[profiles.backend]` block and re-locks. `--skill '*'` means every inline skill.
+`[toolsets.backend]` block and re-locks. `--skill '*'` means every inline skill.
 
 **Naming a toolset does not switch to it.** Nothing is rendered and none of your
 CLIs change — you have defined a subset, not chosen it. Activate it when you
-want it, with `agentstack session start backend` (see
+want it, with `agentstack x session start backend` (see
 [below](#which-activation-session-or-apply)). To undo the creation itself,
-delete the `[profiles.backend]` block from the manifest.
+delete the `[toolsets.backend]` block from the manifest.
 
 Scripts and graphical clients get a two-step consent contract instead —
 [reference: selective skills via toolsets](../reference.md#selective-skills-via-toolsets).
@@ -40,7 +40,7 @@ Scripts and graphical clients get a two-step consent contract instead —
 ## Or write it by hand
 
 A toolset is four lines of TOML, and reading it is often clearer than reading a
-command. Add one `[profiles.<name>]` block that lists the servers and skills
+command. Add one `[toolsets.<name>]` block that lists the servers and skills
 that task needs:
 
 ```toml
@@ -51,7 +51,7 @@ that task needs:
 [skills.oncall-runbook] # ...
 
 # A new toolset: name the subset "backend" needs. Nothing else changes.
-[profiles.backend]
+[toolsets.backend]
 servers = ["postgres", "github"]
 skills  = ["sql-review"]
 ```
@@ -60,12 +60,12 @@ Then activate it — temporarily for a task, or applied on disk:
 
 ```bash
 agentstack use --list                 # see every toolset and its readiness
-agentstack session start backend      # use it for now; `session end` reverts
+agentstack x session start backend      # use it for now; `session end` reverts
 agentstack use backend --write        # or apply it on disk (stable/offline)
 ```
 
 Prefer to **capture what you actually used** instead of writing the list by
-hand? During a session, `agentstack session freeze --name backend` pins the
+hand? During a session, `agentstack x session freeze --name backend` pins the
 resolved set — the toolset's servers plus exactly the skills the agent loaded —
 into a new toolset you can replay deterministically.
 
@@ -76,17 +76,17 @@ database and code servers and the review skills; a 2 a.m. page wants read-only
 observability and the runbook, and nothing that can write:
 
 ```toml
-[profiles.backend]
+[toolsets.backend]
 servers = ["postgres", "github"]
 skills  = ["sql-review", "api-conventions"]
 
-[profiles.incident]
+[toolsets.incident]
 servers = ["grafana", "logs"]
 skills  = ["oncall-runbook"]
 ```
 
-`agentstack session start incident` for the duration of the page, then
-`agentstack session end` puts every file back exactly as it was — the incident
+`agentstack x session start incident` for the duration of the page, then
+`agentstack x session end` puts every file back exactly as it was — the incident
 tools never linger in your everyday setup.
 
 A project toolset can be committed and deliberately minimal while your machine
@@ -96,8 +96,8 @@ already passed review.
 
 ## Which activation: session or apply
 
-- **Beginner path — use it temporarily.** `agentstack session start <name>`
-  renders the toolset, and `agentstack session end` restores every native file
+- **Beginner path — use it temporarily.** `agentstack x session start <name>`
+  renders the toolset, and `agentstack x session end` restores every native file
   to its pre-session bytes. Nothing lingers between tasks, and an interrupted
   session is always one `session end` from clean — this is the recommended way
   to switch toolsets.
@@ -107,7 +107,7 @@ already passed review.
   offline machine, a long-lived checkout.
 
 Both are reversible: a session reverts on `end`, and an applied toolset is
-undone with [`agentstack restore`](undo.md).
+undone with [`agentstack x restore`](undo.md).
 
 - [Concepts](../concepts.md) — toolset, manifest, delivery modes
 - [Reference: selective skills via toolsets](../reference.md#selective-skills-via-toolsets)

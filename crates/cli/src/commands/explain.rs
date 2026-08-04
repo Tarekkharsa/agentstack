@@ -1,4 +1,4 @@
-//! `agentstack explain <capability>` — the trust lens. For a server or skill in
+//! `agentstack x explain <capability>` — the trust lens. For a server or skill in
 //! the manifest: where it came from, what secrets it needs (and whether they
 //! resolve here), which tools get it and the files that get written, and the
 //! safety signals (runs code? network egress? needs a secret?). Read-only.
@@ -585,7 +585,7 @@ fn explain_server(name: &str, ctx: &crate::commands::Context) -> String {
         None => kv(
             &mut o,
             "Context cost",
-            "unmeasured — run `agentstack report usage --live`",
+            "unmeasured — run `agentstack x report usage --live`",
         ),
     }
 

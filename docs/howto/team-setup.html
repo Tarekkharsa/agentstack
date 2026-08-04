@@ -260,20 +260,21 @@
 <p class="versionbar">These pages describe <b>unreleased <code>main</code></b>, which is ahead of the latest release (<b>v0.18.0</b>) — and the release is what <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">the installer gives you</a>. Commands and flags documented here may not exist in your build; <code>agentstack --version</code> says which one you have.</p>
 <h1 id="share-one-setup-with-your-team">Share one setup with your team</h1>
 <p>For a team that wants every member's agent CLIs configured the same way. Prerequisite: a working <a href="../concepts.html">manifest</a> in <code>.agentstack/</code> (run <code>agentstack init</code>, then <code>agentstack apply --write</code>, once).</p>
-<p>Two ways to hand a setup over: <strong>commit it</strong> (this page — the repo itself carries the manifest and lock, and each clone reviews before anything activates), or <strong>bundle it</strong> — <code>agentstack share &lt;name&gt;</code> produces a signed <code>.astack</code> bundle (signing is part of sharing, not a flag) that a teammate reviews with <code>agentstack receive &lt;path&gt;</code>: staged inert and carded first, and a publisher they recognize shortens the card, never skips it. Use the bundle when there is no shared repo to commit to.</p>
-<p>(<code>share</code> and <code>receive</code> are v0.18.0 and later; the current stable install serves v0.17.1, where committing the manifest is the whole story.)</p>
+<p>You hand a setup over by <strong>committing it</strong>: the repo itself carries the manifest and lock, and each clone reviews before anything activates.</p>
 <pre class="block"><code># You, once: commit the manifest and its lockfile
 git add .agentstack/          # manifest + agentstack.lock
 git commit -m "Add agentstack setup"
 git push
 
 # Each teammate, after cloning:
-agentstack up                  # one command: detects their CLIs, renders the shared setup, names what's left
-agentstack secret set GH_PAT   # their own value (keychain by default) — `up` says if one is needed</code></pre>
-<p>(<code>up</code> is v0.18.0 and later; on older releases the same journey is <code>agentstack apply --write</code> then <code>agentstack doctor</code>.)</p>
-<p>You commit <strong>intent</strong>, not credentials. The <a href="../concepts.html">manifest</a> is the reviewed source of truth and the <a href="../concepts.html">lockfile</a> pins exact versions and digests, so everyone resolves the same bytes. Secrets appear in the manifest only as <code>${REF}</code> placeholders — each teammate stores their own value locally with <code>agentstack secret set</code>, and <code>up</code> renders the shared config into whatever CLIs they have installed, confirms the result, and names the fix for anything missing (<code>apply --write</code> and <code>doctor</code> remain the step-by-step equivalents).</p>
+agentstack trust .             # review what the repo declares, then approve it
+agentstack secret set GH_PAT   # their own value (keychain by default)
+agentstack apply --write       # render the shared setup into the CLIs they have
+agentstack doctor              # confirm the result; every warning names its fix</code></pre>
+<p>You commit <strong>intent</strong>, not credentials. The <a href="../concepts.html">manifest</a> is the reviewed source of truth and the <a href="../concepts.html">lockfile</a> pins exact versions and digests, so everyone resolves the same bytes. Secrets appear in the manifest only as <code>${REF}</code> placeholders — each teammate stores their own value locally with <code>agentstack secret set</code>.</p>
+<p>In v0.18.0 and later, <code>agentstack x up</code> collapses the teammate's four commands into one, and <code>agentstack x share &lt;name&gt;</code> / <code>agentstack x receive &lt;path&gt;</code> move a setup as a signed <code>.astack</code> bundle when there is no shared repo to commit to — staged inert and carded first. See <a href="../start.html#newer-than-the-stable-release">newer than the stable release</a>.</p>
 <p><strong>Never committed:</strong> secret values (they live per-machine in the OS keychain or a gitignored <code>.env</code>) and the rendered native artifacts — <code>.mcp.json</code>, <code>.claude/skills/</code>, the compiled <code>CLAUDE.md</code> — which sit behind a managed <code>.gitignore</code> block whenever they are written — see <a href="../concepts.html#delivery-modes">delivery routing</a> for which capabilities are written at all and which are served live.</p>
-<p><strong>Optional provenance.</strong> A maintainer can <code>agentstack sign</code> the lockfile — it writes a detached ed25519 signature and prints a public key to publish. Teammates run <code>agentstack verify --pubkey &lt;key&gt;</code> to confirm the lockfile is the one the maintainer signed before they rely on it.</p>
+<p><strong>Optional provenance.</strong> A maintainer can <code>agentstack x sign</code> the lockfile — it writes a detached ed25519 signature and prints a public key to publish. Teammates run <code>agentstack x verify --pubkey &lt;key&gt;</code> to confirm the lockfile is the one the maintainer signed before they rely on it.</p>
 <p><strong>Limits.</strong> agentstack shares configuration, not trust in referenced code. <code>verify</code> proves who signed the lockfile, not that a server it names is safe to run. In the <a href="../howto/trust-a-repo.html">zero-files mode</a> each teammate still runs <code>agentstack trust .</code> themselves — consent is per person, per machine.</p>
 <ul>
 <li><a href="../concepts.html">Concepts</a> — manifest, lockfile, secrets, delivery modes</li>

@@ -15,8 +15,9 @@ pub mod skills;
 
 pub(crate) use apply::declared_host;
 pub use apply::{
-    effective_servers, failed_secret_line, plan_target, plan_target_with_servers,
-    resolve_active_servers, resolve_targets, ruleset_for, section_keys, Selection, TargetPlan,
+    effective_servers, failed_secret_line, no_server_lane, plan_target, plan_target_with_servers,
+    resolve_active_servers, resolve_targets, ruleset_for, section_keys, NoServerLane, Selection,
+    TargetPlan,
 };
 pub use hooks::{plan_hooks, HooksPlan};
 pub use owned::{refresh_owned_servers, OwnedStatus};

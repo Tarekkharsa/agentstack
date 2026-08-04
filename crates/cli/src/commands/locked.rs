@@ -1499,7 +1499,7 @@ fn keys_at(value: &serde_json::Value, dotted: &str) -> Vec<String> {
 /// pinned inputs, and reads as a harmless explanation (why re-locking flipped
 /// trust) for the user who only re-locked and forgot to re-trust.
 fn relock_guidance() -> &'static str {
-    "If you changed pinned inputs, run `agentstack lock` first — new pins re-gate trust."
+    "If you changed pinned inputs, run `agentstack lock --write` first — new pins re-gate trust."
 }
 
 fn live(
@@ -1515,7 +1515,7 @@ fn live(
         .unwrap_or_else(|| crate::scope::Scope::default_for(&ctx.dir));
     let desc = ctx.registry.get(&args.harness).with_context(|| {
         format!(
-            "unknown harness '{}' — see `agentstack adapters list`",
+            "unknown harness '{}' — see `agentstack x adapters list`",
             args.harness
         )
     })?;
@@ -1982,7 +1982,7 @@ fn live(
             banner!(
                 quiet,
                 headless,
-                "\nSee what happened: `agentstack report run {run_id}`"
+                "\nSee what happened: `agentstack x report run {run_id}`"
             );
             // Child delivery: the outcome above is RECORDED; the report hands
             // the drive loop the identity + captured stdout, and the drive
@@ -2027,7 +2027,7 @@ fn live(
                     banner!(
                         quiet,
                         headless,
-                        "\nSee what happened: `agentstack report run {run_id}`"
+                        "\nSee what happened: `agentstack x report run {run_id}`"
                     );
                     Err(e)
                 }
@@ -3323,7 +3323,7 @@ mod tests {
             assert!(plan_msg.contains("[trust]"), "{plan_msg}");
             assert!(plan_msg.contains("re-trust"), "{plan_msg}");
             assert!(
-                plan_msg.contains("`agentstack lock`"),
+                plan_msg.contains("`agentstack lock --write`"),
                 "plan teaches re-lock: {plan_msg}"
             );
             assert!(
@@ -3335,7 +3335,7 @@ mod tests {
             let live_err = run_locked(Some(proj.path()), &run_args(false)).unwrap_err();
             let live_msg = format!("{live_err:#}");
             assert!(
-                live_msg.contains("`agentstack lock`"),
+                live_msg.contains("`agentstack lock --write`"),
                 "live teaches re-lock: {live_msg}"
             );
             assert!(

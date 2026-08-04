@@ -295,7 +295,7 @@ pub fn render(
                     }
                     ExtensionLockStatus::MissingLockEntry => blocked.push((
                         format!("extension '{}'", p.ext_name),
-                        "not pinned in agentstack.lock — run `agentstack lock` (executable content is never first-pinned at render)".to_string(),
+                        "not pinned in agentstack.lock — run `agentstack lock --write` (executable content is never first-pinned at render)".to_string(),
                     )),
                     other => {
                         if let Verdict::Block(why) = extension_verdict(&other) {
@@ -314,7 +314,7 @@ pub fn render(
                 .join("\n");
             let pronoun = if blocked.len() == 1 { "it" } else { "them" };
             anyhow::bail!(
-                "refusing to render native extensions: {} failed lock verification —\n{}\nReview the changes, then run `agentstack lock` to accept {pronoun}.",
+                "refusing to render native extensions: {} failed lock verification —\n{}\nReview the changes with `agentstack lock`, then run `agentstack lock --write` to accept {pronoun}.",
                 crate::commands::count(blocked.len(), "extension"),
                 lines
             );
@@ -445,7 +445,7 @@ pub fn verify_rendered(
                 "extension '{name}' (rendered copy) at {} drifted from agentstack.lock \
                  (locked {}, rendered {}) — the delivered bytes no longer match the reviewed \
                  pin; re-run `agentstack apply` to re-render, or review the source and \
-                 `agentstack lock`",
+                 `agentstack lock --write`",
                 artifact.display(),
                 short12(pin),
                 short12(current.hex()),

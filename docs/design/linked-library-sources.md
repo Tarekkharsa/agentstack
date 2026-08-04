@@ -153,7 +153,7 @@ holding, unmodified, with more than one source in the picture.
 Selection and serving are different acts on different days:
 
 - **Selection** happens at lock time. Resolution walks the ordered sources,
-  finds bytes, and `agentstack lock` writes their **digest** into
+  finds bytes, and `agentstack lock --write` writes their **digest** into
   `agentstack.lock`.
 - **Serving** happens at load/render time and never re-walks the sources. Both
   the MCP load path and the rendered lane read the pinned bytes from the
@@ -166,7 +166,7 @@ pinned name would now resolve to different bytes, that is the divergence
 `pinned-serving-and-library-drift.md` already classifies: the serve path serves
 the pin and notes an update is available; the consent and activation gates
 (`use`, `trust`, `doctor`, `apply`) still call it drift and still refuse until
-`agentstack lock` rewrites the lock — which flips the trust digest and re-gates
+`agentstack lock --write` rewrites the lock — which flips the trust digest and re-gates
 through the ordinary review card. Nothing about the source list can produce a
 silent swap, because no serving path reads the source list at all.
 
@@ -223,7 +223,7 @@ Against `CLAUDE.md`'s non-negotiable invariants.
 - **4 · Pinned byte changes re-gate.** Untouched, and re-stated above: the
   source list is not in the lock and not in the trust digest, because it cannot
   change what a locked project serves. A name that would now resolve to
-  different bytes re-gates through `agentstack lock` exactly as a single
+  different bytes re-gates through `agentstack lock --write` exactly as a single
   library moving ahead already does. No cache and no partial-trust path is
   introduced.
 - **5 · Secrets never serialize.** A linked source's `servers/<name>.toml`

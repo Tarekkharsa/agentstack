@@ -1,6 +1,6 @@
 ---
 name: mine-skills
-description: Mine your past agent sessions (Claude Code, Codex) for recurring failures and re-explained procedures, then distill the best candidates into reusable skills that land in the central library via `agentstack lib add`. Local and read-only until you approve a draft.
+description: Mine your past agent sessions (Claude Code, Codex) for recurring failures and re-explained procedures, then distill the best candidates into reusable skills that land in the central library via `agentstack x lib add`. Local and read-only until you approve a draft.
 ---
 
 # Mine skills from your sessions
@@ -38,7 +38,7 @@ assume a fixed schema. Use python for the parsing, not shell one-liners.
    SKILL.md (use the skill-creator skill if available). The skill teaches the
    right way, not a description of the failure.
 5. **Land it on the rails** — show the draft to the user; on approval:
-   `agentstack lib add ./<draft-dir> --name <name> --write`. That path
+   `agentstack x lib add ./<draft-dir> --name <name> --write`. That path
    content-scans it, records provenance, checksums it, and makes it
    referenceable by name from any project (and syncable via `lib sync`).
 
@@ -63,4 +63,4 @@ assume a fixed schema. Use python for the parsing, not shell one-liners.
 - **Require recurrence.** Default bar: seen in ≥ 2 distinct sessions. Below
   that, mention it at most as an honorable mention.
 - **Prefer updating an existing skill** over minting a near-duplicate — check
-  `agentstack lib list` first.
+  `agentstack x lib list` first.

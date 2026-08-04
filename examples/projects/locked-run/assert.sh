@@ -107,7 +107,7 @@ printf '\033[1;36m  agentstack — run: the Protected host tier, by default\033[
 
 # ── pin + trust: the Protected tier's entry requirements ─────────────────────
 say "Pin the surface (lock) and grant consent (trust) — a protected run demands both"
-"$AS" lock --manifest-dir "$PROJECT" >/dev/null
+"$AS" lock --write --manifest-dir "$PROJECT" >/dev/null
 consent=$("$AS" trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')
 "$AS" trust . --yes --consented-digest "$consent" >/dev/null 2>&1
 
@@ -260,7 +260,7 @@ else
     ok "D3: refused before launch after the executable edit"
   fi
 fi
-"$AS" lock --manifest-dir "$PROJECT" >/dev/null
+"$AS" lock --write --manifest-dir "$PROJECT" >/dev/null
 consent=$("$AS" trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')
 "$AS" trust . --yes --consented-digest "$consent" >/dev/null 2>&1
 if "$AS" run claude-code --locked >/dev/null 2>&1; then

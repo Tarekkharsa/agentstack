@@ -33,7 +33,12 @@ fn setup(tmp: &Path) -> (std::path::PathBuf, std::path::PathBuf) {
     fs::write(proj.join("skills/local/SKILL.md"), "# local\n").unwrap();
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        // The managed .gitignore block covers RENDERED artifacts, and `apply`
+        // honours the delivery planner — so this fixture asks for the rendered
+        // lane explicitly. Without it there is no `.mcp.json` to hide, and the
+        // block under test has no subject.
+        "version = 1\n[delivery]\nrender_locally = true\n\
+         [targets]\ndefault = [\"claude-code\"]\n\
          [servers.demo]\ntype = \"http\"\nurl = \"https://x/mcp\"\n\
          [skills.local]\npath = \"./skills/local\"\n\
          [profiles.default]\nservers = [\"demo\"]\nskills = [\"local\"]\n",

@@ -71,7 +71,7 @@ pub fn run(manifest_dir: Option<&Path>, args: &WorkflowDeclareArgs) -> Result<()
     if manifest.workflows.contains_key(name) {
         bail!(
             "refusing to declare: [workflows.{name}] already exists — pick another name, or edit \
-             the existing entry and re-run `agentstack lock`"
+             the existing entry and re-run `agentstack lock --write`"
         );
     }
 
@@ -219,7 +219,11 @@ pub fn run(manifest_dir: Option<&Path>, args: &WorkflowDeclareArgs) -> Result<()
             roles.join(", ")
         }
     );
-    println!("  {:<18} {}", "then", "agentstack lock (re-pin)".dimmed());
+    println!(
+        "  {:<18} {}",
+        "then",
+        "agentstack lock --write (re-pin)".dimmed()
+    );
     if !args.write {
         println!("\n{}", "Re-run with --write to declare it.".dimmed());
         return Ok(());
@@ -317,9 +321,9 @@ pub fn run(manifest_dir: Option<&Path>, args: &WorkflowDeclareArgs) -> Result<()
                 "Next — review it, then run it:".bold(),
                 "agentstack trust .        review the roles, ceilings, and the approved graph"
                     .dimmed(),
-                format!("agentstack workflow run {name}").dimmed()
+                format!("agentstack x workflow run {name}").dimmed()
             );
-            println!("  {}", "undo: agentstack restore --last --write".dimmed());
+            println!("  {}", "undo: agentstack x restore --last --write".dimmed());
             Ok(())
         }
         Err(e) => {
@@ -345,7 +349,7 @@ pub fn run(manifest_dir: Option<&Path>, args: &WorkflowDeclareArgs) -> Result<()
             bail!(
                 "declaring workflow '{name}' failed, and rolling it back was INCOMPLETE \
                  ({reverted} of {} restored) — the project is NOT as it was.\n\n\
-                 Finish the undo with:  agentstack restore --last --write\n\nWhat failed: {e:#}",
+                 Finish the undo with:  agentstack x restore --last --write\n\nWhat failed: {e:#}",
                 super::count(undo.len(), "file")
             );
         }

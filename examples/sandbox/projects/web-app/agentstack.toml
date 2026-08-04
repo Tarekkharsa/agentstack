@@ -16,7 +16,7 @@ path = "./skills/frontend-review"
 path = "./skills/pixel-perfect"
 
 # A bundle you can load as a session, then revert.
-[profiles.review]
+[toolsets.review]
 servers = ["figma"]
 skills = ["frontend-review", "pixel-perfect"]
 

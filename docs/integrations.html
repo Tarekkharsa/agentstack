@@ -298,8 +298,8 @@
 <pre class="block"><code>agentstack doctor</code></pre>
 <p>When t3code is installed, doctor checks the supervisor integration, including provider guard coverage and home-directory overrides that can move a CLI away from the configuration AgentStack manages.</p>
 <p>For per-session run identity, create a transparent launcher:</p>
-<pre class="block"><code>agentstack shim make claude</code></pre>
-<p>Point the matching t3code provider's binary-path setting at the generated shim. Each launched session then appears in <code>agentstack report runs</code> and receives its own run report.</p>
+<pre class="block"><code>agentstack x shim make claude</code></pre>
+<p>Point the matching t3code provider's binary-path setting at the generated shim. Each launched session then appears in <code>agentstack x report runs</code> and receives its own run report.</p>
 <h3 id="project-actions-fresh-worktrees-set-themselves-up">Project actions: fresh worktrees set themselves up<a class="hlink" href="#project-actions-fresh-worktrees-set-themselves-up" aria-label="Link to this section">#</a></h3>
 <p>t3code runs each task in a fresh git worktree — a clean checkout in which AgentStack's rendered configuration (<code>.mcp.json</code>, <code>.claude/skills/</code>, and the other native files) does not exist, because the managed <code>.gitignore</code> block deliberately keeps generated artifacts out of git. Left alone, every t3code task therefore starts without the project's servers and skills, and nothing announces the loss.</p>
 <p>t3code's project actions close that gap with no panel and no new AgentStack surface, so they work in any t3code build. A <code>t3.json</code> checked into the repository root offers named commands; t3code shows them for one-click import, runs them in a real terminal inside the worktree, and can run one of them automatically when a worktree is created:</p>

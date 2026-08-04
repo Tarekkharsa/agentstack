@@ -253,7 +253,9 @@ fn run<'a>(
                             IssueKind::MissingTransportFields,
                             format!("server '{name}' is type=http but has no `url`"),
                         )
-                        .with_fix(format!("agentstack set server {name} --url <URL> --write")),
+                        .with_fix(format!(
+                            "agentstack x set server {name} --url <URL> --write"
+                        )),
                     );
                 }
             }
@@ -265,7 +267,7 @@ fn run<'a>(
                             format!("server '{name}' is type=stdio but has no `command`"),
                         )
                         .with_fix(format!(
-                            "agentstack set server {name} --command \"<CMD>\" --write"
+                            "agentstack x set server {name} --command \"<CMD>\" --write"
                         )),
                     );
                 }
@@ -282,7 +284,7 @@ fn run<'a>(
                             format!("server '{name}' has `extra.{target}` but no adapter '{target}' is registered"),
                         )
                         .with_fix(format!(
-                            "rename [servers.{name}.extra.{target}] to a registered adapter id (see: agentstack adapters list)"
+                            "rename [servers.{name}.extra.{target}] to a registered adapter id (see: agentstack x adapters list)"
                         )),
                     );
                 }
@@ -298,7 +300,7 @@ fn run<'a>(
                             format!("server '{name}' references unknown target '{target}'"),
                         )
                         .with_fix(format!(
-                            "edit [servers.{name}] targets — remove '{target}' or replace it with a registered adapter id (see: agentstack adapters list)"
+                            "edit [servers.{name}] targets — remove '{target}' or replace it with a registered adapter id (see: agentstack x adapters list)"
                         )),
                     );
                 }
@@ -313,7 +315,7 @@ fn run<'a>(
                             format!("server '{name}' has `owner = \"{owner}\"` but no adapter '{owner}' is registered"),
                         )
                         .with_fix(format!(
-                            "edit [servers.{name}] owner — set a registered adapter id or remove it (see: agentstack adapters list)"
+                            "edit [servers.{name}] owner — set a registered adapter id or remove it (see: agentstack x adapters list)"
                         )),
                     );
                 }
@@ -467,12 +469,12 @@ fn run<'a>(
                     let (msg, fix) = if instr.from_user_layer {
                         (
                             format!("machine-layer instruction '{name}' references unknown target '{target}'"),
-                            format!("edit the machine manifest's [instructions.{name}] targets — remove '{target}' or use a registered adapter id (see: agentstack adapters list)"),
+                            format!("edit the machine manifest's [instructions.{name}] targets — remove '{target}' or use a registered adapter id (see: agentstack x adapters list)"),
                         )
                     } else {
                         (
                             format!("instruction '{name}' references unknown target '{target}'"),
-                            format!("edit [instructions.{name}] targets — remove '{target}' or replace it with a registered adapter id (see: agentstack adapters list)"),
+                            format!("edit [instructions.{name}] targets — remove '{target}' or replace it with a registered adapter id (see: agentstack x adapters list)"),
                         )
                     };
                     issues.push(Issue::new(IssueKind::UnknownInstructionTarget, msg).with_fix(fix));
@@ -578,7 +580,7 @@ fn run<'a>(
                     format!("extension '{name}' must target exactly one adapter — extension code is harness-specific, `\"*\"` cannot apply"),
                 )
                 .with_fix(format!(
-                    "set [extensions.{name}] target to exactly one registered adapter id (see: agentstack adapters list)"
+                    "set [extensions.{name}] target to exactly one registered adapter id (see: agentstack x adapters list)"
                 )),
             );
         } else if !targets.is_empty() && !targets.contains(&ext.target) {
@@ -591,7 +593,7 @@ fn run<'a>(
                     ),
                 )
                 .with_fix(format!(
-                    "edit [extensions.{name}] target to a registered adapter id (see: agentstack adapters list)"
+                    "edit [extensions.{name}] target to a registered adapter id (see: agentstack x adapters list)"
                 )),
             );
         }

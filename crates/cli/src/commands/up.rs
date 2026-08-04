@@ -215,8 +215,13 @@ pub fn run(args: &UpArgs, manifest_dir: Option<&Path>) -> Result<()> {
     // The P3.1 seam, not a summary of our own. See the module docs: `up` ends
     // in an unfinished state often enough that inventing a closing verdict
     // here is how a false "ready" would get born.
+    //
+    // `next_step`, not `next_action`: this is a human surface. `next_action`
+    // is the machine field and is null whenever the honest next step is not a
+    // runnable command (an empty trusted project's is `agentstack search
+    // <query>`), which would end `up` with no closing line at all.
     let report = super::doctor::collect(Some(&dir))?;
-    if let Some(next) = report["next_action"].as_str() {
+    if let Some(next) = report["next_step"].as_str() {
         crate::outln!("\n{} {}", "next:".bold(), next.bold());
     }
     Ok(())
