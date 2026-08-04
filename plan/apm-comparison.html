@@ -1,0 +1,584 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>APM vs AgentStack — comparison report</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1c1f24;
+    --muted: #5b6472;
+    --rule: #e2e6ec;
+    --rule-strong: #c8cfda;
+    --accent: #2f5d8c;
+    --code-bg: #f2f4f7;
+    --thead-bg: #eef1f5;
+    --zebra: #f8f9fb;
+    --quote-bg: #f7f8fa;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171b;
+      --fg: #e4e7ec;
+      --muted: #9aa4b2;
+      --rule: #2a2f37;
+      --rule-strong: #3b424c;
+      --accent: #8ab4e0;
+      --code-bg: #21262d;
+      --thead-bg: #1e232a;
+      --zebra: #191d23;
+      --quote-bg: #1a1e24;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    padding: 2.5rem 1.25rem 6rem;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+    font-size: 16px;
+    line-height: 1.65;
+    overflow-x: hidden;
+  }
+
+  main {
+    max-width: 62rem;
+    margin: 0 auto;
+  }
+
+  header.doc-header {
+    border-bottom: 1px solid var(--rule-strong);
+    padding-bottom: 1.25rem;
+    margin-bottom: 2rem;
+  }
+
+  header.doc-header .meta {
+    color: var(--muted);
+    font-size: 0.875rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin: 0 0 0.5rem;
+  }
+
+  header.doc-header .subtitle {
+    color: var(--muted);
+    font-size: 1.0625rem;
+    margin: 0.5rem 0 0;
+  }
+
+  h1 {
+    font-size: 1.9rem;
+    line-height: 1.25;
+    margin: 0;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+  }
+
+  h2 {
+    font-size: 1.4rem;
+    line-height: 1.3;
+    margin: 3rem 0 0.75rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--rule);
+    font-weight: 640;
+    letter-spacing: -0.005em;
+  }
+
+  h3 {
+    font-size: 1.125rem;
+    margin: 2rem 0 0.5rem;
+    font-weight: 640;
+  }
+
+  p { margin: 0 0 1rem; }
+
+  ul, ol { margin: 0 0 1rem; padding-left: 1.5rem; }
+  li { margin: 0.35rem 0; }
+
+  a { color: var(--accent); }
+  a:hover { text-decoration: none; }
+
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+                 "Liberation Mono", monospace;
+    font-size: 0.875em;
+    background: var(--code-bg);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 0.08em 0.35em;
+    word-break: break-word;
+  }
+
+  blockquote {
+    margin: 1.25rem 0;
+    padding: 0.85rem 1.15rem;
+    background: var(--quote-bg);
+    border-left: 3px solid var(--rule-strong);
+    color: var(--fg);
+  }
+
+  blockquote p { margin: 0 0 0.5rem; }
+  blockquote p:last-child { margin-bottom: 0; }
+
+  nav.toc {
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 1.1rem 1.35rem;
+    margin: 0 0 2.5rem;
+    background: var(--zebra);
+  }
+
+  nav.toc h2 {
+    font-size: 0.8125rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin: 0 0 0.6rem;
+    padding: 0;
+    border: 0;
+    font-weight: 600;
+  }
+
+  nav.toc ol {
+    margin: 0;
+    padding-left: 1.4rem;
+  }
+
+  nav.toc li { margin: 0.2rem 0; }
+
+  div.table-wrap {
+    margin: 1.25rem 0 1.5rem;
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 32rem;
+    font-size: 0.9375rem;
+  }
+
+  thead th {
+    background: var(--thead-bg);
+    text-align: left;
+    font-weight: 640;
+    border-bottom: 1px solid var(--rule-strong);
+  }
+
+  th, td {
+    padding: 0.55rem 0.8rem;
+    border-bottom: 1px solid var(--rule);
+    border-right: 1px solid var(--rule);
+    vertical-align: top;
+  }
+
+  th:last-child, td:last-child { border-right: 0; }
+
+  tbody tr:nth-child(even) { background: var(--zebra); }
+  tbody tr:last-child td { border-bottom: 0; }
+
+  strong { font-weight: 650; }
+
+  hr {
+    border: 0;
+    border-top: 1px solid var(--rule);
+    margin: 2.5rem 0;
+  }
+</style>
+</head>
+<body>
+<main>
+
+<header class="doc-header">
+  <p class="meta">2026-08-04</p>
+  <h1>Report — APM (microsoft/apm) compared to AgentStack</h1>
+  <p class="subtitle">Four agents read both repositories. This report gives the facts, then the comparison, then what I recommend.</p>
+</header>
+
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#s1">What each product is</a></li>
+    <li><a href="#s2">Numbers</a></li>
+    <li><a href="#s3">The manifest and the lockfile</a></li>
+    <li><a href="#s4">The CLI surface</a></li>
+    <li><a href="#s5">Target tools</a></li>
+    <li><a href="#s6">Security — the most important section</a></li>
+    <li><a href="#s7">Standards and conformance</a></li>
+    <li><a href="#s8">Distribution and ecosystem</a></li>
+    <li><a href="#s9">Quality engineering</a></li>
+    <li><a href="#s10">Where each product wins</a></li>
+    <li><a href="#s11">What this means for strategy</a></li>
+    <li><a href="#s12">What I recommend</a></li>
+    <li><a href="#s13">One correction found in our repository</a></li>
+  </ol>
+</nav>
+
+<h2 id="s1">1. What each product is</h2>
+
+<p><strong>APM</strong> is the Agent Package Manager from Microsoft. It is a <strong>dependency manager for agent context</strong>. It installs skills, prompts, instructions, hooks and MCP servers into many agent tools. It has a manifest (<code>apm.yml</code>), a lockfile (<code>apm.lock.yaml</code>) and a policy file (<code>apm-policy.yml</code>).</p>
+
+<p>APM states one boundary again and again:</p>
+
+<blockquote>
+  <p>"apm-policy.yml governs what gets installed; your agent harness governs what runs. The two planes do not overlap."</p>
+  <p>"APM is an install-time gate, not a runtime sandbox."</p>
+</blockquote>
+
+<p><strong>AgentStack</strong> is your product. It does the same install-plane job. It then adds a second plane that APM refuses: <strong>runtime enforcement</strong>. It has a trust gate, policy intersection, a Docker sandbox, an enforced egress proxy, a call recorder and a governed executor.</p>
+
+<p><strong>This is the key difference. APM stops where AgentStack starts.</strong></p>
+
+<h2 id="s2">2. Numbers</h2>
+
+<div class="table-wrap"><div style="overflow-x:auto">
+<table>
+  <thead>
+    <tr><th>Item</th><th>APM</th><th>AgentStack</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Language</td><td>Python 3.10+</td><td>Rust (MSRV 1.88)</td></tr>
+    <tr><td>Source lines</td><td>147,869 (427 files)</td><td>139,604 (185 files)</td></tr>
+    <tr><td>Test lines</td><td>516,740</td><td>39,210</td></tr>
+    <tr><td>Test count</td><td>28,117 test functions (1,105 files)</td><td>101 test binaries</td></tr>
+    <tr><td>Test-to-source ratio</td><td>3.5 : 1</td><td>0.28 : 1</td></tr>
+    <tr><td>Version</td><td>0.27.0</td><td>0.18.0-rc.2</td></tr>
+    <tr><td>First commit</td><td>2025-09-18</td><td>2026-06-25</td></tr>
+    <tr><td>Age</td><td>~11 months</td><td>~40 days</td></tr>
+    <tr><td>Commits</td><td>1,742</td><td>910</td></tr>
+    <tr><td>Releases (tags)</td><td>73</td><td>23</td></tr>
+    <tr><td>Authors</td><td>93 (61% from one person)</td><td>1</td></tr>
+    <tr><td>Target tools</td><td>18 in the catalog</td><td>13 adapters</td></tr>
+    <tr><td>MCP client adapters</td><td>12</td><td>12</td></tr>
+    <tr><td>CI workflows</td><td>31</td><td>5</td></tr>
+    <tr><td>Docs</td><td>122 pages, 193,064 words</td><td>reference + architecture + enforcement</td></tr>
+    <tr><td>Users</td><td>public, many</td><td>"anyone but the maintainer: never"</td></tr>
+  </tbody>
+</table>
+</div></div>
+
+<p>APM writes <strong>3.5 lines of test for each line of source</strong>. Your ratio is much lower. Note that this is not a like-for-like measure — 108 of your 135 CLI files carry inline <code>#[cfg(test)]</code> modules, and Rust types remove many tests that Python needs.</p>
+
+<h2 id="s3">3. The manifest and the lockfile</h2>
+
+<div class="table-wrap"><div style="overflow-x:auto">
+<table>
+  <thead>
+    <tr><th>Item</th><th>APM</th><th>AgentStack</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Manifest</td><td><code>apm.yml</code> (YAML)</td><td><code>.agentstack/agentstack.toml</code> (TOML)</td></tr>
+    <tr><td>Lockfile</td><td><code>apm.lock.yaml</code> (YAML)</td><td><code>agentstack.lock</code> (TOML)</td></tr>
+    <tr><td>Policy</td><td>separate <code>apm-policy.yml</code></td><td><code>[policy]</code> table in the manifest</td></tr>
+    <tr><td>Primitives</td><td>prompts, agents, commands, instructions, hooks, canvas, skills</td><td>servers, skills, toolsets, instructions, settings, hooks, extensions, workflows, packs</td></tr>
+    <tr><td>Digest</td><td>SHA-256, whole tree and per file</td><td>SHA-256 on every lock entry</td></tr>
+    <tr><td>Transitive dependencies</td><td><strong>yes</strong> — parallel BFS, cycle detection, first-wins</td><td><strong>no</strong> — packs only, one level</td></tr>
+    <tr><td>Version ranges</td><td><strong>yes</strong> — semver ranges against git tags</td><td>pinned refs only</td></tr>
+    <tr><td><code>apm deps why</code> / <code>tree</code></td><td><strong>yes</strong></td><td><code>why</code> is new and not yet committed</td></tr>
+    <tr><td>Forward compatibility</td><td><code>x-*</code> keys and <code>_unknown_fields</code> round-trip</td><td><code>extra.&lt;adapter&gt;</code> for native keys</td></tr>
+  </tbody>
+</table>
+</div></div>
+
+<p><strong>APM is a true package manager. AgentStack is not yet one.</strong></p>
+
+<p>APM resolves a dependency graph. It has depth, parents, children, cycles, winners and a <code>why</code> walker. It resolves semver ranges against remote git tags. Your model has <code>[packs]</code> and <code>[package_overrides]</code>, but no graph and no ranges.</p>
+
+<p>This is the largest capability gap.</p>
+
+<h2 id="s4">4. The CLI surface</h2>
+
+<p>APM has <strong>33 top-level commands</strong> plus 15 groups. AgentStack shows <strong>15 verbs</strong> and hides the rest behind <code>agentstack x</code>.</p>
+
+<p>Commands APM has that you do not:</p>
+
+<div class="table-wrap"><div style="overflow-x:auto">
+<table>
+  <thead>
+    <tr><th>APM command</th><th>What it does</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>deps tree</code> / <code>deps why</code></td><td>show the dependency graph and explain a resolution</td></tr>
+    <tr><td><code>outdated</code></td><td>list locked dependencies that have a newer version</td></tr>
+    <tr><td><code>update</code></td><td>move dependencies to the newest matching ref</td></tr>
+    <tr><td><code>prune</code></td><td>remove packages that left the graph</td></tr>
+    <tr><td><code>publish</code></td><td>push a package to a REST registry</td></tr>
+    <tr><td><code>pack</code> / <code>unpack</code></td><td>build and open a bundle</td></tr>
+    <tr><td><code>marketplace</code> (12 subcommands)</td><td>register, browse, search, author an index</td></tr>
+    <tr><td><code>find</code></td><td>trace a deployed file back to its package</td></tr>
+    <tr><td><code>view</code></td><td>show package metadata and remote versions</td></tr>
+    <tr><td><code>self-update</code></td><td>update the binary</td></tr>
+    <tr><td><code>approve</code> / <code>deny</code></td><td>grant or refuse executable primitives</td></tr>
+    <tr><td><code>lifecycle trust</code></td><td>trust the project lifecycle scripts</td></tr>
+  </tbody>
+</table>
+</div></div>
+
+<p>Commands you have that APM does not:</p>
+
+<div class="table-wrap"><div style="overflow-x:auto">
+<table>
+  <thead>
+    <tr><th>AgentStack command</th><th>What it does</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>run --sandbox</code> / <code>--lockdown</code></td><td>start an agent CLI in a container</td></tr>
+    <tr><td><code>trust</code></td><td>approve the declared capabilities with a content digest</td></tr>
+    <tr><td><code>undo</code></td><td>go back to a point in the change timeline</td></tr>
+    <tr><td><code>adopt</code></td><td>pull a hand edit back into the manifest</td></tr>
+    <tr><td><code>secret</code></td><td>keep secrets in the OS keychain</td></tr>
+    <tr><td><code>yes</code></td><td>review and activate in one step</td></tr>
+    <tr><td><code>x workflow</code></td><td>run a Boa workflow engine</td></tr>
+    <tr><td><code>x lease</code> / <code>x session</code></td><td>open a bounded capability window</td></tr>
+    <tr><td><code>x gateway</code></td><td>broker every MCP call through one point</td></tr>
+    <tr><td><code>x report</code></td><td>read the call and run audit</td></tr>
+    <tr><td><code>x image</code></td><td>build a self-run image</td></tr>
+  </tbody>
+</table>
+</div></div>
+
+<p><strong>Read this as two different products that share a middle.</strong> APM owns the supply chain. AgentStack owns the run.</p>
+
+<h2 id="s5">5. Target tools</h2>
+
+<p>APM supports 18 targets. AgentStack supports 13. The overlap is large.</p>
+
+<div class="table-wrap"><div style="overflow-x:auto">
+<table>
+  <thead>
+    <tr><th>Target</th><th>APM</th><th>AgentStack</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Claude Code</td><td>yes</td><td>yes</td></tr>
+    <tr><td>Copilot (VS Code + CLI)</td><td>yes</td><td>yes (2 adapters)</td></tr>
+    <tr><td>Cursor</td><td>yes</td><td>yes</td></tr>
+    <tr><td>Codex</td><td>yes</td><td>yes</td></tr>
+    <tr><td>Gemini</td><td>yes</td><td>yes</td></tr>
+    <tr><td>OpenCode</td><td>yes</td><td>yes</td></tr>
+    <tr><td>Windsurf</td><td>yes</td><td>yes</td></tr>
+    <tr><td>Kiro</td><td>yes</td><td>yes</td></tr>
+    <tr><td>Antigravity</td><td>yes</td><td>yes</td></tr>
+    <tr><td>JetBrains / IntelliJ</td><td>yes</td><td>no</td></tr>
+    <tr><td>Grok (build + cloud)</td><td>yes</td><td>no</td></tr>
+    <tr><td>Hermes, OpenClaw, Cowork</td><td>yes (flagged)</td><td>no</td></tr>
+    <tr><td>Claude Desktop</td><td>no</td><td>yes</td></tr>
+    <tr><td>Junie</td><td>no</td><td>yes</td></tr>
+    <tr><td>pi</td><td>no</td><td>yes</td></tr>
+  </tbody>
+</table>
+</div></div>
+
+<p><strong>Two structural differences:</strong></p>
+
+<ol>
+  <li><strong>APM deploys much more content per target.</strong> It writes agents, commands, prompts, rules, steering files, hooks and skills. You write MCP config, skills, instructions, settings and hooks. APM transforms rule formats per target (<code>.mdc</code> for Cursor, steering for Kiro). You do not.</li>
+  <li><strong>You verify against the real tool. APM does not.</strong> Your nightly <code>conformance.yml</code> installs each real CLI and asks it to read your config back. That is Tier 1 for 5 adapters. APM has no such live check. Your claim is stronger, for fewer tools.</li>
+</ol>
+
+<p>Your descriptor design (YAML files, <code>include_dir!</code>, SHA-256 digest, no adapter id in production code) is cleaner than APM's three separate registries (<code>target_catalog.py</code>, <code>KNOWN_TARGETS</code>, <code>_MCP_CLIENT_REGISTRY</code>). APM keeps them in agreement with an import-time cross-check.</p>
+
+<h2 id="s6">6. Security — the most important section</h2>
+
+<h3>6.1 What APM enforces</h3>
+
+<div class="table-wrap"><div style="overflow-x:auto">
+<table>
+  <thead>
+    <tr><th>Control</th><th>Status</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Hidden-Unicode scan</td><td><strong>enforced</strong>, blocks deployment, exit 1</td></tr>
+    <tr><td>Commit pinning (40-hex SHA)</td><td><strong>enforced</strong></td></tr>
+    <tr><td>Content hash on re-download</td><td><strong>enforced</strong>, aborts install</td></tr>
+    <tr><td>Policy gate before download</td><td><strong>enforced</strong>, tighten-only inheritance</td></tr>
+    <tr><td>Path traversal and symlinks</td><td><strong>enforced</strong>, hard fail</td></tr>
+    <tr><td>TLS through the OS trust store</td><td><strong>enforced</strong>, never disabled</td></tr>
+    <tr><td>Token in <code>apm.yml</code></td><td><strong>hard fail</strong></td></tr>
+    <tr><td>Telemetry</td><td>none collected</td></tr>
+    <tr><td>Package signing</td><td><strong>absent</strong> — "a planned hardening item"</td></tr>
+    <tr><td>Runtime sandbox</td><td><strong>absent by design</strong></td></tr>
+    <tr><td>Egress control</td><td><strong>absent</strong></td></tr>
+  </tbody>
+</table>
+</div></div>
+
+<h3>6.2 The one large hole in APM</h3>
+
+<p>APM has an executable trust gate for hooks, MCP, <code>bin/</code> and canvas. The gate is <strong>off by default</strong>.</p>
+
+<p>From <code>src/apm_cli/security/executables.py</code>:</p>
+
+<blockquote>
+  <p>"Projects that omit the block entirely get backward-compatible behaviour (all executables deployed)."</p>
+</blockquote>
+
+<p>The result: on a normal repository with no <code>allowExecutables</code> block, <code>apm install &lt;third-party-package&gt;</code> writes that package's hook commands into <code>.claude/settings.json</code> or <code>.cursor/hooks.json</code>. There is <strong>no prompt, no signature, no allowlist and no sandbox</strong>. The hooks then run at your permission.</p>
+
+<p>APM applies the strong model to a different thing. Its <strong>lifecycle scripts</strong> use always-on default-deny, keyed to a SHA-256 of the <code>lifecycle:</code> subtree, and re-gate when the bytes change. That is your trust model. APM applies it only to its own manifest, not to dependency hooks.</p>
+
+<p><strong>AgentStack does the opposite, and does it right.</strong> Your standing rule says hooks are an executable capability kind. The full consent ceremony always applies. <code>PackageMemberKind</code> is <code>Skill | Server | Instruction</code> only, so a package reference can never carry a hook. That is a real and defensible advantage.</p>
+
+<h3>6.3 Secrets</h3>
+
+<p>APM splits by target:</p>
+
+<ul>
+  <li>VS Code, Copilot CLI, Kiro, JetBrains — APM writes a <strong>placeholder</strong>. The tool interpolates at runtime.</li>
+  <li>Codex, Gemini, Cursor, Hermes — APM <strong>resolves the secret at install time and writes the literal value to disk</strong>, mode 0600. <code>.codex/config.toml</code> and <code>.cursor/mcp.json</code> are inside the repository.</li>
+</ul>
+
+<p>AgentStack uses <code>secret_mode: literal</code> for all 12 MCP adapters. The manifest keeps <code>${REF}</code>; the native config gets the value. You also have <code>agentstack secret</code> with the OS keychain, which APM does not have.</p>
+
+<p><strong>Both write literal secrets. You have a better store for them. Neither writes placeholders where the tool cannot interpolate.</strong></p>
+
+<h3>6.4 Honesty</h3>
+
+<p>Both projects are honest. This is unusual and worth noting.</p>
+
+<p>APM says: "APM does NOT sandbox MCP servers at runtime, does not do malware analysis, does not sign packages." It tells readers to write "APM dependency governance" in compliance papers, <strong>not</strong> "supply-chain signing".</p>
+
+<p>You say: "a lock is not trust, trust is not policy, policy is not a sandbox, audit is not enforcement." Your enforcement matrix marks <code>unsupported</code> instead of <code>advisory</code>.</p>
+
+<p>APM adds a "honesty contract" in <code>CONFORMANCE.md</code>: "A requirement marked skipped carries a written waiver; this is debt, not coverage."</p>
+
+<p><strong>Neither product oversells. You are level with them here.</strong></p>
+
+<h2 id="s7">7. Standards and conformance</h2>
+
+<p>APM publishes <strong>OpenAPM v0.1</strong> — a formal specification with 110 numbered requirements, four JSON schemas and four conformance classes. Tests bind to requirement ids with <code>@pytest.mark.req("req-lk-012")</code>.</p>
+
+<p>Two gates are novel and worth copying:</p>
+
+<ol>
+  <li><strong><code>orphan_check.py</code></strong> demands exact set equality across four views of the same 110 ids: the spec anchors, the YAML manifest, the appendix table and the pytest markers. A gap in any one fails CI.</li>
+  <li><strong><code>mode_b_detector.sh</code></strong> — the "silent extension" detector. If a pull request touches a critical path, adds 20+ lines, and changes no spec text and no requirement marker, CI fails. The author must write <code>apm-spec-waiver: &lt;reason&gt;</code>. This stops code from growing past the specification without a decision.</li>
+</ol>
+
+<p>APM admits the limit: there is one implementation, and the spec calls itself a working draft. The conformance system measures <strong>assertion coverage, not behaviour</strong>.</p>
+
+<p><strong>AgentStack has no equivalent.</strong> Your <code>docs/reference.md</code> drift check and your <code>ui_contract.rs</code> closed action set are the nearest things. Your nightly live-CLI check is behavioural, which APM's is not.</p>
+
+<h2 id="s8">8. Distribution and ecosystem</h2>
+
+<div class="table-wrap"><div style="overflow-x:auto">
+<table>
+  <thead>
+    <tr><th>Item</th><th>APM</th><th>AgentStack</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Install</td><td><code>aka.ms/apm-unix</code>, PowerShell, Homebrew, Scoop, PyPI (<code>apm-cli</code>), devcontainer</td><td><code>install.sh</code>, Homebrew tap</td></tr>
+    <tr><td>Platforms</td><td>5 binaries (no Windows arm64)</td><td>4 binaries (Windows built, not tested)</td></tr>
+    <tr><td>Package index</td><td><strong>none is canonical</strong></td><td>none</td></tr>
+    <tr><td>Marketplaces</td><td>git repositories with Anthropic's <code>marketplace.json</code> schema</td><td>none</td></tr>
+    <tr><td>Registry</td><td>REST, experimental, no public instance</td><td>none</td></tr>
+    <tr><td>Enterprise knobs</td><td>GHES, mirrors, proxy, air-gapped bundles</td><td>none</td></tr>
+    <tr><td>GitHub Action</td><td>no</td><td>yes (<code>agentstack trust gate</code>)</td></tr>
+    <tr><td>Provenance attestation</td><td>no</td><td><strong>yes, on every release</strong></td></tr>
+    <tr><td>SBOM</td><td>SPDX from the lockfile</td><td>CycloneDX in CI</td></tr>
+  </tbody>
+</table>
+</div></div>
+
+<p><strong>APM has no marketplace either.</strong> This is important. Its own docs say: "Not a marketplace. Any git repository is a valid APM package." Marketplace authoring and REST registries are both behind default-off experimental flags. The one hardwired default is the MCP registry at <code>api.mcp.github.com</code>.</p>
+
+<p>So the "public index" gap you keep out of scope is a gap APM also has. Your <code>STRATEGY.md</code> position — "no public marketplace before local reuse earns one" — matches what the market leader actually ships.</p>
+
+<h2 id="s9">9. Quality engineering</h2>
+
+<p>APM is ahead here. The evidence:</p>
+
+<ul>
+  <li>28,117 test functions, split into <code>unit</code>, <code>integration</code>, <code>red_team</code> (161 adversarial), <code>spec_conformance</code>, <code>benchmarks</code>, <code>quality</code>, <code>mutation</code>.</li>
+  <li><code>quality/</code> tests the tests: CI topology, test taxonomy, assertion quality, duplicate detection, with committed baselines.</li>
+  <li>A <strong>merge gate</strong> that polls the Checks API and aggregates results. Its header names two production incidents it was built to stop.</li>
+  <li>~25 <code>check_*_owner.py</code> scripts that enforce single-authority boundaries in the architecture.</li>
+  <li>Nightly mutation testing with <code>mutmut</code>.</li>
+  <li>7 agentic workflows and 21 persona agents. <strong>APM governs itself with its own product.</strong></li>
+</ul>
+
+<p>You have strong things APM does not: <code>cargo-deny</code> with RUSTSEC, MSRV gate, a Docker sandbox end-to-end job, provenance attestation, byte-match after docs deploy, and the nightly live-CLI conformance run.</p>
+
+<p><strong>APM has more tests. You have more kinds of gate at the release boundary.</strong></p>
+
+<h2 id="s10">10. Where each product wins</h2>
+
+<h3>APM is ahead on</h3>
+
+<ol>
+  <li><strong>Dependency resolution.</strong> A real graph, transitive, with semver ranges, cycle detection and a <code>why</code> walker. You have none of this.</li>
+  <li><strong>Content deployment breadth.</strong> Agents, commands, prompts and rules, with per-target format transforms.</li>
+  <li><strong>Test depth.</strong> 28k tests, red-team suite, mutation testing, meta-tests.</li>
+  <li><strong>Ecosystem.</strong> 93 authors, 73 releases, real users, Microsoft's name.</li>
+  <li><strong>The specification.</strong> OpenAPM v0.1 and the two conformance gates.</li>
+  <li><strong>Enterprise install paths.</strong> GHES, mirrors, proxies, air-gapped bundles.</li>
+  <li><strong>Lifecycle commands.</strong> <code>outdated</code>, <code>update</code>, <code>prune</code>, <code>find</code>, <code>view</code>.</li>
+</ol>
+
+<h3>AgentStack is ahead on</h3>
+
+<ol>
+  <li><strong>Runtime enforcement.</strong> Sandbox, lockdown, egress proxy with SNI check and anti-SSRF, gateway as the single dispatch point. APM has nothing here and says so.</li>
+  <li><strong>The trust model, applied to the right things.</strong> Content-bound consent, no digest cache, re-checked at every dispatch. Hooks always get the full ceremony. APM's gate is off by default for the path that third-party packages use.</li>
+  <li><strong>Secret storage.</strong> OS keychain. APM has no store.</li>
+  <li><strong>Live adapter verification.</strong> The nightly run asks the real CLI to read your file. APM does not do this.</li>
+  <li><strong>Audit.</strong> Keyed-hash call records, run events, trust mutations. APM has no runtime record.</li>
+  <li><strong>Architecture discipline.</strong> Ten crates with a stated dependency law. <code>executor</code> and <code>workflow</code> have zero internal edges, so Boa cannot reach enforcement. <code>adapters</code> cannot reach <code>policy</code>.</li>
+  <li><strong>Reversibility.</strong> <code>undo</code> and <code>adopt</code>. APM has cleanup and drift detection, but no timeline.</li>
+  <li><strong>Release integrity.</strong> Provenance attestation and checksum-verified install.</li>
+</ol>
+
+<h2 id="s11">11. What this means for strategy</h2>
+
+<p>Three conclusions.</p>
+
+<p><strong>First: APM does not compete with your core claim.</strong> It refuses the runtime plane in writing, in six files. Your enforcement matrix is a product APM has decided not to build. Your <code>STRATEGY.md</code> tripwires watch eve and vercel-labs/skills. <strong>APM is a fourth tripwire, and it is bigger than the other three.</strong> But it is a tripwire on the install plane only.</p>
+
+<p><strong>Second: the install plane is where APM will beat you.</strong> A user who wants "install this skill from that repo, with its dependencies, pinned, in every tool" gets a better answer from APM today. Transitive resolution and semver ranges are the reason. You should decide, deliberately, whether you compete there or concede it.</p>
+
+<p><strong>Third: APM's default-off executable gate is your clearest opening.</strong> APM writes third-party hook commands into <code>.claude/settings.json</code> with no consent. Your standing rule forbids exactly this. That is a real, demonstrable, security difference. It is also the kind of thing that a single blog post can show.</p>
+
+<h2 id="s12">12. What I recommend</h2>
+
+<p>I do not recommend that you start work. Your <code>STRATEGY.md</code> says the shape is committed, and item 11 is the only open item. These are proposals for you to adopt or refuse.</p>
+
+<p><strong>Do not start now, but record:</strong></p>
+
+<ol>
+  <li><strong>Add APM as a named competitive tripwire in <code>STRATEGY.md</code>.</strong> It is the largest one. Name the trigger: "APM ships a runtime enforcement plane."</li>
+</ol>
+
+<p><strong>Consider after the bar is met:</strong></p>
+
+<ol start="2">
+  <li><strong>Transitive dependency resolution.</strong> This is the gap that a user will feel. Your <code>[packs]</code> model is the seam.</li>
+  <li><strong>Version ranges against git tags.</strong> Second-largest gap.</li>
+  <li><strong><code>outdated</code> and <code>update</code>.</strong> Cheap, and the absence is visible.</li>
+</ol>
+
+<p><strong>Consider copying, at low cost:</strong></p>
+
+<ol start="5">
+  <li><strong>The silent-extension gate.</strong> APM's <code>mode_b_detector.sh</code> idea maps well onto your <code>docs/ENFORCEMENT.md</code>: if a pull request touches <code>crates/trust</code>, <code>crates/policy</code> or <code>crates/egress</code> and does not change the enforcement matrix, demand a written waiver. This directly serves your "claims match enforcement" invariant.</li>
+  <li><strong>A red-team test directory.</strong> APM has 161 adversarial tests in five named groups. Your security claims would carry more weight with a directory that is visibly adversarial.</li>
+</ol>
+
+<h2 id="s13">13. One correction found in our repository</h2>
+
+<p>The AgentStack agent found an error introduced by the unpushed commit <code>f21b772</code>.</p>
+
+<p><code>README.md:155</code> now says: "there is no published Homebrew tap."</p>
+
+<p>This is wrong. The tap <code>Tarekkharsa/homebrew-tap</code> exists. <code>Formula/agentstack.rb</code> is pinned at 0.17.1, with 5 commits. <code>CHANGELOG.md</code> lines 40 and 75 both name <code>brew install</code> for v0.17.1. <code>RELEASING.md</code> section 3 documents the publish step.</p>
+
+</main>
+</body>
+</html>
