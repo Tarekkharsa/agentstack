@@ -72,7 +72,7 @@ fn trust_grant_refuses_previewed_digest_after_manifest_edit() {
     )
     .unwrap();
 
-    let err = trust_cmd::run(&grant_args(&proj, Some(previewed))).unwrap_err();
+    let err = trust_cmd::run(&grant_args(&proj, Some(previewed)), None).unwrap_err();
     let msg = format!("{err:#}");
     assert!(
         msg.contains("consent"),
@@ -86,7 +86,7 @@ fn trust_grant_refuses_previewed_digest_after_manifest_edit() {
 
     // Recovery is a fresh preview of the new bytes, then the grant binds.
     let fresh = trust::digest_for(&proj).unwrap();
-    trust_cmd::run(&grant_args(&proj, Some(fresh))).unwrap();
+    trust_cmd::run(&grant_args(&proj, Some(fresh)), None).unwrap();
     assert_eq!(trust::check(&proj), TrustState::Trusted);
 }
 

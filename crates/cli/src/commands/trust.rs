@@ -1013,11 +1013,11 @@ pub fn content_drift_at(base: &Path) -> Vec<ContentDrift> {
     content_drift(&dir, &loaded.manifest, &lock, &library)
 }
 
-pub fn run(args: &TrustArgs) -> Result<()> {
+pub fn run(args: &TrustArgs, manifest_dir: Option<&Path>) -> Result<()> {
     if args.list {
         return list();
     }
-    let base = resolve_base(args.path.as_deref())?;
+    let base = resolve_base(args.path.as_deref(), manifest_dir)?;
     if args.preview {
         return preview(&base);
     }
@@ -1491,10 +1491,31 @@ pub fn preview_value(base: &Path) -> Result<serde_json::Value> {
     Ok(crate::ui_contract::envelope(out))
 }
 
-/// Resolve the project base to act on: walk up from the given path (or cwd) so
+/// Resolve the project base to act on: walk up from the chosen start so
 /// `agentstack trust` works from a subdirectory too.
-fn resolve_base(path: Option<&Path>) -> Result<PathBuf> {
-    let start = match path {
+///
+/// The order is a trust decision, so it is explicit and stated rather than
+/// implied. A path the user typed is the most specific statement of which
+/// project this consent is about. `--manifest-dir` is next: it is the global
+/// flag every other command already obeys, and naming a directory on the
+/// command line is a statement of intent too. The cwd walk is the last resort
+/// — it is the only candidate nobody stated, and it must not decide the target
+/// when someone did state one. Without this, a companion that spawns the CLI
+/// from `/` (or from an unrelated repo) could not preview or grant trust for a
+/// project it names by absolute path: a human's yes would be blocked by where
+/// a process happened to start.
+///
+/// Only the START of the walk changes; the walk itself does not. Every
+/// candidate still goes through [`crate::manifest::discover_project_base`], so
+/// what may be trusted is exactly what it was before — an undiscoverable
+/// directory still fails, and the machine home (`~/.agentstack`) is still
+/// never a project and so never trustable. That is why `--manifest-dir` is
+/// deliberately NOT taken verbatim here the way [`crate::commands::project_base`]
+/// takes it: that helper serves commands that read or write a manifest the
+/// user already owns, while a grant here MINTS consent, so its target must
+/// earn discovery rather than be asserted.
+fn resolve_base(path: Option<&Path>, manifest_dir: Option<&Path>) -> Result<PathBuf> {
+    let start = match path.or(manifest_dir) {
         Some(p) => p
             .canonicalize()
             .with_context(|| format!("no such directory: {}", p.display()))?,

@@ -122,14 +122,19 @@ fn the_compressed_path_records_the_same_events_as_the_explicit_one() {
         .as_str()
         .expect("the preview names the digest it rendered")
         .to_string();
-    agentstack::commands::trust::run(&agentstack::cli::TrustArgs {
-        path: Some(slow.clone()),
-        list: false,
-        revoke: false,
-        yes: true,
-        consented_digest: Some(digest),
-        ..Default::default()
-    })
+    agentstack::commands::trust::run(
+        &agentstack::cli::TrustArgs {
+            path: Some(slow.clone()),
+            list: false,
+            revoke: false,
+            yes: true,
+            consented_digest: Some(digest),
+            ..Default::default()
+        },
+        // This call names its target with an explicit `path`, which outranks
+        // `--manifest-dir`; passing None keeps it resolving exactly as before.
+        None,
+    )
     .unwrap();
 
     let fast_events = events_for(&fast);
