@@ -2403,6 +2403,11 @@ fn run_checks(
         );
         report.mark_irrelevant();
     } else {
+        // G18: the pins to measure the declaration against. One read for the
+        // whole section — an unreadable or absent lock degrades to
+        // `Lock::default()`, i.e. no pins, which `check_setting_pins` reports as
+        // "not pinned yet" rather than as drift.
+        let settings_lock = crate::lock::Lock::load(&ctx.dir).unwrap_or_default();
         for (id, value) in &manifest.settings {
             match ctx.registry.get(id) {
                 None => report.line(
@@ -2461,21 +2466,14 @@ fn run_checks(
                                 desc.display
                             ),
                         ),
-                        Ok(Some(plan)) if plan.changed() => report.line(
-                            Level::Warn,
-                            format!(
-                                "{:<14} {keys} not yet in {} ↳ agentstack apply --write",
-                                desc.display,
-                                tidy_path(&plan.settings_path)
-                            ),
-                        ),
-                        Ok(Some(plan)) => report.line(
-                            Level::Ok,
-                            format!(
-                                "{:<14} {keys} merged into {}",
-                                desc.display,
-                                tidy_path(&plan.settings_path)
-                            ),
+                        Ok(Some(plan)) => check_setting_pins(
+                            report,
+                            &desc.display,
+                            id,
+                            value,
+                            &plan,
+                            &prev,
+                            &settings_lock,
                         ),
                         Err(e) => report.line(
                             Level::Error,
@@ -3355,6 +3353,156 @@ fn check_reproducibility(
 /// `agentstack.lock` pin. Drift and unreadable files are errors (`doctor --ci`
 /// gates on them); an unpinned fragment is a warning. Machine-layer fragments
 /// are the user's own content and are never pinned — skipped.
+/// G18: report, for one CLI's `[settings.<id>]` block, whether what is on disk
+/// is what was approved.
+///
+/// **The claim is a chain of two legs, and the probe never collapses them.** A
+/// settings pin covers the value *as declared*, `${REF}`s unresolved
+/// (`LockedSetting`), because a resolved value is machine-specific and can be a
+/// secret. So "the delivered bytes are the reviewed bytes" is only true when
+/// both of these hold, and each has its own fix:
+///
+///   1. **declaration ↔ pin.** The declared value still digests to what
+///      `agentstack.lock` records. A mismatch means the manifest moved since the
+///      last `lock --write`; that edit already re-gated trust through the
+///      manifest bytes, and `agentstack lock --write` is what re-records it.
+///   2. **declaration ↔ disk.** Re-merging the declared key into the live
+///      settings file would change nothing, i.e. the rendered value is the
+///      declared one ([`SettingsPlan::drifted_keys`]). A mismatch is either a
+///      merge that has not happened yet or one that was edited afterwards, and
+///      `agentstack apply --write` is what restores it.
+///
+/// Leg 2 is reported per key and only for keys we declare — AgentStack owns a
+/// set of top-level keys and leaves the rest of the harness's file alone, so a
+/// user's unrelated edit elsewhere in `settings.json` is not drift and is never
+/// named here.
+///
+/// **"Not applied yet" and "applied then edited" are different facts**, and the
+/// wording says which: `previously_managed` is the key set the last write
+/// recorded in state, so a drifted key we have written before really did move
+/// underneath us, while one we have never written is simply pending.
+///
+/// **Backward compatibility.** A lock written before settings pins existed
+/// carries no `[[setting]]` rows. That is reported as an advisory naming
+/// `lock --write`, never as drift and never as an error — a project mid-upgrade
+/// degrades to exactly the pre-G18 behaviour (leg 2 alone), and the next
+/// `lock --write` backfills the pins.
+fn check_setting_pins(
+    report: &mut Report,
+    display: &str,
+    id: &str,
+    declared: &serde_json::Value,
+    plan: &crate::render::SettingsPlan,
+    previously_managed: &[String],
+    lock: &crate::lock::Lock,
+) {
+    let path = tidy_path(&plan.settings_path);
+    let declared_keys: Vec<(&String, &serde_json::Value)> = declared
+        .as_object()
+        .map(|o| o.iter().collect())
+        .unwrap_or_default();
+    let drifted = plan.drifted_keys();
+
+    // Leg 1, per key. An unpinned key is a warning rather than an error: it is
+    // the honest state of a project that has declared settings and not yet
+    // re-locked, and `doctor --ci` should not fail a repo for a pin kind that
+    // arrived after its lockfile was written.
+    let mut unpinned: Vec<&str> = Vec::new();
+    let mut repinned: Vec<&str> = Vec::new();
+    for (key, value) in &declared_keys {
+        match lock.get_setting(id, key) {
+            None => unpinned.push(key.as_str()),
+            Some(pin)
+                if pin.checksum != agentstack_core::lock::LockedSetting::checksum_of(value) =>
+            {
+                repinned.push(key.as_str())
+            }
+            Some(_) => {}
+        }
+    }
+    if !unpinned.is_empty() {
+        // One line whether the lock predates settings pins entirely or is
+        // merely stale for a key: the finding and the fix are the same, and
+        // splitting them would give the user two sentences with one action.
+        report.line(
+            Level::Warn,
+            format!(
+                "{display:<14} {} not pinned in agentstack.lock ({}) \
+                 ↳ agentstack lock --write",
+                super::count(unpinned.len(), "key"),
+                unpinned.join(", ")
+            ),
+        );
+    }
+    if !repinned.is_empty() {
+        report.line(
+            Level::Warn,
+            format!(
+                // Verbs here stay number-agnostic ("moved", "drifted"): these
+                // lines carry a count that is 1 as often as not, and
+                // "1 key differ" is the kind of seam a reader notices instead
+                // of the finding.
+                "{display:<14} {} moved since the lock was written ({}) \
+                 ↳ agentstack lock --write",
+                super::count(repinned.len(), "declared key"),
+                repinned.join(", ")
+            ),
+        );
+    }
+
+    // Leg 2, per key, split by whether we ever wrote the key.
+    let (edited, pending): (Vec<&String>, Vec<&String>) = drifted
+        .iter()
+        .partition(|k| previously_managed.iter().any(|p| p == *k));
+    if !edited.is_empty() {
+        let names: Vec<&str> = edited.iter().map(|k| k.as_str()).collect();
+        report.line(
+            Level::Warn,
+            format!(
+                "{display:<14} {} in {path} drifted from the declared value ({}) \
+                 ↳ agentstack apply --write",
+                super::count(edited.len(), "owned key"),
+                names.join(", ")
+            ),
+        );
+    }
+    if !pending.is_empty() {
+        let names: Vec<&str> = pending.iter().map(|k| k.as_str()).collect();
+        report.line(
+            Level::Warn,
+            format!(
+                "{display:<14} {} not yet in {path} ({}) ↳ agentstack apply --write",
+                super::count(pending.len(), "key"),
+                names.join(", ")
+            ),
+        );
+    }
+    // Keys we own but no longer declare are a pending prune, not drift — the
+    // value on disk is one WE put there and the manifest has since dropped.
+    if !plan.removed.is_empty() {
+        report.line(
+            Level::Warn,
+            format!(
+                "{display:<14} {} still in {path} after being dropped from the manifest ({}) \
+                 ↳ agentstack apply --write",
+                super::count(plan.removed.len(), "key"),
+                plan.removed.join(", ")
+            ),
+        );
+    }
+
+    // The full chain holds — and only then is the strong sentence said.
+    if unpinned.is_empty() && repinned.is_empty() && drifted.is_empty() && plan.removed.is_empty() {
+        report.line(
+            Level::Ok,
+            format!(
+                "{display:<14} {} in {path} match agentstack.lock",
+                super::count(declared_keys.len(), "key")
+            ),
+        );
+    }
+}
+
 fn check_instruction_reproducibility(manifest: &Manifest, dir: &Path, report: &mut Report) {
     use crate::resolve::{instruction_lock_status_with, InstructionLockStatus};
     let lock = crate::lock::Lock::load(dir).unwrap_or_default();

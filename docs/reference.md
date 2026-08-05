@@ -139,15 +139,15 @@ agentstack x restore <adapter>       # single-slot config restore (fallback)
 Reverted files show up as pending again; both verbs read the same recorded
 writes and either can roll each one back.
 
-### Where did this come from? (`agentstack why`)
+### Where did this come from? (`agentstack x why`)
 
 Under the default routing a served capability writes **no file**, so there is
-nothing on disk to inspect. `agentstack why <name>` is the answer to "where did
-this come from, and where is it live right now":
+nothing on disk to inspect. `agentstack x why <name>` is the answer to "where
+did this come from, and where is it live right now":
 
 ```text
-agentstack why github          # one card: origin, pin, approval, live, written, reach
-agentstack why github --json   # the same facts, machine-readable
+agentstack x why github          # one card: origin, pin, approval, live, written, reach
+agentstack x why github --json   # the same facts, machine-readable
 ```
 
 It takes the **name** of a server, skill, house rule, hook, extension, or
@@ -1813,9 +1813,11 @@ The generated command tree and the one-glance census, unchanged. Everything abov
 The full command surface, generated from the CLI's own command tree by
 `agentstack x self docs --write` (CI fails if this list goes stale). Bare
 `agentstack --help` deliberately shows only the **everyday commands** —
-`init`, `status`, `add`, `search`, `apply`, `doctor`, `lock`, `lib`, `toolset`,
-`use`, `yes`, `run`, `trust`, `undo`, `adopt`, `why`, `secret` — seventeen
-verbs. The rest sit one hop away
+`init`, `status`, `add`, `search`, `apply`, `doctor`, `lock`, `toolset`,
+`use`, `yes`, `run`, `trust`, `undo`, `adopt`, `secret` — fifteen
+verbs. A verb earns that screen when the product itself can tell you to run
+it: a first-run step, a `doctor` fix line, or a machine-readable
+`next_action`. The rest sit one hop away
 under `agentstack x` — run bare `agentstack x` for the grouped listing — and
 are **fully supported**, each with its own `--help`; **hidden does not mean
 deprecated or unsupported**. Every hidden command also still runs at its own
@@ -1843,7 +1845,7 @@ you need the exact verb, flag, or subcommand.
 - **`publisher`** _(hidden)_ — Your publishing key, and the publishers you recognize — subcommands `show/trust`
 - **`lock`** — Resolve each toolset's skill + server refs and pin `agentstack.lock` — flags `--toolset/--update/--upgrade/--all/--with-instructions/--yes/--write`
 - **`try`** _(hidden)_ — Try a skill without installing anything: stage, scan, and emit a wrapper prompt on stdout for piping into any agent CLI — flags `--skill/--rev/--subpath/--allow-flagged`
-- **`lib`** — The central library: the capabilities you keep, ready for any project — subcommands `new/add/add-server/add-extension/add-hook/list/remove/remove-server/remove-extension/remove-hook/trash/sync/pack-init/link/unlink/sources/reorder`
+- **`lib`** _(hidden)_ — The central library: the capabilities you keep, ready for any project — subcommands `new/add/add-server/add-extension/add-hook/list/remove/remove-server/remove-extension/remove-hook/trash/sync/pack-init/link/unlink/sources/reorder`
 - **`toolset`** — Work with toolsets: name one that bundles what you already have — subcommands `create/rename/delete/list`
 - **`use`** — Toolset: switch to one — its servers and skills go live in your CLIs — flags `--target/--scope/--write/--allow-unresolved/--prune-foreign/--no-gitignore/--list/--json`
 - **`yes`** — Review and activate the files you dropped into this project — one step — flags `--yes`
@@ -1867,7 +1869,7 @@ you need the exact verb, flag, or subcommand.
 - **`mcp`** _(hidden)_ — Run agentstack as an MCP server over stdio (for an agent to call) — flags `--auto-project/--transparent`
 - **`diff`** _(hidden)_ — Show drift between the manifest and the on-disk configs — flags `--target/--profile/--scope/--json`
 - **`explain`** _(hidden)_ — Explain a server, skill, or instruction before you rely on it — flags `--json`
-- **`why`** — Where did this come from, and where is it live right now? — flags `--json`
+- **`why`** _(hidden)_ — Where did this come from, and where is it live right now? — flags `--json`
 - **`optimize`** _(hidden)_ — Turn agentstack's collected signals into concrete recommendations — flags `--json/--write/--since`
 - **`proxy`** _(hidden)_ — Start the wire relay: a localhost proxy in front of the Anthropic API — flags `--port/--upstream`
 - **`secret`** — Manage secrets in the OS keychain — subcommands `set/get/rm/list`

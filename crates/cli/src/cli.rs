@@ -11,15 +11,19 @@
 //! each of the four ideas the help already promises — Setup · Toolset · Status
 //! · Undo.
 //!
-//! That derivation yields seventeen, not ten. It is the honest number: `lock`,
+//! That derivation yields fifteen, not ten. It is the honest number: `lock`,
 //! `secret` and `adopt` are here because guidance names them, and hiding one to
 //! reach a rounder count would trade a real guarantee for a tidier screen.
 //!
-//! `lib` and `why` are the two the same rule adds under dynamic delivery.
-//! The central library is where capabilities are kept, so `lib` is the spine a
-//! reader reaches for daily, not an advanced tool; and once nothing is written
-//! to disk, `why <name>` is the ONLY answer to "where did this come from?" —
-//! a question a hidden command cannot be the answer to.
+//! `lib` and `why` were briefly visible on an argument from importance — the
+//! library is where capabilities are kept, and `why` answers "where did this
+//! come from?" when nothing is on disk. Importance is not the rule. The rule
+//! asks whether an EMITTER can name a command, and neither is named by a
+//! first-run rung, by a `↳ fix` line, or by a machine `next_action` / `fix`
+//! field: doctor's one mention of `lib` (a linked folder that vanished) already
+//! prints `agentstack x lib unlink`, and nothing anywhere emits `why` at all.
+//! Both are therefore behind `x`, on exactly the terms `guard` and `gateway`
+//! are — commands guidance may still name, listed one hop away.
 //!
 //! Everything else moves behind `agentstack x <command>` — the same commands,
 //! one hop away, listed and grouped by [`namespace_listing`]. Nothing is
@@ -221,6 +225,7 @@ pub enum Command {
     /// Any folder can be linked as a source, several at once; the first source
     /// holding a name wins. `~/.agentstack/lib/` is the one you start with.
     /// `agentstack lib list` shows what is in it.
+    #[command(hide = true)]
     Lib(LibArgs),
 
     // ── Activate & run ───────────────────────────────────────────────────
@@ -429,10 +434,13 @@ Examples:
     /// Takes the NAME of a server, skill, house rule, hook, extension, or
     /// setting. Not a tool name — mapping a tool back to its server needs a
     /// live connection to that server, so `why` will not guess one.
-    #[command(after_help = "\
+    #[command(
+        hide = true,
+        after_help = "\
 Examples:
   agentstack why github
-  agentstack why sql-review --json")]
+  agentstack why sql-review --json"
+    )]
     Why(WhyArgs),
 
     /// Turn agentstack's collected signals into concrete recommendations.
@@ -3221,9 +3229,9 @@ pub const NAMESPACE: &str = "x";
 
 /// What `agentstack x` prints: the rest of the toolbox, grouped by task.
 ///
-/// Grouped by the same headings as `--help --all`, minus the seventeen
-/// commands the default help already lists — this screen is the complement of
-/// that one, not a second copy of it.
+/// Grouped by the same headings as `--help --all`, minus the fifteen commands
+/// the default help already lists — this screen is the complement of that one,
+/// not a second copy of it.
 pub fn namespace_listing() -> String {
     String::from(
         "agentstack x — the rest of the toolbox. Every one of these also runs at its\n\
@@ -3231,15 +3239,15 @@ pub fn namespace_listing() -> String {
          same command. Run `agentstack x <command> --help` for flags and details.\n\
          \n  \
          Set up      up · adapters · settings · self · completions\n  \
-         Edit        set · remove · install · export · import\n  \
+         Edit        set · remove · install · lib · export · import\n  \
          Share       share · receive · publisher\n  \
          Render      instructions · session · diff · unrender · uninstall · delivery\n  \
          Undo        restore\n  \
-         Protect     explain · guard · sign · verify\n  \
+         Protect     explain · why · guard · sign · verify\n  \
          Run         kill · shim · workflow · image · gateway · mcp · try\n  \
          Inspect     report · lease · optimize · proxy\n\
          \n\
-         The everyday seventeen are on `agentstack --help`. For all of it at once,\n\
+         The everyday fifteen are on `agentstack --help`. For all of it at once,\n\
          including the fixed actions a graphical panel invokes:\n  \
          agentstack --help --all\n",
     )

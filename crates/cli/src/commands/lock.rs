@@ -183,7 +183,8 @@ pub fn preview(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
         (false, false) => {
             println!(
                 "  nothing to pin — this project declares no skills, servers, instructions, \
-                 extensions, workflows, or packages, so no agentstack.lock would be written."
+                 settings, extensions, workflows, or packages, so no agentstack.lock would \
+                 be written."
             );
         }
     }
@@ -314,6 +315,12 @@ fn pin_all(ctx: &super::Context, args: &LockArgs) -> Result<Pinned> {
     // pruned. Resolution is library-aware and fetches git sources.
     let extensions = record_extension_pins(&ctx.dir, manifest, &library, &lib_home, &store)?;
 
+    // Native settings keys (G18) are manifest-global like instructions: pin
+    // them regardless of the profile selection. Nothing is fetched and nothing
+    // can fail to resolve, so there is no strict/lenient split — the values are
+    // already in hand, in the manifest this command just validated.
+    let settings = record_setting_pins(&ctx.dir, manifest, &store)?;
+
     // Governed workflows (D7 W1) are manifest-global like extensions: pin them
     // regardless of the profile selection. Strict — an undigestable or
     // sourceless entry is an error, stale pins for undeclared names are
@@ -374,6 +381,7 @@ fn pin_all(ctx: &super::Context, args: &LockArgs) -> Result<Pinned> {
         (extensions, "extension"),
         (workflows, "workflow"),
         (packages, "package"),
+        (settings, "settings key"),
     ] {
         if n > 0 {
             pinned_parts.push(super::count(n, what));
@@ -602,6 +610,62 @@ pub(crate) fn record_instruction_pins(
         lock.retain_instruction_names(&declared);
     }
     // Don't churn the lockfile (or the trust digest) for a byte-identical pin.
+    if lock != before {
+        lock.save(dir)?;
+    }
+    Ok(pinned)
+}
+
+/// Pin every top-level key the manifest declares under `[settings.*]` (G18),
+/// at the grain AgentStack actually owns: one pin per `(target, key)`, over the
+/// value **as declared** — `${REF}`s left unresolved, so the pin is the same on
+/// every machine and no resolved secret can reach a committed lockfile
+/// (`LockedSetting`).
+///
+/// Strict like the other manifest-global pins: pins for `(target, key)` pairs
+/// the manifest no longer declares are pruned, so a removed key cannot leave a
+/// stale pin behind for `doctor` to measure against. Unlike them there is no
+/// lenient mode and no failure path — nothing is fetched, nothing is read from
+/// disk, and the values are already in hand.
+///
+/// A `[settings.<id>]` whose value is not a table declares no keys and pins
+/// nothing. That shape is a validation error `refuse_invalid_manifest` has
+/// already rejected before this runs, and `doctor` reports it in its own words;
+/// skipping it here keeps this function from inventing a third opinion about a
+/// manifest error. Whether `<id>` is a CLI we know is deliberately NOT consulted:
+/// the pin covers declared content, and content declared for a harness we have
+/// no adapter for is still content the user reviewed.
+///
+/// Returns how many keys pinned.
+pub(crate) fn record_setting_pins(
+    dir: &Path,
+    manifest: &Manifest,
+    store: &crate::store::Store,
+) -> Result<usize> {
+    let mut lock = Lock::load(dir)?;
+    let before = lock.clone();
+    let mut keep: Vec<(String, String)> = Vec::new();
+    let mut pinned = 0usize;
+    for (target, value) in &manifest.settings {
+        let Some(obj) = value.as_object() else {
+            continue;
+        };
+        for (key, declared) in obj {
+            // `pin_settings_key` is the sole production site for this checksum:
+            // it deposits the canonical bytes it hashed, so a later re-gate can
+            // show WHICH lines of the value moved (`Store::pin_settings_key`).
+            let checksum = store.pin_settings_key(target, key, declared);
+            keep.push((target.clone(), key.clone()));
+            lock.upsert_setting(agentstack_core::lock::LockedSetting {
+                target: target.clone(),
+                key: key.clone(),
+                checksum,
+            });
+            pinned += 1;
+        }
+    }
+    lock.retain_settings(&keep);
+    // Don't churn the lockfile (or the trust digest) for byte-identical pins.
     if lock != before {
         lock.save(dir)?;
     }

@@ -276,6 +276,49 @@ impl Store {
         pin
     }
 
+    /// **The pinning act, for one owned native-settings key** (G18). Sibling of
+    /// [`pin_server_definition`] and closest to it in shape: both digest a text
+    /// blob that lives in the manifest rather than a file on disk, and both
+    /// deposit exactly the bytes they hashed.
+    ///
+    /// Why a function here and not `LockedSetting::checksum_of` called at the
+    /// lock site: the checksum alone is what `doctor` needs, but a *pin* — the
+    /// value that goes into `agentstack.lock` — must leave its bytes behind, or
+    /// a later re-gate can say a settings value changed without being able to
+    /// show what it changed from. Routing the lock's only production pin site
+    /// through here makes that deposit a property of pinning instead of call-
+    /// site discipline, the same argument [`pin_instruction`] makes.
+    ///
+    /// The digest is `LockedSetting::checksum_of` verbatim — no second digest
+    /// path, and the canonicalization lives in core beside the struct so the
+    /// probing side computes the identical value.
+    ///
+    /// `target`/`key` only name the deposited file for a human browsing the
+    /// store; they are not part of the address, so two harnesses declaring an
+    /// identical value share one content directory under whichever name landed
+    /// first. Readers take the single file they find, never a name they expect.
+    ///
+    /// Best-effort like every sibling: a failed deposit never fails the pin, and
+    /// the only cost is the card's honest "no snapshot recorded" line.
+    ///
+    /// [`pin_instruction`]: Store::pin_instruction
+    /// [`pin_server_definition`]: Store::pin_server_definition
+    pub fn pin_settings_key(
+        &self,
+        target: &str,
+        key: &str,
+        value: &serde_json::Value,
+    ) -> Sha256Hex {
+        let canonical = agentstack_core::lock::canonical_settings_json(value);
+        let pin = agentstack_core::lock::LockedSetting::checksum_of(value);
+        let _ = self.deposit_bytes(
+            &std::ffi::OsString::from(format!("{target}.{key}.json")),
+            canonical.as_bytes(),
+            pin.hex(),
+        );
+        pin
+    }
+
     /// **The pinning act, for an integrity-root source** — a native extension
     /// or a governed workflow. Fourth sibling of [`pin`], [`pin_instruction`]
     /// and [`pin_server_definition`], and the pair that deposited nothing at
@@ -1634,6 +1677,7 @@ mod tests {
                 instructions: Vec::new(),
                 executables: Vec::new(),
                 workflows: Vec::new(),
+                settings: Vec::new(),
             };
 
             let manifest: crate::manifest::Manifest =
