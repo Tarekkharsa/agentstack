@@ -267,6 +267,7 @@
 <li><a href="#how-the-tiers-are-defined">How the tiers are defined</a></li>
 <li><a href="#the-matrix">The matrix</a></li>
 <li><a href="#what-each-adapter-manages">What each adapter manages</a></li>
+<li><a href="#which-adapters-get-the-host-guard">Which adapters get the host guard</a></li>
 <li><a href="#when-an-upstream-cli-changes-its-schema">When an upstream CLI changes its schema</a></li>
 <li><a href="#why-conformance-runs-nightly-not-on-pull-requests">Why conformance runs nightly, not on pull requests</a></li>
 <li><a href="#adding-or-overriding-an-adapter">Adding or overriding an adapter</a></li>
@@ -338,7 +339,31 @@
 <li><strong>Extensions</strong> — a plugin directory the tool loads code from. Declared for two adapters, discovered read-only.</li>
 <li><strong>Headless run</strong> — a prompt-in/text-out invocation, which is what <code>agentstack run &lt;cli&gt; --prompt</code> (the protected default) and workflow steps drive. Only two adapters declare one.</li>
 </ul>
-<p>Two things this table deliberately does not tell you. It does not say a <code>yes</code> cell is nightly-verified — cross-reference <a href="#the-matrix">the matrix</a> for that. And it does not say the tool is <em>confined</em>: what AgentStack enforces once a CLI is running is a separate question, answered in the <a href="enforcement.html">enforcement matrix</a>.</p>
+<p>Two things this table deliberately does not tell you. It does not say a <code>yes</code> cell is nightly-verified — cross-reference <a href="#the-matrix">the matrix</a> for that. And it does not say the tool is <em>confined</em>: what AgentStack enforces once a CLI is running is a separate question, answered in the <a href="enforcement.html">enforcement matrix</a> and, per CLI, in the next section.</p>
+<h2 id="which-adapters-get-the-host-guard">Which adapters get the host guard<a class="hlink" href="#which-adapters-get-the-host-guard" aria-label="Link to this section">#</a></h2>
+<p>Writing a CLI's config and refereeing what that CLI then does are two different jobs, and the second is not available on every adapter. <code>agentstack guard install</code> wires <code>agentstack guard check</code> into a <strong>detected</strong> CLI's own pre-tool-use hook; per call it can then block destructive commands, any access to <code>[policy.filesystem] deny</code> globs (machine ∪ project — a repo can only add), and writes outside the workspace plus <code>[guard] allow_roots</code> plus temp. It is cooperative by construction — the CLI chooses to ask — so it catches an agent's accidents, not a determined attacker. <code>agentstack guard status</code> prints this same list for the machine in front of you, marking which of the hooked CLIs it actually detected.</p>
+<div class="tblwrap"><table>
+<thead><tr><th>Adapter</th><th>Host guard</th><th>Where the hook lives</th></tr></thead><tbody>
+<tr><td><code>claude-code</code></td><td>yes</td><td><code>~/.claude/settings.json</code> — <code>PreToolUse</code></td></tr>
+<tr><td><code>vscode</code></td><td>yes, through the entry above</td><td>VS Code agent mode reads the same user-scope Claude-format hooks. Best-effort: VS Code's hook support is in Preview and an organization can disable it</td></tr>
+<tr><td><code>codex</code></td><td>yes</td><td><code>~/.codex/hooks.json</code> — <code>PreToolUse</code></td></tr>
+<tr><td><code>gemini</code></td><td>yes</td><td><code>~/.gemini/settings.json</code> — <code>BeforeTool</code></td></tr>
+<tr><td><code>antigravity</code></td><td>yes</td><td><code>~/.gemini/config/hooks.json</code> — <code>PreToolUse</code></td></tr>
+<tr><td><code>cursor</code></td><td>yes</td><td><code>~/.cursor/hooks.json</code> — <code>beforeShellExecution</code>, <code>beforeReadFile</code></td></tr>
+<tr><td><code>windsurf</code></td><td>yes</td><td><code>~/.codeium/windsurf/hooks.json</code> — <code>pre_run_command</code>, <code>pre_write_code</code>, <code>pre_read_code</code>, <code>pre_mcp_tool_use</code></td></tr>
+<tr><td><code>copilot-cli</code></td><td>yes</td><td><code>~/.copilot/hooks/agentstack-guard.json</code> (a file the guard owns outright)</td></tr>
+<tr><td><code>opencode</code></td><td>yes</td><td><code>~/.config/opencode/plugins/agentstack-guard.js</code> (guard-owned)</td></tr>
+<tr><td><code>pi</code></td><td>yes</td><td><code>~/.pi/agent/extensions/agentstack-guard.ts</code> (guard-owned)</td></tr>
+<tr><td><code>claude-desktop</code></td><td><strong>no — no hook surface exists</strong></td><td>no <code>PreToolUse</code>-style hook exists on that surface, so there is nothing for a guard to ride</td></tr>
+<tr><td><code>junie</code></td><td><strong>no — no hook surface exists</strong></td><td>only a static action allowlist; no per-call hook</td></tr>
+<tr><td><code>kiro</code></td><td><strong>no — not wired yet</strong></td><td>AgentStack has not built one. This is a gap in AgentStack, not in Kiro: this repo's descriptor records Kiro's MCP config only, not a hook file the guard could install into</td></tr>
+</tbody></table></div>
+<p><strong>The two "no" reasons are different promises, and the page keeps them apart.</strong> "No hook surface exists" is a fact about the CLI — nothing to build, nothing to wait for. "Not wired yet" is a fact about AgentStack — the CLI could be covered, and is not. A security list that blurred them would read as <em>impossible</em> where the truth is <em>unbuilt</em>. Kiro leaves the second list only when this repo knows all three things a guard target needs: a detect path, the concrete hook file, and the per-entry shape uninstall can find again. The adapter descriptors in <code>crates/adapters/descriptors/</code> are the authority for that, so a hook format guessed from outside them would be coverage AgentStack cannot honestly claim.</p>
+<p>Two reach notes, because "guarded" is not uniform inside a guarded CLI:</p>
+<ul>
+<li>Cursor's <code>beforeMCPExecution</code> is deliberately <strong>not</strong> registered — an MCP call has no file or shell surface the guard can judge without inventing new policy.</li>
+<li><strong>Shell</strong> writes reach the guard on every wired CLI, because they arrive as commands. <strong>File-tool</strong> writes reach it on two signals: a fixed list of writer tool names, and — beyond that list — the <em>shape of the payload</em>, so a tool this build has never heard of is still confined when the call plainly intends a write. The exact reach and the named residual are in the <a href="enforcement.html#filesystem--write">enforcement matrix</a>.</li>
+</ul>
 <h2 id="when-an-upstream-cli-changes-its-schema">When an upstream CLI changes its schema<a class="hlink" href="#when-an-upstream-cli-changes-its-schema" aria-label="Link to this section">#</a></h2>
 <p>Thirteen adapters means thirteen vendors who can change a config format without telling us. Here is the honest sequence.</p>
 <p><strong>Tier 1.</strong> The nightly run installs the vendor's new release, renders a config, and the CLI rejects it — the job goes red, typically within a day of the release. The fix is a descriptor change, not code. Until then, your <code>agentstack apply</code> is still writing the old shape.</p>

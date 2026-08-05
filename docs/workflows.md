@@ -57,7 +57,14 @@ until you review and pin it.
   each other's.
 - **A complete evidence tree.** The run records which orchestration bytes
   ran, what authority every step had, and the full spawn tree — so you can
-  audit exactly what happened.
+  audit exactly what happened. Each step is a protected run with its own
+  report, and a call its **toolset fence** refused (the project divides its
+  capabilities into toolsets and no open lease selects one that exposes the
+  named server) appears there in its own **Fence refusals** section, naming
+  the server, the tool, the toolset that would have exposed it, and the
+  reason. It is a `fence_refused` row in that run's `events.jsonl`, kept
+  deliberately out of the Tool-calls section: a refused call was never
+  dispatched, so it must not inflate the count of calls the step made.
 - **Resume without re-running.** The evidence log doubles as the resume
   journal: an interrupted run replays its completed steps' results (verified
   against each step's recorded output digest) and only executes what never
@@ -107,6 +114,24 @@ paths, and both are contained by the out-of-thread watchdog — which force-exit
 the process at the wall ceiling plus grace, behind an armed no-I/O exit so a
 blocked write cannot keep a runaway alive — rather than by a ceiling. Removing
 them is what the recorded QuickJS-in-wasmtime fallback is for.
+
+**The wall-clock budget is not an engine ceiling.** `max_wall_seconds` is inert
+inside the interpreter: the engine is clock-free, and the number is surfaced to
+the script through `budget` only. Enforcement lives in two places outside it,
+both in the CLI:
+
+- the **drive loop's cooperative deadline**, checked at every batch boundary.
+  Once the effective ceiling has passed it refuses the *next* batch and fails
+  the workflow cleanly through the normal error path (exit `1`); and
+- the **out-of-thread watchdog** above, armed before the first step at the
+  effective ceiling plus a fixed grace, which force-exits the process
+  (exit `124`) whatever the interpreter is doing.
+
+The clock is therefore live-run state, never replayable state — which is
+deliberate: a `--resume` must not spuriously time out replaying a run that
+originally used its full wall clock, so a resumed run restarts at the full
+effective ceiling. The effective ceiling itself is the narrowest of the machine
+cap, the manifest request and the script's own `meta` request.
 
 ## Writing one
 

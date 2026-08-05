@@ -6,6 +6,111 @@ binaries, checksums, and provenance attestations for each entry.
 
 ## Unreleased
 
+**Behaviour change you will notice: delivery now needs your yes.**
+`agentstack apply --write` and `agentstack use --write` refuse a project that
+is untrusted or whose reviewed content has drifted. Before this, an
+unreviewed repository still got its MCP server config written into your CLI
+and its skill files materialized on disk; only launching through agentstack
+was gated. Both refusals exit nonzero and name `agentstack trust .` as the one
+thing to do. If a script of yours calls `apply --write` or `use --write` on a
+fresh clone, put `agentstack trust` in front of it — `--allow-unresolved`
+forgives a missing secret, never a missing consent.
+
+- **The trust gate covers all five delivered kinds.** Servers, skills,
+  instructions, hooks, and extensions now sit behind the same refusal, which
+  is what the enforcement docs had claimed of them for some time. Servers are
+  refused in the `apply` / `use` / `doctor --fix` write choke point; skills at
+  materialization, which also catches `add --write`'s additive path;
+  instruction fragments because, though nothing executes them, they land in
+  the region a harness reads straight into an agent's context. Deliberately
+  outside the gate: the machine-layer manifest (your own house rules are not
+  held hostage by a repository), machine-layer instruction fragments, and the
+  inert direction — removal and prune plans.
+
+- **Accepting drifted content is not the same as approving it.** `lock --write`
+  accepts the new bytes; it does not answer the consent question those bytes
+  reopened. Re-locking drifted content therefore no longer delivers it — the
+  next command still shows you the review.
+
+- **A command no longer refuses its own delivery.** `add --write` and the
+  panel's edit verbs write the manifest and lockfile and then deliver in the
+  same run, and those bytes *are* the consent digest. They now judge the gate
+  against the trust state as it stood when the command started. Nothing is
+  re-pinned: the project is left reading `Changed`, so the next command
+  re-gates and you still meet the review. Hooks take no such relaxation — they
+  always get the full consent ceremony.
+
+- **Setting a preference does not cost the project its review.** Writing a
+  preference-shaped manifest key moved the consent digest and walled you off
+  from the very journey the command exists to start (`x delivery
+  render-locally --write`, then `apply --write`). Trust that was valid
+  immediately before such a write is now carried across it. The rule reaches
+  exactly two keys — `[delivery] render_locally` and `[meta] gitignore` — and
+  it never creates trust, never resolves a pending review, and never covers
+  `agentstack.lock`.
+
+- **A yes follows the project you name, not the directory you launched from.**
+  `agentstack trust` honours `--manifest-dir`, so previewing or granting trust
+  for a project by absolute path works from any working directory. The
+  candidate order is typed path, then `--manifest-dir`, then the cwd walk, and
+  every candidate still has to earn project discovery. The MCP server now
+  prefers `AGENTSTACK_MANIFEST_DIR` over the process cwd, so an explicitly
+  configured project stops losing to an accident of launch.
+
+- **Native settings are pinned** (`[[setting]]` rows in `agentstack.lock`).
+  Settings are pinned per (target, key) — the grain agentstack actually owns —
+  so a key you edited yourself in a file agentstack does not declare can never
+  read as drift. The checksum covers the value as declared, with `${REF}`
+  unresolved. Drift is reported as two legs with different fixes and it
+  **warns rather than refuses**: settings are inert config in a file the
+  harness owns, and a project declaring no `[settings.*]` keeps a
+  byte-identical lockfile.
+
+- **Every pinned kind now keeps a copy of the bytes you approved.**
+  Extensions, workflows, and blueprints deposit their approved source into the
+  content store, bounded at 500 files / 8 MiB to match the diff renderer's own
+  caps. Before this, a re-review of the two executable kinds could say the
+  bytes had moved but not which lines moved. No lockfile field changed and no
+  pin digest moved; a lockfile written before this simply shows the honest
+  "the bytes you approved were not recorded" line instead of a diff.
+
+- **Fifteen top-level verbs.** `lib` and `why` move behind `agentstack x`.
+  Nothing is removed and both spellings produce identical stdout, stderr, and
+  exit code.
+
+- **More refusals leave evidence.** A fence refusal now reaches the run report
+  in its own section; the render-time egress refusal is recorded through the
+  gateway's own recorders, naming the declared host and never the URL; guard
+  system refusals are recorded under an unforgeable synthetic subject; and the
+  trust store logs `decide` / `undecide` alongside its other mutations, so
+  every store mutation is evidence again.
+
+- **The guard's write confinement is payload-shaped, not name-shaped.** Two
+  pre-existing holes close with it: `str_replace_editor` was on the writer
+  list but dead, and Pascal-case path keys produced no event at all. Kiro's
+  coverage gap is now reported as `NOT_WIRED` (a fact about agentstack) rather
+  than `NO_HOOK_SURFACE` (a fact about the CLI); no Kiro hook format was
+  invented.
+
+- **The sandbox result-file bind gets a real 4 MiB `RLIMIT_FSIZE` kernel cap**,
+  rather than a limit checked after the fact.
+
+- **`doctor`'s hooks check judges the scope `apply` would write.** It
+  hardcoded global scope, so for a repo project it diffed the manifest's hooks
+  against `~/.claude/settings.json` — a file `apply` at project scope never
+  touches. A hook written seconds earlier was reported stale forever, with a
+  fix line naming a command that would not change the file it had just judged.
+
+- **The MCP catalog stops advertising a keep-pinned item it cannot serve**, and
+  the protected run's refusal names a remedy that works instead of one that
+  does nothing.
+
+- **The example suite shows the yes it was skipping.** Four of the twelve
+  demos walked a project from nothing to rendered config or materialized
+  skills with no human consent anywhere. The consent step is added where a
+  person actually stands, never as a blanket grant at the top of a file. Order
+  is now consistent everywhere: `lock --write` first, then the grant.
+
 - **The review card has a machine-readable form** (`trust-card-diff-v1`).
   `agentstack trust --preview` now carries a `review` object beside the fields
   it already emitted: every reviewed item with what it runs, what it contacts,

@@ -104,10 +104,41 @@ setup, so the gate mainly appears in two situations: a repository you
 **changed** since you approved it.
 
 Untrusted means inert — a repo's declarations cannot spawn servers, enter agent
-context, or resolve secrets until a human has read them. Trust is bound to the
-content it approved, so a `git pull` that changes pinned bytes drops the repo
-back to inert on purpose. `agentstack trust .` prints the full declared surface
-and asks. Details: [trust a cloned repo](howto/trust-a-repo.md).
+context, or resolve secrets until a human has read them, and nothing is written
+for them either: no native MCP server config, no skill files, no compiled
+`CLAUDE.md` / `AGENTS.md` region, no hooks, no extensions. Each refuses out loud
+and exits nonzero. Settings, removal and machine-level content stay outside the
+gate, because none of them authorizes new content.
+
+Trust is bound to the content it approved, so a `git pull` that changes pinned
+bytes drops the repo back to inert on purpose. `agentstack trust .` prints the
+full declared surface and asks. Details:
+[trust a cloned repo](howto/trust-a-repo.md).
+
+## I re-locked and it still refuses to deliver
+
+Because re-locking is not reviewing. The lockfile is part of what you consent
+to, so `agentstack lock --write` *always* makes an existing grant stale — new
+pins are new consent. It accepts the new bytes; only `agentstack trust .`
+reviews them, and only the review re-opens delivery.
+
+```bash
+agentstack lock --write   # accept the new bytes
+agentstack trust .        # review them — this is the step that unblocks
+```
+
+The order is the same on a fresh project: lock first, then trust. `trust`
+refuses an unpinned surface, so there is no other way round. Full walkthrough:
+[lock first, then trust](troubleshooting.md#lock-first-then-trust).
+
+## I added a skill and now everything else refuses
+
+That is the design. `agentstack add … --write` writes the manifest and lockfile
+and delivers in the same run — it judges trust as it stood when the command
+started, so it never refuses the thing you just asked for. But it does not
+re-approve the project on your behalf: a new capability is content you have not
+read yet. So the project reads `trust stale (content changed)` and the next
+command re-gates. Run `agentstack trust .` and the review is over in one step.
 
 ## I dropped a skill folder into `.agentstack/skills/` — how do I use it without editing any config?
 

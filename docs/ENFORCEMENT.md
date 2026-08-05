@@ -76,9 +76,13 @@ Trusted does **not** mean:
 Conversely, **untrusted project declarations are inert on automatic and
 experimental execution paths**: the auto-project gateway does not spawn or
 contact their MCP servers or resolve their secrets, and `tools_execute` refuses
-to begin. This does not sandbox arbitrary repository code, prevent a user from
-running it manually, or block an explicit static `agentstack apply`; those are
-separate authorization and execution paths.
+to begin. Since the write gate reached all five capability kinds, an explicit
+static `agentstack apply --write` is blocked too: it renders no server config,
+no skills, no instruction fragments, no hooks and no extensions for a project
+that is untrusted or drifted. What this still does *not* do is sandbox
+arbitrary repository code or prevent a user from running it by hand — those are
+separate authorization and execution paths, and a harness that reads bytes
+already on disk starts them outside agentstack entirely.
 
 ## Policy is authority, not isolation
 

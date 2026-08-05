@@ -29,7 +29,7 @@ undone by their own verb, because they are not file writes:
 | a recorded write (`apply` / `use` / `session` / settings / hooks / instructions) | `agentstack x restore <id> --write` | puts the changed native config back and marks it pending |
 | a [gateway](../concepts.md) registration | `agentstack x gateway disconnect <cli> --write` | removes the gateway entry from that CLI's global config (`--all` for every CLI) |
 | the destructive-command [guard](../concepts.md) | `agentstack x guard uninstall` | removes every hook it installed and sets `[guard] enabled = false` |
-| [trust](../concepts.md) for a repo | `agentstack trust --revoke` | withdraws consent — the repo goes inert again |
+| [trust](../concepts.md) for a repo | `agentstack trust --revoke` | withdraws consent — the repo goes inert again: no servers written or served, no skills materialized, no house rules compiled, no hooks or extensions rendered |
 | an active [session](../concepts.md) | `agentstack x session end` | reverts this directory's ephemeral toolset (`--all` for every session) |
 | a server config the rendered lane left behind | `agentstack x unrender --write` | removes only server files AgentStack wrote for harnesses now served live; previews without `--write`, and is itself undoable |
 | a server or skill in the manifest | `agentstack x remove <name> --write` | drops it from the manifest and the lockfile |
@@ -37,6 +37,14 @@ undone by their own verb, because they are not file writes:
 In v0.18.0 and later, `agentstack undo` shows the same record as a timeline —
 pick a point and it reverts to there. See
 [newer than the stable release](../start.md#newer-than-the-stable-release).
+
+**Undoing is never gated.** Delivering into a project needs
+[a review first](trust-a-repo.md) — writing a server config, materializing a
+skill, compiling house rules, rendering a hook or an extension all refuse until
+you run `agentstack trust .`. Taking those bytes back off disk does not. Every
+verb above, plus `x unrender` and `x uninstall`, works in a repo that is
+untrusted or whose review has gone stale, because removal is the inert
+direction. You never have to consent to something in order to get rid of it.
 
 **Limits.** `restore` reverts agentstack's own recorded config writes, not side
 effects a tool already had — a file a server deleted is not brought back.

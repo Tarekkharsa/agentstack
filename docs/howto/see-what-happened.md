@@ -13,7 +13,7 @@ host run that talks to servers directly leaves nothing to report.
 | To see… | Run |
 | --- | --- |
 | Every tracked run, one line each | `agentstack x report runs` |
-| One run in full — lifecycle, [egress](../concepts.md#egress), tool calls, secret refs, [posture](../concepts.md) | `agentstack x report run <id>` |
+| One run in full — lifecycle, [egress](../concepts.md#egress), tool calls, fence refusals, secret refs, [posture](../concepts.md) | `agentstack x report run <id>` |
 | What each capability costs you in context | `agentstack x report usage` |
 | Every brokered tool call — ok, denied, errored | `agentstack x report calls` |
 | What the `tools` block actually costs per turn, on the wire | `agentstack x report wire` |
@@ -43,11 +43,20 @@ agentstack x explain <name>             # provenance, effective policy, and cont
 brokered yet — runs are tracked when launched with `agentstack run`, and calls
 are brokered through the [gateway](trust-a-repo.md).
 
+**A call that was refused is not a call the run made.** `report run <id>` lists
+tool calls the [fence](../concepts.md#lease-session-or-protected-run-fence)
+turned away in their own **Fence refusals** section, naming the server, the tool,
+the toolset it was asked through, and the reason — deliberately kept out of the
+tool-call count above it, so the number a reviewer reads is what the run
+actually did.
+
 **Before you trust.** `agentstack x explain <name>` is the vet-first command: it
 shows one server or skill's origin and provenance, whether it has drifted from
 its pin, its [effective policy](../reference.md#mcp-firewall-policytools) (the
 tool, egress, and secret-access rules that will actually apply), and its
-per-session context cost. Run it before `agentstack trust .` (see
+per-session context cost. It reads and reports only, so it is not itself gated —
+it works in the untrusted repo you are trying to make a decision about. That is
+the point: run it before `agentstack trust .` (see
 [trust a cloned repo](trust-a-repo.md)) or before adding a capability to a
 toolset.
 

@@ -284,11 +284,17 @@ agentstack adopt --write
 agentstack x lib add-server kibana --file ./kibana.toml --write
 #   then in the manifest:  [toolsets.backend]  servers = ["kibana"]
 
-# After any of them: re-lock, then render into every CLI
+# After any of them: re-lock, review the change, then render into every CLI
 agentstack lock --write
+agentstack trust .          # the manifest and lock both moved — approve them
 agentstack apply --write</code></pre>
-<p>Verbs 1–4 write only the <a href="../concepts.html">manifest</a> (verb 4 also writes your first <a href="../concepts.html">linked library source</a>) — commit-safe, with secrets kept as <code>${REF}</code> placeholders. Nothing reaches a CLI until <code>apply --write</code> renders it. Hand-edit <code>[servers.&lt;name&gt;]</code> in the manifest directly only when you need fields the flags don't cover — native per-adapter keys under <code>extra.&lt;adapter&gt;</code>, a launch <code>cwd</code>, <code>targets</code> scoping, or <code>owner</code>. Whenever you change a toolset's server list, re-lock with <code>agentstack lock --write</code> so the <a href="../concepts.html">lockfile</a> pins the new set, then <code>apply --write</code> to render.</p>
-<p><strong>Limits.</strong> Adding a server does not store its secret, trust it, or run it. Store the value with <code>agentstack secret set GH_PAT</code> (it stays out of the manifest). In the <a href="../howto/trust-a-repo.html">zero-files delivery mode</a>, a new server also stays inert until you re-run <code>agentstack trust .</code>, because the edit changes the <a href="../concepts.html#trust-and-the-consent-digest">manifest digest</a>.</p>
+<p>Verbs 1–4 write only the <a href="../concepts.html">manifest</a> (verb 4 also writes your first <a href="../concepts.html">linked library source</a>) — commit-safe, with secrets kept as <code>${REF}</code> placeholders. Nothing reaches a CLI until <code>apply --write</code> renders it. Hand-edit <code>[servers.&lt;name&gt;]</code> in the manifest directly only when you need fields the flags don't cover — native per-adapter keys under <code>extra.&lt;adapter&gt;</code>, a launch <code>cwd</code>, <code>targets</code> scoping, or <code>owner</code>. Whenever you change a toolset's server list, re-lock with <code>agentstack lock --write</code> so the <a href="../concepts.html">lockfile</a> pins the new set, review it with <code>agentstack trust .</code>, then <code>apply --write</code> to render.</p>
+<p><strong>Why the <code>trust .</code> step is there.</strong> Adding a server changes the manifest, and re-locking changes the lockfile — both are part of the <a href="../concepts.html#trust-and-the-consent-digest">consent surface</a>, so the write re-opens the review. Skip it and <code>apply --write</code> refuses out loud rather than writing a server definition your CLI would launch on its own:</p>
+<pre class="block"><code>✗ refusing to render MCP servers: project at /path/to/repo changed since it
+  was trusted — review and `agentstack trust .` before writing server
+  definitions the harness launches on its own ('github')</code></pre>
+<p>Do it in this order — <code>lock --write</code> first, then <code>trust .</code>. Re-locking after you approve would invalidate the approval you just gave. See <a href="../howto/trust-a-repo.html">trust a cloned repo</a>.</p>
+<p><strong>Limits.</strong> Adding a server does not store its secret, trust it, or run it. Store the value with <code>agentstack secret set GH_PAT</code> (it stays out of the manifest). The review gate is not confined to the live lane: a new server stays inert until you re-run <code>agentstack trust .</code> whichever way it is delivered.</p>
 <ul>
 <li><a href="../concepts.html">Concepts</a> — server, toolset, library, secrets</li>
 <li><a href="../reference.html#adopt-and-add">Reference: <code>adopt</code> and <code>add</code></a></li>

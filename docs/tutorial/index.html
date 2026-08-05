@@ -115,6 +115,15 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
 </head>
 <body>
 <a class="skip-link" href="#main-content">Skip to content</a>
+<div role="note" style="padding:12px 24px;background:#fdf3d8;border-bottom:2px solid #d9b45f;color:#4a3a10;font-size:14px;line-height:1.5">
+  <strong>This tour is behind the binary.</strong> It was written against v0.17.1 and two things have changed since.
+  The review now gates <strong>five</strong> kinds of content — MCP servers, skills, house rules, hooks and native
+  extensions — so <code>apply --write</code> and <code>use --write</code> refuse on a project that is untrusted or has
+  changed since you approved it, and several sequences below are missing their <code>agentstack trust .</code> step.
+  Delivery is also <em>routed</em> now, not chosen during <code>init</code>, so the three-mode picker in the later
+  lessons describes an axis the product retired.
+  For what the current binary does, follow <a href="../start.html" style="color:#7a5b10;font-weight:600">Get started</a>.
+</div>
 <div id="app" style="display:flex;flex-direction:column;height:100vh;overflow:hidden;background:var(--paper);color:var(--ink)">
   <nav id="topnav" style="flex:none;display:flex;align-items:center;gap:20px;padding:12px 24px;background:var(--surface);border-bottom:1px solid var(--line)">
     <a href="../index.html" style="display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--ink)">

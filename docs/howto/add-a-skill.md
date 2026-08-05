@@ -27,7 +27,16 @@ agentstack use --write       # activate it
 Until you approve it, the file is **inert** — nothing resolves, pins, renders,
 or reads it, and no agent sees it. `agentstack trust .` shows the review: what
 will run, what it will contact, what secrets it can read, and the bytes each
-item is pinned to. Undo any of it with `agentstack x restore --last --write`.
+item is pinned to. Skip it and `use --write` refuses out loud and exits
+nonzero — "refusing to materialize skills … review and `agentstack trust .`
+before putting its words into an agent's context". Undo any of it with
+`agentstack x restore --last --write`.
+
+**The order is not interchangeable.** The lockfile is part of the consent
+surface, so `lock --write` re-opens the review — lock first, *then* trust. Doing
+it the other way round throws away the approval you just gave, and re-locking is
+never a way past a refusal: accepting new bytes is not an answer to the question
+they reopen. See [trust a cloned repo](trust-a-repo.md).
 
 `agentstack x lib new <name>` scaffolds the template if you'd rather not start
 from an empty file.
@@ -70,10 +79,26 @@ anything is offered, and a dry run fetches into transient staging — the
 [manifest](../concepts.md), [lockfile](../concepts.md), and content store
 stay untouched until `--write`. The write records the exact commit and
 content checksum in the lockfile, and — where the skill is
-[routed to the rendered lane](../concepts.md#delivery-modes) and the active
-toolset is unambiguous — materializes it into your CLIs' skills directories
-immediately. Where it is served live instead, the honest next step is printed:
-`agentstack trust .`, because the manifest edit re-gates trust
+[routed to the rendered lane](../concepts.md#delivery-modes), the active
+toolset is unambiguous, **and the project was trusted when the command
+started** — materializes it into your CLIs' skills directories immediately.
+That last condition is the one that surprises people. `add` is allowed to
+deliver what it just wrote, because a command must not refuse the thing you
+typed it to get; it is not allowed to deliver into a project that was already
+untrusted or already drifted. In that case the manifest and lock writes stand,
+nothing is materialized, and the command exits nonzero naming the two steps in
+order:
+
+```text
+error: 3 targets failed to materialize (the manifest and lock writes stand —
+  each ✗ above names the blocker; if it is consent, review with
+  `agentstack trust .`, then `agentstack use --write`)
+```
+
+Even a successful add leaves the project reading drifted afterwards — the new
+skill still owes a review — so the *next* command asks for `agentstack trust .`.
+Where the skill is served live instead, the honest next step is printed
+straight away: `agentstack trust .`, because the manifest edit re-gates trust
 ([trust a repo](trust-a-repo.md)); a clean-at-rest project gets
 `session start`.
 

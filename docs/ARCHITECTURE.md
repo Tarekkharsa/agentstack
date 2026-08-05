@@ -64,9 +64,12 @@ manifest + library → resolve + lock → adapters → native CLI config
                                       machine rules
 ```
 
-Static config rendering and governed execution are sibling paths. A normal
-`apply` is an explicit, non-executing render operation; trust gates automatic
-project loading and execution paths, not every config write.
+Static config rendering and governed execution are sibling paths, and both are
+behind the trust gate. `apply` is still an explicit, non-executing render
+operation, but `apply --write` and `use --write` refuse an untrusted or drifted
+project rather than writing native config or materializing skill files. The
+exemptions are stated rather than implied: the machine layer, and the inert
+direction (removal and prune plans).
 
 Generated code follows the same path through a policy-agnostic execution
 domain: the CLI freezes an exact tool grant and limits into an immutable plan;
@@ -188,9 +191,30 @@ web-search = ["*", "!*_delete"]
 ```
 
 `agentstack.lock` pins resolved server definitions, skill-directory content,
-and instruction bytes to SHA-256 digests. Trust separately binds the manifest,
-local overlay, and lockfile into one consent digest. Detached ed25519 signing
+instruction bytes, extension and workflow sources, and native settings to
+SHA-256 digests. Settings are pinned at the grain agentstack owns — one
+`[[setting]]` row per (target, key), checksummed over the canonical JSON of
+the value as declared with `${REF}` unresolved — so an undeclared key a user
+edited themselves can never read as drift. That pin is a review signal, not a
+delivery gate: unlike an unpinned skill or instruction, a drifted settings key
+warns rather than refusing a render, because settings are inert config merged
+into a file the harness owns. Trust separately binds the manifest, local
+overlay, and lockfile into one consent digest. Detached ed25519 signing
 and verification of the lockfile are available as distribution primitives.
+
+Each pin has a matching deposit. The machine-local content store keeps a
+verbatim, content-addressed copy of the bytes a pin covers, which is what lets
+a re-review show *which lines* moved rather than only that the digest did. The
+deposit siblings are one per digest family, never one function with branches,
+so no kind's pin format can silently change: `Store::pin` (skill trees),
+`pin_instruction` (raw file bytes), `pin_server_definition` (one-file
+definitions), `pin_settings_key` (canonical settings JSON),
+`pin_integrity_root` (the strict integrity-root digest extensions and
+workflows use), and `pin_blueprint` (a workflow's approved blueprint, the
+instruction family with containment rules in front of it). Every deposit is
+best-effort and never blocks its pin; reads re-prove the address, and a
+lockfile predating a deposit degrades to an honest "the bytes you approved
+were not recorded" line rather than failing the project.
 
 Key decisions:
 - Skills and instructions are content-pinned like code because they can alter
@@ -213,8 +237,35 @@ The implemented states are **untrusted** and **trusted**. Before confirmation,
 `agentstack trust` summarizes the exact stdio commands, HTTP contacts, secret
 references, and skill pin status. Trust binds to the consent digest, so a
 manifest, local-overlay, or lockfile change re-gates automatically. Automatic
-project loading and experimental execution refuse untrusted content; an
-explicit static `apply` remains a separate user-authorized operation.
+project loading, experimental execution, and **delivery** all refuse untrusted
+content: the gate covers the five kinds `apply` and `use` deliver — servers,
+skills, instructions, hooks, and extensions.
+
+Two rules qualify *when* the gate reads the store, and they are deliberately
+separate seams in `crates/cli` because they answer different questions:
+
+- **`render::prior_trust::PriorTrust` — a command may not refuse itself.**
+  `add --write` and the panel's edit verbs write the manifest and lockfile and
+  then deliver in the same run, and those bytes *are* the consent digest, so a
+  gate reading the store afterwards would refuse the delivery the human just
+  asked for. The gate is therefore judged against the trust state as of
+  command start, captured from a pre-write snapshot. It authorizes nothing
+  new — an untrusted or drifted project was untrusted or drifted before the
+  command ran too — and it does **not** re-pin: the project is left reading
+  `Changed` so the next command re-gates. `PriorTrust::STRICT` is the
+  `Default`, so a call site that captures nothing gets the unrelaxed gate.
+  Hooks take no relaxation at all: `render::hooks` reads the store directly,
+  because hooks always get the full consent ceremony.
+- **`trust_carry::TrustCarry` — a preference-shaped rewrite carries trust.**
+  A write that records only *where* declared capabilities land — `[delivery]
+  render_locally`, `[meta] gitignore` — moves the consent digest without
+  moving the reviewed surface. Trust that was valid immediately before such a
+  write is re-pinned across it. Four properties bound it: it never creates
+  trust, never resolves a pending review, never blesses a race (the digest
+  comes from the pre-write snapshot with the caller's own bytes spliced in,
+  never a disk re-read), and it fails closed on any path that is not one of
+  the two manifest layers — `agentstack.lock` is excluded structurally,
+  because accepting content digests is a human's to give.
 
 Invariant: changing any byte in the manifest/local/lock consent surface changes
 the trust digest. Changing lock-pinned skill, instruction, or library-server
@@ -365,9 +416,10 @@ dimensions to different depths; [`ENFORCEMENT.md`](ENFORCEMENT.md) is the
 authoritative per-cell matrix. This section describes the mechanisms behind it.
 
 **Host mode:** adapters write configs onto the bare machine. Honest framing:
-advisory enforcement — static apply is user-invoked rather than trust-gated,
-while render-time policy and fail-closed secret checks govern what gets
-written. A CLI on the host can still bypass that config and could in principle
+advisory enforcement — a static apply is trust-gated at the write choke point,
+and render-time policy plus fail-closed secret checks govern what gets
+written, but once the bytes are on disk they are the harness's to execute.
+A CLI on the host can still bypass that config and could in principle
 tamper with the trust store itself (Layer 2). What each dimension actually
 enforces on this path is in [`ENFORCEMENT.md`](ENFORCEMENT.md#the-matrix).
 

@@ -35,8 +35,9 @@ agentstack adopt --write
 agentstack x lib add-server kibana --file ./kibana.toml --write
 #   then in the manifest:  [toolsets.backend]  servers = ["kibana"]
 
-# After any of them: re-lock, then render into every CLI
+# After any of them: re-lock, review the change, then render into every CLI
 agentstack lock --write
+agentstack trust .          # the manifest and lock both moved — approve them
 agentstack apply --write
 ```
 
@@ -47,13 +48,29 @@ Hand-edit `[servers.<name>]` in the manifest directly only when you need fields
 the flags don't cover — native per-adapter keys under `extra.<adapter>`, a
 launch `cwd`, `targets` scoping, or `owner`. Whenever you change a toolset's
 server list, re-lock with `agentstack lock --write` so the [lockfile](../concepts.md)
-pins the new set, then `apply --write` to render.
+pins the new set, review it with `agentstack trust .`, then `apply --write` to
+render.
+
+**Why the `trust .` step is there.** Adding a server changes the manifest, and
+re-locking changes the lockfile — both are part of the
+[consent surface](../concepts.md#trust-and-the-consent-digest), so the write
+re-opens the review. Skip it and `apply --write` refuses out loud rather than
+writing a server definition your CLI would launch on its own:
+
+```text
+✗ refusing to render MCP servers: project at /path/to/repo changed since it
+  was trusted — review and `agentstack trust .` before writing server
+  definitions the harness launches on its own ('github')
+```
+
+Do it in this order — `lock --write` first, then `trust .`. Re-locking after you
+approve would invalidate the approval you just gave. See
+[trust a cloned repo](trust-a-repo.md).
 
 **Limits.** Adding a server does not store its secret, trust it, or run it.
 Store the value with `agentstack secret set GH_PAT` (it stays out of the
-manifest). In the [zero-files delivery mode](trust-a-repo.md), a new server also
-stays inert until you re-run `agentstack trust .`, because the edit changes the
-[manifest digest](../concepts.md#trust-and-the-consent-digest).
+manifest). The review gate is not confined to the live lane: a new server stays
+inert until you re-run `agentstack trust .` whichever way it is delivered.
 
 - [Concepts](../concepts.md) — server, toolset, library, secrets
 - [Reference: `adopt` and `add`](../reference.md#adopt-and-add)
