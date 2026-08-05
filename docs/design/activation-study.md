@@ -101,10 +101,13 @@ docs — participants must arrive cold; the task script hands them the URL.
   > byte-identical.
 
 - Confirm the binary they end up with carries the current journey:
-  `agentstack --version` ≥ 0.18.0-rc.2. A bare `| sh` installs the latest
-  *stable* release instead, which is a different and older journey — if their
-  version reads 0.17.x, they used the wrong line and the session should
-  restart from the install.
+  `agentstack --version` ≥ 0.18.0-rc.2. Two other routes hand them an older
+  binary: a bare `| sh` installs the latest *stable* release, and
+  `brew install Tarekkharsa/tap/agentstack` does the same — the tap holds one
+  formula with no prerelease channel, so it advances only on a final release
+  and never carries an RC. Both are a different and older journey — if their
+  version reads 0.17.x, they used one of those instead of the pinned line, and
+  the session should restart from the install.
 - Start a timer at the moment they run the install command; note wall-clock
   timestamps at each milestone below.
 
@@ -296,7 +299,7 @@ found deterministically by the §8.1 pilot and fixed in v0.17.1.
 ### 8.1 Isolated pilot run (2026-07-31) — kit rehearsal, not a participant
 
 > **HISTORICAL — captured on v0.17.0, replayed on v0.17.1. Participants run
-> v0.18.0-rc.1.** Everything in this section is evidence that specific
+> v0.18.0-rc.2.** Everything in this section is evidence that specific
 > blockers were found and fixed. **It is not a description of what a
 > participant will see.** Read it to know what was already caught, so a
 > familiar-looking stall can be recognized as either "the old one, back" (a
@@ -566,16 +569,20 @@ Where their servers live today (tick what you SEE, do not ask them to change it)
     ______________________________________________________________
     understood every block they hit?                            yes / no
 
---- THE TWO v2 OBSERVATION PROMPTS (observe only; feed no gate) ---
+--- v2 OBSERVATION PROMPTS V1 AND V2 (observe only; feed no gate) ---
+ (§5 defines four. V3 is box 5 above, V4 is box 4 above; only V1 and V2 are
+  here, because only these two have nowhere else on the sheet to live.)
+
  V1  THE DROP-A-FILE REACH — do not prompt for this, only watch.
-     The moment they act as if putting a file somewhere makes it live, then
-     stall because it is not.
-     [ ] not observed
+     Dropping a file in works now, so what is watched is whether they find it
+     unaided. If they never place one, that is a finding about
+     discoverability, not a failed session.
+     [ ] not observed (they placed no file of their own)
      time __:__   what they had just done: ___________________________
      exact path of the file they wrote/edited: _______________________
      what they said, verbatim: _______________________________________
      _________________________________________________________________
-     (do NOT tell them whether it works)
+     (do NOT tell them the path exists; the route they took is box 1 above)
 
  V2  WHAT THEIR YES GRANTED — ask ONCE, after Q1 and Q2:
      "Earlier you approved this project — in your own words, what did that

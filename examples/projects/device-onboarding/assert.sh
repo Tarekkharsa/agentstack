@@ -39,6 +39,22 @@
 # Requires: `agentstack` on PATH (or AGENTSTACK_BIN=..., or a built
 # target/{release,debug}/agentstack in this repo), git, python3.
 # ─────────────────────────────────────────────────────────────────────────────
+# `set -u` and nothing else, deliberately — no `-e`, no `pipefail`. Several
+# pipelines below let the reader quit before the writer is done: `$AS … |
+# grep -q` (grep exits at the first match) and `grep … | head -1`. The writer
+# then takes a SIGPIPE, and today its status is discarded with the rest of the
+# pipeline's. Turn on `pipefail` (or `-e`) and each one starts failing whenever
+# the output did not happen to fit in the pipe buffer — intermittently, on
+# machine speed and buffer luck, which is the worst way to find it.
+#
+# So if you ever add either flag, fix them all in the same change. Five are on
+# the live assertion path: the `REF=$(grep … | head -1 | tr …)` capture in A3,
+# `run --locked --plan | grep -q` in C1 and in C3, and the two `$AS … | grep -q`
+# in D1. Two more only run while building a `bad` message (A2 and A3), so they
+# cannot change a result, but they are the same shape. The fix each time is the
+# one most assertions here already use: capture into `OUT=$(…)` first, then
+# match against a here-string, so nobody is writing into a closed pipe. Commit
+# 299a88b cleaned up this same accident elsewhere.
 set -u
 
 HERE="$(cd "$(dirname "$0")" && pwd -P)"
