@@ -333,6 +333,8 @@ agentstack x uninstall --write  # do it</code></pre>
 <thead><tr><th>In v0.18.0 and later</th><th>What it shortens</th></tr></thead><tbody>
 <tr><td><code>agentstack yes</code></td><td>drop a skill or instruction file in <code>.agentstack/</code>, then declare + pin + trust + render behind one review</td></tr>
 <tr><td><code>agentstack undo</code></td><td>the recorded changes as a timeline — pick a point and revert to it (<code>restore</code> does it one write at a time)</td></tr>
+<tr><td><code>agentstack why &lt;name&gt;</code></td><td>where a capability came from, its pin, its approval, which CLIs serve it live, and what it reaches — the answer when nothing was written to disk</td></tr>
+<tr><td><code>agentstack x unrender</code></td><td>take back a server config the rendered lane left behind, without the whole-machine <code>x uninstall</code></td></tr>
 <tr><td><code>agentstack x up</code></td><td>set a new machine up from a setup that already exists (<code>apply --write</code> then <code>doctor</code> today)</td></tr>
 <tr><td><code>agentstack x share</code> / <code>agentstack x receive</code></td><td>move a setup between people as a signed bundle (committing the manifest does it today)</td></tr>
 </tbody></table></div>

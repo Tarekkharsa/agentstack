@@ -98,15 +98,23 @@ Here is the whole loop, condensed from a real run of the current binary:
 2. **Import** — `agentstack init --yes --secrets env`: one manifest; the token
    is copied to a gitignored `.env` and referenced as `${GITHUB_TOKEN}` (your
    CLI's own config keeps its copy until you apply at global scope).
-3. **Render** — `agentstack apply --scope global --write`: both CLIs now carry
-   both servers, each in its own format. (This walkthrough uses the rendered
-   lane throughout, so every step is a file you can diff.)
-4. **Verify** — `agentstack doctor`: 0 errors. On your own machine expect a
-   note or two — advisories like "these servers launch via bare `npx`" are
-   stated once and do not count against readiness; a first Codex project also
-   warns until you open Codex there once and accept its trust prompt.
-5. **Undo** — `agentstack x restore --last --write`, twice: every file
-   byte-identical to where it started.
+3. **Connect** — `agentstack x gateway connect --all --write`: the live lane
+   needs one bridge registered per MCP-capable CLI.
+4. **Route** — `agentstack delivery`: both CLIs are MCP-capable, so the servers
+   are served live and no file is written for them. The project holds
+   `.agentstack/` and the `.gitignore` that hides the lifted secret — no native
+   config at all.
+5. **Verify** — `agentstack doctor`: 0 errors, 0 warnings. On your own machine
+   expect a note or two — advisories like "these servers launch via bare `npx`"
+   are stated once and do not count against readiness; a first Codex project
+   also warns until you open Codex there once and accept its trust prompt.
+6. **Render anyway** — `agentstack x delivery render-locally --write`, then
+   `agentstack apply --toolset default --scope global --write`: the rendered
+   lane is routed, not removed, so asking for files is an explicit opt-in. Both
+   CLIs then carry both servers, each in its own format.
+7. **Undo** — `agentstack x restore --last --write`, four times (the render, the
+   render-locally override, the bridge, the import): every file byte-identical
+   to where it started.
 
 Reproduce it yourself, fenced (an isolated temp `HOME` — it never touches your
 real configs, and it asserts every step, so it doubles as the witness that this
@@ -151,8 +159,21 @@ Release binaries ship with sandbox support compiled in; a bare `cargo build` doe
 `--features sandbox` to get `run --sandbox` / `--lockdown`.
 
 Once installed, `agentstack x self update` moves you to the latest release; it verifies the
-download against the release's published checksum before replacing anything. The installer
-and `cargo build` are the two supported install paths — there is no published Homebrew tap.
+download against the release's published checksum before replacing anything.
+
+There is also a Homebrew tap, `Tarekkharsa/homebrew-tap`, whose
+`Formula/agentstack.rb` currently pins v0.17.1 — the latest published release:
+
+```sh
+brew install Tarekkharsa/tap/agentstack
+```
+
+The formula is published by hand after each release, so it can lag a tag; if
+`brew info` shows an older version than the
+[releases page](https://github.com/Tarekkharsa/agentstack/releases), use the
+installer or a checkout. On a Homebrew install, upgrade with
+`brew upgrade agentstack` rather than `agentstack x self update` — replacing the
+file directly desynchronizes the formula.
 
 **Supported platforms: macOS and Linux.** A Windows binary is published, but it is not
 exercised by CI and the codebase carries almost no Windows-specific handling — treat it as
@@ -181,9 +202,16 @@ governance only when you need them:
 
 ## The command surface
 
-`agentstack --help` lists the fifteen everyday verbs — `init`, `status`, `add`,
-`search`, `apply`, `doctor`, `lock`, `toolset`, `use`, `yes`, `run`, `trust`,
-`undo`, `adopt`, `secret`. Four ideas cover them: Setup, Toolset, Status, Undo.
+`agentstack --help` lists the seventeen everyday verbs — `init`, `status`,
+`add`, `search`, `apply`, `doctor`, `lock`, `lib`, `toolset`, `use`, `yes`,
+`run`, `trust`, `undo`, `adopt`, `why`, `secret`. Four ideas cover them: Setup,
+Toolset, Status, Undo.
+
+`agentstack why <name>` is the one to reach for when nothing is on disk: under
+the default routing a served capability writes no file, so `why` is where its
+origin, pin, approval, live tools and reach are stated. `agentstack x unrender`
+is the opposite direction — it takes back a server config the rendered lane
+left behind.
 
 Everything else lives one hop away under `agentstack x`:
 

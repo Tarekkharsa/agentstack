@@ -31,6 +31,7 @@ undone by their own verb, because they are not file writes:
 | the destructive-command [guard](../concepts.md) | `agentstack x guard uninstall` | removes every hook it installed and sets `[guard] enabled = false` |
 | [trust](../concepts.md) for a repo | `agentstack trust --revoke` | withdraws consent — the repo goes inert again |
 | an active [session](../concepts.md) | `agentstack x session end` | reverts this directory's ephemeral toolset (`--all` for every session) |
+| a server config the rendered lane left behind | `agentstack x unrender --write` | removes only server files AgentStack wrote for harnesses now served live; previews without `--write`, and is itself undoable |
 | a server or skill in the manifest | `agentstack x remove <name> --write` | drops it from the manifest and the lockfile |
 
 In v0.18.0 and later, `agentstack undo` shows the same record as a timeline —

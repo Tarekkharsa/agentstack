@@ -32,6 +32,11 @@ startup**. After any write, `apply` says so itself.
 
 Restart the CLI first, then work down this list.
 
+Under the default routing there is often **no file to look at** — an MCP-capable
+CLI is served live. `agentstack why <name>` states where that capability came
+from, whether it is pinned and approved, which CLIs serve it live, which get a
+file, and what it reaches. Start there before hunting for a config on disk.
+
 **`Claude Code    1 change pending ↳ agentstack apply --write`**
 
 The manifest declares something the native config does not have yet. Nothing is

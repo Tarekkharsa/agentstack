@@ -139,6 +139,34 @@ agentstack x restore <adapter>       # single-slot config restore (fallback)
 Reverted files show up as pending again; both verbs read the same recorded
 writes and either can roll each one back.
 
+### Where did this come from? (`agentstack why`)
+
+Under the default routing a served capability writes **no file**, so there is
+nothing on disk to inspect. `agentstack why <name>` is the answer to "where did
+this come from, and where is it live right now":
+
+```text
+agentstack why github          # one card: origin, pin, approval, live, written, reach
+agentstack why github --json   # the same facts, machine-readable
+```
+
+It takes the **name** of a server, skill, house rule, hook, extension, or
+setting — not a tool name; mapping a tool back to its server needs a live
+connection to that server, and `why` will not guess one. The card states:
+
+| Line | What it answers |
+|---|---|
+| `from` | this project's manifest, the central library, or a linked source |
+| `pinned` | the lockfile pin, or the `lock --write` that would create one |
+| `approved` | who said yes, and whether the project changed since |
+| `live` | which tools serve it live, and which are not connected yet |
+| `written` | which tools get a file for it (empty under the default routing) |
+| `scope` | what it reaches — the command it runs, the hosts it may contact |
+| `used` | how often it was activated from here |
+
+Every line that names a gap names the command that closes it. `agentstack
+explain <name>` is the long form of the same subject.
+
 ### Sharing is signing: `share` and `receive`
 
 `agentstack x share <name>` (v0.18.0+) bundles this setup — manifest, lock, and
@@ -588,6 +616,23 @@ kind and the CLI it is going to. What the lanes *are*:
   background process, debugging without another runtime dependency, or
   compatibility testing against a CLI's own behaviour. Clearing it removes the
   key: automatic is the *absence* of an override, not a second stored value.
+- **Leftovers from the rendered lane** — a config `apply` wrote before a
+  harness's servers moved to the live lane stays on disk, and the harness keeps
+  reading it at startup. `agentstack x unrender` takes exactly those files back
+  off:
+
+  ```text
+  agentstack x unrender                  # preview what would be removed (default)
+  agentstack x unrender --verbose        # ...with the full diff of each file
+  agentstack x unrender --target codex   # limit to one adapter id
+  agentstack x unrender --write          # remove them
+  ```
+
+  It removes only server config AgentStack itself wrote: settings, hooks and
+  instructions are still rendered for those harnesses and are left alone, and
+  the whole-machine exit stays [`agentstack x uninstall`](#the-whole-way-out-uninstall).
+  Every removal is snapshotted first, so `agentstack undo` — or
+  `agentstack x restore --last --write` — puts it back.
 - A gateway-served project keeps **0 project artifacts for the capabilities
   served live** — never "0 files": the manifest, the lockfile, and any managed
   house-rules region remain.
@@ -1768,8 +1813,9 @@ The generated command tree and the one-glance census, unchanged. Everything abov
 The full command surface, generated from the CLI's own command tree by
 `agentstack x self docs --write` (CI fails if this list goes stale). Bare
 `agentstack --help` deliberately shows only the **everyday commands** —
-`init`, `status`, `add`, `search`, `apply`, `doctor`, `lock`, `toolset`, `use`,
-`yes`, `run`, `trust`, `undo`, `adopt`, `secret`. The rest sit one hop away
+`init`, `status`, `add`, `search`, `apply`, `doctor`, `lock`, `lib`, `toolset`,
+`use`, `yes`, `run`, `trust`, `undo`, `adopt`, `why`, `secret` — seventeen
+verbs. The rest sit one hop away
 under `agentstack x` — run bare `agentstack x` for the grouped listing — and
 are **fully supported**, each with its own `--help`; **hidden does not mean
 deprecated or unsupported**. Every hidden command also still runs at its own

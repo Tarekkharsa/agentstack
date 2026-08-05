@@ -199,6 +199,8 @@ v0.18.0 and later, and `agentstack --version` says which you have:
 | --- | --- |
 | `agentstack yes` | drop a skill or instruction file in `.agentstack/`, then declare + pin + trust + render behind one review |
 | `agentstack undo` | the recorded changes as a timeline — pick a point and revert to it (`restore` does it one write at a time) |
+| `agentstack why <name>` | where a capability came from, its pin, its approval, which CLIs serve it live, and what it reaches — the answer when nothing was written to disk |
+| `agentstack x unrender` | take back a server config the rendered lane left behind, without the whole-machine `x uninstall` |
 | `agentstack x up` | set a new machine up from a setup that already exists (`apply --write` then `doctor` today) |
 | `agentstack x share` / `agentstack x receive` | move a setup between people as a signed bundle (committing the manifest does it today) |
 

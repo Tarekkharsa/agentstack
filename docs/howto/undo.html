@@ -272,6 +272,7 @@ agentstack x restore claude-code     # fallback: restore one adapter's config fr
 <tr><td>the destructive-command <a href="../concepts.html">guard</a></td><td><code>agentstack x guard uninstall</code></td><td>removes every hook it installed and sets <code>[guard] enabled = false</code></td></tr>
 <tr><td><a href="../concepts.html">trust</a> for a repo</td><td><code>agentstack trust --revoke</code></td><td>withdraws consent — the repo goes inert again</td></tr>
 <tr><td>an active <a href="../concepts.html">session</a></td><td><code>agentstack x session end</code></td><td>reverts this directory's ephemeral toolset (<code>--all</code> for every session)</td></tr>
+<tr><td>a server config the rendered lane left behind</td><td><code>agentstack x unrender --write</code></td><td>removes only server files AgentStack wrote for harnesses now served live; previews without <code>--write</code>, and is itself undoable</td></tr>
 <tr><td>a server or skill in the manifest</td><td><code>agentstack x remove &lt;name&gt; --write</code></td><td>drops it from the manifest and the lockfile</td></tr>
 </tbody></table></div>
 <p>In v0.18.0 and later, <code>agentstack undo</code> shows the same record as a timeline — pick a point and it reverts to there. See <a href="../start.html#newer-than-the-stable-release">newer than the stable release</a>.</p>

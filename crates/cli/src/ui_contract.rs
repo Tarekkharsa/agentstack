@@ -666,6 +666,93 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   action on this contract** — running, resuming, or authoring a workflow
 ///   from a panel stays deferred (UI control-plane §Deferred), because each
 ///   would need an authority path the read surface does not have.
+/// - `abandoned-render-v1`: a native server config that is ON DISK while this
+///   project routes that harness's MCP servers through the live lane is
+///   reported, by every surface that reports anything about delivery, with a
+///   remedy conjugated by AUTHORSHIP.
+///
+///   `agentstack why <name> --json` gains `abandoned[]` — the display names of
+///   the harnesses whose config for that capability is a leftover render —
+///   beside the `written[]` it already carried; the matching `written[]` row
+///   for such a harness carries the sentence and its `↳ <remedy>` slot.
+///   `doctor --json` reports each one as a `warn` section line whose `↳` slot
+///   holds the COMMAND and nothing else, and `status` prints the same reading
+///   and can promote it to `next_action`. `apply` names it at the moment of
+///   writing. All four read ONE walk
+///   (`commands::apply::abandoned_live_renders`) and one sentence
+///   (`AbandonedRender::sentence`), so no surface can hold a second opinion.
+///
+///   **Disk is the trigger, the ledger only conjugates the remedy.** The
+///   detector reads the file and lists the servers it actually declares. What
+///   the state ledger decides is which of two commands is offered:
+///   `agentstack x unrender --write` for a file AgentStack recorded writing,
+///   and `agentstack adopt` for one it did not (a clone, a git checkout, a hand
+///   edit). That split is not cosmetic — `x unrender` removes only
+///   ledger-recorded entries, so offering it for a foreign file would name a
+///   command that answers "nothing is ours to remove" and makes no progress.
+///   A panel must render the remedy the payload gives it and must never
+///   synthesise one from the presence of the finding.
+///
+///   `agentstack x unrender` exists as a command on this binary: it takes an
+///   abandoned server config back off disk, previewing by default and writing
+///   under `--write`, and it is reachable in one hop under `agentstack x`. It
+///   is NOT a panel action — it is absent from [`PANEL_ACTIONS`], so a panel
+///   may show the command as text for a human to run and may not invoke it.
+///
+///   **What it does not promise.** It is not an activation reading: a file on
+///   disk says the harness may still be reading it, never that any server is
+///   running. And `status --json` carries no `abandoned` key of its own — the
+///   finding reaches a machine consumer there only through `next_action`, and
+///   through `doctor --json`'s section lines. A panel wanting the per-harness
+///   list asks `why <name> --json`.
+///
+/// # Breaking changes a panel must absorb
+///
+/// **Panel action names are unchanged.** Every entry in [`PANEL_ACTIONS`]
+/// keeps its name, its verb and its binding, so no argv a panel builds breaks.
+/// What changed is the SHAPE of four read payloads. Three fail loudly; one
+/// fails silently, and that one is the dangerous one.
+///
+/// 1. `doctor --json`'s `next_action` is **nullable**. It is the machine
+///    field, so it holds only commands that can run verbatim and make
+///    progress, and `null` is the true answer over a healthy project. A
+///    consumer typed to expect a string breaks on every healthy project —
+///    loudly, and immediately. The human sentence is `next_step`, always
+///    present, never something to exec. (`status-v1` states this; it is
+///    repeated here because it is a change a live panel meets.)
+/// 2. `status --json`'s `next_action` is now an **object**, not a string:
+///    `{command, sentence, why}`, where `command` is runnable-or-null and
+///    `sentence` is display prose. A consumer treating it as a string breaks
+///    loudly. `command` is filtered by the same `machine_command` rule
+///    `doctor` applies, so the two surfaces cannot hand a program different
+///    commands for one state.
+/// 3. **DANGEROUS — fails silently.** `drifted` is now a FOURTH value a
+///    consumer meets (`trust-content-drift-v1`), and nothing throws when it
+///    does. Each `review.items[].change` may now read `drifted` where the
+///    field only ever held `added` / `changed` / `unchanged`; a decoder
+///    matching those three words with a `default:` arm quietly files a drifted
+///    item under whatever that arm says. `trust --preview`'s `state` keeps its
+///    word set (`trusted` / `drifted` / `untrusted`) but now reaches `drifted`
+///    in a NEW case — a project whose digest is intact while a pinned BODY was
+///    edited in place — so a panel that only ever saw `drifted` after a
+///    manifest edit now sees it over a manifest that never moved. Both are
+///    silent failures: the payload parses, the types hold, and the panel
+///    reports a project the gate refuses as healthy. `status --json`'s
+///    `project.trust` takes the same reading, and
+///    `review.groups[].counts.drifted` is the matching tally. Every consumer of
+///    those fields must be audited by hand; a type error will not find this
+///    one.
+/// 4. `diff --json` **omits live-routed targets from `targets[]`** and names
+///    them in `warnings` instead. Where the planner routes a harness's MCP
+///    servers live, `apply` writes no server config, so there is nothing
+///    rendered to compare — and `changed: false` is the wire form of "in
+///    sync", which would be a claim about a comparison that never happened
+///    (invariant 8). A panel that counts targets sees fewer than it expects
+///    and must not read the absence as "clean"; the free-text `warnings` entry
+///    names each withheld harness and whether it is served live or planned
+///    live and not connected. This fails loudly only if the panel asserts a
+///    target per configured CLI; otherwise it under-reports, so treat the
+///    `warnings` line as the authority on what was not compared.
 pub const FEATURES: &[&str] = &[
     "init-plan",
     "apply-setup",
@@ -709,6 +796,7 @@ pub const FEATURES: &[&str] = &[
     "image-plan-v1",
     "workflow-role-selection-v1",
     "trust-content-drift-v1",
+    "abandoned-render-v1",
 ];
 
 /// How one panel action's apply is bound.
@@ -985,6 +1073,30 @@ mod tests {
         let before = sorted.len();
         sorted.dedup();
         assert_eq!(before, sorted.len(), "FEATURES contains a duplicate name");
+    }
+
+    /// The abandoned-render reading is advertised, and it is a READ contract
+    /// only: `agentstack x unrender` removes a file, so it may never become a
+    /// panel action without its own deliberate entry in [`PANEL_ACTIONS`].
+    #[test]
+    fn abandoned_render_is_advertised_and_is_not_a_panel_action() {
+        assert!(
+            FEATURES.contains(&"abandoned-render-v1"),
+            "a panel cannot gate the abandoned-render reading it cannot negotiate"
+        );
+        assert!(
+            !SUPERSEDED.contains(&"abandoned-render-v1"),
+            "a name may never be both served and retired"
+        );
+        for action in PANEL_ACTIONS {
+            assert_ne!(
+                action.verb,
+                &["x", "unrender"],
+                "`x unrender` deletes a config file; a panel names it as text for \
+                 a human to run, and does not invoke it"
+            );
+            assert_ne!(action.name, "unrender");
+        }
     }
 
     /// A retired name is advertised as retired, and never as both. The two

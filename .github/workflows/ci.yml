@@ -172,6 +172,42 @@ jobs:
           python3 tools/make-docs-pages.py
           git diff --exit-code docs/
 
+  # Invariant 8 ("claims match enforcement") made mechanical: a PR that changes
+  # enforcement BEHAVIOUR in crates/trust, crates/policy or crates/egress must
+  # also change docs/ENFORCEMENT.md — where the enforcement claims live — or
+  # carry an explicit written waiver. The whole class of defect this defends
+  # against is code and documentation disagreeing while nobody notices.
+  #
+  # pull_request only, on purpose: a push has no dependable base commit to diff
+  # against (force-push, squash merge, first push of a branch), and the waiver
+  # can live in the PR body, which does not exist on a push. Test-only and
+  # comment-only changes in those crates are exempt so the gate does not cry
+  # wolf; the checker's docstring explains the trade. Fast and dependency-light,
+  # same rationale as docs-checks above.
+  enforcement-pairing:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          # The gate diffs base...head, so both sides and their merge base must
+          # be present; the default shallow checkout has neither.
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Checker self-test
+        run: python3 tools/check-enforcement-pairing.py --self-test
+      - name: Enforcement code and ENFORCEMENT.md change together
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # Pass the PR body through a file, never through the shell command
+          # line: it is untrusted, attacker-influenced text.
+          printf '%s' "$PR_BODY" > /tmp/pr-body.txt
+          python3 tools/check-enforcement-pairing.py \
+            --base "${{ github.event.pull_request.base.sha }}" \
+            --head "${{ github.event.pull_request.head.sha }}" \
+            --waiver-file /tmp/pr-body.txt
+
   # Phase 0 structural lint (TODO.md P0.3): every capability kind and policy
   # dimension in the manifest model must have a lock pin, doctor probe,
   # witness test, and ENFORCEMENT.md statement — or a signed-off baseline

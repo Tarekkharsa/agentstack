@@ -269,6 +269,7 @@ agentstack doctor    # every check, each finding followed by ↳ its fix</code><
 <pre class="block"><code>→ Restart or reopen your agent CLIs so they pick up the new config.
   undo: agentstack x restore --last --write</code></pre>
 <p>Restart the CLI first, then work down this list.</p>
+<p>Under the default routing there is often <strong>no file to look at</strong> — an MCP-capable CLI is served live. <code>agentstack why &lt;name&gt;</code> states where that capability came from, whether it is pinned and approved, which CLIs serve it live, which get a file, and what it reaches. Start there before hunting for a config on disk.</p>
 <p><strong><code>Claude Code    1 change pending ↳ agentstack apply --write</code></strong></p>
 <p>The manifest declares something the native config does not have yet. Nothing is written until you ask.</p>
 <pre class="block"><code>agentstack apply --write</code></pre>
