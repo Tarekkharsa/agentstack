@@ -424,12 +424,20 @@ toolset containing it.
   write `~/y`") — the grant lives in the MACHINE manifest, so a project can
   never widen its own write scope, and the guard denies shell writes to that
   manifest's directory precisely so this table can't be edited into
-  allowlisting itself. **Rule** denials are recorded to the
-  audit log (`host-guard` entries in `calls.jsonl`); the three fail-closed
-  *system* refusals are not — an unreadable machine config, an unavailable
-  machine policy, and an unreadable or oversized hook payload each deny the
-  call and write no audit line, because what refused was the guard's own
-  broken state rather than an evaluated rule. The ceiling is the
+  allowlisting itself. Every denial is recorded to the audit log
+  (`host-guard` entries in `calls.jsonl`), and the two kinds stay tellable
+  apart by their subject. A **rule** denial names the call it judged —
+  `bash: …`, `read: …`, `write: …`, `other` — and carries the anchored
+  workspace. The three fail-closed *system* refusals — an unreadable machine
+  config, an unavailable machine policy, and an unreadable or oversized hook
+  payload — are recorded under a synthetic subject
+  (`system: machine-config-unreadable`, `system: machine-policy-unavailable`,
+  `system: hook-payload-unreadable`) with no project, because what refused was
+  the guard's own broken state rather than an evaluated rule, and no workspace
+  had been anchored yet. The prefixes are machine-authored and payload content
+  can only land after them, so no tool call can forge a system subject.
+  Recording never gates the block: an unwritable audit log loses the evidence,
+  never the denial. The ceiling is the
   legend's: the harness must honor its own hook protocol — this catches
   accidents, not malice. Three CLIs sit in `NO_HOOK_SURFACE` and their cells
   are effectively *unsupported*, for two different reasons: Claude Desktop has
@@ -500,7 +508,7 @@ Which is which, per denial family:
 | Filesystem guard | **cooperative** — the harness chose to ask | yes | `calls.jsonl` (`server: host-guard`, `run: None`) |
 | Content-pin refusal | **enforced** — the server is dropped before it is spawned or dialled | yes, **new in Phase 4** | `calls.jsonl` (`tool: pin`) + run `events.jsonl` (`PinRejected`) |
 | Trust-at-dispatch refusal | **enforced** — the call is refused before the upstream is dialled | yes, **new in W2** | `calls.jsonl` (`tool: trust`) + run `events.jsonl` (`TrustRefused`) |
-| Toolset-fence refusal | **enforced** — the fenced gateway holds no upstream for the name, so nothing was spawned, dialled, or forwarded | yes, **new in W4** | `calls.jsonl` (`tool: fence`) — no run event |
+| Toolset-fence refusal | **enforced** — the fenced gateway holds no upstream for the name, so nothing was spawned, dialled, or forwarded | yes, **new in W4** | `calls.jsonl` (`tool: fence`) + run `events.jsonl` (`FenceRefused`) |
 
 Eight rows, seven families: `Family::Egress` refuses in two places that do not
 enforce alike, so its row is split rather than averaged. Counting rows is not
@@ -511,12 +519,14 @@ when a call names a server this project declares while no open toolset selects
 it. Note the order: the fence had already emptied the gateway of that upstream,
 so the record is *evidence* rather than the act — `mcp_server::fence_refusal`
 turns what would otherwise be a bare "unknown tool" into a line that names the
-toolset to open. Two bounds on it are deliberate. It records only for a server
+toolset to open. One bound on it is deliberate: it records only for a server
 the manifest **declares**, because otherwise any caller could write unbounded
-rows into the audit log by inventing names; and it is the one family with no
-run-log mirror — the run id rides the `calls.jsonl` line, but `RunEvent` has no
-fence variant, so a run report surfaces these only through the cross-project
-audit log. (`crates/cli/src/seatbelt.rs` `Family::Fence`,
+rows into the audit log by inventing names. Inside a tracked run it writes the
+same two-destination evidence its siblings write — the `calls.jsonl` line and a
+`RunEvent::FenceRefused` mirror, which `agentstack report run <id>` renders in
+its own **Fence refusals** section rather than among the tool calls, because a
+refused call is not a call the run made.
+(`crates/cli/src/seatbelt.rs` `Family::Fence`,
 `crates/cli/src/mcp_server.rs` `fence_refusal`)
 
 The trust-at-dispatch row is the sixth family, added in W2 (automatic
@@ -984,15 +994,20 @@ harness until those names are present in the run's own environment.
 
 ### Trust-store mutation logging
 
-**What ships:** every mutation of a project's **trust grant** appends one
+**What ships:** every mutation of the machine trust store appends one
 identity-only line to `~/.agentstack/audit/trust.jsonl` — timestamp, action
-(`grant`, `regrant`, `repin`, `revoke`), the store's own project key, and the
-consent digest pinned or removed. Never the manifest bytes, never the reviewed
-surface. Those four digest-bearing actions are the whole log, and the scope is
-exact rather than incidental: a standing re-gate answer (`keep-pinned` or
-`blocked`) is written onto the same project entry in the same store file and
-appends **nothing**. The log answers "what was consented to, and when", not
-"what changed in `trust.json`". The append happens inside the store lock and only after the store
+(`grant`, `regrant`, `repin`, `revoke`, `decide`, `undecide`), the store's own
+project key, and the consent digest pinned, removed, or already stood on. Never
+the manifest bytes, never the reviewed surface. A standing re-gate answer
+(`keep-pinned` or `blocked`) is written onto the same project entry in the same
+store file, so it appends a line too — `decide` when one is recorded,
+`undecide` when one is withdrawn. The split is what the identity-only rule
+costs: WHICH item was answered and WHAT the answer was are consent content and
+stay out of the log, so the action name is the only place the direction of the
+change can live. A call that changes nothing — re-affirming an identical
+answer, or clearing one nobody gave — writes nothing and records nothing. The
+log now answers both "what was consented to, and when" and "what changed in
+`trust.json`". The append happens inside the store lock and only after the store
 write succeeded, so log order is store order and every event describes a
 mutation that actually happened. `repin` is recorded distinctly from
 `regrant` because no human consented to it. The file is created `0600` and is
@@ -1238,9 +1253,9 @@ feature and has no host fallback.
 | Tool authority | **enforced** | Immutable, exact namespaced grant; per-run authenticated relay checks membership and count; the existing gateway re-applies compiled machine ∩ project tool policy. Allowed tools can still have side effects. |
 | Secrets | **enforced** | No resolved secret, gateway environment, or relay credential appears in guest env/result/events. Upstream processes still receive secrets that their declared server configuration authorizes. |
 | Filesystem read | **enforced** | Guest sees only a private read-only `/app` mount containing source, JSON input, bootstrap, generated bindings, and relay token. The policy ruleset is mounted only into the sidecar. The guest does not receive workspace, AgentStack home, Docker socket, or host home mounts. Container/kernel escape is outside this claim. |
-| Filesystem write | **enforced** | Read-only root and `/app`; only a 16 MiB `noexec,nosuid,nodev` `/tmp` tmpfs and one pre-created result-file bind are writable. The tmpfs size is a real kernel cap. The result file is not: the guest may write it without limit, and the 1 MiB `MAX_RESULT_BYTES` is a **host-side read refusal** applied afterwards — an oversized result is rejected as invalid, never truncated, so nothing is silently accepted, but nothing stops the write either. |
+| Filesystem write | **enforced** | Read-only root and `/app`; only a 16 MiB `noexec,nosuid,nodev` `/tmp` tmpfs and one pre-created result-file bind are writable. Both are real kernel caps, by different mechanisms: the tmpfs size caps the mount, but a bind's bytes land in the host inode and no mount option bounds them, so the result file is bounded at the writer instead — a 4 MiB `RLIMIT_FSIZE` (`--ulimit fsize=`, soft == hard) covering every file in the container. A write past it fails with `SIGXFSZ`, and with capabilities dropped and `no-new-privileges` set the guest cannot raise its own hard limit. The 1 MiB `MAX_RESULT_BYTES` remains a separate **host-side read refusal** applied afterwards: an oversized result is rejected as invalid, never truncated. The write cap is deliberately four times the read refusal, so it can never clip a result the host would have accepted. The cap is per file, not aggregate; total host-disk exposure per execution is bounded because the bind is the only writable host path. |
 | Direct egress | **enforced** | Internal Docker network has only the egress sidecar as peer. Its ordinary proxy requires an undisclosed separate token; the fixed raw relay reaches only the host execution relay. The host relay binds the narrowest interface the sidecar can still reach via `host.docker.internal`: the private, non-routable docker0 bridge gateway on a native Linux daemon, or the host loopback on Docker Desktop — never a LAN-facing interface. It stays reachable from Docker containers on the host (not from other LAN hosts); the residual `0.0.0.0` wildcard bind applies whenever that narrow address is unknown or unbindable, which is three cases and not one: a Linux host that cannot bind the gateway it chose (Docker-Desktop-on-Linux, whose gateway lives in the VM); a Linux host whose docker0 gateway could not be determined at all — no daemon, no such network, no IPv4 gateway, or an address that would not parse — where no narrow bind is even attempted; and any platform that is not linux/macOS/Windows, which stays functional on the wildcard rather than guess. The second case is an ordinary failure mode, not an exotic one, and the code carries it as documented residual exposure. Its random token, exact grant, bounded protocol, and execution-scoped lifetime are the control. No payload/content inspection occurs on allowed tool results. |
-| Process isolation | **enforced** | Non-root uid/gid 65532, capabilities dropped, `no-new-privileges`, 128 MiB memory, one CPU, 32 PIDs. Docker's configured/default seccomp policy, Docker itself, and the host kernel remain trusted computing base; AgentStack does not yet ship a custom executor seccomp policy. |
+| Process isolation | **enforced** | Non-root uid/gid 65532, capabilities dropped, `no-new-privileges`, 128 MiB memory, one CPU, 32 PIDs, 4 MiB max file size. Docker's configured/default seccomp policy, Docker itself, and the host kernel remain trusted computing base; AgentStack does not yet ship a custom executor seccomp policy. |
 | Limits | **enforced** | Machine-owned timeout, output, and call defaults are configurable only below compiled hard ceilings; requests may only narrow them. Aggregate stdout/stderr and separate result/source/input bytes, granted-tool count, and relay call count are bounded. A tool call already dispatched upstream cannot be revoked atomically. |
 | Recording | **enforced** | Run log creation is required. Events store digests and metadata, never source/input/result/secret values; tool calls carry execution IDs and render beneath the execution in `agentstack report run`. Recording is evidence, not tamper-proof remote attestation. |
 | Runtime supply chain | **partial** | Node image is pinned by repository digest. AgentStack does not yet publish an executor-specific SBOM, attestation, or independent scan, so the feature remains experimental. |

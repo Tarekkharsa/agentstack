@@ -169,6 +169,8 @@ pub fn set_decision(base: &Path, kind: &str, name: &str, answer: Option<Decision
         let Some(entry) = store.trusted.get_mut(&key) else {
             return Ok(false);
         };
+        let recorded = answer.is_some();
+        let before = entry.decisions.clone();
         let mut list = entry.decisions.take().unwrap_or_default();
         list.retain(|d| !(d.kind == kind && d.name == name));
         if let Some(answer) = answer {
@@ -180,7 +182,36 @@ pub fn set_decision(base: &Path, kind: &str, name: &str, answer: Option<Decision
         }
         list.sort_by(|a, b| (&a.kind, &a.name).cmp(&(&b.kind, &b.name)));
         entry.decisions = if list.is_empty() { None } else { Some(list) };
+        if entry.decisions == before {
+            // Nothing actually changed — re-affirming an identical answer, or
+            // clearing one nobody gave (the common case: the trust commit path
+            // clears a decision for EVERY accepted item). Writing the same
+            // bytes back is not a mutation, so it must neither save nor log:
+            // the invariant this crate keeps is "one store write, one line",
+            // and a stream of empty `undecide` lines would drown the real
+            // answers in the evidence the consent metrics are counted over.
+            // Same posture as `repin`, which records nothing when it changes
+            // nothing.
+            return Ok(true);
+        }
+        // Held before the save so the `&mut entry` borrow ends here; the digest
+        // is what the entry ALREADY stood on — a standing answer re-pins
+        // nothing, and identifies which grant the answer sits under.
+        let digest = entry.digest.clone();
         store.save()?;
+        // P0.2: a standing answer is a mutation of the trust store, so it
+        // appends a line like every other one — identity only. The item, the
+        // answer, and the pin a keep-pinned answer names are consent CONTENT
+        // and stay out of the log; the action carries only the direction.
+        record_mutation(
+            if recorded {
+                agentstack_recorder::TrustAction::Decide
+            } else {
+                agentstack_recorder::TrustAction::Undecide
+            },
+            key.clone(),
+            digest,
+        );
         Ok(true)
     })
 }
@@ -519,7 +550,8 @@ fn store_entry(base: &Path, digest: String, surface: Option<Vec<SurfaceItem>>) -
 
 /// The one seam between the trust store and the recorder: every mutation path
 /// funnels its event through here. Identity only (project key + digest);
-/// never the reviewed surface or manifest bytes.
+/// never the reviewed surface, the manifest bytes, or a standing answer's
+/// item and content.
 fn record_mutation(action: agentstack_recorder::TrustAction, project: String, digest: String) {
     agentstack_recorder::record_trust(&agentstack_recorder::TrustMutation {
         ts: agentstack_recorder::now_epoch(),
@@ -709,6 +741,76 @@ mod tests {
                     (TrustAction::Revoke, "sha256:repinned".to_string()),
                 ]
             );
+        });
+    }
+
+    /// P0.2 witness (G16): a standing re-gate answer mutates the trust store,
+    /// so it appends one line too — the claim is "every mutation of the store",
+    /// not "every mutation that re-pins a digest". And the line stays
+    /// IDENTITY-ONLY: which item was answered, what the answer was, and the pin
+    /// a keep-pinned answer names are consent content, and none of it reaches
+    /// the log. NEVER widen this — the log says a decision happened under this
+    /// grant, never what was decided.
+    #[test]
+    fn standing_decisions_are_recorded_as_identity_only_events() {
+        use agentstack_recorder::{read_trust_all, TrustAction};
+        with_home(|_| {
+            let proj = project_with_manifest();
+            let key = key_for(proj.path());
+            let granted = trust_unreviewed(proj.path()).unwrap();
+
+            // Recording an answer: one line, and it carries the digest the
+            // entry ALREADY stood on — a standing answer re-pins nothing.
+            assert!(set_decision(
+                proj.path(),
+                "skill",
+                "alpha-witness",
+                Some(Decision::KeepPinned {
+                    pin: "sha256:decision-pin-must-not-leak".into(),
+                }),
+            )
+            .unwrap());
+            // Withdrawing it: one line, and a DISTINCT action — with the item
+            // and the answer absent by design, the action is the only place the
+            // direction of the change can live.
+            assert!(set_decision(proj.path(), "skill", "alpha-witness", None).unwrap());
+            // Clearing an answer nobody gave changes nothing — records nothing.
+            assert!(set_decision(proj.path(), "skill", "never-answered", None).unwrap());
+            // Nor does an answer about a project nobody trusted: no entry, no
+            // mutation, no line.
+            let untrusted = project_with_manifest();
+            assert!(
+                !set_decision(untrusted.path(), "skill", "ghost", Some(Decision::Blocked)).unwrap()
+            );
+
+            let events: Vec<_> = read_trust_all()
+                .into_iter()
+                .map(|e| (e.action, e.project, e.digest))
+                .collect();
+            assert_eq!(
+                events,
+                vec![
+                    (TrustAction::Grant, key.clone(), granted.clone()),
+                    (TrustAction::Decide, key.clone(), granted.clone()),
+                    (TrustAction::Undecide, key, granted),
+                ]
+            );
+
+            // The identity-only assertion, made against the raw bytes on disk
+            // rather than the parsed struct: nothing about WHAT was decided may
+            // appear in the file, whatever shape a future field takes.
+            let raw = std::fs::read_to_string(agentstack_recorder::trust_log_path()).unwrap();
+            for leaked in [
+                "alpha-witness",
+                "decision-pin-must-not-leak",
+                "keep-pinned",
+                "blocked",
+            ] {
+                assert!(
+                    !raw.contains(leaked),
+                    "the decision's content leaked into the trust log: {leaked}\n{raw}"
+                );
+            }
         });
     }
 

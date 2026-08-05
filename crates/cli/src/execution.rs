@@ -388,6 +388,14 @@ mod hosted {
                     container: "/app".into(),
                     read_only: true,
                 },
+                // The one host path the guest may write. Node's permission
+                // model narrows WHICH path; the size of the write is bounded
+                // by the kernel, via the hardened profile's `RLIMIT_FSIZE`
+                // (`SandboxSecurity::file_size_bytes`) — a bind cannot be
+                // capped by a mount option, because its bytes land in the
+                // host inode. `parse_result` below refuses to READ more than
+                // `MAX_RESULT_BYTES`; that is the second, host-side layer,
+                // not the write bound.
                 Mount {
                     host: files.result.display().to_string(),
                     container: "/agentstack-result.json".into(),

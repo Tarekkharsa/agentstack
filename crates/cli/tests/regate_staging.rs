@@ -534,6 +534,16 @@ fn accepting_leaves_the_same_event_trail_as_relock_then_trust() {
 /// leave the same trail. This is the honest comparison, and it still catches
 /// the failure that matters: keep-pinned inventing a new digest, recording
 /// nothing, or recording extra events.
+///
+/// G16 amendment: the two routes are not equally many MUTATIONS, so the trails
+/// are not equal either. Keep-pinned writes a standing answer onto the trust
+/// entry; the scripted route restores the bytes and writes none. Since every
+/// mutation of the store appends exactly one identity-only line, keep-pinned
+/// must leave the re-trust trail plus one `Decide` — and that line must carry
+/// the SAME digest, because a standing answer re-pins nothing. Naming the one
+/// extra line rather than dropping the comparison keeps every failure the
+/// witness was built for: a new digest, a silent answer, or any event beyond
+/// this one still fails.
 #[test]
 fn keeping_the_pin_leaves_the_same_event_trail_as_a_plain_retrust() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -575,8 +585,17 @@ fn keeping_the_pin_leaves_the_same_event_trail_as_a_plain_retrust() {
     let card_tail = &events(&card)[card_before..];
     let script_tail = &events(&script)[script_before..];
     assert!(!card_tail.is_empty(), "keep-pinned recorded nothing");
+    // The re-trust trail, plus the one line the extra store mutation owes — on
+    // the digest the grant just recorded, never a new one.
+    let granted = script_tail
+        .last()
+        .and_then(|e| e.split_once(':'))
+        .map(|(_, d)| d.to_string())
+        .expect("the scripted re-trust must record a grant to compare against");
+    let mut expected = script_tail.to_vec();
+    expected.push(format!("Decide:{granted}"));
     assert_eq!(
-        card_tail, script_tail,
+        card_tail, expected,
         "keep-pinned's event trail diverged from a plain re-trust's"
     );
 }
