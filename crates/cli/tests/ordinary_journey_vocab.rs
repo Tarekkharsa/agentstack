@@ -153,20 +153,28 @@ fn scripted_init_apply_doctor_needs_no_advanced_vocabulary() {
     // be the dishonest outcome: capabilities route to the live lane and reach
     // nothing. Invariant 8 makes that one error the correct close.
     assert!(proj.join(".agentstack/agentstack.toml").exists());
-    // Two findings, and both are the honest ones. The error is the
-    // un-registered bridge. The warning is the file this journey imported
-    // FROM: `~/.claude.json` still holds `search`, the harness still reads it,
-    // and the live lane writes nothing there — so reporting a clean drift
-    // section over it would be the "checked and clean" claim invariant 8
-    // forbids. AgentStack did not write that file, so the step named next is
-    // `agentstack adopt`, not a removal `x unrender` would refuse.
+    // Exactly one finding, and it is the honest one: the un-registered bridge.
+    //
+    // This assertion used to expect `1 error, 1 warning`, the extra warning
+    // being the file this journey imported FROM — `~/.claude.json` still holds
+    // `search` and the harness still reads it. Commit `a435c4f` ("a config you
+    // already had is not an abandoned render") removed that warning on
+    // purpose: a GLOBAL harness config AgentStack never wrote is the user's own
+    // machine environment and, on this very journey, the source of the import
+    // rather than a leftover render — so `agentstack adopt` there named a
+    // server the manifest already had. Zero warnings is now the correct close,
+    // and it is the whole point of the fix that the most common first run in
+    // the product reaches it.
     assert!(
-        transcript.contains("1 error, 1 warning"),
-        "expected the bridge finding and the still-read imported config:\n{transcript}"
+        transcript.contains("1 error, 0 warnings"),
+        "expected the bridge finding and nothing else:\n{transcript}"
     );
+    // The other half of `a435c4f`, pinned so the noise cannot come back: the
+    // config `init` read the servers out of is never reported as one
+    // AgentStack did not write.
     assert!(
-        transcript.contains("AgentStack did not write it"),
-        "the warning must be the still-read imported config:\n{transcript}"
+        !transcript.contains("AgentStack did not write it"),
+        "the imported config must not be reported as an abandoned render:\n{transcript}"
     );
     assert!(
         transcript.contains("nothing routed live is reaching it"),
