@@ -47,8 +47,8 @@ fn status_parses_and_help_maps_every_command() {
     assert_eq!(
         visible,
         [
-            "init", "status", "add", "search", "apply", "doctor", "lock", "lib", "toolset", "use",
-            "yes", "run", "trust", "undo", "adopt", "why", "secret"
+            "init", "status", "add", "search", "apply", "doctor", "lock", "toolset", "use", "yes",
+            "run", "trust", "undo", "adopt", "secret"
         ],
         "the visible list is DERIVED, not curated by taste: a command is here \
          because the product tells someone to run it — the first-run ladder in \
@@ -62,15 +62,16 @@ fn status_parses_and_help_maps_every_command() {
          find is the exact defect this list exists to prevent. `adopt` stays for \
          the same reason (doctor names it for a server found in a CLI config but \
          not in the manifest, which is a FIRST-RUN state). `toolset`, `status`, \
-         `undo` and `init` cover Toolset · Status · Undo · Setup. `lib` and \
-         `why` are the two the same rule adds once delivery is dynamic by \
-         default: the central library is where capabilities are KEPT, so it is \
-         the daily spine rather than an advanced tool, and with nothing written \
-         to disk `agentstack why <name>` is the only answer left to \"where did \
-         this come from?\" — a question whose answer may not itself be hidden. \
-         The honest count is seventeen, not ten: hiding one of the forced \
+         `undo` and `init` cover Toolset · Status · Undo · Setup. The honest \
+         count the rule produces is fifteen, not ten: hiding one of the forced \
          commands to reach a rounder number would trade a real guarantee for a \
          tidier screen. \
+         `lib` and `why` were briefly here on an argument from importance, \
+         which is not this rule. No first-run rung, no `↳ fix` line and no \
+         machine field names either: doctor's single mention of `lib` (a linked \
+         folder that vanished) already prints `agentstack x lib unlink`, and \
+         nothing emits `why` at all — so they sit behind `x` on the same terms \
+         as `guard` and `gateway`. \
          `up`, `share`, `receive`, `workflow` and `restore` moved behind \
          `agentstack x` — none is named by any fix or ladder rung, STRATEGY.md \
          v3 puts share/receive quiet until team features arrive, and `undo` is \
@@ -113,31 +114,24 @@ fn status_parses_and_help_maps_every_command() {
     // `agentstack x` is the home of everything not visible, and it must actually
     // list them — an escape hatch that names nothing is a dead end.
     let listing = agentstack::cli::namespace_listing();
-    // `lib` was one of these eight until it became a visible verb. The
-    // guarantee did not weaken — it strengthened: a command listed by plain
-    // `agentstack --help` is findable in ZERO hops, not one, so asserting its
-    // visibility is strictly stronger than asserting the toolbox lists it. It
-    // is checked against the derived `visible` list above rather than typed
-    // into a second place.
-    assert!(
-        visible.contains(&"lib"),
-        "`lib` is named by guidance and is now a visible verb — the toolbox \
-         listing is no longer where it is found, so the visible list must \
-         carry it or the guarantee has a hole"
-    );
-    // The seven verbs guidance names by a `↳ fix` line or a ladder rung and
-    // that are still hidden. They used to be repeated on the plain help
+    // The verbs guidance names by a `↳ fix` line, a ladder rung or ordinary
+    // prose and that are hidden. They used to be repeated on the plain help
     // screen; the toolbox is now their only listing, so this is where the
     // "guidance never names an unfindable command" guarantee is anchored on
-    // this side.
+    // this side. `lib` and `why` rejoined them when the count went back to
+    // fifteen: guidance still names both (`agentstack x lib unlink` in
+    // doctor's fix column, `agentstack lib list` in `explain` and `why`
+    // prose), so both must be findable here in one hop.
     for named_by_guidance in [
         "gateway",
         "guard",
         "install",
         "instructions",
+        "lib",
         "self",
         "session",
         "up",
+        "why",
     ] {
         assert!(
             listing.contains(named_by_guidance),
@@ -234,10 +228,10 @@ fn full_inventory_differs_from_short_help_and_covers_hidden_commands() {
 
 /// The closure arithmetic, recomputed from the real binary rather than typed:
 /// **visible ∪ namespaced ∪ panel = every top-level command, and the three sets
-/// do not overlap.** Promoting a verb (here `lib`) or adding one (`why`) is
-/// exactly the change that can break it — a promoted command left in the
-/// toolbox listing appears twice, and a new one left out of both appears
-/// nowhere. Names are read off the `·`-separated group lines, never by
+/// do not overlap.** Moving a verb across the split (here `lib` and `why`, back
+/// behind `x`) is exactly the change that can break it — a demoted command left
+/// out of the toolbox listing appears nowhere, and a promoted one left in it
+/// appears twice. Names are read off the `·`-separated group lines, never by
 /// substring: `run` occurs inside the toolbox's own prose.
 #[test]
 fn visible_namespaced_and_panel_partition_the_whole_surface() {
@@ -352,8 +346,8 @@ fn consolidated_verbs_parse() {
         vec!["agentstack", "explain", "github", "--json"],
         vec!["agentstack", "why", "github"],
         vec!["agentstack", "why", "sql-review", "--json"],
-        // `lib` is visible now; the whole subcommand tree must still parse at
-        // the direct spelling, not just the promoted parent.
+        // `lib` is hidden again; the whole subcommand tree must still parse at
+        // the direct spelling, not just at `agentstack x lib`.
         vec!["agentstack", "lib", "list"],
         // The machine-invoked entrypoint written into harness configs must
         // keep parsing exactly as `connect` renders it.
@@ -505,6 +499,13 @@ fn the_namespace_is_a_prefix_not_a_second_command() {
         vec!["up"],
         vec!["share", "team-setup"],
         vec!["workflow", "list"],
+        // The two the fifteen-verb count moved back behind `x`. Nothing was
+        // removed: both still parse at their own names, and a nested
+        // subcommand travels with its parent through the rewrite.
+        vec!["lib", "list"],
+        vec!["lib", "sources"],
+        vec!["why", "github"],
+        vec!["why", "sql-review", "--json"],
     ] {
         let mut direct = vec!["agentstack".to_string()];
         direct.extend(verb.iter().map(|s| s.to_string()));
@@ -535,4 +536,84 @@ fn the_namespace_is_a_prefix_not_a_second_command() {
         agentstack::cli::strip_namespace(&argv(&["agentstack"])).is_none(),
         "a bare invocation is not namespaced"
     );
+}
+
+/// TODO #10 is explicit that nothing is removed when a verb is demoted, and
+/// `lib` and `why` are the last two to move. Parse-tree equivalence is asserted
+/// above; this drives the real binary, because "still runs at its own name with
+/// its own `--help`" and "the same dispatch and exit code" are properties of a
+/// process, not of a `clap::Command`. Both spellings are compared on stdout,
+/// stderr AND exit code — a rewrite that lost an argument would still exit 0.
+#[test]
+fn demoted_verbs_run_identically_at_both_spellings() {
+    use std::path::Path;
+    use std::process::{Command, Stdio};
+
+    let home = tempfile::tempdir().expect("temp home");
+    let proj = tempfile::tempdir().expect("temp project");
+
+    // An isolated HOME and a minimal PATH, for the same reason
+    // `guidance_is_executable` does it: an inherited developer environment
+    // would change which findings appear and make the comparison meaningless.
+    let run = |args: &[&str], home: &Path, proj: &Path| {
+        let out = Command::new(env!("CARGO_BIN_EXE_agentstack"))
+            .args(args)
+            .current_dir(proj)
+            .env_clear()
+            .env("HOME", home)
+            .env("AGENTSTACK_HOME", home.join(".agentstack"))
+            .env("PATH", "/usr/bin:/bin")
+            .env("NO_COLOR", "1")
+            .env("TERM", "dumb")
+            .stdin(Stdio::null())
+            .output()
+            .expect("spawn agentstack");
+        (
+            out.status.code(),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        )
+    };
+
+    for direct in [
+        vec!["lib", "--help"],
+        vec!["lib", "list"],
+        vec!["lib", "sources"],
+        vec!["why", "--help"],
+        vec!["why", "no-such-capability"],
+    ] {
+        // First-run side effects (a library directory created on demand) belong
+        // to neither spelling, so let them happen before anything is compared.
+        run(&direct, home.path(), proj.path());
+
+        let (code, stdout, stderr) = run(&direct, home.path(), proj.path());
+        assert!(
+            code.is_some(),
+            "`agentstack {}` must still run at its own name, not die on a signal",
+            direct.join(" ")
+        );
+        if direct[1] == "--help" {
+            assert_eq!(
+                code,
+                Some(0),
+                "a hidden command keeps its own --help: `agentstack {}`",
+                direct.join(" ")
+            );
+            assert!(
+                stdout.contains(&format!("Usage: agentstack {}", direct[0])),
+                "`agentstack {}` must print its own usage; got: {stdout}",
+                direct.join(" ")
+            );
+        }
+
+        let namespaced: Vec<&str> = std::iter::once("x").chain(direct.iter().copied()).collect();
+        let (x_code, x_stdout, x_stderr) = run(&namespaced, home.path(), proj.path());
+        assert_eq!(
+            (x_code, x_stdout, x_stderr),
+            (code, stdout, stderr),
+            "`agentstack x {0}` and `agentstack {0}` must be one command — same \
+             dispatch, same output, same exit code",
+            direct.join(" ")
+        );
+    }
 }

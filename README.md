@@ -202,19 +202,21 @@ governance only when you need them:
 
 ## The command surface
 
-`agentstack --help` lists the seventeen everyday verbs — `init`, `status`,
-`add`, `search`, `apply`, `doctor`, `lock`, `lib`, `toolset`, `use`, `yes`,
-`run`, `trust`, `undo`, `adopt`, `why`, `secret`. Four ideas cover them: Setup,
-Toolset, Status, Undo.
+`agentstack --help` lists the fifteen everyday verbs — `init`, `status`, `add`,
+`search`, `apply`, `doctor`, `lock`, `toolset`, `use`, `yes`, `run`, `trust`,
+`undo`, `adopt`, `secret`. Four ideas cover them: Setup, Toolset, Status, Undo.
 
-Three of them — `yes`, `undo` and `why` — plus `agentstack x unrender` below are
-in v0.18.0 and later, which is newer than the v0.17.1 the tap and the installer
-serve; on that binary they are an `unrecognized subcommand` error.
-`agentstack --version` says which you have, and
+A verb is on that screen when the product itself can tell you to run it — a
+first-run step, a `doctor` fix line, or a machine-readable `next_action`.
+
+Two of them — `yes` and `undo` — plus `agentstack x why` and
+`agentstack x unrender` below are in v0.18.0 and later, which is newer than the
+v0.17.1 the tap and the installer serve; on that binary they are an
+`unrecognized subcommand` error. `agentstack --version` says which you have, and
 [newer than the stable release](https://tarekkharsa.github.io/agentstack/start.html#newer-than-the-stable-release)
 lists the full set.
 
-`agentstack why <name>` is the one to reach for when nothing is on disk: under
+`agentstack x why <name>` is the one to reach for when nothing is on disk: under
 the default routing a served capability writes no file, so `why` is where its
 origin, pin, approval, live tools and reach are stated. `agentstack x unrender`
 is the opposite direction — it takes back a server config the rendered lane
