@@ -299,11 +299,14 @@ for subj in "read: secrets/api-keys.env" "write: personal-notes/diary.md" "read:
 done
 if [ "$RECORDED" -gt 0 ]; then
   printf '  \033[2msample audit records:\033[0m\n'
-  grep 'host-guard' "$AUDIT" | python3 -c '
+  # Bound the INPUT with `grep -m4` rather than the output with `| head -4`:
+  # a downstream `head` exits early, SIGPIPEs python, and `set -o pipefail`
+  # turns that into a script-aborting exit 141.
+  grep -m4 'host-guard' "$AUDIT" | python3 -c '
 import json, sys
 for line in sys.stdin:
     d = json.loads(line)
-    print("   ", {k: d.get(k) for k in ("server", "tool", "outcome")})' | head -4
+    print("   ", {k: d.get(k) for k in ("server", "tool", "outcome")})'
 fi
 
 # ── 9) PROJECT-LAYER deny (F1 regression check, issue #11) ────────────────────
@@ -318,7 +321,7 @@ mkdir -p "$PBX/home" "$PBX/fakehome" "$PWS/.agentstack" "$PWS/.git" "$PWS/vault"
 printf 'version = 1\n[guard]\nenabled = true\nallow_roots = []\n[policy.filesystem]\ndeny = []\n' > "$PBX/home/agentstack.toml"
 printf 'x\n' > "$PWS/vault/token.txt"
 probe_read() { # $1=manifest-location  → echoes BLOCKED/ALLOWED
-  python3 - "$PWS" <<'PY' | AGENTSTACK_HOME="$PBX/home" HOME="$PBX/fakehome" "$AS" guard check --protocol claude 2>/dev/null | { grep -q '"permissionDecision":"deny"' && echo BLOCKED || echo ALLOWED; }
+  python3 - "$PWS" <<'PY' | AGENTSTACK_HOME="$PBX/home" HOME="$PBX/fakehome" "$AS" guard check --protocol claude 2>/dev/null | { out="$(cat)"; grep -q '"permissionDecision":"deny"' <<<"$out" && echo BLOCKED || echo ALLOWED; }
 import json, sys
 print(json.dumps({"cwd": sys.argv[1], "tool_name": "Read",
                   "tool_input": {"file_path": "vault/token.txt"}}))

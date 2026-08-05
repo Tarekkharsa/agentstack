@@ -43,8 +43,11 @@ echo "▶ harness: mock (SCALE_FLAT=${SCALE_FLAT:-0}, fast=${SCALE_FAST_MS:-200}
 
 # --- admission: lock, then trust the pinned bytes -------------------------
 ( cd "$PROJ" && "$BIN" lock --write >/dev/null )
+# `awk NR==1`, not `head -1`: head exits at the first line, SIGPIPEs the
+# writers behind it, and `set -o pipefail` turns the 141 into an abort as soon
+# as the preview grows past one pipe buffer. awk drains its input.
 CONSENT="$(cd "$PROJ" && "$BIN" trust . --preview \
-  | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p' | head -1)"
+  | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p' | awk 'NR==1')"
 [ -n "$CONSENT" ] || { echo "could not read the trust preview digest" >&2; exit 1; }
 ( cd "$PROJ" && "$BIN" trust . --yes --consented-digest "$CONSENT" >/dev/null )
 echo "▶ admitted: workflow pinned and trusted"

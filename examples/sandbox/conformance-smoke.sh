@@ -229,7 +229,7 @@ if out="$(probe)"; then
   elif [[ "$(classify_cli_failure "$out")" == skip ]]; then
     # Some CLIs (Copilot) print their auth gate and still exit 0.
     echo "live: SKIPPED — '$cli_bin' hit an auth/onboarding gate (exit 0). Output:"
-    echo "$out" | head -20
+    head -20 <<<"$out"
   else
     echo "FAIL: $cli_bin ran but does not see the probe server. Output:"
     echo "$out"
@@ -241,10 +241,10 @@ else
   # wording we have never seen — FAILS. A rot alarm must fail unknown.
   if [[ "$(classify_cli_failure "$out")" == skip ]]; then
     echo "live: SKIPPED — '$cli_bin mcp list' hit an auth/onboarding gate. Output:"
-    echo "$out" | head -20
+    head -20 <<<"$out"
   else
     echo "FAIL: $cli_bin exited nonzero and the output matches no known auth gate:"
-    echo "$out" | head -20
+    head -20 <<<"$out"
     exit 1
   fi
 fi

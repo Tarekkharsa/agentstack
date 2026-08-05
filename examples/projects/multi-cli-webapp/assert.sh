@@ -104,7 +104,10 @@ fi
 # ── 1. seed the central library, then lock ───────────────────────────────────
 say "Seed the isolated central library with the team's skill, then lock:"
 "$AS" lib add ./team-library/api-conventions --name api-conventions --write >/dev/null 2>&1
-if "$AS" lib list 2>&1 | nocolor | grep -q "api-conventions"; then
+# Capture once, then match the text: `cmd | grep -q` under `set -o pipefail`
+# fails the assertion when grep's early exit SIGPIPEs the writer.
+lib_list="$("$AS" lib list 2>&1 | nocolor)"
+if grep -q "api-conventions" <<< "$lib_list"; then
   ok "api-conventions is in the central library (referenced by name from the toolset)"
 else
   bad "lib add did not register api-conventions"
@@ -228,8 +231,8 @@ $explain_skill"
 # in either order (explain says "not supported by: … Cursor"; apply prints the
 # note inside Cursor's own block). Once a silent gap (issue #12), now asserted.
 drop_phrases='no instruction|no skill|unsupported|not supported|skipp|dropp|can.?t receive|will not'
-if printf '%s' "$combined" | grep -iqE "cursor.*($drop_phrases)|($drop_phrases).*cursor" \
-   || printf '%s' "$apply_out" | grep -iqE "$drop_phrases"; then
+if grep -iqE "cursor.*($drop_phrases)|($drop_phrases).*cursor" <<< "$combined" \
+   || grep -iqE "$drop_phrases" <<< "$apply_out"; then
   ok "AgentStack warns that Cursor cannot receive the instruction fragment"
 else
   bad "regressed (issue #12): no surface warns that Cursor's instruction is dropped"

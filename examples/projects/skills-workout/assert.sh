@@ -93,7 +93,12 @@ fi
 say "Seed the isolated central library (sql-review, incident-runbook):"
 "$AS" lib add "$PROJECT/lib-sources/sql-review"       --name sql-review       --write >/dev/null
 "$AS" lib add "$PROJECT/lib-sources/incident-runbook" --name incident-runbook --write >/dev/null
-if "$AS" lib list 2>&1 | grep -q 'sql-review' && "$AS" lib list 2>&1 | grep -q 'incident-runbook'; then
+# Capture once, then match the text. Piping a command into `grep -q` under
+# `set -o pipefail` is a trap: grep exits at the first match, the writer takes
+# SIGPIPE (exit 141), and pipefail turns a SUCCESSFUL match into a failure as
+# soon as the output grows past one pipe buffer.
+LIB_LIST="$("$AS" lib list 2>&1)"
+if grep -q 'sql-review' <<< "$LIB_LIST" && grep -q 'incident-runbook' <<< "$LIB_LIST"; then
   ok "library holds sql-review + incident-runbook"
 else
   bad "library seeding failed"
