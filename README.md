@@ -207,6 +207,13 @@ governance only when you need them:
 `run`, `trust`, `undo`, `adopt`, `why`, `secret`. Four ideas cover them: Setup,
 Toolset, Status, Undo.
 
+Three of them — `yes`, `undo` and `why` — plus `agentstack x unrender` below are
+in v0.18.0 and later, which is newer than the v0.17.1 the tap and the installer
+serve; on that binary they are an `unrecognized subcommand` error.
+`agentstack --version` says which you have, and
+[newer than the stable release](https://tarekkharsa.github.io/agentstack/start.html#newer-than-the-stable-release)
+lists the full set.
+
 `agentstack why <name>` is the one to reach for when nothing is on disk: under
 the default routing a served capability writes no file, so `why` is where its
 origin, pin, approval, live tools and reach are stated. `agentstack x unrender`
