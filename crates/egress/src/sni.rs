@@ -125,13 +125,16 @@ fn parse_sni(record: &[u8]) -> Option<SniVerdict> {
     let comp_len = c.u8()? as usize;
     c.take(comp_len)?; // compression_methods
 
-    // Extensions block absent entirely (ancient ClientHello, body ends here) →
-    // provably no SNI. A PRESENT-but-truncated extensions length is a `?` fail
-    // above/below → Unverifiable.
-    let ext_total = match c.u16() {
-        Some(n) => n,
-        None => return Some(SniVerdict::Absent),
-    };
+    // The body ends exactly here: no extensions block at all (ancient
+    // ClientHello) → provably no SNI.
+    if c.is_empty() {
+        return Some(SniVerdict::Absent);
+    }
+    // Anything still left is a PRESENT extensions block. A single trailing byte
+    // cannot form its u16 length, so `?` makes that Unverifiable — reading it as
+    // `Absent` (which the proxy allows) would let one stray byte wave a hello
+    // past the SNI check.
+    let ext_total = c.u16()?;
     let extensions = c.take(ext_total)?;
 
     let mut e = Reader::new(extensions);
@@ -271,6 +274,42 @@ mod tests {
                                           // The record layer take(short_rec_len) yields a truncated handshake whose
                                           // declared body_len overruns it → Unverifiable.
         assert_eq!(extract_sni(&rec), SniVerdict::Unverifiable);
+    }
+
+    #[test]
+    fn one_stray_trailing_byte_is_unverifiable_not_absent() {
+        // A body that ends right after compression_methods carries no
+        // extensions block at all → provably no SNI. Append ONE stray byte and
+        // the extensions length is present but truncated: the verdict must flip
+        // to Unverifiable, because `Absent` is what the proxy allows and a
+        // single byte must not buy a pass past the SNI check.
+        fn hello_with_trailing(extra: &[u8]) -> Vec<u8> {
+            let mut body = Vec::new();
+            body.extend_from_slice(&[0x03, 0x03]); // client_version
+            body.extend_from_slice(&[0u8; 32]); // random
+            body.push(0x00); // session_id len 0
+            body.extend_from_slice(&0x0002u16.to_be_bytes()); // cipher_suites len
+            body.extend_from_slice(&[0x13, 0x01]); // one cipher suite
+            body.push(0x01); // compression_methods len
+            body.push(0x00); // null compression
+            body.extend_from_slice(extra); // no extensions block, then `extra`
+            let mut hs = vec![0x01];
+            let bl = body.len();
+            hs.extend_from_slice(&[(bl >> 16) as u8, (bl >> 8) as u8, bl as u8]);
+            hs.extend_from_slice(&body);
+            let mut rec = vec![0x16, 0x03, 0x01];
+            rec.extend_from_slice(&(hs.len() as u16).to_be_bytes());
+            rec.extend_from_slice(&hs);
+            rec
+        }
+        // Negative control: zero trailing bytes stays a clean Absent.
+        assert_eq!(extract_sni(&hello_with_trailing(&[])), SniVerdict::Absent);
+        // The bug: one trailing byte used to read as Absent, so a stray byte
+        // bypassed the SNI/domain-fronting check.
+        assert_eq!(
+            extract_sni(&hello_with_trailing(&[0x00])),
+            SniVerdict::Unverifiable
+        );
     }
 
     #[test]
