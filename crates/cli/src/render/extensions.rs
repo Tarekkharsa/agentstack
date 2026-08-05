@@ -10,7 +10,9 @@
 //! or governs them. So this renderer
 //! makes exactly two promises: the bytes are copies of a lock-pinned source,
 //! and the project was trusted at render time. Both are checked before a single
-//! byte is written.
+//! byte is written. The one exemption from the second is the machine manifest,
+//! which is the user's own layer and has no project to trust (see the gate in
+//! [`render`], and `render::hooks::trust_refusal` for the same rule on hooks).
 //!
 //! Copy, never symlink (unlike skills): the harness must load the bytes that
 //! were pinned, not whatever a post-render source edit leaves behind — a live
@@ -251,18 +253,33 @@ pub fn render(
     if has_renders {
         // (a) Trust: an untrusted or drifted project renders ZERO extension
         //     bytes (rule 3, "untrusted means inert").
-        match crate::trust::check(&base) {
-            crate::trust::TrustState::Trusted => {}
-            state => anyhow::bail!(
-                "refusing to render native extensions: project at {} is {} — review and \
-                 `agentstack trust .` before rendering executable extension code",
-                base.display(),
-                match state {
-                    crate::trust::TrustState::Untrusted => "not trusted",
-                    crate::trust::TrustState::Changed => "changed since it was trusted",
-                    crate::trust::TrustState::Trusted => unreachable!(),
-                }
-            ),
+        //
+        //     Exempt: the machine manifest itself. `$AGENTSTACK_HOME/
+        //     agentstack.toml` is the user's own personal layer, not a
+        //     project's content, and it is deliberately undiscoverable as a
+        //     project (`manifest::discover_project_base`), so `agentstack
+        //     trust` can never reach it — its base resolves to `$HOME`, which
+        //     no code path can put in the trust store. Gating it would refuse
+        //     machine-level extensions permanently while pointing the user at
+        //     a command that cannot help: a gate nobody can satisfy is a
+        //     broken feature, not a stronger one. One spelling of the rule
+        //     across the two executable capability kinds — keep this in step
+        //     with `render::hooks::trust_refusal`, which states the same
+        //     exemption for `[hooks.*]`.
+        if !crate::util::paths::is_machine_home(manifest_dir) {
+            match crate::trust::check(&base) {
+                crate::trust::TrustState::Trusted => {}
+                state => anyhow::bail!(
+                    "refusing to render native extensions: project at {} is {} — review and \
+                     `agentstack trust .` before rendering executable extension code",
+                    base.display(),
+                    match state {
+                        crate::trust::TrustState::Untrusted => "not trusted",
+                        crate::trust::TrustState::Changed => "changed since it was trusted",
+                        crate::trust::TrustState::Trusted => unreachable!(),
+                    }
+                ),
+            }
         }
 
         // (b) Lock: every extension to render must be pinned AND matching. A
