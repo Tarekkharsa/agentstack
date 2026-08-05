@@ -20,6 +20,27 @@ pub const SCHEMA_VERSION: u64 = 1;
 /// - `init-plan`: `init --plan` emits the detection plan with `plan_digest`.
 /// - `apply-setup`: `init --yes --consented-plan <digest>` applies a reviewed
 ///   plan and refuses when the detected inputs drifted since the plan.
+/// - `init-tool-managed-v1`: the plan carries `tool_managed[]` — servers whose
+///   executable lives inside another application's bundle, which `init` leaves
+///   out of the import by default. Each entry names the server, the owning
+///   `application` as detected, the `path` that evidences it, the `reason`,
+///   and whether it was `imported` (true only under
+///   `--include-tool-managed`). Without this a panel sees such a server as
+///   simply absent, which is the wrong claim: "left alone" and "not found"
+///   differ, and the entry still exists in every CLI's own config.
+///
+///   Two properties a panel may rely on. The list is DEDUPLICATED by name:
+///   the desktop applications register one server into every tool config on
+///   the machine, so six sightings are one row. And it does NOT join
+///   `plan_digest` — like `unsupported`, it is informational; an excluded
+///   server is absent from `servers`, which the digest already binds, so
+///   including it would add nothing and would re-gate a reviewed plan when a
+///   vendor moved a path that changes nothing this import writes.
+///
+///   The classification is a heuristic over path text, not a claim of
+///   provenance — nothing is executed, resolved or signature-checked. A panel
+///   must present it as "looks owned by X" with the `path` beside it, never as
+///   an established fact, and must keep the override reachable.
 /// - `trust-preview`: `trust --preview` emits the reviewed surface with
 ///   `surface_digest`. This said "the FULL reviewed surface", which was not
 ///   true — see `trust-review-card-v1` for what it covers and what it still
@@ -756,6 +777,7 @@ pub const SCHEMA_VERSION: u64 = 1;
 pub const FEATURES: &[&str] = &[
     "init-plan",
     "apply-setup",
+    "init-tool-managed-v1",
     "trust-preview",
     "trust-consent",
     "status-v1",

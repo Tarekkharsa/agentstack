@@ -208,6 +208,173 @@ fn plan_json_carries_configs_found_and_destinations() {
     assert!(!proj.join("agentstack.toml").exists());
 }
 
+/// A global config holding one server the user chose and two the ChatGPT and
+/// Codex desktop applications installed and keep updated. The two commands are
+/// copied from real entries on a machine with both apps present.
+fn seed_tool_managed_fixture(home: &Path) {
+    fs::write(
+        home.join(".claude.json"),
+        r#"{"mcpServers":{
+            "github":{"command":"npx","args":["-y","github-mcp"]},
+            "node_repl":{"command":"/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl"},
+            "computer-use":{"command":"sh","args":["-c","cd '.' && exec './Codex Computer Use.app/Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient' 'mcp'"]}
+        }}"#,
+    )
+    .unwrap();
+}
+
+/// The default leaves another application's servers out of the import — and
+/// says so. The absence is the easy half; the claim under test is that it is
+/// NEVER silent. "Left alone" and "not found" are different statements, and a
+/// run that printed neither would let a user read the first as the second.
+#[test]
+fn servers_another_app_owns_are_left_out_of_the_import_and_named() {
+    let bin = env!("CARGO_BIN_EXE_agentstack");
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    seed_tool_managed_fixture(&home);
+
+    let stub_bin = tmp.path().join("bin");
+    fs::create_dir_all(&stub_bin).unwrap();
+    write_stub(&stub_bin, "claude");
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(proj.join(".git")).unwrap();
+
+    let (text, ok) = run(
+        bin,
+        &["init", "--dry-run", "--secrets", "skip"],
+        &home,
+        &proj,
+        &stub_bin,
+    );
+    assert!(ok, "init --dry-run failed:\n{text}");
+
+    // Only the user's own server is imported.
+    assert!(text.contains("Importing 1 MCP server"), "{text}");
+    assert!(text.contains("runs npx -y github-mcp"), "{text}");
+
+    // And the two that were left out are NAMED, with who appears to own them,
+    // the path that evidences it, and the flag that overrides the default.
+    assert!(
+        text.contains(
+            "2 servers are managed by the apps that installed them and were left alone: \
+             node_repl, computer-use"
+        ),
+        "the exclusion must be stated, not inferred:\n{text}"
+    );
+    assert!(text.contains("ChatGPT"), "{text}");
+    assert!(text.contains("Codex Computer Use"), "{text}");
+    assert!(
+        text.contains("/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl"),
+        "the evidence behind the reading is shown:\n{text}"
+    );
+    assert!(text.contains("nothing was deleted"), "{text}");
+    assert!(text.contains("--include-tool-managed"), "{text}");
+
+    // `--dry-run` wrote nothing, as always.
+    assert!(!proj.join(".agentstack/agentstack.toml").exists());
+}
+
+/// The same two facts as data, for the panel (`init-tool-managed-v1`): the
+/// excluded servers are absent from `servers[]` AND present in
+/// `tool_managed[]` with the owner, the evidence and the reason — so a UI can
+/// render "left alone" instead of a gap or a duplicate. The opt-in flag flips
+/// both halves.
+#[test]
+fn plan_json_names_the_servers_another_app_owns() {
+    let bin = env!("CARGO_BIN_EXE_agentstack");
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    seed_tool_managed_fixture(&home);
+
+    let stub_bin = tmp.path().join("bin");
+    fs::create_dir_all(&stub_bin).unwrap();
+    write_stub(&stub_bin, "claude");
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+
+    let names = |v: &serde_json::Value, key: &str| -> Vec<String> {
+        v[key]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|s| s["name"].as_str().unwrap().to_string())
+            .collect()
+    };
+
+    let (text, ok) = run(bin, &["init", "--plan"], &home, &proj, &stub_bin);
+    assert!(ok, "init --plan failed:\n{text}");
+    let v: serde_json::Value = serde_json::from_str(&text).expect("plan is JSON");
+    assert!(
+        v["features"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f == "init-tool-managed-v1"),
+        "the contract is advertised: {}",
+        v["features"]
+    );
+    assert_eq!(names(&v, "servers"), vec!["github".to_string()]);
+
+    let managed = v["tool_managed"].as_array().unwrap();
+    assert_eq!(
+        managed.len(),
+        2,
+        "one row per name, deduplicated: {managed:?}"
+    );
+    let node_repl = managed
+        .iter()
+        .find(|t| t["name"] == "node_repl")
+        .expect("node_repl is named as left alone");
+    assert_eq!(node_repl["application"], "ChatGPT");
+    assert_eq!(
+        node_repl["path"],
+        "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl"
+    );
+    assert!(node_repl["reason"]
+        .as_str()
+        .unwrap()
+        .contains("another application's bundle"));
+    assert_eq!(node_repl["imported"], false);
+    let computer_use = managed
+        .iter()
+        .find(|t| t["name"] == "computer-use")
+        .expect("the shell-wrapped one is named too");
+    assert_eq!(computer_use["application"], "Codex Computer Use");
+
+    // The opt-in: a user who genuinely wants one gets it, and the row says so.
+    let (text, ok) = run(
+        bin,
+        &["init", "--plan", "--include-tool-managed"],
+        &home,
+        &proj,
+        &stub_bin,
+    );
+    assert!(ok, "init --plan --include-tool-managed failed:\n{text}");
+    let v: serde_json::Value = serde_json::from_str(&text).expect("plan is JSON");
+    let imported = names(&v, "servers");
+    assert!(imported.contains(&"node_repl".to_string()), "{imported:?}");
+    assert!(
+        imported.contains(&"computer-use".to_string()),
+        "{imported:?}"
+    );
+    assert!(
+        v["tool_managed"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|t| t["imported"] == true),
+        "opting in is stated too, never left to be inferred: {}",
+        v["tool_managed"]
+    );
+
+    assert!(!proj.join(".agentstack").exists());
+}
+
 #[test]
 fn init_imports_a_namespaced_server_name_into_the_library_unchanged() {
     let bin = env!("CARGO_BIN_EXE_agentstack");

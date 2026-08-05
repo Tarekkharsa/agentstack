@@ -100,6 +100,7 @@ fn init_args(yes: bool, consented_plan: Option<String>) -> InitArgs {
         secrets: Some(agentstack::cli::SecretStore::Skip),
         no_keychain: false,
         project_servers: false,
+        include_tool_managed: false,
         yes,
         consented_plan,
     }

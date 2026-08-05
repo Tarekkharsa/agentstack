@@ -1755,6 +1755,14 @@ pub struct SetupArgs {
     /// --project-servers` means the same thing on both routes.
     #[arg(long)]
     pub project_servers: bool,
+
+    /// Also import MCP servers another application installed and keeps
+    /// updated (see `agentstack init --help`). Carried through to the
+    /// wizard's import step for the same reason `--project-servers` is: a
+    /// flag that parses and then does nothing on one of two routes is worse
+    /// than no flag.
+    #[arg(long)]
+    pub include_tool_managed: bool,
 }
 
 #[derive(Args, Debug)]
@@ -1971,6 +1979,17 @@ pub struct InitArgs {
     /// The default is library-first: the project references them by name.
     #[arg(long)]
     pub project_servers: bool,
+
+    /// Also import MCP servers that another application installed and keeps
+    /// updated — entries whose executable lives inside an app bundle, such as
+    /// ChatGPT's `node_repl`. They are left out by default because the
+    /// application that owns one rewrites it on its own schedule, so its
+    /// pinned bytes churn and re-gate on a change you never made, and `apply`
+    /// would copy one application's plumbing into tools it never targeted.
+    /// Excluded servers are always named in the output — never dropped
+    /// silently — so this flag is an override, not a discovery.
+    #[arg(long)]
+    pub include_tool_managed: bool,
 
     /// Run the promptless import without a terminal: acknowledge that the
     /// manifest (and any lifted token values) will be written. Required when

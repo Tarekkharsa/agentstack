@@ -392,6 +392,66 @@ fn render_library_collisions(source_name: &str, collisions: &[LibraryCollision])
     out
 }
 
+/// The tool-managed block in the pre-write review: how many servers another
+/// application owns, which names, who appears to own each and on what
+/// evidence, and the flag that overrides the default.
+///
+/// The block exists because an exclusion nobody can see is a silent drop.
+/// "Left alone" and "not found" are different claims, and only one of them is
+/// true here — so the names are printed either way, with the wording changing
+/// to say which of the two outcomes happened.
+///
+/// Pure so its wording is unit-testable. Every value came out of another CLI's
+/// config file — hostile input — so names and paths are sanitized and bounded
+/// before display.
+fn render_tool_managed(entries: &[ToolManagedServer], included: bool) -> String {
+    if entries.is_empty() {
+        return String::new();
+    }
+    let names: Vec<String> = entries
+        .iter()
+        .map(|t| crate::text::sanitize_line(&t.name))
+        .collect();
+    let verb = if entries.len() == 1 { "is" } else { "are" };
+    let outcome = if included {
+        "imported at your request"
+    } else {
+        "left alone"
+    };
+    let mut out = format!(
+        "{}  {} {verb} managed by the apps that installed them and {} {}: {}\n",
+        "⚠".yellow(),
+        super::count(entries.len(), "server"),
+        if entries.len() == 1 { "was" } else { "were" },
+        outcome,
+        names.join(", ")
+    );
+    for t in entries {
+        out.push_str(&format!(
+            "      {}  —  {}\n        {}\n",
+            crate::text::sanitize_line(&t.name),
+            crate::text::truncate_chars(&crate::text::sanitize_line(&t.application), 48),
+            // Bounded, but generously: the path IS the evidence, and evidence
+            // clipped mid-bundle cannot be checked against the config it came
+            // from. The plan JSON carries it in full either way.
+            crate::text::truncate_chars(&crate::text::sanitize_line(&t.evidence), 160),
+        ));
+    }
+    out.push_str(&format!("      The rule: {TOOL_MANAGED_REASON}.\n"));
+    if included {
+        out.push_str(
+            "      That application rewrites the entry on its own schedule, so expect the \
+             pinned\n      bytes to change and re-gate on something you did not choose.\n",
+        );
+    } else {
+        out.push_str(
+            "      They stay in each CLI's own config, unchanged — nothing was deleted.\n\
+             \x20     Import one anyway with `agentstack init --include-tool-managed`.\n",
+        );
+    }
+    out
+}
+
 /// The names a schema may declare: sorted, de-duplicated, and restricted to
 /// well-formed reference names. The filter is not defensive decoration — these
 /// names come from imported third-party CLI configs, and anything that is not a
@@ -583,6 +643,7 @@ fn run_gated(args: &InitArgs, manifest_dir: Option<&Path>, interactive: bool) ->
                 // does not make the run scripted (it is absent from `bare`
                 // above on purpose) — but the wizard must still honour it.
                 project_servers: args.project_servers,
+                include_tool_managed: args.include_tool_managed,
             };
             return super::setup::run(&wizard, manifest_dir);
         }
@@ -649,7 +710,7 @@ pub fn plan_json(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<serde_j
     let dir = crate::manifest::new_manifest_dir(&base);
     let manifest_path = dir.join(MANIFEST_FILE);
     let already_initialized = existing_manifest(manifest_dir)?.is_some();
-    let det = detect_import(&dir)?;
+    let det = detect_import(&dir, args.include_tool_managed)?;
     let destination = store_label(resolve_secret_store(args, false)?);
     let digest = plan_digest(&det, &base, already_initialized, destination);
 
@@ -752,6 +813,27 @@ pub fn plan_json(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<serde_j
                 "reason": s.reason,
             }))
             .collect::<Vec<_>>(),
+        // Servers another application installed and keeps updated
+        // (`init-tool-managed-v1`). Left out of the import by default and
+        // NAMED here, so a panel renders "left alone" — an entry that already
+        // has an owner — rather than showing nothing or a duplicate. Each
+        // carries the evidence behind the reading, because the classification
+        // is a heuristic over paths and a user must be able to check it.
+        // `imported` states which of the two default/override outcomes
+        // happened. Informational, like `unsupported`: it does not join the
+        // digest, and it does not need to — an excluded server is absent from
+        // `servers`, which the digest already binds.
+        "tool_managed": det
+            .tool_managed
+            .iter()
+            .map(|t| serde_json::json!({
+                "name": crate::text::sanitize_line(&t.name),
+                "application": crate::text::sanitize_line(&t.application),
+                "path": crate::text::sanitize_line(&t.evidence),
+                "reason": TOOL_MANAGED_REASON,
+                "imported": det.tool_managed_included,
+            }))
+            .collect::<Vec<_>>(),
         "plan_digest": digest,
     }))
 }
@@ -816,7 +898,38 @@ struct DetectedImport {
     /// this manifest) would manage — derived from the same detection, so the
     /// plan and the terminal review state identical destinations.
     destinations: Vec<PlanDestination>,
+    /// Servers whose executable lives inside another application's bundle, in
+    /// first-seen order and deduplicated by name (the desktop apps register
+    /// the same entry into every tool config on the machine, so one server
+    /// arrives six times). Recorded whether or not they were imported: an
+    /// exclusion nobody can see is exactly the silent drop this exists to
+    /// prevent.
+    tool_managed: Vec<ToolManagedServer>,
+    /// Whether `--include-tool-managed` overrode the default, so the plan and
+    /// the review can state which of the two happened instead of leaving a
+    /// reader to infer it from a list.
+    tool_managed_included: bool,
 }
+
+/// One server the classifier read as belonging to the application that
+/// installed it, carrying the evidence behind that reading so a user can check
+/// it rather than take it on faith.
+struct ToolManagedServer {
+    name: String,
+    /// The owning application as DETECTED — a bundle directory name, not a
+    /// verified publisher (see [`crate::adapter::tool_managed`]).
+    application: String,
+    /// The path that matched, verbatim.
+    evidence: String,
+}
+
+/// Why a tool-managed server is left out, in one plain sentence. A constant so
+/// the JSON a panel renders and the line a terminal prints cannot drift apart.
+/// Phrased as the RULE rather than as a fact about one entry, so it reads
+/// correctly both as a per-server `reason` and under a list of several.
+const TOOL_MANAGED_REASON: &str =
+    "an executable inside another application's bundle belongs to that application: it \
+     installs, updates and owns the entry";
 
 impl DetectedImport {
     /// The detected CLI ids, in detection order — the manifest's default
@@ -835,7 +948,10 @@ fn det_display(detected: &[DetectedCli], id: &str) -> String {
         .unwrap_or_else(|| id.to_string())
 }
 
-fn detect_import(dir: &Path) -> Result<DetectedImport> {
+/// One detection pass. `include_tool_managed` decides only whether servers the
+/// classifier attributes to another application STAY in the import; they are
+/// recorded and reported either way.
+fn detect_import(dir: &Path, include_tool_managed: bool) -> Result<DetectedImport> {
     let registry = Registry::load()?;
     let mut detected: Vec<DetectedCli> = Vec::new();
     let mut contributing: Vec<String> = Vec::new();
@@ -843,6 +959,7 @@ fn detect_import(dir: &Path) -> Result<DetectedImport> {
     let mut settings: IndexMap<String, serde_json::Value> = IndexMap::new();
     let mut conflict_counts: IndexMap<String, usize> = IndexMap::new();
     let mut skipped: Vec<(String, crate::adapter::SkippedImport)> = Vec::new();
+    let mut tool_managed: IndexMap<String, ToolManagedServer> = IndexMap::new();
     let mut project_sourced = false;
     // Which scopes this import reads. A project manifest imports what is
     // configured in the project too — before this, `init` asked the machine-scope
@@ -894,8 +1011,35 @@ fn detect_import(dir: &Path) -> Result<DetectedImport> {
             let Some(value) = desc.read_config_value_for(scope, dir)? else {
                 continue;
             };
-            let (imported, skips) = extract_servers_with_skips(desc, &value);
+            let (extracted, skips) = extract_servers_with_skips(desc, &value);
             skipped.extend(skips.into_iter().map(|s| (desc.display.clone(), s)));
+            // Another application's plumbing is not this user's setup. Record
+            // every such entry (once, by name — the desktop apps register the
+            // same server into every tool config here), and drop it from the
+            // import unless the flag says otherwise. This happens BEFORE the
+            // merge so an excluded name never becomes a conflict nothing
+            // imported, and BEFORE `contributed` so a CLI whose only offering
+            // was someone else's plumbing does not become a default target.
+            let mut imported = Vec::with_capacity(extracted.len());
+            for (name, server) in extracted {
+                let Some(found) = crate::adapter::tool_managed(&server) else {
+                    imported.push((name, server));
+                    continue;
+                };
+                if !tool_managed.contains_key(&name) {
+                    tool_managed.insert(
+                        name.clone(),
+                        ToolManagedServer {
+                            name: name.clone(),
+                            application: found.application,
+                            evidence: found.evidence,
+                        },
+                    );
+                }
+                if include_tool_managed {
+                    imported.push((name, server));
+                }
+            }
             contributed |= !imported.is_empty();
             let offered = imported.len();
             let mut collided = 0usize;
@@ -984,6 +1128,8 @@ fn detect_import(dir: &Path) -> Result<DetectedImport> {
         skipped,
         project_sourced,
         destinations,
+        tool_managed: tool_managed.into_values().collect(),
+        tool_managed_included: include_tool_managed,
     })
 }
 
@@ -1377,7 +1523,7 @@ fn run_impl(
     // config that changed between the two reads be imported (and its token
     // stored) without ever being compared against the reviewed plan
     // (independent review, 2026-07-23).
-    let det = detect_import(&dir)?;
+    let det = detect_import(&dir, args.include_tool_managed)?;
     // Reviewed-plan binding: refuse before ANY print or mutation when this
     // detection no longer digests to the reviewed plan. The destination is
     // resolved non-interactively exactly as `--plan` resolved it, so both
@@ -1408,6 +1554,8 @@ fn run_impl(
         skipped,
         project_sourced,
         destinations,
+        tool_managed,
+        tool_managed_included,
     } = det;
     let detected_ids: Vec<String> = detected.iter().map(|c| c.id.clone()).collect();
     let display_names: Vec<String> = detected.iter().map(|c| c.display.clone()).collect();
@@ -1571,6 +1719,13 @@ version = 1
             skip.reason
         );
     }
+    // Servers another application owns: excluded by default, and named here
+    // whichever way it went. `--dry-run` reaches this same review, so the
+    // preview and the real run make the identical statement.
+    print!(
+        "{}",
+        render_tool_managed(&tool_managed, tool_managed_included)
+    );
     if !settings.is_empty() {
         let from: Vec<String> = settings
             .keys()
@@ -2730,6 +2885,8 @@ mod tests {
                 lifted: Vec::new(),
                 skipped: Vec::new(),
                 destinations: Vec::new(),
+                tool_managed: Vec::new(),
+                tool_managed_included: false,
             }
         };
 
@@ -2781,6 +2938,85 @@ mod tests {
             out.contains("binary on PATH — no config files found"),
             "a binary-only CLI states the honest fact:\n{out}"
         );
+    }
+
+    /// An exclusion nobody can read is a silent drop. The block must state the
+    /// count, every name, the apparent owner, the evidence, and the way to
+    /// override it — and it must say "left alone", never let absence speak.
+    #[test]
+    fn the_tool_managed_block_names_the_servers_the_evidence_and_the_override() {
+        let entries = vec![
+            ToolManagedServer {
+                name: "node_repl".into(),
+                application: "ChatGPT".into(),
+                evidence: "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl"
+                    .into(),
+            },
+            ToolManagedServer {
+                name: "computer-use".into(),
+                application: "Codex Computer Use".into(),
+                evidence: "./Codex Computer Use.app/Contents/MacOS/SkyComputerUseClient".into(),
+            },
+        ];
+        let out = render_tool_managed(&entries, false);
+        assert!(
+            out.contains(
+                "2 servers are managed by the apps that installed them and were left alone: \
+                 node_repl, computer-use"
+            ),
+            "the count and the names lead the block:\n{out}"
+        );
+        assert!(out.contains("ChatGPT"), "{out}");
+        assert!(
+            out.contains("/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl"),
+            "the evidence is shown so the reading can be checked:\n{out}"
+        );
+        assert!(
+            out.contains("nothing was deleted"),
+            "the entries survive in their own CLI's config:\n{out}"
+        );
+        assert!(
+            out.contains("--include-tool-managed"),
+            "the override is named where the exclusion is stated:\n{out}"
+        );
+
+        // Opting in is stated too, with its cost — the same names, the other
+        // outcome. Silence would be wrong in this direction as well.
+        let included = render_tool_managed(&entries, true);
+        assert!(included.contains("imported at your request"), "{included}");
+        assert!(
+            included.contains("re-gate"),
+            "the churn an owned entry causes is stated:\n{included}"
+        );
+
+        // Nothing found, nothing claimed.
+        assert!(render_tool_managed(&[], false).is_empty());
+    }
+
+    /// Every value in the block came from another CLI's config file. Both the
+    /// name and the path are hostile input.
+    #[test]
+    fn the_tool_managed_block_sanitizes_names_and_paths() {
+        let out = render_tool_managed(
+            &[ToolManagedServer {
+                name: "ev\u{1b}[31mil".into(),
+                application: "App\u{1b}[0m".into(),
+                evidence: "/Applications/E\u{1b}[2Kvil.app/Contents/x\u{7}".into(),
+            }],
+            false,
+        );
+        // Every hostile value is neutralized. (The block's own `⚠` still
+        // carries this crate's colour codes — those are ours, not input.)
+        assert!(out.contains("left alone: evil\n"), "{out:?}");
+        assert!(
+            !out.contains("\u{1b}[31m"),
+            "no colour injection from input: {out:?}"
+        );
+        assert!(
+            !out.contains("\u{1b}[2K"),
+            "no cursor control from input: {out:?}"
+        );
+        assert!(!out.contains('\u{7}'), "no bell from input: {out:?}");
     }
 
     /// Review finding 3: the collision block names the clash, BOTH sides, and
@@ -3236,6 +3472,7 @@ mod tests {
             secrets: None,
             no_keychain: false,
             project_servers: false,
+            include_tool_managed: false,
             yes: false,
             consented_plan: None,
         };
@@ -3267,6 +3504,7 @@ mod tests {
             secrets: None,
             no_keychain: false,
             project_servers: false,
+            include_tool_managed: false,
             yes: false,
             consented_plan: None,
         };
@@ -3294,6 +3532,7 @@ mod tests {
             secrets: None,
             no_keychain: false,
             project_servers: false,
+            include_tool_managed: false,
             yes: false,
             consented_plan: None,
         };
