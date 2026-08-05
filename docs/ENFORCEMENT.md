@@ -356,10 +356,15 @@ toolset containing it.
 
 ### Secrets
 
-- **host — enforced, fail-closed.** `ScopedResolver::resolve` calls
-  `secret_decision(server, name)` before returning any value; a denied or
-  unresolvable `${REF}` blocks the write rather than emitting a literal
-  placeholder. Once allowed, the concrete value is written into the native config
+- **host — enforced and fail-closed for a *denied* ref; overridable for an
+  *unresolved* one.** `ScopedResolver::resolve` calls
+  `secret_decision(server, name)` before returning any value. A ref denied by
+  `[policy.secrets]` blocks the write with no escape hatch —
+  `--allow-unresolved` forgives a missing secret, never a policy refusal. A ref
+  that merely fails to resolve (no such secret on this machine, or a store that
+  errored) also blocks the write by default, but under `--allow-unresolved` the
+  renderer keeps the literal `${NAME}` and that placeholder is what reaches the
+  config file. Once allowed, the concrete value is written into the native config
   file on disk — that on-disk exposure is a separate, accepted fact (ARCHITECTURE
   Layer 1), not a policy gap. (`crates/cli/src/secret/mod.rs`)
 - **gateway — enforced, fail-closed.** A per-server `ScopedResolver` substitutes
@@ -400,17 +405,37 @@ toolset containing it.
   tool call it blocks: destructive
   commands (`rm -rf` outside the workspace, `git reset --hard`, `git clean
   -f`, disk writes, …), any access to `[policy.filesystem] deny` globs
-  (machine ∪ project — a repo can only add), and file-tool writes outside
-  the workspace + `[guard] allow_roots` + temp. `[guard.project_roots]`
+  (machine ∪ project — a repo can only add), and writes outside
+  the workspace + `[guard] allow_roots` + temp. That last confinement has an
+  exact reach, worth naming. **Shell** writes reach it on every wired CLI — a
+  redirect, `rm`/`mv`/`cp`/`tee`, `sed -i` — because they arrive as commands
+  and route through the same write-target check. **File-tool** writes reach it
+  only when the guard recognizes the tool name as a writer (`WRITERS`:
+  `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `write_file`, `replace`,
+  `edit_file`, `fs_write`, `create_file`, `str_replace_editor`,
+  `replace_string_in_file`, `multi_replace_string_in_file`, `apply_patch`); a
+  path-bearing tool under any other name degrades to the read path and gets
+  the deny-glob check only — the safe default, chosen so an unfamiliar tool
+  name cannot wedge a harness. Cursor is confined for shell writes and for
+  nothing else: its surface offers no pre-write file hook, so the installer
+  wires only `beforeShellExecution` and `beforeReadFile` and no Cursor file
+  write is ever presented for a decision. `[guard.project_roots]`
   scopes an extra root to one workspace ("sessions under `~/x` may also
   write `~/y`") — the grant lives in the MACHINE manifest, so a project can
   never widen its own write scope, and the guard denies shell writes to that
   manifest's directory precisely so this table can't be edited into
-  allowlisting itself. Denials are recorded to the
-  audit log (`host-guard` entries in `calls.jsonl`). The ceiling is the
+  allowlisting itself. **Rule** denials are recorded to the
+  audit log (`host-guard` entries in `calls.jsonl`); the three fail-closed
+  *system* refusals are not — an unreadable machine config, an unavailable
+  machine policy, and an unreadable or oversized hook payload each deny the
+  call and write no audit line, because what refused was the guard's own
+  broken state rather than an evaluated rule. The ceiling is the
   legend's: the harness must honor its own hook protocol — this catches
-  accidents, not malice, and Claude Desktop / Junie expose no hook surface
-  at all (their cells are effectively *unsupported*). Config unreadable →
+  accidents, not malice. Three CLIs sit in `NO_HOOK_SURFACE` and their cells
+  are effectively *unsupported*, for two different reasons: Claude Desktop has
+  no PreToolUse-style hook and Junie has only a static action allowlist —
+  there is nothing to ride — while Kiro's hooks nest inside per-agent config
+  files and are simply not wired yet. Config unreadable →
   the hook fails CLOSED; unrecognized payload shapes fail open (a guard
   that wedges the harness gets uninstalled, not fixed).
   (`crates/cli/src/guard.rs`, `crates/cli/src/commands/guard.rs`)
@@ -433,8 +458,15 @@ toolset containing it.
   are still never consulted on these paths.
   (`crates/cli/src/guard.rs`, `crates/cli/src/commands/guard.rs`)
 - **sandbox / lockdown — coarse.** The whole workspace is visible inside the
-  container and nothing outside the mounted workspace directory is — so the
-  workspace boundary itself is a real, kernel-level read scope. But no finer mount
+  container and no *user* filesystem outside the mounted workspace directory
+  is — so the workspace boundary itself is a real, kernel-level read scope.
+  What else is mounted is agentstack's own generated content, never yours: the
+  gateway config it renders for this run, and the empty shadows it lays over a
+  stale project config, are bound **read-only** from a run-scoped `0700` temp
+  directory that is removed when the run ends. One of those files carries the
+  run's live gateway token, which is exactly why it is read-only and why it is
+  not workspace content. No Docker socket, no `$AGENTSTACK_HOME`, no host
+  home. But no finer mount
   is created from `[policy.filesystem] read`, so read globs narrower than the whole
   workspace are informational only. (`crates/cli/src/commands/sandbox.rs`,
   `crates/runtime/src/spec.rs`)
@@ -463,11 +495,29 @@ Which is which, per denial family:
 |---|---|---|---|
 | Gateway tool block | **enforced** (gateway/sandbox/lockdown) | yes | `calls.jsonl` + run `events.jsonl` (`ToolCall`, `outcome: denied`) |
 | Egress refusal — sandbox proxy | **enforced** under `--lockdown`, `coarse`/proxied under plain `--sandbox` | yes | run `events.jsonl` (`Egress`, `allowed: false`) |
-| Egress refusal — host path | **coarse** — a write-time check on the declared host, not a wire-level fence | yes, **new in Phase 3** | `calls.jsonl` (`tool: egress`) + run `events.jsonl` (`Egress`) when inside a run |
+| Egress refusal — host path | **coarse** — a write-time check on the declared host, not a wire-level fence | the gateway-build one only | `calls.jsonl` (`tool: egress`) + run `events.jsonl` (`Egress`) when inside a run. The refusal raised while *rendering* config (`apply` / `use` / `doctor`) is printed and discarded — no line, no event |
 | Secret-scope refusal | **enforced** — the ref reaches no backing store | yes, **new in Phase 3** | `calls.jsonl` (`tool: secret`) + run `events.jsonl` (`SecretDenied`) |
 | Filesystem guard | **cooperative** — the harness chose to ask | yes | `calls.jsonl` (`server: host-guard`, `run: None`) |
 | Content-pin refusal | **enforced** — the server is dropped before it is spawned or dialled | yes, **new in Phase 4** | `calls.jsonl` (`tool: pin`) + run `events.jsonl` (`PinRejected`) |
 | Trust-at-dispatch refusal | **enforced** — the call is refused before the upstream is dialled | yes, **new in W2** | `calls.jsonl` (`tool: trust`) + run `events.jsonl` (`TrustRefused`) |
+| Toolset-fence refusal | **enforced** — the fenced gateway holds no upstream for the name, so nothing was spawned, dialled, or forwarded | yes, **new in W4** | `calls.jsonl` (`tool: fence`) — no run event |
+
+Eight rows, seven families: `Family::Egress` refuses in two places that do not
+enforce alike, so its row is split rather than averaged. Counting rows is not
+counting families, and the paragraphs below number the families.
+
+The toolset-fence row is the seventh family, added in W4 (leases). It fires
+when a call names a server this project declares while no open toolset selects
+it. Note the order: the fence had already emptied the gateway of that upstream,
+so the record is *evidence* rather than the act — `mcp_server::fence_refusal`
+turns what would otherwise be a bare "unknown tool" into a line that names the
+toolset to open. Two bounds on it are deliberate. It records only for a server
+the manifest **declares**, because otherwise any caller could write unbounded
+rows into the audit log by inventing names; and it is the one family with no
+run-log mirror — the run id rides the `calls.jsonl` line, but `RunEvent` has no
+fence variant, so a run report surfaces these only through the cross-project
+audit log. (`crates/cli/src/seatbelt.rs` `Family::Fence`,
+`crates/cli/src/mcp_server.rs` `fence_refusal`)
 
 The trust-at-dispatch row is the sixth family, added in W2 (automatic
 delivery). It fires when the project's consent digest stops matching the one a
@@ -492,9 +542,17 @@ The content-pin row is the fifth family, added in Phase 4. It differs from the
 other four in what refused: nothing the user *authored* denied anything here,
 the delivered bytes simply are not the bytes they reviewed — which is why it
 has its own family and its own next step (review what changed, or re-pin
-deliberately), rather than borrowing the tool block's. It only ever fires for
-a project that is already trusted: an unreviewed bundle is refused whole,
-earlier, and never reaches per-server verification.
+deliberately), rather than borrowing the tool block's. Under a sandboxed run
+it only ever fires for a project that is already trusted: `Gateway::from_frozen`
+carries the hard trust gate, so an unreviewed bundle is refused whole, earlier,
+and never reaches per-server verification. The host, lease, and eager gateways
+(`Gateway::from_manifest`, `from_manifest_lease`) carry no such gate — they
+resolve and pin-verify every selected server for an untrusted project too, and
+can emit this refusal for one. That is deliberate rather than an oversight:
+those constructors are reached by naming the project, and on the eager path
+`--manifest-dir` is itself the consent. What the refusal *means* is identical
+on every path — the delivered bytes are not the bytes that were reviewed —
+only the "already trusted" precondition is the sandboxed run's alone.
 
 One honesty note specific to it: its refusal text is composed from lockfile and
 manifest fragments, which are repository content and therefore hostile input
@@ -502,25 +560,35 @@ manifest fragments, which are repository content and therefore hostile input
 printed or recorded, so the reason in the log is deliberately lossy — a denial
 the reader can trust to be a denial is worth more than a complete one.
 
-The two rows marked *new in Phase 3* were previously refusals that happened,
-printed once, and left nothing behind. Adding their events changed **only**
-what is written: both were already fail-closed refusals, both still are, and
-neither row's enforcement claim moved as a result. The same is true of the
+The secret-scope row and the gateway half of the host-path egress row were
+what Phase 3 gave events to: refusals that happened, printed once, and left
+nothing behind. Adding those events changed **only** what is written — both
+were already fail-closed refusals, both still are, and neither row's
+enforcement claim moved as a result. The same is true of the
 Phase 4 row: `Gateway::build` drops exactly the servers it dropped before, and
 `refuse` still returns `()`. The host-path egress row in
 particular stays `coarse` — recording a write-time decision does not make it a
 runtime fence, and reading this table as though it did is the exact error the
-paragraph above exists to prevent.
+paragraph above exists to prevent. Its render-time half is the reverse
+reminder: a refusal with no record is still a refusal.
 
 - **host — unsupported for MCP tool calls.** Native host-mode runs never call
   `calllog::record` for tool traffic because the harness talks to upstream MCP
   servers directly, bypassing AgentStack entirely. Audit of *calls* happens only
   if the harness is separately configured to route via the gateway (`agentstack
-  mcp`). Since Phase 3 the host path does record its own **refusals** — the
-  host-path egress check and secret-scope denials above — which is why this cell
-  is `unsupported` for the dimension (what the agent did) while denials are
-  nonetheless retrievable (what agentstack refused). (`crates/cli/src/runs.rs`,
-  `crates/cli/src/seatbelt.rs`)
+  mcp`). Since Phase 3 the host path does record *some* of its own
+  **refusals** — secret-scope denials, and the egress refusal raised while the
+  gateway is being built — which is why this cell is `unsupported` for the
+  dimension (what the agent did) while those denials are nonetheless
+  retrievable (what agentstack refused). One host-path refusal is not
+  retrievable, and the table above says so: the write-time egress check in
+  `render::apply` pushes a reason string that `apply`, `use`, and `doctor`
+  print as "blocked by policy" and then drop. Nothing under
+  `crates/cli/src/render/` calls the seatbelt at all, so the refusal that most
+  users actually meet leaves no line in `calls.jsonl` and no run event. It
+  still refuses — the write does not happen — it is simply not written down.
+  (`crates/cli/src/runs.rs`, `crates/cli/src/seatbelt.rs`,
+  `crates/cli/src/gateway.rs`, `crates/cli/src/render/apply.rs`)
 - **gateway — enforced.** `Gateway::try_call` logs every outcome (denied / ok /
   error) via `calllog::record` to `~/.agentstack/audit/calls.jsonl`. Only an
   argument *digest* is stored, never raw values or resolved secrets, and upstream
@@ -552,13 +620,32 @@ paragraph above exists to prevent.
 
 ### Servers
 
-- **pre-delivery — content-pinned by definition, trust-gated.** A
+- **pre-delivery — content-pinned by definition, trust-gated at launch.** A
   `[servers.*]` entry *is* its definition: transport, command, args, env, url.
   `agentstack.lock` pins that resolved definition's checksum
   (`LockedServer`), the manifest bytes are bound into the trust digest, and
   `doctor`'s `check_server_reproducibility` reports pin-vs-manifest drift.
-  Editing a server's command line therefore re-gates trust review, and an
-  untrusted or drifted project renders no server config and spawns nothing.
+  Editing a server's command line therefore re-gates trust review, with one
+  named exception: a server tagged `owner = <adapter>` is refreshed from the
+  owning app's own on-disk config by `apply --write`, and because that value
+  is machine-derived from a config the owner already executes, a project that
+  was trusted immediately before the refresh has its trust **re-pinned** to
+  the new digest instead of re-gated. A project that was already untrusted or
+  drifted is left alone — pending review stays pending — and the re-pin
+  digest comes from a pre-write snapshot with agentstack's own new bytes
+  spliced in, never from a re-read of disk, so a hostile edit racing the
+  write cannot be blessed by it. (`crates/cli/src/render/owned.rs`
+  `refresh_owned_servers`, `crates/cli/src/commands/apply.rs`.)
+  An untrusted or drifted project **spawns nothing through agentstack**:
+  `session start`, the protected `run`, and the MCP server's auto-project gate
+  all refuse, and `Gateway::from_frozen` refuses to build for a sandboxed run
+  at all. Its server *config is nonetheless written* — `apply --write` blocks a
+  server target only on an unresolved `${REF}`, a failed secret read, or a
+  policy refusal, and consults trust nowhere. The enforcement point is launch,
+  not render, and the qualifier is load-bearing: a harness that reads those
+  rendered bytes on its own starts the server outside agentstack entirely,
+  which is the accepted host-mode fact (ARCHITECTURE Layer 1) and not a
+  promise this row makes.
   A stdio server's *executable* is a separate pin: repo-local commands and
   interpreter-script args are pinned as D3 `LockedExecutable` entries, which
   a protected `run` re-verifies before launch.
@@ -574,14 +661,28 @@ paragraph above exists to prevent.
 
 ### Skills
 
-- **pre-delivery — content-pinned, trust-gated, materialized on activation.**
-  A skill is instructional text an agent reads, not code agentstack executes.
-  `agentstack.lock` pins each skill's bytes (`LockedSkill`, carrying its
-  source — path, git, or library), the manifest bytes are trust-bound, and an
-  untrusted or drifted project materializes no skill files: nothing enters an
-  agent's context before the gate passes. Skills land on disk through
-  `agentstack use <toolset> --write`, not `apply`, and pruning is scoped by
-  the ownership ledger to what agentstack placed.
+- **pre-delivery — content-pinned, pin-gated at materialization, trust-gated
+  at every path that serves the content.** A skill is instructional text an
+  agent reads, not code agentstack executes. `agentstack.lock` pins each
+  skill's bytes (`LockedSkill`, carrying its source — path, git, or library),
+  and the manifest bytes are trust-bound. Where the gate sits is worth stating
+  exactly, because it is not at materialization: `agentstack use <toolset>
+  --write` gates on the **lock** — `verify::ensure_activatable` blocks a
+  drifted or broken pin and deliberately lets an `Unpinned` entry through,
+  because recording that first pin is itself the consenting act — and it reads
+  trust state only to print a word. Trust is enforced one step later, on every
+  path that puts a skill in front of an agent: `session start` refuses an
+  untrusted or drifted project outright and is stricter still
+  (`ensure_session_startable` refuses `Unpinned` too, being the verb external
+  UIs drive headlessly), the protected `run` refuses before launch, and the
+  MCP server leaves an untrusted auto-project with control-plane tools only —
+  `agentstack_list_loadable` returns skill *names*, and no skill body loads.
+  So `use --write` at a human's keyboard can put skill files into an untrusted
+  project's own directory; no session, no protected run, and no MCP surface
+  will then serve them. Skills land on disk through `agentstack use <toolset>
+  --write`, not `apply`, and pruning is scoped by the ownership ledger to what
+  agentstack placed. (`crates/cli/src/verify.rs`, `crates/cli/src/session.rs`,
+  `crates/cli/src/commands/locked.rs`, `crates/cli/src/mcp_server.rs`)
 - **runtime — unsupported, and the honest reason matters.** A skill's content
   is prose the model reads. No mode inspects, filters, or contains it, because
   there is nothing to intercept: it is context, not a call. A reviewed skill
@@ -592,13 +693,25 @@ paragraph above exists to prevent.
 
 ### Instructions
 
-- **pre-delivery — content-pinned per fragment, trust-gated, compiled into
-  managed regions.** Each `[instructions.*]` fragment is a local file pinned
-  by the SHA-256 of its raw bytes (`LockedInstruction`), and
+- **pre-delivery — content-pinned per fragment, pin-gated and decision-gated,
+  compiled into managed regions.** Each `[instructions.*]` fragment is a local
+  file pinned by the SHA-256 of its raw bytes (`LockedInstruction`), and
   `doctor`'s `check_instruction_reproducibility` reports drift between pin and
-  file. Compilation writes only into agentstack's managed region of
+  file. The gate before compilation is the **lock**: every readable declared
+  fragment must still match its pin, and an unpinned fragment passes — the
+  successful write records its first pin. Compilation then honours the standing
+  re-gate answers per fragment: `blocked` excludes the fragment, `keep-pinned`
+  compiles the approved snapshot instead of the live file and excludes the
+  fragment if that snapshot cannot be re-verified. What compilation does **not**
+  do is call `trust::check`. Unlike hooks and native extensions, whose render
+  paths refuse outright for an untrusted or drifted project, a fragment with no
+  standing decision against it compiles from the live file whatever the
+  project's trust state. Manifest bytes are still trust-bound, so declaring or
+  editing a fragment *entry* re-gates consent; the compilation step itself does
+  not re-ask. Compilation writes only into agentstack's managed region of
   `CLAUDE.md` / `AGENTS.md`, leaving hand-written content outside that region
-  untouched and restorable.
+  untouched and restorable. (`crates/cli/src/commands/apply.rs`,
+  `crates/cli/src/render/instructions.rs`)
 - **Layer scope — machine fragments are not repo content.** User/global-layer
   fragments are deliberately *not* pinned: they are yours, not the project's,
   and binding them into a project's consent digest would make your own
@@ -622,9 +735,12 @@ paragraph above exists to prevent.
   validation, not drift detection.) Every other kind on this page can answer
   "are the delivered bytes the reviewed bytes?" — settings cannot.
 - **Why this is stated rather than fixed here.** The gap was surfaced by the
-  P0.3 structural lint and is recorded as **F20** in `TODO.md`. Closing it is
+  P0.3 structural lint. It is **not currently on the queue**: `TODO.md` was
+  re-seeded from `STRATEGY.md` v3 on 2026-08-02 and carries no settings-pinning
+  item, so this section is the only place it stands recorded. Closing it is
   a behavior change — pinning settings values, re-gating on change, adding a
-  probe and a witness — which is scheduled as its own supervised item. Until
+  probe and a witness — and belongs in a supervised item of its own whenever it
+  is queued. Until
   then, treat a settings value the way you would treat any un-pinned config:
   read it at review time, and expect no machinery to tell you if it moves.
 - **What still applies, precisely.** Settings live in the manifest, and
@@ -736,9 +852,19 @@ paragraph above exists to prevent.
   ceiling is frozen at admission. Can mislead, cannot widen — that is the
   honest boundary.
 - **Not enforced: token and cost accounting.** `budget` meters agent count and
-  wall clock, which the engine observes; tokens it cannot observe uniformly
+  wall clock, but the two are enforced in different places and the difference
+  matters. Agent count is the engine's: it counts spawns against the grant and
+  refuses past it. `max_wall_seconds` is **inert inside the engine** — a number
+  the engine surfaces to the script, never a clock it reads, because the engine
+  is deliberately clock-free so a run stays replayable. Wall time is enforced by
+  the CLI instead: the drive loop checks the deadline at every batch boundary
+  and fails the run, and an out-of-thread watchdog force-exits past the ceiling
+  plus a grace. So the ceiling is real; it just is not the engine that holds it,
+  and a workflow driven by anything other than that loop gets no wall
+  enforcement at all. Tokens the engine cannot observe uniformly
   across harnesses, and the recorder's cost dimension is still unwired.
   (`crates/core/src/lock.rs` `LockedWorkflow`, `crates/workflow/src/lib.rs`,
+  `crates/cli/src/commands/workflow.rs` `run_value` / `spawn_watchdog`,
   `crates/cli/src/commands/doctor.rs` `check_workflow_reproducibility` /
   `check_workflow_ceilings`)
 
@@ -822,11 +948,15 @@ harness until those names are present in the run's own environment.
 
 ### Trust-store mutation logging
 
-**What ships:** every mutation of the machine trust store appends one
+**What ships:** every mutation of a project's **trust grant** appends one
 identity-only line to `~/.agentstack/audit/trust.jsonl` — timestamp, action
 (`grant`, `regrant`, `repin`, `revoke`), the store's own project key, and the
 consent digest pinned or removed. Never the manifest bytes, never the reviewed
-surface. The append happens inside the store lock and only after the store
+surface. Those four digest-bearing actions are the whole log, and the scope is
+exact rather than incidental: a standing re-gate answer (`keep-pinned` or
+`blocked`) is written onto the same project entry in the same store file and
+appends **nothing**. The log answers "what was consented to, and when", not
+"what changed in `trust.json`". The append happens inside the store lock and only after the store
 write succeeded, so log order is store order and every event describes a
 mutation that actually happened. `repin` is recorded distinctly from
 `regrant` because no human consented to it. The file is created `0600` and is
@@ -918,10 +1048,14 @@ review of identical content gets shorter.
 
 - **The content snapshot store**, `~/.agentstack/store/content/<sha256>/`. The
   bytes a pin covers, deposited at pin time as part of producing the pin
-  itself: a lockfile entry cannot be built without a checksum, and the only way
-  to obtain one is through the depositing function
-  (`Store::pin` for skills, `Store::pin_instruction` for instruction
-  fragments). Write-once, keyed by exactly the checksum the lockfile records,
+  itself: for the kinds that deposit, the checksum a lockfile entry carries
+  comes from the depositing function and from nowhere else — `Store::pin` for
+  skills, `Store::pin_instruction` for instruction fragments,
+  `Store::pin_server_definition` for server definitions. Three kinds do not
+  deposit at all: extension, workflow, and workflow-blueprint checksums are
+  digested straight into the lockfile with no store object behind them, so a
+  re-gate on those has a pin to compare against and no approved copy to diff.
+  Write-once, keyed by exactly the checksum the lockfile records,
   never evicted — which is what lets both sides of a re-lock coexist so a diff
   has something to compare. Copies, never links, so a delivered or compared
   artifact cannot track later edits to the project file. Every read re-hashes
@@ -943,12 +1077,28 @@ review of identical content gets shorter.
   stated at the top of this document. The card must never be read as attesting
   that the snapshot it diffs against is authentic — it attests that this is
   what *was recorded* when consent was given.
-- **Not consulted by trust verification.** `check`/`check_digest` read the
-  trust store and the pinned files, exactly as before. Snapshots and the
-  recognition index are read at card-render time only. Deleting all three
-  changes what the review can *show*, never what it *decides*: a missing
-  snapshot degrades to the honest "the bytes you approved were not recorded"
-  message, and a missing index simply produces no recognition line.
+- **Not consulted by trust verification — but the snapshot store is a
+  delivery source, not only a display one.** `check`/`check_digest` read the
+  trust store and the pinned files, exactly as before, and no verdict of theirs
+  moves if all three are deleted. The recognition index really is render-only:
+  delete it and the card simply shows no recognition line. The other two are
+  not. Standing decisions are read on five delivery paths — skill
+  materialization under `use --write`, the MCP loadable-skill catalog,
+  `skill_load`, instruction compilation, and the protected `run`, which refuses
+  outright rather than partially when an item is `blocked`. And a
+  `keep-pinned` item is served **from** the snapshot store, by the digest the
+  decision names, with the read re-proving the address first. So deleting
+  `~/.agentstack/store/` drops every keep-pinned skill from materialization,
+  excludes every keep-pinned instruction fragment from the compiled region,
+  and makes `skill_load` refuse; the MCP catalog is the one place that
+  degrades to display only, still listing the name under an honest "approved
+  copy unavailable". That is fail-closed and deliberately so — the approved
+  bytes are what agents load, or nothing is. It is nevertheless a change in
+  what is *delivered*, not only in what is *shown*.
+  (`crates/cli/src/store.rs` `verified_snapshot`,
+  `crates/cli/src/commands/use_profile.rs`,
+  `crates/cli/src/render/instructions.rs`,
+  `crates/cli/src/commands/locked.rs`, `crates/cli/src/mcp_server.rs`)
 - **Not synced, and not portable.** None of the three is rendered into a
   project, committed, or shared. Recognition in particular never crosses
   machines — that is a consequence of where it lives, not a policy promise.
@@ -985,9 +1135,20 @@ What it does not prove, and must never be read as proving:
   settled — and changes nothing else. The review body is identical, and a
   witness compares both runs byte for byte to keep that true.
 
-An unsigned bundle and an invalid signature are both stated on the card and
-neither aborts: the full review stands in both cases. An invalid signature is
-the loudest of the three, because it means the bytes changed after signing.
+Interactively, an unsigned bundle and an invalid signature are both stated on
+the card and neither aborts: the full review stands in both cases. An invalid
+signature is the loudest of the three, because it means the bytes changed after
+signing.
+
+Headlessly the rule inverts, and this is the one place a signature *does*
+decide something. `receive --yes` refuses both — a headless accept leans
+entirely on the signature, and neither an absent one nor a broken one holds.
+What it demands is a **verified** signature, not a recognized publisher: a good
+signature from a key nobody has ever trusted passes `--yes`, because whose key
+it is remains the reader's question and `--yes` was never a way to answer it.
+And with no `--yes` and no terminal there is no accept path at all — the
+receive declines. (`crates/cli/src/commands/share.rs` `confirmed`,
+`crates/cli/src/publisher.rs` `Provenance::verifies`)
 
 ### Quarantine — where intake waits
 
@@ -1041,8 +1202,8 @@ feature and has no host fallback.
 | Tool authority | **enforced** | Immutable, exact namespaced grant; per-run authenticated relay checks membership and count; the existing gateway re-applies compiled machine ∩ project tool policy. Allowed tools can still have side effects. |
 | Secrets | **enforced** | No resolved secret, gateway environment, or relay credential appears in guest env/result/events. Upstream processes still receive secrets that their declared server configuration authorizes. |
 | Filesystem read | **enforced** | Guest sees only a private read-only `/app` mount containing source, JSON input, bootstrap, generated bindings, and relay token. The policy ruleset is mounted only into the sidecar. The guest does not receive workspace, AgentStack home, Docker socket, or host home mounts. Container/kernel escape is outside this claim. |
-| Filesystem write | **enforced** | Read-only root and `/app`; only a 16 MiB `noexec,nosuid,nodev` `/tmp` tmpfs and one pre-created, 1 MiB-capped result-file bind are writable. |
-| Direct egress | **enforced** | Internal Docker network has only the egress sidecar as peer. Its ordinary proxy requires an undisclosed separate token; the fixed raw relay reaches only the host execution relay. The host relay binds the narrowest interface the sidecar can still reach via `host.docker.internal`: the private, non-routable docker0 bridge gateway on a native Linux daemon, or the host loopback on Docker Desktop — never a LAN-facing interface. It stays reachable from Docker containers on the host (not from other LAN hosts); the residual `0.0.0.0` wildcard bind applies only as a fallback when a Linux host cannot bind that gateway (Docker-Desktop-on-Linux, whose gateway lives in the VM). Its random token, exact grant, bounded protocol, and execution-scoped lifetime are the control. No payload/content inspection occurs on allowed tool results. |
+| Filesystem write | **enforced** | Read-only root and `/app`; only a 16 MiB `noexec,nosuid,nodev` `/tmp` tmpfs and one pre-created result-file bind are writable. The tmpfs size is a real kernel cap. The result file is not: the guest may write it without limit, and the 1 MiB `MAX_RESULT_BYTES` is a **host-side read refusal** applied afterwards — an oversized result is rejected as invalid, never truncated, so nothing is silently accepted, but nothing stops the write either. |
+| Direct egress | **enforced** | Internal Docker network has only the egress sidecar as peer. Its ordinary proxy requires an undisclosed separate token; the fixed raw relay reaches only the host execution relay. The host relay binds the narrowest interface the sidecar can still reach via `host.docker.internal`: the private, non-routable docker0 bridge gateway on a native Linux daemon, or the host loopback on Docker Desktop — never a LAN-facing interface. It stays reachable from Docker containers on the host (not from other LAN hosts); the residual `0.0.0.0` wildcard bind applies whenever that narrow address is unknown or unbindable, which is three cases and not one: a Linux host that cannot bind the gateway it chose (Docker-Desktop-on-Linux, whose gateway lives in the VM); a Linux host whose docker0 gateway could not be determined at all — no daemon, no such network, no IPv4 gateway, or an address that would not parse — where no narrow bind is even attempted; and any platform that is not linux/macOS/Windows, which stays functional on the wildcard rather than guess. The second case is an ordinary failure mode, not an exotic one, and the code carries it as documented residual exposure. Its random token, exact grant, bounded protocol, and execution-scoped lifetime are the control. No payload/content inspection occurs on allowed tool results. |
 | Process isolation | **enforced** | Non-root uid/gid 65532, capabilities dropped, `no-new-privileges`, 128 MiB memory, one CPU, 32 PIDs. Docker's configured/default seccomp policy, Docker itself, and the host kernel remain trusted computing base; AgentStack does not yet ship a custom executor seccomp policy. |
 | Limits | **enforced** | Machine-owned timeout, output, and call defaults are configurable only below compiled hard ceilings; requests may only narrow them. Aggregate stdout/stderr and separate result/source/input bytes, granted-tool count, and relay call count are bounded. A tool call already dispatched upstream cannot be revoked atomically. |
 | Recording | **enforced** | Run log creation is required. Events store digests and metadata, never source/input/result/secret values; tool calls carry execution IDs and render beneath the execution in `agentstack report run`. Recording is evidence, not tamper-proof remote attestation. |
