@@ -513,6 +513,7 @@ adapters → core
 runtime  → core, policy, recorder
 egress   → core, policy, recorder
 executor → (nothing)
+workflow → (nothing)
 cli      → everything
 ```
 

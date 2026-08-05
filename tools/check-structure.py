@@ -27,6 +27,15 @@ Per policy dimension: the same heading+body(+row) requirement as (e) above,
 via check_dimension_row (requirement (f) above) — except FsDeny, a deliberate exception matched by a
 literal prose anchor instead (see FS_DENY_PROSE).
 
+Independently of all the above, CRATE-EDGE INTEGRITY (verify_crate_edges)
+parses the allowed internal crate edges straight out of docs/ARCHITECTURE.md
+("Crate dependency rules") and compares them against the real
+`crates/*/Cargo.toml` dependency tables. The doc says "anything not listed is
+forbidden"; before this check that sentence was enforced by reviewer memory
+alone. Like kind-set integrity it is NOT baseline-able: an undocumented edge
+is an architecture change, and the only two honest fixes are to drop the
+dependency or to change the doc on the record.
+
 Independently of all the above, KIND-SET INTEGRITY (verify_kind_set) parses
 every `pub <field>:` in the Manifest struct — regardless of declared type —
 and asserts it is exactly EXPECTED_KINDS ∪ CONFIG_ALLOWLIST. This is not a
@@ -76,12 +85,20 @@ import sys
 import tempfile
 from pathlib import Path
 
+try:
+    import tomllib  # stdlib since Python 3.11
+except ModuleNotFoundError:  # pragma: no cover - refusal path, not a lint result
+    print("refusing: check-structure.py needs Python 3.11+ (stdlib tomllib) to read Cargo.toml")
+    sys.exit(2)
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MODEL_RS = REPO_ROOT / "crates/core/src/manifest/model.rs"
 LOCK_RS = REPO_ROOT / "crates/core/src/lock.rs"
 DOCTOR_RS = REPO_ROOT / "crates/cli/src/commands/doctor.rs"
 TRUST_RS = REPO_ROOT / "crates/cli/src/commands/trust.rs"
 ENFORCEMENT_MD = REPO_ROOT / "docs/ENFORCEMENT.md"
+ARCHITECTURE_MD = REPO_ROOT / "docs/ARCHITECTURE.md"
+CRATES_DIR = REPO_ROOT / "crates"
 BASELINE_FILE = REPO_ROOT / "tools/check-structure-baseline.txt"
 
 # --------------------------------------------------------------------------
@@ -302,6 +319,217 @@ def verify_kind_set(model_rs_text: str) -> list[str]:
         if kind not in seen_kinds:
             errors.append(f"EXPECTED_KINDS member {kind!r} is missing from the Manifest struct fields")
     return errors
+
+
+# --------------------------------------------------------------------------
+# Crate-edge integrity: docs/ARCHITECTURE.md is the authority.
+#
+# The doc carries the rule in a fenced block introduced by EDGE_RULES_ANCHOR:
+#
+#     core     → (nothing)
+#     trust    → core, recorder
+#     ...
+#     cli      → everything
+#
+# That shape is machine-readable, so the edge set is PARSED rather than
+# copied here — the doc stays the single authority and the two can never
+# disagree. Node names are the crate DIRECTORY names under crates/ (`cli`,
+# not the `agentstack` package name it publishes as).
+EDGE_RULES_ANCHOR = "Exact internal edges (anything not listed is forbidden):"
+EDGE_WILDCARD = "everything"   # `cli → everything`: every internal crate is allowed
+EDGE_NONE = "(nothing)"        # `core → (nothing)`: no internal edge at all
+_EDGE_LINE_RE = re.compile(r"^[ \t]*([a-z0-9_-]+)[ \t]*(?:→|->)[ \t]*(\S.*?)[ \t]*$")
+
+# Which Cargo.toml tables carry an internal edge.
+#
+# DEV-DEPENDENCIES ARE IN SCOPE, deliberately. A dev-dependency is a real edge
+# in the crate graph: it compiles into the crate's own test targets, it can
+# create a dependency cycle, and it would let a security-critical crate
+# (`trust`, `policy`) acquire authority through its test surface without the
+# architecture rule ever being consulted. ARCHITECTURE.md says "exact internal
+# edges" with no test exemption, so neither does this check. If a dev-only
+# edge is ever genuinely wanted, the doc is where that decision gets made.
+# Optional (feature-gated) dependencies are in scope for the same reason:
+# `agentstack-egress` is still an edge, it is just one a feature turns on.
+_DEP_TABLE_NAMES = ("dependencies", "dev-dependencies", "build-dependencies")
+
+
+def parse_allowed_edges(architecture_md_text: str) -> dict[str, frozenset[str] | None]:
+    """The allowed internal edges, straight from docs/ARCHITECTURE.md.
+
+    WHERE: the fenced block introduced by EDGE_RULES_ANCHOR under
+    "## Crate dependency rules".
+    WHAT: `<crate> → <targets>` per line. Returns `crate -> frozenset(targets)`,
+    with `None` standing for the EDGE_WILDCARD row (`cli → everything`) and an
+    empty frozenset for EDGE_NONE (`core → (nothing)`).
+
+    A crate that is ABSENT from the block is not an error here — the doc's own
+    sentence ("anything not listed is forbidden") makes an unlisted crate a
+    crate with zero allowed edges, which is how verify_crate_edges reads it.
+    """
+    # Same decoy guard as parse_manifest_fields: the anchor sentence must
+    # occur exactly once, so a second copy planted above a permissive fake
+    # block cannot silently become the one this parser reads.
+    count = architecture_md_text.count(EDGE_RULES_ANCHOR)
+    if count != 1:
+        print(
+            f"refusing: {count} occurrences of the crate-edge anchor sentence in ARCHITECTURE.md — "
+            f"the edge parser needs exactly one (expected: {EDGE_RULES_ANCHOR!r})"
+        )
+        sys.exit(2)
+    m = re.search(re.escape(EDGE_RULES_ANCHOR) + r"\s*\n+```[a-z]*\n(.*?)\n?```", architecture_md_text, re.DOTALL)
+    if not m:
+        print("refusing: no fenced edge block follows the crate-edge anchor sentence in ARCHITECTURE.md")
+        sys.exit(2)
+    allowed: dict[str, frozenset[str] | None] = {}
+    for raw in m.group(1).splitlines():
+        if not raw.strip():
+            continue
+        line = _EDGE_LINE_RE.match(raw)
+        if not line:
+            print(f"refusing: unparseable line in the ARCHITECTURE.md edge block: {raw!r}")
+            sys.exit(2)
+        crate, targets = line.group(1), line.group(2)
+        if crate in allowed:
+            print(f"refusing: crate {crate!r} listed twice in the ARCHITECTURE.md edge block")
+            sys.exit(2)
+        if targets == EDGE_WILDCARD:
+            allowed[crate] = None
+        elif targets == EDGE_NONE:
+            allowed[crate] = frozenset()
+        else:
+            allowed[crate] = frozenset(t.strip() for t in targets.split(",") if t.strip())
+    if not allowed:
+        print("refusing: the ARCHITECTURE.md edge block parsed to zero edges")
+        sys.exit(2)
+    return allowed
+
+
+def collect_internal_edges(crates_dir: Path) -> dict[str, dict[str, list[str]]]:
+    """Every internal edge the workspace actually declares.
+
+    WHERE: each `crates/<dir>/Cargo.toml`.
+    WHAT: `<dir> -> {target dir -> [table labels it is declared in]}`, over
+    `[dependencies]`, `[dev-dependencies]`, `[build-dependencies]` AND their
+    `[target.'cfg(...)'.…]` variants — a cfg-gated table is an ordinary edge
+    that happens to be conditional, and leaving it out would be a one-line
+    bypass of the whole check.
+
+    A dependency counts as internal when it resolves to a sibling crate
+    directory: by its `path` first (so a `package = ` rename or an
+    off-convention key name cannot hide it), then by package name, then by the
+    bare key. Everything else is an external crate and none of this check's
+    business.
+    """
+    pkg_to_dir: dict[str, str] = {}
+    parsed: dict[str, dict] = {}
+    for cargo_toml in sorted(crates_dir.glob("*/Cargo.toml")):
+        dir_name = cargo_toml.parent.name
+        try:
+            data = tomllib.loads(cargo_toml.read_text(encoding="utf-8"))
+        except tomllib.TOMLDecodeError as exc:
+            print(f"refusing: {cargo_toml} is not parseable TOML: {exc}")
+            sys.exit(2)
+        parsed[dir_name] = data
+        pkg_name = data.get("package", {}).get("name")
+        if isinstance(pkg_name, str):
+            pkg_to_dir[pkg_name] = dir_name
+
+    def resolve(key: str, spec: object, crate_dir: Path) -> str | None:
+        path = spec.get("path") if isinstance(spec, dict) else None
+        if isinstance(path, str):
+            resolved = (crate_dir / path).resolve()
+            if resolved.parent == crates_dir.resolve() and resolved.name in parsed:
+                return resolved.name
+        package = spec.get("package") if isinstance(spec, dict) else None
+        name = package if isinstance(package, str) else key
+        return pkg_to_dir.get(name)
+
+    edges: dict[str, dict[str, list[str]]] = {}
+    for dir_name, data in parsed.items():
+        crate_dir = crates_dir / dir_name
+        tables: list[tuple[str, dict]] = []
+        for table_name in _DEP_TABLE_NAMES:
+            table = data.get(table_name)
+            if isinstance(table, dict):
+                tables.append((f"[{table_name}]", table))
+        targets = data.get("target")
+        if isinstance(targets, dict):
+            for cfg, cfg_tables in sorted(targets.items()):
+                if not isinstance(cfg_tables, dict):
+                    continue
+                for table_name in _DEP_TABLE_NAMES:
+                    table = cfg_tables.get(table_name)
+                    if isinstance(table, dict):
+                        tables.append((f"[target.'{cfg}'.{table_name}]", table))
+        found: dict[str, list[str]] = {}
+        for label, table in tables:
+            for key, spec in table.items():
+                target = resolve(key, spec, crate_dir)
+                if target is None or target == dir_name:
+                    continue
+                found.setdefault(target, []).append(label)
+        edges[dir_name] = found
+    return edges
+
+
+def verify_crate_edges(
+    edges: dict[str, dict[str, list[str]]],
+    allowed: dict[str, frozenset[str] | None],
+) -> list[str]:
+    """Crate-edge integrity. Returns a list of error strings (empty = OK).
+
+    NOT baseline-able, for the same reason kind-set integrity is not: an edge
+    the doc does not list is not an honestly-recorded product gap, it is an
+    architecture change nobody wrote down. The two honest fixes are named in
+    the failure message — drop the dependency, or change the edge block in
+    docs/ARCHITECTURE.md and take the review that comes with it.
+    """
+    errors: list[str] = []
+    for crate in sorted(allowed):
+        if crate not in edges:
+            errors.append(
+                f"docs/ARCHITECTURE.md lists edges for crate {crate!r}, but crates/{crate}/Cargo.toml "
+                f"does not exist — remove the stale row from the edge block"
+            )
+    for crate in sorted(edges):
+        allowed_targets = allowed.get(crate, frozenset())
+        if allowed_targets is None:  # `→ everything`
+            continue
+        for target, tables in sorted(edges[crate].items()):
+            if target in allowed_targets:
+                continue
+            if crate in allowed:
+                permitted = ", ".join(sorted(allowed_targets)) or EDGE_NONE
+                rule = f"ARCHITECTURE.md allows `{crate} → {permitted}`"
+            else:
+                rule = (
+                    f"ARCHITECTURE.md does not list `{crate}` in its edge block at all, and "
+                    f"anything not listed is forbidden"
+                )
+            errors.append(
+                f"forbidden internal edge `{crate} → {target}`: declared in "
+                f"{', '.join(sorted(set(tables)))} of crates/{crate}/Cargo.toml, but {rule}. "
+                f"Fix: drop the dependency from crates/{crate}/Cargo.toml, or change the architecture "
+                f'on the record in docs/ARCHITECTURE.md ("Crate dependency rules")'
+            )
+    return errors
+
+
+def print_edge_explain(
+    edges: dict[str, dict[str, list[str]]],
+    allowed: dict[str, frozenset[str] | None],
+) -> None:
+    print("\n--explain: internal crate edges (allowed per docs/ARCHITECTURE.md)\n")
+    for crate in sorted(edges):
+        allowed_targets = allowed.get(crate, frozenset())
+        if allowed_targets is None:
+            permitted = EDGE_WILDCARD
+        else:
+            permitted = ", ".join(sorted(allowed_targets)) or EDGE_NONE
+        declared = ", ".join(sorted(edges[crate])) or EDGE_NONE
+        listed = "" if crate in allowed else " (crate NOT listed in ARCHITECTURE.md)"
+        print(f"  {crate}: declared -> {declared} | allowed -> {permitted}{listed}")
 
 
 def parse_dimensions(model_rs_text: str) -> list[str]:
@@ -806,6 +1034,102 @@ pub enum Dimension {
             "in the test module (production disclosure could be deleted undetected)"
         )
 
+    # ---- Crate-edge integrity -------------------------------------------
+    # Proves the check CATCHES a forbidden edge, not merely that it runs: a
+    # synthetic workspace in a temp dir declares one allowed edge, one
+    # forbidden edge in [dependencies], one forbidden dev-dependency, one
+    # forbidden cfg-gated dependency, and one edge hidden behind a `package =`
+    # rename. All four bad ones must be named; the good ones must not be.
+    fixture_architecture = (
+        "## Crate dependency rules\n\n"
+        f"{EDGE_RULES_ANCHOR}\n\n"
+        "```\n"
+        "core     → (nothing)\n"
+        "policy   → core\n"
+        "adapters → core\n"
+        "cli      → everything\n"
+        "ghost    → core\n"
+        "```\n\nProse after the block.\n"
+    )
+    fixture_allowed = parse_allowed_edges(fixture_architecture)
+    if fixture_allowed.get("core") != frozenset():
+        failures.append("self-test: `core → (nothing)` did not parse to an empty allowed set")
+    if fixture_allowed.get("cli") is not None:
+        failures.append("self-test: `cli → everything` did not parse to the wildcard")
+    if fixture_allowed.get("policy") != frozenset({"core"}):
+        failures.append("self-test: a single-target edge row did not parse to that one target")
+
+    with tempfile.TemporaryDirectory() as edge_tmp:
+        edge_crates = Path(edge_tmp) / "crates"
+        for dir_name, body in (
+            ("core", '[package]\nname = "agentstack-core"\n'),
+            # allowed: policy → core
+            ("policy", '[package]\nname = "agentstack-policy"\n\n[dependencies]\nagentstack-core = { path = "../core" }\n'),
+            # forbidden: adapters → policy (a real, deliberate rule — see
+            # ARCHITECTURE.md's "adapters deliberately does not depend on policy")
+            (
+                "adapters",
+                '[package]\nname = "agentstack-adapters"\n\n[dependencies]\n'
+                'agentstack-core = { path = "../core" }\n'
+                'agentstack-policy = { path = "../policy" }\n',
+            ),
+            # forbidden, and only visible if dev-dependencies are in scope
+            (
+                "core-dev",
+                '[package]\nname = "agentstack-core-dev"\n\n[dev-dependencies]\n'
+                'agentstack-policy = { path = "../policy" }\n',
+            ),
+            # forbidden, and only visible if target-cfg tables are in scope
+            (
+                "cfgcrate",
+                '[package]\nname = "agentstack-cfgcrate"\n\n'
+                "[target.'cfg(unix)'.dependencies]\n"
+                'agentstack-policy = { path = "../policy" }\n',
+            ),
+            # forbidden, and only visible if `package =` renames are resolved
+            (
+                "renamer",
+                '[package]\nname = "agentstack-renamer"\n\n[dependencies]\n'
+                'aliased = { path = "../policy", package = "agentstack-policy" }\n',
+            ),
+            # allowed by the wildcard row
+            (
+                "cli",
+                '[package]\nname = "agentstack"\n\n[dependencies]\n'
+                'agentstack-core = { path = "../core" }\n'
+                'agentstack-policy = { path = "../policy" }\n'
+                'serde = "1"\n',
+            ),
+        ):
+            (edge_crates / dir_name).mkdir(parents=True)
+            (edge_crates / dir_name / "Cargo.toml").write_text(body, encoding="utf-8")
+
+        fixture_edges = collect_internal_edges(edge_crates)
+        edge_errors = "\n".join(verify_crate_edges(fixture_edges, fixture_allowed))
+
+        if "`adapters → policy`" not in edge_errors:
+            failures.append("self-test: forbidden [dependencies] edge NOT caught")
+        if "crates/adapters/Cargo.toml" not in edge_errors:
+            failures.append("self-test: forbidden-edge message does not name the file to change")
+        if "`core-dev → policy`" not in edge_errors or "[dev-dependencies]" not in edge_errors:
+            failures.append("self-test: forbidden [dev-dependencies] edge NOT caught")
+        if "`cfgcrate → policy`" not in edge_errors or "target.'cfg(unix)'" not in edge_errors:
+            failures.append("self-test: forbidden cfg-gated edge NOT caught")
+        if "`renamer → policy`" not in edge_errors:
+            failures.append("self-test: forbidden edge hidden behind a `package =` rename NOT caught")
+        # An unlisted crate has zero allowed edges, and the message must say so
+        # rather than implying the doc granted it an empty set on purpose.
+        if "does not list `cfgcrate`" not in edge_errors:
+            failures.append("self-test: a crate absent from the edge block was not reported as unlisted")
+        if "`policy → core`" in edge_errors or "`cli →" in edge_errors:
+            failures.append("self-test: an ALLOWED edge (or a wildcard row's edge) wrongly flagged as forbidden")
+        if "core" not in fixture_edges or fixture_edges["core"]:
+            failures.append("self-test: a crate with no internal dependencies did not collect to zero edges")
+        if "serde" in edge_errors:
+            failures.append("self-test: an external dependency was mistaken for an internal edge")
+        if "'ghost'" not in edge_errors or "does not exist" not in edge_errors:
+            failures.append("self-test: an edge-block row for a crate that does not exist NOT caught")
+
     with tempfile.TemporaryDirectory() as tmp:
         root = Path(tmp)
         tests_dir = root / "crates" / "cli" / "tests"
@@ -1016,9 +1340,11 @@ pub enum Dimension {
             print(f"  - {f}")
         return 1
     print(
-        "self-test: OK (kind-set-integrity mismatch, a deleted registered witness, a gutted "
-        "section body, a missing matrix row, a missing-from-baseline gap, and a stale baseline "
-        "entry are all caught; fully-covered requirements are not)"
+        "self-test: OK (kind-set-integrity mismatch, a forbidden internal crate edge — in "
+        "[dependencies], [dev-dependencies], a cfg-gated table, or behind a `package =` rename — "
+        "a deleted registered witness, a gutted section body, a missing matrix row, a "
+        "missing-from-baseline gap, and a stale baseline entry are all caught; fully-covered "
+        "requirements and allowed edges are not)"
     )
     return 0
 
@@ -1035,10 +1361,13 @@ def main(argv: list[str]) -> int:
     if rc != 0:
         return rc
 
-    for path in (MODEL_RS, LOCK_RS, DOCTOR_RS, TRUST_RS, ENFORCEMENT_MD):
+    for path in (MODEL_RS, LOCK_RS, DOCTOR_RS, TRUST_RS, ENFORCEMENT_MD, ARCHITECTURE_MD):
         if not path.is_file():
             print(f"ERROR: expected source file not found: {path}")
             return 2
+    if not CRATES_DIR.is_dir():
+        print(f"ERROR: expected crate directory not found: {CRATES_DIR}")
+        return 2
 
     model_text = MODEL_RS.read_text(encoding="utf-8")
     lock_text = LOCK_RS.read_text(encoding="utf-8")
@@ -1058,12 +1387,19 @@ def main(argv: list[str]) -> int:
     for err in verify_kind_set(model_text):
         findings.append(f"kind-set integrity: {err}")
 
+    # Crate-edge integrity: likewise hard and non-baseline-able.
+    allowed_edges = parse_allowed_edges(ARCHITECTURE_MD.read_text(encoding="utf-8"))
+    declared_edges = collect_internal_edges(CRATES_DIR)
+    for err in verify_crate_edges(declared_edges, allowed_edges):
+        findings.append(f"crate-edge integrity: {err}")
+
     evidence = run_structure_check(
         findings, model_text, lock_text, doctor_text, trust_text, enforcement_text, REPO_ROOT, baseline
     )
 
     if "--explain" in argv:
         print_explain(evidence, baseline)
+        print_edge_explain(declared_edges, allowed_edges)
 
     if findings:
         print(f"\ncheck-structure: {len(findings)} finding(s):\n")
@@ -1073,7 +1409,8 @@ def main(argv: list[str]) -> int:
 
     print(
         f"check-structure: OK ({len(evidence)} requirement(s) checked, "
-        f"{len(baseline)} baselined gap(s), all others satisfied)"
+        f"{sum(len(t) for t in declared_edges.values())} internal crate edge(s) all allowed by "
+        f"ARCHITECTURE.md, {len(baseline)} baselined gap(s), all others satisfied)"
     )
     return 0
 
