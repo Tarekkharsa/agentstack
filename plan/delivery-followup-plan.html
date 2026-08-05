@@ -207,8 +207,12 @@
 <p><strong>Status as of 2026-08-05 — HEAD <code>34c0db9</code> on <code>main</code>.</strong>
 Fourteen of the twenty items are done and named to the commit that closed them. Seven are still
 open — P2, P5b, P6, P8, P9, R1 and R2 — and three of those, P2, R1 and R2, are maintainer-owned by
-construction. Three items found on 2026-08-05 are added at the end as N1, N2 and N3. Every item
-below carries its own status, and both summary tables match those statuses.</p>
+construction. Three items found on 2026-08-05 are added as N1, N2 and N3. A second review pass the
+same day — three independent reviews (idea and strategy, developer experience, architecture and
+code) plus a fourth external one, all read against this same HEAD — added ten more, gathered at the
+end as <a href="#part-four">Part four</a>, F1 … F10. <strong>Twenty items are open in
+total.</strong> Every item below carries its own status, and every summary table matches those
+statuses.</p>
 
 <p><strong>What landed.</strong> Thirteen rounds made the delivery lane honest.
 <code>apply</code>, <code>use</code>, <code>session</code> and <code>diff</code> now consult one
@@ -230,6 +234,7 @@ the evidence, what &ldquo;done&rdquo; looks like, a rough size, and its status.<
 <nav class="toc">
   <h2>Contents</h2>
   <ol>
+    <li><a href="#next">What to do next, in order</a></li>
     <li><a href="#p0">P0 — CI is red. The example suite fails.</a></li>
     <li><a href="#p1">P1 — the detector warns about the configs <code>init</code> imported from.</a></li>
     <li><a href="#p2">P2 — the delivery contract is false.</a></li>
@@ -262,9 +267,49 @@ the evidence, what &ldquo;done&rdquo; looks like, a rough size, and its status.<
         <li><a href="#n3">N3 — five deliberate SIGPIPE pipelines in <code>device-onboarding/assert.sh</code>.</a></li>
       </ol>
     </li>
+    <li><a href="#part-four">Part four — found by the 2026-08-05 reviews</a>
+      <ol>
+        <li><a href="#f1">F1 — <code>crates/egress/src/sni.rs</code> fails open on a case its own comment says cannot happen.</a></li>
+        <li><a href="#f2">F2 — the README advertises verbs the pinned stable release does not have.</a></li>
+        <li><a href="#f3">F3 — <code>docs/integrations.md</code> contradicts the shipped <code>FEATURES</code> list.</a></li>
+        <li><a href="#f4">F4 — <code>with_store_lock</code> in <code>crates/trust</code> is not panic-safe.</a></li>
+        <li><a href="#f5">F5 — the dependency-edge rule has no gate.</a></li>
+        <li><a href="#f6">F6 — the one mandatory first-run command is hidden behind the <code>x</code> namespace.</a></li>
+        <li><a href="#f7">F7 — the activation study measures usability, not demand.</a></li>
+        <li><a href="#f8">F8 — <code>--yes</code> on <code>trust</code> means the opposite of its universal meaning.</a></li>
+        <li><a href="#f9">F9 — the docs never address re-trust friction in aggregate.</a></li>
+        <li><a href="#f10">F10 — the enforcement code lives in the CLI crate, not in the small review boundaries.</a></li>
+      </ol>
+    </li>
     <li><a href="#pattern">The pattern</a></li>
   </ol>
 </nav>
+
+<h2 id="next">What to do next, in order</h2>
+
+<p>Twenty items are open across four parts. This is the order to take them in, and why each one
+sits where it does.</p>
+
+<ol>
+  <li><strong><a href="#f1">F1</a> — the SNI fail-open fix.</strong> Security-relevant, an
+    hour.</li>
+  <li><strong><a href="#f2">F2</a> — the README/Homebrew version mismatch.</strong> It breaks the
+    documented happy path for exactly the strangers <a href="#p9">P9</a> needs.</li>
+  <li><strong><a href="#f7">F7</a> then <a href="#p9">P9</a></strong> — amend the activation study
+    with a demand question, then run it with five cold users on rc.2, with a two-week retention
+    follow-up. This is the highest-value open item; every week of polish before contact compounds
+    assumption risk.</li>
+  <li><strong>The maintainer-decision batch</strong>, about an hour in total:
+    <a href="#p2">P2</a>, <a href="#r1">R1</a>, <a href="#r2">R2</a>, <a href="#f6">F6</a>,
+    <a href="#n1">N1</a>.</li>
+  <li><strong><a href="#f3">F3</a> with <a href="#p5b">P5b</a></strong> — the panel contract
+    document must match <code>FEATURES</code> before any consumer migrates.</li>
+  <li><strong><a href="#f4">F4</a> and <a href="#f5">F5</a></strong> — small hardening.</li>
+  <li><strong>Everything else</strong> — <a href="#p6">P6</a>, <a href="#p8">P8</a>,
+    <a href="#n2">N2</a>, <a href="#n3">N3</a>, <a href="#f8">F8</a>, <a href="#f9">F9</a>,
+    <a href="#f10">F10</a> — after the study, re-prioritized by what the five participants
+    actually stall on.</li>
+</ol>
 
 <div class="table-wrap" style="overflow-x: auto;">
 <table>
@@ -985,6 +1030,346 @@ the left-hand side of a pipe is discarded and the assertion behaves correctly to
 failing intermittently, on buffer-size luck, which is the hardest kind of CI failure to diagnose and
 the same class of accident that <code>299a88b</code> already cleaned up once.</p>
 
+<h2 id="part-four">Part four — found by the 2026-08-05 reviews</h2>
+
+<p>Three independent reviews — idea and strategy, developer experience, architecture and code — plus
+a fourth external review read the repository at HEAD <code>34c0db9</code> on 2026-08-05. Ten items
+survived that pass. Each claim below was re-checked against the code or the document it names before
+it was written here; where a review&rsquo;s own figure did not survive the check, the measured figure
+is given instead and the substitution is stated. The items are labelled <strong>F1 … F10</strong> so
+they cannot collide with P0–P9, R1–R10 or N1–N3. All ten are open.</p>
+
+<div class="table-wrap" style="overflow-x: auto;">
+<table>
+  <thead>
+    <tr>
+      <th>Item</th>
+      <th>What it is</th>
+      <th>Slot</th>
+      <th>Size</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><a href="#f1">F1</a></td>
+      <td><code>crates/egress/src/sni.rs</code> fails open on a case its own comment says cannot
+        happen. <strong>Security-relevant.</strong></td>
+      <td>First, in part four</td>
+      <td>An hour</td>
+      <td><strong>OPEN</strong></td>
+    </tr>
+    <tr>
+      <td><a href="#f2">F2</a></td>
+      <td>The README advertises verbs the pinned stable release does not have.</td>
+      <td>Before P9</td>
+      <td>An hour, or ship v0.18.0</td>
+      <td><strong>OPEN</strong></td>
+    </tr>
+    <tr>
+      <td><a href="#f3">F3</a></td>
+      <td><code>docs/integrations.md</code> contradicts the shipped <code>FEATURES</code> list, and
+        no check ties them.</td>
+      <td>With P5b</td>
+      <td>Half a day</td>
+      <td><strong>OPEN</strong></td>
+    </tr>
+    <tr>
+      <td><a href="#f4">F4</a></td>
+      <td><code>with_store_lock</code> in <code>crates/trust</code> is not panic-safe.</td>
+      <td>After the study</td>
+      <td>An hour</td>
+      <td><strong>OPEN</strong></td>
+    </tr>
+    <tr>
+      <td><a href="#f5">F5</a></td>
+      <td>The dependency-edge rule has no gate.</td>
+      <td>After the study</td>
+      <td>An hour</td>
+      <td><strong>OPEN</strong></td>
+    </tr>
+    <tr>
+      <td><a href="#f6">F6</a></td>
+      <td>The one mandatory first-run command is hidden behind the <code>x</code> namespace.
+        <strong>Maintainer decision.</strong></td>
+      <td>With P2, R1 and R2</td>
+      <td>Thirty minutes to decide</td>
+      <td><strong>OPEN</strong> — maintainer</td>
+    </tr>
+    <tr>
+      <td><a href="#f7">F7</a></td>
+      <td>The activation study measures usability, not demand. <strong>Maintainer-owned.</strong></td>
+      <td>Immediately before P9</td>
+      <td>Ten minutes to amend the instrument</td>
+      <td><strong>OPEN</strong> — maintainer</td>
+    </tr>
+    <tr>
+      <td><a href="#f8">F8</a></td>
+      <td><code>--yes</code> on <code>trust</code> means &ldquo;I read the review&rdquo;, the
+        opposite of its universal meaning. <strong>Maintainer decision.</strong></td>
+      <td>After the study</td>
+      <td>An hour</td>
+      <td><strong>OPEN</strong> — maintainer</td>
+    </tr>
+    <tr>
+      <td><a href="#f9">F9</a></td>
+      <td>The docs never address re-trust friction in aggregate.</td>
+      <td>With P9&rsquo;s observation sheet</td>
+      <td>A note</td>
+      <td><strong>OPEN</strong></td>
+    </tr>
+    <tr>
+      <td><a href="#f10">F10</a></td>
+      <td>The enforcement code lives in the CLI crate, not in the small review boundaries.
+        <strong>Recorded, deferred.</strong></td>
+      <td>Not before the bar</td>
+      <td>Large</td>
+      <td><strong>OPEN</strong> — deferred</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h3 id="f1">F1 — <code>crates/egress/src/sni.rs</code> fails open on a case its own comment says cannot happen.</h3>
+
+<p><strong>Slot:</strong> do this first among part four. <strong>Size:</strong> an hour.
+<strong>Security-relevant. Status: OPEN.</strong></p>
+
+<p>The cursor&rsquo;s <code>u16()</code> (<code>crates/egress/src/sni.rs:33-37</code>) calls
+<code>u8()?</code> twice. With exactly one byte remaining in the handshake body the first call
+succeeds and the second returns <code>None</code>, so <code>u16()</code> yields <code>None</code> —
+and the arm that receives it (<code>sni.rs:131-134</code>) returns
+<code>SniVerdict::Absent</code>:</p>
+
+<pre style="overflow-x: auto; background: var(--code-bg); border: 1px solid var(--rule); border-radius: 6px; padding: 0.85rem 1rem; font-size: 0.875rem; line-height: 1.55; margin: 1.25rem 0;">let ext_total = match c.u16() {
+    Some(n) =&gt; n,
+    None =&gt; return Some(SniVerdict::Absent),
+};</pre>
+
+<p>The guarding comment directly above it says the opposite:</p>
+
+<blockquote>
+  <p>A PRESENT-but-truncated extensions length is a <code>?</code> fail above/below →
+  <code>Unverifiable</code>.</p>
+</blockquote>
+
+<p>It is not, for a length of exactly one byte. And <code>crates/egress/src/proxy.rs:298</code>
+treats the verdict as an allow — <code>SniVerdict::Absent =&gt; {} // provably no SNI — nothing to
+front</code>. So a well-formed handshake body with a single stray trailing byte bypasses the
+SNI-versus-CONNECT-host check that exists to stop domain fronting.</p>
+
+<p><strong>Exploitability is low</strong> — the CONNECT authority was already policy-checked and the
+resolved IP already passed netguard — but this is exactly the failure class the
+<code>Absent</code>/<code>Unverifiable</code> split was built to prevent, and the module&rsquo;s own
+header promises &ldquo;never a silent <code>Absent</code>&rdquo;.</p>
+
+<p><strong>Done looks like:</strong> zero-bytes-remaining and one-byte-remaining distinguished, the
+latter returning <code>Unverifiable</code>; and a witness test that feeds a ClientHello with one
+stray trailing byte and asserts <code>Unverifiable</code>.</p>
+
+<h3 id="f2">F2 — the README advertises verbs the pinned stable release does not have.</h3>
+
+<p><strong>Slot:</strong> before P9 — the strangers the study needs will install via Homebrew.
+<strong>Size:</strong> an hour, or ship v0.18.0. <strong>Status: OPEN.</strong></p>
+
+<p><code>README.md:205-214</code> lists <code>yes</code>, <code>undo</code> and <code>why</code>
+among the seventeen everyday verbs with no version guard of any kind.
+<code>docs/start.md:193-206</code> guards the same verbs under a heading that says
+&ldquo;Newer than the stable release&rdquo; and a table column headed &ldquo;In v0.18.0 and
+later&rdquo;. The README&rsquo;s Homebrew section (<code>README.md:164-165</code>) says the tap
+&ldquo;currently pins v0.17.1 — the latest published release&rdquo;.</p>
+
+<p>So a reader who installs with <code>brew install Tarekkharsa/tap/agentstack</code> and types
+<code>agentstack yes</code> gets <code>error: unrecognized subcommand 'yes'</code>, on the
+documented happy path. The workspace is at <code>0.18.0-rc.2</code>; the release is not out.</p>
+
+<p><strong>This is not <a href="#r10">R10</a> reopened.</strong> R10 fixed the tap&rsquo;s
+<em>existence</em> claim, and it is fixed. This is the <em>verb-availability</em> guard — present in
+<code>start.md</code>, absent from the README. Worth naming, because the two failures look alike
+from a distance and the second was invisible while the first was being repaired.</p>
+
+<p><strong>Done looks like:</strong> the <code>start.md</code>-style guard applied to the README, or
+v0.18.0 shipped and the tap bumped.</p>
+
+<h3 id="f3">F3 — <code>docs/integrations.md</code> contradicts the shipped <code>FEATURES</code> list, and no check ties them.</h3>
+
+<p><strong>Slot:</strong> with P5b. <strong>Size:</strong> half a day. <strong>Status: OPEN.</strong></p>
+
+<p><code>crates/cli/src/ui_contract.rs:756-800</code> declares <strong>43</strong>
+<code>FEATURES</code> names. The table in <code>docs/integrations.md</code> tabulates
+<strong>29</strong> of them, and the paragraph under it asserts:</p>
+
+<blockquote>
+  <p>One name in <code>FEATURES</code> is deliberately absent from this table. … Every other name
+  appears above.</p>
+</blockquote>
+
+<p>That is false. Fifteen names are missing, of which one — <code>json-reads-v1</code> — is the
+deliberate omission the paragraph describes. The other <strong>fourteen are simply undocumented</strong>:
+<code>trust-card-diff-v1</code>, <code>trust-card-groups-v1</code>, <code>activity-skill-load-v1</code>,
+<code>needs-your-yes-v1</code>, <code>update-offer-v1</code>, <code>package-members-v1</code>,
+<code>lease-status-v1</code>, <code>delivery-routing-v1</code>, <code>library-sources-v1</code>,
+<code>instruction-channels-v1</code>, <code>image-plan-v1</code>,
+<code>workflow-role-selection-v1</code>, <code>trust-content-drift-v1</code> and
+<code>abandoned-render-v1</code>.</p>
+
+<p><strong>Worse, six rows are wrong in the direction that costs an integrator work.</strong> Each
+is marked <code>no — next release</code> while the name is in <code>FEATURES</code> in this build:
+<code>status-honesty-v1</code>, <code>trust-review-card-v1</code>, <code>doctor-mode-v1</code>,
+<code>diff-existence-v1</code>, <code>gitignore-opt-out-v1</code> and
+<code>doctor-cli-coverage-v1</code>. An integrator reading that table ships a permanently disabled
+button for a feature that works.</p>
+
+<p>Note the shape. &ldquo;Every other name appears above&rdquo; is a claim computed from a record —
+what the table&rsquo;s author believed the table contained — instead of from reality. It is the
+engagement&rsquo;s single defect, in a new place.</p>
+
+<p><strong>Done looks like:</strong> the table corrected, plus a witness test in the same shape as
+the <code>FEATURES</code>/<code>SUPERSEDED</code> disjointness test
+(<code>crates/cli/src/ui_contract.rs:1109</code>), asserting that every <code>FEATURES</code> name
+appears in <code>docs/integrations.md</code> with a correct availability column.</p>
+
+<h3 id="f4">F4 — <code>with_store_lock</code> in <code>crates/trust</code> is not panic-safe.</h3>
+
+<p><strong>Size:</strong> an hour. <strong>Status: OPEN.</strong></p>
+
+<p><code>crates/trust/src/lib.rs</code> ends <code>with_store_lock</code> like this:</p>
+
+<pre style="overflow-x: auto; background: var(--code-bg); border: 1px solid var(--rule); border-radius: 6px; padding: 0.85rem 1rem; font-size: 0.875rem; line-height: 1.55; margin: 1.25rem 0;">let out = f();
+let _ = std::fs::remove_dir(&amp;lock_dir);
+out</pre>
+
+<p>The release is a plain statement, not a destructor. If <code>f()</code> panics — or the process
+is signalled — the lock directory leaks, and every subsequent trust mutation on that machine waits
+its five seconds and then fails closed until the 30-second staleness window elapses. The documented
+staleness break (<code>STORE_LOCK_STALE</code>) is what keeps this a nuisance rather than a wedge,
+so it is partially mitigated already.</p>
+
+<p><strong>Done looks like:</strong> an RAII <code>LockGuard</code> whose <code>Drop</code> removes
+the directory — about five lines, and it removes the whole class rather than this instance. Note for
+a TypeScript reader: <code>Drop</code> runs during panic unwinding, which is exactly why moving the
+cleanup into it is a fix and not a restyling.</p>
+
+<h3 id="f5">F5 — the dependency-edge rule has no gate.</h3>
+
+<p><strong>Size:</strong> an hour. <strong>Status: OPEN.</strong></p>
+
+<p><code>docs/ARCHITECTURE.md:505</code> introduces the internal crate edges with &ldquo;Exact
+internal edges (anything not listed is forbidden)&rdquo; and then lists them. Nothing enforces it.
+<code>tools/check-structure.py</code> does not read <code>Cargo.toml</code> at all;
+<code>tools/check-enforcement-pairing.py</code> mentions <code>Cargo.toml</code> only to decide
+whether a diff to one is substantive, never to parse the edge set. The edges are correct today by
+discipline alone — the review checked all ten crates and every one matches.</p>
+
+<p><strong>Done looks like:</strong> roughly twenty lines in <code>check-structure.py</code> that
+parse each crate&rsquo;s <code>Cargo.toml</code> and fail on any unlisted internal edge, turning the
+ARCHITECTURE claim into a gate instead of a convention. Same reasoning as <a href="#r8">R8</a>: a
+rule nobody can violate accidentally is worth more than a rule everyone currently honours.</p>
+
+<h3 id="f6">F6 — the one mandatory first-run command is hidden behind the <code>x</code> namespace.</h3>
+
+<p><strong>Slot:</strong> with P2, R1 and R2. <strong>Size:</strong> thirty minutes to decide.
+<strong>Maintainer decision. Status: OPEN.</strong></p>
+
+<p>Step 2 of the quickstart (<code>README.md:25</code>) is <code>agentstack x gateway connect --all
+--write</code>. Without it nothing is served live — yet <code>gateway</code> is not one of the
+seventeen everyday verbs the same README lists at line 205. The mandatory step sits one hop away,
+in &ldquo;the rest of the toolbox&rdquo;.</p>
+
+<p>Two options are on the table: promote <code>gateway connect</code> into the seventeen, or fold it
+into <code>init</code> as a confirmed step. Either is defensible. Leaving the mandatory step behind
+the toolbox hop is the option that is not.</p>
+
+<p>This touches the surface the bar judges, so it is the maintainer&rsquo;s call — recorded here
+rather than started.</p>
+
+<h3 id="f7">F7 — the activation study measures usability, not demand.</h3>
+
+<p><strong>Slot:</strong> immediately before P9. <strong>Size:</strong> ten minutes to amend the
+instrument. <strong>Maintainer-owned. Status: OPEN.</strong></p>
+
+<p>Every gate metric in <code>docs/design/activation-study.md</code> §7 is a usability threshold:
+finished unaided, median install→clean doctor, &ldquo;one setup across CLIs&rdquo;, zero advanced
+concepts needed, understood every block. Nothing measures whether a participant would keep the
+tool.</p>
+
+<p>Five people can complete the journey unaided and uninstall it that afternoon. The study would
+then have validated the UX thesis while leaving the product thesis untested — and its own header
+says it is &ldquo;the one planned activity that can falsify the product thesis&rdquo;.</p>
+
+<p><strong>Done looks like:</strong> one added exit question — &ldquo;would you keep this installed
+next week, and why or why not?&rdquo; — and a scheduled two-week follow-up — &ldquo;is it still
+installed; did you run it?&rdquo; — both recorded as part of the study result. Then run
+<a href="#p9">P9</a>.</p>
+
+<h3 id="f8">F8 — <code>--yes</code> on <code>trust</code> means &ldquo;I read the review&rdquo;, the opposite of its universal meaning.</h3>
+
+<p><strong>Size:</strong> an hour. <strong>Maintainer decision. Status: OPEN.</strong></p>
+
+<p>Everywhere else in the CLI ecosystem <code>--yes</code> means &ldquo;stop asking me&rdquo;. Here
+it asserts the reviewer read what was printed. <code>TrustArgs::yes</code>
+(<code>crates/cli/src/cli.rs:1016-1021</code>) is documented as
+&ldquo;acknowledge the review non-interactively&rdquo; and requires
+<code>--consented-digest</code>; <code>YesArgs::yes</code> (<code>cli.rs:2126-2130</code>) says
+&ldquo;Same meaning it has on <code>trust</code>: the reviewer asserts they read what was
+printed.&rdquo; So <code>agentstack yes --yes</code> is a real invocation.</p>
+
+<p>The overload invites cargo-culting <code>--yes</code> into scripts and CI — exactly where the
+ceremony&rsquo;s value evaporates. The candidate fix is a rename to <code>--reviewed</code>, keeping
+<code>--yes</code> as a deprecated alias for one release. It touches the consent surface, so it is
+maintainer-owned.</p>
+
+<h3 id="f9">F9 — the docs never address re-trust friction in aggregate.</h3>
+
+<p><strong>Size:</strong> a note. <strong>Status: OPEN.</strong></p>
+
+<p>Re-gating on every byte change is the correct security property, and
+<code>docs/howto/trust-a-repo.md</code> states it plainly — trust is consent to a set of bytes. What
+the page does not say, anywhere, is what that feels like on an active team repository with twenty
+commits a day. Its <strong>Limits</strong> paragraph covers what trust does not confine, not what it
+costs to keep.</p>
+
+<p>Per event the friction is proportionate. In aggregate it is the likely number-one abandonment
+point, and <a href="#p9">P9</a> should be watching for it.</p>
+
+<p><strong>Done looks like:</strong> an honest paragraph in <code>trust-a-repo.md</code>&rsquo;s
+Limits section, and an observer note added to the study sheet.</p>
+
+<h3 id="f10">F10 — the enforcement code lives in the CLI crate, not in the small review boundaries.</h3>
+
+<p><strong>Slot:</strong> not before the bar. <strong>Size:</strong> large.
+<strong>Recorded, deferred. Status: OPEN.</strong></p>
+
+<p>The declared single enforcement point is <code>Gateway::try_call</code>
+(<code>crates/cli/src/gateway.rs</code>, named as such in
+<code>docs/ENFORCEMENT.md:279</code>). It, and <code>grant.rs</code>, <code>guard.rs</code>,
+<code>machine_policy.rs</code> and <code>execution.rs</code>, all live in <code>crates/cli</code> —
+the one crate that cannot carry <code>forbid(unsafe_code)</code>, because it holds the concentrated
+<code>src/sys.rs</code> boundary and so declares <code>deny</code> with a single
+<code>#[allow]</code> instead. Meanwhile the &ldquo;small, line-by-line-reviewed security-critical
+crates&rdquo; framing points a reviewer at <code>trust</code> and <code>policy</code> — 1,466 lines
+of pure decisions outside their inline test modules, containing no enforcement.</p>
+
+<p><strong>Two of the review&rsquo;s own figures did not survive checking, and the measured ones are
+used above.</strong> The review called this an &ldquo;82k-line CLI crate&rdquo;;
+<code>crates/cli/src</code> is <strong>117,424</strong> lines, or <strong>89,743</strong> excluding
+inline <code>#[cfg(test)]</code> modules — neither is 82k. The review also named
+<code>commands/trust.rs</code> and <code>commands/doctor.rs</code> the two largest files; measured,
+the two largest are <code>commands/doctor.rs</code> (5,621) and <code>commands/workflow.rs</code>
+(5,044), with <code>commands/trust.rs</code> (3,647) seventh. The point the figures were reaching
+for stands on the corrected numbers — <code>trust.rs</code> is large <em>and</em> it is the consent
+path — but the numbers themselves were computed from a record, and this document does not repeat
+that.</p>
+
+<p>The candidate shape is a <code>crates/enforce</code> extraction carrying
+<code>forbid(unsafe_code)</code>, <strong>moving existing code</strong> — the working rule applies:
+acceptance is preservation of the single authority and dispatch paths and their witnesses, not a
+line count.</p>
+
+<p><strong>Explicitly not started.</strong> It is a structural change against the surface the bar
+judges, and STRATEGY v3 does not open lanes before the bar is met. Recorded so it is not
+rediscovered.</p>
+
 <h2 id="pattern">The pattern</h2>
 
 <p>Every defect in this engagement had one shape: <strong>a claim computed from a record instead of
@@ -1014,6 +1399,14 @@ competitor&rsquo;s codebase without reading enough of it to support them. Both w
 engagement&rsquo;s single defect in a new place — a claim computed from a record instead of from
 reality — and both were cheap to fix by going and looking. Both have now been fixed that way, in
 <code>34c0db9</code> and in the throughput plan committed beside this document.</p>
+
+<p>The F-series found the same shape twice more, in code and in documentation. The SNI parser
+carries a comment asserting that a present-but-truncated extensions length always fails closed,
+while four lines below it the code returns <code>Absent</code> for a length of exactly one byte
+(<a href="#f1">F1</a>). <code>docs/integrations.md</code> asserts that every <code>FEATURES</code>
+name except one &ldquo;appears above&rdquo;, while fourteen do not (<a href="#f3">F3</a>). Neither
+claim was ever checked against the thing it described; both were computed from a record. Both were
+found the only way this kind of defect is ever found — by going and looking.</p>
 
 </main>
 </body>

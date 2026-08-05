@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Draft amendment to STRATEGY.md — the runtime thesis</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1c1f24;
+    --muted: #5b6472;
+    --rule: #e2e6ec;
+    --rule-strong: #c8cfda;
+    --accent: #2f5d8c;
+    --code-bg: #f2f4f7;
+    --thead-bg: #eef1f5;
+    --zebra: #f8f9fb;
+    --quote-bg: #f7f8fa;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171b;
+      --fg: #e4e7ec;
+      --muted: #9aa4b2;
+      --rule: #2a2f37;
+      --rule-strong: #3b424c;
+      --accent: #8ab4e0;
+      --code-bg: #21262d;
+      --thead-bg: #1e232a;
+      --zebra: #191d23;
+      --quote-bg: #1a1e24;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    padding: 2.5rem 1.25rem 6rem;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+    font-size: 16px;
+    line-height: 1.65;
+    overflow-x: hidden;
+  }
+
+  main {
+    max-width: 62rem;
+    margin: 0 auto;
+  }
+
+  header.doc-header {
+    border-bottom: 1px solid var(--rule-strong);
+    padding-bottom: 1.25rem;
+    margin-bottom: 2rem;
+  }
+
+  header.doc-header .meta {
+    color: var(--muted);
+    font-size: 0.875rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin: 0 0 0.5rem;
+  }
+
+  header.doc-header .subtitle {
+    color: var(--muted);
+    font-size: 1.0625rem;
+    margin: 0.5rem 0 0;
+  }
+
+  h1 {
+    font-size: 1.9rem;
+    line-height: 1.25;
+    margin: 0;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+  }
+
+  h2 {
+    font-size: 1.4rem;
+    line-height: 1.3;
+    margin: 3rem 0 0.75rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--rule);
+    font-weight: 640;
+    letter-spacing: -0.005em;
+  }
+
+  h3 {
+    font-size: 1.125rem;
+    margin: 2rem 0 0.5rem;
+    font-weight: 640;
+  }
+
+  p { margin: 0 0 1rem; }
+
+  ul, ol { margin: 0 0 1rem; padding-left: 1.5rem; }
+  li { margin: 0.35rem 0; }
+
+  a { color: var(--accent); }
+  a:hover { text-decoration: none; }
+
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+                 "Liberation Mono", monospace;
+    font-size: 0.875em;
+    background: var(--code-bg);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 0.08em 0.35em;
+    word-break: break-word;
+  }
+
+  blockquote {
+    margin: 1.25rem 0;
+    padding: 0.85rem 1.15rem;
+    background: var(--quote-bg);
+    border-left: 3px solid var(--rule-strong);
+    color: var(--fg);
+  }
+
+  blockquote p { margin: 0 0 0.5rem; }
+  blockquote p:last-child { margin-bottom: 0; }
+
+  nav.toc {
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 1.1rem 1.35rem;
+    margin: 0 0 2.5rem;
+    background: var(--zebra);
+  }
+
+  nav.toc h2 {
+    font-size: 0.8125rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin: 0 0 0.6rem;
+    padding: 0;
+    border: 0;
+    font-weight: 600;
+  }
+
+  nav.toc ol {
+    margin: 0;
+    padding-left: 1.4rem;
+  }
+
+  nav.toc li { margin: 0.2rem 0; }
+
+  div.table-wrap {
+    margin: 1.25rem 0 1.5rem;
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 32rem;
+    font-size: 0.9375rem;
+  }
+
+  thead th {
+    background: var(--thead-bg);
+    text-align: left;
+    font-weight: 640;
+    border-bottom: 1px solid var(--rule-strong);
+  }
+
+  th, td {
+    padding: 0.55rem 0.8rem;
+    border-bottom: 1px solid var(--rule);
+    border-right: 1px solid var(--rule);
+    vertical-align: top;
+  }
+
+  th:last-child, td:last-child { border-right: 0; }
+
+  tbody tr:nth-child(even) { background: var(--zebra); }
+  tbody tr:last-child td { border-bottom: 0; }
+
+  strong { font-weight: 650; }
+
+  hr {
+    border: 0;
+    border-top: 1px solid var(--rule);
+    margin: 2.5rem 0;
+  }
+
+  p.anchor {
+    color: var(--muted);
+    font-size: 0.9375rem;
+    border-left: 3px solid var(--accent);
+    padding: 0.15rem 0 0.15rem 0.85rem;
+    margin: 0 0 0.9rem;
+  }
+
+  p.paste-label {
+    color: var(--muted);
+    font-size: 0.8125rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+    margin: 1.25rem 0 0.4rem;
+  }
+
+  pre {
+    margin: 0 0 1.5rem;
+    padding: 1rem 1.15rem;
+    background: var(--code-bg);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    overflow-x: auto;
+    font-size: 0.875rem;
+    line-height: 1.55;
+  }
+
+  pre code {
+    background: none;
+    border: 0;
+    padding: 0;
+    font-size: inherit;
+    word-break: normal;
+    white-space: pre;
+  }
+</style>
+</head>
+<body>
+<main>
+
+<header class="doc-header">
+  <p class="meta">2026-08-05 — proposal, not the strategy</p>
+  <h1>Draft amendment to STRATEGY.md — the runtime thesis</h1>
+  <p class="subtitle">A draft for the maintainer to adopt by editing
+  <a href="../STRATEGY.md"><code>STRATEGY.md</code></a> himself. Drafted against v3
+  (adopted 2026-08-02, current as of 0.18.0-rc.2).</p>
+  <p class="subtitle"><strong>Adopting means: paste, adjust, commit.</strong> Nothing on this
+  page is operative until the maintainer takes the blocks he wants, puts them in his own
+  wording, and commits them. An agent does not edit the strategy — authorship is the property
+  that makes it authority. The page is HTML; every paste payload below is markdown, because
+  <code>STRATEGY.md</code> is a markdown file.</p>
+  <p class="subtitle"><strong>Sources.</strong> Every APM number below is quoted from
+  <a href="apm-comparison.html"><code>plan/apm-comparison.html</code></a> (facts retrieved
+  2026-08-04, fact-checked in commit <code>34c0db9</code>). Cite that file, not this one, if a
+  number is questioned.</p>
+</header>
+
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#thesis">The thesis this amendment encodes</a></li>
+    <li><a href="#a">Block A — the install plane, conceded</a></li>
+    <li><a href="#b">Block B — a fifth competitive tripwire: APM</a></li>
+    <li><a href="#c">Block C — positioning: runtime first, portability second</a></li>
+    <li><a href="#d">Block D — the buyer stays; the future buyer gets a name</a></li>
+    <li><a href="#e">Block E — one consequence for the queue</a></li>
+    <li><a href="#unchanged">What this amendment does not change</a></li>
+  </ol>
+</nav>
+
+<h2 id="thesis">The thesis this amendment encodes</h2>
+
+<p>In the maintainer's own words, preserved:</p>
+
+<blockquote>
+  <p>APM is building the best install-time package manager for AI agents. Once installation is
+  complete, APM intentionally stops there — "your agent harness governs what runs." AgentStack
+  should take the opposite approach. The long-term opportunity is not to build a better package
+  manager than Microsoft. It is to become the runtime platform for AI agents: enforcing
+  permissions and policies while agents are running; running agents inside sandboxes or lockdown
+  environments; governing network access, secrets, and capabilities; recording and auditing
+  everything an agent does; providing a single runtime layer that works across every AI CLI and
+  editor.</p>
+  <p><strong>APM manages what gets installed. AgentStack governs what is allowed to run.</strong></p>
+</blockquote>
+
+<p>Five ready-to-paste blocks follow. Each names its anchor in <code>STRATEGY.md</code> by that
+document's real section names.</p>
+
+<div class="table-wrap"><div style="overflow-x:auto">
+<table>
+  <thead>
+    <tr><th>Block</th><th>Target section in STRATEGY.md</th><th>Kind of edit</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>A</td><td>The shape</td><td>new closing subsection</td></tr>
+    <tr><td>B</td><td>Competitive watch</td><td>new paragraph + new list item</td></tr>
+    <tr><td>C</td><td>Distribution</td><td>replaces one bullet, adds one</td></tr>
+    <tr><td>D</td><td>Distribution; The plan → Revisit triggers</td><td>new paragraph + new list item</td></tr>
+    <tr><td>E</td><td>none — <code>TODO.md</code> territory</td><td>queue note</td></tr>
+  </tbody>
+</table>
+</div></div>
+
+<h2 id="a">Block A — the install plane, conceded</h2>
+
+<p class="anchor"><strong>Anchor:</strong> insert into section <strong>"The shape"</strong>, after
+the final bullet (<em>"Everything else is quiet."</em>), as a closing subsection of that section.</p>
+
+<p class="paste-label">Paste payload (markdown)</p>
+<pre><code>### The install plane is conceded, deliberately
+
+APM manages what gets installed. AgentStack governs what is allowed to
+run. That split is a choice, not a shortfall, and this document makes it
+explicit so that no queue item is ever justified by closing it.
+
+AgentStack will not build: transitive dependency resolution (APM has a
+parallel BFS graph with cycle detection and a `why` walker; ours is
+`[packs]` and `[package_overrides]`, one level, and stays that way),
+semver ranges against remote git tags (we pin exact refs — pinning is the
+consent anchor, not a versioning convenience), `outdated` / `update` /
+`prune` lifecycle tooling, or a registry race. A user who wants "install
+this skill from that repo, with its dependencies, pinned, in every tool"
+gets a better answer from APM today, and will keep getting one.
+
+The complement is committed direction: APM's ecosystem — with
+vercel-labs/skills and the MCP registry — is machine-readable supply for
+our governed intake. It enters through the trust gate like everything
+else; origin stops mattering because review does. One governed intake
+path beats a competing resolver. This is the prediction that already
+shipped for eve's ecosystem, extended to the install plane's winner.
+
+Ambiguous is the one answer that costs something.</code></pre>
+
+<h2 id="b">Block B — a fifth competitive tripwire: APM</h2>
+
+<p class="anchor"><strong>Anchor:</strong> insert into section <strong>"Competitive watch"</strong> —
+the paragraph as a new second paragraph, after the eve paragraph and before the <em>"2026-08
+refresh"</em> note; the tripwire as a new numbered item at the end of the tripwire list.</p>
+
+<p class="paste-label">Paste payload — the paragraph (markdown)</p>
+<pre><code>APM (microsoft/apm) is the install plane's leader and, by its own
+documentation, not in our plane: *"apm-policy.yml governs what gets
+installed; your agent harness governs what runs. The two planes do not
+overlap"*; *"APM is an install-time gate, not a runtime sandbox."* We
+concede the install plane (see "The shape") and watch the stated
+boundary, because stated boundaries move. Two observations date this
+watch. The cadence: **~196 commits in the last 30 days, a minor release
+every two weeks — v0.24.0 (2026-07-05) through v0.27.0 (2026-08-02)**.
+Any tripwire on APM is re-read on that two-week clock, not once a
+quarter. The precedent: **APM shipped a dashboard** — the v0.27.0 notes
+carry `fix(dashboard): enforce POST body size limits` and
+`fix(dashboard): harden static path traversal checks`, a served UI with a
+served UI's attack surface. A project that added a graphical surface can
+add a runtime one. (Both facts from `plan/apm-comparison.html`, retrieved
+2026-08-04.)</code></pre>
+
+<p class="paste-label">Paste payload — the tripwire (markdown)</p>
+<pre><code>5. **APM ships a runtime enforcement plane** — anything that enforces at
+   or after launch rather than at install: a sandbox, a policy check on a
+   live agent, brokered network or secret access, an audit record of what
+   ran. Checkable on the release notes at the cadence above.</code></pre>
+
+<h2 id="c">Block C — positioning: runtime first, portability second</h2>
+
+<p class="anchor"><strong>Anchor:</strong> insert into section <strong>"Distribution"</strong>,
+replacing the second bullet (<em>"The announcement leads with portability"</em>) and adding the
+honesty rider immediately after it.</p>
+
+<p class="paste-label">Paste payload (markdown)</p>
+<pre><code>- **The announcement leads with the runtime claim** — *"One runtime layer
+  that governs what your agents are allowed to run — across every CLI."* —
+  with portability as the second beat: *"and your setup follows you
+  everywhere."* The asymmetric first-run framing is the candidate wedge
+  copy: *"you have everything in Claude Code — get it governed in Codex in
+  one command."* Wedge posts may invert the emphasis locally; the launch
+  itself never hitches to a competitor's name.
+- **"Governs" never outruns [`ENFORCEMENT.md`](docs/ENFORCEMENT.md).**
+  Host mode is cooperative; only sandbox mode is enforced. Wherever the
+  copy makes the runtime claim it carries that distinction in the same
+  breath — headline, README, first-run, demo. This is "Claims match
+  enforcement" applied to our own marketing: an advisory check is not
+  confinement, recording is not prevention, and an allowed destination can
+  still exfiltrate. A positioning flip that loses this line is not
+  adopted.</code></pre>
+
+<h2 id="d">Block D — the buyer stays; the future buyer gets a name</h2>
+
+<p class="anchor"><strong>Anchor:</strong> the paragraph into section <strong>"Distribution"</strong>,
+after the <em>"Beachhead pair"</em> bullet; the trigger as a new numbered item in
+<strong>"The plan" → "Revisit triggers"</strong>.</p>
+
+<p class="paste-label">Paste payload — the paragraph (markdown)</p>
+<pre><code>The beachhead does not move. The audience is still the developer
+personally running two or more coding CLIs, and first-run material still
+demonstrates Claude Code + Codex flawlessly. The runtime thesis has a
+further consequence — central policy, fleet audit, and compliance are
+what a team asks a runtime layer for — and naming it is not starting it.
+**The team and enterprise buyer is not a current lane.** "No enterprise
+administration suite" stays in the non-goals until the trigger below
+fires.</code></pre>
+
+<p class="paste-label">Paste payload — the revisit trigger (markdown)</p>
+<pre><code>4. **The team buyer asks** — fires when the activation study has run and
+   a retention signal exists, **and** a team asks for central policy or
+   fleet audit. Both halves are required: an ask without evidence of
+   individual retention is a distraction, and evidence without an ask is
+   a guess. Reopens this document to decide whether the enterprise
+   non-goal holds.</code></pre>
+
+<h2 id="e">Block E — one consequence for the queue</h2>
+
+<p class="anchor"><strong>Anchor:</strong> none in <code>STRATEGY.md</code> — this is
+<a href="../TODO.md"><code>TODO.md</code></a> territory, recorded here so the adoption is coherent.
+<strong>The maintainer should mirror it in <code>TODO.md</code>.</strong> If he wants it visible in
+the strategy, the natural home is one sentence in <strong>"The plan"</strong>, under the queue
+list.</p>
+
+<p class="paste-label">Paste payload (markdown)</p>
+<pre><code>The runtime thesis makes `run` and `workflow` load-bearing: they are the
+two entry points of the runtime plane, and they are the least verified
+surfaces we have (plan item P8). Verification of both rises in priority
+and lands before the bar is judged. A thesis that the runtime layer is
+the product cannot rest on the two verbs nobody has proven.</code></pre>
+
+<h2 id="unchanged">What this amendment does not change</h2>
+
+<ul>
+  <li><strong>The shape</strong> — the committed set is unchanged; conceding the install plane
+  removes nothing from it and adds nothing to it.</li>
+  <li><strong>What never changes</strong> — every invariant holds verbatim; Block C tightens
+  "Claims match enforcement" rather than touching it.</li>
+  <li><strong>The bar</strong> — still the maintainer's own satisfaction, still first, still
+  before any other person sees the product.</li>
+  <li><strong>The non-goals</strong> — all of them stand, including "no enterprise administration
+  suite"; Block D names a future buyer and starts nothing.</li>
+  <li><strong>The standing constraints</strong> — the CLI remains the primary surface and the sole
+  authority, and the embedded dashboard stays removed. APM shipping a dashboard is a divergence to
+  record, never a gap to close.</li>
+</ul>
+
+</main>
+</body>
+</html>
