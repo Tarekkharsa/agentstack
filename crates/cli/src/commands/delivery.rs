@@ -338,6 +338,33 @@ pub fn harness_sentence(h: &HarnessPlan, bridge_registered: bool) -> String {
     }
 }
 
+/// `Reason::why` states the routed rationale as if the live channel were
+/// already carrying the capability: "served live, on demand". That is true only
+/// once this harness has the bridge registered — with none, nothing in the
+/// dynamic lane reaches any tool, so the clause claims a delivery that is not
+/// happening. Same invariant (8) and same correction [`harness_sentence`] makes
+/// for `summary`, applied at the one field that was left behind.
+///
+/// It stays RATIONALE — why this kind takes this lane — rather than turning
+/// into a second copy of `summary` or into something to go and do: the reason
+/// skills and servers route live is that the live channel here can carry them,
+/// and that reason holds whether or not a bridge has been registered yet. Only
+/// the *tense* moves. Every other reason is a physical fact about the kind or
+/// the tool and reads identically either way, so only [`Reason::Routed`] is
+/// restated.
+///
+/// Takes `&Route` rather than `Reason` so a caller cannot pair a reason with
+/// the wrong route's bridge state; returns `&'static str` because both arms are
+/// fixed copy, exactly as `Reason::why` is.
+pub fn route_why(route: &crate::delivery::Route, bridge_registered: bool) -> &'static str {
+    match route.reason {
+        crate::delivery::Reason::Routed if !bridge_registered => {
+            "the live channel here can carry it on demand"
+        }
+        other => other.why(),
+    }
+}
+
 /// One line for surfaces that already print a per-harness list and only need
 /// the lane summary appended (`init`'s plan screen, `status`).
 ///

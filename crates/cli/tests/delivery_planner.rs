@@ -7,7 +7,7 @@
 //! W4 — the delivery planner, the one override, and the flip
 //! (`docs/design/automatic-delivery.md` §"The decision", §"Honesty rules").
 //!
-//! Five witnesses, one per claim the contract makes about routing:
+//! Six witnesses, one per claim the contract makes about routing:
 //!
 //! 1. **The matrix holds.** Every kind goes to the lane the matrix names, on an
 //!    MCP-capable harness and on one that reads files only — and hooks and
@@ -19,7 +19,10 @@
 //!    have worked — per project, and per harness.
 //! 4. **The flip.** With no override, skills and MCP servers on an MCP-capable
 //!    harness default to the dynamic lane.
-//! 5. **The honesty rules hold against real command output**: no surface says
+//! 5. **A live route's `why` is conjugated by the bridge**, exactly as the
+//!    `summary` beside it is: with none registered it gives the rationale for
+//!    the lane and claims no service, and with one it reads as live again.
+//! 6. **The honesty rules hold against real command output**: no surface says
 //!    "0 files", and no surface describes an instruction as going live.
 //!
 //! `pi` is the file-only harness throughout (no MCP channel; skills,
@@ -350,7 +353,149 @@ fn the_default_is_dynamic_for_skills_and_servers_on_an_mcp_capable_harness() {
     assert!(agentstack::ui_contract::FEATURES.contains(&"delivery-routing-v1"));
 }
 
-// ─────────────────────────────────────────────────── 5. the honesty rules
+// ──────────────────────────────── 5. the honesty rules reach `routes[].why`
+
+/// The `why` on a live route is conjugated by THIS harness's bridge, exactly as
+/// `summary` beside it is.
+///
+/// `Reason::Routed.why()` reads "served live, on demand" — a delivery claim.
+/// With no bridge registered nothing in the dynamic lane reaches the tool, so
+/// that clause described a state that was not happening (invariant 8). The
+/// field is rationale rather than a report, which is why it outlived the
+/// correction made to `summary`; rationale still may not assert service.
+///
+/// Asked at the seam that emits it, both ways, because a fixture cannot easily
+/// hold one project with a registered bridge and one without.
+#[test]
+fn a_live_route_stops_claiming_service_when_no_bridge_is_registered() {
+    let plan = plan_for(&Delivery::default(), &[MCP_HARNESS, FILE_ONLY_HARNESS]);
+    let why = |body: &Value, harness: &str, kind: &str| -> String {
+        body["harnesses"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|h| h["id"] == harness)
+            .unwrap_or_else(|| panic!("no row for {harness} in {body}"))["routes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["kind"] == kind)
+            .unwrap_or_else(|| panic!("no route for {kind} in {body}"))["why"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+
+    // ── no bridge anywhere ───────────────────────────────────────────────
+    let unconnected = plan.to_json(&|_| false);
+    for kind in ["skills", "servers"] {
+        let w = why(&unconnected, MCP_HARNESS, kind);
+        assert!(
+            !w.contains("served live"),
+            "{kind} claims service with no bridge registered: {w}"
+        );
+        assert!(
+            !w.is_empty(),
+            "{kind} must still say why it takes the live lane"
+        );
+        // Rationale, not a repeat of `summary` and not a thing to go and do.
+        assert!(
+            !w.contains("planned live") && !w.contains("agentstack "),
+            "`why` must stay rationale, not a summary or a next action: {w}"
+        );
+    }
+    // The row still says the lane is dynamic — the routing did not change,
+    // only what the prose asserts — and the typed field a panel decides on is
+    // right beside it.
+    let claude = unconnected["harnesses"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|h| h["id"] == MCP_HARNESS)
+        .unwrap();
+    assert_eq!(claude["bridge_registered"], false);
+    assert_eq!(
+        claude["routes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|r| r["kind"] == "servers")
+            .unwrap()["lane"],
+        "dynamic"
+    );
+
+    // ── the control: connected reads as live ─────────────────────────────
+    let connected = plan.to_json(&|_| true);
+    for kind in ["skills", "servers"] {
+        assert_eq!(
+            why(&connected, MCP_HARNESS, kind),
+            Reason::Routed.why(),
+            "a registered bridge keeps the connected clause for {kind}"
+        );
+        assert!(why(&connected, MCP_HARNESS, kind).contains("served live"));
+    }
+
+    // ── every other reason is a physical fact and never moves ────────────
+    // House rules and settings on the MCP-capable tool, and every kind on the
+    // file-only one: the bridge has nothing to say about any of them.
+    for kind in ["instructions", "settings", "hooks"] {
+        assert_eq!(
+            why(&unconnected, MCP_HARNESS, kind),
+            why(&connected, MCP_HARNESS, kind),
+            "{kind} does not route live, so its reason cannot depend on a bridge"
+        );
+    }
+    let file_only = plan
+        .harnesses
+        .iter()
+        .find(|h| h.id == FILE_ONLY_HARNESS)
+        .expect("pi is in the plan");
+    for r in &file_only.routes {
+        let slug = r.kind.slug();
+        assert_eq!(
+            why(&unconnected, FILE_ONLY_HARNESS, slug),
+            Reason::NoLiveChannel.why(),
+            "{slug} on a file-only tool reads the same either way"
+        );
+        assert_eq!(
+            why(&connected, FILE_ONLY_HARNESS, slug),
+            Reason::NoLiveChannel.why()
+        );
+    }
+}
+
+/// And end to end: a real project with no bridge registered emits no "served
+/// live" anywhere in its `delivery --json`, `why` included.
+#[test]
+fn the_json_of_an_unconnected_project_claims_no_live_service() {
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = home_in(tmp.path());
+    let proj = project(tmp.path(), "");
+
+    let body = routing_json(&run(&["delivery", "--json"], &proj, &home));
+    let claude = body["harnesses"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|h| h["id"] == MCP_HARNESS)
+        .unwrap_or_else(|| panic!("no {MCP_HARNESS} row: {body}"));
+    assert_eq!(
+        claude["bridge_registered"], false,
+        "a fresh HOME has no bridge registered, or this proves nothing: {body}"
+    );
+    for r in claude["routes"].as_array().unwrap() {
+        assert!(
+            !r["why"].as_str().unwrap().contains("served live"),
+            "a route claimed service with no bridge: {r}"
+        );
+    }
+    assert!(
+        !claude["summary"].as_str().unwrap().contains("served live"),
+        "the summary claimed service with no bridge: {claude}"
+    );
+}
+
+// ─────────────────────────────────────────────────── 6. the honesty rules
 
 #[test]
 fn no_surface_claims_zero_files_or_calls_an_instruction_gateway_delivered() {

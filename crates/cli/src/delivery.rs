@@ -150,6 +150,12 @@ impl Reason {
     /// A clause a surface can drop straight into a sentence. Plain language on
     /// purpose — this copy reaches `init`, which is the first screen a person
     /// ever sees.
+    ///
+    /// [`Reason::Routed`]'s clause is the CONNECTED form; it names the delivery
+    /// that a registered bridge actually performs. A surface that does not know
+    /// the bridge is registered must ask
+    /// [`crate::commands::delivery::route_why`] instead, which restates that one
+    /// clause and passes the rest through.
     pub fn why(self) -> &'static str {
         match self {
             Reason::RenderLocally => "render locally is set here",
@@ -370,24 +376,38 @@ impl Plan {
     /// worse than in text because a consumer has no prose to correct against.
     /// `bridge_registered` is emitted beside it so a consumer can tell the two
     /// states apart without parsing the sentence.
+    ///
+    /// Each route's `why` is read through the same seam
+    /// ([`crate::commands::delivery::route_why`]) for the same reason: the
+    /// routed reason's plain form says "served live", which is the same claim in
+    /// the same object. It is rationale rather than a claim about the project,
+    /// which is why it survived the first correction; it still may not assert
+    /// that something is being served when nothing is.
+    ///
+    /// The bridge is probed ONCE per harness and reused, because `is_bridged`
+    /// reads that CLI's config off disk — asking it per route would multiply one
+    /// answer into a file read per capability kind.
     pub fn to_json(&self, is_bridged: &dyn Fn(&str) -> bool) -> serde_json::Value {
         serde_json::json!({
             "default": "automatic",
-            "harnesses": self.harnesses.iter().map(|h| serde_json::json!({
-                "id": h.id,
-                "display": h.display,
-                "mcp_capable": h.mcp_capable,
-                "render_locally": h.render_locally,
-                "override": h.override_source.slug(),
-                "bridge_registered": is_bridged(&h.id),
-                "summary": crate::commands::delivery::harness_sentence(h, is_bridged(&h.id)),
-                "routes": h.routes.iter().map(|r| serde_json::json!({
-                    "kind": r.kind.slug(),
-                    "lane": r.lane.slug(),
-                    "why": r.reason.why(),
-                    "full_ceremony": r.full_ceremony(),
-                })).collect::<Vec<_>>(),
-            })).collect::<Vec<_>>(),
+            "harnesses": self.harnesses.iter().map(|h| {
+                let bridged = is_bridged(&h.id);
+                serde_json::json!({
+                    "id": h.id,
+                    "display": h.display,
+                    "mcp_capable": h.mcp_capable,
+                    "render_locally": h.render_locally,
+                    "override": h.override_source.slug(),
+                    "bridge_registered": bridged,
+                    "summary": crate::commands::delivery::harness_sentence(h, bridged),
+                    "routes": h.routes.iter().map(|r| serde_json::json!({
+                        "kind": r.kind.slug(),
+                        "lane": r.lane.slug(),
+                        "why": crate::commands::delivery::route_why(r, bridged),
+                        "full_ceremony": r.full_ceremony(),
+                    })).collect::<Vec<_>>(),
+                })
+            }).collect::<Vec<_>>(),
         })
     }
 }
