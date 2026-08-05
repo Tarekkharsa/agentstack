@@ -45,6 +45,7 @@ use crate::cli::{
     PanelRenameProfileArgs, PanelSetGitignoreArgs, PanelUseProfileArgs,
 };
 use crate::manifest::Manifest;
+use crate::render::PriorTrust;
 
 /// Domain separator for the profiles-edit consent digest. Distinct from the
 /// `init-plan` and `trust` digest domains — these are three independent schemes
@@ -184,7 +185,20 @@ pub(crate) fn verify_consent(consented: Option<&str>, actual: &str) -> Result<()
 /// `write = true` so this materializes skills and renders server configs, and
 /// fails closed (nonzero) when a `${REF}` did not resolve unless
 /// `allow_unresolved`.
-fn activate(profile: &str, allow_unresolved: bool, dir: Option<&Path>) -> Result<()> {
+///
+/// `prior` is the trust state from BEFORE the caller's manifest write. Every
+/// verb here mutates the manifest and then re-renders in the same run, so the
+/// mutation flips the consent digest and the delivery gates would refuse the
+/// verb's own render. They are judged against the pre-write state instead — see
+/// [`crate::render::PriorTrust`], and note that nothing re-pins: the project is
+/// left `Changed` and the human still reviews the new declaration before the
+/// next command delivers anything.
+fn activate(
+    profile: &str,
+    allow_unresolved: bool,
+    dir: Option<&Path>,
+    prior: PriorTrust,
+) -> Result<()> {
     let args = crate::cli::UseArgs {
         profile: Some(profile.to_string()),
         targets: vec![],
@@ -197,7 +211,7 @@ fn activate(profile: &str, allow_unresolved: bool, dir: Option<&Path>) -> Result
         json: false,
         quiet: false,
     };
-    crate::commands::use_profile::run(&args, dir)
+    crate::commands::use_profile::run_with_prior_trust(&args, dir, prior)
 }
 
 /// Re-lock and re-render the only unambiguous project selection.
@@ -205,7 +219,11 @@ fn activate(profile: &str, allow_unresolved: bool, dir: Option<&Path>) -> Result
 /// With no toolsets this is the implicit full manifest; with one it is that
 /// toolset. Callers must refuse a multi-toolset manifest before writing,
 /// because choosing one implicitly could widen or narrow a user's active set.
-fn activate_unambiguous(allow_unresolved: bool, dir: Option<&Path>) -> Result<()> {
+fn activate_unambiguous(
+    allow_unresolved: bool,
+    dir: Option<&Path>,
+    prior: PriorTrust,
+) -> Result<()> {
     let args = crate::cli::UseArgs {
         profile: None,
         targets: vec![],
@@ -218,7 +236,20 @@ fn activate_unambiguous(allow_unresolved: bool, dir: Option<&Path>) -> Result<()
         json: false,
         quiet: false,
     };
-    crate::commands::use_profile::run(&args, dir)
+    crate::commands::use_profile::run_with_prior_trust(&args, dir, prior)
+}
+
+/// The project's trust state RIGHT NOW, for a verb that is about to write the
+/// manifest and then re-render it in the same run.
+///
+/// Every call must sit before that write — the value means "how this project
+/// stood when the verb started", and reading it afterwards would just re-read
+/// the digest the verb itself moved, which is the self-refusal this exists to
+/// prevent. One helper so the ordering is stated once and every verb below
+/// reads the same.
+fn prior_trust(dir: Option<&Path>) -> Result<PriorTrust> {
+    let base = crate::commands::project_base(dir)?;
+    Ok(PriorTrust::at_command_start(&base))
 }
 
 /// Require `profile` to already exist. Toolsets are created with `create-profile`;
@@ -262,6 +293,8 @@ pub fn add_skill(args: &PanelAddSkillArgs, dir: Option<&Path>) -> Result<()> {
         return emit(&preview);
     }
     verify_consent(args.consent.consented.as_deref(), preview_digest(&preview)?)?;
+    // Before the manifest write below, never after it.
+    let prior = prior_trust(dir)?;
 
     // The write decision is pure over the flags (`--git`/`--path` defines a new
     // skill; neither enrolls an existing one), so recomputing it here can never
@@ -283,7 +316,7 @@ pub fn add_skill(args: &PanelAddSkillArgs, dir: Option<&Path>) -> Result<()> {
     } else {
         enroll(dir, &args.profile, "skills", &args.name)?;
     }
-    activate(&args.profile, args.consent.allow_unresolved, dir)
+    activate(&args.profile, args.consent.allow_unresolved, dir, prior)
 }
 
 /// Validate the request and build its enveloped preview (with the
@@ -365,6 +398,8 @@ pub fn add_server(args: &PanelAddServerArgs, dir: Option<&Path>) -> Result<()> {
         return emit(&preview);
     }
     verify_consent(args.consent.consented.as_deref(), preview_digest(&preview)?)?;
+    // Before the manifest write below, never after it.
+    let prior = prior_trust(dir)?;
 
     if server_defines_new(args) {
         // Header/env `Key=Value` pairs become JSON objects; `${REF}`s pass
@@ -386,7 +421,7 @@ pub fn add_server(args: &PanelAddServerArgs, dir: Option<&Path>) -> Result<()> {
     } else {
         enroll(dir, &args.profile, "servers", &args.name)?;
     }
-    activate(&args.profile, args.consent.allow_unresolved, dir)
+    activate(&args.profile, args.consent.allow_unresolved, dir, prior)
 }
 
 /// A server definition is present iff any wire field was given; otherwise the
@@ -828,7 +863,15 @@ pub fn use_profile(args: &PanelUseProfileArgs, dir: Option<&Path>) -> Result<()>
         return emit(&preview);
     }
     verify_consent(args.consent.consented.as_deref(), preview_digest(&preview)?)?;
-    activate(&args.profile, args.consent.allow_unresolved, dir)
+    // STRICT: this verb changes no manifest byte, so it has authored nothing
+    // and takes the ordinary gate. A drifted project must not be able to
+    // re-render itself live through the panel.
+    activate(
+        &args.profile,
+        args.consent.allow_unresolved,
+        dir,
+        PriorTrust::STRICT,
+    )
 }
 
 /// Validate the request and build its enveloped preview (with the
@@ -1111,6 +1154,8 @@ pub fn remove_capability(args: &PanelRemoveCapabilityArgs, dir: Option<&Path>) -
         return emit(&preview);
     }
     verify_consent(args.consent.consented.as_deref(), preview_digest(&preview)?)?;
+    // Before the manifest write below, never after it.
+    let prior = prior_trust(dir)?;
 
     let base = crate::commands::project_base(dir)?;
     let path =
@@ -1126,7 +1171,7 @@ pub fn remove_capability(args: &PanelRemoveCapabilityArgs, dir: Option<&Path>) -
     crate::util::atomic::write(&path, &out)
         .with_context(|| format!("writing {}", path.display()))?;
 
-    activate_unambiguous(args.consent.allow_unresolved, dir)
+    activate_unambiguous(args.consent.allow_unresolved, dir, prior)
 }
 
 /// Validate and describe a project capability removal without writing.
@@ -1206,6 +1251,8 @@ pub fn edit_profile(args: &PanelEditProfileArgs, dir: Option<&Path>) -> Result<(
         return emit(&preview);
     }
     verify_consent(args.consent.consented.as_deref(), preview_digest(&preview)?)?;
+    // Before the manifest write below, never after it.
+    let prior = prior_trust(dir)?;
 
     // One read, every mutation, one write. Doing it member-by-member through
     // `enroll` would re-read and re-write the manifest per capability, so a
@@ -1234,7 +1281,7 @@ pub fn edit_profile(args: &PanelEditProfileArgs, dir: Option<&Path>) -> Result<(
 
     // One re-lock and one re-render for the whole batch — the activation path
     // every other mutating panel verb uses.
-    activate(&args.profile, args.consent.allow_unresolved, dir)
+    activate(&args.profile, args.consent.allow_unresolved, dir, prior)
 }
 
 /// Validate the batch and build its enveloped preview. Public so the panel (and

@@ -101,6 +101,9 @@ fn render_locally_makes_use_write_servers_again() {
     let tmp = assert_fs::TempDir::new().unwrap();
     set_home(&tmp.path().join("home"));
     let proj = project(tmp.path(), true);
+    // Consent is not this test's subject: grant so the rendered lane's trust
+    // gate (`render::apply::trust_refusal`) is out of the way.
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
 
     use_profile::run(&use_args(), Some(&proj)).unwrap();
 

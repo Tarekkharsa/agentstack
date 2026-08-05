@@ -72,6 +72,10 @@ default = ["claude-code", "codex"]
 "#,
     )
     .unwrap();
+    // Consent is not this test's subject: grant so the rendered lane's
+    // trust gate (`render::apply::trust_refusal` /
+    // `render::skills::trust_refusal`) is out of the way.
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
 
     let err = apply::run(
         &ApplyArgs {

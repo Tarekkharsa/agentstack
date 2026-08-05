@@ -68,6 +68,12 @@ pub struct TargetPlan {
     /// so the user knows the server may need a shell wrapper on that harness,
     /// rather than the field vanishing silently.
     pub warnings: Vec<String>,
+    /// Set when the project's trust state forbids delivering the server
+    /// definitions this plan carries (see the gate in [`trust_refusal`]). The
+    /// plan is still built so the caller can SHOW what is being withheld;
+    /// [`TargetPlan::write`] refuses, so a plan in this state can never reach
+    /// disk.
+    pub refusal: Option<String>,
 }
 
 /// Render one `TargetPlan::failed` entry — already shaped as
@@ -107,7 +113,14 @@ impl TargetPlan {
     }
 
     /// Write the proposed config to disk, creating parent dirs as needed.
+    ///
+    /// The write choke point. The trust refusal is enforced HERE, not only at
+    /// the call sites, so a caller that forgets to read `refusal` still cannot
+    /// put an untrusted project's server command lines into a harness config.
     pub fn write(&self) -> Result<()> {
+        if let Some(why) = &self.refusal {
+            anyhow::bail!("{why}");
+        }
         crate::util::atomic::write(&self.config_path, &self.proposed)
     }
 
@@ -213,6 +226,67 @@ pub fn section_keys(content: &str, location: &str, format: Format) -> Vec<String
         .unwrap_or_default()
 }
 
+/// The trust gate for server delivery — the same rule `render::extensions`
+/// states as "untrusted means inert" (invariant 3), and `render::hooks` applies
+/// to `[hooks.*]`, applied to the third thing a rendered file makes executable.
+///
+/// A `[servers.*]` entry IS a command line (stdio) or an endpoint the harness
+/// talks to (http). Once it is in a native MCP config, the harness spawns or
+/// dials it ITSELF, at its own startup, outside agentstack — so none of the
+/// launch-time gates that do consult trust (`session start`, the protected
+/// `run`, `Gateway::from_frozen`, the MCP auto-project gate) is in the path.
+/// The rendered file is the delivery, and it is therefore what the gate has to
+/// hold. As with hooks, the gate is on the CONTENT's provenance, not on the
+/// destination, so it is identical at project scope (`.mcp.json`) and global
+/// scope (`~/.claude.json`) — the global case being the sharper half, since a
+/// repository's command line lands where every project the user opens reads it.
+///
+/// Returns the refusal message, or `None` when there is nothing to refuse.
+/// Deliberately NOT gated:
+///   * an empty `managed` — a prune (or a plan that selects nothing here)
+///     removes or re-emits bytes we already own, which is the inert direction
+///     and must keep working for an untrusted project, exactly as extension and
+///     hook pruning does;
+///   * the machine manifest itself — `$AGENTSTACK_HOME/agentstack.toml` is the
+///     user's own personal layer. It is deliberately undiscoverable as a
+///     project (`manifest::discover_project_base`), so `trust` can never reach
+///     it: its base resolves to `$HOME`, which no code path can put in the
+///     trust store. Gating it would make machine-level servers permanently
+///     unrenderable rather than merely pending a review no command can perform.
+///     One spelling of the rule across the capability kinds — keep this in step
+///     with `render::hooks::trust_refusal` and `render::extensions::render`.
+///
+/// `prior` is the third exemption and the only conditional one: a command that
+/// WROTE the manifest bytes this project is now `Changed` by is judged against
+/// the state that held before it wrote, because a command cannot be allowed to
+/// refuse itself. See [`crate::render::PriorTrust`] for why that authorizes
+/// nothing new, and why nothing is re-pinned afterwards.
+fn trust_refusal(
+    managed: &[String],
+    project_dir: &Path,
+    prior: crate::render::PriorTrust,
+) -> Option<String> {
+    if managed.is_empty() {
+        return None;
+    }
+    if crate::util::paths::is_machine_home(project_dir) {
+        return None;
+    }
+    let base = crate::manifest::project_root_of(project_dir);
+    let why = prior.refusal_reason(&base)?;
+    let names = managed
+        .iter()
+        .map(|n| format!("'{n}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(format!(
+        "refusing to render MCP servers: project at {} {why} — review and \
+         `agentstack trust .` before writing server definitions the harness \
+         launches on its own ({names})",
+        base.display()
+    ))
+}
+
 /// Which servers a run targets.
 pub enum Selection {
     /// Every server in the manifest.
@@ -227,6 +301,9 @@ pub enum Selection {
 /// the server names we wrote on the last `apply` (from state); any not in the
 /// current selection are pruned. Returns `Ok(None)` when the target doesn't
 /// support `scope` (e.g. project scope for a global-only CLI).
+// One over the limit, and the eighth is the trust answer this plan is judged
+// against — a grouping struct would only rename the same eight facts.
+#[allow(clippy::too_many_arguments)]
 pub fn plan_target(
     manifest: &Manifest,
     desc: &AdapterDescriptor,
@@ -235,6 +312,7 @@ pub fn plan_target(
     previously_managed: &[String],
     scope: Scope,
     project_dir: &Path,
+    prior: crate::render::PriorTrust,
 ) -> Result<Option<TargetPlan>> {
     // Back-compat, inline-only server map (today's behavior). Callers not yet
     // wired for the central library keep this path.
@@ -255,6 +333,7 @@ pub fn plan_target(
         previously_managed,
         scope,
         project_dir,
+        prior,
     )
 }
 
@@ -323,6 +402,13 @@ pub fn no_server_lane(
 /// renderer: secret resolution happens *here*, via `render_server` + `resolver`,
 /// never earlier. Library-aware callers build the map with [`effective_servers`]
 /// and call this directly.
+///
+/// `prior` is the trust state as of the calling command's START —
+/// [`crate::render::PriorTrust::STRICT`] unless the caller captured one before
+/// writing its own manifest bytes.
+// One over the limit, and the eighth is the trust answer this plan is judged
+// against — a grouping struct would only rename the same eight facts.
+#[allow(clippy::too_many_arguments)]
 pub fn plan_target_with_servers(
     desc: &AdapterDescriptor,
     resolver: &dyn Resolver,
@@ -331,6 +417,7 @@ pub fn plan_target_with_servers(
     previously_managed: &[String],
     scope: Scope,
     project_dir: &Path,
+    prior: crate::render::PriorTrust,
 ) -> Result<Option<TargetPlan>> {
     let Some((config_path, format)) = desc.config_for(scope, project_dir) else {
         return Ok(None);
@@ -480,6 +567,7 @@ pub fn plan_target_with_servers(
         proposed = existing.clone();
     }
 
+    let refusal = trust_refusal(&managed, project_dir, prior);
     Ok(Some(TargetPlan {
         id: desc.id.clone(),
         display: desc.display.clone(),
@@ -496,6 +584,7 @@ pub fn plan_target_with_servers(
         skipped,
         secrets,
         warnings,
+        refusal,
     }))
 }
 
@@ -879,6 +968,7 @@ mod tests {
             &[],
             Scope::Global,
             proj.path(),
+            crate::render::PriorTrust::STRICT,
         )
         .unwrap()
         .unwrap();
@@ -900,6 +990,7 @@ mod tests {
             &[],
             Scope::Global,
             proj.path(),
+            crate::render::PriorTrust::STRICT,
         )
         .unwrap()
         .unwrap();
@@ -939,6 +1030,7 @@ mod tests {
             &[],
             Scope::Global,
             proj.path(),
+            crate::render::PriorTrust::STRICT,
         )
         .unwrap()
         .unwrap();
@@ -1014,6 +1106,7 @@ mod tests {
                 &[],
                 Scope::Global,
                 proj.path(),
+                crate::render::PriorTrust::STRICT,
             )
             .unwrap()
             .unwrap();
@@ -1075,6 +1168,7 @@ mod tests {
             &[],
             Scope::Global,
             proj.path(),
+            crate::render::PriorTrust::STRICT,
         )
         .unwrap()
         .unwrap();
@@ -1090,6 +1184,7 @@ mod tests {
             &["github-github".to_string()],
             Scope::Global,
             proj.path(),
+            crate::render::PriorTrust::STRICT,
         )
         .unwrap()
         .unwrap();
@@ -1137,6 +1232,7 @@ mod tests {
             &[],
             Scope::Global,
             proj.path(),
+            crate::render::PriorTrust::STRICT,
         )
         .unwrap()
         .unwrap();
@@ -1154,6 +1250,7 @@ mod tests {
             &[],
             Scope::Global,
             proj.path(),
+            crate::render::PriorTrust::STRICT,
         )
         .unwrap()
         .unwrap();
@@ -1216,6 +1313,7 @@ startup_timeout_sec = 20
             &[],
             Scope::Global,
             proj.path(),
+            crate::render::PriorTrust::STRICT,
         )
         .unwrap()
         .unwrap();

@@ -235,6 +235,7 @@ fn collect(args: &DiffArgs, manifest_dir: Option<&Path>, print_text: bool) -> Re
             &previously,
             scope,
             &ctx.dir,
+            crate::render::PriorTrust::STRICT,
         )?
         else {
             continue;

@@ -11,6 +11,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 
 use crate::adapter::descriptor::SkillStrategy;
+use crate::render::PriorTrust;
 
 /// A marker dropped inside copied skill dirs so pruning can tell "ours" from a
 /// user's hand-made directory.
@@ -35,6 +36,11 @@ pub struct SkillPlan {
     /// source is the content-store snapshot, and copying detaches the delivered
     /// artifact from the live file.
     pub pinned_copies: Vec<String>,
+    /// Set when the project's trust state forbids delivering the skills this
+    /// plan carries (see the gate in [`trust_refusal`]). The plan is still
+    /// built so the caller can SHOW what is being withheld; [`materialize`]
+    /// refuses, so a plan in this state can never reach disk.
+    pub refusal: Option<String>,
 }
 
 impl SkillPlan {
@@ -57,13 +63,28 @@ impl SkillPlan {
 /// validated before it can reach the `skills_dir.join(name)` below and in
 /// `materialize` — a bad name in a hand-edited manifest fails the whole plan
 /// here, at the last gate before filesystem writes, instead of traversing.
+///
+/// `project_dir` is the manifest's directory: the consent context this plan's
+/// content comes from, judged by [`trust_refusal`]. `prior` is the trust state
+/// as of the calling command's START — [`PriorTrust::STRICT`] unless the caller
+/// captured one before writing its own manifest/lock bytes.
 pub fn plan(
     skills_dir: PathBuf,
     strategy: SkillStrategy,
     active: Vec<(String, PathBuf)>,
     previously_managed: &[String],
+    project_dir: &Path,
+    prior: PriorTrust,
 ) -> Result<SkillPlan> {
-    plan_with_pinned(skills_dir, strategy, active, previously_managed, Vec::new())
+    plan_with_pinned(
+        skills_dir,
+        strategy,
+        active,
+        previously_managed,
+        Vec::new(),
+        project_dir,
+        prior,
+    )
 }
 
 /// [`plan`], plus the names a re-gate `keep-pinned` answer forces to be copied
@@ -74,6 +95,8 @@ pub fn plan_with_pinned(
     active: Vec<(String, PathBuf)>,
     previously_managed: &[String],
     pinned_copies: Vec<String>,
+    project_dir: &Path,
+    prior: PriorTrust,
 ) -> Result<SkillPlan> {
     for (name, _) in &active {
         crate::text::validate_name(name)
@@ -94,6 +117,7 @@ pub fn plan_with_pinned(
         }
     }
 
+    let refusal = trust_refusal(&active, project_dir, prior);
     Ok(SkillPlan {
         skills_dir,
         strategy,
@@ -101,7 +125,110 @@ pub fn plan_with_pinned(
         to_remove,
         conflicts,
         pinned_copies,
+        refusal,
     })
+}
+
+/// The trust gate for skill delivery — the same rule `render::extensions`
+/// states as "untrusted means inert" (invariant 3), applied to the capability
+/// kind whose delivery point nothing downstream re-checks.
+///
+/// A skill is instructional text an agent reads. Nothing intercepts it at run
+/// time (`docs/ENFORCEMENT.md`, Skills), and once its bytes sit in a harness's
+/// skills directory the harness loads them itself, in a session agentstack
+/// never sees. The trust-checking paths that DO exist — `session start`, the
+/// protected `run`, the MCP server's auto-project gate — govern launches
+/// agentstack drives; a user opening the harness in the directory takes none of
+/// them. Materialization is therefore the delivery moment, and the gate has to
+/// hold here.
+///
+/// The LOCK gate stays exactly as it was: `verify::ensure_activatable` lets an
+/// `Unpinned` entry through because recording that first pin IS the consenting
+/// act. This is a second, orthogonal question — "did a human review this
+/// project?" — not a stricter version of the first.
+///
+/// Returns the refusal message, or `None` when there is nothing to refuse.
+/// Deliberately NOT gated:
+///   * an empty `active` set — a removal-only plan (deactivation, `x unrender`)
+///     takes bytes we already placed back OFF disk, which is the inert
+///     direction and must keep working for an untrusted project, exactly as
+///     hook and extension pruning does;
+///   * the machine manifest itself — `$AGENTSTACK_HOME/agentstack.toml` is the
+///     user's own personal layer, deliberately undiscoverable as a project
+///     (`manifest::discover_project_base`), so `trust` can never reach it: its
+///     base resolves to `$HOME`, which no code path can put in the trust store.
+///     Gating it would make machine-level skills permanently undeliverable
+///     rather than merely pending a review no command can perform. Same
+///     exemption, same words, as `render::hooks::trust_refusal`.
+///
+/// `prior` is the third exemption and the only conditional one: a command that
+/// WROTE the manifest and lock bytes this project is now `Changed` by is judged
+/// against the state that held before it wrote, because a command cannot be
+/// allowed to refuse itself. See [`PriorTrust`] for why that authorizes nothing
+/// new, and why nothing is re-pinned afterwards.
+fn trust_refusal(
+    active: &[(String, PathBuf)],
+    project_dir: &Path,
+    prior: PriorTrust,
+) -> Option<String> {
+    if active.is_empty() {
+        return None;
+    }
+    if crate::util::paths::is_machine_home(project_dir) {
+        return None;
+    }
+    let base = crate::manifest::project_root_of(project_dir);
+    let why = prior.refusal_reason(&base)?;
+    let names = active
+        .iter()
+        .map(|(n, _)| format!("'{n}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(format!(
+        "refusing to materialize skills: project at {} {why} — review and \
+         `agentstack trust .` before putting its words into an agent's context \
+         ({names})",
+        base.display()
+    ))
+}
+
+/// Test-only: put `dir` into the trusted state, so the tests below keep
+/// exercising materialization MECHANICS (symlink vs copy, pruning, the
+/// no-clobber rule). The trust gate has its own witnesses in
+/// `crates/cli/tests/red_team_skills_trust_gate.rs`; re-proving it in every
+/// symlink test would only make them fail for the wrong reason.
+///
+/// The returned value holds the shared env lock and the temp `AGENTSTACK_HOME`
+/// the grant is recorded in — keep it alive for the length of the test.
+#[cfg(test)]
+#[must_use]
+fn granted_for_test(dir: &Path) -> TestGrant {
+    let lock = crate::util::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let home = assert_fs::TempDir::new().unwrap();
+    std::env::set_var("AGENTSTACK_HOME", home.path());
+    // `trust_unreviewed` digests the manifest layers, so there has to be a
+    // manifest to digest — the minimum a real project would have.
+    fs::write(dir.join("agentstack.toml"), "version = 1\n").unwrap();
+    crate::trust::trust_unreviewed(dir).unwrap();
+    TestGrant {
+        _lock: lock,
+        _home: home,
+    }
+}
+
+#[cfg(test)]
+struct TestGrant {
+    _lock: std::sync::MutexGuard<'static, ()>,
+    _home: assert_fs::TempDir,
+}
+
+#[cfg(test)]
+impl Drop for TestGrant {
+    fn drop(&mut self) {
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
 }
 
 /// CONSENT WITNESS (Phase 2, keep-pinned). A `keep-pinned` answer means the
@@ -119,6 +246,7 @@ mod keep_pinned_tests {
     #[test]
     fn a_keep_pinned_skill_is_copied_from_the_snapshot_even_when_the_adapter_symlinks() {
         let tmp = assert_fs::TempDir::new().unwrap();
+        let _grant = granted_for_test(tmp.path());
         // The bytes consent covered, as they live in the content store.
         let snapshot = tmp.child("store/content/abc");
         snapshot.child("SKILL.md").write_str("approved\n").unwrap();
@@ -136,6 +264,8 @@ mod keep_pinned_tests {
             ],
             &[],
             vec!["pinned".to_string()],
+            tmp.path(),
+            PriorTrust::STRICT,
         )
         .unwrap();
         materialize(&plan).unwrap();
@@ -164,6 +294,7 @@ mod keep_pinned_tests {
     #[test]
     fn editing_the_live_file_cannot_reach_a_keep_pinned_delivery() {
         let tmp = assert_fs::TempDir::new().unwrap();
+        let _grant = granted_for_test(tmp.path());
         let snapshot = tmp.child("store/content/abc");
         snapshot.child("SKILL.md").write_str("approved\n").unwrap();
         let skills_dir = tmp.child("out").to_path_buf();
@@ -173,6 +304,8 @@ mod keep_pinned_tests {
             vec![("pinned".to_string(), snapshot.to_path_buf())],
             &[],
             vec!["pinned".to_string()],
+            tmp.path(),
+            PriorTrust::STRICT,
         )
         .unwrap();
         materialize(&plan).unwrap();
@@ -193,7 +326,16 @@ mod keep_pinned_tests {
 /// set. Conflicting (user-owned) names are skipped. A plan that leaves nothing
 /// managed also clears the skills dir itself if pruning emptied it — so
 /// deactivation leaves no stray `.claude/skills/` husk behind.
+///
+/// The write choke point. The trust refusal is enforced HERE, not only at the
+/// call sites, so a caller that forgets to read `refusal` still cannot put an
+/// untrusted project's skills where an agent reads them. A refused plan does
+/// nothing at all — including its prunes — so the delivered set stays exactly
+/// as the human last approved it.
 pub fn materialize(plan: &SkillPlan) -> Result<()> {
+    if let Some(why) = &plan.refusal {
+        anyhow::bail!("{why}");
+    }
     // Prune-only plans (deactivation) must not create the very dir they are
     // about to empty.
     if !plan.active.is_empty() {
@@ -291,6 +433,7 @@ mod tests {
     #[test]
     fn symlinks_active_and_prunes_removed() {
         let tmp = assert_fs::TempDir::new().unwrap();
+        let _grant = granted_for_test(tmp.path());
         let a = lib_skill(&tmp, "a");
         let b = lib_skill(&tmp, "b");
         let skills_dir = tmp.child("skills").path().to_path_buf();
@@ -301,6 +444,8 @@ mod tests {
             SkillStrategy::Symlink,
             vec![("a".into(), a.clone()), ("b".into(), b.clone())],
             &[],
+            tmp.path(),
+            PriorTrust::STRICT,
         )
         .unwrap();
         materialize(&p1).unwrap();
@@ -313,6 +458,8 @@ mod tests {
             SkillStrategy::Symlink,
             vec![("a".into(), a.clone())],
             &["a".to_string(), "b".to_string()],
+            tmp.path(),
+            PriorTrust::STRICT,
         )
         .unwrap();
         assert_eq!(p2.to_remove, vec!["b".to_string()]);
@@ -324,6 +471,7 @@ mod tests {
     #[test]
     fn prune_to_zero_removes_the_emptied_skills_dir() {
         let tmp = assert_fs::TempDir::new().unwrap();
+        let _grant = granted_for_test(tmp.path());
         let a = lib_skill(&tmp, "a");
         let skills_dir = tmp.child("skills").path().to_path_buf();
 
@@ -332,6 +480,8 @@ mod tests {
             SkillStrategy::Symlink,
             vec![("a".into(), a)],
             &[],
+            tmp.path(),
+            PriorTrust::STRICT,
         )
         .unwrap();
         materialize(&p1).unwrap();
@@ -343,6 +493,8 @@ mod tests {
             SkillStrategy::Symlink,
             vec![],
             &["a".to_string()],
+            tmp.path(),
+            PriorTrust::STRICT,
         )
         .unwrap();
         materialize(&p2).unwrap();
@@ -352,6 +504,7 @@ mod tests {
     #[test]
     fn prune_only_plans_keep_user_content_and_create_nothing() {
         let tmp = assert_fs::TempDir::new().unwrap();
+        let _grant = granted_for_test(tmp.path());
         let skills_dir = tmp.child("skills");
         skills_dir
             .child("mine/SKILL.md")
@@ -364,6 +517,8 @@ mod tests {
             SkillStrategy::Symlink,
             vec![],
             &["gone".to_string()],
+            tmp.path(),
+            PriorTrust::STRICT,
         )
         .unwrap();
         materialize(&p).unwrap();
@@ -377,6 +532,8 @@ mod tests {
             SkillStrategy::Symlink,
             vec![],
             &["gone".to_string()],
+            tmp.path(),
+            PriorTrust::STRICT,
         )
         .unwrap();
         materialize(&p2).unwrap();
@@ -389,6 +546,7 @@ mod tests {
     #[test]
     fn never_clobbers_a_user_skill_dir() {
         let tmp = assert_fs::TempDir::new().unwrap();
+        let _grant = granted_for_test(tmp.path());
         let a = lib_skill(&tmp, "a");
         let skills_dir = tmp.child("skills");
         // User already has a real "a" skill dir (no marker, not a symlink).
@@ -402,6 +560,8 @@ mod tests {
             SkillStrategy::Symlink,
             vec![("a".into(), a)],
             &[],
+            tmp.path(),
+            PriorTrust::STRICT,
         )
         .unwrap();
         assert_eq!(p.conflicts, vec!["a".to_string()]);
@@ -416,6 +576,7 @@ mod tests {
     #[test]
     fn copy_strategy_materializes_and_prunes_with_marker() {
         let tmp = assert_fs::TempDir::new().unwrap();
+        let _grant = granted_for_test(tmp.path());
         let a = lib_skill(&tmp, "a");
         let skills_dir = tmp.child("skills").path().to_path_buf();
 
@@ -424,6 +585,8 @@ mod tests {
             SkillStrategy::Copy,
             vec![("a".into(), a)],
             &[],
+            tmp.path(),
+            PriorTrust::STRICT,
         )
         .unwrap();
         materialize(&p1).unwrap();
@@ -435,6 +598,8 @@ mod tests {
             SkillStrategy::Copy,
             vec![],
             &["a".to_string()],
+            tmp.path(),
+            PriorTrust::STRICT,
         )
         .unwrap();
         materialize(&p2).unwrap();
@@ -444,6 +609,7 @@ mod tests {
     #[test]
     fn copy_strategy_never_carries_the_sources_git_dir() {
         let tmp = assert_fs::TempDir::new().unwrap();
+        let _grant = granted_for_test(tmp.path());
         let a = lib_skill(&tmp, "a");
         tmp.child("lib/a/.git/HEAD")
             .write_str("ref: refs/heads/main\n")
@@ -455,6 +621,8 @@ mod tests {
             SkillStrategy::Copy,
             vec![("a".into(), a)],
             &[],
+            tmp.path(),
+            PriorTrust::STRICT,
         )
         .unwrap();
         materialize(&p).unwrap();

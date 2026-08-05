@@ -82,6 +82,7 @@ fn empty_selection_does_not_create_empty_json_scaffold() {
         &[],
         Scope::Global,
         Path::new("/"),
+        agentstack::render::PriorTrust::STRICT,
     )
     .unwrap()
     .unwrap();
@@ -119,6 +120,7 @@ fn empty_selection_still_prunes_previously_managed_entries() {
         &previously,
         Scope::Global,
         Path::new("/"),
+        agentstack::render::PriorTrust::STRICT,
     )
     .unwrap()
     .unwrap();
@@ -131,7 +133,22 @@ fn empty_selection_still_prunes_previously_managed_entries() {
 
 #[test]
 fn non_destructive_merge_preserves_other_content_and_is_idempotent() {
+    // This is the one test here that WRITES, and `TargetPlan::write` is a
+    // choke point with a trust gate on it (`render::apply::trust_refusal`).
+    // "/" — fine as a plan-only placeholder everywhere else in this file — can
+    // never be a trusted project, so the fixture gets a real project dir and a
+    // grant. Merge behaviour is the subject; consent is witnessed elsewhere.
+    let _env = agentstack::util::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let tmp = assert_fs::TempDir::new().unwrap();
+    std::env::set_var("AGENTSTACK_HOME", tmp.child("store").path());
+    let proj = tmp.child("proj");
+    proj.create_dir_all().unwrap();
+    proj.child("agentstack.toml")
+        .write_str("version = 1\n")
+        .unwrap();
+    agentstack::trust::trust_unreviewed(proj.path()).unwrap();
     let cfg = tmp.child("claude.json");
     cfg.write_str(
         "{\n  \"numStartups\": 42,\n  \"stats\": { \"avg\": 0.9402052562189797 },\n  \"mcpServers\": {\n    \"tldraw\": { \"type\": \"stdio\", \"command\": \"node\" }\n  }\n}\n",
@@ -150,7 +167,8 @@ fn non_destructive_merge_preserves_other_content_and_is_idempotent() {
         &Selection::All,
         &[],
         Scope::Global,
-        Path::new("/"),
+        proj.path(),
+        agentstack::render::PriorTrust::STRICT,
     )
     .unwrap()
     .unwrap();
@@ -177,7 +195,8 @@ fn non_destructive_merge_preserves_other_content_and_is_idempotent() {
         &Selection::All,
         &[],
         Scope::Global,
-        Path::new("/"),
+        proj.path(),
+        agentstack::render::PriorTrust::STRICT,
     )
     .unwrap()
     .unwrap();
@@ -186,6 +205,7 @@ fn non_destructive_merge_preserves_other_content_and_is_idempotent() {
         "re-apply should be a no-op:\n{}",
         plan2.diff()
     );
+    std::env::remove_var("AGENTSTACK_HOME");
 }
 
 #[test]
@@ -212,6 +232,7 @@ fn profile_selection_limits_servers() {
         &[],
         Scope::Global,
         Path::new("/"),
+        agentstack::render::PriorTrust::STRICT,
     )
     .unwrap()
     .unwrap();
@@ -242,6 +263,7 @@ fn prunes_servers_that_left_the_selection() {
         &previously,
         Scope::Global,
         Path::new("/"),
+        agentstack::render::PriorTrust::STRICT,
     )
     .unwrap()
     .unwrap();
@@ -324,6 +346,7 @@ fn unrepresentable_http_server_is_skipped_not_emptied() {
         &[],
         Scope::Global,
         Path::new("/"),
+        agentstack::render::PriorTrust::STRICT,
     )
     .unwrap()
     .unwrap();
@@ -390,6 +413,7 @@ mcp:
         &[],
         Scope::Global,
         Path::new("/"),
+        agentstack::render::PriorTrust::STRICT,
     )
     .unwrap()
     .unwrap();
@@ -414,6 +438,7 @@ mcp:
         &[],
         Scope::Global,
         Path::new("/"),
+        agentstack::render::PriorTrust::STRICT,
     )
     .unwrap()
     .unwrap();
@@ -503,6 +528,7 @@ fn missing_secret_is_reported_not_blanked() {
         &[],
         Scope::Global,
         Path::new("/"),
+        agentstack::render::PriorTrust::STRICT,
     )
     .unwrap()
     .unwrap();

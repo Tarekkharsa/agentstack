@@ -44,6 +44,26 @@ fn run(args: &[&str], cwd: &Path, home: &Path) -> String {
     )
 }
 
+/// Test-only grant, the two-step a panel drives: pin the surface, review it,
+/// then bind the yes to the digest of exactly those bytes. Consent is not this
+/// file's subject — this keeps the rendered lane's trust gate
+/// (`render::apply::trust_refusal`) from being the thing that stops a write.
+fn grant(proj: &Path, home: &Path) {
+    run(&["lock", "--write"], proj, home);
+    let preview = run(&["trust", "--preview"], proj, home);
+    let digest = serde_json::from_str::<serde_json::Value>(&preview)
+        .unwrap_or_else(|e| panic!("trust --preview is not JSON ({e}):\n{preview}"))
+        ["surface_digest"]
+        .as_str()
+        .expect("preview carries a surface digest")
+        .to_string();
+    run(
+        &["trust", "--yes", "--consented-digest", &digest],
+        proj,
+        home,
+    );
+}
+
 /// A project whose only target is the MCP-capable harness, so the flip moves
 /// its one server from files to the live lane and nothing else changes.
 fn project(root: &Path) -> PathBuf {
@@ -79,6 +99,9 @@ fn a_config_left_behind_by_the_flip_is_named_by_every_surface_and_removable() {
         &proj,
         &home,
     );
+    // The flip above edited the manifest, and manifest bytes are the consent
+    // digest — so re-review before the write, exactly as a human would.
+    grant(&proj, &home);
     run(&["apply", "--write"], &proj, &home);
     assert!(mcp.exists(), "the rendered lane wrote .mcp.json");
 
@@ -251,7 +274,7 @@ fn the_global_config_the_import_read_from_is_not_called_a_foreign_file() {
     let home = tmp.path().join("home");
     std::fs::create_dir_all(&home).unwrap();
     let proj = project(tmp.path());
-
+    grant(&proj, &home);
     // The user's own machine environment, exactly as `init` finds it.
     let global = home.join(".claude.json");
     std::fs::write(
@@ -285,6 +308,9 @@ fn the_global_config_the_import_read_from_is_not_called_a_foreign_file() {
         &proj,
         &home,
     );
+    // The flip above edited the manifest, and manifest bytes are the consent
+    // digest — so re-review before the write, exactly as a human would.
+    grant(&proj, &home);
     run(&["apply", "--scope", "global", "--write"], &proj, &home);
     assert!(
         std::fs::read_to_string(&global).unwrap().contains("demo"),

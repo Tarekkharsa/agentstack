@@ -92,6 +92,7 @@ pub fn run(args: &AdoptArgs, manifest_dir: Option<&Path>) -> Result<()> {
             &[],
             scope,
             &ctx.dir,
+            crate::render::PriorTrust::STRICT,
         )?
         .map(|plan| parse_config(&plan.proposed, format))
         .transpose()
@@ -687,6 +688,11 @@ mod tests {
             )
             .unwrap();
 
+        // Adoption is this test's subject, not consent: grant so the rendered
+        // lane's trust gate (`render::apply::trust_refusal`) is out of the way
+        // and the fixture's first write can stand in for a real `apply`.
+        crate::trust::trust_unreviewed(proj.path()).unwrap();
+
         // `apply --scope project --write`, then a hand-edit of the url.
         let reg = crate::adapter::Registry::load().unwrap();
         let desc = reg.get("claude-code").unwrap();
@@ -702,6 +708,7 @@ mod tests {
             &[],
             Scope::Project,
             proj.path(),
+            crate::render::PriorTrust::STRICT,
         )
         .unwrap()
         .unwrap()
@@ -746,6 +753,7 @@ mod tests {
             &[],
             Scope::Project,
             proj.path(),
+            crate::render::PriorTrust::STRICT,
         )
         .unwrap()
         .unwrap();

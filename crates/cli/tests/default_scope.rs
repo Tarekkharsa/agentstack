@@ -57,6 +57,9 @@ fn quickstart_in_a_repo_defaults_to_project_artifacts() {
     fs::create_dir_all(proj.join(".git")).unwrap();
     fs::create_dir_all(proj.join(".agentstack")).unwrap();
     fs::write(proj.join(".agentstack/agentstack.toml"), MANIFEST).unwrap();
+    // Consent is not this test's subject: grant so the rendered lane's trust
+    // gate (`render::apply::trust_refusal`) is out of the way.
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
 
     apply::run(&apply_write(), Some(&proj)).unwrap();
 
@@ -80,6 +83,10 @@ fn quickstart_in_a_repo_defaults_to_project_artifacts() {
     let machine_home = home.join(".agentstack");
     fs::create_dir_all(&machine_home).unwrap();
     fs::write(machine_home.join("agentstack.toml"), MANIFEST).unwrap();
+    // No grant here, deliberately: the machine manifest is exempt from the
+    // trust gate — it is the user's own layer, and `discover_project_base`
+    // refuses to see it as a project, so no `trust` command could ever satisfy
+    // a gate on it (`render::apply::trust_refusal`).
     apply::run(&apply_write(), Some(&machine_home)).unwrap();
     let config = fs::read_to_string(home.join(".claude.json")).unwrap();
     assert!(

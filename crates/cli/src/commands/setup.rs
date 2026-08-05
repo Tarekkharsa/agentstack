@@ -863,7 +863,16 @@ pub fn materialize_profile(
     };
     let libctx = ctx.library_ctx();
     let prepared = super::use_profile::prepare(ctx, &libctx, &use_args)?;
-    super::use_profile::activate(ctx, &libctx, &use_args, &prepared)
+    // STRICT: `setup` runs its own consent ceremony before it gets here, so
+    // the trust state it delivers under is the one on disk — it has no
+    // pre-write answer to fall back on and must not invent one.
+    super::use_profile::activate(
+        ctx,
+        &libctx,
+        &use_args,
+        &prepared,
+        crate::render::PriorTrust::STRICT,
+    )
 }
 
 fn apply_args(args: &SetupArgs, scope: Scope, write: bool) -> ApplyArgs {

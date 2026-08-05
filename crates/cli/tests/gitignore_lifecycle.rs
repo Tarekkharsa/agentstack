@@ -115,6 +115,21 @@ fn apply_and_use_emit_an_identical_block() {
          [profiles.default]\nservers = [\"demo\"]\nskills = [\"local\"]\n",
     )
     .unwrap();
+    // Consent is not this test's subject: pin, then grant, so the rendered
+    // lane's trust gate (`render::apply::trust_refusal` /
+    // `render::skills::trust_refusal`) is out of the way. Pinning FIRST is the
+    // order a human takes, and it keeps the grant valid: lock bytes are part of
+    // the consent digest, so a first pin recorded by a later write would
+    // re-gate the project mid-test.
+    agentstack::commands::lock::run(
+        &agentstack::cli::LockArgs {
+            write: true,
+            ..Default::default()
+        },
+        Some(&proj),
+    )
+    .unwrap();
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
 
     // Establish every artifact once: apply compiles CLAUDE.md + writes config,
     // use materializes skills + records them.
@@ -168,6 +183,21 @@ fn activation_writes_stable_entries_and_deactivation_keeps_the_block() {
          [profiles.off]\nservers = []\nskills = []\n",
     )
     .unwrap();
+    // Consent is not this test's subject: pin, then grant, so the rendered
+    // lane's trust gate (`render::apply::trust_refusal` /
+    // `render::skills::trust_refusal`) is out of the way. Pinning FIRST is the
+    // order a human takes, and it keeps the grant valid: lock bytes are part of
+    // the consent digest, so a first pin recorded by a later write would
+    // re-gate the project mid-test.
+    agentstack::commands::lock::run(
+        &agentstack::cli::LockArgs {
+            write: true,
+            ..Default::default()
+        },
+        Some(&proj),
+    )
+    .unwrap();
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
 
     // Phase 1: activate — the block lists the skills DIR and the config file,
     // never a per-skill line, so membership changes can't churn it.
@@ -233,6 +263,21 @@ fn names_only_profile_ignores_the_resolved_mcp_config() {
          [profiles.dev]\nservers = [\"kibana\"]\n",
     )
     .unwrap();
+    // Consent is not this test's subject: pin, then grant, so the rendered
+    // lane's trust gate (`render::apply::trust_refusal` /
+    // `render::skills::trust_refusal`) is out of the way. Pinning FIRST is the
+    // order a human takes, and it keeps the grant valid: lock bytes are part of
+    // the consent digest, so a first pin recorded by a later write would
+    // re-gate the project mid-test.
+    agentstack::commands::lock::run(
+        &agentstack::cli::LockArgs {
+            write: true,
+            ..Default::default()
+        },
+        Some(&proj),
+    )
+    .unwrap();
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
 
     use_profile::run(&use_args("dev"), Some(&proj)).unwrap();
 
@@ -326,6 +371,21 @@ fn apply_and_use_alternate_without_churn() {
          [profiles.default]\nservers = [\"demo\"]\nskills = [\"local\"]\n",
     )
     .unwrap();
+    // Consent is not this test's subject: pin, then grant, so the rendered
+    // lane's trust gate (`render::apply::trust_refusal` /
+    // `render::skills::trust_refusal`) is out of the way. Pinning FIRST is the
+    // order a human takes, and it keeps the grant valid: lock bytes are part of
+    // the consent digest, so a first pin recorded by a later write would
+    // re-gate the project mid-test.
+    agentstack::commands::lock::run(
+        &agentstack::cli::LockArgs {
+            write: true,
+            ..Default::default()
+        },
+        Some(&proj),
+    )
+    .unwrap();
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
 
     // Establish, then alternate — capture the block after each of the last four.
     apply::run(&apply_args(), Some(&proj)).unwrap();
@@ -370,6 +430,21 @@ fn leftover_managed_config_keeps_mcp_entry() {
          [profiles.p]\nservers = []\nskills = [\"local\"]\n",
     )
     .unwrap();
+    // Consent is not this test's subject: pin, then grant, so the rendered
+    // lane's trust gate (`render::apply::trust_refusal` /
+    // `render::skills::trust_refusal`) is out of the way. Pinning FIRST is the
+    // order a human takes, and it keeps the grant valid: lock bytes are part of
+    // the consent digest, so a first pin recorded by a later write would
+    // re-gate the project mid-test.
+    agentstack::commands::lock::run(
+        &agentstack::cli::LockArgs {
+            write: true,
+            ..Default::default()
+        },
+        Some(&proj),
+    )
+    .unwrap();
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
 
     // Pre-seed a kept-foreign server for this target — a managed config file
     // another manifest left on disk. Our own server set is empty.

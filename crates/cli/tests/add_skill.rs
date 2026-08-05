@@ -8,6 +8,16 @@
 //! pins, the taken-slot path pinned-re-resolves to the same commit, and the
 //! scan gate blocks hostile content before anything is offered.
 
+// Every `--write` here is preceded by a [`grant`], and that is the consent
+// model, not fixture noise. `add … --write` rewrites the manifest and the
+// lockfile — the consent digest — and then materializes in the same run, so the
+// skill trust gate (`render::skills::trust_refusal`) is judged against the state
+// from BEFORE the write: a command cannot be allowed to refuse itself. Nothing
+// re-pins afterwards, so each add leaves the project `Changed` and the NEXT
+// command re-gates it — which is why a second add, and the trailing `use
+// --write`, each need their own grant. The refusals that rule does not relax
+// are witnessed in `red_team_skills_trust_gate.rs`.
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -87,6 +97,17 @@ fn seed_project(tmp: &Path) -> PathBuf {
     proj
 }
 
+/// The human review, in the one line an integration test can afford: record
+/// trust for whatever the project currently digests to.
+///
+/// Must run immediately before each `--write`, because the write it precedes
+/// moves the digest and leaves the project `Changed`. That staleness is
+/// deliberate — `add` delivers what it just declared and then re-gates itself —
+/// so a test that writes twice reviews twice.
+fn grant(proj: &Path) {
+    agentstack::trust::trust_unreviewed(proj).unwrap();
+}
+
 fn add_args(source: &str, skills: &[&str], write: bool) -> AddArgs {
     AddArgs {
         kind: AddKind::Skill(AddSkillArgs {
@@ -158,6 +179,7 @@ fn write_lands_manifest_store_and_lock_then_use_materializes() {
         .unwrap()
         .success());
 
+    grant(&proj);
     add::run(&add_args(&url, &["pdf", "docx"], true), Some(&proj)).unwrap();
 
     let manifest = fs::read_to_string(proj.join("agentstack.toml")).unwrap();
@@ -208,6 +230,9 @@ fn write_lands_manifest_store_and_lock_then_use_materializes() {
     assert!(lock.contains(&head), "lock pins the promoted HEAD commit");
 
     // And `use --write` materializes straight away — no `install` needed.
+    // The add above deliberately did not re-pin trust, so this second command
+    // meets the review the new manifest and lock bytes still owed.
+    grant(&proj);
     use_profile::run(
         &UseArgs {
             profile: None,
@@ -240,6 +265,7 @@ fn taken_slot_falls_back_to_pinned_re_resolve() {
     let proj = seed_project(tmp.path());
 
     // First write adopts the staged clone (slot empty).
+    grant(&proj);
     add::run(&add_args(&url, &["pdf"], true), Some(&proj)).unwrap();
     let clone = store_clone(&home).unwrap();
     let head_before = agentstack::gitx::run(
@@ -250,6 +276,7 @@ fn taken_slot_falls_back_to_pinned_re_resolve() {
     .unwrap();
 
     // Second write finds the slot taken → pinned re-resolve, same commit.
+    grant(&proj);
     add::run(&add_args(&url, &["docx"], true), Some(&proj)).unwrap();
     let lock = fs::read_to_string(proj.join("agentstack.lock")).unwrap();
     assert!(lock.contains("docx"));
@@ -271,7 +298,9 @@ fn second_add_records_the_union_of_managed_skills() {
     let url = fixture_repo(tmp.path(), false);
     let proj = seed_project(tmp.path());
 
+    grant(&proj);
     add::run(&add_args(&url, &["pdf"], true), Some(&proj)).unwrap();
+    grant(&proj);
     add::run(&add_args(&url, &["docx"], true), Some(&proj)).unwrap();
 
     assert!(proj.join(".claude/skills/pdf/SKILL.md").exists());
@@ -308,6 +337,7 @@ fn several_profiles_write_does_not_materialize() {
     if let AddKind::Skill(a) = &mut args.kind {
         a.profile = Some("a".to_string());
     }
+    grant(&proj);
     add::run(&args, Some(&proj)).unwrap();
 
     let manifest = fs::read_to_string(proj.join("agentstack.toml")).unwrap();
@@ -336,11 +366,13 @@ fn update_refreshes_revless_git_skills_and_detects_deletion() {
     // docx pinned to the branch by name — the reviewed regression was that
     // `checkout <branch>` after fetch lands on the stale LOCAL branch, so
     // branch pins silently never advanced.
+    grant(&proj);
     add::run(&add_args(&url, &["pdf"], true), Some(&proj)).unwrap();
     let mut branch_pinned = add_args(&url, &["docx"], true);
     if let AddKind::Skill(a) = &mut branch_pinned.kind {
         a.rev = Some("main".to_string());
     }
+    grant(&proj);
     add::run(&branch_pinned, Some(&proj)).unwrap();
     let lock_before = fs::read_to_string(proj.join("agentstack.lock")).unwrap();
 
@@ -421,6 +453,7 @@ fn materialized_git_skill_survives_a_later_checkout_of_another_revision() {
     let repo = tmp.path().join("skills-repo");
     let proj = seed_project(tmp.path());
 
+    grant(&proj);
     add::run(&add_args(&url, &["pdf"], true), Some(&proj)).unwrap();
     let mat = proj.join(".claude/skills/pdf/SKILL.md");
     let original = fs::read_to_string(&mat).unwrap();
@@ -497,6 +530,7 @@ fn offline_resolution_reads_the_pinned_commit_not_the_churned_clone() {
 
     // Add a rev-less skill through the real command path. Its authoritative
     // commit exists only in the lock; the manifest deliberately has no rev.
+    grant(&proj);
     add::run(&add_args(&url, &["pdf"], true), Some(&proj)).unwrap();
     let ctx = agentstack::commands::load(Some(&proj)).unwrap();
     let lock = agentstack::lock::Lock::load(&ctx.dir).unwrap();

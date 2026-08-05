@@ -260,6 +260,21 @@ fn kept_foreign_stays_reported_after_guarded_apply() {
          [servers.beta]\ntype = \"http\"\nurl = \"https://beta/mcp\"\n",
     )
     .unwrap();
+    // Consent is not this test's subject: pin, then grant, so the rendered
+    // lane's trust gate (`render::apply::trust_refusal` /
+    // `render::skills::trust_refusal`) is out of the way. Pinning FIRST is the
+    // order a human takes, and it keeps the grant valid: lock bytes are part of
+    // the consent digest, so a first pin recorded by a later write would
+    // re-gate the project mid-test.
+    agentstack::commands::lock::run(
+        &agentstack::cli::LockArgs {
+            write: true,
+            ..Default::default()
+        },
+        Some(&proj_b),
+    )
+    .unwrap();
+    agentstack::trust::trust_unreviewed(&proj_b).unwrap();
     agentstack::commands::apply::run(
         &agentstack::cli::ApplyArgs {
             verbose: false,
@@ -369,6 +384,21 @@ fn unmanaged_churn_is_not_edited_on_disk() {
          [servers.kibana_mcp]\ntype = \"http\"\nurl = \"https://kibana/mcp\"\n",
     )
     .unwrap();
+    // Consent is not this test's subject: pin, then grant, so the rendered
+    // lane's trust gate (`render::apply::trust_refusal` /
+    // `render::skills::trust_refusal`) is out of the way. Pinning FIRST is the
+    // order a human takes, and it keeps the grant valid: lock bytes are part of
+    // the consent digest, so a first pin recorded by a later write would
+    // re-gate the project mid-test.
+    agentstack::commands::lock::run(
+        &agentstack::cli::LockArgs {
+            write: true,
+            ..Default::default()
+        },
+        Some(&proj),
+    )
+    .unwrap();
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
 
     // Apply once (global scope) so the on-disk managed region and the recorded
     // hash both reflect the real render — no exact-match guessing.

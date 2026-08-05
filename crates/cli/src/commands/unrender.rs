@@ -119,6 +119,7 @@ pub(crate) fn plan(
                     &managed,
                     scope,
                     &ctx.dir,
+                    crate::render::PriorTrust::STRICT,
                 )? {
                     if plan.changed() {
                         touched = true;
@@ -200,8 +201,19 @@ pub(crate) fn plan(
             if !prev_skills.is_empty() {
                 if let Some(skills_dir) = desc.skills_dir_for(scope, &ctx.dir) {
                     let strategy = desc.skills.as_ref().map(|s| s.strategy).unwrap_or_default();
-                    let plan =
-                        skills::plan(skills_dir.clone(), strategy, Vec::new(), &prev_skills)?;
+                    // Removal-only (empty active set): the inert direction, so
+                    // the plan's trust gate has nothing to refuse and `x
+                    // unrender` keeps working on an untrusted project — which
+                    // is exactly what a project whose consent went stale needs
+                    // to take our artifacts back off its disk.
+                    let plan = skills::plan(
+                        skills_dir.clone(),
+                        strategy,
+                        Vec::new(),
+                        &prev_skills,
+                        &ctx.dir,
+                        crate::render::PriorTrust::STRICT,
+                    )?;
                     if plan.has_work() {
                         touched = true;
                         let diff = plan

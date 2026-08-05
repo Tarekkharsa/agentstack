@@ -59,6 +59,9 @@ fn default_apply_is_dry_run_when_not_a_terminal() {
     let proj = tmp.path().join("proj");
     fs::create_dir_all(&proj).unwrap();
     write_manifest(&proj);
+    // Consent is not this test's subject: grant so the rendered lane's trust
+    // gate (`render::apply::trust_refusal`) is out of the way.
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
 
     let claude_cfg = home.join(".claude.json");
 

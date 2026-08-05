@@ -87,6 +87,9 @@ fn project_referencing(proj: &Path, reference: &str) {
         ),
     )
     .unwrap();
+    // Source precedence is this file's subject, not consent: grant so the
+    // trust gate (`render::skills::trust_refusal`) is out of the way.
+    agentstack::trust::trust_unreviewed(proj).unwrap();
 }
 
 fn use_args(write: bool) -> UseArgs {

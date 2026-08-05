@@ -81,6 +81,10 @@ fn inline_skill_drift_blocks_activation_until_relocked() {
     let proj = tmp.path().join("proj");
     fs::create_dir_all(&proj).unwrap();
     write_project(&proj);
+    // The trust gate is not this test's subject, and it is a separate question
+    // from the lock: grant first so `render::skills::trust_refusal` is out of
+    // the way and the pin gate is the only one that can speak.
+    trust::trust_unreviewed(&proj).unwrap();
 
     // First activation pins the lock (the pinning act), then the human trusts.
     use_profile::run(&use_args(true), Some(&proj)).unwrap();
@@ -465,6 +469,10 @@ fn unpinned_first_activation_proceeds_and_pins() {
     let proj = tmp.path().join("proj");
     fs::create_dir_all(&proj).unwrap();
     write_project(&proj);
+    // The trust gate is not this test's subject, and it is a separate question
+    // from the lock: grant first so `render::skills::trust_refusal` is out of
+    // the way and the pin gate is the only one that can speak.
+    trust::trust_unreviewed(&proj).unwrap();
 
     assert!(!proj.join("agentstack.lock").exists());
     use_profile::run(&use_args(true), Some(&proj)).unwrap();

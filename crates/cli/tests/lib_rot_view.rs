@@ -119,6 +119,25 @@ fn lib_list_names_what_is_dead_without_ever_inventing_a_zero() {
     fs::write(&manifest, text).unwrap();
     let (out, ok) = run(bin, &["lock", "--write"], &home, &proj);
     assert!(ok, "lock failed:\n{out}");
+    // The manifest edit above re-gated consent, and an activation delivers
+    // content — so review and grant, exactly as a human would, or the trust
+    // gate (`render::skills::trust_refusal`) blocks the very materialization
+    // the usage meter is here to count.
+    let (preview, ok) = run(bin, &["trust", "--preview"], &home, &proj);
+    assert!(ok, "trust --preview failed:\n{preview}");
+    let digest = serde_json::from_str::<serde_json::Value>(&preview)
+        .unwrap_or_else(|e| panic!("trust --preview is not JSON ({e}):\n{preview}"))
+        ["surface_digest"]
+        .as_str()
+        .expect("preview carries a surface digest")
+        .to_string();
+    let (out, ok) = run(
+        bin,
+        &["trust", "--yes", "--consented-digest", &digest],
+        &home,
+        &proj,
+    );
+    assert!(ok, "grant failed:\n{out}");
     // Activation is what the usage meter counts; ignore the delivery outcome,
     // which depends on which harnesses this machine has.
     let _ = run(bin, &["use", "default", "--write"], &home, &proj);

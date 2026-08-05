@@ -766,6 +766,7 @@ fn render(
                         &previously,
                         scope,
                         &ctx.dir,
+                        crate::render::PriorTrust::STRICT,
                     )?
                     else {
                         crate::outln!(
@@ -845,12 +846,33 @@ fn render(
                         missing_secrets.insert(name.to_string());
                         error_count += 1;
                     }
+                    // Trust: a server entry is a command line the harness spawns
+                    // itself, outside agentstack, so an untrusted or drifted
+                    // project renders none of them
+                    // (`render::apply::trust_refusal`). Reported like any other
+                    // fail-closed gate — the diff is still shown, so what is
+                    // being withheld stays reviewable.
+                    //
+                    // Only where something would actually be delivered: an
+                    // unchanged plan writes nothing, and "refusing to render"
+                    // printed above "✓ up to date" would be two contradictory
+                    // claims about the same file.
+                    let refused = plan.refusal.is_some() && plan.changed();
+                    if refused {
+                        if let Some(why) = &plan.refusal {
+                            crate::outln!("  {} {why}", "✗".red());
+                        }
+                        error_count += 1;
+                    }
                     // `${REF}`s that didn't resolve must never reach a live config file —
                     // whether the secret is missing or a store failed to read it.
                     blocked = ((!plan.unresolved.is_empty() || !plan.failed.is_empty()) && !args.allow_unresolved)
                 // Policy refusals are not a convenience gap: --allow-unresolved
-                // never overrides [policy.secrets]/[policy.egress].
-                || !plan.denied.is_empty();
+                // never overrides [policy.secrets]/[policy.egress]. Neither does
+                // it reach the trust gate: that flag forgives a missing secret,
+                // never a missing consent.
+                || !plan.denied.is_empty()
+                || refused;
                     if blocked {
                         write_blockers += 1;
                     }
@@ -863,15 +885,23 @@ fn render(
                         }
                         if will_write && blocked {
                             blocked_targets.insert(desc.display.clone());
-                            let reason = if plan.unresolved.is_empty() {
-                                "secret read failures; set them"
+                            if refused {
+                                crate::outln!(
+                                    "  {} not written — the project has not been trusted for \
+                                     this content",
+                                    "✗".red()
+                                );
                             } else {
-                                "unresolved secrets; set them"
-                            };
-                            crate::outln!(
-                                "  {} not written — {reason} or pass --allow-unresolved",
-                                "✗".red()
-                            );
+                                let reason = if plan.unresolved.is_empty() {
+                                    "secret read failures; set them"
+                                } else {
+                                    "unresolved secrets; set them"
+                                };
+                                crate::outln!(
+                                    "  {} not written — {reason} or pass --allow-unresolved",
+                                    "✗".red()
+                                );
+                            }
                         } else if will_write {
                             let capture = crate::history::capture(
                                 &plan.config_path,
@@ -1606,8 +1636,13 @@ fn render(
             };
             let mut what = Vec::new();
             if !blocked_targets.is_empty() {
+                // Deliberately not a list of causes: a target can be blocked by
+                // an unresolved secret, a missing fragment source, a policy
+                // refusal, or a trust refusal, and a summary that names only
+                // some of them sends the reader looking for the wrong fix. Each
+                // ✗ above states its own blocker.
                 what.push(format!(
-                    "{} blocked by unresolved secrets or missing fragment sources",
+                    "{} blocked — see the ✗ line for each",
                     blocked_targets.len()
                 ));
             }

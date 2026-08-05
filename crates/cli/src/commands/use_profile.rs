@@ -14,7 +14,7 @@ use crate::library::Library;
 use crate::lock::{Lock, LockedServer, LockedSkill, ServerSource, SkillLockSource};
 use crate::manifest::Manifest;
 use crate::render::skills;
-use crate::render::{resolve_targets, Selection};
+use crate::render::{resolve_targets, PriorTrust, Selection};
 use crate::resolve::{ResolveMode, ResolvedServer, ResolvedSkill, ServerOrigin, SkillOrigin};
 use crate::scope::Scope;
 use crate::state::{target_key, State};
@@ -182,14 +182,32 @@ pub(crate) fn profile_disambiguation(manifest: &Manifest) -> String {
     out
 }
 
+/// `agentstack use` as the user types it: nothing here authored the manifest,
+/// so the delivery gates read the trust store as it stands
+/// ([`PriorTrust::STRICT`]).
 pub fn run(args: &UseArgs, manifest_dir: Option<&Path>) -> Result<()> {
+    run_with_prior_trust(args, manifest_dir, PriorTrust::STRICT)
+}
+
+/// [`run`], for a command that already wrote the manifest (or lock) bytes this
+/// activation is about to deliver — today the panel's edit verbs, which mutate
+/// and then re-render in one run.
+///
+/// `prior` MUST have been captured before that write; see [`PriorTrust`]. The
+/// separate name is the point: the relaxed reading is never what a caller gets
+/// by default, and every use of it is greppable.
+pub fn run_with_prior_trust(
+    args: &UseArgs,
+    manifest_dir: Option<&Path>,
+    prior: PriorTrust,
+) -> Result<()> {
     if args.list {
         return list_profiles(args.json, manifest_dir);
     }
     let ctx = super::load(manifest_dir)?;
     let libctx = ctx.library_ctx();
     let prepared = prepare(&ctx, &libctx, args)?;
-    activate(&ctx, &libctx, args, &prepared)
+    activate(&ctx, &libctx, args, &prepared, prior)
 }
 
 /// `use --list [--json]` — the Lane B read primitive (UI control-plane §5):
@@ -418,12 +436,18 @@ pub(crate) struct SkillsActivation {
 /// (`record_skills` is a full overwrite; recording less would silently
 /// untrack live symlinks). Skills-only by construction: no server, hook,
 /// settings, or instruction path is touched.
+///
+/// `prior` is the trust state as of the calling command's START. `add --write`
+/// wrote the manifest and the lock — the consent digest — moments before
+/// calling this, so without it the skill gate would refuse the command's own
+/// delivery ([`PriorTrust`]).
 pub(crate) fn materialize_skills_additive(
     ctx: &super::Context,
     scope: Scope,
     target_ids: &[String],
     new_skills: &[(String, PathBuf)],
     no_gitignore: bool,
+    prior: PriorTrust,
 ) -> Result<SkillsActivation> {
     let mut out = SkillsActivation {
         written: Vec::new(),
@@ -457,7 +481,14 @@ pub(crate) fn materialize_skills_additive(
         };
         let strategy = desc.skills.as_ref().map(|s| s.strategy).unwrap_or_default();
         let key = target_key(id, scope, &ctx.dir);
-        let plan = match skills::plan(skills_dir.clone(), strategy, new_skills.to_vec(), &[]) {
+        let plan = match skills::plan(
+            skills_dir.clone(),
+            strategy,
+            new_skills.to_vec(),
+            &[],
+            &ctx.dir,
+            prior,
+        ) {
             Ok(p) => p,
             Err(e) => {
                 out.failed
@@ -522,11 +553,18 @@ pub(crate) fn materialize_skills_additive(
     Ok(out)
 }
 
+/// The one activation path: servers, skills, hooks, settings, instructions.
+///
+/// `prior` is the trust state as of the calling command's START, and is
+/// [`PriorTrust::STRICT`] for every caller that did not itself write the
+/// manifest first (`use`, `setup`, `session start`, `yes` — which grants
+/// afresh before it renders).
 pub fn activate(
     ctx: &super::Context,
     libctx: &super::LibraryCtx,
     args: &UseArgs,
     prepared: &Prepared,
+    prior: PriorTrust,
 ) -> Result<()> {
     let manifest = &ctx.loaded.manifest;
     // Default scope follows the manifest's home: project for a repo manifest,
@@ -900,6 +938,7 @@ pub fn activate(
                 &previously,
                 scope,
                 &ctx.dir,
+                prior,
             )? {
                 None => println!("  servers: no {scope} scope"),
                 Some(plan) => {
@@ -932,9 +971,26 @@ pub fn activate(
                         let name = f.split_whitespace().next().unwrap_or(f.as_str());
                         missing_secrets.insert(name.to_string());
                     }
+                    // Trust: an untrusted or drifted project writes no server
+                    // definitions (`render::apply::trust_refusal`) — reported
+                    // per target, like every other fail-closed gate here, so
+                    // the rest of the activation still reports honestly. Only
+                    // where something would actually be delivered: an unchanged
+                    // plan writes nothing, and "refusing to render" printed
+                    // above "✓ servers up to date" would be two contradictory
+                    // claims about the same file.
+                    let refused = plan.refusal.is_some() && plan.changed();
+                    if refused {
+                        if let Some(why) = &plan.refusal {
+                            println!("  {} {why}", "✗".red());
+                        }
+                    }
                     let blocked = ((!plan.unresolved.is_empty() || !plan.failed.is_empty())
                         && !args.allow_unresolved)
-                        || !plan.denied.is_empty();
+                        || !plan.denied.is_empty()
+                        // --allow-unresolved forgives a missing secret, never a
+                        // missing consent.
+                        || refused;
                     // What a write WOULD leave managed here. `blocked` gates it
                     // exactly as it gates the write below: an activation that
                     // writes nothing must not preview hiding a hand-maintained
@@ -944,15 +1000,23 @@ pub fn activate(
                     if plan.changed() {
                         if args.write && blocked {
                             blocked_targets.push(desc.display.clone());
-                            let reason = if plan.unresolved.is_empty() {
-                                "secret read failures; set them"
+                            if refused {
+                                println!(
+                                    "  {} not written — the project has not been trusted for \
+                                     this content",
+                                    "✗".red()
+                                );
                             } else {
-                                "unresolved secrets; set them"
-                            };
-                            println!(
-                                "  {} not written — {reason} or pass --allow-unresolved",
-                                "✗".red()
-                            );
+                                let reason = if plan.unresolved.is_empty() {
+                                    "secret read failures; set them"
+                                } else {
+                                    "unresolved secrets; set them"
+                                };
+                                println!(
+                                    "  {} not written — {reason} or pass --allow-unresolved",
+                                    "✗".red()
+                                );
+                            }
                         } else if args.write {
                             backups.push(crate::history::capture(
                                 &plan.config_path,
@@ -1018,6 +1082,8 @@ pub fn activate(
                 active_skills.clone(),
                 &prev_skills,
                 pinned_copies.clone(),
+                &ctx.dir,
+                prior,
             )?;
 
             for c in &plan.conflicts {
@@ -1029,7 +1095,23 @@ pub fn activate(
             for r in &plan.to_remove {
                 println!("  {} unlinking skill '{r}'", "−".yellow());
             }
-            if plan.has_work() {
+            // Trust: a skill is words this project puts into an agent's
+            // context, and nothing downstream re-checks them once they are in
+            // the harness's skills dir (`render::skills::trust_refusal`).
+            // Reported per target through the same blocked-target seam an
+            // unresolved secret uses, so the rest of the activation still
+            // reports honestly and the command still exits nonzero.
+            if let Some(why) = &plan.refusal {
+                println!("  {} {why}", "✗".red());
+                if args.write {
+                    blocked_targets.push(desc.display.clone());
+                    println!(
+                        "  {} skills not materialized — the project has not been trusted for \
+                         this content",
+                        "✗".red()
+                    );
+                }
+            } else if plan.has_work() {
                 if args.write {
                     skills::materialize(&plan)?;
                     state.record_skills(&key, plan.managed_names());
@@ -1298,8 +1380,12 @@ pub fn activate(
                     .collect();
                 format!("fix: {} (or pass --allow-unresolved)", cmds.join(" · "))
             };
+            // Not "unresolved secrets blocked …": a target here can equally be
+            // blocked by a policy refusal or by the trust gate, and naming one
+            // cause for all of them sends the reader after the wrong fix. Each
+            // ✗ above states its own blocker.
             anyhow::bail!(
-                "unresolved secrets blocked {} — {fix}",
+                "{} blocked — {fix}",
                 super::count(blocked_targets.len(), "target")
             );
         }

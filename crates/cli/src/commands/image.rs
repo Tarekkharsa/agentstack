@@ -289,6 +289,12 @@ fn stage(plan: &ImagePlan, manifest_path: &Path, manifest_dir: &Path) -> Result<
             plan.skill_sources.clone(),
             &[],
             names,
+            // `run` already refused to stage anything unless this project is
+            // Trusted, so the plan's own gate finds nothing to refuse; passing
+            // the manifest dir keeps the two answers derived from one fact
+            // rather than leaving the choke point trusting its caller.
+            manifest_dir,
+            crate::render::PriorTrust::STRICT,
         )?;
         crate::render::skills::materialize(&skill_plan)?;
     }

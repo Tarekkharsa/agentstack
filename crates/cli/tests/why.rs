@@ -46,6 +46,28 @@ fn run(args: &[&str], home: &Path, proj: &Path) -> Out {
     }
 }
 
+/// Test-only grant, the two-step a panel drives: pin the surface, review it,
+/// then bind the yes to the digest of exactly those bytes. Call it AFTER any
+/// manifest edit (`delivery render-locally --write` is one), since manifest and
+/// lock bytes are the consent digest and the rendered lane's trust gate
+/// (`render::apply::trust_refusal`) reads it.
+fn grant(home: &Path, proj: &Path) {
+    assert!(run(&["lock", "--write"], home, proj).ok);
+    let preview = run(&["trust", "--preview"], home, proj).text;
+    let digest = serde_json::from_str::<serde_json::Value>(&preview)
+        .unwrap_or_else(|e| panic!("trust --preview is not JSON ({e}):\n{preview}"))
+        ["surface_digest"]
+        .as_str()
+        .expect("preview carries a surface digest")
+        .to_string();
+    let granted = run(
+        &["trust", "--yes", "--consented-digest", &digest],
+        home,
+        proj,
+    );
+    assert!(granted.ok, "grant failed:\n{}", granted.text);
+}
+
 /// A project declaring one HTTP server (a host + a secret) and one local skill.
 fn fixture() -> (assert_fs::TempDir, std::path::PathBuf, std::path::PathBuf) {
     let tmp = assert_fs::TempDir::new().unwrap();
@@ -146,6 +168,7 @@ fn a_rendered_file_on_disk_is_what_written_reports() {
         run(&["delivery", "render-locally", "--write"], &home, &proj).ok,
         "render locally must be settable"
     );
+    grant(&home, &proj);
     let applied = run(&["apply", "--write"], &home, &proj);
     assert!(applied.ok, "{}", applied.text);
     assert!(proj.join(".mcp.json").exists(), "the render must land");
@@ -160,6 +183,7 @@ fn a_rendered_file_on_disk_is_what_written_reports() {
 fn a_capability_routed_live_still_names_its_abandoned_file() {
     let (_tmp, home, proj) = plain_fixture(true);
     assert!(run(&["delivery", "render-locally", "--write"], &home, &proj).ok);
+    grant(&home, &proj);
     assert!(run(&["apply", "--write"], &home, &proj).ok);
     // Back to automatic: servers go live, and the file stays where it is.
     assert!(

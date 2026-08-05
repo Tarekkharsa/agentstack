@@ -384,6 +384,7 @@ pub fn start(manifest_dir: Option<&Path>, profile: &str, scope: Scope) -> Result
                 &prev,
                 scope,
                 &ctx.dir,
+                crate::render::PriorTrust::STRICT,
             )? {
                 backups.push(crate::history::capture(
                     &plan.config_path,
@@ -399,7 +400,16 @@ pub fn start(manifest_dir: Option<&Path>, profile: &str, scope: Scope) -> Result
     }
 
     // Activate the profile (servers + skills) in this scope.
-    crate::commands::use_profile::activate(&ctx, &libctx, &use_args, &prepared)?;
+    // STRICT: `session start` already refused an untrusted or drifted project
+    // long before this line, and it authored no manifest byte — the gate here
+    // reads the store, like every non-authoring caller.
+    crate::commands::use_profile::activate(
+        &ctx,
+        &libctx,
+        &use_args,
+        &prepared,
+        crate::render::PriorTrust::STRICT,
+    )?;
 
     // Record the server snapshots as one undoable history entry.
     let history_id = crate::history::record(

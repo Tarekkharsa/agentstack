@@ -66,6 +66,10 @@ fn seed_state_from_manifest_a(tmp: &std::path::Path, home: &std::path::Path) {
          [servers.kibana_mcp]\ntype = \"http\"\nurl = \"https://kibana/mcp\"\n",
     )
     .unwrap();
+    // The subject is the cross-manifest prune guard, not consent: grant so the
+    // rendered lane's trust gate (`render::apply::trust_refusal`) is out of the
+    // way and only the guard under test can hold a write back.
+    agentstack::trust::trust_unreviewed(&proj_a).unwrap();
     fs::write(home.join(".claude.json"), CONFIG_FROM_A).unwrap();
     let mut state = State::default();
     state.record(
@@ -87,6 +91,10 @@ fn write_manifest_b(tmp: &std::path::Path) -> std::path::PathBuf {
          [servers.beta]\ntype = \"http\"\nurl = \"https://beta/mcp\"\n",
     )
     .unwrap();
+    // The subject is the cross-manifest prune guard, not consent: grant so the
+    // rendered lane's trust gate (`render::apply::trust_refusal`) is out of the
+    // way and only the guard under test can hold a write back.
+    agentstack::trust::trust_unreviewed(&proj_b).unwrap();
     proj_b
 }
 
@@ -238,6 +246,9 @@ fn use_prune_foreign_still_works_after_guarded_use() {
          [profiles.p]\nservers = [\"beta\"]\n",
     )
     .unwrap();
+    // Consent is not the subject here — grant so the rendered lane's trust gate
+    // is out of the way (see the note in `write_manifest_b`).
+    agentstack::trust::trust_unreviewed(&proj_b).unwrap();
     let use_args = |prune_foreign: bool| UseArgs {
         profile: Some("p".into()),
         targets: vec![],
@@ -259,6 +270,10 @@ fn use_prune_foreign_still_works_after_guarded_use() {
         vec!["kibana_mcp".to_string()]
     );
 
+    // The first activation pinned the lockfile, and lock bytes are part of the
+    // consent digest — so the project legitimately re-gates here. Re-grant, as
+    // a human would after reviewing the new pins.
+    agentstack::trust::trust_unreviewed(&proj_b).unwrap();
     use_profile::run(&use_args(true), Some(&proj_b)).unwrap();
     let config = fs::read_to_string(home.join(".claude.json")).unwrap();
     assert!(
@@ -300,6 +315,9 @@ fn diff_does_not_preview_foreign_prunes() {
          [servers.kibana_mcp]\ntype = \"http\"\nurl = \"https://kibana/mcp\"\n",
     )
     .unwrap();
+    // Consent is not the subject here — grant so the rendered lane's trust gate
+    // is out of the way (see the note in `write_manifest_b`).
+    agentstack::trust::trust_unreviewed(&proj_a).unwrap();
     apply::run(&apply_args(false), Some(&proj_a)).unwrap();
 
     // Manifest B selects nothing at all — the only "change" the old diff saw

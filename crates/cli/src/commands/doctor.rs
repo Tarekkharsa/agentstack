@@ -1893,6 +1893,7 @@ fn run_checks(
                     &previously,
                     scope,
                     &ctx.dir,
+                    crate::render::PriorTrust::STRICT,
                 )?
                 else {
                     continue;
@@ -1983,9 +1984,24 @@ fn run_checks(
                     if args.fix
                         && (!plan.unresolved.is_empty()
                             || !plan.failed.is_empty()
-                            || !plan.denied.is_empty())
+                            || !plan.denied.is_empty()
+                            // The trust gate blocks `--fix` exactly as it blocks
+                            // `apply --write`: `TargetPlan::write` refuses, so
+                            // reaching it would abort the whole report instead
+                            // of reporting this target.
+                            || plan.refusal.is_some())
                     {
                         any_drift = true;
+                        if plan.refusal.is_some() {
+                            report.line(
+                                Level::Error,
+                                format!(
+                                    "{:<14} not fixed — the project is not trusted for this \
+                                     content ↳ agentstack trust .",
+                                    desc.display
+                                ),
+                            );
+                        }
                         if !plan.unresolved.is_empty() {
                             report.line(
                                 Level::Error,
@@ -2029,6 +2045,21 @@ fn run_checks(
                                 "{:<14} re-applied {}",
                                 desc.display,
                                 super::count(plan.managed.len(), "change")
+                            ),
+                        );
+                    } else if plan.refusal.is_some() {
+                        // Trust first: when the gate refuses the servers,
+                        // `apply --write` is not the next action — it would
+                        // refuse too. Name the action that actually unblocks
+                        // it (one next action, honestly), exactly as the Hooks
+                        // section does.
+                        any_drift = true;
+                        report.line(
+                            Level::Warn,
+                            format!(
+                                "{:<14} servers not delivered — project not trusted ↳ agentstack \
+                                 trust .",
+                                desc.display
                             ),
                         );
                     } else if plan.removed.is_empty() {

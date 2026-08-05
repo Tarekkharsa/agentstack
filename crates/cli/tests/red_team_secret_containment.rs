@@ -200,6 +200,24 @@ fn no_json_surface_ever_prints_the_resolved_value() {
 fn an_unresolvable_secret_blocks_the_write_instead_of_emitting_a_blank() {
     let tmp = tempfile::tempdir().unwrap();
     let (home, proj) = fixture(tmp.path());
+    // The subject is the SECRET gate, so the consent gate must not be what
+    // stops the write: pin and grant first (the same two-step the resolved
+    // case above performs), leaving the unresolvable reference as the only
+    // reason a write can be refused.
+    let (text, ok) = run(&["lock", "--write"], &home, &proj, false);
+    assert!(ok, "lock failed:\n{text}");
+    let (text, _) = run(&["trust", "--preview"], &home, &proj, false);
+    let digest = serde_json::from_str::<serde_json::Value>(&text).unwrap()["surface_digest"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (text, ok) = run(
+        &["trust", "--yes", "--consented-digest", &digest],
+        &home,
+        &proj,
+        false,
+    );
+    assert!(ok, "grant failed:\n{text}");
 
     let (text, ok) = run(&["apply", "--write"], &home, &proj, false);
     assert!(!ok, "apply succeeded with an unresolvable secret:\n{text}");

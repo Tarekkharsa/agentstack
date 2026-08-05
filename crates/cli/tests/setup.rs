@@ -76,6 +76,9 @@ fn materialize_profile_writes_skills_and_pins_the_lock() {
     )
     .unwrap();
     fs::write(proj.join("skills/helper/SKILL.md"), "# helper\n").unwrap();
+    // Consent is not this test's subject: grant so the trust gate
+    // (`render::skills::trust_refusal`) is out of the way.
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
 
     // Drive the setup phase directly: `setup::run` stops at its interactive
     // confirm in a test shell, so the phase function is the testable seam.
