@@ -113,6 +113,16 @@ SRC_SQL="$AGENTSTACK_HOME/lib/skills/sql-review/SKILL.md"
 say "LANE A (on request) — the rendered lane via 'use <toolset> --write'"
 # ─────────────────────────────────────────────────────────────────────────────
 "$AS" lock --write >/dev/null
+# The yes, before EITHER lane delivers anything. A skill body is text an agent
+# is told to follow, so — like a server definition, which is a command the
+# harness launches on its own — it reaches a tool only after a human has
+# reviewed this project and approved it. Lock first: the grant binds to the
+# manifest AND lockfile bytes, so pinning after a grant would invalidate it.
+# `trust .` is the interactive review; unattended here, so this reads the
+# surface with --preview and presents that exact digest back, as the red-team
+# tests do. One grant covers both lanes — nothing edits the surface between them.
+consent=$("$AS" trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')
+"$AS" trust . --yes --consented-digest "$consent" >/dev/null
 "$AS" use docs --scope project --write >/dev/null
 
 # docs = api-conventions (inline) + sql-review (library), and EXACTLY those two.
@@ -178,8 +188,9 @@ fi
 # ─────────────────────────────────────────────────────────────────────────────
 say "LANE B (the default) — the live lane: a toolset lease over 'agentstack mcp'"
 # ─────────────────────────────────────────────────────────────────────────────
-consent=$("$AS" trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')
-"$AS" trust . --yes --consented-digest "$consent" >/dev/null
+# No second grant here: the consent taken above still holds — the lock and the
+# manifest have not moved, and the live lane is gated by the same trust the
+# rendered lane is. That is the point being made twice, once per lane.
 
 OUT="$SBX/leaseout"
 python3 "$HERE/lease_client.py" "$AS" "$PROJECT" "$OUT"

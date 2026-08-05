@@ -115,6 +115,22 @@ fi
 "$AS" lock --write >/dev/null 2>&1
 ok "locked the manifest (skill + server + instruction pinned)"
 
+# ── 1b. the human yes, before anything is delivered ──────────────────────────
+# A `[servers.*]` entry is a command line the harness dials or spawns itself, at
+# its own startup, outside agentstack — so nothing renders one until a human has
+# reviewed this project and approved it. Same rule for the skills below. Lock
+# first: the grant is bound to the manifest AND lockfile bytes, so pinning after
+# a grant would invalidate it.
+say "Review and approve the project — a server definition is a command the harness launches on its own:"
+# `trust .` is the interactive review; unattended here, so it reads the surface
+# with --preview and presents that exact digest back, as the red-team tests do.
+consent=$("$AS" trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')
+if "$AS" trust . --yes --consented-digest "$consent" >/dev/null 2>&1; then
+  ok "consent granted against the reviewed surface digest (servers + skills may now be delivered)"
+else
+  bad "trust refused the digest that trust --preview just emitted"
+fi
+
 # ── 2. activate the toolset + render instructions ────────────────────────────
 say "Activate the toolset (servers + skills), then render instructions:"
 "$AS" use team --scope project --write >/dev/null 2>&1
