@@ -2457,7 +2457,20 @@ fn run_checks(
         report.line(Level::Unchecked, "no hooks declared — nothing to check");
         report.mark_irrelevant();
     } else {
-        let machine_hooks = crate::commands::guard::machine_hooks_for_apply();
+        // The scope `agentstack apply --write` would use with no flag — the same
+        // reality-derived shape as the settings check above. Judging the GLOBAL
+        // file for a repo project reports a repo-scoped hook as stale forever
+        // and names a command that never touches the file it named.
+        let scope = Scope::default_for(&ctx.dir);
+        // Mirror `apply`: the machine's guard hook rides along only at global
+        // scope, so machine protection never lands in a repo's committed
+        // config. Passing it at project scope would diff a hook apply would
+        // never write there.
+        let machine_hooks = if scope == Scope::Global {
+            crate::commands::guard::machine_hooks_for_apply()
+        } else {
+            Vec::new()
+        };
         let mut hook_issues = 0;
         let mut hook_capable = 0;
         for id in &target_ids {
@@ -2469,14 +2482,14 @@ fn run_checks(
             }
             hook_capable += 1;
             let prev = !state
-                .managed_hooks(&target_key(id, Scope::Global, &ctx.dir))
+                .managed_hooks(&target_key(id, scope, &ctx.dir))
                 .is_empty();
             match plan_hooks(
                 manifest,
                 desc,
                 &ctx.resolver,
                 prev,
-                Scope::Global,
+                scope,
                 &ctx.dir,
                 &machine_hooks,
             ) {
