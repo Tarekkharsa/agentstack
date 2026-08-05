@@ -514,6 +514,42 @@ pub fn report_text(run_id: &str) -> String {
         }
     }
 
+    // Calls the toolset fence refused. Its own section for the same reason
+    // "Skills loaded" has one: a refused call is not a call the run made, so it
+    // must not swell the Tool-calls count a reviewer reads as this run's
+    // gateway actions. Without this arm the event would be recorded and print
+    // nothing, which is the gap it was added to close.
+    let fenced: Vec<(&str, &str, Option<&str>, &str)> = events
+        .iter()
+        .filter_map(|e| match e {
+            RunEvent::FenceRefused {
+                server,
+                tool,
+                toolset,
+                reason,
+                ..
+            } => Some((
+                server.as_str(),
+                tool.as_str(),
+                toolset.as_deref(),
+                reason.as_str(),
+            )),
+            _ => None,
+        })
+        .collect();
+    if !fenced.is_empty() {
+        o.push_str(&format!("  {}\n", "Fence refusals".bold()));
+        for (server, tool, toolset, reason) in fenced {
+            let via = toolset
+                .map(|t| format!("  [toolset {t}]"))
+                .unwrap_or_default();
+            o.push_str(&format!(
+                "    {} {server}__{tool}{via}  ({reason})\n",
+                "✗".red()
+            ));
+        }
+    }
+
     // Skills this run loaded on demand. Its own section, never folded into
     // "Tool calls": a load is not a call, and the count above is what a
     // reviewer reads as the run's gateway actions. Identity only — the name
@@ -682,6 +718,67 @@ mod tests {
             assert!(text.contains("evil.example") && text.contains("[policy.egress] denied"));
             assert!(text.contains("web-search__search") && text.contains("12ms"));
             assert!(text.contains("Exit") && text.contains('0'));
+        });
+    }
+
+    /// G17 — a toolset-fence refusal is rendered, in the case that hid it.
+    ///
+    /// A run that made any tool call has `ToolCall` events, so the report never
+    /// falls back to the audit log — and the fence's `calls.jsonl` row (the
+    /// only evidence it used to write) is exactly what that fallback would have
+    /// surfaced. The refusal therefore has to arrive as its own event and be
+    /// rendered in its own section, or a reviewer reading one run's story
+    /// cannot see that a fence refused anything.
+    #[test]
+    fn a_fence_refusal_is_rendered_even_when_the_run_made_tool_calls() {
+        with_home(|| {
+            let log = RunLog::create("r-fence").unwrap();
+            log.append(&RunEvent::ToolCall {
+                ts: 1,
+                execution_id: None,
+                server: "srvb".into(),
+                tool: "beta_pong".into(),
+                outcome: agentstack_recorder::CallOutcome::Ok,
+                args_digest: "abc".into(),
+                detail: None,
+                ms: 4,
+            });
+            log.append(&RunEvent::FenceRefused {
+                ts: 2,
+                server: "srva".into(),
+                tool: "alpha_ping".into(),
+                toolset: Some("alpha".into()),
+                reason: "this project fences its servers behind toolsets, and no open lease \
+                         selects one that exposes it"
+                    .into(),
+            });
+            // The audit row the refusal also writes — present, and provably not
+            // what the report is reading here.
+            agentstack_recorder::record(&CallRecord {
+                ts: 2,
+                run: Some("r-fence".into()),
+                pid: 1,
+                project: None,
+                server: "srva".into(),
+                tool: "fence".into(),
+                args_digest: String::new(),
+                outcome: agentstack_recorder::CallOutcome::Denied,
+                detail: Some("no open lease".into()),
+                ms: 0,
+            });
+
+            let text = report_text("r-fence");
+            assert!(text.contains("Fence refusals"), "{text}");
+            assert!(text.contains("srva__alpha_ping"), "{text}");
+            assert!(text.contains("[toolset alpha]"), "{text}");
+            assert!(text.contains("no open lease"), "{text}");
+            // The refusal did not become a tool call: the Tool-calls section
+            // still lists only the call the run actually made.
+            assert!(text.contains("srvb__beta_pong"), "{text}");
+            assert!(
+                !text.contains("srva__fence"),
+                "a refusal must not be rendered as a call the run made: {text}"
+            );
         });
     }
 

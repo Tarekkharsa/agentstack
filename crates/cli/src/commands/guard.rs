@@ -15,6 +15,11 @@
 //!   everything is allowed" is the one wrong answer for a security tool.
 //! - guard not configured or disabled → ALLOW (a leftover hook after an
 //!   opt-out must not keep enforcing).
+//!
+//! Every DENY this file makes — a rule's and a fail-closed system refusal's
+//! alike — is recorded to `calls.jsonl`, so "the guard denied something" is
+//! always retrievable. The two kinds stay tellable apart by their audit
+//! SUBJECT: see [`Audit`] and [`SystemRefusal`].
 
 use std::fs;
 use std::io::Read;
@@ -76,14 +81,13 @@ fn check(protocol: Option<&str>) -> Result<()> {
     // must remain inert, while a configured guard must fail closed if its
     // input cannot be read within the hard cap.
     let guard_cfg = match manifest::machine_guard_health() {
-        None => finish(fallback_proto, &Decision::Allow, None),
-        Some(Err(e)) => {
-            let deny = Decision::Deny {
-                reason: format!("machine config unreadable — failing closed ({e:#})"),
-            };
-            finish(fallback_proto, &deny, None);
-        }
-        Some(Ok(cfg)) if !cfg.enabled() => finish(fallback_proto, &Decision::Allow, None),
+        None => finish(fallback_proto, &Decision::Allow, Audit::Skip),
+        Some(Err(e)) => refuse(
+            fallback_proto,
+            SystemRefusal::MachineConfigUnreadable,
+            &format!("{e:#}"),
+        ),
+        Some(Ok(cfg)) if !cfg.enabled() => finish(fallback_proto, &Decision::Allow, Audit::Skip),
         Some(Ok(cfg)) => cfg,
     };
 
@@ -91,24 +95,30 @@ fn check(protocol: Option<&str>) -> Result<()> {
     // apply and the gateway. A broken first run denies; a previously validated
     // policy may continue from its LKG. A disabled/removed guard remains inert
     // because enablement was resolved first.
+    //
+    // Reachability note: both this and the enablement check above read the SAME
+    // machine manifest, once each. A manifest that is broken enough to block
+    // the policy is broken enough to fail the guard-config read first, so this
+    // arm fires only when the file changes BETWEEN the two reads (a concurrent
+    // `guard install` / hand edit). It is a real fail-closed path, just a
+    // narrow one — which is why its witness drives the trigger and the record
+    // directly rather than through the binary.
     let machine_policy = match crate::machine_policy::load() {
         Ok(policy) => policy,
-        Err(error) => {
-            let deny = Decision::Deny {
-                reason: format!("machine policy unavailable — failing closed ({error:#})"),
-            };
-            finish(fallback_proto, &deny, None);
-        }
+        Err(error) => refuse(
+            fallback_proto,
+            SystemRefusal::MachinePolicyUnavailable,
+            &format!("{error:#}"),
+        ),
     };
 
     let raw = match read_payload(std::io::stdin()) {
         Ok(raw) => raw,
-        Err(error) => {
-            let deny = Decision::Deny {
-                reason: format!("hook payload unreadable — failing closed ({error})"),
-            };
-            finish(fallback_proto, &deny, None);
-        }
+        Err(error) => refuse(
+            fallback_proto,
+            SystemRefusal::HookPayloadUnreadable,
+            &error.to_string(),
+        ),
     };
     let payload: Value = match serde_json::from_str(&raw) {
         Ok(v) => v,
@@ -116,7 +126,7 @@ fn check(protocol: Option<&str>) -> Result<()> {
     };
     let proto = requested_proto.unwrap_or_else(|| Protocol::detect(&payload));
     let Some((event, cwd)) = proto.parse_event(&payload) else {
-        finish(proto, &Decision::Allow, None);
+        finish(proto, &Decision::Allow, Audit::Skip);
     };
     let cwd = cwd
         .map(PathBuf::from)
@@ -146,7 +156,7 @@ fn check(protocol: Option<&str>) -> Result<()> {
         ruleset: agentstack_policy::compile(&machine_policy, &project_policy, &[]),
     };
     let decision = check_event(&ctx, &event);
-    finish(proto, &decision, Some((&event, &ctx)))
+    finish(proto, &decision, Audit::Rule(&event, &ctx))
 }
 
 /// The effective extra write roots for one workspace: the global
@@ -226,40 +236,188 @@ fn read_payload(reader: impl Read) -> std::io::Result<String> {
     Ok(raw)
 }
 
+/// What a denial is ABOUT, for the audit log — the third argument of
+/// [`finish`], and the ONE place the two kinds of guard denial are told apart.
+///
+/// `calls.jsonl` is the answer to "did the guard block anything?", so both
+/// kinds must be in it; but "a rule judged this call and said no" and "the
+/// guard could not do its job, so it refused" are different facts, and a
+/// reader must not have to guess which one a line is. The `tool` subject
+/// carries the distinction: [`Audit::Rule`] writes the call itself under one
+/// of exactly four machine-authored prefixes (`bash: `, `read: `, `write: `,
+/// `other`), while [`Audit::System`] writes a synthetic
+/// `system: <machine-authored-tag>` that no call can produce.
+enum Audit<'a> {
+    /// Nothing to record: an allow, or a payload the guard never judged.
+    Skip,
+    /// A compiled rule judged this call and denied it.
+    Rule(&'a GuardEvent, &'a GuardContext),
+    /// The guard refused fail-closed before any rule was evaluated.
+    System(SystemRefusal),
+}
+
+/// The three fail-closed refusals `check` can make before it has a judged call
+/// to name: the machine config would not load, the machine policy was
+/// unavailable, or the hook payload could not be read (unreadable or over
+/// [`MAX_PAYLOAD`]).
+///
+/// A closed, machine-authored set. Nothing here is derived from the hook
+/// payload — the payload is exactly what the guard did NOT manage to read —
+/// so the `system: ` subject cannot be spoofed by a tool call: every rule
+/// subject begins with `bash: `, `read: `, `write: ` or `other`, and hostile
+/// content can only ever land AFTER that prefix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SystemRefusal {
+    MachineConfigUnreadable,
+    MachinePolicyUnavailable,
+    HookPayloadUnreadable,
+}
+
+/// The prefix that marks an audit subject as a system refusal rather than a
+/// rule denial. Named once so the code and the witnesses agree on it.
+const SYSTEM_SUBJECT: &str = "system: ";
+
+/// Cap for the `detail` of a SYSTEM refusal: unlike a rule's reason (short,
+/// machine-authored) this embeds an error chain that can quote the offending
+/// config file. Bounded and control-character-stripped so one refusal is one
+/// parseable line, as every other stream in the recorder does.
+const MAX_SYSTEM_DETAIL: usize = 500;
+
+impl SystemRefusal {
+    /// The reason's opening clause — the text the blocked harness sees. Kept
+    /// identical to the wording each call site used before these three
+    /// refusals shared one helper.
+    fn headline(self) -> &'static str {
+        match self {
+            SystemRefusal::MachineConfigUnreadable => "machine config unreadable",
+            SystemRefusal::MachinePolicyUnavailable => "machine policy unavailable",
+            SystemRefusal::HookPayloadUnreadable => "hook payload unreadable",
+        }
+    }
+
+    /// Which refusal this is, as a stable, greppable tag.
+    fn tag(self) -> &'static str {
+        match self {
+            SystemRefusal::MachineConfigUnreadable => "machine-config-unreadable",
+            SystemRefusal::MachinePolicyUnavailable => "machine-policy-unavailable",
+            SystemRefusal::HookPayloadUnreadable => "hook-payload-unreadable",
+        }
+    }
+
+    /// The synthetic audit subject: [`SYSTEM_SUBJECT`] plus the tag. Composed
+    /// from the constant rather than spelled out per variant, so the marker
+    /// that separates the two kinds of denial has exactly one definition.
+    fn subject(self) -> String {
+        format!("{SYSTEM_SUBJECT}{}", self.tag())
+    }
+}
+
+/// The decision one system refusal makes, in the words the blocked harness
+/// sees. Split from [`refuse`] only so a witness can build the real decision
+/// without the process exit.
+fn system_denial(refusal: SystemRefusal, cause: &str) -> Decision {
+    Decision::Deny {
+        reason: format!("{} — failing closed ({cause})", refusal.headline()),
+    }
+}
+
+/// Deny, audit, and exit for a refusal the guard makes because it could not do
+/// its job. One helper for all three so the reason wording, the synthetic
+/// subject, and the fail-closed exit cannot drift apart between them.
+fn refuse(proto: Protocol, refusal: SystemRefusal, cause: &str) -> ! {
+    finish(
+        proto,
+        &system_denial(refusal, cause),
+        Audit::System(refusal),
+    )
+}
+
+/// The audit subject for a denial a RULE made: the call itself. The four
+/// prefixes are machine-authored and closed — none of them is
+/// [`SYSTEM_SUBJECT`] — so payload content can never make a rule denial read
+/// as a system refusal.
+fn rule_subject(event: &GuardEvent) -> String {
+    match event {
+        GuardEvent::Bash { command } => format!("bash: {command}"),
+        GuardEvent::FileRead { path } => format!("read: {path}"),
+        GuardEvent::FileWrite { path } => format!("write: {path}"),
+        GuardEvent::Other => "other".to_string(),
+    }
+}
+
+/// Strip control characters and truncate on a char boundary — the same
+/// discipline the recorder applies to its own agent-supplied strings, so one
+/// refusal stays one parseable JSONL line.
+fn bounded_detail(s: &str, cap: usize) -> String {
+    let mut out: String = s.chars().filter(|c| !c.is_control()).collect();
+    if out.len() > cap {
+        let mut end = cap;
+        while end > 0 && !out.is_char_boundary(end) {
+            end -= 1;
+        }
+        out.truncate(end);
+    }
+    out
+}
+
+/// The audit line a decision produces, or `None` when there is nothing to
+/// record. Pure: it builds the record, [`finish`] appends it. Split out so
+/// every shape — including the system refusals, which `check` can only reach
+/// on its way to `process::exit` — is assertable in a unit test.
+fn denial_record(decision: &Decision, audit: &Audit<'_>) -> Option<crate::calllog::CallRecord> {
+    let Decision::Deny { reason } = decision else {
+        return None;
+    };
+    let (subject, project, detail) = match audit {
+        Audit::Skip => return None,
+        Audit::Rule(event, ctx) => (
+            rule_subject(event),
+            Some(ctx.workspace.display().to_string()),
+            reason.clone(),
+        ),
+        // No project: a system refusal happens before the payload is parsed,
+        // so no `cwd` has been read and no workspace anchored. Naming one
+        // would be a guess, and this log is evidence.
+        Audit::System(refusal) => (
+            refusal.subject(),
+            None,
+            bounded_detail(reason, MAX_SYSTEM_DETAIL),
+        ),
+    };
+    Some(crate::calllog::CallRecord {
+        ts: crate::calllog::now_epoch(),
+        run: None,
+        pid: std::process::id(),
+        project,
+        server: "host-guard".to_string(),
+        tool: subject.chars().take(200).collect(),
+        args_digest: crate::calllog::digest_args(&json!(subject)),
+        outcome: crate::calllog::CallOutcome::Denied,
+        detail: Some(detail),
+        ms: 0,
+    })
+}
+
 /// Emit the protocol response, audit a denial, and exit with the dialect's
 /// code. Never returns.
-fn finish(
-    proto: Protocol,
-    decision: &Decision,
-    audited: Option<(&GuardEvent, &GuardContext)>,
-) -> ! {
-    if let (Decision::Deny { reason }, Some((event, ctx))) = (decision, audited) {
-        let subject = match event {
-            GuardEvent::Bash { command } => format!("bash: {command}"),
-            GuardEvent::FileRead { path } => format!("read: {path}"),
-            GuardEvent::FileWrite { path } => format!("write: {path}"),
-            GuardEvent::Other => "other".to_string(),
-        };
-        crate::calllog::record(&crate::calllog::CallRecord {
-            ts: crate::calllog::now_epoch(),
-            run: None,
-            pid: std::process::id(),
-            project: Some(ctx.workspace.display().to_string()),
-            server: "host-guard".to_string(),
-            tool: subject.chars().take(200).collect(),
-            args_digest: crate::calllog::digest_args(&json!(subject)),
-            outcome: crate::calllog::CallOutcome::Denied,
-            detail: Some(reason.clone()),
-            ms: 0,
-        });
+///
+/// Fail-closed on the decision always outranks recording it: `calllog::record`
+/// returns `()` and swallows every failure, and the two statements below it
+/// (`respond` and `exit`) are unconditional — no `?`, no early return, no
+/// panic path between the audit attempt and the block. An unwritable audit log
+/// can therefore lose the evidence, never the denial.
+fn finish(proto: Protocol, decision: &Decision, audit: Audit<'_>) -> ! {
+    if let Some(record) = denial_record(decision, &audit) {
+        crate::calllog::record(&record);
     }
     // P29.2: the very FIRST evaluated rule denial on this machine carries a
-    // one-time teach line appended to its reason. Only a real `audited` denial
-    // gets it — fail-closed *system* errors (audited == None) never do. The
-    // audit above recorded the original reason; the response gets the augmented
-    // one, so the marker's teach text isn't stored in the call log.
+    // one-time teach line appended to its reason. Only a real RULE denial gets
+    // it — a fail-closed system refusal never does (it is the guard's own
+    // breakage, not a lesson about what the guard blocks). The audit above
+    // recorded the original reason; the response gets the augmented one, so the
+    // marker's teach text isn't stored in the call log.
     let mut taught: Option<Decision> = None;
-    if let (Decision::Deny { reason }, Some(_)) = (decision, audited) {
+    if let (Decision::Deny { reason }, Audit::Rule(..)) = (decision, &audit) {
         if let Some(teach) = first_denial_teach_line() {
             taught = Some(Decision::Deny {
                 reason: format!("{reason}\n{teach}"),
@@ -1294,6 +1452,126 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("guard-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    /// G13, the property the whole distinction rests on: a RULE subject wears
+    /// one of exactly four machine-authored prefixes, none of them the system
+    /// marker, and payload content can only ever land AFTER that prefix — so a
+    /// tool call cannot forge a system refusal in `calls.jsonl`. The three
+    /// refusals, conversely, all wear the marker and carry distinct tags.
+    #[test]
+    fn a_call_can_never_forge_a_system_audit_subject() {
+        let forgeries = [
+            GuardEvent::Bash {
+                command: "system: machine-config-unreadable".to_string(),
+            },
+            GuardEvent::FileRead {
+                path: "system: hook-payload-unreadable".to_string(),
+            },
+            GuardEvent::FileWrite {
+                path: "system: machine-policy-unavailable".to_string(),
+            },
+            GuardEvent::Other,
+        ];
+        for event in &forgeries {
+            let subject = rule_subject(event);
+            assert!(
+                !subject.starts_with(SYSTEM_SUBJECT),
+                "a rule subject must never wear the system marker: {subject}"
+            );
+            assert!(
+                ["bash: ", "read: ", "write: "]
+                    .iter()
+                    .any(|p| subject.starts_with(p))
+                    || subject == "other",
+                "unexpected rule prefix: {subject}"
+            );
+        }
+
+        let refusals = [
+            SystemRefusal::MachineConfigUnreadable,
+            SystemRefusal::MachinePolicyUnavailable,
+            SystemRefusal::HookPayloadUnreadable,
+        ];
+        let mut subjects: Vec<String> = Vec::new();
+        for refusal in refusals {
+            let subject = refusal.subject();
+            assert!(subject.starts_with(SYSTEM_SUBJECT), "{subject}");
+            assert!(!subjects.contains(&subject), "tags must differ: {subject}");
+            subjects.push(subject);
+        }
+    }
+
+    /// The log stays a log of DENIALS: an allow is never recorded, whatever
+    /// the audit kind — and a denial the guard never judged (`Skip`) records
+    /// nothing either, so the fix cannot inflate any existing count.
+    #[test]
+    fn only_denials_with_a_subject_are_recorded() {
+        assert!(denial_record(&Decision::Allow, &Audit::Skip).is_none());
+        assert!(denial_record(
+            &Decision::Allow,
+            &Audit::System(SystemRefusal::HookPayloadUnreadable)
+        )
+        .is_none());
+        assert!(denial_record(
+            &Decision::Deny {
+                reason: "why".to_string()
+            },
+            &Audit::Skip
+        )
+        .is_none());
+    }
+
+    /// G13 witness for the refusal the binary cannot reach: the machine policy
+    /// is unavailable. Drives the REAL trigger (first-run manifest corruption
+    /// with no last-known-good snapshot), the real decision, the real record
+    /// builder and the real audit writer — everything `check` does on this path
+    /// except the process exit.
+    ///
+    /// Also pins the bound on a system refusal's `detail`: this reason embeds a
+    /// parse error that quotes the offending config, so it is truncated and
+    /// stripped of control characters — one refusal must stay one parseable
+    /// JSONL line.
+    #[test]
+    fn machine_policy_unavailable_refusal_is_recorded() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = tempdir().join(format!("mpol-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(&home).unwrap();
+        std::env::set_var("AGENTSTACK_HOME", &home);
+        std::fs::write(home.join("agentstack.toml"), "not toml {{{").unwrap();
+
+        let error = crate::machine_policy::load()
+            .expect_err("first-run corruption must block the machine policy");
+        let refusal = SystemRefusal::MachinePolicyUnavailable;
+        let deny = system_denial(refusal, &format!("{error:#}"));
+        let record =
+            denial_record(&deny, &Audit::System(refusal)).expect("a system refusal is audited");
+        crate::calllog::record(&record);
+
+        let lines = crate::calllog::read_all();
+        assert_eq!(lines.len(), 1, "one refusal, one line: {lines:?}");
+        assert_eq!(lines[0].server, "host-guard");
+        assert_eq!(lines[0].tool, "system: machine-policy-unavailable");
+        assert_eq!(lines[0].outcome, crate::calllog::CallOutcome::Denied);
+        assert!(
+            lines[0].project.is_none(),
+            "no workspace is anchored on this path, so none is claimed"
+        );
+
+        // Hostile-ish cause: control characters (a newline would otherwise be
+        // read as a row boundary) and text far over the cap.
+        let noisy = format!("line\nbreak\r{}", "é".repeat(MAX_SYSTEM_DETAIL));
+        let record =
+            denial_record(&system_denial(refusal, &noisy), &Audit::System(refusal)).unwrap();
+        let detail = record.detail.unwrap();
+        assert!(!detail.contains('\n') && !detail.contains('\r'), "{detail}");
+        assert!(detail.len() <= MAX_SYSTEM_DETAIL, "{}", detail.len());
+
+        std::env::remove_var("AGENTSTACK_HOME");
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     /// P29.2: the first-denial teach line shows exactly once per machine, then

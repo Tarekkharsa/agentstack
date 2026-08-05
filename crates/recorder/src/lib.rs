@@ -299,12 +299,20 @@ pub fn now_epoch() -> u64 {
 // the trust crate only AFTER the store write succeeded — it adds events,
 // never gates, and it is not tamper-evident.
 
-/// What one trust-store mutation did — a closed 4-value set.
+/// What one trust-store mutation did — a closed 6-value set.
 ///
 /// `Repin` is deliberately distinct from `Regrant`: a repin carries existing
 /// trust across agentstack's OWN rewrite of the pinned bytes (no human in the
 /// loop), so consent metrics counted over these events must be able to
 /// exclude it; `Grant`/`Regrant` are the human consent moments.
+///
+/// `Decide`/`Undecide` cover the standing re-gate answers stored on an existing
+/// entry. They carry the entry's pinned digest, not a new one — nothing is
+/// re-pinned — and they are split in two for a reason particular to this log:
+/// because the line is identity-only, WHICH item was answered and WHAT the
+/// answer was are both absent, so the action name is the only place the
+/// direction of the change can live. One action would leave a history that
+/// cannot tell a refusal being recorded from the same refusal being withdrawn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TrustAction {
@@ -312,6 +320,10 @@ pub enum TrustAction {
     Regrant,
     Repin,
     Revoke,
+    /// A standing re-gate answer was recorded on an existing entry.
+    Decide,
+    /// A standing re-gate answer was withdrawn from an existing entry.
+    Undecide,
 }
 
 /// One line in `audit/trust.jsonl`. Identity only — see the module note above
@@ -322,8 +334,9 @@ pub struct TrustMutation {
     pub action: TrustAction,
     /// Canonical project base dir — the trust store's own key for the entry.
     pub project: String,
-    /// The `sha256:` consent digest pinned (grant/regrant/repin) or removed
-    /// (revoke).
+    /// The `sha256:` consent digest pinned (grant/regrant/repin), removed
+    /// (revoke), or — for `decide`/`undecide`, which re-pin nothing — the
+    /// digest the answered entry already stood on.
     pub digest: String,
 }
 
@@ -690,6 +703,52 @@ pub enum RunEvent {
         /// withdrawn yes back as `"untrusted"`, because the store keeps no
         /// trace of an entry that was removed.
         state: String,
+        /// Why, in the words the user saw. Machine-authored text; bounded by
+        /// the caller so the log line and the terminal line are identical.
+        reason: String,
+    },
+    /// The toolset fence refused a call: the project divides its capabilities
+    /// into toolsets, no open lease selects one that exposes the named server,
+    /// and so no upstream held the name (W4 precondition 3).
+    ///
+    /// Its own variant for the same reason [`RunEvent::TrustRefused`] is one.
+    /// Filing it under [`RunEvent::ToolCall`] with `outcome: denied` would put
+    /// it in the bucket a reviewer reads as "calls this run made through the
+    /// gateway" — and a call the fence refused was never dispatched, never
+    /// reached an upstream, and was not denied by `[policy.tools]` either. The
+    /// question it answers is "nothing has selected this capability yet",
+    /// which is neither of the questions the existing variants answer.
+    ///
+    /// Identity-shaped, like every other refusal event here: the server and
+    /// tool NAMES, the toolset that would expose the server, and the reason in
+    /// the words the user was shown. Never the arguments — a call refused
+    /// before dispatch is precisely one whose payload should not be copied
+    /// anywhere.
+    ///
+    /// Emitted only for a server the project DECLARES, mirroring the
+    /// `calls.jsonl` row's own scope: a name nothing declares is a typo, not a
+    /// security event, and recording those would let any caller write
+    /// unbounded rows into a run's log by inventing names.
+    ///
+    /// Best-effort and never gating, like every event here: the refusal has
+    /// already happened by the time this is written, and a recorder failure
+    /// can only lose the evidence — never restore the call.
+    FenceRefused {
+        ts: u64,
+        /// The upstream server NAME the call addressed. Manifest- and
+        /// wire-derived, therefore hostile input — bounded and
+        /// control-character stripped by the caller (invariant 7).
+        server: String,
+        /// The bare upstream tool NAME, bounded by the caller for the same
+        /// reason.
+        tool: String,
+        /// The toolset that selects `server`, so a reader knows which lease
+        /// would have exposed it — the same name the refusal sentence names.
+        /// Manifest-authored, therefore bounded by the caller. `None` when no
+        /// toolset selects the server: there is then no lease to open, and
+        /// naming one that would not help would be worse than naming none.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        toolset: Option<String>,
         /// Why, in the words the user saw. Machine-authored text; bounded by
         /// the caller so the log line and the terminal line are identical.
         reason: String,

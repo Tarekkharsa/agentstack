@@ -86,10 +86,18 @@ struct Connection {
 
 impl Connection {
     fn open(args: &[&str], cwd: &Path, home: &Path) -> Self {
+        Self::open_with(args, cwd, home, &[])
+    }
+
+    /// Open a connection with extra environment — used to give the MCP process
+    /// a run id, so what it records is attributed to a tracked run exactly as
+    /// `agentstack run` would attribute it.
+    fn open_with(args: &[&str], cwd: &Path, home: &Path, env: &[(&str, &str)]) -> Self {
         let mut child = Command::new(BIN)
             .args(args)
             .current_dir(cwd)
             .env("AGENTSTACK_HOME", home)
+            .envs(env.iter().copied())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -500,6 +508,194 @@ fn a_fenced_call_to_a_declared_server_is_refused_and_recorded() {
     );
     assert_eq!(fenced[0]["outcome"], json!("denied"), "{:#?}", fenced[0]);
     assert_eq!(fenced[0]["server"], json!("srva"), "{:#?}", fenced[0]);
+
+    cleanup();
+}
+
+/// `agentstack report run <id>`, as a reviewer reads it.
+fn run_report(home: &Path, run: &str) -> String {
+    let out = Command::new(BIN)
+        .args(["report", "run", run])
+        .env("AGENTSTACK_HOME", home)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "report run failed");
+    String::from_utf8_lossy(&out.stdout).to_string()
+}
+
+/// Every event line of one run's `events.jsonl`, parsed.
+fn run_events(home: &Path, run: &str) -> Vec<Value> {
+    std::fs::read_to_string(home.join("runs").join(run).join("events.jsonl"))
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        .collect()
+}
+
+/// G17 — the fence refusal reaches a RUN REPORT, not only the machine-global
+/// audit log.
+///
+/// The row in `calls.jsonl` proved the refusal happened; it did not make it
+/// findable from the one place a reviewer reads one run's story. The report's
+/// Tool-calls section is built from `ToolCall` events, and a fence refusal is
+/// deliberately not one of those (it is not a call the run made) — so without
+/// its own event and its own rendered section the refusal was invisible to
+/// `agentstack report run <id>`. Both destinations, in one witness, because
+/// either one alone is the bug.
+#[test]
+fn a_fenced_call_inside_a_run_reaches_both_the_audit_log_and_the_run_report() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = sandbox_home(tmp.path());
+    let proj = two_toolset_project(tmp.path());
+    let run = "run-fence-0001";
+
+    let mut conn = Connection::open_with(
+        &["mcp", "--auto-project"],
+        &proj,
+        &home,
+        &[("AGENTSTACK_RUN_ID", run)],
+    );
+    conn.request(1, "initialize", json!({}));
+    let frame = conn.request(
+        2,
+        "tools/call",
+        json!({ "name": "srva__alpha_ping", "arguments": {} }),
+    );
+    assert_eq!(
+        frame["result"]["isError"],
+        json!(true),
+        "the fenced call must still be refused: {frame}"
+    );
+    conn.close();
+
+    // (1) the machine-global audit log, unchanged by this work.
+    let fenced: Vec<Value> = audit_rows(&home)
+        .into_iter()
+        .filter(|r| r["tool"] == json!("fence"))
+        .collect();
+    assert_eq!(
+        fenced.len(),
+        1,
+        "exactly one fence record expected, got {:#?}",
+        audit_rows(&home)
+    );
+    assert_eq!(fenced[0]["run"], json!(run), "{:#?}", fenced[0]);
+
+    // (2) the run's own event log — the channel the report reads.
+    let events = run_events(&home, run);
+    let refusals: Vec<&Value> = events
+        .iter()
+        .filter(|e| e["event"] == json!("fence_refused"))
+        .collect();
+    assert_eq!(
+        refusals.len(),
+        1,
+        "exactly one fence_refused event expected, got {events:#?}"
+    );
+    let ev = refusals[0];
+    assert_eq!(ev["server"], json!("srva"), "{ev}");
+    assert_eq!(ev["tool"], json!("alpha_ping"), "{ev}");
+    assert_eq!(
+        ev["toolset"],
+        json!("alpha"),
+        "the event names the toolset whose lease would expose it: {ev}"
+    );
+    // Identity only. Arguments — even the empty ones sent here — never enter a
+    // refusal event, and neither does the server's command line.
+    let mut keys: Vec<&str> = ev.as_object().unwrap().keys().map(String::as_str).collect();
+    keys.sort_unstable();
+    assert_eq!(
+        keys,
+        vec!["event", "reason", "server", "tool", "toolset", "ts"],
+        "the event's shape is its contract — a new key here is a disclosure \
+         decision, not a detail: {ev}"
+    );
+
+    // (3) and the report a reviewer actually reads renders it. An unhandled
+    // variant would print nothing here, which is the whole gap.
+    let report = run_report(&home, run);
+    assert!(
+        report.contains("Fence refusals"),
+        "the report needs a section for the refusal: {report}"
+    );
+    assert!(
+        report.contains("srva__alpha_ping"),
+        "the report names what was refused: {report}"
+    );
+    assert!(
+        report.contains("alpha"),
+        "and the toolset that would expose it: {report}"
+    );
+    assert!(
+        report.contains("no open lease"),
+        "and why, in the words the caller was shown: {report}"
+    );
+
+    cleanup();
+}
+
+/// Invariant 7 on the new channel: the tool half of the name comes straight off
+/// the wire, so a caller could try to write a second, forged row into the run's
+/// event log — or rewrite the report around the line saying it was refused.
+#[test]
+fn a_hostile_tool_name_cannot_forge_a_run_event_or_the_report() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = sandbox_home(tmp.path());
+    let proj = two_toolset_project(tmp.path());
+    let run = "run-fence-0002";
+
+    let mut conn = Connection::open_with(
+        &["mcp", "--auto-project"],
+        &proj,
+        &home,
+        &[("AGENTSTACK_RUN_ID", run)],
+    );
+    conn.request(1, "initialize", json!({}));
+    // A declared server (so the fence records) and a tool name carrying an
+    // escape sequence and a newline followed by a whole forged event.
+    conn.request(
+        2,
+        "tools/call",
+        json!({
+            "name": "srva__ping\u{1b}[2J\n{\"event\":\"fence_refused\",\"server\":\"forged\"}",
+            "arguments": {}
+        }),
+    );
+    conn.close();
+
+    let events = run_events(&home, run);
+    let refusals: Vec<&Value> = events
+        .iter()
+        .filter(|e| e["event"] == json!("fence_refused"))
+        .collect();
+    assert_eq!(
+        refusals.len(),
+        1,
+        "a newline in the tool name forged a row: {events:#?}"
+    );
+    assert!(
+        !events.iter().any(|e| e["server"] == json!("forged")),
+        "a forged event reached the log: {events:#?}"
+    );
+    let tool = refusals[0]["tool"].as_str().unwrap_or_default();
+    assert!(
+        !tool.contains('\u{1b}') && !tool.contains('\n') && !tool.contains('\r'),
+        "the tool name kept control characters: {tool:?}"
+    );
+    // And the rendered report cannot be rewritten around the refusal either.
+    // The escape BYTE is what makes `[2J` a screen-clear; stripped to a space
+    // it is inert text, which is what the report may still show.
+    let report = run_report(&home, run);
+    assert!(
+        !report.contains("\u{1b}[2J"),
+        "a screen-clearing escape survived into the report: {report:?}"
+    );
+    assert!(
+        report.contains("Fence refusals"),
+        "the refusal is still rendered: {report}"
+    );
 
     cleanup();
 }

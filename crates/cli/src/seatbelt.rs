@@ -23,7 +23,11 @@
 //! in the Tool-calls section rather than the user having to have been watching
 //! the terminal at the time. (The run-scoped `SecretDenied` / `PinRejected`
 //! events carry the same fact structured for `--json`; the terminal report
-//! renders the `CallRecord`, not those variants.)
+//! renders the `CallRecord`, not those variants. The one exception is
+//! `FenceRefused`: a fence refusal is not a call the run made, so the audit
+//! row it writes is deliberately outside the Tool-calls section the report
+//! builds from `ToolCall` events — the run report renders the event itself,
+//! in its own section, or the refusal would be invisible there.)
 //!
 //! # The invariant this module must never break
 //!
@@ -355,6 +359,36 @@ pub fn record_trust_refused(
         server: server.to_string(),
         tool: tool.to_string(),
         state: state.to_string(),
+        reason: reason.to_string(),
+    });
+}
+
+/// The run-scoped mirror for a toolset-fence refusal: a call the gateway did
+/// not hold an upstream for, because the project fences its servers behind
+/// toolsets and no open lease selects one that exposes this server (W4).
+///
+/// `server`, `tool`, and `toolset` must already have been through
+/// [`bounded_reason`], for the same reason [`record_trust_refused`] insists on
+/// it: all three are manifest- or wire-derived (hostile input, invariant 7),
+/// and passing them pre-bounded keeps the log line and the terminal line
+/// identical. Evidence that differs from what was shown is worse than no
+/// evidence.
+pub fn record_fence_refused(
+    run: Option<&str>,
+    server: &str,
+    tool: &str,
+    toolset: Option<&str>,
+    reason: &str,
+) {
+    let Some(run) = run else { return };
+    let Some(log) = RunLog::create(run) else {
+        return;
+    };
+    log.append(&RunEvent::FenceRefused {
+        ts: now_epoch(),
+        server: server.to_string(),
+        tool: tool.to_string(),
+        toolset: toolset.map(str::to_string),
         reason: reason.to_string(),
     });
 }

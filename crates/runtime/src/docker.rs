@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use bollard::models::{ContainerCreateBody, HostConfig};
+use bollard::models::{ContainerCreateBody, HostConfig, ResourcesUlimits};
 use bollard::query_parameters::{
     CreateContainerOptionsBuilder, LogsOptionsBuilder, RemoveContainerOptionsBuilder,
     StartContainerOptions, WaitContainerOptions,
@@ -160,6 +160,18 @@ impl Sandbox for DockerSandbox {
                 .security
                 .no_new_privileges
                 .then(|| vec!["no-new-privileges:true".into()]),
+            // `RLIMIT_FSIZE`, set soft == hard so the guest cannot even raise
+            // its own soft limit. This is what bounds a read-write FILE bind:
+            // a `tmpfs` size caps a container-private filesystem, but a bind's
+            // bytes land in the host inode, so only a limit on the writer
+            // reaches it. Docker takes this value in bytes.
+            ulimits: spec.security.file_size_bytes.map(|bytes| {
+                vec![ResourcesUlimits {
+                    name: Some("fsize".into()),
+                    soft: Some(bytes),
+                    hard: Some(bytes),
+                }]
+            }),
             tmpfs: (!spec.security.tmpfs.is_empty()).then(|| {
                 spec.security
                     .tmpfs

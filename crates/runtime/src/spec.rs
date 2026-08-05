@@ -55,8 +55,31 @@ pub struct SandboxSecurity {
     pub pids_limit: Option<i64>,
     pub drop_all_capabilities: bool,
     pub no_new_privileges: bool,
+    /// `RLIMIT_FSIZE` for every process in the container, in BYTES (the raw
+    /// rlimit unit Docker's `--ulimit fsize=` takes, not the 512-byte blocks
+    /// `ulimit -f` prints). The kernel refuses to extend ANY file past this
+    /// and kills the writer with `SIGXFSZ`.
+    ///
+    /// This is the only kernel-level size bound available for a read-write
+    /// *file* bind. A `tmpfs` size caps a container-private filesystem, so it
+    /// cannot bound a bind: the bytes land in the host inode, and no mount
+    /// option limits how many of them there are. `RLIMIT_FSIZE` bounds the
+    /// writer instead of the mount, which reaches the bind. With capabilities
+    /// dropped and `no-new-privileges` set the guest cannot raise its own hard
+    /// limit, so it is not cooperative.
+    pub file_size_bytes: Option<i64>,
     pub tmpfs: BTreeMap<String, String>,
 }
+
+/// Kernel ceiling on any single file the hardened executor's guest can write,
+/// including the read-write result-file bind. Four times the host's 1 MiB
+/// `agentstack_executor::MAX_RESULT_BYTES` read refusal, so it cannot clip a
+/// result the host would have accepted (a legitimate result is at most 1 MiB
+/// by definition — over that the host refuses to read it anyway), while still
+/// bounding what a hostile guest can push onto host disk to a quarter of the
+/// 16 MiB `/tmp` tmpfs below. The two limits are complementary: this stops the
+/// write, `MAX_RESULT_BYTES` stops the read.
+const EXECUTOR_MAX_FILE_BYTES: i64 = 4 * 1024 * 1024;
 
 impl SandboxSecurity {
     pub fn hardened_executor() -> Self {
@@ -68,6 +91,7 @@ impl SandboxSecurity {
             pids_limit: Some(32),
             drop_all_capabilities: true,
             no_new_privileges: true,
+            file_size_bytes: Some(EXECUTOR_MAX_FILE_BYTES),
             tmpfs: BTreeMap::from([(
                 "/tmp".into(),
                 "rw,noexec,nosuid,nodev,size=16m,mode=1777".into(),

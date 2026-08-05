@@ -606,6 +606,14 @@ fn declares_toolsets(base: &Path) -> bool {
 /// call is dispatched here and no authority is constructed, only the sentence
 /// and the record that the refusal already deserved.
 ///
+/// **Two destinations, like its siblings.** The machine-global `calls.jsonl`
+/// row (`tool: "fence"`, outcome denied) always, so a refusal outside a
+/// tracked run is not lost; and, inside an `agentstack run`, the run-scoped
+/// [`agentstack_recorder::RunEvent::FenceRefused`] mirror, so
+/// `agentstack report run <id>` shows it beside the rest of that run's story.
+/// The mirror is not redundant: the report builds its Tool-calls section from
+/// `ToolCall` events, and a fence refusal is deliberately not one of those.
+///
 /// **Declared, not merely unknown.** Evidence is written only when the project
 /// declares `server` somewhere — inline or in a toolset. Then the refusal is
 /// security-relevant: a real capability exists and the fence is what stands
@@ -643,19 +651,22 @@ fn fence_refusal(
     // input, invariant 7 — so they are bounded before they reach a terminal or
     // a log, exactly as the trust refusal bounds its own.
     let subject = crate::seatbelt::bounded_reason(server);
-    let attempted = format!("call {}", crate::seatbelt::bounded_reason(tool));
+    let bounded_tool = crate::seatbelt::bounded_reason(tool);
+    let attempted = format!("call {bounded_tool}");
     let why = "this project fences its servers behind toolsets, and no open lease selects one that exposes it";
     // The toolsets are listed in manifest order, so the name suggested is
     // stable across calls. A declared server that no toolset selects has no
     // lease to open, and saying so beats naming a toolset that would not help.
-    let next_step = match manifest
+    // Bound it once here so the sentence and the run-scoped event name the
+    // toolset with byte-identical text.
+    let toolset = manifest
         .profiles
         .iter()
         .find(|(_, p)| p.servers.iter().any(|s| s == server))
-    {
-        Some((toolset, _)) => format!(
-            "open a lease for the toolset that selects it: `agentstack_lease_open` profile={}",
-            crate::seatbelt::bounded_reason(toolset)
+        .map(|(name, _)| crate::seatbelt::bounded_reason(name));
+    let next_step = match &toolset {
+        Some(toolset) => format!(
+            "open a lease for the toolset that selects it: `agentstack_lease_open` profile={toolset}"
         ),
         None => "no toolset selects this server — add it to one in agentstack.toml, then open a lease for that toolset".to_string(),
     };
@@ -670,6 +681,19 @@ fn fence_refusal(
         &denial,
         Some(ctx.dir.display().to_string()),
         gateway.run_id(),
+    );
+    // The second destination, the one the other families already wrote to: a
+    // fence refusal inside a tracked run belongs in that run's own event log
+    // too, or `agentstack report run <id>` cannot show that a fence refused
+    // anything. The audit row above is machine-global and — because a fence
+    // refusal is not a `ToolCall` — the report's Tool-calls section never
+    // reaches it.
+    crate::seatbelt::record_fence_refused(
+        gateway.run_id(),
+        &subject,
+        &bounded_tool,
+        toolset.as_deref(),
+        why,
     );
     Some(denial.sentence())
 }
