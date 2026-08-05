@@ -269,7 +269,8 @@ agentstack doctor    # every check, each finding followed by ↳ its fix</code><
 <pre class="block"><code>→ Restart or reopen your agent CLIs so they pick up the new config.
   undo: agentstack x restore --last --write</code></pre>
 <p>Restart the CLI first, then work down this list.</p>
-<p>Under the default routing there is often <strong>no file to look at</strong> — an MCP-capable CLI is served live. <code>agentstack why &lt;name&gt;</code> states where that capability came from, whether it is pinned and approved, which CLIs serve it live, which get a file, and what it reaches. Start there before hunting for a config on disk.</p>
+<p>Under the default routing there is often <strong>no file to look at</strong> — an MCP-capable CLI is served live. <code>agentstack x why &lt;name&gt;</code> states where that capability came from, whether it is pinned and approved, which CLIs serve it live, which get a file, and what it reaches. Start there before hunting for a config on disk.</p>
+<p>If a write was <em>refused</em> rather than skipped, the cause is almost always the trust gate — jump to <a href="#it-refuses-because-the-project-isnt-trusted">it refuses because the project isn't trusted</a>.</p>
 <p><strong><code>Claude Code    1 change pending ↳ agentstack apply --write</code></strong></p>
 <p>The manifest declares something the native config does not have yet. Nothing is written until you ask.</p>
 <pre class="block"><code>agentstack apply --write</code></pre>
@@ -302,7 +303,7 @@ agentstack doctor    # every check, each finding followed by ↳ its fix</code><
 agentstack apply --write</code></pre>
 <p><strong><code>✗ not written — unresolved secrets; set them or pass --allow-unresolved</code></strong></p>
 <p>The per-target consequence of the line above: that config file was left untouched. <code>--allow-unresolved</code> writes the literal <code>${REF}</code> through to the native config, which is occasionally what you want (the harness expands it itself) and usually not.</p>
-<p><strong><code>error: blocked write on 1 target — fix: agentstack secret set LINEAR_TOKEN (or pass --allow-unresolved)</code></strong></p>
+<p><strong><code>error: 1 blocked write on 1 target — fix: agentstack secret set LINEAR_TOKEN (or pass --allow-unresolved)</code></strong></p>
 <p>The closing line, and a <strong>nonzero exit</strong> — scripts and CI must not read a blocked <code>apply --write</code> as success. It names every missing ref, so the fix is copy-pasteable.</p>
 <pre class="block"><code>✗ secret read failed LINEAR_TOKEN (server 'linear') — keychain read failed: A
   default keychain could not be found. ↳ run `agentstack secret set LINEAR_TOKEN`,
@@ -343,13 +344,77 @@ agentstack apply --write     # the manifest is right: re-render over the disk</c
 <p><strong><code>{name}    content drifted from lock ↳ agentstack lock --write</code></strong></p>
 <p>A different kind of drift: the <em>pinned bytes</em> of a skill, server, instruction, extension or workflow changed since <code>agentstack.lock</code> was written. Use sites fail closed until you re-pin.</p>
 <pre class="block"><code>agentstack lock --write</code></pre>
+<pre class="block"><code>{name}    content changed since you approved it — the pinned bytes and the files
+          on disk differ; re-pin it, then review and re-trust with
+          `agentstack trust .` ↳ agentstack lock --write</code></pre>
+<p>The same drift on a project you have already <strong>trusted</strong>, and the wording says what that costs you: re-pinning is not the whole fix. <code>lock --write</code> accepts the new bytes and, because the lockfile is part of the consent surface, immediately marks your grant stale. Two steps, in this order:</p>
+<pre class="block"><code>agentstack lock --write    # accept the new bytes
+agentstack trust .         # review them and re-grant</code></pre>
+<p>Full explanation: <a href="#i-re-locked-and-it-still-will-not-deliver">I re-locked and it still will not deliver</a>.</p>
 <p><strong><code>{name}    not locked ↳ agentstack lock --write</code></strong> / <strong><code>{name}    from library, not locked ↳ agentstack lock --write</code></strong></p>
 <p>Something the manifest references has no lock entry at all. Same fix.</p>
 <p><strong><code>error: existing config is not valid JSON: expected ident at line 1 column 2</code></strong></p>
 <p>agentstack refuses to write into a file it cannot parse, because merging into broken JSON would destroy it. Open the named file, fix the syntax, re-run. If the file is unsalvageable, <code>agentstack x restore &lt;adapter&gt;</code> puts back its single-slot backup.</p>
+<h3 id="settings-drift-is-reported-as-two-legs-with-two-different-fixes">Settings drift is reported as two legs, with two different fixes<a class="hlink" href="#settings-drift-is-reported-as-two-legs-with-two-different-fixes" aria-label="Link to this section">#</a></h3>
+<p><code>[settings.*]</code> values are pinned per key, so <code>doctor</code>'s <strong>Settings</strong> section answers two separate questions and never merges them. Read the <code>↳</code> — it tells you which leg moved.</p>
+<p><strong>Leg 1 — the declaration no longer matches the pin.</strong> Fix with <code>lock --write</code>.</p>
+<pre class="block"><code>Claude Code    2 keys not pinned in agentstack.lock (model, permissions) ↳ agentstack lock --write
+Claude Code    1 declared key moved since the lock was written (model) ↳ agentstack lock --write</code></pre>
+<p>The first line is also what a lockfile written before settings pins existed reports; it is an advisory, not an error, and the next <code>lock --write</code> backfills it.</p>
+<p><strong>Leg 2 — the declaration no longer matches the file on disk.</strong> Fix with <code>apply --write</code>.</p>
+<pre class="block"><code>Claude Code    2 keys not yet in {path}/.claude/settings.json (model, permissions) ↳ agentstack apply --write
+Claude Code    1 owned key in {path}/.claude/settings.json drifted from the declared value (model) ↳ agentstack apply --write</code></pre>
+<p><code>not yet in</code> means the merge has not happened; <code>drifted from the declared value</code> means it happened and something changed the key afterwards. Only keys agentstack declares are named — your own unrelated edits elsewhere in <code>settings.json</code> are never reported as drift.</p>
 <p>More: <a href="reference.html#drift-adopt-or-apply">drift — adopt or apply?</a> and <a href="concepts.html#drift">concepts — drift</a>.</p>
 <h2 id="it-refuses-because-the-project-isnt-trusted">It refuses because the project isn't trusted<a class="hlink" href="#it-refuses-because-the-project-isnt-trusted" aria-label="Link to this section">#</a></h2>
 <p>Untrusted means <strong>inert</strong>: a cloned repository's declarations cannot spawn servers, enter agent context, or resolve secrets until a human has read them. A consented <code>agentstack init</code> records trust for you, so in practice this gate shows up in two places — a repo you cloned, and a manifest that changed since you approved it.</p>
+<h3 id="the-five-kinds-the-gate-holds-back">The five kinds the gate holds back<a class="hlink" href="#the-five-kinds-the-gate-holds-back" aria-label="Link to this section">#</a></h3>
+<p>Every refusal below opens with <code>refusing to …</code> and closes the same way: nothing is written, the run <strong>exits nonzero</strong>, and the fix is always <code>agentstack trust .</code>. The two halves of each <code>is not trusted</code> line change to <code>changed since it was trusted</code> when the project <em>was</em> approved and its bytes moved since.</p>
+<p><strong>MCP server config</strong> — from <code>apply --write</code> and <code>use --write</code>. No <code>.mcp.json</code>, no <code>[mcp_servers]</code> block. The per-target consequence follows on its own line.</p>
+<pre class="block"><code>✗ refusing to render MCP servers: project at {dir} is not trusted — review and
+  `agentstack trust .` before writing server definitions the harness launches on
+  its own ('notes')
+✗ not written — the project has not been trusted for this content</code></pre>
+<p><strong>Skill files</strong> — from <code>use --write</code>. No skill directory or symlink lands in <code>.claude/skills/</code> or its per-CLI equivalents. (<code>session start</code> never reaches this line: it refuses up front with its own message, below.)</p>
+<pre class="block"><code>✗ refusing to materialize skills: project at {dir} is not trusted — review and
+  `agentstack trust .` before putting its words into an agent's context ('notes')
+✗ skills not materialized — the project has not been trusted for this content</code></pre>
+<p><strong>Instruction fragments</strong> — from <code>apply --write</code>. Nothing is compiled into the managed region of <code>CLAUDE.md</code> / <code>AGENTS.md</code>: a repo's prose reaches the model only after a yes.</p>
+<pre class="block"><code>✗ refusing to render instructions: project at {dir} is not trusted — review and
+  `agentstack trust .` before putting its words into the managed region a harness
+  reads straight into an agent's context ('house')
+✗ instructions not written — the project has not been trusted for this content</code></pre>
+<p><code>agentstack x instructions --write</code> refuses the same content with a shorter pair of lines, and the same nonzero exit:</p>
+<pre class="block"><code>✗ not written — the project has not been trusted for this content
+error: 1 instruction file not written — the project has not been trusted for this
+content — review and `agentstack trust .`</code></pre>
+<p><strong>Hooks</strong>, which the harness runs at full user permission.</p>
+<pre class="block"><code>✗ refusing to render hooks: project at {dir} is not trusted — review and
+  `agentstack trust .` before rendering hook commands the harness runs at full
+  user permission ('fmt')
+✗ hooks not written — the project has not been trusted for this content</code></pre>
+<p><strong>Extensions</strong>, which are executable code. This one aborts the command outright.</p>
+<pre class="block"><code>error: refusing to render native extensions: project at {dir} is not trusted —
+review and `agentstack trust .` before rendering executable extension code</code></pre>
+<p>Hooks and extensions run code, so they take the full consent ceremony every time and accept no relaxation at all.</p>
+<p>The command's closing line names the count, and the exit code is nonzero — a script must not read a refused write as success:</p>
+<pre class="block"><code>Wrote 0 of 1 target; 1 blocked — see the ✗ line for each; see ✗ above.
+error: 1 blocked write on 1 target — each ✗ above names the blocker</code></pre>
+<pre class="block"><code>⚠ activated 'default' on 0 targets (wrote 0); 2 targets BLOCKED: Claude Code, Claude Code
+error: 2 targets blocked — each ✗ above names the blocker</code></pre>
+<p><strong>What the gate does <em>not</em> hold back.</strong> Pruning and removal, machine-layer content, the machine manifest at <code>~/.agentstack/agentstack.toml</code>, and <code>[settings.*]</code> values all go through on an untrusted project. Seeing <code>✓ wrote 1 setting</code> next to a refusal is correct, not a leak: none of them authorizes new content — a settings value declares no code to run, and taking a server away can only shrink what a CLI can reach.</p>
+<p>One caveat on removal: the gate blocks a <em>target</em>, not one entry. If the same config file still has something the gate refuses, the whole write is skipped and the planned prune waits with it:</p>
+<pre class="block"><code>− pruning 'notes' (no longer in manifest)
+✗ refusing to render MCP servers: project at {dir} is not trusted …
+✗ not written — the project has not been trusted for this content</code></pre>
+<p>When the prune is all that is left, it lands:</p>
+<pre class="block"><code>− pruning 'notes' (no longer in manifest)
+− removed empty {dir}/.mcp.json
+1 target in sync — wrote 1.</code></pre>
+<p>The <code>doctor</code> forms of the same state:</p>
+<pre class="block"><code>⚠ Claude Code    servers not delivered — project not trusted ↳ agentstack trust .
+⚠ Claude Code    hooks not delivered — project not trusted ↳ agentstack trust .</code></pre>
+<h3 id="the-session-and-probe-refusals">The session and probe refusals<a class="hlink" href="#the-session-and-probe-refusals" aria-label="Link to this section">#</a></h3>
 <pre class="block"><code>error: refusing to start a session: this project is not trusted — review and
 trust it with `agentstack trust` (or the UI trust review), then retry</code></pre>
 <pre class="block"><code>agentstack trust .</code></pre>
@@ -358,8 +423,60 @@ trust it with `agentstack trust` (or the UI trust review), then retry</code></pr
 project was trusted — review with `agentstack trust` (or the UI trust review),
 then retry</code></pre>
 <p>Trust is bound to content. A <code>git pull</code>, or your own edit to the manifest or lockfile, invalidates the old approval — that re-gate is the feature. Review what changed, then re-trust.</p>
+<pre class="block"><code>refusing to probe: this project is not trusted — starting its servers would run
+code nobody has reviewed ↳ agentstack trust
+refusing to probe: the manifest or lockfile changed since this project was
+trusted ↳ agentstack trust</code></pre>
+<p><code>doctor --probe</code> warns rather than aborting, and finishes the rest of the report.</p>
 <p><strong><code>trusted, but the manifest or lockfile changed since it was last reviewed ↳ agentstack trust</code></strong></p>
-<p>The <code>doctor</code> form of the same state. <code>agentstack status</code> calls it <code>trust stale (content changed)</code>.</p>
+<p>The <code>doctor</code> form of the same state. <code>agentstack status</code> calls it <code>trust stale (content changed)</code> and names the next step:</p>
+<pre class="block"><code>Next:  agentstack trust .   the content changed since you reviewed it — review and re-trust</code></pre>
+<a id="lock-first-then-trust"></a>
+<h3 id="lock---write-invalidates-the-grant--lock-first-then-trust"><code>lock --write</code> invalidates the grant — lock first, then trust<a class="hlink" href="#lock---write-invalidates-the-grant--lock-first-then-trust" aria-label="Link to this section">#</a></h3>
+<p>The lockfile is part of the consent surface, so <strong>re-pinning is new consent</strong>. Running <code>lock --write</code> on a project you have already trusted always leaves the grant stale, and <code>lock</code> says so before it says anything else:</p>
+<pre class="block"><code>⚠ this project is trusted — new pins are new consent, so its trust is now stale; re-review and re-grant with `agentstack trust .`</code></pre>
+<p>So the order is fixed, and it is the reverse of what most people try:</p>
+<pre class="block"><code>agentstack lock --write   # 1. pin the bytes
+agentstack trust .        # 2. review and approve the pinned bytes</code></pre>
+<p>Trusting first and locking after simply throws the approval away. <code>trust</code> will not even let you go the other way round — an unpinned surface is not approvable:</p>
+<pre class="block"><code>error: cannot trust {path}: its loadable surface isn't fully pinned — 1 item needs locking or review:
+  notes  inline skill unpinned — run `agentstack lock --write`
+Pin with `agentstack lock --write`, then review and trust with `agentstack trust .`.</code></pre>
+<a id="i-re-locked-and-it-still-will-not-deliver"></a>
+<h3 id="i-re-locked-and-it-still-will-not-deliver">"I re-locked and it still will not deliver"<a class="hlink" href="#i-re-locked-and-it-still-will-not-deliver" aria-label="Link to this section">#</a></h3>
+<p>This is the same rule seen from the other end, and it is the most common surprise. You edited a pinned skill, server or instruction. Delivery failed closed on the lock:</p>
+<pre class="block"><code>error: refusing to activate 'default': 1 pinned item changed since agentstack.lock was written —
+  notes  skill content drifted from agentstack.lock (locked 0bc689f0eecd, current 49abb4cbcab0)
+Review the changes with `agentstack lock`, then run `agentstack lock --write` to accept them (re-locking re-gates the project for auto mode).</code></pre>
+<p><code>apply --write</code> fails the same way for an instruction fragment, under a different opening sentence:</p>
+<pre class="block"><code>error: refusing to compile instructions for {dir}/.agentstack: 1 pinned item changed since agentstack.lock was written —
+  house  instruction content drifted from agentstack.lock (locked 1718cc28481d, current a1aecdd87ab5)</code></pre>
+<p>You then ran <code>agentstack lock --write</code>, as instructed — and the next command refuses again, now with the <em>drifted</em> wording:</p>
+<pre class="block"><code>✗ refusing to materialize skills: project at {dir} changed since it was trusted — review and `agentstack trust .` before putting its words into an agent's context ('notes')</code></pre>
+<p>Nothing is broken. Re-locking accepts the new bytes; it does not review them. Accepting content is a machine's job, reviewing it is yours, and only the second one delivers. Read the parenthesis in the first message literally — <em>re-locking re-gates the project</em>. The complete fix is three commands:</p>
+<pre class="block"><code>agentstack lock            # see what moved
+agentstack lock --write    # accept the new bytes
+agentstack trust .         # review them — this is what unblocks delivery</code></pre>
+<h3 id="i-added-a-skill-and-now-everything-else-refuses">"I added a skill and now everything else refuses"<a class="hlink" href="#i-added-a-skill-and-now-everything-else-refuses" aria-label="Link to this section">#</a></h3>
+<p><code>agentstack add … --write</code> and the panel's edit verbs write the manifest and the lockfile <strong>and</strong> deliver, in one run. They judge trust as it stood when the command started, so the thing you just asked for is not refused by the bytes you just asked it to write:</p>
+<pre class="block"><code>✓ added 'tidy'.
+  ✓ claude-code: 1 skill → {dir}/.claude/skills</code></pre>
+<p>But they deliberately do <strong>not</strong> re-pin the grant. The new capability is real content and still owes you a review, so the project is left stale and the <em>next</em> command re-gates:</p>
+<pre class="block"><code>Status    locked · trust stale (content changed)
+Next:  agentstack trust .   the content changed since you reviewed it — review and re-trust</code></pre>
+<pre class="block"><code>agentstack trust .</code></pre>
+<p>If the delivery half failed too, <code>add</code> names the order for you:</p>
+<pre class="block"><code>error: 1 target failed to materialize (the manifest and lock writes stand — each ✗
+above names the blocker; if it is consent, review with `agentstack trust .`, then
+`agentstack use --write`)</code></pre>
+<h3 id="writes-that-keep-your-grant">Writes that keep your grant<a class="hlink" href="#writes-that-keep-your-grant" aria-label="Link to this section">#</a></h3>
+<p>Not every manifest write costs you a review. A write that records a <em>preference</em> — it declares no capability and runs no code — carries valid trust across itself, so the documented next step is not refused by the bytes the command just wrote:</p>
+<ul>
+<li><code>agentstack x delivery render-locally [--harness &lt;id&gt;] --write</code></li>
+<li>the <code>.gitignore</code> preference (<code>[meta] gitignore</code>, set by <code>init</code>)</li>
+</ul>
+<p>Both re-pin <strong>only</strong> when trust was valid immediately before the write. An untrusted project stays untrusted, and a review already pending stays pending — neither command can create or resolve a grant.</p>
+<h3 id="other-trust-messages">Other trust messages<a class="hlink" href="#other-trust-messages" aria-label="Link to this section">#</a></h3>
 <p><strong><code>not trusted — 1 CLI uses the gateway, but this project's 1 server is not proxied ↳ agentstack trust &lt;path&gt;</code></strong></p>
 <p>A harness is wired to the gateway, this project declares servers, and none of them reach the agent — every session here silently gets control-plane tools only.</p>
 <p><strong><code>not trusted for auto mode — untrusted repos get control-plane tools only ↳ agentstack trust</code></strong></p>
@@ -374,9 +491,7 @@ agentstack trust --yes --consented-digest sha256:…</code></pre>
 trust --preview`, review the surface, and pass its `surface_digest` back</code></pre>
 <p><code>--yes</code> alone would make "the user saw the review" the caller's claim rather than a checked fact.</p>
 <p><strong><code>cannot trust {path}: its loadable surface isn't fully pinned — N items need locking or review</code></strong></p>
-<p>Trust binds to bytes, so everything loadable must be pinned first.</p>
-<pre class="block"><code>agentstack lock --write   # pin whatever is unpinned
-agentstack trust .  # then review and approve the pinned surface</code></pre>
+<p>Trust binds to bytes, so everything loadable must be pinned first. Full output and the ordering rule: <a href="#lock-first-then-trust">lock first, then trust</a>.</p>
 <p><strong><code>error: refusing to apply without --consented &lt;digest&gt; — run --preview first, review, then pass the digest it printed</code></strong></p>
 <p>From the digest-bound panel actions (<code>create-profile</code>, <code>use-profile</code>, <code>add-server-to-profile</code>, <code>add-skill-to-profile</code>). Run the same command with <code>--preview</code>, read the JSON, then re-run with <code>--yes --consented &lt;digest&gt;</code>.</p>
 <p>To withdraw consent at any time:</p>

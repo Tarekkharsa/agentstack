@@ -273,6 +273,12 @@ agentstack run claude-code --sandbox --lockdown  # container, no route out</code
 <li><code>run --sandbox</code> launches the CLI inside a Docker container with the project mounted as its workspace and HTTPS routed through a host-side egress proxy. The container's bridge network still has a direct route a proxy-ignoring process could use. Posture: <code>SANDBOX / PROXIED · DIRECT ROUTE OPEN</code>.</li>
 <li><code>run --sandbox --lockdown</code> puts the container on an internal-only network whose sole peer is the egress sidecar — no host route, no internet. Posture: <code>LOCKDOWN / ENFORCED · NO DIRECT ROUTE</code>.</li>
 </ul>
+<p><strong>Content trust is the gate you meet first.</strong> "Enforces content trust before launch" means a protected run of an untrusted or drifted project is refused, not downgraded. <code>--plan</code> tells you so without launching anything, and the message carries the fix in the order it has to happen:</p>
+<pre class="block"><code>error: a live `run claude-code --locked` would be REFUSED — 1 blocker:
+  [trust] configuration changed since it was trusted — re-review and re-trust.
+  If you changed pinned inputs, run `agentstack lock --write` first — new pins
+  re-gate trust.</code></pre>
+<p>Lock, then <code>agentstack trust .</code>, then run — see <a href="../howto/trust-a-repo.html">trust a cloned repo</a>. <code>--unprotected</code> is the only way past it, and it drops the whole pre-launch gate, not just this check.</p>
 <p>Point <code>AGENTSTACK_SANDBOX_IMAGE</code> at an image that carries your agent CLI. The lockdown egress sidecar is pulled from GHCR automatically, pinned per release (override with <code>AGENTSTACK_EGRESS_IMAGE</code>).</p>
 <p>After a run, <code>agentstack x report run &lt;id&gt;</code> replays its posture label and every egress and tool-call decision — see <a href="../howto/see-what-happened.html">see what your agents did</a>.</p>
 <p><strong>Limits.</strong> The posture labels name each mode's ceiling honestly: the protected default is pre-launch gating plus a frozen surface, not a kernel fence — the harness still runs as you, on the host — and only <code>--lockdown</code> is topologically confined. What each mode actually enforces per dimension, with every strength caveat, is the <a href="../enforcement.html#the-matrix">enforcement matrix</a>.</p>

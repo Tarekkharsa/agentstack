@@ -83,8 +83,13 @@ Files in the rendered lane are written either way.
 
 That same directory arriving in a repository you *cloned* behaves differently: it
 stays inert until you review it — no server spawns, no skill enters an agent's
-context, no secret resolves — and nothing a project declares can loosen the
-limits your own machine sets.
+context, no secret resolves, and no file is written for it either. `apply --write`
+and `use --write` refuse to render an untrusted project's servers, skills,
+instructions, hooks, and extensions, and name `agentstack trust .` as the fix;
+editing the manifest or the lock afterwards drops the project back to
+untrusted until you review it again. Running `init` yourself needs no such
+step — building the setup *is* the consent. And nothing a project declares can
+loosen the limits your own machine sets.
 
 `init` is a guided wizard. Scripting or CI?
 [Use it in CI](https://tarekkharsa.github.io/agentstack/howto/ci.html).
@@ -100,7 +105,7 @@ Here is the whole loop, condensed from a real run of the current binary:
    CLI's own config keeps its copy until you apply at global scope).
 3. **Connect** — `agentstack x gateway connect --all --write`: the live lane
    needs one bridge registered per MCP-capable CLI.
-4. **Route** — `agentstack delivery`: both CLIs are MCP-capable, so the servers
+4. **Route** — `agentstack x delivery`: both CLIs are MCP-capable, so the servers
    are served live and no file is written for them. The project holds
    `.agentstack/` and the `.gitignore` that hides the lifted secret — no native
    config at all.

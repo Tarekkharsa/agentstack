@@ -273,8 +273,45 @@ agentstack trust .          # review what it declares, then pin its digest
 agentstack trust --list     # every trusted project + whether it still matches
 agentstack trust --revoke   # withdraw trust</code></pre>
 <p><code>gateway connect --all --write</code> registers agentstack's gateway once in each CLI's global MCP (<a href="../concepts.html">Model Context Protocol</a>) config. After that, every repo you open serves its own MCP servers with no files copied in — but a repo you just cloned is <strong>inert</strong>: none of its servers run or are contacted, and no secrets resolve, until you run <code>agentstack trust .</code>. Trust shows exactly what the manifest runs and contacts, then pins the <a href="../concepts.html">consent digest</a> of the <a href="../concepts.html">manifest</a>, its local overlay, and the <a href="../concepts.html">lockfile</a>. Any edit — a <code>git pull</code>, an <code>agentstack lock --write</code> — drops the repo back to inert until you trust it again. To vet one server or skill in depth first — its provenance, effective policy, and context cost — run <code>agentstack x explain &lt;name&gt;</code>; see <a href="../howto/see-what-happened.html">see what your agents did</a>.</p>
-<p><strong>What trust covers, and what it doesn't.</strong> Trust pins those three files and gates whether the declared servers may run; it does <strong>not</strong> vouch for the code those servers point at. A server that runs a local script authorizes <em>that command</em>, not later edits to it — so review referenced scripts as part of <code>trust .</code>, the way you'd read a <code>.envrc</code> before <code>direnv allow</code>. The full boundary is the enforcement matrix's <a href="../enforcement.html#what-trusted-does-and-does-not-mean">What "trusted" does and does not mean</a>.</p>
-<p><strong>Limits.</strong> Trust is consent to a set of bytes, not a sandbox. It gates activation; it does not confine a server once it runs. For runtime confinement, see <a href="../howto/lock-down-a-run.html">lock down a run</a>.</p>
+<h2 id="what-the-review-gates">What the review gates<a class="hlink" href="#what-the-review-gates" aria-label="Link to this section">#</a></h2>
+<p>The gate is not only about the live lane. Until this project is trusted at its current bytes, <strong>five kinds of delivery refuse</strong> — every one of them a way the repo's own words or commands would otherwise reach an agent:</p>
+<div class="tblwrap"><table>
+<thead><tr><th>Refused until reviewed</th><th>The command that hits it</th></tr></thead><tbody>
+<tr><td>MCP server definitions written into a CLI's native config</td><td><code>agentstack apply --write</code></td></tr>
+<tr><td>Skill files materialized into a CLI's skills directory</td><td><code>agentstack use --write</code>, <code>agentstack add skill … --write</code></td></tr>
+<tr><td>Instruction fragments compiled into the managed <code>CLAUDE.md</code> / <code>AGENTS.md</code> region</td><td><code>agentstack apply --write</code>, <code>agentstack x instructions --write</code></td></tr>
+<tr><td>Lifecycle hooks</td><td><code>agentstack apply --write</code></td></tr>
+<tr><td>Native harness extensions</td><td><code>agentstack apply --write</code></td></tr>
+</tbody></table></div>
+<p>Serving over the gateway is gated the same way, and so are <code>agentstack x session start</code> and a protected <code>agentstack run</code> — those two refuse outright rather than deliver a partial setup.</p>
+<p><strong>What stays outside it.</strong> Three things deliberately do not ask:</p>
+<ul>
+<li><strong>Taking bytes off disk.</strong> A removal-only plan — deactivation, <code>agentstack x unrender --write</code>, <code>agentstack x restore --write</code>, <code>agentstack x uninstall --write</code>, hook and extension pruning — is the inert direction, so it keeps working in a repo you have not trusted. You can always undo, and you never need consent to remove.</li>
+<li><strong>Your machine layer.</strong> The machine manifest in <code>$AGENTSTACK_HOME</code> is your own personal setup, not a project, so <code>trust</code> can never reach it — gating it would make machine-level capabilities permanently undeliverable rather than merely pending a review no command can perform.</li>
+<li><strong>A command reviewing its own write.</strong> <code>agentstack add … --write</code> is judged against the trust state as it stood <em>before</em> it wrote, because a command must not refuse the very thing you typed it to get. In an already-trusted project the add still delivers; it then leaves the project reading drifted, so the next command asks for the review.</li>
+</ul>
+<h2 id="what-a-refusal-looks-like">What a refusal looks like<a class="hlink" href="#what-a-refusal-looks-like" aria-label="Link to this section">#</a></h2>
+<p>It is loud, it names the capability, and it exits nonzero. Nothing is written:</p>
+<pre class="block"><code>✗ refusing to materialize skills: project at /path/to/repo is not trusted —
+  review and `agentstack trust .` before putting its words into an agent's
+  context ('pdf-review')
+✗ skills not materialized — the project has not been trusted for this content
+error: 3 targets blocked — each ✗ above names the blocker</code></pre>
+<p>A repo you cloned and never reviewed says <strong>is not trusted</strong>; a repo whose manifest, overlay, or lockfile moved since you said yes says <strong>changed since it was trusted</strong>. Both are fixed by the same command, <code>agentstack trust .</code>.</p>
+<h2 id="lock-first-then-trust">Lock first, then trust<a class="hlink" href="#lock-first-then-trust" aria-label="Link to this section">#</a></h2>
+<p>The <a href="../concepts.html">lockfile</a> is part of the consent surface, so <code>agentstack lock --write</code> <strong>invalidates a grant you already have</strong> — new pins are new consent. That fixes the order for good:</p>
+<pre class="block"><code>agentstack lock --write     # pin the new bytes (this re-opens consent)
+agentstack trust .          # review what moved, then approve it
+agentstack use --write      # …now it activates</code></pre>
+<p>The reverse order costs you the review twice. It also means re-locking is not a way past a refusal: when pinned content has drifted, <code>agentstack lock --write</code> accepts the new bytes but does <strong>not</strong> deliver them — accepting content is not an answer to the consent question it reopens. <code>lock --write</code> says so as it runs:</p>
+<pre class="block"><code>⚠ this project is trusted — new pins are new consent, so its trust is now
+  stale; re-review and re-grant with `agentstack trust .`</code></pre>
+<p><code>agentstack trust</code> honours the global <code>--manifest-dir &lt;dir&gt;</code> flag, so you can review a project without changing into it.</p>
+<h2 id="limits">Limits<a class="hlink" href="#limits" aria-label="Link to this section">#</a></h2>
+<p><strong>What trust covers, and what it doesn't.</strong> Trust pins those three files and gates the five deliveries above; it does <strong>not</strong> vouch for the code the declared servers point at. A server that runs a local script authorizes <em>that command</em>, not later edits to it — so review referenced scripts as part of <code>trust .</code>, the way you'd read a <code>.envrc</code> before <code>direnv allow</code>. The full boundary is the enforcement matrix's <a href="../enforcement.html#what-trusted-does-and-does-not-mean">What "trusted" does and does not mean</a>.</p>
+<p><strong>It gates activation, not behaviour.</strong> Trust is consent to a set of bytes, not a sandbox: it decides whether a server may be delivered, never what it does once it runs. For runtime confinement, see <a href="../howto/lock-down-a-run.html">lock down a run</a>.</p>
+<p><strong>Re-trusting adds up.</strong> Consent is one grant over the whole project, not one per capability, and it is bound to bytes rather than to intent. So adding one server, pulling one commit, or re-pinning one skill drifts the single grant, and the next <code>apply</code>, <code>use</code>, or <code>session start</code> refuses until you review again — in a repo whose setup changes daily, that is a review per change. Two things keep it survivable: the review is a <strong>diff</strong>, marking only what moved since you last said yes (<code>+</code> added, <code>~</code> changed, <code>-</code> removed) rather than making you re-read the whole surface, and the undo direction never asks — deactivating, <code>x unrender --write</code>, and <code>x restore --write</code> all work untrusted, so postponing a review never traps you. The practical habit is to batch a run of edits, then spend one <code>lock --write</code> and one <code>trust .</code> on the lot.</p>
+<p><strong>And it does not travel.</strong> The grant lives in your own trust store, keyed by the project's path on this machine. A teammate, a second checkout of the same repo in another directory, a new laptop, and every fresh CI runner all start untrusted — by design, since consent is per person, per machine. See <a href="../howto/team-setup.html">share one setup with your team</a> and <a href="../howto/ci.html">use it in CI</a>.</p>
 <ul>
 <li><a href="../concepts.html">Concepts</a> — trust, gateway, consent digest, drift</li>
 <li><a href="../reference.html#the-zero-files-gateway---auto-project--trust">Reference: the zero-files gateway</a></li>

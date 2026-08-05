@@ -33,9 +33,13 @@ startup**. After any write, `apply` says so itself.
 Restart the CLI first, then work down this list.
 
 Under the default routing there is often **no file to look at** — an MCP-capable
-CLI is served live. `agentstack why <name>` states where that capability came
+CLI is served live. `agentstack x why <name>` states where that capability came
 from, whether it is pinned and approved, which CLIs serve it live, which get a
 file, and what it reaches. Start there before hunting for a config on disk.
+
+If a write was *refused* rather than skipped, the cause is almost always the
+trust gate — jump to
+[it refuses because the project isn't trusted](#it-refuses-because-the-project-isnt-trusted).
 
 **`Claude Code    1 change pending ↳ agentstack apply --write`**
 
@@ -134,7 +138,7 @@ untouched. `--allow-unresolved` writes the literal `${REF}` through to the
 native config, which is occasionally what you want (the harness expands it
 itself) and usually not.
 
-**`error: blocked write on 1 target — fix: agentstack secret set LINEAR_TOKEN (or pass --allow-unresolved)`**
+**`error: 1 blocked write on 1 target — fix: agentstack secret set LINEAR_TOKEN (or pass --allow-unresolved)`**
 
 The closing line, and a **nonzero exit** — scripts and CI must not read a
 blocked `apply --write` as success. It names every missing ref, so the fix is
@@ -257,6 +261,25 @@ fail closed until you re-pin.
 agentstack lock --write
 ```
 
+```text
+{name}    content changed since you approved it — the pinned bytes and the files
+          on disk differ; re-pin it, then review and re-trust with
+          `agentstack trust .` ↳ agentstack lock --write
+```
+
+The same drift on a project you have already **trusted**, and the wording says
+what that costs you: re-pinning is not the whole fix. `lock --write` accepts the
+new bytes and, because the lockfile is part of the consent surface, immediately
+marks your grant stale. Two steps, in this order:
+
+```bash
+agentstack lock --write    # accept the new bytes
+agentstack trust .         # review them and re-grant
+```
+
+Full explanation: [I re-locked and it still will not
+deliver](#i-re-locked-and-it-still-will-not-deliver).
+
 **`{name}    not locked ↳ agentstack lock --write`** / **`{name}    from library, not locked ↳ agentstack lock --write`**
 
 Something the manifest references has no lock entry at all. Same fix.
@@ -268,6 +291,36 @@ broken JSON would destroy it. Open the named file, fix the syntax, re-run. If
 the file is unsalvageable, `agentstack x restore <adapter>` puts back its
 single-slot backup.
 
+### Settings drift is reported as two legs, with two different fixes
+
+`[settings.*]` values are pinned per key, so `doctor`'s **Settings** section
+answers two separate questions and never merges them. Read the `↳` — it tells
+you which leg moved.
+
+**Leg 1 — the declaration no longer matches the pin.** Fix with `lock --write`.
+
+```text
+Claude Code    2 keys not pinned in agentstack.lock (model, permissions) ↳ agentstack lock --write
+Claude Code    1 declared key moved since the lock was written (model) ↳ agentstack lock --write
+```
+
+The first line is also what a lockfile written before settings pins existed
+reports; it is an advisory, not an error, and the next `lock --write` backfills
+it.
+
+**Leg 2 — the declaration no longer matches the file on disk.** Fix with
+`apply --write`.
+
+```text
+Claude Code    2 keys not yet in {path}/.claude/settings.json (model, permissions) ↳ agentstack apply --write
+Claude Code    1 owned key in {path}/.claude/settings.json drifted from the declared value (model) ↳ agentstack apply --write
+```
+
+`not yet in` means the merge has not happened; `drifted from the declared value`
+means it happened and something changed the key afterwards. Only keys agentstack
+declares are named — your own unrelated edits elsewhere in `settings.json` are
+never reported as drift.
+
 More: [drift — adopt or apply?](reference.md#drift-adopt-or-apply) and
 [concepts — drift](concepts.md#drift).
 
@@ -278,6 +331,119 @@ servers, enter agent context, or resolve secrets until a human has read them.
 A consented `agentstack init` records trust for you, so in practice this gate
 shows up in two places — a repo you cloned, and a manifest that changed since
 you approved it.
+
+### The five kinds the gate holds back
+
+Every refusal below opens with `refusing to …` and closes the same way: nothing
+is written, the run **exits nonzero**, and the fix is always `agentstack trust .`.
+The two halves of each `is not trusted` line change to `changed since it was
+trusted` when the project *was* approved and its bytes moved since.
+
+**MCP server config** — from `apply --write` and `use --write`. No `.mcp.json`,
+no `[mcp_servers]` block. The per-target consequence follows on its own line.
+
+```text
+✗ refusing to render MCP servers: project at {dir} is not trusted — review and
+  `agentstack trust .` before writing server definitions the harness launches on
+  its own ('notes')
+✗ not written — the project has not been trusted for this content
+```
+
+**Skill files** — from `use --write`. No skill directory or symlink lands in
+`.claude/skills/` or its per-CLI equivalents. (`session start` never reaches
+this line: it refuses up front with its own message, below.)
+
+```text
+✗ refusing to materialize skills: project at {dir} is not trusted — review and
+  `agentstack trust .` before putting its words into an agent's context ('notes')
+✗ skills not materialized — the project has not been trusted for this content
+```
+
+**Instruction fragments** — from `apply --write`. Nothing is compiled into the
+managed region of `CLAUDE.md` / `AGENTS.md`: a repo's prose reaches the model
+only after a yes.
+
+```text
+✗ refusing to render instructions: project at {dir} is not trusted — review and
+  `agentstack trust .` before putting its words into the managed region a harness
+  reads straight into an agent's context ('house')
+✗ instructions not written — the project has not been trusted for this content
+```
+
+`agentstack x instructions --write` refuses the same content with a shorter
+pair of lines, and the same nonzero exit:
+
+```text
+✗ not written — the project has not been trusted for this content
+error: 1 instruction file not written — the project has not been trusted for this
+content — review and `agentstack trust .`
+```
+
+**Hooks**, which the harness runs at full user permission.
+
+```text
+✗ refusing to render hooks: project at {dir} is not trusted — review and
+  `agentstack trust .` before rendering hook commands the harness runs at full
+  user permission ('fmt')
+✗ hooks not written — the project has not been trusted for this content
+```
+
+**Extensions**, which are executable code. This one aborts the command outright.
+
+```text
+error: refusing to render native extensions: project at {dir} is not trusted —
+review and `agentstack trust .` before rendering executable extension code
+```
+
+Hooks and extensions run code, so they take the full consent ceremony every
+time and accept no relaxation at all.
+
+The command's closing line names the count, and the exit code is nonzero — a
+script must not read a refused write as success:
+
+```text
+Wrote 0 of 1 target; 1 blocked — see the ✗ line for each; see ✗ above.
+error: 1 blocked write on 1 target — each ✗ above names the blocker
+```
+
+```text
+⚠ activated 'default' on 0 targets (wrote 0); 2 targets BLOCKED: Claude Code, Claude Code
+error: 2 targets blocked — each ✗ above names the blocker
+```
+
+**What the gate does *not* hold back.** Pruning and removal, machine-layer
+content, the machine manifest at `~/.agentstack/agentstack.toml`, and
+`[settings.*]` values all go through on an untrusted project. Seeing
+`✓ wrote 1 setting` next to a refusal is correct, not a leak: none of them
+authorizes new content — a settings value declares no code to run, and taking a
+server away can only shrink what a CLI can reach.
+
+One caveat on removal: the gate blocks a *target*, not one entry. If the same
+config file still has something the gate refuses, the whole write is skipped and
+the planned prune waits with it:
+
+```text
+− pruning 'notes' (no longer in manifest)
+✗ refusing to render MCP servers: project at {dir} is not trusted …
+✗ not written — the project has not been trusted for this content
+```
+
+When the prune is all that is left, it lands:
+
+```text
+− pruning 'notes' (no longer in manifest)
+− removed empty {dir}/.mcp.json
+1 target in sync — wrote 1.
+```
+
+The `doctor` forms of the same state:
+
+```text
+⚠ Claude Code    servers not delivered — project not trusted ↳ agentstack trust .
+⚠ Claude Code    hooks not delivered — project not trusted ↳ agentstack trust .
+```
+
+### The session and probe refusals
 
 ```text
 error: refusing to start a session: this project is not trusted — review and
@@ -301,10 +467,140 @@ Trust is bound to content. A `git pull`, or your own edit to the manifest or
 lockfile, invalidates the old approval — that re-gate is the feature. Review
 what changed, then re-trust.
 
+```text
+refusing to probe: this project is not trusted — starting its servers would run
+code nobody has reviewed ↳ agentstack trust
+refusing to probe: the manifest or lockfile changed since this project was
+trusted ↳ agentstack trust
+```
+
+`doctor --probe` warns rather than aborting, and finishes the rest of the
+report.
+
 **`trusted, but the manifest or lockfile changed since it was last reviewed ↳ agentstack trust`**
 
 The `doctor` form of the same state. `agentstack status` calls it
-`trust stale (content changed)`.
+`trust stale (content changed)` and names the next step:
+
+```text
+Next:  agentstack trust .   the content changed since you reviewed it — review and re-trust
+```
+
+<a id="lock-first-then-trust"></a>
+### `lock --write` invalidates the grant — lock first, then trust
+
+The lockfile is part of the consent surface, so **re-pinning is new consent**.
+Running `lock --write` on a project you have already trusted always leaves the
+grant stale, and `lock` says so before it says anything else:
+
+```text
+⚠ this project is trusted — new pins are new consent, so its trust is now stale; re-review and re-grant with `agentstack trust .`
+```
+
+So the order is fixed, and it is the reverse of what most people try:
+
+```bash
+agentstack lock --write   # 1. pin the bytes
+agentstack trust .        # 2. review and approve the pinned bytes
+```
+
+Trusting first and locking after simply throws the approval away. `trust` will
+not even let you go the other way round — an unpinned surface is not
+approvable:
+
+```text
+error: cannot trust {path}: its loadable surface isn't fully pinned — 1 item needs locking or review:
+  notes  inline skill unpinned — run `agentstack lock --write`
+Pin with `agentstack lock --write`, then review and trust with `agentstack trust .`.
+```
+
+<a id="i-re-locked-and-it-still-will-not-deliver"></a>
+### "I re-locked and it still will not deliver"
+
+This is the same rule seen from the other end, and it is the most common
+surprise. You edited a pinned skill, server or instruction. Delivery failed
+closed on the lock:
+
+```text
+error: refusing to activate 'default': 1 pinned item changed since agentstack.lock was written —
+  notes  skill content drifted from agentstack.lock (locked 0bc689f0eecd, current 49abb4cbcab0)
+Review the changes with `agentstack lock`, then run `agentstack lock --write` to accept them (re-locking re-gates the project for auto mode).
+```
+
+`apply --write` fails the same way for an instruction fragment, under a
+different opening sentence:
+
+```text
+error: refusing to compile instructions for {dir}/.agentstack: 1 pinned item changed since agentstack.lock was written —
+  house  instruction content drifted from agentstack.lock (locked 1718cc28481d, current a1aecdd87ab5)
+```
+
+You then ran `agentstack lock --write`, as instructed — and the next command
+refuses again, now with the *drifted* wording:
+
+```text
+✗ refusing to materialize skills: project at {dir} changed since it was trusted — review and `agentstack trust .` before putting its words into an agent's context ('notes')
+```
+
+Nothing is broken. Re-locking accepts the new bytes; it does not review them.
+Accepting content is a machine's job, reviewing it is yours, and only the second
+one delivers. Read the parenthesis in the first message literally — *re-locking
+re-gates the project*. The complete fix is three commands:
+
+```bash
+agentstack lock            # see what moved
+agentstack lock --write    # accept the new bytes
+agentstack trust .         # review them — this is what unblocks delivery
+```
+
+### "I added a skill and now everything else refuses"
+
+`agentstack add … --write` and the panel's edit verbs write the manifest and the
+lockfile **and** deliver, in one run. They judge trust as it stood when the
+command started, so the thing you just asked for is not refused by the bytes you
+just asked it to write:
+
+```text
+✓ added 'tidy'.
+  ✓ claude-code: 1 skill → {dir}/.claude/skills
+```
+
+But they deliberately do **not** re-pin the grant. The new capability is real
+content and still owes you a review, so the project is left stale and the *next*
+command re-gates:
+
+```text
+Status    locked · trust stale (content changed)
+Next:  agentstack trust .   the content changed since you reviewed it — review and re-trust
+```
+
+```bash
+agentstack trust .
+```
+
+If the delivery half failed too, `add` names the order for you:
+
+```text
+error: 1 target failed to materialize (the manifest and lock writes stand — each ✗
+above names the blocker; if it is consent, review with `agentstack trust .`, then
+`agentstack use --write`)
+```
+
+### Writes that keep your grant
+
+Not every manifest write costs you a review. A write that records a
+*preference* — it declares no capability and runs no code — carries valid trust
+across itself, so the documented next step is not refused by the bytes the
+command just wrote:
+
+- `agentstack x delivery render-locally [--harness <id>] --write`
+- the `.gitignore` preference (`[meta] gitignore`, set by `init`)
+
+Both re-pin **only** when trust was valid immediately before the write. An
+untrusted project stays untrusted, and a review already pending stays pending —
+neither command can create or resolve a grant.
+
+### Other trust messages
 
 **`not trusted — 1 CLI uses the gateway, but this project's 1 server is not proxied ↳ agentstack trust <path>`**
 
@@ -342,12 +638,8 @@ than a checked fact.
 
 **`cannot trust {path}: its loadable surface isn't fully pinned — N items need locking or review`**
 
-Trust binds to bytes, so everything loadable must be pinned first.
-
-```bash
-agentstack lock --write   # pin whatever is unpinned
-agentstack trust .  # then review and approve the pinned surface
-```
+Trust binds to bytes, so everything loadable must be pinned first. Full output
+and the ordering rule: [lock first, then trust](#lock-first-then-trust).
 
 **`error: refusing to apply without --consented <digest> — run --preview first, review, then pass the digest it printed`**
 

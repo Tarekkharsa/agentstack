@@ -58,9 +58,46 @@ non-zero. Parse stdout only when the exit code is `0`.
 ```console
 $ agentstack use --list --json --manifest-dir /var/empty
 error: no agentstack manifest in /var/empty
+(a project keeps one at .agentstack/agentstack.toml, or agentstack.toml at the repo root)
+…
 $ echo $?
 1
 ```
+
+### The refusal a headless run meets first: trust
+
+The reads on this page answer for a project in any trust state: `status --json`
+and `use --list --json` report `trust: "untrusted"` and still exit `0`. (The one
+exception is the read that spawns — `doctor --probe` refuses to start anything
+for a project that is not trusted at its current bytes.) **Writes are
+different.** For an untrusted or drifted project the trust gate covers five
+kinds, and each one refuses in place, names the item, and points at the same
+command:
+
+| A headless call to | Refuses to |
+| --- | --- |
+| `agentstack apply --write` | write native MCP server config, compile instruction fragments, render hooks, render native extensions |
+| `agentstack use --write` | materialize skills (and the server half above) |
+
+Every refusal line has the same shape — *refusing to …: project at `<path>` is
+not trusted — review and* `agentstack trust .` *before …* — naming the item it
+withheld in parentheses. Trust is recorded per project directory and never
+copied, so a clone, a second checkout, or a fresh worktree of a project someone
+already approved is untrusted at its new path. An unattended pipeline against
+one does not silently render a partial setup: it stops, and the fix is a human
+review. Budget for it — clone, `agentstack x install --locked`, then the
+digest-bound `trust --preview` → `trust --yes --consented-digest` pair on this
+page, before any `--write`. (`agentstack trust .` is the interactive form: it
+asks one closing question, so it exits nonzero with no terminal to answer it.)
+
+**Gate on the exit code, and know what it counts.** The exit code counts
+*blocked writes*, not printed refusals: a blocked pending write exits `1`
+(`error: 1 blocked write on 1 target`), while a project whose managed region
+already matches prints the same `✗` line and exits `0`, because nothing needed
+writing. A pipeline that wants "did the gate refuse anything?" rather than "was
+anything left unwritten?" must read the output, not only `$?`.
+
+Pruning, machine-layer content and the machine manifest are outside this gate.
 
 ## Reads
 
@@ -94,7 +131,7 @@ process start time).
 | `agentstack x workflow list --json` / `workflow explain --json` | `workflow-role-selection-v1` | per-entry `role_details[]` — each role's `harness`, `model`, `effort`, `serial`, and any declared value that would not reach the child. `explain` carries the envelope too; it is the deeper per-workflow read and **re-gates on trust** |
 | `agentstack x workflow runs --json` | `workflow-observe-v1` | `runs[]` from the machine-global runs directory |
 | `agentstack x lease status --json` | `lease-status-v1` | `leases[]` — the machine-level runtime lease registry, each row's `liveness` derived at read time from the PID and that process's start time. `unknown` never means live. Writes nothing; on macOS it does run `/bin/ps` per recorded PID to read a start time, because there is no `/proc` to read instead |
-| `agentstack x delivery --json` | `delivery-routing-v1` | `default` plus one `harnesses[]` row per targeted CLI with its per-kind `routes[]` — where bytes go, never whether anything is live |
+| `agentstack x delivery --json` | `delivery-routing-v1` | `default` plus one `harnesses[]` row per targeted CLI with its per-kind `routes[]` (where the bytes go) and that harness's own `bridge_registered`. Decide on those two typed fields; the row's `summary` and `why` are display copy and must never be matched on |
 | `agentstack x image --json` | `image-plan-v1` | the packaging plan: every pinned `members[]` entry, `required_secrets` (names only), `blockers`, `buildable` |
 | `agentstack status --json` | `library-sources-v1` | `project.shadowed_names[]` — one sentence per capability name more than one linked library source holds. Always present, `[]` when nothing collides |
 | `agentstack status --json` | `instruction-channels-v1` | `project.instruction_channels[]` — one row per targeted CLI, including the ones with no instruction channel at all |
@@ -183,9 +220,16 @@ Field notes:
   that.
 - `trust` is `"trusted"`, `"drifted"`, or `"untrusted"` — the same three values
   `use --list --json` uses.
-- `trust_relevant` says whether trusting would change what this project can do
-  here. It is `false` for a static project with no bridge, whose configs render
-  either way. Do not push a user toward a review that buys them nothing.
+- `trust_relevant` is a **prompting hint, not a capability reading**. It is
+  `true` when a bridge is registered for a harness or the derived `mode` is
+  `zero-files` / `clean-at-rest` — the states where an untrusted project is
+  served nothing at all, so `trust .` is the one next step worth pushing. It is
+  `false` for a static project with no bridge. That `false` does **not** mean
+  trusting buys nothing there: the trust gate refuses MCP server config,
+  instruction fragments, hooks, extensions and skill materialization in every
+  mode (see [Errors](#errors)), so an untrusted static project still cannot
+  render. Use `trust` — the three-value state — for "can this project write?",
+  and `trust_relevant` only to decide how loudly to ask.
 - `mode` is `"static"`, `"clean-at-rest"`, or `"zero-files"`.
 - `secrets` carries a **count** and the **names** that resolve from no layer.
   A value never appears. `null` means the reading was not taken.
@@ -285,6 +329,56 @@ Field notes:
 - Both `started_unix` and `age_seconds` ship: a poller wants the stable start
   time, a one-shot caller wants the age.
 
+### `delivery --json`
+
+```json
+{
+  "default": "automatic",
+  "harnesses": [
+    {
+      "id": "claude-code",
+      "display": "Claude Code",
+      "mcp_capable": true,
+      "render_locally": false,
+      "override": "none",
+      "bridge_registered": false,
+      "summary": "skills + MCP servers planned live (not connected) · house rules + settings + hooks written to files",
+      "routes": [
+        {
+          "kind": "servers",
+          "lane": "dynamic",
+          "why": "the live channel here can carry it on demand",
+          "full_ceremony": false
+        }
+      ]
+    }
+  ]
+}
+```
+
+`routes` carries one row per capability kind — skills, servers, instructions,
+settings, hooks — trimmed to one here.
+
+Field notes:
+
+- `lane` is the routing — where the bytes for that kind go. It is **not** an
+  activation reading: `dynamic` does not say a lease is open, a bridge is
+  registered, or the project is trusted.
+- `bridge_registered` is **this harness's own** bridge state, never a
+  project-wide any-of: one connected CLI delivers nothing to the harnesses that
+  have no bridge. Branch on it whenever you would otherwise be tempted to read
+  liveness out of the prose. It is still not a full activation reading —
+  `lease-status-v1`, `doctor-cli-coverage-v1` and the trust surfaces answer the
+  rest, each with its own limits.
+- `summary` and `why` are **display copy, and both are conjugated by
+  `bridge_registered`**. With no bridge a live route's `why` gives the
+  rationale ("the live channel here can carry it on demand") instead of a
+  delivery claim, and `summary` says "planned live (not connected)". Neither
+  field's shape moved, so this stayed `delivery-routing-v1` — which is exactly
+  why **neither may be matched on**: the same routing reads two ways.
+- `full_ceremony` says a kind is executable (hooks, extensions), never that a
+  ceremony has happened.
+
 ## JSON that is not part of this contract
 
 Some commands emit JSON that is evidence or analysis rather than control-plane
@@ -297,6 +391,31 @@ change without a `schema_version` bump. Treat them as reports, not APIs:
 - `agentstack x optimize --json`
 - `agentstack x workflow report --json` (`workflow explain --json` left this list
   when it gained the envelope and `workflow-role-selection-v1`)
+
+The append-only evidence files are the same kind of thing: JSON Lines with no
+envelope and no feature name, self-describing per row, and free to gain
+variants. Three moved recently and are worth knowing if you parse them:
+
+- `~/.agentstack/runs/<id>/events.jsonl` — each row carries its own `event`
+  tag. Toolset-fence refusals arrive as `"event": "fence_refused"` (server,
+  tool, the `toolset` that would expose it, and the reason), deliberately
+  **not** as a `tool_call` with a denied outcome, so a refusal never inflates
+  the count of calls a run made. `agentstack x report run <id>` prints them in
+  their own **Fence refusals** section.
+- `~/.agentstack/audit/calls.jsonl` — the guard's three fail-closed *system*
+  refusals are filed under synthetic `system: <tag>` subjects
+  (`system: machine-config-unreadable`, `system: machine-policy-unavailable`,
+  `system: hook-payload-unreadable`) with no project. Rule denials name the
+  call instead, under one of exactly four machine-authored prefixes:
+  `bash: `, `read: `, `write: `, `other`. Nothing derived from a hook payload
+  can produce the `system: ` prefix, so the two kinds cannot be confused.
+- `~/.agentstack/audit/trust.jsonl` — one identity-only row per trust-store
+  mutation. The action set is `grant`, `regrant`, `repin`, `revoke`, `decide`
+  and `undecide`; the last two record and withdraw a standing re-gate answer
+  and re-pin nothing, carrying the digest the entry already stood on.
+
+What those files prove about enforcement — recorded is not prevented — is
+[the enforcement matrix](ENFORCEMENT.md)'s question, not this page's.
 
 ## Guarantees
 

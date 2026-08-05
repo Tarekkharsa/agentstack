@@ -34,7 +34,14 @@ live channel would have worked. Pick it for offline work, deterministic native
 files, inspection with ordinary filesystem tools, a rule against a persistent
 background process, debugging without another runtime dependency, or testing a
 CLI's own behaviour. Switching it changes only *where the bytes go* — never what
-you trust or what your policy allows.
+you trust or what your policy allows, and it costs you no review: a preference
+declares no capability, so a grant that was valid before the write is carried
+across it.
+
+Either lane still passes the trust gate. On an untrusted or drifted project
+neither the live channel nor the file lane delivers servers, skills,
+instructions, hooks or extensions — see
+[concepts — trust](concepts.md#trust-and-the-consent-digest).
 
 The older per-project delivery modes (`static`, `clean-at-rest`, `zero-files`)
 are readings of a project's current shape, not choices: `agentstack set-mode`
@@ -53,7 +60,7 @@ own words.
 |---|---|---|---|
 | just syncing config across your CLIs | config sync | `init` then `apply --write` | Copies your reviewed config into each CLI. No runtime check — nothing is blocked once an agent is running. |
 | worried about `rm -rf` or `.env` accidents | the guard | `guard install` | **Cooperative**: catches an agent's *accidents* through each CLI's own hook. Not a determined attacker. |
-| cloning repos you didn't write | the trust gate | `gateway connect` then `trust .` | A repo's servers, skills, and secrets stay **inert** until you trust it. Trust gates whether they load — it does not sandbox the code. |
+| cloning repos you didn't write | the trust gate | `gateway connect` then `trust .` | A repo's servers, skills, instructions, hooks and extensions stay **inert** until you trust it — not loaded, and not written to disk either. Trust gates whether they reach your tools; it does not sandbox the code. |
 | launching a frozen, verified surface, no Docker | a Protected run — already the default | `run <cli>` | Fail-closed trust and pin checks before launch, then a frozen surface. This is what a plain `agentstack run` does now; `--unprotected` opts out. Labelled `HOST / PROTECTED`. Not kernel isolation — the agent still runs as you. |
 | running sensitive work that must not leak | Lockdown (Docker) | `run <cli> --sandbox --lockdown` | Container with no route out; egress is **enforced**. Unapproved egress is blocked — that never means exfiltration is impossible. Labelled `LOCKDOWN / ENFORCED`. |
 

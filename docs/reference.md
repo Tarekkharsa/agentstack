@@ -20,6 +20,7 @@ implementation internals — live in
 - [The everyday loop, new in v0.18.0](#the-everyday-loop-new-in-v0180)
   - [Drop a file, say yes (`agentstack yes`)](#drop-a-file-say-yes-agentstack-yes)
   - [Undo: `undo` and `restore`](#undo-undo-and-restore)
+  - [Where did this come from? (`agentstack x why`)](#where-did-this-come-from-agentstack-x-why)
   - [Sharing is signing: `share` and `receive`](#sharing-is-signing-share-and-receive)
   - [A setup that already exists (`agentstack x up`)](#a-setup-that-already-exists-agentstack-up)
 - [Secrets and trust](#secrets-and-trust)
@@ -65,6 +66,7 @@ implementation internals — live in
   - [Layout and name resolution](#layout-and-name-resolution)
   - [Pinning and provenance](#pinning-and-provenance)
   - [Adding capabilities](#adding-capabilities)
+  - [Removing capabilities (and getting them back)](#removing-capabilities-and-getting-them-back)
   - [Syncing across machines (`lib sync`)](#syncing-across-machines-lib-sync)
   - [The two mental models](#the-two-mental-models)
 - [Capabilities](#capabilities)
@@ -81,6 +83,11 @@ implementation internals — live in
   - [Wire proxy (`proxy`)](#wire-proxy-proxy)
   - [`export` / `import`](#export--import)
 - [Optimize (`agentstack x optimize`)](#optimize-agentstack-optimize)
+- [Staying current (`agentstack x self update`)](#staying-current-agentstack-self-update)
+  - [The version note in `doctor`](#the-version-note-in-doctor)
+- [Which build am I running? (`--version`)](#which-build-am-i-running---version)
+- [Shell completions (`agentstack x completions`)](#shell-completions-agentstack-completions)
+- [Integrations](#integrations)
 
 **[Part III — Full command reference](#part-iii--full-command-reference)**
 
@@ -179,7 +186,8 @@ manages your publishing key and the publishers you recognize; `sign`/`verify`
 remain the scriptable primitives on the lockfile itself, and on releases
 without `share` they are how a lockfile gets signed at all.
 
-### A setup that already exists (`agentstack up`)
+<a id="a-setup-that-already-exists-agentstack-up"></a>
+### A setup that already exists (`agentstack x up`)
 
 The moment is sitting down at a machine that has the checkout but nothing
 configured. `agentstack x up` (v0.18.0+) is that whole moment in one command: it
@@ -490,6 +498,19 @@ whose wrapper died is pruned on the next `report runs`. A toolset-bound run uses
 the session engine, so one is allowed per directory at a time. Every tracked run
 records a minimal lifecycle and prints `agentstack x report run <id>` when it exits;
 gateway-brokered tool calls join that report without recording argument values.
+A call the run's **toolset fence** refused gets its own **Fence refusals**
+section in that report — never folded into the Tool-calls count, because a
+refused call is not a call the run made:
+
+```text
+  Fence refusals
+    ✗ github__create_issue  [toolset review]  (this project fences its servers
+      behind toolsets, and no open lease selects one that exposes it)
+```
+
+Each row names the server and tool, the fencing toolset when a lease selects
+one, and the reason — identity only, never argument values.
+
 Unix only for now.
 
 ## Part II — The power surface
@@ -606,8 +627,12 @@ kind and the CLI it is going to. What the lanes *are*:
 
 - `agentstack x delivery` prints the routing per CLI; `--json` is the same reading
   for a UI (`delivery-routing-v1`), with `default`, per-harness
-  `mcp_capable` / `render_locally` / `override`, and a `routes` array carrying
-  each kind's `lane`, `why`, and `full_ceremony`.
+  `mcp_capable` / `render_locally` / `override` / `bridge_registered` / `summary`,
+  and a `routes` array carrying each kind's `lane`, `why`, and `full_ceremony`.
+  A `why` never claims a service that is not running: with no bridge registered
+  a dynamic route reads `the live channel here can carry it on demand` (and the
+  summary says `planned live (not connected)`); it becomes `served live, on
+  demand` only once `bridge_registered` is true.
 - **Render locally** is the one override: `[delivery] render_locally = true`, or
   `[delivery.harness.<id>] render_locally = true` for a single CLI. Set it with
   `agentstack x delivery render-locally [--harness <id>] [--off] --write`. It
@@ -707,7 +732,8 @@ that was **valid** immediately before the rewrite is re-pinned to the new digest
 (a machine-derived change from a config the owner already executes); trust
 already broken or absent is left untouched — the refresh never mints trust.
 
-## Agent-operable (`agentstack mcp`)
+<a id="agent-operable-agentstack-mcp"></a>
+## Agent-operable (`agentstack x mcp`)
 
 agentstack runs as an MCP server over stdio, so the agent itself can discover and
 propose capabilities. The control-plane tools it advertises are below; the
@@ -787,9 +813,18 @@ re-trusted.
 
 ```bash
 agentstack trust .          # preview what the manifest runs/contacts, then pin its digest
+agentstack trust --manifest-dir <DIR>   # the same, naming the project instead of cd-ing to it
 agentstack trust --list     # every trusted project + whether its manifest still matches
 agentstack trust --revoke   # withdraw
+agentstack trust . --preview                        # emit the review surface as JSON, grant nothing
+agentstack trust . --yes --consented-digest <D>     # grant without a TTY, bound to the reviewed bytes
 ```
+
+`trust` reads the global `--manifest-dir` like every other verb; the positional
+`[PATH]` and a bare cwd still work, and naming the directory either way is the
+same grant. `--preview` emits `surface_digest`, the value a later
+`--yes --consented-digest` must present — the CLI-enforced "a human reviewed
+these exact bytes" for external UIs and scripts.
 
 `trust .` previews the **effective runtime surface** — inline servers and library
 refs alike, each ref labeled pinned/unpinned/drifted. Explicit `--manifest-dir`
@@ -1056,7 +1091,8 @@ into CI unnoticed. Everyday `doctor` skips this scan (it reads every skill body)
 Interactive `init` offers the deep scan as an explicit yes/no at its
 closing doctor step, but only when the project actually has skills.
 
-## Ephemeral sessions (`agentstack session`)
+<a id="ephemeral-sessions-agentstack-session"></a>
+## Ephemeral sessions (`agentstack x session`)
 
 A session loads a toolset **for now** and reverts it on exit — the clean-at-rest
 mode's native primitive, so nothing generated persists between sessions.
@@ -1219,8 +1255,13 @@ skips just that server (with a stderr report) and keeps the rest up.
 
 Name refs are pinned by digest in `agentstack.lock` — servers pin the
 **definition** digest only; secret values stay `${REF}` and resolve at
-render/gateway time, never in the library or the lock. Native extensions pin
-differently: a `[[extension]]` entry records `name`, `target`, and a `checksum`
+render/gateway time, never in the library or the lock. The lockfile's row kinds
+are `[[server]]`, `[[skill]]`, `[[instruction]]`, `[[setting]]`,
+`[[extension]]`, `[[executable]]`, `[[workflow]]`, and `[[package]]`. A
+`[[setting]]` row pins **per (target, key)** — `target`, `key`, and a
+`checksum` over the declared value — so one CLI's `model` and another's are
+separate pins and a single changed key is the only thing that re-gates. Native
+extensions pin differently: a `[[extension]]` entry records `name`, `target`, and a `checksum`
 from the **strict** integrity-root digest over the whole source tree, so
 retargeting a byte-identical extension is drift and a one-byte source edit
 re-gates trust (see [Native extensions](#native-extensions)). `doctor`/`explain`
@@ -1541,6 +1582,21 @@ agentstack x settings unset <target> <key>
 
 Dry-run by default; `--write` applies.
 
+Settings are pinned per (target, key) as `[[setting]]` rows in the lock, so
+`doctor` reports settings drift as **two separate legs with opposite fixes** —
+read which side moved off the fix it names:
+
+```text
+Settings
+  ⚠ Claude Code    1 declared key moved since the lock was written (model) ↳ agentstack lock --write
+  ⚠ Claude Code    1 owned key in <path>/.claude/settings.json drifted from the declared value (model) ↳ agentstack apply --write
+```
+
+The first leg is the **manifest** moving ahead of the lock — re-pin it. The
+second is the **live settings file** no longer matching what the manifest
+declares — re-render it. Both can fire at once, as above, and each names only
+the keys it owns.
+
 ### Lifecycle hooks
 
 Declare `[hooks.*]` once (event + optional matcher + command) and `apply` renders
@@ -1650,7 +1706,8 @@ agentstack x import <file> [--passphrase <p>]
 An age-encrypted archive (manifest + lock + optionally secrets) for moving a
 setup to a new machine; passphrase-protected.
 
-## Optimize (`agentstack optimize`)
+<a id="optimize-agentstack-optimize"></a>
+## Optimize (`agentstack x optimize`)
 
 Turns the signals agentstack already collects — activation counts, the gateway
 call audit log, per-server context costs (`report usage --live`), the trust
@@ -1675,9 +1732,10 @@ gateway-brokered calls — a server rendered into a native config is called
 directly by the harness, so such servers are never auto-removed on "no calls"
 evidence alone.
 
-## Staying current (`agentstack self update`)
+<a id="staying-current-agentstack-self-update"></a>
+## Staying current (`agentstack x self update`)
 
-Upgrading the binary is part of the product, not a manual chore. `agentstack
+Upgrading the binary is part of the product, not a manual chore. `agentstack x
 self update` replaces the binary you are running with the newest published
 release, and `agentstack doctor` tells you when there is one.
 
@@ -1722,8 +1780,11 @@ release over somebody's build output would be a surprise, not an upgrade.
 
 ```text
 Updates
-  · AgentStack 0.17.1 is available (you are on 0.17.0) ↳ agentstack x self update
+  · AgentStack 0.17.1 is available (you are on 0.17.0) ↳ agentstack self update
 ```
+
+(The note still names the verb bare. `agentstack self update` and
+`agentstack x self update` are the same command.)
 
 It is a **note**, not a warning: it counts in `doctor --json`'s `advisories`,
 never in `errors` or `warnings`, so it cannot move `state` off `ready` or become
@@ -1772,7 +1833,8 @@ error: this build has no sandbox support — nothing was launched
 `agentstack run --sandbox --plan` still works on either build: a dry run
 describes, it never launches.
 
-## Shell completions (`agentstack completions`)
+<a id="shell-completions-agentstack-completions"></a>
+## Shell completions (`agentstack x completions`)
 
 `agentstack x completions <bash|zsh|fish>` prints a completion script on stdout.
 It is generated by walking the CLI's own command tree, so it covers every

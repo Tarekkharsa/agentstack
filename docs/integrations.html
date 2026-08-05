@@ -295,7 +295,7 @@
 <tr><td>Workflow monitor — per-role model and effort</td><td><code>workflow-role-selection-v1</code></td><td>yes</td></tr>
 <tr><td>Activity feed — on-demand skill loads beside calls</td><td><code>activity-skill-load-v1</code></td><td>yes</td></tr>
 <tr><td>Runtime leases — one row each, with derived liveness</td><td><code>lease-status-v1</code></td><td>yes</td></tr>
-<tr><td>Delivery routing — the lane per capability kind</td><td><code>delivery-routing-v1</code></td><td>yes</td></tr>
+<tr><td>Delivery routing — the lane per capability kind, plus each harness's own <code>bridge_registered</code></td><td><code>delivery-routing-v1</code></td><td>yes</td></tr>
 <tr><td>Image plan — one toolset's packaging plan</td><td><code>image-plan-v1</code></td><td>yes</td></tr>
 <tr><td>Startup test — actually start the servers</td><td><code>doctor-probe-v1</code></td><td>yes</td></tr>
 <tr><td>Status — typed delivery mode + activation</td><td><code>doctor-mode-v1</code></td><td>yes</td></tr>
@@ -314,6 +314,7 @@
 <p>Run:</p>
 <pre class="block"><code>agentstack doctor</code></pre>
 <p>When t3code is installed, doctor checks the supervisor integration, including provider guard coverage and home-directory overrides that can move a CLI away from the configuration AgentStack manages.</p>
+<p><strong>Guard coverage is per provider, and it is not universal.</strong> Whichever CLI t3code launches, AgentStack manages its native configuration; whether a host guard can referee that session afterwards depends on the CLI. Claude Code (and VS Code agent mode, which reads the same user-scope hooks), Codex, Gemini, Antigravity, Cursor, Windsurf, Copilot CLI, OpenCode and Pi all have a pre-tool-use hook the guard rides. Three do not, for two different reasons: Claude Desktop and Junie expose <strong>no hook surface</strong> — there is nothing to build — while Kiro is simply <strong>not wired yet</strong>, a gap in AgentStack rather than in Kiro. A panel must not flatten those into one "unsupported" label: one is a limit, the other is a to-do. The per-CLI table, and what the guard blocks once wired, is in <a href="adapters.html#which-adapters-get-the-host-guard">the adapter support matrix</a>; <code>agentstack guard status</code> prints the same list for the machine in front of you.</p>
 <p>For per-session run identity, create a transparent launcher:</p>
 <pre class="block"><code>agentstack x shim make claude</code></pre>
 <p>Point the matching t3code provider's binary-path setting at the generated shim. Each launched session then appears in <code>agentstack x report runs</code> and receives its own run report.</p>
@@ -337,13 +338,16 @@
   ]
 }</code></pre>
 <ul>
-<li><strong>Set up toolset</strong> runs the moment a worktree is created, before the coding agent starts. With the project's manifest and lockfile committed, <code>agentstack use --write</code> activates the single declared toolset and renders every native config in place; a project that declares several toolsets must name one (<code>agentstack use &lt;toolset&gt; --write</code>). Verified on v0.17.0: the first activation in a fresh worktree exits 0 and materializes servers and skills for every CLI with project scope, and re-runs are idempotent.</li>
+<li><strong>Set up toolset</strong> runs the moment a worktree is created, before the coding agent starts. With the project's manifest and lockfile committed, <code>agentstack use --write</code> activates the single declared toolset and renders every native config in place; a project that declares several toolsets must name one (<code>agentstack use &lt;toolset&gt; --write</code>).</li>
+</ul>
+<p><strong>A fresh worktree is a fresh project, and the trust gate says so.</strong> Trust is recorded per project directory, so a new worktree of a repo you already trusted is <em>untrusted</em> at its new path. <code>agentstack use --write</code> there refuses to write server definitions and refuses to materialize skills, prints a <code>✗</code> line per blocked target naming <code>agentstack trust .</code>, and <strong>exits nonzero</strong> — the action's terminal shows the refusal rather than a half-configured session. That is the gate working, not the action failing: run <code>agentstack trust .</code> in the worktree once, then re-run the action. Once trusted, activation exits 0 and materializes servers and skills for every CLI with project scope, and re-runs are idempotent. An automation that must not stop at a human review should not import this action.</p>
+<ul>
 <li><strong>Check setup</strong> is the same <code>agentstack doctor</code> the CLI journey already teaches, one click — or one keybinding — away when a session seems to be missing a capability.</li>
 </ul>
 <p>What to expect:</p>
 <ul>
 <li>t3code runs only the <strong>first</strong> <code>runOnWorktreeCreate</code> script. If the project already has a worktree setup command, chain them: <code>"command": "bun install &amp;&amp; agentstack use --write"</code>.</li>
-<li>If AgentStack needs a decision — an unfamiliar project awaiting review, a drifted lockfile — the action's terminal shows the same message the CLI shows anywhere else, with the exact next step. The action adds no authority and skips no consent check.</li>
+<li>If AgentStack needs a decision — an unfamiliar project awaiting review (which every new worktree is), a drifted lockfile — the action's terminal shows the same message the CLI shows anywhere else, with the exact next step. The action adds no authority and skips no consent check.</li>
 <li><code>t3.json</code> is repository content. t3code never runs a file script before you import it, and it shows the literal command at import time — read it, particularly in repositories you did not author. AgentStack's own review gate for repository-declared capabilities is unchanged underneath.</li>
 <li>Keybindings are personal. The file format deliberately has none; each person attaches their own after importing.</li>
 <li>Clean-at-rest projects should not import the setup action — materializing configuration on worktree creation is exactly what that mode avoids. Keep the doctor action, and launch through <code>agentstack run &lt;cli&gt;</code> instead.</li>
@@ -380,7 +384,7 @@
 <ul>
 <li>There is no public t3code package or supported acquisition path today. The CLI journey is complete without it; do not make a launch or onboarding claim depend on the private fork.</li>
 <li>t3code injects its own browser-preview MCP endpoint directly into sessions, outside native CLI configuration. AgentStack can gate calls on governed paths, but the endpoint is not declared in the project manifest or lockfile. That endpoint is not currently treated as a governed cross-harness workflow launcher. Using t3code MCP for child launch and supervision is a separate research item and must preserve AgentStack's admitted execution plan, authority, cancellation, and evidence path.</li>
-<li>t3code's most permissive provider modes can disable the coding CLI's own approval prompts. AgentStack guard coverage matters more in those sessions; doctor reports missing coverage.</li>
+<li>t3code's most permissive provider modes can disable the coding CLI's own approval prompts. AgentStack guard coverage matters more in those sessions; doctor reports missing coverage. For Claude Desktop, Junie and Kiro there is no coverage to report — see <a href="#what-works-today">guard coverage is per provider</a> above for which of those is a missing hook surface and which is unbuilt.</li>
 <li>A source-built t3code may keep state in a different location from the packaged app, so doctor may not observe that development state.</li>
 <li>Read and write parity across CLI/t3code versions is feature-negotiated. Unsupported combinations must fail with an upgrade message, never guess.</li>
 </ul>

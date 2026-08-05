@@ -283,8 +283,20 @@
 <p>A refusal is not a JSON body. When a command cannot answer, stdout stays <strong>empty</strong>, the reason goes to stderr as human text, and the exit code is non-zero. Parse stdout only when the exit code is <code>0</code>.</p>
 <pre class="block"><code>$ agentstack use --list --json --manifest-dir /var/empty
 error: no agentstack manifest in /var/empty
+(a project keeps one at .agentstack/agentstack.toml, or agentstack.toml at the repo root)
+…
 $ echo $?
 1</code></pre>
+<h3 id="the-refusal-a-headless-run-meets-first-trust">The refusal a headless run meets first: trust<a class="hlink" href="#the-refusal-a-headless-run-meets-first-trust" aria-label="Link to this section">#</a></h3>
+<p>The reads on this page answer for a project in any trust state: <code>status --json</code> and <code>use --list --json</code> report <code>trust: "untrusted"</code> and still exit <code>0</code>. (The one exception is the read that spawns — <code>doctor --probe</code> refuses to start anything for a project that is not trusted at its current bytes.) <strong>Writes are different.</strong> For an untrusted or drifted project the trust gate covers five kinds, and each one refuses in place, names the item, and points at the same command:</p>
+<div class="tblwrap"><table>
+<thead><tr><th>A headless call to</th><th>Refuses to</th></tr></thead><tbody>
+<tr><td><code>agentstack apply --write</code></td><td>write native MCP server config, compile instruction fragments, render hooks, render native extensions</td></tr>
+<tr><td><code>agentstack use --write</code></td><td>materialize skills (and the server half above)</td></tr>
+</tbody></table></div>
+<p>Every refusal line has the same shape — <em>refusing to …: project at <code>&lt;path&gt;</code> is not trusted — review and</em> <code>agentstack trust .</code> <em>before …</em> — naming the item it withheld in parentheses. Trust is recorded per project directory and never copied, so a clone, a second checkout, or a fresh worktree of a project someone already approved is untrusted at its new path. An unattended pipeline against one does not silently render a partial setup: it stops, and the fix is a human review. Budget for it — clone, <code>agentstack x install --locked</code>, then the digest-bound <code>trust --preview</code> → <code>trust --yes --consented-digest</code> pair on this page, before any <code>--write</code>. (<code>agentstack trust .</code> is the interactive form: it asks one closing question, so it exits nonzero with no terminal to answer it.)</p>
+<p><strong>Gate on the exit code, and know what it counts.</strong> The exit code counts <em>blocked writes</em>, not printed refusals: a blocked pending write exits <code>1</code> (<code>error: 1 blocked write on 1 target</code>), while a project whose managed region already matches prints the same <code>✗</code> line and exits <code>0</code>, because nothing needed writing. A pipeline that wants "did the gate refuse anything?" rather than "was anything left unwritten?" must read the output, not only <code>$?</code>.</p>
+<p>Pruning, machine-layer content and the machine manifest are outside this gate.</p>
 <h2 id="reads">Reads<a class="hlink" href="#reads" aria-label="Link to this section">#</a></h2>
 <p>Every command below is read-only: it does not write a file, render a config, resolve a <code>${REF}</code> into a value, or start a server — with two deliberate, named exceptions noted in their rows (<code>doctor --probe</code> starts each stdio server and stops it again; <code>lease status</code> runs <code>/bin/ps</code> on macOS to read a process start time).</p>
 <div class="tblwrap"><table>
@@ -311,7 +323,7 @@ $ echo $?
 <tr><td><code>agentstack x workflow list --json</code> / <code>workflow explain --json</code></td><td><code>workflow-role-selection-v1</code></td><td>per-entry <code>role_details[]</code> — each role's <code>harness</code>, <code>model</code>, <code>effort</code>, <code>serial</code>, and any declared value that would not reach the child. <code>explain</code> carries the envelope too; it is the deeper per-workflow read and <strong>re-gates on trust</strong></td></tr>
 <tr><td><code>agentstack x workflow runs --json</code></td><td><code>workflow-observe-v1</code></td><td><code>runs[]</code> from the machine-global runs directory</td></tr>
 <tr><td><code>agentstack x lease status --json</code></td><td><code>lease-status-v1</code></td><td><code>leases[]</code> — the machine-level runtime lease registry, each row's <code>liveness</code> derived at read time from the PID and that process's start time. <code>unknown</code> never means live. Writes nothing; on macOS it does run <code>/bin/ps</code> per recorded PID to read a start time, because there is no <code>/proc</code> to read instead</td></tr>
-<tr><td><code>agentstack x delivery --json</code></td><td><code>delivery-routing-v1</code></td><td><code>default</code> plus one <code>harnesses[]</code> row per targeted CLI with its per-kind <code>routes[]</code> — where bytes go, never whether anything is live</td></tr>
+<tr><td><code>agentstack x delivery --json</code></td><td><code>delivery-routing-v1</code></td><td><code>default</code> plus one <code>harnesses[]</code> row per targeted CLI with its per-kind <code>routes[]</code> (where the bytes go) and that harness's own <code>bridge_registered</code>. Decide on those two typed fields; the row's <code>summary</code> and <code>why</code> are display copy and must never be matched on</td></tr>
 <tr><td><code>agentstack x image --json</code></td><td><code>image-plan-v1</code></td><td>the packaging plan: every pinned <code>members[]</code> entry, <code>required_secrets</code> (names only), <code>blockers</code>, <code>buildable</code></td></tr>
 <tr><td><code>agentstack status --json</code></td><td><code>library-sources-v1</code></td><td><code>project.shadowed_names[]</code> — one sentence per capability name more than one linked library source holds. Always present, <code>[]</code> when nothing collides</td></tr>
 <tr><td><code>agentstack status --json</code></td><td><code>instruction-channels-v1</code></td><td><code>project.instruction_channels[]</code> — one row per targeted CLI, including the ones with no instruction channel at all</td></tr>
@@ -385,7 +397,7 @@ $ echo $?
 <ul>
 <li><code>targets.pinned</code> is <code>[targets].default</code>; <code>targets.fanout</code> is how many detected CLIs a command would reach when nothing is pinned. An empty <code>pinned</code> with a <code>fanout</code> of 6 is <em>"nothing pinned, six CLIs detected"</em> — one number cannot say that.</li>
 <li><code>trust</code> is <code>"trusted"</code>, <code>"drifted"</code>, or <code>"untrusted"</code> — the same three values <code>use --list --json</code> uses.</li>
-<li><code>trust_relevant</code> says whether trusting would change what this project can do here. It is <code>false</code> for a static project with no bridge, whose configs render either way. Do not push a user toward a review that buys them nothing.</li>
+<li><code>trust_relevant</code> is a <strong>prompting hint, not a capability reading</strong>. It is <code>true</code> when a bridge is registered for a harness or the derived <code>mode</code> is <code>zero-files</code> / <code>clean-at-rest</code> — the states where an untrusted project is served nothing at all, so <code>trust .</code> is the one next step worth pushing. It is <code>false</code> for a static project with no bridge. That <code>false</code> does <strong>not</strong> mean trusting buys nothing there: the trust gate refuses MCP server config, instruction fragments, hooks, extensions and skill materialization in every mode (see <a href="#errors">Errors</a>), so an untrusted static project still cannot render. Use <code>trust</code> — the three-value state — for "can this project write?", and <code>trust_relevant</code> only to decide how loudly to ask.</li>
 <li><code>mode</code> is <code>"static"</code>, <code>"clean-at-rest"</code>, or <code>"zero-files"</code>.</li>
 <li><code>secrets</code> carries a <strong>count</strong> and the <strong>names</strong> that resolve from no layer. A value never appears. <code>null</code> means the reading was not taken.</li>
 <li><code>next_action</code> is the one step to surface. It is never a command that would refuse. On <code>status --json</code> it is an object; on <code>doctor --json</code> it is a bare command string <strong>or <code>null</code></strong> when no step is runnable verbatim, so a consumer must handle null there.</li>
@@ -455,6 +467,37 @@ $ echo $?
 <li><code>abandoned</code> is the CLI's judgment, not a threshold to re-invent. It is the state a supervising UI died in — offer <code>agentstack x session end</code>, which restores every file the session touched.</li>
 <li>Both <code>started_unix</code> and <code>age_seconds</code> ship: a poller wants the stable start time, a one-shot caller wants the age.</li>
 </ul>
+<h3 id="delivery---json"><code>delivery --json</code><a class="hlink" href="#delivery---json" aria-label="Link to this section">#</a></h3>
+<pre class="block"><code>{
+  "default": "automatic",
+  "harnesses": [
+    {
+      "id": "claude-code",
+      "display": "Claude Code",
+      "mcp_capable": true,
+      "render_locally": false,
+      "override": "none",
+      "bridge_registered": false,
+      "summary": "skills + MCP servers planned live (not connected) · house rules + settings + hooks written to files",
+      "routes": [
+        {
+          "kind": "servers",
+          "lane": "dynamic",
+          "why": "the live channel here can carry it on demand",
+          "full_ceremony": false
+        }
+      ]
+    }
+  ]
+}</code></pre>
+<p><code>routes</code> carries one row per capability kind — skills, servers, instructions, settings, hooks — trimmed to one here.</p>
+<p>Field notes:</p>
+<ul>
+<li><code>lane</code> is the routing — where the bytes for that kind go. It is <strong>not</strong> an activation reading: <code>dynamic</code> does not say a lease is open, a bridge is registered, or the project is trusted.</li>
+<li><code>bridge_registered</code> is <strong>this harness's own</strong> bridge state, never a project-wide any-of: one connected CLI delivers nothing to the harnesses that have no bridge. Branch on it whenever you would otherwise be tempted to read liveness out of the prose. It is still not a full activation reading — <code>lease-status-v1</code>, <code>doctor-cli-coverage-v1</code> and the trust surfaces answer the rest, each with its own limits.</li>
+<li><code>summary</code> and <code>why</code> are <strong>display copy, and both are conjugated by <code>bridge_registered</code></strong>. With no bridge a live route's <code>why</code> gives the rationale ("the live channel here can carry it on demand") instead of a delivery claim, and <code>summary</code> says "planned live (not connected)". Neither field's shape moved, so this stayed <code>delivery-routing-v1</code> — which is exactly why <strong>neither may be matched on</strong>: the same routing reads two ways.</li>
+<li><code>full_ceremony</code> says a kind is executable (hooks, extensions), never that a ceremony has happened.</li>
+</ul>
 <h2 id="json-that-is-not-part-of-this-contract">JSON that is not part of this contract<a class="hlink" href="#json-that-is-not-part-of-this-contract" aria-label="Link to this section">#</a></h2>
 <p>Some commands emit JSON that is evidence or analysis rather than control-plane state. These carry <strong>no envelope</strong> and <strong>no feature name</strong>, and their shape may change without a <code>schema_version</code> bump. Treat them as reports, not APIs:</p>
 <ul>
@@ -463,6 +506,13 @@ $ echo $?
 <li><code>agentstack x optimize --json</code></li>
 <li><code>agentstack x workflow report --json</code> (<code>workflow explain --json</code> left this list when it gained the envelope and <code>workflow-role-selection-v1</code>)</li>
 </ul>
+<p>The append-only evidence files are the same kind of thing: JSON Lines with no envelope and no feature name, self-describing per row, and free to gain variants. Three moved recently and are worth knowing if you parse them:</p>
+<ul>
+<li><code>~/.agentstack/runs/&lt;id&gt;/events.jsonl</code> — each row carries its own <code>event</code> tag. Toolset-fence refusals arrive as <code>"event": "fence_refused"</code> (server, tool, the <code>toolset</code> that would expose it, and the reason), deliberately <strong>not</strong> as a <code>tool_call</code> with a denied outcome, so a refusal never inflates the count of calls a run made. <code>agentstack x report run &lt;id&gt;</code> prints them in their own <strong>Fence refusals</strong> section.</li>
+<li><code>~/.agentstack/audit/calls.jsonl</code> — the guard's three fail-closed <em>system</em> refusals are filed under synthetic <code>system: &lt;tag&gt;</code> subjects (<code>system: machine-config-unreadable</code>, <code>system: machine-policy-unavailable</code>, <code>system: hook-payload-unreadable</code>) with no project. Rule denials name the call instead, under one of exactly four machine-authored prefixes: <code>bash: </code>, <code>read: </code>, <code>write: </code>, <code>other</code>. Nothing derived from a hook payload can produce the <code>system: </code> prefix, so the two kinds cannot be confused.</li>
+<li><code>~/.agentstack/audit/trust.jsonl</code> — one identity-only row per trust-store mutation. The action set is <code>grant</code>, <code>regrant</code>, <code>repin</code>, <code>revoke</code>, <code>decide</code> and <code>undecide</code>; the last two record and withdraw a standing re-gate answer and re-pin nothing, carrying the digest the entry already stood on.</li>
+</ul>
+<p>What those files prove about enforcement — recorded is not prevented — is <a href="enforcement.html">the enforcement matrix</a>'s question, not this page's.</p>
 <h2 id="guarantees">Guarantees<a class="hlink" href="#guarantees" aria-label="Link to this section">#</a></h2>
 <ul>
 <li><strong>Reads never write.</strong> Nothing on the reads table creates, edits, or deletes a file. The one command that starts a process (<code>doctor --probe</code>) says so, has its own contract name, and refuses to spawn anything for a project that is not trusted at its current bytes.</li>

@@ -24,6 +24,7 @@ Audience: anyone deciding whether to point AgentStack at a particular CLI.
 - [How the tiers are defined](#how-the-tiers-are-defined)
 - [The matrix](#the-matrix)
 - [What each adapter manages](#what-each-adapter-manages)
+- [Which adapters get the host guard](#which-adapters-get-the-host-guard)
 - [When an upstream CLI changes its schema](#when-an-upstream-cli-changes-its-schema)
 - [Why conformance runs nightly, not on pull requests](#why-conformance-runs-nightly-not-on-pull-requests)
 - [Adding or overriding an adapter](#adding-or-overriding-an-adapter)
@@ -156,7 +157,59 @@ Two things this table deliberately does not tell you. It does not say a `yes`
 cell is nightly-verified — cross-reference [the matrix](#the-matrix) for that.
 And it does not say the tool is *confined*: what AgentStack enforces once a CLI
 is running is a separate question, answered in the
-[enforcement matrix](ENFORCEMENT.md).
+[enforcement matrix](ENFORCEMENT.md) and, per CLI, in the next section.
+
+## Which adapters get the host guard
+
+Writing a CLI's config and refereeing what that CLI then does are two different
+jobs, and the second is not available on every adapter. `agentstack guard
+install` wires `agentstack guard check` into a **detected** CLI's own
+pre-tool-use hook; per call it can then block destructive commands, any access
+to `[policy.filesystem] deny` globs (machine ∪ project — a repo can only add),
+and writes outside the workspace plus `[guard] allow_roots` plus temp. It is
+cooperative by construction — the CLI chooses to ask — so it catches an agent's
+accidents, not a determined attacker. `agentstack guard status` prints this
+same list for the machine in front of you, marking which of the hooked CLIs it
+actually detected.
+
+| Adapter | Host guard | Where the hook lives |
+| --- | --- | --- |
+| `claude-code` | yes | `~/.claude/settings.json` — `PreToolUse` |
+| `vscode` | yes, through the entry above | VS Code agent mode reads the same user-scope Claude-format hooks. Best-effort: VS Code's hook support is in Preview and an organization can disable it |
+| `codex` | yes | `~/.codex/hooks.json` — `PreToolUse` |
+| `gemini` | yes | `~/.gemini/settings.json` — `BeforeTool` |
+| `antigravity` | yes | `~/.gemini/config/hooks.json` — `PreToolUse` |
+| `cursor` | yes | `~/.cursor/hooks.json` — `beforeShellExecution`, `beforeReadFile` |
+| `windsurf` | yes | `~/.codeium/windsurf/hooks.json` — `pre_run_command`, `pre_write_code`, `pre_read_code`, `pre_mcp_tool_use` |
+| `copilot-cli` | yes | `~/.copilot/hooks/agentstack-guard.json` (a file the guard owns outright) |
+| `opencode` | yes | `~/.config/opencode/plugins/agentstack-guard.js` (guard-owned) |
+| `pi` | yes | `~/.pi/agent/extensions/agentstack-guard.ts` (guard-owned) |
+| `claude-desktop` | **no — no hook surface exists** | no `PreToolUse`-style hook exists on that surface, so there is nothing for a guard to ride |
+| `junie` | **no — no hook surface exists** | only a static action allowlist; no per-call hook |
+| `kiro` | **no — not wired yet** | AgentStack has not built one. This is a gap in AgentStack, not in Kiro: this repo's descriptor records Kiro's MCP config only, not a hook file the guard could install into |
+
+**The two "no" reasons are different promises, and the page keeps them apart.**
+"No hook surface exists" is a fact about the CLI — nothing to build, nothing to
+wait for. "Not wired yet" is a fact about AgentStack — the CLI could be
+covered, and is not. A security list that blurred them would read as
+*impossible* where the truth is *unbuilt*. Kiro leaves the second list only
+when this repo knows all three things a guard target needs: a detect path, the
+concrete hook file, and the per-entry shape uninstall can find again. The
+adapter descriptors in `crates/adapters/descriptors/` are the authority for
+that, so a hook format guessed from outside them would be coverage AgentStack
+cannot honestly claim.
+
+Two reach notes, because "guarded" is not uniform inside a guarded CLI:
+
+- Cursor's `beforeMCPExecution` is deliberately **not** registered — an MCP
+  call has no file or shell surface the guard can judge without inventing new
+  policy.
+- **Shell** writes reach the guard on every wired CLI, because they arrive as
+  commands. **File-tool** writes reach it on two signals: a fixed list of
+  writer tool names, and — beyond that list — the *shape of the payload*, so a
+  tool this build has never heard of is still confined when the call plainly
+  intends a write. The exact reach and the named residual are in the
+  [enforcement matrix](ENFORCEMENT.md#filesystem--write).
 
 ## When an upstream CLI changes its schema
 

@@ -37,6 +37,22 @@ what each label actually guarantees is the
   whose sole peer is the egress sidecar — no host route, no internet. Posture:
   `LOCKDOWN / ENFORCED · NO DIRECT ROUTE`.
 
+**Content trust is the gate you meet first.** "Enforces content trust before
+launch" means a protected run of an untrusted or drifted project is refused, not
+downgraded. `--plan` tells you so without launching anything, and the message
+carries the fix in the order it has to happen:
+
+```text
+error: a live `run claude-code --locked` would be REFUSED — 1 blocker:
+  [trust] configuration changed since it was trusted — re-review and re-trust.
+  If you changed pinned inputs, run `agentstack lock --write` first — new pins
+  re-gate trust.
+```
+
+Lock, then `agentstack trust .`, then run — see
+[trust a cloned repo](trust-a-repo.md). `--unprotected` is the only way past it,
+and it drops the whole pre-launch gate, not just this check.
+
 Point `AGENTSTACK_SANDBOX_IMAGE` at an image that carries your agent CLI. The
 lockdown egress sidecar is pulled from GHCR automatically, pinned per release
 (override with `AGENTSTACK_EGRESS_IMAGE`).

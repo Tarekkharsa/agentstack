@@ -24,6 +24,18 @@ The plan names the Claude Code and Codex files it read, every server it can
 map, unsupported fields it will leave alone, lifted secret reference *names*,
 and both native destinations. The write creates one manifest and renders only
 the targets that contributed configuration. Existing foreign entries are kept.
+An import consents to what it imported, so the new project is trusted at those
+bytes and the [review step](#the-review-step) below does not apply here — it is
+for a setup arriving from somewhere else.
+
+One thing `apply --write` may tell you instead of writing: delivery is routed,
+and for an MCP-capable CLI servers are routed to the **live** lane, which
+`apply` does not render. With no bridge registered yet it therefore writes
+nothing and exits nonzero, naming the two ways forward — register the bridge
+(`agentstack x gateway connect --all --write`) or route those kinds to files
+(`agentstack x delivery render-locally --write`). `agentstack init` prints the
+same two options at the end of the import. This applies to the recipe below as
+well.
 
 To undo onboarding, list the labelled entries and restore them newest first:
 
@@ -70,6 +82,7 @@ On each machine:
 
 ```sh
 agentstack x install --locked
+agentstack trust .             # review — see "The review step" below
 agentstack apply               # preview
 agentstack apply --write
 agentstack doctor
@@ -96,6 +109,7 @@ A teammate then runs:
 agentstack x install --locked
 agentstack doctor              # list unresolved reference names
 agentstack secret set GITHUB_TOKEN   # repeat for each unresolved reference
+agentstack trust .             # review — see "The review step" below
 agentstack apply               # preview
 agentstack apply --write
 agentstack doctor
@@ -105,6 +119,57 @@ Each person supplies values on their own machine and reviews the cloned project
 before activation. Trust records are never copied. See [share a setup with your
 team](howto/team-setup.md) for signatures, platform differences, and the full
 handoff checklist.
+
+## The review step
+
+Every recipe above that brings a setup to a machine ends at the same gate, so
+it is worth stating once rather than in each block. **Trust is recorded per
+project directory and is never copied**, so a clone, a second checkout, or a
+fresh git worktree of a project you already approved arrives *untrusted* at its
+new path — even with the manifest and lockfile committed and `agentstack x
+install --locked` already run.
+
+Until it is reviewed, a write refuses in place and names the item it withheld:
+
+- `agentstack apply --write` writes no native MCP server config, compiles no
+  instruction fragments, renders no hooks and no native extensions;
+- `agentstack use --write` materializes no skills.
+
+Each prints a `✗` line pointing at `agentstack trust .` and exits nonzero, so a
+half-configured setup is not what you get — nothing is written at all. `trust .`
+shows the reviewed surface and asks one closing question, so it needs a person
+at a terminal; a scripted rollout uses the digest-bound pair instead
+(`agentstack trust --preview`, then `agentstack trust --yes --consented-digest
+<digest>`), which refuses a stale or missing digest.
+
+Nothing about this is a migration: it is the same first-run review a project
+gets anywhere, arriving once per machine and per checkout.
+
+## What changed on disk
+
+Two notes for anyone tracking the file formats rather than the commands.
+
+**`agentstack.lock` gained `[[setting]]` rows, and nothing needs migrating.**
+Each row pins one native settings key per target — `target`, `key`, `checksum`
+over the value *as declared*, `${REF}`s unresolved — at the same grain the
+renderer owns keys, so a probe can name which key moved. The lockfile version
+did **not** move; these rows are additive:
+
+- an older lock with no `[[setting]]` rows loads and works unchanged;
+- `agentstack lock --write` backfills them on the next run;
+- a project that declares no `[settings.*]` keeps a byte-identical lockfile —
+  the list is omitted entirely, so no one is re-gated by the arrival of a new
+  pin kind.
+
+A settings pin is also not a delivery gate: unlike an unpinned skill or
+instruction, an unpinned or drifted settings key does not refuse a render.
+
+**`~/.agentstack/audit/trust.jsonl` gained two actions.** Beside `grant`,
+`regrant`, `repin` and `revoke`, a line's `action` can now be `decide` or
+`undecide` — a standing re-gate answer being recorded on an existing entry, or
+withdrawn from one. Neither re-pins anything: both carry the digest the entry
+already stood on. The file remains identity-only and append-only, and it is
+machine-local: like every trust record, it is not copied between machines.
 
 ## Remove AgentStack completely
 

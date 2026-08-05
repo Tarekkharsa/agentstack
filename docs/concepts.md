@@ -66,9 +66,25 @@ extensions. You edit it; AgentStack renders it into each tool's own config. It
 holds only `${REF}` secret placeholders, never real values.
 
 **Lockfile** — `agentstack.lock` pins the manifest's resolved contents (server
-definitions, skill bytes, instruction bytes) to SHA-256 digests, so the same
-inputs reproduce and any change is visible. It is part of what you consent to
-when you trust a project.
+definitions, skill bytes, instruction bytes, settings values) to SHA-256
+digests, so the same inputs reproduce and any change is visible. It is part of
+what you consent to when you trust a project — and that has one consequence
+worth learning before you meet it.
+
+**Lock first, then trust.** Because the lockfile is inside the consent surface,
+`agentstack lock --write` always invalidates an existing grant: new pins are new
+consent. So the order never varies — pin the bytes, *then* approve them.
+
+```bash
+agentstack lock --write   # pin
+agentstack trust .        # review the pinned bytes and approve
+```
+
+Doing it the other way round throws the approval away, and `trust` refuses an
+unpinned surface anyway. The same rule explains why re-locking a changed skill
+does not make it deliverable again: `lock --write` *accepts* the new bytes,
+which is a machine's job; only `trust` *reviews* them, which is yours, and only
+the review re-opens delivery.
 
 ## Toolset
 
@@ -125,10 +141,35 @@ skill enters context, no secret resolves. Trust says the surface was approved
 for loading — not that the code is safe, or that a trusted project is safe to run
 unsandboxed.
 
+**The gate is a write gate too.** Inert is not only about run time. On an
+untrusted or drifted project, five kinds of delivery refuse loudly and exit
+nonzero: **MCP server config** is not written, **skill files** are not
+materialized, **instruction fragments** are not compiled into
+`CLAUDE.md` / `AGENTS.md`, and **hooks** and **extensions** are not rendered —
+those last two run code, so they take the full consent ceremony every time and
+accept no relaxation. Three things stay outside the gate, because none of them
+authorizes new content: removal and pruning, machine-layer content and the
+machine manifest, and `[settings.*]` values. More:
+[troubleshooting — it refuses because the project isn't trusted](troubleshooting.md#it-refuses-because-the-project-isnt-trusted).
+
 **Consent digest** — the SHA-256 fingerprint of your manifest, local overlay,
 and lockfile that trust is pinned to. Change any of those bytes — a `git pull`, a
-re-lock — and the project drops back to untrusted until you re-trust it. More:
+re-lock, your own edit — and the grant goes **stale** (`status` calls it
+`trust stale (content changed)`) until you review what moved and re-trust. More:
 [ENFORCEMENT.md — what trusted does and does not mean](ENFORCEMENT.md#what-trusted-does-and-does-not-mean).
+
+**What a write costs you.** Two rules follow from the digest, and they are the
+source of most surprises:
+
+- A command that writes the manifest **and delivers in the same run** —
+  `agentstack add … --write`, the panel's edit verbs — judges trust as it stood
+  when the command *started*, so it never refuses the delivery you just asked
+  for. It does **not** re-pin: the new capability is real content and still owes
+  a review, so the project is left stale and the next command re-gates.
+- A write that records only a **preference** — `agentstack x delivery
+  render-locally --write`, the `.gitignore` preference — authorizes nothing, so
+  a grant that was valid immediately before is carried across it. It can never
+  create a grant or resolve a pending review.
 
 **The yes** — the consent moment itself, and the one thing never automated. For
 files you drop into `.agentstack/skills/` or `.agentstack/instructions/`,
@@ -160,11 +201,17 @@ a hand-edit, `apply --write` when the manifest is right. More:
 
 ## Guard
 
-**Guard** — a *cooperative* check AgentStack wires into each CLI's own
-pre-tool-use hook to block obvious destructive commands (`rm -rf` outside the
-workspace, writes to `.env` and key files). It catches an agent's accidents, not
-a determined attacker: any CLI that ignores its own hooks, or a process it never
-routes through a hook, bypasses it entirely. It is never enforcement. More:
+**Guard** — a *cooperative* check AgentStack wires into a CLI's own pre-tool-use
+hook to block obvious destructive commands (`rm -rf` outside the workspace,
+writes to `.env` and key files). It catches an agent's accidents, not a
+determined attacker: any CLI that ignores its own hooks, or a process it never
+routes through a hook, bypasses it entirely. It is never enforcement.
+
+Not every CLI is covered, and `agentstack x guard status` distinguishes the two
+reasons. **`no hook surface exists`** is a fact about the CLI — Claude Desktop
+has no PreToolUse-style hook, Junie has only a static action allowlist — and no
+release can fix it. **`not wired yet`** is a fact about AgentStack: Kiro could
+be covered and is not. More:
 [ENFORCEMENT.md — filesystem write](ENFORCEMENT.md#filesystem--write).
 
 <a id="sandbox-lockdown-and-run---locked"></a>

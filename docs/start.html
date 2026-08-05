@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Get started — agentstack</title>
-<meta name="description" content="One agent setup, shared by every coding CLI you use. This page is the whole first hour: install it, run it once, connect the bridge, check the result, name">
+<meta name="description" content="One agent setup, shared by every coding CLI you use. This page is the whole first hour: install it, run it once, connect the bridge, check the result, say">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="canonical" href="https://tarekkharsa.github.io/agentstack/start.html">
@@ -259,7 +259,7 @@
   <main id="main-content" tabindex="-1">
 <p class="versionbar">These pages describe <b>unreleased <code>main</code></b>, which is ahead of the latest release (<b>v0.18.0</b>) — and the release is what <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">the installer gives you</a>. Commands and flags documented here may not exist in your build; <code>agentstack --version</code> says which one you have.</p>
 <h1 id="get-started">Get started</h1>
-<p>One agent setup, shared by every coding CLI you use. This page is the whole first hour: install it, run it once, connect the bridge, check the result, name a toolset, switch between toolsets, and undo anything you did.</p>
+<p>One agent setup, shared by every coding CLI you use. This page is the whole first hour: install it, run it once, connect the bridge, check the result, say yes to it, name a toolset, switch between toolsets, and undo anything you did.</p>
 <p>Everything here is a command from the current stable release. Where a newer release has a shorter path, it is marked and gathered in one place at the bottom — see <a href="#newer-than-the-stable-release">newer than the stable release</a>.</p>
 <h2 id="install">Install<a class="hlink" href="#install" aria-label="Link to this section">#</a></h2>
 <pre class="block"><code>curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh</code></pre>
@@ -280,7 +280,7 @@ agentstack init</code></pre>
 │   ├── agentstack.toml   # the manifest: servers, skills, instructions, toolsets
 │   ├── agentstack.lock   # the pins — exact commits and digests (written by `agentstack lock --write`)
 │   └── .env              # token values lifted out of your configs (only if init found any)
-└── .gitignore            # one managed line, so .env is never committed</code></pre>
+└── .gitignore            # a managed block, so .env and generated artifacts are never committed</code></pre>
 <p>The manifest holds <code>${GITHUB_TOKEN}</code>-style placeholders, never token values.</p>
 <p>Scripting it instead of answering prompts? <code>agentstack init --yes</code> writes the manifest without prompting, <code>--secrets env|keychain|skip</code> decides where lifted values go, and <code>agentstack init --plan</code> writes nothing at all and emits the detection as JSON. See <a href="howto/ci.html">use it in CI</a>.</p>
 <h2 id="register-the-bridge">Register the bridge<a class="hlink" href="#register-the-bridge" aria-label="Link to this section">#</a></h2>
@@ -292,14 +292,24 @@ agentstack x gateway connect --all --write   # register it</code></pre>
 <pre class="block"><code>agentstack x delivery        # the routing, per tool and per capability kind</code></pre>
 <p>The routing report names both lanes separately — the live one, and a <code>rendered lane:</code> line for what went into files. If the bridge is not registered, the live entries read <code>planned live (not connected)</code>, and the report tells you the one command that connects it.</p>
 <p>To write files even where the live channel would have worked:</p>
-<pre class="block"><code>agentstack x delivery render-locally</code></pre>
+<pre class="block"><code>agentstack x delivery render-locally           # preview: what it would record
+agentstack x delivery render-locally --write   # record it, then `agentstack apply --write`</code></pre>
 <h2 id="verify-it">Verify it<a class="hlink" href="#verify-it" aria-label="Link to this section">#</a></h2>
 <pre class="block"><code>agentstack status    # where this project stands, and the one next step
 agentstack doctor    # the deep check: what is wired, what is missing, what changed</code></pre>
 <p><code>status</code> is one screen. <code>doctor</code> is the thorough pass — it names every problem with the command that fixes it, and <code>doctor --ci</code> exits nonzero so a pipeline can gate on it. When something is routed live and a CLI has no bridge registered, <code>doctor</code> reports it as an error — <code>no bridge for &lt;those CLIs&gt; — nothing routed live is reaching them</code> — and names <code>agentstack x gateway connect --all --write</code>. A project that routes nothing live gets no such error.</p>
 <p>Expect a note or two on a real machine. Advisories — "these servers launch via bare <code>npx</code>", for instance — are stated once and do not count against readiness.</p>
-<p>If the project came from someone else, it stays inert until you review it: no server spawns, no skill enters an agent's context, no secret resolves.</p>
+<h2 id="say-yes-to-it">Say yes to it<a class="hlink" href="#say-yes-to-it" aria-label="Link to this section">#</a></h2>
+<p>Nothing this project declares reaches a tool until you approve it — not a project you cloned, and not the one you just built. Until then no server spawns, no server definition is written into a CLI's config, no skill file is materialized, no instruction block enters a <code>CLAUDE.md</code> or <code>AGENTS.md</code>, and no secret resolves.</p>
 <pre class="block"><code>agentstack trust .   # read the review, then approve it</code></pre>
+<p><code>init</code> already asked, so a project fresh from the wizard reads <code>trusted</code> and this is a no-op. It is every change after that which needs you: a <code>git pull</code>, an <code>agentstack add</code>, a new toolset, a re-lock.</p>
+<p>The yes is bound to the exact bytes you read, so every later edit to the manifest or the lockfile reopens it — <code>status</code> and <code>doctor</code> then say <code>trust stale (content changed)</code>. Any command that would deliver content refuses by name and exits nonzero:</p>
+<pre class="block"><code>✗ refusing to materialize skills: project at /your-project changed since it was
+  trusted — review and `agentstack trust .` before putting its words into an
+  agent's context ('code-review')
+✗ skills not materialized — the project has not been trusted for this content
+error: 3 targets blocked — each ✗ above names the blocker</code></pre>
+<p>Pruning and removal stay outside the gate, and so do the machine-level manifest and its content — the question is only ever about new content this project asks a tool to read or run.</p>
 <p>See <a href="howto/trust-a-repo.html">trust a repo</a> for what the review shows.</p>
 <h2 id="name-a-toolset">Name a toolset<a class="hlink" href="#name-a-toolset" aria-label="Link to this section">#</a></h2>
 <p>A toolset is a named subset of this project's servers and skills — one for backend work, one for incident response — so you switch context without editing five config files.</p>
@@ -309,31 +319,41 @@ agentstack toolset list          # what is declared, and whether each is ready</
 <pre class="block"><code>[toolsets.backend]
 servers = ["github"]
 skills  = ["code-review"]</code></pre>
+<p>Creating a toolset re-pins <code>agentstack.lock</code>, and the lock is part of what you approved — so the project needs your yes again before it activates. The command says so on its own last line: <code>Next: agentstack trust . to review and consent.</code></p>
 <h2 id="switch-between-toolsets">Switch between toolsets<a class="hlink" href="#switch-between-toolsets" aria-label="Link to this section">#</a></h2>
-<pre class="block"><code>agentstack use backend           # preview what activating it changes
+<pre class="block"><code>agentstack trust .               # the lock moved, so approve it again
+agentstack use backend           # preview what activating it changes
 agentstack use backend --write   # activate it
 agentstack use --list            # every toolset, with a readiness flag</code></pre>
+<p>Skip that first line and the last two refuse: <code>use --write</code> reports <code>skills not materialized — the project has not been trusted for this content</code> for each target and exits nonzero. <code>use --list</code> prints the standing answer in its header — <code>Declared toolsets (project trust: drifted)</code>.</p>
 <p>With one toolset declared, <code>agentstack use</code> picks it for you; with none declared, every inline skill and server activates.</p>
-<p>When you change what a toolset references, re-pin and re-review:</p>
-<pre class="block"><code>agentstack lock --write   # pin the new refs into agentstack.lock
-agentstack trust .        # the lock is part of the consent surface, so re-approve</code></pre>
+<p>When you change what a toolset references, re-pin, re-review, then activate — always in that order:</p>
+<pre class="block"><code>agentstack lock --write          # pin the new refs into agentstack.lock
+agentstack trust .               # the lock is part of the consent surface, so re-approve
+agentstack use backend --write   # now it activates</code></pre>
+<p>Re-locking is not the yes. Content that drifted from its pin is refused until you re-lock, and re-locking then says <code>this project is trusted — new pins are new consent, so its trust is now stale</code>: accepting the content does not answer the question that accepting it reopened.</p>
 <p><code>agentstack lock</code> on its own previews: it prints the pins it would add, change, or remove and writes nothing into the project. Computing the preview still resolves sources, so git-backed sources are fetched. <code>--write</code> pins them.</p>
 <h2 id="undo-anything">Undo anything<a class="hlink" href="#undo-anything" aria-label="Link to this section">#</a></h2>
-<p>Every write is recorded before it lands, so every write can be taken back.</p>
+<p>Every config write is recorded before it lands, so it can be taken back — <code>init</code>, <code>apply</code>, <code>gateway connect</code> and the delivery override all appear here.</p>
 <pre class="block"><code>agentstack x restore                  # everything undoable, newest first
 agentstack x restore --last --write   # undo the most recent write
 agentstack x restore a1b2 --write     # undo one write by its id prefix</code></pre>
+<p>Skill directories that <code>use --write</code> materialized are not in that list. Switch toolsets to move them, or take them off with <code>x uninstall</code> below.</p>
 <p>To reverse everything agentstack rendered, everywhere:</p>
 <pre class="block"><code>agentstack x uninstall          # preview: what would come off
 agentstack x uninstall --write  # do it</code></pre>
-<p>Your <code>agentstack.toml</code> stays where it is, so <code>agentstack apply --write</code> brings the whole setup back. Full detail: <a href="howto/undo.html">undo anything</a>.</p>
+<p>Your <code>agentstack.toml</code> stays where it is, so the setup rebuilds from it. But <code>x uninstall</code> also removes <code>~/.agentstack</code> — the undo ledger, the trust store and the library — so the rebuild starts from an untrusted project and needs the yes again:</p>
+<pre class="block"><code>agentstack trust .               # approve it again
+agentstack apply --write         # the rendered lane
+agentstack use backend --write   # the skills</code></pre>
+<p>Keep that state, and your approvals with it, by passing <code>--keep-home</code>. Full detail: <a href="howto/undo.html">undo anything</a>.</p>
 <h2 id="newer-than-the-stable-release">Newer than the stable release<a class="hlink" href="#newer-than-the-stable-release" aria-label="Link to this section">#</a></h2>
 <p>The install line above serves the current stable release. These verbs are in v0.18.0 and later, and <code>agentstack --version</code> says which you have:</p>
 <div class="tblwrap"><table>
 <thead><tr><th>In v0.18.0 and later</th><th>What it shortens</th></tr></thead><tbody>
 <tr><td><code>agentstack yes</code></td><td>drop a skill or instruction file in <code>.agentstack/</code>, then declare + pin + trust + render behind one review</td></tr>
 <tr><td><code>agentstack undo</code></td><td>the recorded changes as a timeline — pick a point and revert to it (<code>restore</code> does it one write at a time)</td></tr>
-<tr><td><code>agentstack why &lt;name&gt;</code></td><td>where a capability came from, its pin, its approval, which CLIs serve it live, and what it reaches — the answer when nothing was written to disk</td></tr>
+<tr><td><code>agentstack x why &lt;name&gt;</code></td><td>where a capability came from, its pin, its approval, which CLIs serve it live, and what it reaches — the answer when nothing was written to disk</td></tr>
 <tr><td><code>agentstack x unrender</code></td><td>take back a server config the rendered lane left behind, without the whole-machine <code>x uninstall</code></td></tr>
 <tr><td><code>agentstack x up</code></td><td>set a new machine up from a setup that already exists (<code>apply --write</code> then <code>doctor</code> today)</td></tr>
 <tr><td><code>agentstack x share</code> / <code>agentstack x receive</code></td><td>move a setup between people as a signed bundle (committing the manifest does it today)</td></tr>

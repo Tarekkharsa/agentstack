@@ -29,10 +29,27 @@ At a terminal it shows what it will create, asks, and on yes writes the
 `[toolsets.backend]` block and re-locks. `--skill '*'` means every inline skill.
 
 **Naming a toolset does not switch to it.** Nothing is rendered and none of your
-CLIs change — you have defined a subset, not chosen it. Activate it when you
-want it, with `agentstack x session start backend` (see
-[below](#which-activation-session-or-apply)). To undo the creation itself,
-delete the `[toolsets.backend]` block from the manifest.
+CLIs change — you have defined a subset, not chosen it. To undo the creation
+itself, delete the `[toolsets.backend]` block from the manifest.
+
+**Review it before you activate it.** `toolset create` writes the manifest and
+re-locks, and both files are part of the
+[consent surface](../concepts.md#trust-and-the-consent-digest) — so creating a
+toolset re-opens the review, even though it added no new capability:
+
+```bash
+agentstack trust .                    # approve the manifest and lock as they now stand
+agentstack x session start backend    # …now it activates
+```
+
+Activate it when you want it, and pick how — see
+[which activation](#which-activation-session-or-apply).
+
+Skip it and the activation refuses rather than half-applying: `use --write`
+reports "refusing to materialize skills … review and `agentstack trust .`" for
+each blocked target, and `session start` stops with "refusing to start a
+session: the manifest or lockfile changed since this project was trusted". See
+[trust a cloned repo](trust-a-repo.md) for what else the gate covers.
 
 Scripts and graphical clients get a two-step consent contract instead —
 [reference: selective skills via toolsets](../reference.md#selective-skills-via-toolsets).
@@ -56,13 +73,18 @@ servers = ["postgres", "github"]
 skills  = ["sql-review"]
 ```
 
-Then activate it — temporarily for a task, or applied on disk:
+Then pin the new set, approve it, and activate it — temporarily for a task, or
+applied on disk:
 
 ```bash
+agentstack lock --write               # pin what this toolset selects
+agentstack trust .                    # the edit re-opened the review; approve it
 agentstack use --list                 # see every toolset and its readiness
 agentstack x session start backend      # use it for now; `session end` reverts
 agentstack use backend --write        # or apply it on disk (stable/offline)
 ```
+
+Lock first, then trust: re-locking after you approve throws the approval away.
 
 Prefer to **capture what you actually used** instead of writing the list by
 hand? During a session, `agentstack x session freeze --name backend` pins the

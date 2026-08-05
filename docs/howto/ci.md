@@ -37,6 +37,54 @@ fails the gate. `init --secrets skip` writes only the manifest and `${REF}`
 placeholders — no prompts, no token values — for jobs that reverse-engineer a
 manifest from what's on disk.
 
+## The trust gate, headlessly
+
+A fresh runner is an untrusted checkout — the grant is keyed to a path on one
+machine and never travels with the repo — and an untrusted project refuses to
+**deliver**: no server definitions written into a CLI's config, no skill files
+materialized, no instruction fragments compiled, no hooks, no extensions (see
+[trust a cloned repo](trust-a-repo.md)).
+
+**The gate above is unaffected.** `install --locked` fetches into the store and
+`doctor --ci` only reads — neither renders nor activates anything, so neither
+asks for consent. Both pass on an untrusted checkout, `doctor` states
+"not trusted for auto mode" as a fact rather than a failure, and the one-line
+Action keeps working exactly as written.
+
+**A job that renders needs the two-step grant.** If your pipeline goes further
+— `apply --write`, `use --write`, `agentstack x session start`, or a protected
+`agentstack run` — it hits the gate, and a bare `agentstack trust .` refuses in
+CI because stdin is not a terminal. Present the reviewed digest back instead:
+
+```bash
+# 1. Emit the review surface as JSON and grant nothing. Keep it as a build
+#    artifact — it is the record of what the runner was about to approve.
+agentstack trust --preview . > surface.json
+
+# 2. Bind the grant to those exact bytes, then render.
+DIGEST=$(jq -r .surface_digest surface.json)
+agentstack trust . --yes --consented-digest "$DIGEST"
+agentstack apply --write
+```
+
+`--yes` is refused without a digest, and `--consented-digest` is refused on any
+mismatch — so a checkout that moved between the preview and the grant fails
+closed rather than approving bytes nobody saw. Derive the digest from the
+surface the job just printed over a pinned checkout; taking it from anywhere
+else defeats the whole mechanism, since the digest *is* the claim that this
+surface was reviewed.
+
+The preview also says whether the grant can succeed before you attempt it:
+`grantable` is false, with a `blockers` array naming each item and its fix,
+whenever the loadable surface is not fully pinned. Branch on that rather than
+parsing an error string.
+
+Two ordering rules carry over into automation. `agentstack lock --write`
+invalidates a grant, so a job that re-locks must lock **before** it trusts,
+never after. And if the job runs from a repository root while the manifest sits
+in a subdirectory, `agentstack trust` honours the global `--manifest-dir <dir>`
+flag — the same directory the Action's `working-directory` input points at.
+
 **Limits.** `doctor --ci` gates config health and *declared* policy, not runtime
 enforcement — it checks what the manifest declares, not what a server does once
 it runs. Content scanning catches known hidden-Unicode and injection heuristics,

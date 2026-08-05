@@ -5,8 +5,8 @@
 # Get started
 
 One agent setup, shared by every coding CLI you use. This page is the whole
-first hour: install it, run it once, connect the bridge, check the result, name
-a toolset, switch between toolsets, and undo anything you did.
+first hour: install it, run it once, connect the bridge, check the result, say
+yes to it, name a toolset, switch between toolsets, and undo anything you did.
 
 Everything here is a command from the current stable release. Where a newer
 release has a shorter path, it is marked and gathered in one place at the
@@ -56,7 +56,7 @@ your-project/
 │   ├── agentstack.toml   # the manifest: servers, skills, instructions, toolsets
 │   ├── agentstack.lock   # the pins — exact commits and digests (written by `agentstack lock --write`)
 │   └── .env              # token values lifted out of your configs (only if init found any)
-└── .gitignore            # one managed line, so .env is never committed
+└── .gitignore            # a managed block, so .env and generated artifacts are never committed
 ```
 
 The manifest holds `${GITHUB_TOKEN}`-style placeholders, never token values.
@@ -98,7 +98,8 @@ report tells you the one command that connects it.
 To write files even where the live channel would have worked:
 
 ```sh
-agentstack x delivery render-locally
+agentstack x delivery render-locally           # preview: what it would record
+agentstack x delivery render-locally --write   # record it, then `agentstack apply --write`
 ```
 
 ## Verify it
@@ -120,12 +121,38 @@ Expect a note or two on a real machine. Advisories — "these servers launch via
 bare `npx`", for instance — are stated once and do not count against
 readiness.
 
-If the project came from someone else, it stays inert until you review it: no
-server spawns, no skill enters an agent's context, no secret resolves.
+## Say yes to it
+
+Nothing this project declares reaches a tool until you approve it — not a
+project you cloned, and not the one you just built. Until then no server
+spawns, no server definition is written into a CLI's config, no skill file is
+materialized, no instruction block enters a `CLAUDE.md` or `AGENTS.md`, and no
+secret resolves.
 
 ```sh
 agentstack trust .   # read the review, then approve it
 ```
+
+`init` already asked, so a project fresh from the wizard reads `trusted` and
+this is a no-op. It is every change after that which needs you: a `git pull`, an
+`agentstack add`, a new toolset, a re-lock.
+
+The yes is bound to the exact bytes you read, so every later edit to the
+manifest or the lockfile reopens it — `status` and `doctor` then say
+`trust stale (content changed)`. Any command that would deliver content
+refuses by name and exits nonzero:
+
+```text
+✗ refusing to materialize skills: project at /your-project changed since it was
+  trusted — review and `agentstack trust .` before putting its words into an
+  agent's context ('code-review')
+✗ skills not materialized — the project has not been trusted for this content
+error: 3 targets blocked — each ✗ above names the blocker
+```
+
+Pruning and removal stay outside the gate, and so do the machine-level manifest
+and its content — the question is only ever about new content this project asks
+a tool to read or run.
 
 See [trust a repo](howto/trust-a-repo.md) for what the review shows.
 
@@ -148,23 +175,40 @@ servers = ["github"]
 skills  = ["code-review"]
 ```
 
+Creating a toolset re-pins `agentstack.lock`, and the lock is part of what you
+approved — so the project needs your yes again before it activates. The command
+says so on its own last line: `Next: agentstack trust . to review and consent.`
+
 ## Switch between toolsets
 
 ```sh
+agentstack trust .               # the lock moved, so approve it again
 agentstack use backend           # preview what activating it changes
 agentstack use backend --write   # activate it
 agentstack use --list            # every toolset, with a readiness flag
 ```
 
+Skip that first line and the last two refuse: `use --write` reports
+`skills not materialized — the project has not been trusted for this content`
+for each target and exits nonzero. `use --list` prints the standing answer in
+its header — `Declared toolsets (project trust: drifted)`.
+
 With one toolset declared, `agentstack use` picks it for you; with none
 declared, every inline skill and server activates.
 
-When you change what a toolset references, re-pin and re-review:
+When you change what a toolset references, re-pin, re-review, then activate —
+always in that order:
 
 ```sh
-agentstack lock --write   # pin the new refs into agentstack.lock
-agentstack trust .        # the lock is part of the consent surface, so re-approve
+agentstack lock --write          # pin the new refs into agentstack.lock
+agentstack trust .               # the lock is part of the consent surface, so re-approve
+agentstack use backend --write   # now it activates
 ```
+
+Re-locking is not the yes. Content that drifted from its pin is refused until
+you re-lock, and re-locking then says `this project is trusted — new pins are
+new consent, so its trust is now stale`: accepting the content does not answer
+the question that accepting it reopened.
 
 `agentstack lock` on its own previews: it prints the pins it would add, change,
 or remove and writes nothing into the project. Computing the preview still
@@ -172,13 +216,17 @@ resolves sources, so git-backed sources are fetched. `--write` pins them.
 
 ## Undo anything
 
-Every write is recorded before it lands, so every write can be taken back.
+Every config write is recorded before it lands, so it can be taken back —
+`init`, `apply`, `gateway connect` and the delivery override all appear here.
 
 ```sh
 agentstack x restore                  # everything undoable, newest first
 agentstack x restore --last --write   # undo the most recent write
 agentstack x restore a1b2 --write     # undo one write by its id prefix
 ```
+
+Skill directories that `use --write` materialized are not in that list. Switch
+toolsets to move them, or take them off with `x uninstall` below.
 
 To reverse everything agentstack rendered, everywhere:
 
@@ -187,8 +235,19 @@ agentstack x uninstall          # preview: what would come off
 agentstack x uninstall --write  # do it
 ```
 
-Your `agentstack.toml` stays where it is, so `agentstack apply --write` brings
-the whole setup back. Full detail: [undo anything](howto/undo.md).
+Your `agentstack.toml` stays where it is, so the setup rebuilds from it. But
+`x uninstall` also removes `~/.agentstack` — the undo ledger, the trust store
+and the library — so the rebuild starts from an untrusted project and needs the
+yes again:
+
+```sh
+agentstack trust .               # approve it again
+agentstack apply --write         # the rendered lane
+agentstack use backend --write   # the skills
+```
+
+Keep that state, and your approvals with it, by passing `--keep-home`. Full
+detail: [undo anything](howto/undo.md).
 
 ## Newer than the stable release
 
@@ -199,7 +258,7 @@ v0.18.0 and later, and `agentstack --version` says which you have:
 | --- | --- |
 | `agentstack yes` | drop a skill or instruction file in `.agentstack/`, then declare + pin + trust + render behind one review |
 | `agentstack undo` | the recorded changes as a timeline — pick a point and revert to it (`restore` does it one write at a time) |
-| `agentstack why <name>` | where a capability came from, its pin, its approval, which CLIs serve it live, and what it reaches — the answer when nothing was written to disk |
+| `agentstack x why <name>` | where a capability came from, its pin, its approval, which CLIs serve it live, and what it reaches — the answer when nothing was written to disk |
 | `agentstack x unrender` | take back a server config the rendered lane left behind, without the whole-machine `x uninstall` |
 | `agentstack x up` | set a new machine up from a setup that already exists (`apply --write` then `doctor` today) |
 | `agentstack x share` / `agentstack x receive` | move a setup between people as a signed bundle (committing the manifest does it today) |
