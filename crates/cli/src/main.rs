@@ -144,7 +144,7 @@ fn run(argv: Vec<String>) -> Result<()> {
             agentstack::cli::LeaseCmd::Status { json } => commands::lease::run(*json),
         },
         Command::Delivery(args) => commands::delivery::run(args, dir),
-        Command::Trust(args) => commands::trust::run(args),
+        Command::Trust(args) => commands::trust::run(args, dir),
         Command::Guard(args) => commands::guard::run(args),
         Command::SelfCmd(args) => commands::self_cmd::run(args),
         Command::Completions(args) => commands::completions::run(args),

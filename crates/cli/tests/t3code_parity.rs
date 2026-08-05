@@ -46,7 +46,7 @@ fn dispatch(argv: &[&str]) -> Result<()> {
     match cli.command.expect("argv names a subcommand") {
         Command::Init(args) => commands::init::run(&args, dir),
         Command::Restore(args) => commands::restore::run(&args, dir),
-        Command::Trust(args) => commands::trust::run(&args),
+        Command::Trust(args) => commands::trust::run(&args, dir),
         // profiles-edit-v1: the closed set of fixed panel verbs. A new panel
         // capability is a new arm here, never an MCP tool wired into the browser.
         Command::AddSkillToProfile(a) => commands::panel_edit::add_skill(&a, dir),

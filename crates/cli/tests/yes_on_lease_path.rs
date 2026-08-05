@@ -146,9 +146,10 @@ impl McpSession {
     }
 
     /// Auto-project mode: the project is discovered per connection and
-    /// trust-gated by `AutoProject`. `$AGENTSTACK_MANIFEST_DIR` is the last rung
-    /// of that discovery ladder and the only one a test can set deterministically
-    /// (client roots need a roots-capable client; the cwd walk needs a chdir).
+    /// trust-gated by `AutoProject`. `$AGENTSTACK_MANIFEST_DIR` is the middle
+    /// rung of that discovery ladder — below the client roots, above the cwd —
+    /// and the only one a test can set deterministically (client roots need a
+    /// roots-capable client; the cwd walk needs a chdir).
     fn open_auto(proj: &Path, run: Option<&str>) -> McpSession {
         let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_agentstack"));
         cmd.args(["mcp", "--auto-project"])

@@ -148,7 +148,9 @@ fn trust_grant_requires_a_pinned_matching_surface() {
     write_project(&proj);
 
     // Unpinned inline skill → refused, pointing at `agentstack lock`.
-    let err = trust_cmd::run(&grant_args(&proj)).unwrap_err().to_string();
+    let err = trust_cmd::run(&grant_args(&proj), None)
+        .unwrap_err()
+        .to_string();
     assert!(err.contains("isn't fully pinned"), "{err}");
     assert!(err.contains("helper"), "{err}");
     // The refusal names the command that actually pins. Bare `agentstack lock`
@@ -159,16 +161,18 @@ fn trust_grant_requires_a_pinned_matching_surface() {
 
     // Pin it → trust grants.
     lock_cmd::run(&LockArgs::default(), Some(&proj)).unwrap();
-    trust_cmd::run(&grant_args(&proj)).unwrap();
+    trust_cmd::run(&grant_args(&proj), None).unwrap();
     assert_eq!(trust::check(&proj), TrustState::Trusted);
 
     // Drift the body → re-granting refuses until re-locked.
     fs::write(proj.join("skills/helper/SKILL.md"), "# helper v2\n").unwrap();
-    let err = trust_cmd::run(&grant_args(&proj)).unwrap_err().to_string();
+    let err = trust_cmd::run(&grant_args(&proj), None)
+        .unwrap_err()
+        .to_string();
     assert!(err.contains("drifted"), "{err}");
 
     lock_cmd::run(&LockArgs::default(), Some(&proj)).unwrap();
-    trust_cmd::run(&grant_args(&proj)).unwrap();
+    trust_cmd::run(&grant_args(&proj), None).unwrap();
     assert_eq!(trust::check(&proj), TrustState::Trusted);
 }
 
@@ -198,7 +202,7 @@ fn trust_preview_grants_nothing() {
     // Even after pinning (a grant would succeed here), preview leaves the
     // project untrusted — it only reports the surface.
     lock_cmd::run(&LockArgs::default(), Some(&proj)).unwrap();
-    trust_cmd::run(&preview_args).unwrap();
+    trust_cmd::run(&preview_args, None).unwrap();
     assert_eq!(trust::check(&proj), TrustState::Untrusted);
 }
 
@@ -248,7 +252,9 @@ fn trust_refusal_does_not_prescribe_lock_for_an_unlockable_declaration() {
     )
     .unwrap();
 
-    let err = trust_cmd::run(&grant_args(&proj)).unwrap_err().to_string();
+    let err = trust_cmd::run(&grant_args(&proj), None)
+        .unwrap_err()
+        .to_string();
 
     assert!(err.contains("Fix or remove the blocked declaration"));
     assert!(
@@ -292,7 +298,7 @@ fn trust_grant_surfaces_requested_policy() {
     // And granting still succeeds once the (unrelated) skill surface is pinned
     // — requested policy is reviewed, never blocking.
     lock_cmd::run(&LockArgs::default(), Some(&proj)).unwrap();
-    trust_cmd::run(&grant_args(&proj)).unwrap();
+    trust_cmd::run(&grant_args(&proj), None).unwrap();
     assert_eq!(trust::check(&proj), TrustState::Trusted);
 }
 
@@ -333,7 +339,9 @@ fn instruction_drift_blocks_apply_until_relocked() {
     fs::write(proj.join("instructions/house.md"), "Be kind.\n").unwrap();
 
     // Unpinned instruction → trust refuses.
-    let err = trust_cmd::run(&grant_args(&proj)).unwrap_err().to_string();
+    let err = trust_cmd::run(&grant_args(&proj), None)
+        .unwrap_err()
+        .to_string();
     assert!(err.contains("isn't fully pinned"), "{err}");
     assert!(err.contains("house"), "{err}");
 
@@ -352,7 +360,7 @@ fn instruction_drift_blocks_apply_until_relocked() {
     );
 
     // Pinned → trust grants.
-    trust_cmd::run(&grant_args(&proj)).unwrap();
+    trust_cmd::run(&grant_args(&proj), None).unwrap();
     assert_eq!(trust::check(&proj), TrustState::Trusted);
 
     // Drift the fragment: manifest + lock untouched → trust digest holds.
@@ -372,7 +380,9 @@ fn instruction_drift_blocks_apply_until_relocked() {
     );
 
     // Re-granting trust refuses over the drift.
-    let err = trust_cmd::run(&grant_args(&proj)).unwrap_err().to_string();
+    let err = trust_cmd::run(&grant_args(&proj), None)
+        .unwrap_err()
+        .to_string();
     assert!(err.contains("drifted"), "{err}");
 
     // Accept via `agentstack lock` (zero profiles — instructions still pin),
@@ -381,7 +391,7 @@ fn instruction_drift_blocks_apply_until_relocked() {
     assert_eq!(trust::check(&proj), TrustState::Changed);
 
     // Re-trust → apply flows and the accepted content compiles.
-    trust_cmd::run(&grant_args(&proj)).unwrap();
+    trust_cmd::run(&grant_args(&proj), None).unwrap();
     apply::run(&apply_args(), Some(&proj)).unwrap();
     assert!(fs::read_to_string(&compiled).unwrap().contains("Be EVIL."));
 }
@@ -429,7 +439,7 @@ fn machine_layer_fragments_are_exempt_from_pinning() {
     // Trust grants (the machine fragment is invisible to the review), and
     // apply --write compiles both layers without the machine fragment ever
     // blocking or pinning.
-    trust_cmd::run(&grant_args(&proj)).unwrap();
+    trust_cmd::run(&grant_args(&proj), None).unwrap();
     apply::run(&apply_args(), Some(&proj)).unwrap();
     let compiled = fs::read_to_string(home.join(".claude/CLAUDE.md")).unwrap();
     assert!(compiled.contains("Machine style."));
@@ -491,7 +501,9 @@ fn workflow_drift_and_roles_widening_block_trust_until_relocked() {
     .unwrap();
 
     // Unpinned workflow → trust refuses, naming it.
-    let err = trust_cmd::run(&grant_args(&proj)).unwrap_err().to_string();
+    let err = trust_cmd::run(&grant_args(&proj), None)
+        .unwrap_err()
+        .to_string();
     assert!(err.contains("isn't fully pinned"), "{err}");
     assert!(err.contains("review"), "{err}");
 
@@ -500,7 +512,7 @@ fn workflow_drift_and_roles_widening_block_trust_until_relocked() {
     let lock_path = proj.join("agentstack.lock");
     let lock_before = fs::read_to_string(&lock_path).unwrap();
     assert!(lock_before.contains("[[workflow]]"), "{lock_before}");
-    trust_cmd::run(&grant_args(&proj)).unwrap();
+    trust_cmd::run(&grant_args(&proj), None).unwrap();
     assert_eq!(trust::check(&proj), TrustState::Trusted);
 
     // One-byte source edit: manifest + lock untouched → trust digest holds
@@ -532,14 +544,16 @@ fn workflow_drift_and_roles_widening_block_trust_until_relocked() {
         );
     }
     // Drift blocks the re-grant…
-    let err = trust_cmd::run(&grant_args(&proj)).unwrap_err().to_string();
+    let err = trust_cmd::run(&grant_args(&proj), None)
+        .unwrap_err()
+        .to_string();
     assert!(err.contains("drifted"), "{err}");
     // …and `agentstack lock` accepts it, which re-gates trust via the lock
     // bytes. Re-trust restores.
     lock_cmd::run(&LockArgs::default(), Some(&proj)).unwrap();
     assert_ne!(fs::read_to_string(&lock_path).unwrap(), lock_before);
     assert_eq!(trust::check(&proj), TrustState::Changed);
-    trust_cmd::run(&grant_args(&proj)).unwrap();
+    trust_cmd::run(&grant_args(&proj), None).unwrap();
     assert_eq!(trust::check(&proj), TrustState::Trusted);
 
     // Roles widening, bytes unchanged: add a second role to the declaration
@@ -550,7 +564,9 @@ fn workflow_drift_and_roles_widening_block_trust_until_relocked() {
     let widened = "version = 1\n[profiles.reader]\n[profiles.writer]\n\
          [workflows.review]\npath = \"./workflows/review\"\nroles = [\"reader\", \"writer\"]\n";
     fs::write(proj.join("agentstack.toml"), widened).unwrap();
-    let err = trust_cmd::run(&grant_args(&proj)).unwrap_err().to_string();
+    let err = trust_cmd::run(&grant_args(&proj), None)
+        .unwrap_err()
+        .to_string();
     assert!(err.contains("roles changed since locked"), "{err}");
 
     // Re-lock records the widened role set; trust then grants over it.
@@ -560,6 +576,6 @@ fn workflow_drift_and_roles_widening_block_trust_until_relocked() {
         relocked.contains("writer"),
         "pin records the widened roles: {relocked}"
     );
-    trust_cmd::run(&grant_args(&proj)).unwrap();
+    trust_cmd::run(&grant_args(&proj), None).unwrap();
     assert_eq!(trust::check(&proj), TrustState::Trusted);
 }

@@ -801,7 +801,7 @@ impl AutoProject {
         }
         let Some(base) = self.discover() else {
             eprintln!(
-                "agentstack mcp: no project manifest found (client roots, cwd, $AGENTSTACK_MANIFEST_DIR) — control-plane tools only"
+                "agentstack mcp: no project manifest found (client roots, $AGENTSTACK_MANIFEST_DIR, cwd) — control-plane tools only"
             );
             return;
         };
@@ -935,16 +935,29 @@ impl AutoProject {
         }
     }
 
-    /// Candidate order: every client root (walked up), then the process cwd
-    /// (walked up), then $AGENTSTACK_MANIFEST_DIR taken as a base directly.
+    /// Candidate order: every client root (walked up), then
+    /// $AGENTSTACK_MANIFEST_DIR taken as a base directly, then the process cwd
+    /// (walked up).
+    ///
+    /// The order ranks candidates by who stated them. Client roots come first:
+    /// they are what the MCP client explicitly declares this session is about,
+    /// the most direct answer to "which project". The environment comes next —
+    /// whoever launched this bridge named a project, and a name is a
+    /// statement of intent. The process cwd is LAST because it is the only
+    /// candidate nobody stated; it is an accident of where the harness
+    /// happened to start. Ranking it above the environment let that accident
+    /// silently outrank an explicitly configured project, so a bridge spawned
+    /// inside an unrelated repo served that repo instead of the one it was
+    /// configured for — the wrong project, chosen quietly.
+    ///
+    /// Every rung stays as selective as it was: roots and the cwd must still
+    /// discover a project (so the machine home is never picked up), the
+    /// environment rung must still point at a real manifest, and in
+    /// auto-project mode whatever is found here is still trust-gated — this
+    /// reorders which project is considered, never whether it may run.
     fn discover(&self) -> Option<PathBuf> {
         for root in &self.roots {
             if let Some(base) = crate::manifest::discover_project_base(root) {
-                return Some(base);
-            }
-        }
-        if let Ok(cwd) = std::env::current_dir() {
-            if let Some(base) = crate::manifest::discover_project_base(&cwd) {
                 return Some(base);
             }
         }
@@ -955,6 +968,11 @@ impl AutoProject {
                 .exists()
             {
                 return Some(dir);
+            }
+        }
+        if let Ok(cwd) = std::env::current_dir() {
+            if let Some(base) = crate::manifest::discover_project_base(&cwd) {
+                return Some(base);
             }
         }
         None
