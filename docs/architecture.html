@@ -423,6 +423,7 @@ adapters → core
 runtime  → core, policy, recorder
 egress   → core, policy, recorder
 executor → (nothing)
+workflow → (nothing)
 cli      → everything</code></pre>
 <p><code>trust → recorder</code> is the one edge added for trust-mutation evidence (P0.2). It keeps <code>trust</code> a small review boundary: <code>recorder</code> depends on <code>core</code> alone and forbids unsafe code, so the edge adds no new external dependency and no new authority. The recording call sits <em>inside</em> the store lock, immediately after the successful save, which is what makes evidence unskippable by construction and makes log order equal store order. The alternative — a callback the caller supplies — was rejected: it is skippable by construction, and a mutation path that forgets to record would be silently unwitnessed.</p>
 <p><code>executor</code> holds no internal edges: it is a self-contained, policy-agnostic domain built on <code>serde</code>/<code>sha2</code>/<code>thiserror</code>, and the <code>cli</code> crate is what composes it with the runtime and recorder. That is why it "never reads or interprets policy" — it structurally cannot.</p>

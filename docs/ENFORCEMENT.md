@@ -693,7 +693,13 @@ paragraph above exists to prevent.
   change re-gates trust review. `apply` renders fail-closed: an untrusted or
   drifted project writes zero extension bytes, and only lock-matching sources
   are **copied** (never symlinked) into the harness's extension directory, so
-  the delivered bytes are the reviewed bytes. An ownership ledger scopes pruning
+  the delivered bytes are the reviewed bytes. Two things sit outside that gate,
+  each because it is not a project's content: pruning artifacts agentstack
+  already owns (the inert direction), and the machine manifest at
+  `$AGENTSTACK_HOME` — which `manifest::discover_project_base` refuses to
+  discover as a project, so no `trust` command could ever satisfy a gate on it.
+  Same exemption as hooks, and witnessed by
+  `crates/cli/tests/red_team_extensions_trust_gate.rs`. An ownership ledger scopes pruning
   to what agentstack placed and hard-excludes the guard's `agentstack-guard*`
   artifacts. Under a protected `run`, the `rendered-verify` gate re-digests each
   delivered copy against its pin before launch, refusing on drift and naming the
