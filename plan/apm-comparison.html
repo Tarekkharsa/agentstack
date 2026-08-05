@@ -202,6 +202,13 @@
   <p class="meta">2026-08-04</p>
   <h1>Report — APM (microsoft/apm) compared to AgentStack</h1>
   <p class="subtitle">Four agents read both repositories. This report gives the facts, then the comparison, then what I recommend.</p>
+  <p class="subtitle"><strong>Sources and retrieval date.</strong> The facts here were checked against
+  <code>github.com/microsoft/apm</code> (source tree, release notes, contributor and issue counts) and
+  <code>microsoft.github.io/apm</code> (published documentation) on <strong>2026-08-04</strong>. No commit SHA was
+  recorded for that retrieval, so treat every claim as true of the repository as it stood on that date.
+  Negative claims below ("APM has no X") are the hardest kind to establish in a 148,000-line codebase: each one
+  means the agents read the named area and found nothing, not that the whole tree was searched exhaustively.
+  Where the wording is now softened, that is why.</p>
 </header>
 
 <nav class="toc">
@@ -261,10 +268,21 @@
     <tr><td>MCP client adapters</td><td>12</td><td>12</td></tr>
     <tr><td>CI workflows</td><td>31</td><td>5</td></tr>
     <tr><td>Docs</td><td>122 pages, 193,064 words</td><td>reference + architecture + enforcement</td></tr>
-    <tr><td>Users</td><td>public, many</td><td>"anyone but the maintainer: never"</td></tr>
+    <tr><td>Adoption (2026-08-04)</td><td>3,461 stars, 313 forks, 91 contributors, 156 open issues</td><td>"anyone but the maintainer: never"</td></tr>
+    <tr><td>Release cadence</td><td>~196 commits in the last 30 days; a minor release every two weeks — v0.24.0 (2026-07-05) through v0.27.0 (2026-08-02)</td><td>23 tags over ~40 days</td></tr>
   </tbody>
 </table>
 </div></div>
+
+<p><strong>The cadence is what makes the tripwire actionable.</strong> A minor release every two weeks, at ~196 commits a
+month, means the gap between what this report says and what APM ships widens on a two-week clock. Any tripwire on APM
+must be re-read at least that often, not once a quarter.</p>
+
+<p><strong>APM ships a dashboard.</strong> The v0.27.0 notes include <code>fix(dashboard): enforce POST body size
+limits</code> and <code>fix(dashboard): harden static path traversal checks</code> — a served UI, with the
+attack surface a served UI carries. AgentStack has a standing rule the other way: the embedded dashboard stays removed
+and no second UI is recreated. This is not a gap to close; it is a divergence to record. The market leader is moving
+toward a graphical surface while we hold the CLI as the single source of authority.</p>
 
 <p>APM writes <strong>3.5 lines of test for each line of source</strong>. Your ratio is much lower. Note that this is not a like-for-like measure — 108 of your 135 CLI files carry inline <code>#[cfg(test)]</code> modules, and Rust types remove many tests that Python needs.</p>
 
@@ -381,7 +399,7 @@
 
 <ol>
   <li><strong>APM deploys much more content per target.</strong> It writes agents, commands, prompts, rules, steering files, hooks and skills. You write MCP config, skills, instructions, settings and hooks. APM transforms rule formats per target (<code>.mdc</code> for Cursor, steering for Kiro). You do not.</li>
-  <li><strong>You verify against the real tool. APM does not.</strong> Your nightly <code>conformance.yml</code> installs each real CLI and asks it to read your config back. That is Tier 1 for 5 adapters. APM has no such live check. Your claim is stronger, for fewer tools.</li>
+  <li><strong>You verify against the real tool. APM does not.</strong> Your nightly <code>conformance.yml</code> installs each real CLI and asks it to read your config back. That is Tier 1 for 5 adapters. In APM's 31 CI workflows, as read on 2026-08-04, no equivalent live check was found. Your claim is stronger, for fewer tools.</li>
 </ol>
 
 <p>Your descriptor design (YAML files, <code>include_dir!</code>, SHA-256 digest, no adapter id in production code) is cleaner than APM's three separate registries (<code>target_catalog.py</code>, <code>KNOWN_TARGETS</code>, <code>_MCP_CLIENT_REGISTRY</code>). APM keeps them in agreement with an import-time cross-check.</p>
@@ -411,14 +429,41 @@
 </table>
 </div></div>
 
-<h3>6.2 The one large hole in APM</h3>
+<h3>6.2 The one large hole in APM — and the documentation says the opposite</h3>
 
-<p>APM has an executable trust gate for hooks, MCP, <code>bin/</code> and canvas. The gate is <strong>off by default</strong>.</p>
+<p>APM has an executable trust gate for hooks, MCP, <code>bin/</code> and canvas. The gate is <strong>off by default</strong>.
+That alone is the weaker statement. The stronger and verified fact is that <strong>APM's own published documentation
+contradicts its code on this control.</strong></p>
 
-<p>From <code>src/apm_cli/security/executables.py</code>:</p>
+<p><code>microsoft.github.io/apm/enterprise/security/</code> says:</p>
+
+<blockquote>
+  <p>"APM blocks executable primitives from dependency packages by default."</p>
+</blockquote>
+
+<p>The README says <strong>"Secure by default"</strong>. But <code>src/apm_cli/security/executables.py</code> says:</p>
 
 <blockquote>
   <p>"Projects that omit the block entirely get backward-compatible behaviour (all executables deployed)."</p>
+</blockquote>
+
+<p>Those two cannot both be true. A project with no <code>allowExecutables</code> block is the default case, and in the
+default case the code deploys every executable. This is not a missing feature; it is a
+<strong>documentation-versus-enforcement mismatch in a security control</strong> — precisely the failure our own
+"claims match enforcement" invariant exists to prevent. It is the single most significant finding in this report, and it
+is stronger than "the gate is off by default" because it means a reader who follows the documentation will believe they
+are protected when they are not.</p>
+
+<p><strong>The window is closing.</strong> <code>allowExecutables</code> is already deprecated in favour of
+<code>executables.allow</code>, with a migration helper. When that migration lands and the default flips, the mismatch
+disappears and the finding goes with it. Whatever is done with this, it has a shelf life measured in releases — and at a
+minor release every two weeks, that is short.</p>
+
+<blockquote>
+  <p><strong>Report this privately first.</strong> This is an unpatched security-relevant mismatch in a Microsoft
+  project. It goes to Microsoft through their private security-reporting channel, and they get time to respond, before
+  anything public is written about it — no blog post, no talk, no comparison page that names it. Item 3 in section 11
+  and the "single blog post" line there are subject to this, without exception.</p>
 </blockquote>
 
 <p>The result: on a normal repository with no <code>allowExecutables</code> block, <code>apm install &lt;third-party-package&gt;</code> writes that package's hook commands into <code>.claude/settings.json</code> or <code>.cursor/hooks.json</code>. There is <strong>no prompt, no signature, no allowlist and no sandbox</strong>. The hooks then run at your permission.</p>
@@ -481,7 +526,7 @@
     <tr><td>Marketplaces</td><td>git repositories with Anthropic's <code>marketplace.json</code> schema</td><td>none</td></tr>
     <tr><td>Registry</td><td>REST, experimental, no public instance</td><td>none</td></tr>
     <tr><td>Enterprise knobs</td><td>GHES, mirrors, proxy, air-gapped bundles</td><td>none</td></tr>
-    <tr><td>GitHub Action</td><td>no</td><td>yes (<code>agentstack trust gate</code>)</td></tr>
+    <tr><td>GitHub Action</td><td><strong>yes</strong> — <code>microsoft/apm-action</code>, with <code>microsoft/apm-sample-package</code> as a worked example, both under the same org</td><td>yes (<code>agentstack trust gate</code>)</td></tr>
     <tr><td>Provenance attestation</td><td>no</td><td><strong>yes, on every release</strong></td></tr>
     <tr><td>SBOM</td><td>SPDX from the lockfile</td><td>CycloneDX in CI</td></tr>
   </tbody>
@@ -528,9 +573,9 @@
 <ol>
   <li><strong>Runtime enforcement.</strong> Sandbox, lockdown, egress proxy with SNI check and anti-SSRF, gateway as the single dispatch point. APM has nothing here and says so.</li>
   <li><strong>The trust model, applied to the right things.</strong> Content-bound consent, no digest cache, re-checked at every dispatch. Hooks always get the full ceremony. APM's gate is off by default for the path that third-party packages use.</li>
-  <li><strong>Secret storage.</strong> OS keychain. APM has no store.</li>
-  <li><strong>Live adapter verification.</strong> The nightly run asks the real CLI to read your file. APM does not do this.</li>
-  <li><strong>Audit.</strong> Keyed-hash call records, run events, trust mutations. APM has no runtime record.</li>
+  <li><strong>Secret storage.</strong> OS keychain. No keychain-backed store was found in APM's secret-handling code as read on 2026-08-04; it resolves from the environment.</li>
+  <li><strong>Live adapter verification.</strong> The nightly run asks the real CLI to read your file. No equivalent was found in APM's CI on 2026-08-04.</li>
+  <li><strong>Audit.</strong> Keyed-hash call records, run events, trust mutations. APM records install-plane events only; no runtime call record was found, which follows from its stated refusal of the runtime plane.</li>
   <li><strong>Architecture discipline.</strong> Ten crates with a stated dependency law. <code>executor</code> and <code>workflow</code> have zero internal edges, so Boa cannot reach enforcement. <code>adapters</code> cannot reach <code>policy</code>.</li>
   <li><strong>Reversibility.</strong> <code>undo</code> and <code>adopt</code>. APM has cleanup and drift detection, but no timeline.</li>
   <li><strong>Release integrity.</strong> Provenance attestation and checksum-verified install.</li>
@@ -544,7 +589,7 @@
 
 <p><strong>Second: the install plane is where APM will beat you.</strong> A user who wants "install this skill from that repo, with its dependencies, pinned, in every tool" gets a better answer from APM today. Transitive resolution and semver ranges are the reason. You should decide, deliberately, whether you compete there or concede it.</p>
 
-<p><strong>Third: APM's default-off executable gate is your clearest opening.</strong> APM writes third-party hook commands into <code>.claude/settings.json</code> with no consent. Your standing rule forbids exactly this. That is a real, demonstrable, security difference. It is also the kind of thing that a single blog post can show.</p>
+<p><strong>Third: APM's default-off executable gate is your clearest opening.</strong> APM writes third-party hook commands into <code>.claude/settings.json</code> with no consent. Your standing rule forbids exactly this. That is a real, demonstrable, security difference — sharpened by the fact that APM's documentation claims the opposite. It is also the kind of thing that a single blog post can show, <strong>but only after Microsoft has been told privately and given time to respond</strong> (see 6.2).</p>
 
 <h2 id="s12">12. What I recommend</h2>
 
