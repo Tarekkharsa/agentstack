@@ -253,24 +253,46 @@ impl Why {
                 // checked-out config would be a claim it cannot keep. Both
                 // clauses come from the shared `AbandonedRender`, never from a
                 // second opinion held here.
-                written.push(match abandoned_render(&state, ctx, &h.id, kind) {
-                    Some(found) => format!(
-                        "{} — {} ↳ {}",
-                        h.display,
-                        if found.recorded {
-                            "left over from an earlier render"
-                        } else {
-                            "on disk, AgentStack did not write it"
-                        },
-                        found.remedy()
-                    ),
-                    None => format!(
-                        "{} — left over from an earlier render ↳ {}",
-                        h.display,
-                        crate::commands::apply::AbandonedRender::REMOVE_IT
-                    ),
-                });
-                abandoned.push(h.display.clone());
+                match abandoned_render(&state, ctx, &h.id, kind) {
+                    Some(found) => {
+                        written.push(format!(
+                            "{} — {} ↳ {}",
+                            h.display,
+                            if found.recorded {
+                                "left over from an earlier render"
+                            } else {
+                                "on disk, AgentStack did not write it"
+                            },
+                            found.remedy()
+                        ));
+                        abandoned.push(h.display.clone());
+                    }
+                    // For SERVERS, `None` is now a positive answer, not an
+                    // absence: the shared detector looked and deliberately said
+                    // nothing. Two cases reach here — the harness's own global
+                    // config (the file `init` imports FROM), and the gateway's
+                    // own bridge entry. Neither is "left over from an earlier
+                    // render", and `x unrender` would refuse both, so `why`
+                    // reports the file honestly and names no command. Keeping
+                    // the old wording here would have re-introduced, on one
+                    // surface, exactly the dead end the detector's global gate
+                    // removes — and `why` must not disagree with `doctor` and
+                    // `status` about the same file.
+                    None if kind == Kind::Server => written.push(format!(
+                        "{} — in its own config, which AgentStack does not manage",
+                        h.display
+                    )),
+                    // Every other kind still has no shared whole-file reading;
+                    // the ledger-shaped answer is all there is.
+                    None => {
+                        written.push(format!(
+                            "{} — left over from an earlier render ↳ {}",
+                            h.display,
+                            crate::commands::apply::AbandonedRender::REMOVE_IT
+                        ));
+                        abandoned.push(h.display.clone());
+                    }
+                }
             }
         }
 

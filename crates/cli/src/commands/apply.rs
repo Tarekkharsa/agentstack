@@ -125,6 +125,11 @@ fn restart_hint(outcome: &Outcome) {
 /// the defect: any route that puts the file back without the record hid a live
 /// file behind a green tick, which is invariant 8 in the most ordinary team
 /// scenario there is.
+///
+/// One exception, argued at the gate in [`abandoned_at`]: a GLOBAL config with
+/// no ledger record is the user's own machine environment — the file `init`
+/// imports FROM — so it is not reported. Global configs AgentStack did write
+/// still are, and so is every project-scope file either way.
 pub(crate) struct AbandonedRender {
     /// Human name of the harness: `Claude Code`.
     pub display: String,
@@ -319,6 +324,36 @@ pub(crate) fn abandoned_at(
         .into_iter()
         .filter(|n| servers.contains(n))
         .collect();
+    // A GLOBAL harness config AgentStack never wrote is the user's own machine
+    // environment, not a leftover of ours. It is the normal state of every
+    // installed CLI on every machine — and on the most common first run there
+    // is, it is the very file `init` just imported the servers OUT of. Saying
+    // "AgentStack did not write it" there, and offering `adopt` for a server
+    // that is already in the manifest, is a named command that cannot make
+    // progress: exactly the dead end this detector exists to prevent.
+    //
+    // The cut keeps BOTH dimensions, deliberately:
+    //   * authorship — `recorded` files are still reported at either scope, so
+    //     an abandoned GLOBAL render (`apply --scope global --write`, then the
+    //     flip) stays visible. A scope-only cut was rejected before for making
+    //     that invisible, and it would be wrong here for the same reason.
+    //   * scope — at PROJECT scope a config we never wrote is genuinely worth
+    //     naming: it came with the repo (the clone case), it is inside the
+    //     boundary this manifest claims to be the source of truth for, and
+    //     `adopt` there really does make progress.
+    // The foreign-keep list survives the cut on purpose: those names are
+    // another manifest's writes that a guarded write of OURS chose to keep, so
+    // they are still our report to make wherever they sit.
+    //
+    // Rejected: keying on IMPORT PROVENANCE ("init read this file, so stay
+    // quiet about it"). No such record exists — `init` writes nothing to the
+    // state ledger — so it would mean inventing a persisted field, and it
+    // would still leave every pre-existing global config on a machine that
+    // never ran `init` just as noisy. Scope plus authorship needs no new
+    // storage and covers the wider, truer case.
+    if scope == Scope::Global && !recorded && foreign.is_empty() {
+        return None;
+    }
     Some(AbandonedRender {
         display: desc.display.clone(),
         path,

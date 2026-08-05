@@ -232,3 +232,77 @@ fn the_gateways_own_registration_is_never_reported_as_a_foreign_file() {
         );
     }
 }
+
+/// The import case: the harness config `init` reads the servers OUT of is not
+/// an abandoned render of ours.
+///
+/// This is the single most common first run in the product. A user with a real
+/// `~/.claude.json` runs `agentstack init`; the servers land in the manifest;
+/// and the surfaces then warned that the user's own config was on disk,
+/// "AgentStack did not write it", offering `agentstack adopt` for a server that
+/// the import had just put in the manifest — a named command with no progress
+/// left to make.
+///
+/// The fixture is that first run, minus `init`'s prompts: a global config the
+/// user owns, a manifest naming the same server, and servers routed live.
+#[test]
+fn the_global_config_the_import_read_from_is_not_called_a_foreign_file() {
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let proj = project(tmp.path());
+
+    // The user's own machine environment, exactly as `init` finds it.
+    let global = home.join(".claude.json");
+    std::fs::write(
+        &global,
+        r#"{"mcpServers":{"github":{"command":"/usr/bin/env","args":["true"]}}}"#,
+    )
+    .unwrap();
+
+    for (label, args) in [
+        ("status", &["status"][..]),
+        ("doctor", &["doctor", "--all"][..]),
+        ("apply", &["apply"][..]),
+        ("delivery", &["delivery"][..]),
+    ] {
+        let out = run(args, &proj, &home);
+        assert!(
+            !out.contains("AgentStack did not write it"),
+            "`{label}` called the user's own global config a foreign file:\n{out}"
+        );
+        assert!(
+            !out.contains(&global.display().to_string()),
+            "`{label}` named the user's own global config:\n{out}"
+        );
+    }
+
+    // The other half of the cut: authorship still wins over scope. A global
+    // config AgentStack DID write, then stopped maintaining, stays visible —
+    // the scope-only version of this fix would have hidden it.
+    run(
+        &["x", "delivery", "render-locally", "--write"],
+        &proj,
+        &home,
+    );
+    run(&["apply", "--scope", "global", "--write"], &proj, &home);
+    assert!(
+        std::fs::read_to_string(&global).unwrap().contains("demo"),
+        "the fixture must actually render globally"
+    );
+    run(
+        &["x", "delivery", "render-locally", "--off", "--write"],
+        &proj,
+        &home,
+    );
+    for (label, args) in [
+        ("status", &["status"][..]),
+        ("doctor", &["doctor", "--all"][..]),
+    ] {
+        let out = run(args, &proj, &home);
+        assert!(
+            out.contains("still on disk") && out.contains("agentstack x unrender --write"),
+            "`{label}` lost the abandoned GLOBAL render:\n{out}"
+        );
+    }
+}
