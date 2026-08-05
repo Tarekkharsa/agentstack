@@ -568,13 +568,26 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   panel may therefore render `lane` as a fact about where the bytes go, and
 ///   `override` as the scope a person actually set.
 ///
+///   Each row also carries `bridge_registered` — THIS harness's own bridge
+///   reading, never a project-wide any-of — and both prose fields are
+///   conjugated by it. With no bridge registered nothing in the dynamic lane
+///   reaches that tool, so `summary` says "planned live (not connected)" rather
+///   than "served live", and a live route's `why` gives the rationale ("the
+///   live channel here can carry it on demand") instead of the connected
+///   clause. Neither field's shape moves and neither is new, so this stays
+///   `delivery-routing-v1`: a consumer decides on `lane` and
+///   `bridge_registered`, which are the typed fields, and the prose only stops
+///   claiming a delivery that is not happening (invariant 8).
+///
 ///   **What it does not promise.** It is **not an activation reading**: a
 ///   `dynamic` lane says where a capability is routed, not that a lease is
 ///   open, that the bridge is registered, or that the project is trusted —
 ///   `lease-status-v1`, `doctor-cli-coverage-v1` and the trust surfaces answer
-///   those, each with its own limits. And `full_ceremony` is a statement about
-///   hooks and extensions being executable kinds, never a claim that a
-///   ceremony has happened. Its own name for the usual reason: a binary
+///   those, each with its own limits. A panel must therefore not match on
+///   either prose field: `summary` and `why` are display copy that reads
+///   differently for one routing depending on the bridge. And `full_ceremony`
+///   is a statement about hooks and extensions being executable kinds, never a
+///   claim that a ceremony has happened. Its own name for the usual reason: a binary
 ///   predating it has no such command.
 /// - `library-sources-v1`: `status --json`'s `project` gains a
 ///   `shadowed_names` array (`project.shadowed_names`, beside the other
