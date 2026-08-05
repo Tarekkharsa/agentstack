@@ -238,13 +238,19 @@ FIRSTRUN = (
 )
 
 # The headline demo (README, landing hero, start, examples). Condensed from
-# docs/demos/first-value.cast — the asciinema recording of
-# examples/first-value-demo/run-demo.sh, which asserts all eight claims shown
-# here. Paths are shortened to their tails (the real run uses an isolated temp
-# HOME) and the long JSON/TOML dumps are collapsed to one line each; every
-# other line is the run's own output.
+# examples/first-value-demo/run-demo.sh — the CI-asserted script, which is the
+# authority for this wording; the .cast recording alongside it predates the
+# routed delivery lane. Paths are shortened to their tails (the real run uses
+# an isolated temp HOME) and the long JSON/TOML dumps are collapsed to one line
+# each; every other line is the run's own output.
+#
+# The journey is the routed one: servers reach both CLIs LIVE over the gateway
+# and the project stays clean, so rendering files is a later, explicit opt-in
+# (`x delivery render-locally`) rather than the second step. Do not collapse
+# those two acts back together — the old scene claimed `apply` was the way
+# servers arrive, which the delivery router no longer does by default.
 FIRST_VALUE = (
-    "two half-set-up CLIs → one manifest → both in sync → undone",
+    "two half-set-up CLIs → one manifest → served live → files on request → undone",
     [
         cmd("cat ~/.claude.json ~/.codex/config.toml", "   # two CLIs, two formats"),
         out(("c", '  "github": { … "GITHUB_TOKEN": "ghp-…" }   '), ("i", "Claude Code · JSON")),
@@ -252,18 +258,24 @@ FIRST_VALUE = (
         out(("c", "  neither knows the other's server — and a live token sits in plain JSON"), d=0.8),
         gap(),
         cmd("agentstack init --yes --secrets env"),
-        out(("c", "  📥  Imported 2 MCP server(s) from those configs: github · tldraw")),
-        out(("c", "  🔐  1 plaintext token lifted to "), ("ok", "${GITHUB_TOKEN}"), ("c", " → gitignored .env")),
-        out(("ok", "  ✅  Wrote .agentstack/agentstack.toml"), ("c", "   the manifest holds the ${REF}"), d=0.8),
+        out(("c", "  📥  Importing 2 MCP servers from those configs: github · tldraw")),
+        out(("c", "  🔐  1 plaintext token replaced with "), ("ok", "${GITHUB_TOKEN}"), ("c", " → gitignored .env")),
+        out(("ok", "  ✅  Wrote .agentstack/agentstack.toml"), ("c", "   definitions land in the library"), d=0.8),
         gap(),
-        cmd("agentstack apply --scope global --write"),
-        out(("ok", "  ✓"), ("c", " wrote 2 server(s) — 2 target(s) in sync")),
-        out(("c", "  Claude Code gained 'tldraw' · Codex gained 'github' — each in its own syntax"), d=0.8),
+        cmd("agentstack x gateway connect --all --write", "   # register the bridge"),
+        out(("ok", "  ✓"), ("c", " Updated 2 harness configs."), d=0.55),
+        cmd("agentstack delivery", "                         # how does each tool get them?"),
+        out(("c", "  Claude Code · Codex CLI   "), ("ok", "MCP servers served live"), ("c", " · house rules to files")),
+        out(("c", "  · 0 project artifacts for the capabilities served live"), d=0.8),
         gap(),
         cmd("agentstack doctor"),
-        out(("ok", "  ✓"), ("c", " 0 error(s), 0 warning(s)"), d=0.8),
+        out(("ok", "  ✓"), ("c", " 0 errors, 0 warnings."), ("c", "   ready: reviewed, activated, verified"), d=0.8),
         gap(),
-        cmd("agentstack restore --last --write", "   # twice: undo the render, then the import"),
+        cmd("agentstack x delivery render-locally --write", "   # want the files anyway?"),
+        cmd("agentstack apply --toolset default --scope global --write"),
+        out(("ok", "  ✓"), ("c", " wrote 2 servers — 2 targets in sync, each in its own syntax"), d=0.8),
+        gap(),
+        cmd("agentstack restore --last --write", "   # four times: back to the start"),
         out(("ok", "  ✓"), ("c", " both native configs byte-identical to where they started")),
         out(("ok", "  ✓"), ("c", " manifest and .env gone — the machine is exactly as it was")),
     ],

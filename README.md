@@ -91,7 +91,7 @@ limits your own machine sets.
 
 Here is the whole loop, condensed from a real run of the current binary:
 
-![Two CLIs with different half-setups: agentstack imports both into one manifest, renders each native format, passes doctor with 0 errors, and restores the machine byte-for-byte](docs/demos/first-value.svg)
+![Two CLIs with different half-setups: agentstack imports both into one manifest, connects the gateway so both CLIs are served the servers live while the project stays clean, passes doctor with 0 errors, renders each native format on request, and restores the machine byte-for-byte](docs/demos/first-value.svg)
 
 1. **Start** — two real native configs: Claude Code knows a `github` server
    (inline token), Codex knows `tldraw`. Neither knows the other's.
