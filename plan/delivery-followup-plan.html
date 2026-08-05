@@ -1,0 +1,1020 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delivery follow-up — what is left, in order</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #1c1f24;
+    --muted: #5b6472;
+    --rule: #e2e6ec;
+    --rule-strong: #c8cfda;
+    --accent: #2f5d8c;
+    --code-bg: #f2f4f7;
+    --thead-bg: #eef1f5;
+    --zebra: #f8f9fb;
+    --quote-bg: #f7f8fa;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #14171b;
+      --fg: #e4e7ec;
+      --muted: #9aa4b2;
+      --rule: #2a2f37;
+      --rule-strong: #3b424c;
+      --accent: #8ab4e0;
+      --code-bg: #21262d;
+      --thead-bg: #1e232a;
+      --zebra: #191d23;
+      --quote-bg: #1a1e24;
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    padding: 2.5rem 1.25rem 6rem;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+    font-size: 16px;
+    line-height: 1.65;
+    overflow-x: hidden;
+  }
+
+  main {
+    max-width: 62rem;
+    margin: 0 auto;
+  }
+
+  header.doc-header {
+    border-bottom: 1px solid var(--rule-strong);
+    padding-bottom: 1.25rem;
+    margin-bottom: 2rem;
+  }
+
+  header.doc-header .meta {
+    color: var(--muted);
+    font-size: 0.875rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin: 0 0 0.5rem;
+  }
+
+  header.doc-header .subtitle {
+    color: var(--muted);
+    font-size: 1.0625rem;
+    margin: 0.5rem 0 0;
+  }
+
+  h1 {
+    font-size: 1.9rem;
+    line-height: 1.25;
+    margin: 0;
+    font-weight: 650;
+    letter-spacing: -0.01em;
+  }
+
+  h2 {
+    font-size: 1.4rem;
+    line-height: 1.3;
+    margin: 3rem 0 0.75rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--rule);
+    font-weight: 640;
+    letter-spacing: -0.005em;
+  }
+
+  h3 {
+    font-size: 1.125rem;
+    margin: 2rem 0 0.5rem;
+    font-weight: 640;
+  }
+
+  p { margin: 0 0 1rem; }
+
+  ul, ol { margin: 0 0 1rem; padding-left: 1.5rem; }
+  li { margin: 0.35rem 0; }
+
+  a { color: var(--accent); }
+  a:hover { text-decoration: none; }
+
+  code {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+                 "Liberation Mono", monospace;
+    font-size: 0.875em;
+    background: var(--code-bg);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 0.08em 0.35em;
+    word-break: break-word;
+  }
+
+  blockquote {
+    margin: 1.25rem 0;
+    padding: 0.85rem 1.15rem;
+    background: var(--quote-bg);
+    border-left: 3px solid var(--rule-strong);
+    color: var(--fg);
+  }
+
+  blockquote p { margin: 0 0 0.5rem; }
+  blockquote p:last-child { margin-bottom: 0; }
+
+  nav.toc {
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 1.1rem 1.35rem;
+    margin: 0 0 2.5rem;
+    background: var(--zebra);
+  }
+
+  nav.toc h2 {
+    font-size: 0.8125rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin: 0 0 0.6rem;
+    padding: 0;
+    border: 0;
+    font-weight: 600;
+  }
+
+  nav.toc ol {
+    margin: 0;
+    padding-left: 1.4rem;
+  }
+
+  nav.toc li { margin: 0.2rem 0; }
+
+  div.table-wrap {
+    margin: 1.25rem 0 1.5rem;
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 32rem;
+    font-size: 0.9375rem;
+  }
+
+  thead th {
+    background: var(--thead-bg);
+    text-align: left;
+    font-weight: 640;
+    border-bottom: 1px solid var(--rule-strong);
+  }
+
+  th, td {
+    padding: 0.55rem 0.8rem;
+    border-bottom: 1px solid var(--rule);
+    border-right: 1px solid var(--rule);
+    vertical-align: top;
+  }
+
+  th:last-child, td:last-child { border-right: 0; }
+
+  tbody tr:nth-child(even) { background: var(--zebra); }
+  tbody tr:last-child td { border-bottom: 0; }
+
+  strong { font-weight: 650; }
+
+  hr {
+    border: 0;
+    border-top: 1px solid var(--rule);
+    margin: 2.5rem 0;
+  }
+</style>
+</head>
+<body>
+<main>
+
+<header class="doc-header">
+  <p class="meta">2026-08-04 &middot; HEAD <code>e3936bb</code> on <code>main</code></p>
+  <h1>Delivery follow-up — what is left, in order</h1>
+  <p class="subtitle">Twenty items from the delivery lane, hardest and most urgent first.</p>
+</header>
+
+<p><strong>Status as of 2026-08-05 — HEAD <code>34c0db9</code> on <code>main</code>.</strong>
+Fourteen of the twenty items are done and named to the commit that closed them. Seven are still
+open — P2, P5b, P6, P8, P9, R1 and R2 — and three of those, P2, R1 and R2, are maintainer-owned by
+construction. Three items found on 2026-08-05 are added at the end as N1, N2 and N3. Every item
+below carries its own status, and both summary tables match those statuses.</p>
+
+<p><strong>What landed.</strong> Thirteen rounds made the delivery lane honest.
+<code>apply</code>, <code>use</code>, <code>session</code> and <code>diff</code> now consult one
+shared reading — <code>Plan::servers_route_live</code> — so under default routing none of them
+writes an MCP server config for an MCP-capable harness. A project holds only
+<code>.agentstack/</code>. Delivery claims are checked against the filesystem instead of against a
+state record. A new guard rule (f) walks the project directory and asserts that the claims match
+reality. <code>crates/trust</code>, <code>crates/policy</code> and <code>crates/core</code> were
+never touched, and the trust gate still refuses drifted content with the grant store
+byte-identical.</p>
+
+<p><strong>What was broken.</strong> CI, and the first-run experience. Both were consequences of
+that same correct change, and both hit everyone. Both are now fixed — P0 in <code>8e48305</code>
+and <code>299a88b</code>, P1 in <code>a435c4f</code>.</p>
+
+<p><strong>How to read this.</strong> Twenty items, hardest and most urgent first. Each one carries
+the evidence, what &ldquo;done&rdquo; looks like, a rough size, and its status.</p>
+
+<nav class="toc">
+  <h2>Contents</h2>
+  <ol>
+    <li><a href="#p0">P0 — CI is red. The example suite fails.</a></li>
+    <li><a href="#p1">P1 — the detector warns about the configs <code>init</code> imported from.</a></li>
+    <li><a href="#p2">P2 — the delivery contract is false.</a></li>
+    <li><a href="#p3">P3 — README teaches a sequence that no longer works.</a></li>
+    <li><a href="#p4">P4 — two commands exist in no documentation.</a></li>
+    <li><a href="#p5">P5 — the t3code contract.</a></li>
+    <li><a href="#p5b">P5b — the t3code panel migration.</a></li>
+    <li><a href="#p6">P6 — <code>docs/tutorial/</code> has no markdown source.</a></li>
+    <li><a href="#p7">P7 — the library rot view was never built.</a></li>
+    <li><a href="#p8">P8 — <code>run</code> and <code>workflow</code> are unverified.</a></li>
+    <li><a href="#p9">P9 — nobody but the maintainer has ever run this software.</a></li>
+    <li><a href="#part-two">Part two — from the plan documents</a>
+      <ol>
+        <li><a href="#r1">R1 — report the APM executable-gate discrepancy to Microsoft, privately.</a></li>
+        <li><a href="#r2">R2 — two maintainer decisions for <code>STRATEGY.md</code>.</a></li>
+        <li><a href="#r3">R3 — correct three errors in <code>plan/apm-comparison.html</code> before it is shared.</a></li>
+        <li><a href="#r4">R4 — verify whether the workflow dispatcher consumes <code>StepOutcome::Awaiting</code>.</a></li>
+        <li><a href="#r5">R5 — adopt only the cheap subset of the throughput plan, and correct its arithmetic first.</a></li>
+        <li><a href="#r6">R6 — record the measurement-versus-target gap in the throughput plan.</a></li>
+        <li><a href="#r7">R7 — record the side-effect constraint on speculative execution.</a></li>
+        <li><a href="#r8">R8 — copy APM&rsquo;s silent-extension gate.</a></li>
+        <li><a href="#r9">R9 — add a visibly adversarial test directory.</a></li>
+        <li><a href="#r10">R10 — verify the README&rsquo;s Homebrew claim.</a></li>
+      </ol>
+    </li>
+    <li><a href="#part-three">Part three — found on 2026-08-05</a>
+      <ol>
+        <li><a href="#n1">N1 — <code>docs/demos/first-value.cast</code> records the old journey.</a></li>
+        <li><a href="#n2">N2 — consider a backfill pass over <code>docs/ENFORCEMENT.md</code>.</a></li>
+        <li><a href="#n3">N3 — five deliberate SIGPIPE pipelines in <code>device-onboarding/assert.sh</code>.</a></li>
+      </ol>
+    </li>
+    <li><a href="#pattern">The pattern</a></li>
+  </ol>
+</nav>
+
+<div class="table-wrap" style="overflow-x: auto;">
+<table>
+  <thead>
+    <tr>
+      <th>Priority</th>
+      <th>Item</th>
+      <th>Size</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><a href="#p0">P0</a></td>
+      <td>CI is red. The example suite fails.</td>
+      <td>Half a day</td>
+      <td><strong>DONE</strong> — <code>8e48305</code>, <code>299a88b</code></td>
+    </tr>
+    <tr>
+      <td><a href="#p1">P1</a></td>
+      <td>The detector warns about the configs <code>init</code> imported from.</td>
+      <td>Half a day</td>
+      <td><strong>DONE</strong> — <code>a435c4f</code></td>
+    </tr>
+    <tr>
+      <td><a href="#p2">P2</a></td>
+      <td>The delivery contract is false. <strong>Maintainer-owned.</strong></td>
+      <td>Ten minutes</td>
+      <td><strong>OPEN</strong> — maintainer</td>
+    </tr>
+    <tr>
+      <td><a href="#p3">P3</a></td>
+      <td>README teaches a sequence that no longer works.</td>
+      <td>An hour</td>
+      <td><strong>DONE</strong> — <code>477ba10</code>, <code>20522cb</code></td>
+    </tr>
+    <tr>
+      <td><a href="#p4">P4</a></td>
+      <td>Two commands exist in no documentation.</td>
+      <td>An hour</td>
+      <td><strong>DONE</strong> — <code>477ba10</code></td>
+    </tr>
+    <tr>
+      <td><a href="#p5">P5</a></td>
+      <td>The t3code contract documents <code>abandoned</code> and <code>unrender</code>.</td>
+      <td>Half a day</td>
+      <td><strong>DONE</strong> — <code>477ba10</code></td>
+    </tr>
+    <tr>
+      <td><a href="#p5b">P5b</a></td>
+      <td>The t3code panel migration — four consumer-side changes.</td>
+      <td>Half a day</td>
+      <td><strong>OPEN</strong></td>
+    </tr>
+    <tr>
+      <td><a href="#p6">P6</a></td>
+      <td><code>docs/tutorial/</code> has no markdown source.</td>
+      <td>A day</td>
+      <td><strong>OPEN</strong></td>
+    </tr>
+    <tr>
+      <td><a href="#p7">P7</a></td>
+      <td>The library rot view was never built.</td>
+      <td>Two to three days</td>
+      <td><strong>DONE</strong> — <code>af6ba23</code></td>
+    </tr>
+    <tr>
+      <td><a href="#p8">P8</a></td>
+      <td><code>run</code> and <code>workflow</code> are unverified.</td>
+      <td>Unknown until scoped</td>
+      <td><strong>OPEN</strong></td>
+    </tr>
+    <tr>
+      <td><a href="#p9">P9</a></td>
+      <td>Nobody but the maintainer has ever run this software.</td>
+      <td>Thirty minutes of someone else&rsquo;s time</td>
+      <td><strong>OPEN</strong></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="p0">P0 — CI is red. The example suite fails.</h2>
+
+<p><strong>Size:</strong> half a day. <strong>Status: DONE</strong> — <code>8e48305</code> and
+<code>299a88b</code>. All 14 CI scripts pass.</p>
+
+<p><strong>What it took, and the second half nobody expected.</strong> <code>8e48305</code> routed
+each script to the lane it actually demonstrates. Then <code>299a88b</code> found the rest: seven
+scripts failed loudly, and <strong>three further assertions had gone vacuous</strong> — they passed
+only because <code>apply</code> no longer opened the file they inspected, so the check read nothing
+and agreed with itself. A failing assertion announces itself. A vacuous one does not, and it is the
+same defect as everything else in this document: a claim computed from a record — here, an empty
+one — instead of from reality.</p>
+
+<p>Running <code>examples/first-value-demo/run-demo.sh</code> against the current build prints:</p>
+
+<pre style="overflow-x: auto; background: var(--code-bg); border: 1px solid var(--rule); border-radius: 6px; padding: 0.85rem 1rem; font-size: 0.875rem; line-height: 1.55; margin: 1.25rem 0;">FAIL  delivery should route MCP servers live on both MCP-capable tools
+FAIL  the live lane should report zero project artifacts
+FAIL  doctor should be clean after the import (exit 0)</pre>
+
+<p><code>.github/workflows/ci.yml</code> runs ten asserting scripts in its
+<em>Example suite (asserting)</em> step, plus <code>malicious-repo-demo/run-demo.sh</code> and
+<code>sandbox/conformance-smoke.sh</code> nearby. None of them opted into
+<code>[delivery] render_locally</code>, and they assert that <code>apply</code> writes server
+configs — which it no longer does.</p>
+
+<p>Per script, the decision is a single question: is this demo&rsquo;s <strong>subject</strong> the
+rendered lane, or the live lane? If it is the rendered lane, opt its manifest into
+<code>render_locally = true</code> and add a comment saying why. If it is the live lane, rewrite
+its assertions to the new default. Do not opt a script out just to make it pass.</p>
+
+<p><code>first-value-demo</code> is the product&rsquo;s headline proof. It should
+<strong>demonstrate</strong> the new default, not opt out of it.</p>
+
+<p><strong>Root cause, recorded.</strong> Across thirteen rounds every agent was instructed never
+to run the full test suite, to protect time. The example suite is not <code>cargo test</code> — it
+is the CI gate and an asserting end-to-end witness — and it fell in that gap.</p>
+
+<p><strong>Done looks like:</strong> green CI, and the example suite added to the loop for any
+delivery change.</p>
+
+<h2 id="p1">P1 — the detector warns about the configs <code>init</code> imported from.</h2>
+
+<p><strong>Size:</strong> half a day. <strong>Status: DONE</strong> — <code>a435c4f</code>.</p>
+
+<p><strong>How it was narrowed.</strong> The warning is suppressed only at global scope, only when
+there is no ledger record for the file, and only when the foreign-keep list is empty. All three
+conditions must hold together. So the clone case still fires, and an abandoned global render still
+fires — the fix removes the false positive without removing the detector.</p>
+
+<p>Immediately after a successful import, the same demo prints:</p>
+
+<pre style="overflow-x: auto; background: var(--code-bg); border: 1px solid var(--rule); border-radius: 6px; padding: 0.85rem 1rem; font-size: 0.875rem; line-height: 1.55; margin: 1.25rem 0;">&#9888; ~/.claude.json is on disk (it holds github) — AgentStack did not write it, and Claude Code may still be reading it
+&#9888; ~/.codex/config.toml is on disk (it holds tldraw) — AgentStack did not write it, and Codex CLI may still be reading it</pre>
+
+<p>Those are the user&rsquo;s own configs that <code>init</code> had just read servers
+<strong>out of</strong>. They are the source, not an abandoned render, and offering
+<code>agentstack adopt</code> for them on first run is wrong. The clone-case fix is correct in
+itself, but it over-reaches into the import path.</p>
+
+<p><strong>Done looks like:</strong> a config that <code>init</code> imported from is not reported
+as foreign; a genuinely cloned or hand-written project config still is.</p>
+
+<h2 id="p2">P2 — the delivery contract is false.</h2>
+
+<p><strong>Size:</strong> ten minutes. <strong>Maintainer only. Status: OPEN.</strong></p>
+
+<p><code>docs/design/automatic-delivery.md</code>, in the section &ldquo;What &lsquo;default&rsquo;
+means here&rdquo;, still says:</p>
+
+<blockquote>
+  <p><code>agentstack apply</code> <strong>is unchanged</strong> and still renders everything it
+  is asked to.</p>
+</blockquote>
+
+<p>Thirteen rounds made that false.</p>
+
+<p>This item is <strong>maintainer-owned</strong>, and the reason matters. A design
+document&rsquo;s value is that it stated the behaviour <em>before</em> the behaviour existed. An
+agent editing it to match shipped code destroys that property permanently, and nobody notices it
+is gone. What is needed is one paragraph from the maintainer saying what <code>apply</code> now
+means and why.</p>
+
+<h2 id="p3">P3 — README teaches a sequence that no longer works.</h2>
+
+<p><strong>Size:</strong> an hour. <strong>Status: DONE</strong> — <code>477ba10</code> for the verb
+count and the walkthrough, and <code>20522cb</code> for the demo animation and its alt text.</p>
+
+<p><code>README.md:184</code> says &ldquo;the fifteen everyday verbs&rdquo; and lists 15.
+<code>why</code> and <code>lib</code> are missing; it is seventeen.</p>
+
+<p><code>README.md:100-102</code>, step 3, claims that <code>agentstack apply --scope global
+--write</code> makes &ldquo;both CLIs now carry both servers&rdquo;. Under default routing it no
+longer does. The walkthrough is honestly labelled as using the rendered lane, but the commands as
+written will not produce the described result.</p>
+
+<h2 id="p4">P4 — two commands exist in no documentation.</h2>
+
+<p><strong>Size:</strong> an hour. <strong>Status: DONE</strong> — <code>477ba10</code>.</p>
+
+<p><code>agentstack why</code> — one of the seventeen <em>visible</em> verbs — and
+<code>agentstack x unrender</code> each appear in zero files under <code>docs/</code> and in the
+README.</p>
+
+<h2 id="p5">P5 — the t3code contract.</h2>
+
+<p><strong>Size:</strong> half a day. <strong>Status: DONE</strong> — <code>477ba10</code>.</p>
+
+<p><code>crates/cli/src/ui_contract.rs</code> documented <code>surface_unpinned</code>,
+<code>content_drift</code>, <code>next_step</code>, <code>sentence</code> and <code>why</code>. It
+did <strong>not</strong> document <code>abandoned</code> or <code>unrender</code>. It does now.</p>
+
+<p>This item was one item and is now two. The contract is written; the consumer has not moved. The
+second half is P5b, and it stays open — writing the contract down does not migrate anybody.</p>
+
+<h2 id="p5b">P5b — the t3code panel migration.</h2>
+
+<p><strong>Size:</strong> half a day. <strong>Status: OPEN.</strong></p>
+
+<p>t3code itself must absorb four changes. The third is the dangerous one — it is the only one that
+does not announce itself.</p>
+
+<div class="table-wrap" style="overflow-x: auto;">
+<table>
+  <thead>
+    <tr>
+      <th>Surface</th>
+      <th>Change</th>
+      <th>How it breaks</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>doctor --json</code></td>
+      <td><code>next_action</code> is now nullable</td>
+      <td>A consumer expecting a string breaks on any healthy project. Fails loudly.</td>
+    </tr>
+    <tr>
+      <td><code>status --json</code></td>
+      <td><code>next_action</code> is now an object <code>{command, sentence}</code></td>
+      <td>Fails loudly.</td>
+    </tr>
+    <tr>
+      <td><code>trust --preview</code></td>
+      <td><code>state</code>, and an item&rsquo;s <code>change</code>, gained a fourth value
+        <code>drifted</code></td>
+      <td><strong>Dangerous.</strong> A consumer matching the old three words with a default
+        fallback <strong>fails silently</strong>.</td>
+    </tr>
+    <tr>
+      <td><code>diff --json</code></td>
+      <td>Live-routed targets are omitted from <code>targets[]</code> and named in
+        <code>warnings</code></td>
+      <td>A target simply disappears from the list.</td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<p>Panel action names are unchanged, so no argv breaks.</p>
+
+<h2 id="p6">P6 — <code>docs/tutorial/</code> has no markdown source.</h2>
+
+<p><strong>Size:</strong> a day. <strong>Status: OPEN.</strong></p>
+
+<p><code>docs/start.html</code> got one — <code>docs/start.md</code> — in an earlier round. The
+tutorial did not. The README links it six times. Nothing can diff, review or test it, and seven
+false lines lived in it undetected for eight rounds. Every behaviour change makes it staler.</p>
+
+<h2 id="p7">P7 — the library rot view was never built.</h2>
+
+<p><strong>Size:</strong> two to three days. <strong>Status: DONE</strong> — <code>af6ba23</code>.</p>
+
+<p>The maintainer&rsquo;s own diagnosis: skills and configuration stop being relevant over time,
+and a central library that only grows becomes the mess the static configs were.
+<code>agentstack x report calls</code> already measures library-wide dead weight, and it is buried
+under the namespace. Nothing surfaces last-used, never-used or drifted where a person would
+look.</p>
+
+<p>The agent building this died mid-round, and its unverified code was deliberately discarded.
+This item starts from scratch.</p>
+
+<p><strong>The honesty rule it must follow:</strong> &ldquo;no data&rdquo; must never render as
+&ldquo;0 uses&rdquo;. Those are different claims, and the difference decides whether someone
+deletes a skill.</p>
+
+<p>It was rebuilt from scratch, and the honesty rule holds in the shipped view.</p>
+
+<h2 id="p8">P8 — <code>run</code> and <code>workflow</code> are unverified.</h2>
+
+<p><strong>Size:</strong> unknown until scoped. <strong>Status: OPEN.</strong></p>
+
+<p>Neither could be exercised in an isolated environment. The debug build reports no sandbox
+support, so <code>--sandbox</code> and <code>--lockdown</code> refuse before launching, and
+<code>workflow run</code> had nothing declared.</p>
+
+<p>These are the two commands closest to the product&rsquo;s differentiator and the two least
+verified. This item needs either a way to exercise them in CI, or a documented manual
+procedure.</p>
+
+<h2 id="p9">P9 — nobody but the maintainer has ever run this software.</h2>
+
+<p><strong>Size:</strong> thirty minutes of someone else&rsquo;s time.
+<strong>Status: OPEN.</strong></p>
+
+<p>Thirteen rounds found roughly thirty-six real defects. Every one was found by reading code, or
+by forcing a program to drive the CLI. The two worst — a state no command could leave, and a
+<code>grantable: false</code> that blocked a human&rsquo;s yes — surfaced only when a machine drove
+the surfaces, because a machine cannot guess a flag or read past a confusing sentence.</p>
+
+<p>The remaining class needs someone who will not read the source.</p>
+
+<h2 id="part-two">Part two — from the plan documents</h2>
+
+<p>Two plan documents were reviewed on 2026-08-04 — <code>plan/agent-throughput-plan.html</code> and
+<code>plan/apm-comparison.html</code>. The throughput plan&rsquo;s competitor numbers and the APM
+document&rsquo;s claims were checked independently against the live <code>microsoft/apm</code>
+repository and the web. These items are what survived that review. Each is marked with where it
+slots against P0–P9. Nothing here starts before the maintainer adopts it.</p>
+
+<p>The items are labelled <strong>R1 … R10</strong> so they cannot be confused with P0–P9.</p>
+
+<div class="table-wrap" style="overflow-x: auto;">
+<table>
+  <thead>
+    <tr>
+      <th>Item</th>
+      <th>What it is</th>
+      <th>Slot</th>
+      <th>Size</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><a href="#r1">R1</a></td>
+      <td>Report the APM executable-gate discrepancy to Microsoft, privately.
+        <strong>Time-sensitive.</strong></td>
+      <td>First, in part two</td>
+      <td>An hour</td>
+      <td><strong>OPEN</strong> — maintainer</td>
+    </tr>
+    <tr>
+      <td><a href="#r2">R2</a></td>
+      <td>Two maintainer decisions for <code>STRATEGY.md</code>.
+        <strong>Maintainer-owned.</strong></td>
+      <td>With P2</td>
+      <td>Thirty minutes</td>
+      <td><strong>OPEN</strong> — maintainer</td>
+    </tr>
+    <tr>
+      <td><a href="#r3">R3</a></td>
+      <td>Correct three errors in <code>plan/apm-comparison.html</code> before it is shared.</td>
+      <td>Anytime</td>
+      <td>Twenty minutes</td>
+      <td><strong>DONE</strong> — <code>34c0db9</code></td>
+    </tr>
+    <tr>
+      <td><a href="#r4">R4</a></td>
+      <td>Verify whether the workflow dispatcher consumes <code>StepOutcome::Awaiting</code>.</td>
+      <td>Before any throughput work</td>
+      <td>An hour</td>
+      <td><strong>ANSWERED</strong> — no change needed</td>
+    </tr>
+    <tr>
+      <td><a href="#r5">R5</a></td>
+      <td>Adopt only the cheap subset of the throughput plan, and correct its arithmetic first.</td>
+      <td>After R4</td>
+      <td>Small subset; an hour of corrections</td>
+      <td><strong>DONE</strong> — corrections landed</td>
+    </tr>
+    <tr>
+      <td><a href="#r6">R6</a></td>
+      <td>Record the measurement-versus-target gap in the throughput plan.</td>
+      <td>With R5</td>
+      <td>A note</td>
+      <td><strong>DONE</strong> — corrections landed</td>
+    </tr>
+    <tr>
+      <td><a href="#r7">R7</a></td>
+      <td>Record the side-effect constraint on speculative execution.</td>
+      <td>Before any C2 work</td>
+      <td>A note</td>
+      <td><strong>DONE</strong> — corrections landed</td>
+    </tr>
+    <tr>
+      <td><a href="#r8">R8</a></td>
+      <td>Copy APM&rsquo;s silent-extension gate.</td>
+      <td>After P0–P1</td>
+      <td>Half a day</td>
+      <td><strong>DONE</strong> — <code>06a9957</code></td>
+    </tr>
+    <tr>
+      <td><a href="#r9">R9</a></td>
+      <td>Add a visibly adversarial test directory.</td>
+      <td>After P0–P1</td>
+      <td>Two to three days, ongoing</td>
+      <td><strong>DONE</strong> — <code>af6ba23</code></td>
+    </tr>
+    <tr>
+      <td><a href="#r10">R10</a></td>
+      <td>Verify the README&rsquo;s Homebrew claim. <strong>Needs verification.</strong></td>
+      <td>Anytime</td>
+      <td>Ten minutes</td>
+      <td><strong>DONE</strong> — <code>477ba10</code></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h3 id="r1">R1 — report the APM executable-gate discrepancy to Microsoft, privately.</h3>
+
+<p><strong>Slot:</strong> do this first among part two. <strong>Size:</strong> an hour.
+<strong>Time-sensitive. Status: OPEN — maintainer-owned.</strong></p>
+
+<p><code>microsoft/apm</code>&rsquo;s published documentation says the opposite of its code.
+<code>microsoft.github.io/apm/enterprise/security/</code> states &ldquo;APM blocks executable
+primitives from dependency packages by default: hooks, <code>bin/</code> executables, self-defined
+MCP servers, and canvas extensions&rdquo;, and the README says &ldquo;Secure by default&rdquo;. But
+<code>src/apm_cli/security/executables.py</code> on <code>main</code> says, verbatim:</p>
+
+<blockquote>
+  <p>Projects that omit the block entirely get backward-compatible behaviour (all executables
+  deployed).</p>
+</blockquote>
+
+<p>The gate turns on only when a project or an org policy opts in. So a normal repository with no
+<code>allowExecutables</code> block gets third-party hook commands written into
+<code>.claude/settings.json</code> with no prompt, no signature and no sandbox.</p>
+
+<p>This is a documentation-versus-enforcement mismatch in a security control — invariant 8, in
+someone else&rsquo;s product.</p>
+
+<p><strong>Report it privately, before writing anything public.</strong> Reasons, stated plainly:
+real users may be affected; AgentStack has a commercial interest in the finding being damaging,
+which is exactly when disclosure discipline matters most; and leading a launch with an attack on a
+Microsoft project defines the product by its competitor. If they fix it, you were right and you
+behaved well. If they do not, the finding remains and you have standing to discuss it.</p>
+
+<p>Note the window is closing: <code>allowExecutables</code> is already deprecated in favour of
+<code>executables.allow</code>, with a migration helper, so the area is under live development.</p>
+
+<h3 id="r2">R2 — two maintainer decisions for <code>STRATEGY.md</code>.</h3>
+
+<p><strong>Slot:</strong> with P2, the other maintainer-owned item. <strong>Size:</strong> thirty
+minutes. <strong>Maintainer-owned. Status: OPEN.</strong></p>
+
+<p>(a) <strong>Add APM as competitive tripwire #4</strong>, with the trigger the comparison names:
+&ldquo;APM ships a runtime enforcement plane.&rdquo; Attach the rate, which the document omits and
+which is what makes a tripwire useful: roughly 196 commits in the last 30 days, and a minor release
+every two weeks (v0.24.0 on 2026-07-05 through v0.27.0 on 2026-08-02).</p>
+
+<p>(b) <strong>Decide the install plane deliberately, and write the decision down.</strong> APM has
+transitive dependency resolution, semver ranges against git tags, <code>deps tree</code>/<code>why</code>,
+<code>outdated</code> and <code>update</code>. AgentStack has packs and overrides, one level, pinned
+refs only. The comparison calls this &ldquo;the largest capability gap&rdquo; and it is right.</p>
+
+<p>The recommendation is to <strong>concede it and say so</strong>: 11 months and 91 contributors
+against 40 days and one author is not a race that can be won, and spending the next six months
+building a weaker package manager loses both planes. The stronger position is the one
+<code>STRATEGY.md</code> already takes toward eve — treat the competitor&rsquo;s ecosystem as
+machine-readable supply for governed intake. If APM becomes the install plane, AgentStack governing
+what APM installs beats competing with it.</p>
+
+<p>The point is not which way it goes. The point is that &ldquo;ambiguous&rdquo; is the one answer
+that costs something.</p>
+
+<h3 id="r3">R3 — correct three errors in <code>plan/apm-comparison.html</code> before it is shared.</h3>
+
+<p><strong>Slot:</strong> anytime. <strong>Size:</strong> twenty minutes.
+<strong>Status: DONE</strong> — <code>34c0db9</code>.</p>
+
+<p>The document&rsquo;s numbers were checked and hold — first commit 2025-09-18 exact, v0.27.0
+correct, &ldquo;61% from one person&rdquo; matches the API. These do not:</p>
+
+<ul>
+  <li>The distribution table says APM has no GitHub Action. <code>microsoft/apm-action</code> exists
+    under the same org, as does <code>microsoft/apm-sample-package</code>. The document appears to
+    have read only the main repository.</li>
+  <li>It has <strong>zero external citations</strong> — no repository URL, no commit SHA, no
+    retrieval date — while making specific negative claims about a 148,000-line codebase
+    (&ldquo;APM has no such live check&rdquo;, &ldquo;no runtime record&rdquo;, &ldquo;no
+    store&rdquo;). Negative claims are the hardest to establish and none is sourced. Add sources, or
+    soften the claims to what was actually read.</li>
+  <li>It omits adoption data entirely, writing &ldquo;Users: public, many&rdquo; where the figures
+    are 3,461 stars, 313 forks, 91 contributors, 156 open issues.</li>
+</ul>
+
+<p>Also worth adding, because it bears on a standing AgentStack constraint: <strong>APM ships a
+dashboard.</strong> The v0.27.0 notes include <code>fix(dashboard): enforce POST body size
+limits</code> and <code>fix(dashboard): harden static path traversal checks</code>.
+AgentStack&rsquo;s rule is that the embedded dashboard stays removed and no second UI is ever
+recreated. The competitor moving the other way is a data point the comparison does not mention.</p>
+
+<h3 id="r4">R4 — verify whether the workflow dispatcher consumes <code>StepOutcome::Awaiting</code>.</h3>
+
+<p><strong>Slot:</strong> before any throughput work. <strong>Size:</strong> an hour.
+<strong>Status: ANSWERED — no change needed.</strong></p>
+
+<p>This is the throughput plan&rsquo;s own B3, and it was the right thing to do first because it is
+cheap, checkable, and it changes the value of everything else in that plan.
+<code>StepOutcome::Awaiting</code> (<code>crates/workflow/src/lib.rs:277-285</code>) exists so the
+host can step as soon as any one child finishes rather than joining a batch. The plan asserted this
+was unverified. It is now verified, by inspection.</p>
+
+<p><strong>Dispatch is already continuous, not batched.</strong>
+<code>crates/cli/src/commands/workflow.rs:964</code> reads:</p>
+
+<pre style="overflow-x: auto; background: var(--code-bg); border: 1px solid var(--rule); border-radius: 6px; padding: 0.85rem 1rem; font-size: 0.875rem; line-height: 1.55; margin: 1.25rem 0;">let wait_for = if replay.is_some() { outstanding } else { 1 };</pre>
+
+<p>On the live path the dispatcher blocks for exactly one completion, drains whatever else is ready,
+and steps again — so a later stage&rsquo;s child overlaps an earlier stage&rsquo;s child and the
+straggler tail is paid once per run instead of once per stage. Only an active resume journal joins
+the whole batch, and that is deliberate: replay must reproduce the recorded order. A witness test,
+<code>a_later_stage_child_overlaps_an_earlier_stage_child</code>, already guards the behaviour, so
+this is not a claim that can quietly rot.</p>
+
+<p><strong>Consequence for the throughput plan.</strong> The parallelism workstream that assumes a
+batch barrier is <strong>unnecessary</strong> — the barrier it was written to remove does not exist.
+That is the <em>second</em> workstream measurement has removed from that plan, after D0. Both were
+killed by an hour of looking rather than by a week of building, and that is the plan&rsquo;s most
+valuable property.</p>
+
+<h3 id="r5">R5 — adopt only the cheap subset of the throughput plan, and correct its arithmetic first.</h3>
+
+<p><strong>Slot:</strong> after R4. <strong>Size:</strong> the subset is small; the corrections are
+an hour. <strong>Status: DONE</strong> — the corrections are in
+<code>plan/agent-throughput-plan.html</code>, committed beside this document. Adoption of the
+subset itself remains a maintainer decision; <code>STRATEGY.md</code> forbids starting a lane
+before the bar is met.</p>
+
+<p>Adopt <strong>A1</strong> (deterministic tool-result cache keyed by content digest),
+<strong>A3</strong> (batch independent tool calls in one turn) and <strong>B3</strong> (= R4). Defer
+A2, B1 and C, which rest on the weakest evidence.</p>
+
+<p>Three corrections the plan needs before anyone acts on its numbers:</p>
+
+<ul>
+  <li><strong>The ceiling mixes two ratios.</strong> &ldquo;1.22× now → at most 2.06× → target
+    3×&rdquo; compares a parallelism ratio (busy ÷ wall) against a speedup ratio (today&rsquo;s wall
+    ÷ perfect wall). Against busy time the perfect-scheduling ceiling is 2.52×, not 2.06×.</li>
+  <li><strong>&ldquo;16.5 s per tool call&rdquo; is derived, not measured</strong>, and the document
+    calls it measured twice. It is mean agent duration ÷ mean tool calls, so it absorbs thinking
+    time and the 155 minutes of real bash execution the document measures separately. Workstream
+    A&rsquo;s headline 39% assumes removing a call removes 16.5 s of wall time — but cargo alone is
+    23.2 s mean over 132 calls, and that work does not disappear when a tool gets richer. Only the
+    round trip does.</li>
+  <li><strong>The populations do not reconcile.</strong> Section 2 measures 57 agents across 12 runs
+    and reports 6.28 M tokens. Sections 5b and 8 measure 86 transcripts and report 509.8 M input
+    tokens. The document never says whether the 86 include the 57, nor what &ldquo;tokens&rdquo;
+    means in the first table.</li>
+</ul>
+
+<h3 id="r6">R6 — record the measurement-versus-target gap in the throughput plan.</h3>
+
+<p><strong>Slot:</strong> with R5. <strong>Size:</strong> a note. <strong>Status: DONE</strong> — the
+note is in <code>plan/agent-throughput-plan.html</code>, committed beside this document.</p>
+
+<p>The plan&rsquo;s evidence comes from <code>~/.claude/projects/…</code> — Claude Code sessions, not
+AgentStack&rsquo;s own workflow runner. It then proposes raising <code>DEFAULT_MAX_CONCURRENT</code>
+in AgentStack on that basis. Different scheduler, different concurrency model, different process
+boundary.</p>
+
+<p>Some items survive the transfer — a tool-result cache and finer partitioning are general. B1 does
+not. This is the same defect class thirteen rounds of delivery work removed from the code: a claim
+computed from one source and applied to a different reality. Record it in the plan so nobody acts on
+B1 without measuring AgentStack itself first.</p>
+
+<h3 id="r7">R7 — record the side-effect constraint on speculative execution.</h3>
+
+<p><strong>Slot:</strong> before any C2 work; a design note now, not code. <strong>Size:</strong> a
+note. <strong>Status: DONE</strong> — the note is in
+<code>plan/agent-throughput-plan.html</code>, committed beside this document.</p>
+
+<p>The throughput plan&rsquo;s C2 proposes running two copies of a slow task with different hints,
+taking the first result and killing the loser. Hadoop can do that because its tasks are idempotent
+and write nothing until commit. <strong>Agents write files.</strong></p>
+
+<p>This exact failure mode occurred twice during the delivery work: an agent died mid-task and left
+423 compiling, unverified lines in <code>commands/lib.rs</code>, and another left 136 lines across
+three files. Both times the tree looked healthy and the build passed. Deliberately killing a loser
+mid-write produces the same state on purpose.</p>
+
+<p>C2 needs the loser&rsquo;s writes isolated — a worktree per speculative copy, discarded on loss —
+or it is not safe. The plan does not mention this.</p>
+
+<h3 id="r8">R8 — copy APM&rsquo;s silent-extension gate.</h3>
+
+<p><strong>Slot:</strong> after P0–P1. <strong>Size:</strong> half a day.
+<strong>Status: DONE</strong> — <code>06a9957</code>.</p>
+
+<p>APM&rsquo;s <code>mode_b_detector.sh</code> fails CI when a pull request touches a critical path,
+adds 20 or more lines, and changes no specification text and no requirement marker; the author must
+write an explicit waiver. It stops code growing past its specification without a decision.</p>
+
+<p>The AgentStack version: when a pull request touches <code>crates/trust</code>,
+<code>crates/policy</code> or <code>crates/egress</code> and does not change
+<code>docs/ENFORCEMENT.md</code>, demand a written waiver. This directly serves invariant 8,
+&ldquo;claims match enforcement&rdquo;, and it is the cheapest structural defence against the exact
+drift this engagement kept finding — code and documentation disagreeing with nobody noticing.</p>
+
+<p><strong>What the gate found when it was pointed at history.</strong> Over the last 40 non-merge
+commits touching <code>crates/trust</code>, <code>crates/policy</code> and
+<code>crates/egress</code>, 21 fire and 19 pass; 20 of the 21 change production enforcement code
+with no paired claim update. Read that as an <strong>upper bound, not a rate</strong>: the gate runs
+per pull request, and some of those commits sit on branches that updated
+<code>docs/ENFORCEMENT.md</code> in a later commit on the same branch. The honest statement is that
+at most 20 enforcement changes shipped without a paired claim, not that 20 did.</p>
+
+<p><strong>The gate arrived carrying the defect it exists to catch.</strong> Its docstring said it
+exempted test code; its implementation exempted only <code>tests/</code> directories — and this
+repository&rsquo;s dominant convention is the inline <code>#[cfg(test)]</code> module. So the
+description and the behaviour disagreed, in the tool whose whole purpose is to catch descriptions
+and behaviour disagreeing. It was found and fixed before landing. Worth recording, because it is the
+cleanest possible demonstration that a self-test proves nothing about the world.</p>
+
+<h3 id="r9">R9 — add a visibly adversarial test directory.</h3>
+
+<p><strong>Slot:</strong> after P0–P1. <strong>Size:</strong> two to three days, ongoing.
+<strong>Status: DONE</strong> — <code>af6ba23</code>. 18 adversarial tests across six binaries.</p>
+
+<p>APM has 161 adversarial tests in five named groups under a <code>red_team/</code> directory.
+AgentStack&rsquo;s security claims are strong and were verified repeatedly during the delivery work,
+but that verification lives in reviewer transcripts, not in the repository. A directory that is
+visibly adversarial — hostile manifests, path traversal, symlink escapes, drifted content, forged
+consent digests, secrets in every field that serialises — makes the claim checkable by someone who
+does not trust you. That is worth more than the tests themselves.</p>
+
+<p><strong>Each test carries a negative control.</strong> Every one of the 18 was run once with the
+real guard disabled, and confirmed to fail. An adversarial test that passes because it attacks
+nothing is the vacuous assertion of P0 wearing a more impressive name, and the only defence is to
+watch it fail on purpose.</p>
+
+<h3 id="r10">R10 — verify the README&rsquo;s Homebrew claim.</h3>
+
+<p><strong>Slot:</strong> anytime. <strong>Size:</strong> ten minutes.
+<strong>Status: DONE</strong> — <code>477ba10</code>.</p>
+
+<p>The APM comparison notes that <code>README.md:155</code> says there is no published Homebrew tap,
+while <code>Tarekkharsa/homebrew-tap</code> exists with <code>Formula/agentstack.rb</code> pinned at
+0.17.1. An earlier round rewrote that section, so the current wording may be wrong in either
+direction. Check what the README says now and what the tap actually contains, then make them
+agree.</p>
+
+<p><strong>It was wrong in the opposite direction.</strong> The README did not overclaim a tap that
+does not exist; it <em>denied</em> a tap that does. The failure is the same one either way — a
+claim written from memory instead of from the world — but it is worth naming precisely, because the
+instinct when auditing marketing copy is to look only for overclaims.</p>
+
+<h2 id="part-three">Part three — found on 2026-08-05</h2>
+
+<p>Three items surfaced while closing the fourteen above. None is urgent and none blocks anything.
+They are numbered <strong>N1 … N3</strong> so they cannot collide with P0–P9 or R1–R10. All three
+are open.</p>
+
+<div class="table-wrap" style="overflow-x: auto;">
+<table>
+  <thead>
+    <tr>
+      <th>Item</th>
+      <th>What it is</th>
+      <th>Size</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><a href="#n1">N1</a></td>
+      <td><code>docs/demos/first-value.cast</code> records the old journey.
+        <strong>Maintainer decision.</strong></td>
+      <td>Ten minutes, either way</td>
+      <td><strong>OPEN</strong></td>
+    </tr>
+    <tr>
+      <td><a href="#n2">N2</a></td>
+      <td>Consider a backfill pass over <code>docs/ENFORCEMENT.md</code>.</td>
+      <td>Half a day of reading</td>
+      <td><strong>OPEN</strong></td>
+    </tr>
+    <tr>
+      <td><a href="#n3">N3</a></td>
+      <td>Five deliberate SIGPIPE pipelines in <code>device-onboarding/assert.sh</code>.</td>
+      <td>A note now; an hour if the script changes</td>
+      <td><strong>OPEN</strong></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h3 id="n1">N1 — <code>docs/demos/first-value.cast</code> records the old journey.</h3>
+
+<p><strong>Size:</strong> ten minutes, either way. <strong>Status: OPEN — maintainer
+decision.</strong></p>
+
+<p>The recording predates the routed delivery lane, so it shows a first run that the product no
+longer performs. Three facts decide this item, and all three were checked:</p>
+
+<ul>
+  <li><strong>Nothing loads it.</strong> There is no asciinema player anywhere under
+    <code>docs/</code>. The file is inert build output that no page embeds.</li>
+  <li><strong>Re-recording needs a TTY</strong>, so no agent can refresh it. This is a
+    maintainer-only action by mechanism, not by policy.</li>
+  <li><strong>Its only references are two prose lines</strong> in
+    <code>examples/first-value-demo/README.md</code>.</li>
+</ul>
+
+<p>So the choice is small and binary: delete the cast together with those two lines, or keep it and
+add one sentence saying it predates the routed delivery lane. Either is defensible. Leaving it
+undated and unexplained is the only option that is not, because a recording of a journey the
+software no longer takes is exactly the drift this document exists to remove.</p>
+
+<h3 id="n2">N2 — consider a backfill pass over <code>docs/ENFORCEMENT.md</code>.</h3>
+
+<p><strong>Size:</strong> half a day of reading. <strong>Status: OPEN.</strong></p>
+
+<p>R8&rsquo;s gate stops <em>new</em> drift. It says nothing about drift that already landed — and
+the 20 historical commits it flags are a direct hint that the existing claims may lag the code. The
+gate cannot answer this. It compares a diff against a diff; it has no view of whether a sentence
+written in March still describes the enforcement that runs today. Only reading the document beside
+the code can tell you that.</p>
+
+<p>Scope it as a read, not a rewrite. The output is a list of claims that no longer match, which the
+maintainer then decides about — the same reasoning as P2, for the same reason.</p>
+
+<h3 id="n3">N3 — five deliberate SIGPIPE pipelines in <code>device-onboarding/assert.sh</code>.</h3>
+
+<p><strong>Size:</strong> a note now; an hour if the script ever changes.
+<strong>Status: OPEN.</strong></p>
+
+<p>Five pipelines in <code>examples/projects/device-onboarding/assert.sh</code> can leave a producer
+writing into a closed pipe. They were left in place on purpose: the script sets <code>set -u</code>
+and nothing else — neither <code>-e</code> nor <code>pipefail</code> — so a SIGPIPE on
+the left-hand side of a pipe is discarded and the assertion behaves correctly today.</p>
+
+<p>That safety is entirely a property of two options being absent. <strong>If the script ever gains
+<code>pipefail</code>, all five must be fixed in the same change</strong> — otherwise they begin
+failing intermittently, on buffer-size luck, which is the hardest kind of CI failure to diagnose and
+the same class of accident that <code>299a88b</code> already cleaned up once.</p>
+
+<h2 id="pattern">The pattern</h2>
+
+<p>Every defect in this engagement had one shape: <strong>a claim computed from a record instead of
+from reality.</strong></p>
+
+<p><code>apply</code> and <code>doctor</code> each held the routing check as a private closure, so
+four other writers never had it. The abandoned-file detector trusted a state ledger, so a cloned
+config was invisible. Rules (a) through (e) of the guard verified that every command the product
+names is runnable and findable — and all five passed while <code>use --write</code> wrote a file
+that four surfaces denied existed. Rule (f) walks the filesystem; it is the first rule that reads
+the world rather than the product&rsquo;s own claims.</p>
+
+<p>P0 is the same lesson one level up, twice. The example suite went unrun for thirteen rounds
+because it was not <code>cargo test</code> — the loop checked the loop&rsquo;s own definition of the
+work, not the work. And when it was finally run, three of its assertions turned out to be
+<em>vacuous</em>: green because they inspected a file <code>apply</code> no longer opened. The suite
+drives the real binary end to end, and it belongs in the loop for any delivery change.</p>
+
+<p>R8 supplied the purest specimen of all. The enforcement gate&rsquo;s own self-test passed while
+the gate misfired on this repository&rsquo;s dominant test convention, because the self-test and the
+gate were both computed from the same wrong idea of where test code lives. Every failure in this
+list was green, and every one of them was only ever checking itself.</p>
+
+<p>The plan documents show the same shape one level out. The throughput plan measured one system and
+prescribed changes to another; the APM comparison made confident negative claims about a
+competitor&rsquo;s codebase without reading enough of it to support them. Both were the
+engagement&rsquo;s single defect in a new place — a claim computed from a record instead of from
+reality — and both were cheap to fix by going and looking. Both have now been fixed that way, in
+<code>34c0db9</code> and in the throughput plan committed beside this document.</p>
+
+</main>
+</body>
+</html>
