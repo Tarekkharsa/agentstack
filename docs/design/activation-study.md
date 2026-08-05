@@ -30,6 +30,14 @@
 > unchanged — still never screen on where a candidate's servers live).
 > Everything else — task script, protocol, metrics,
 > thresholds, §7 pass condition — is unchanged.
+>
+> **Demand dimension added (2026-08-05):** every gate metric in this kit
+> measures usability; none measured whether anyone wants the thing. Three
+> additive pieces close that: the §5 exit question (D1), the re-trust friction
+> watch (D2), and the §9.1 two-week follow-up. All three are recorded, none is
+> scored. The five thresholds, the §6 metrics sheet, the §7 results template,
+> and the §7 pass condition are byte-identical — a demand answer informs the
+> bar, it does not move the pass/fail line.
 
 ## 1. Participant criteria
 
@@ -194,6 +202,33 @@ rest are silent observation.
    you), whether it worked, and how long it took. Do not suggest undo. If
    nothing goes wrong and they never want to reverse anything, write "not
    observed" and leave §9's recovery-time row blank.
+
+### Demand observation (Phase 0 — one question, one watch; feeds no gate)
+
+Everything above measures whether a stranger can work the tool. Neither of the
+two items below does. They measure whether a stranger would keep it — the one
+thing this kit could not previously see, and the one thing the product thesis
+also rests on. They add no task, no coaching, and no threshold. The two gate
+questions stay exactly two; D1 is asked after them and after V2, last of all.
+**Nothing recorded here changes the §7 pass condition.** A demand answer informs
+the bar; it does not move the pass/fail line.
+
+- **D1 — would they keep it.** After Q1, Q2, and V2, ask once: "Would you keep
+  this installed next week — why or why not?" Write the answer down verbatim,
+  word for word, including the why. Then stop: no persuading, no correcting, no
+  second attempt, no offer to fix the reason they name. A "no" with a clear
+  reason is the most useful sentence in the session. If they answer only "yes"
+  or only "no", ask "why?" once and record that too — the why is the finding,
+  the yes/no is not scored.
+- **D2 — the re-trust friction watch (silent).** Watch for every moment the
+  participant is told approval is stale or is asked to approve again — after a
+  re-lock, after a toolset change, after pinned content moves. Record the time,
+  what was on screen, what they had just done, and their reaction verbatim,
+  including a muttered or non-verbal one ("again?", a sigh, a scroll back). Do
+  not explain the prompt and do not tell them it was expected. Count the
+  moments: the hypothesis under watch is that re-trust friction is cheap once
+  and expensive in aggregate, so the number of times matters as much as any one
+  reaction. If it never happens, write "not observed".
 
 ## 6. Metrics sheet (one per participant)
 
@@ -409,6 +444,46 @@ and the same deletion terms §3 already promises. The F19 constraint applies
 unchanged: these baselines exist only through opt-in studies until F19's
 privacy-preserving measurement design is approved.
 
+### 9.1 Two-week follow-up (demand and retention — feeds no gate)
+
+D1 records what a participant says they will do at the end of a session they
+just spent 40 minutes in. This section records what they actually did. It is the
+only part of the kit that happens outside the room, and like §9 it is a
+baseline, not a gate: **the §7 pass condition ignores it, and no threshold on
+this page moves because of it.**
+
+Contact each of the five participants **14 days after their own session** —
+count from their session date, not from the last session. One message, in
+whatever channel you recruited them in, and no reminder if they do not answer:
+a chased answer is not a retention signal. Ask for three things and nothing
+else:
+
+1. **Is it still installed?** yes / no / unsure.
+2. **Have you run it since the session?** yes / no — and if yes, roughly how
+   many times, their estimate, unrounded by you.
+3. **One sentence on why or why not.** Verbatim, word for word. Take the
+   sentence they give; do not ask a follow-up, do not offer to fix what they
+   name, and do not tell them what changed in the tool since.
+
+Record per participant, on the same numbered sheet:
+
+```text
+Participant #___   session date ______   contacted on ______  (session + 14d)
+
+  still installed          yes / no / unsure / no reply
+  ran it since the session yes / no / no reply     roughly ____ times
+  why / why not (verbatim, one sentence):
+    _______________________________________________________________
+    _______________________________________________________________
+```
+
+No reply is a recorded outcome, not a missing value: write **no reply** and move
+on. Aggregate the five as counts beside the §7 results (_ / 5 still installed,
+_ / 5 ran it since) and keep the five sentences together — the sentences carry
+the finding, the counts only carry its size. Same consent and deletion terms as
+§3: the follow-up is part of the same session's notes, is kept under the same
+participant number, and is deleted with them.
+
 ## 10. Appendix A — printable observer sheet
 
 One per participant. Print it, fill it in the room, in pen. It is designed to
@@ -511,6 +586,24 @@ Where their servers live today (tick what you SEE, do not ask them to change it)
      Then STOP. No correcting, no confirming, no second attempt.
      [ ] no review appeared in their session
 
+--- DEMAND (record only; feeds NO gate — see §5, §9.1) ---
+ D1  WOULD THEY KEEP IT — ask ONCE, last of all, after Q1, Q2 and V2:
+     "Would you keep this installed next week — why or why not?"
+     verbatim, word for word (the WHY is the finding): ________________
+     _________________________________________________________________
+     _________________________________________________________________
+     If they said only yes/no, ask "why?" once and write that here too.
+     Then STOP. Do not persuade, do not offer to fix the reason they name.
+
+ D2  RE-TRUST FRICTION — silent watch, every time it happens, no coaching.
+     Any moment they are told approval is stale or asked to approve again.
+     [ ] not observed          how many times in total: ____
+     #  time    what was on SCREEN (quote it)     what they had just done     their reaction, verbatim
+     1  __:__   ______________________________    ________________________    ____________________
+     2  __:__   ______________________________    ________________________    ____________________
+     3  __:__   ______________________________    ________________________    ____________________
+     (count sighs, mutters and scroll-backs as reactions; quote them)
+
 --- STALL LOG (one block per stall; keep going, do not coach) ---
  #  time    what was on SCREEN (quote it)      what they EXPECTED (their words)      what ACTUALLY happened
  1  __:__   _______________________________    ___________________________________   ______________________
@@ -527,6 +620,15 @@ Where their servers live today (tick what you SEE, do not ask them to change it)
    ______________________________________________________________
  Did they need Docker, policy, gateway, or workflow concepts to get first
  value?   yes / no        (any yes = gate fail for the whole study)
+
+--- 14-DAY FOLLOW-UP (§9.1; fill from OUTSIDE the room; feeds NO gate) ---
+ Contact date = session date + 14 days:  __________   contacted on __________
+ One message, no reminder if they do not answer.
+   still installed             [ ] yes  [ ] no  [ ] unsure  [ ] no reply
+   ran it since the session    [ ] yes  [ ] no  [ ] no reply   roughly ____ times
+   why / why not (verbatim, one sentence, do not follow up):
+     ____________________________________________________________
+     ____________________________________________________________
 ```
 
 ### Scoring rule (restated exactly as §7 states it)
@@ -646,8 +748,9 @@ never select for it.
    the rest of the journey — the blocker list is the point, and a participant
    who stalled still produces most of the data.
 
-5. **Watch for V1 (the drop-a-file reach)** throughout. Never steer toward it.
-   If it never happens, write "not observed".
+5. **Watch for V1 (the drop-a-file reach) and D2 (re-trust friction)**
+   throughout. Never steer toward either. Log every D2 moment, not just the
+   first. If either never happens, write "not observed".
 
 6. **After the tasks, ask Q1 then Q2, verbatim, and write the answers down.**
    Do not react to the answers beyond a neutral "thanks".
@@ -655,12 +758,17 @@ never select for it.
 7. **Then ask V2 once**, verbatim, write the answer word for word, and stop.
    No correcting, no confirming, no filling in the gaps.
 
-8. **Close.** Thank them. Tell them how to remove the tool if they want it
+8. **Then ask D1 once**, last of all: "Would you keep this installed next week —
+   why or why not?" Write it word for word, the why included. Do not persuade,
+   do not defend the tool, and do not offer to fix the reason they give. It
+   feeds no gate; it is the only demand signal the session produces.
+
+9. **Close.** Thank them. Tell them how to remove the tool if they want it
    gone, and offer first-name credit or anonymity, their pick. Removing it is
    the one place you may answer a direct how-do-I question — the session is
    over and it is their machine.
 
-**Things you must not say, at any point before step 8.**
+**Things you must not say, at any point before step 9.**
 
 - Any command name, flag, subcommand, or file path.
 - Any of the concept words, unless the participant says it first: manifest,
@@ -690,8 +798,12 @@ never select for it.
   answer against what the review actually showed them. Score once.
 - Copy the participant's number and their five §7 lines onto the running
   results tally.
+- Put one calendar entry at **session date + 14 days** for the §9.1 follow-up,
+  against this participant's number. Do it now; it is the one part of the study
+  that cannot be recovered later.
 
 **Where each number ends up.** Timeline and yes/no boxes → §6's metrics sheet
 shape, already reproduced in Appendix A. The four baselines → the §9 addendum
-block. The five gate lines → §7's results template, which maps 1:1 onto the
-Stage 1 gate checkboxes in `TODO.md`.
+block. D1, D2 and the 14-day answers → §9.1, recorded beside the results and
+scored by nobody. The five gate lines → §7's results template, which maps 1:1
+onto the Stage 1 gate checkboxes in `TODO.md`.
