@@ -180,11 +180,17 @@ fn run_launches_the_harness_at_the_project_root() {
 #[test]
 fn profile_run_applies_then_reverts_on_exit() {
     let _guard = env_lock();
+    // `render_locally` is deliberate, not incidental. Under the default routing
+    // an MCP-capable harness is served its servers live through the gateway and
+    // nothing is written, but this test's subject IS the file lifecycle —
+    // applied on start, reverted on exit — so it asks for the rendered lane.
+    // Asserting the live lane here would make it pass with nothing to observe.
     let (_tmp, proj) = setup(
         "version = 1\n[meta]\nname = \"t\"\n\
+         [delivery]\nrender_locally = true\n\
          [targets]\ndefault = [\"claude-code\"]\n\
          [servers.demo]\ntype = \"http\"\nurl = \"https://demo.example/mcp\"\n\
-         [profiles.p1]\nservers = [\"demo\"]\nskills = []\n",
+         [toolsets.p1]\nservers = [\"demo\"]\nskills = []\n",
     );
     // Claude Code's project MCP config lives at .mcp.json in the repo root.
     let cfg = proj.join(".mcp.json");
