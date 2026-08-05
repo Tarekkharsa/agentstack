@@ -101,6 +101,7 @@ macro_rules! out {
 // TODO(phase-1): shim — migrate callers to agentstack_trust:: and drop.
 pub use agentstack_trust as trust;
 pub mod trust_anchor;
+pub mod trust_carry;
 pub mod usage;
 pub mod verify;
 pub mod workflows;

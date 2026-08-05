@@ -41,6 +41,22 @@ use std::path::Path;
 /// full consent ceremony (`STRATEGY.md`), which is a stronger promise than the
 /// one made here.
 ///
+/// # The window this does not close
+///
+/// The capture answers for the bytes on disk when the command started; it does
+/// not certify that the bytes now on disk are the ones the command wrote. A
+/// third party with write access to the project could edit the manifest between
+/// the capture and the delivery, and a self-authoring command would deliver
+/// that edit under the pre-command answer.
+///
+/// `add` is immune by construction — its manifest text and its skill sources
+/// are both derived from reads taken before the write, so a racing edit is
+/// overwritten rather than delivered. The panel verbs are not: they write the
+/// manifest and then re-load it through `use_profile::run`. Closing that would
+/// mean carrying the exact expected post-write bytes, not just a verdict, and
+/// the window requires an attacker who already has write access to the project
+/// during the second the command runs. Recorded here rather than papered over.
+///
 /// # Fail closed
 ///
 /// [`PriorTrust::STRICT`] is the `Default`, so a caller that captured nothing

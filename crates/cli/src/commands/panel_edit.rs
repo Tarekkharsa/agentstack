@@ -769,12 +769,19 @@ fn set_gitignore_gated(
 
     let mut backups = Vec::new();
     if updated != original {
+        // The one panel verb that carries trust across its own write. Every
+        // other verb in this file declares a capability and must leave the
+        // project reading `Changed` (see `activate`); `[meta] gitignore` is a
+        // preference about .gitignore hygiene and authorizes nothing, so the
+        // general rule in `crate::trust_carry::TrustCarry` applies instead.
+        let carry = crate::trust_carry::TrustCarry::before_write(&mdir);
         backups.push(crate::history::capture(
             &path,
             "agentstack.toml · gitignore setting",
         ));
         crate::util::atomic::write(&path, &updated)
             .with_context(|| format!("writing {}", path.display()))?;
+        carry.across_write(&path, &updated)?;
     }
 
     // Removing the block is consented HERE and nowhere else: routine commands

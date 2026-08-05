@@ -193,10 +193,26 @@ fn render_locally(
         return Ok(());
     }
 
+    // `[delivery] render_locally` is a routing preference: it says WHERE the
+    // capabilities already declared should land, and declares none of its own.
+    // The write still moves the consent digest, though, so without this the
+    // documented next step (`agentstack apply --write`) would be refused by a
+    // gate this command's own bytes tripped. Captured before the write, spliced
+    // in after it — see `crate::trust_carry::TrustCarry` for why that is the
+    // only safe order.
+    let carry = crate::trust_carry::TrustCarry::before_write(&ctx.dir);
+    let was_trusted = carry.was_valid();
     let backup = crate::history::capture(&path, "agentstack.toml · delivery override");
     crate::util::atomic::write(&path, &updated)
         .with_context(|| format!("writing {}", path.display()))?;
     let _ = crate::history::record("project", "delivery render-locally", vec![], vec![backup]);
+    let carried = carry.across_write(&path, &updated)?;
+    if was_trusted && !carried {
+        println!(
+            "  {} manifest changed — review and re-run `agentstack trust .`",
+            "·".dimmed()
+        );
+    }
 
     if off {
         println!("  {} delivery for {scope} is automatic again.", "✓".green());

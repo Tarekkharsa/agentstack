@@ -347,12 +347,17 @@ fn record_gitignore_optout(manifest_dir: Option<&Path>) -> Result<()> {
 
     let mut backups = Vec::new();
     if updated != original {
+        // `[meta] gitignore` says whether agentstack manages this project's
+        // .gitignore block. It declares nothing and executes nothing, so valid
+        // trust is carried across the write (`crate::trust_carry::TrustCarry`).
+        let carry = crate::trust_carry::TrustCarry::before_write(&ctx.dir);
         backups.push(crate::history::capture(
             &path,
             "agentstack.toml · gitignore opt-out",
         ));
         crate::util::atomic::write(&path, &updated)
             .with_context(|| format!("writing {}", path.display()))?;
+        carry.across_write(&path, &updated)?;
         println!(
             "  {} recorded {} — no command will manage this project's .gitignore",
             "✓".green(),
@@ -1175,9 +1180,15 @@ fn record_render_locally(manifest_dir: Option<&Path>) -> Result<()> {
     if updated == original {
         return Ok(());
     }
+    // Same key, same rule as `x delivery render-locally --write`: a routing
+    // preference declares no capability, so trust that was valid before this
+    // write is carried across it rather than sending the user to a re-review
+    // for a choice the wizard just made on their behalf.
+    let carry = crate::trust_carry::TrustCarry::before_write(&ctx.dir);
     let backup = crate::history::capture(&path, "agentstack.toml · render locally");
     crate::util::atomic::write(&path, &updated)
         .with_context(|| format!("writing {}", path.display()))?;
+    carry.across_write(&path, &updated)?;
     let _ = crate::history::record("project", "setup (render locally)", vec![], vec![backup]);
     println!(
         "  {} recorded {} — this project writes files even where the live channel would work.",
