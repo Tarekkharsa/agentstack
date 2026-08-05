@@ -1123,4 +1123,53 @@ mod tests {
             "the Mode axis retired in v3; a panel still offering a mode picker must be able to see that"
         );
     }
+
+    /// Every served contract is written down, and none is written down as
+    /// absent. `docs/integrations.md` is where an integrator learns which
+    /// affordances this binary can gate on, so the page drifts in two
+    /// directions and both mislead: a name added to [`FEATURES`] with no row
+    /// there is a contract nobody can find, and a row still marked
+    /// "next release" over a name this build serves tells an integrator not to
+    /// build something that already works. Both had happened — fourteen names
+    /// were undocumented and six rows outlived the release they described.
+    ///
+    /// The page is READ at test time rather than embedded with `include_str!`,
+    /// because embedding would bake the bytes into the binary and make the
+    /// check a property of whoever last rebuilt; reading means editing the
+    /// page is what re-runs it. `CARGO_MANIFEST_DIR` is `crates/cli`, so the
+    /// repository root is two levels up — the same anchor
+    /// `tests/docs_commands.rs` uses.
+    #[test]
+    fn every_served_contract_is_documented() {
+        // The marker the page uses for a contract this build does NOT serve.
+        // Nothing may carry it today; it stays named here so re-introducing it
+        // over a served name fails in this repository rather than in an
+        // integrator's version negotiation.
+        const NOT_SERVED: &str = "no — next release";
+
+        let page =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/integrations.md");
+        let text = std::fs::read_to_string(&page)
+            .unwrap_or_else(|e| panic!("cannot read {}: {e}", page.display()));
+
+        for name in FEATURES {
+            // Match the backticked spelling, so `status-v1` is not satisfied by
+            // a line that only mentions `lease-status-v1`.
+            let quoted = format!("`{name}`");
+            let mentions: Vec<&str> = text.lines().filter(|l| l.contains(&quoted)).collect();
+            assert!(
+                !mentions.is_empty(),
+                "'{name}' is served but docs/integrations.md never names it — an \
+                 integrator cannot gate on a contract that is not written down"
+            );
+            for line in mentions {
+                assert!(
+                    !line.contains(NOT_SERVED),
+                    "docs/integrations.md marks '{name}' as \"{NOT_SERVED}\" while this \
+                     build serves it: {}",
+                    line.trim()
+                );
+            }
+        }
+    }
 }
