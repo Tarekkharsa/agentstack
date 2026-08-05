@@ -17,6 +17,42 @@ pub struct Store {
     root: PathBuf,
 }
 
+/// The most files an integrity-root pin will deposit. Matched to the re-gate
+/// reader's own `MAX_TREE_FILES`: past this point that reader truncates the
+/// walk, so a larger deposit could not be faithfully diffed even if it existed.
+const MAX_DEPOSIT_FILES: usize = 500;
+
+/// The most bytes an integrity-root pin will deposit, across the whole pinned
+/// set. Generous for a real extension or workflow, and small enough that the
+/// worst case a single pin can add to a never-evicted store stays bounded.
+/// See [`Store::deposit_integrity_root`] for why a bigger source is skipped
+/// rather than archived.
+const MAX_DEPOSIT_BYTES: u64 = 8 * 1024 * 1024;
+
+/// The on-disk path of one member of an integrity root. A single-file root
+/// yields one EMPTY relative path (`integrity_root_files`' contract), and
+/// joining `""` would append a trailing separator — so the root is read
+/// directly in that case.
+fn member_path(root: &Path, rel: &Path) -> PathBuf {
+    if rel.as_os_str().is_empty() {
+        root.to_path_buf()
+    } else {
+        root.join(rel)
+    }
+}
+
+/// Where that member lands inside the deposit. A directory root keeps its
+/// relative path; a single-file root (empty relative path) is named by the
+/// file, so the deposit is `content/<hex>/<file name>` — the same shape a
+/// fragment deposit takes, which is what lets one re-gate reader serve both.
+fn deposit_member_name(root: &Path, rel: &Path) -> PathBuf {
+    if rel.as_os_str().is_empty() {
+        PathBuf::from(root.file_name().unwrap_or(std::ffi::OsStr::new("body")))
+    } else {
+        rel.to_path_buf()
+    }
+}
+
 /// The resolved local location of a skill's content.
 #[derive(Debug)]
 pub struct Resolved {
@@ -240,6 +276,85 @@ impl Store {
         pin
     }
 
+    /// **The pinning act, for an integrity-root source** — a native extension
+    /// or a governed workflow. Fourth sibling of [`pin`], [`pin_instruction`]
+    /// and [`pin_server_definition`], and the pair that deposited nothing at
+    /// all: their checksums were digested straight into the lockfile, so a
+    /// re-gate on the two EXECUTABLE kinds could show that the bytes moved but
+    /// never which lines moved — the human was asked to review a change with
+    /// only one side of it on disk.
+    ///
+    /// Why this is a fourth function rather than a branch inside [`pin`]: the
+    /// digest is a third family. Extensions and workflows pin the STRICT
+    /// integrity-root digest (`.git` included, a symlink anywhere is a hard
+    /// error, its own domain separator), never the lenient `dir_digest` a skill
+    /// pins. Collapsing them would silently change one kind's pin format. What
+    /// they share — the content-addressed address, the copy-never-link rule,
+    /// the re-proof of the name after the write — is shared, in
+    /// [`deposit_integrity_root`].
+    ///
+    /// `resolved_hex` is the digest the resolver already computed from
+    /// `(anchor, declared)`; this returns exactly that value parsed, so no pin
+    /// changes meaning. Only the deposit is new — and, exactly like [`pin`], it
+    /// is BEST-EFFORT: a failed or refused deposit never fails the pin, and the
+    /// only consequence is that a re-gate shows the honest "the bytes you
+    /// approved were not recorded" line instead of a diff. That is also the
+    /// backward-compatibility story: a lockfile written before this existed
+    /// carries pins with no deposit, and those degrade to precisely today's
+    /// behaviour rather than failing a project that upgraded mid-flight.
+    ///
+    /// [`pin`]: Store::pin
+    /// [`pin_instruction`]: Store::pin_instruction
+    /// [`pin_server_definition`]: Store::pin_server_definition
+    /// [`deposit_integrity_root`]: Store::deposit_integrity_root
+    pub fn pin_integrity_root(
+        &self,
+        anchor: &Path,
+        declared: &str,
+        resolved_hex: &str,
+    ) -> Result<Sha256Hex> {
+        let pin = Sha256Hex::parse(resolved_hex)?;
+        // Errors are deliberately swallowed — see the failure posture above.
+        // Nothing here may block the pin.
+        let _ = self.deposit_integrity_root(anchor, declared, pin.hex());
+        Ok(pin)
+    }
+
+    /// **The pinning act, for a workflow's approved blueprint.** The blueprint
+    /// is a single JSON file digested by `contained_file_digest`, which is the
+    /// SAME raw-SHA-256-over-the-bytes family instruction fragments pin — so
+    /// this is [`pin_instruction`] with the containment rules in front of it,
+    /// and it needs no new store machinery at all. The deposited layout is the
+    /// instruction family's `content/<hex>/<file name>`, which
+    /// [`verified_content`] and the re-gate reader already understand.
+    ///
+    /// The digest is computed by `contained_file_digest` and nothing else, so
+    /// the refusals a declared blueprint can produce (escape, traversal, a
+    /// symlink anywhere on the path, not a regular file) are byte-for-byte the
+    /// ones this path produced before.
+    ///
+    /// The re-read is guarded the way [`pin`]'s is: the deposit happens only
+    /// while the bytes still hash to the digest just taken. A file that moved
+    /// between the two reads deposits nothing rather than landing foreign bytes
+    /// under an approved name — a wrong diff is worse than no diff.
+    ///
+    /// Best-effort, like every sibling: a failed deposit never fails the pin.
+    ///
+    /// [`pin`]: Store::pin
+    /// [`pin_instruction`]: Store::pin_instruction
+    /// [`verified_content`]: verified_content
+    pub fn pin_blueprint(&self, anchor: &Path, declared: &str) -> Result<Sha256Hex> {
+        let pin = agentstack_core::digest::contained_file_digest(anchor, declared)?;
+        if let Ok(path) = agentstack_core::digest::resolve_contained(anchor, declared) {
+            if let Ok(bytes) = fs::read(&path) {
+                if Sha256Hex::of(&bytes).hex() == pin.hex() {
+                    let _ = self.deposit_file(&path, &bytes, pin.hex());
+                }
+            }
+        }
+        Ok(pin)
+    }
+
     /// **The serving act, for a pinned single-file definition.** The text a
     /// pinned server definition must be READ from: the content-addressed
     /// deposit named by `digest_hex`, never the manifest, library or package
@@ -324,6 +439,121 @@ impl Store {
             if !dest.join(name).is_file() {
                 bail!("could not place the content snapshot at {}", dest.display());
             }
+        }
+        Ok(())
+    }
+
+    /// Place an integrity-root source's pinned byte set at `content/<hex>/`,
+    /// write-once — the deposit behind [`pin_integrity_root`].
+    ///
+    /// **What is deposited, and why not everything.** The bytes themselves, in
+    /// the store's existing shape, so the re-gate reader, `verified_content`
+    /// and every other content-addressed reader work unchanged — but only while
+    /// the pinned set stays under [`MAX_DEPOSIT_FILES`] / [`MAX_DEPOSIT_BYTES`].
+    /// A skill or a fragment is a small body; an extension can be a whole tree,
+    /// and the store is never evicted, so every re-lock of a large one would add
+    /// another permanent full copy. Above the ceiling that copy buys the
+    /// reviewer nothing: the re-gate reader already caps what it will read
+    /// (500 files, 2 MiB per file) and the card caps what it will show
+    /// (`regate::DIFF_LINE_CAP`), so an oversized source renders as "too large
+    /// to show here" whether or not it was deposited. The ceiling is set to
+    /// match that reader, and exceeding it degrades to the same honest
+    /// no-snapshot message a never-captured pin gets. A canonical archive was
+    /// the alternative considered and rejected: it saves no bytes and would add
+    /// a second format and a second reader to a store whose whole contract is
+    /// "a directory that re-hashes to its own name".
+    ///
+    /// The byte set comes from `integrity_root_files` — the SAME strict walk
+    /// the digest took, so `.git` is included and a symlink is a hard error
+    /// rather than a silent skip. `copy_dir_all` is deliberately NOT used here:
+    /// it strips `.git` and dereferences links, either of which would deposit
+    /// bytes that are not the pinned bytes.
+    ///
+    /// Layout: a directory root lands verbatim under its relative paths; a
+    /// single-file root lands as `content/<hex>/<file name>`, the same
+    /// one-file-in-a-directory shape [`deposit_file`] uses, so the re-gate's
+    /// reader lines both sides up without a second code path.
+    ///
+    /// [`pin_integrity_root`]: Store::pin_integrity_root
+    /// [`deposit_file`]: Store::deposit_file
+    fn deposit_integrity_root(
+        &self,
+        anchor: &Path,
+        declared: &str,
+        digest_hex: &str,
+    ) -> Result<()> {
+        let content_root = self.root.join("content");
+        let dest = content_root.join(digest_hex);
+        if verified_content(&dest, digest_hex) {
+            return Ok(()); // already deposited, content-addressed
+        }
+        let (root, files) = agentstack_core::digest::integrity_root_files(anchor, declared)?;
+        if files.len() > MAX_DEPOSIT_FILES {
+            bail!(
+                "{} holds {} files — past the deposit ceiling of {MAX_DEPOSIT_FILES}",
+                root.display(),
+                files.len()
+            );
+        }
+        // Measured from metadata, before a single byte is copied: the point of
+        // the ceiling is to not WRITE (and keep forever) what no card can show.
+        let mut total: u64 = 0;
+        for rel in &files {
+            let from = member_path(&root, rel);
+            total = total.saturating_add(fs::symlink_metadata(&from)?.len());
+            if total > MAX_DEPOSIT_BYTES {
+                bail!(
+                    "{} is larger than the deposit ceiling of {MAX_DEPOSIT_BYTES} bytes",
+                    root.display()
+                );
+            }
+        }
+        fs::create_dir_all(&content_root)
+            .with_context(|| format!("creating {}", content_root.display()))?;
+        // A leftover under this name that failed verification is rebuilt.
+        if dest.symlink_metadata().is_ok() {
+            remove_any(&dest);
+        }
+        // Copy to a temp then rename, so a crash never leaves a partial tree
+        // under a digest name (which would read as complete).
+        let tmp = content_root.join(format!(".tmp-{}", crate::runs::gen_id()));
+        fs::create_dir_all(&tmp).with_context(|| format!("creating {}", tmp.display()))?;
+        let copy_all = || -> Result<()> {
+            for rel in &files {
+                let from = member_path(&root, rel);
+                let to = tmp.join(deposit_member_name(&root, rel));
+                if let Some(parent) = to.parent() {
+                    fs::create_dir_all(parent)
+                        .with_context(|| format!("creating {}", parent.display()))?;
+                }
+                fs::copy(&from, &to)
+                    .with_context(|| format!("copying {} → {}", from.display(), to.display()))?;
+            }
+            Ok(())
+        };
+        if let Err(e) = copy_all() {
+            let _ = fs::remove_dir_all(&tmp);
+            return Err(e);
+        }
+        if fs::rename(&tmp, &dest).is_err() {
+            let _ = fs::remove_dir_all(&tmp);
+            // A concurrent writer may have placed a VALID deposit; accept it
+            // only if it verifies.
+            if !verified_content(&dest, digest_hex) {
+                bail!("could not place the content snapshot at {}", dest.display());
+            }
+            return Ok(());
+        }
+        // F4: re-prove the address at the moment the name is claimed. The
+        // digest was computed from a read that happened BEFORE this copy — if
+        // the source moved in between, the copy holds mixed bytes that would
+        // now sit under an approved digest name and read as approved forever.
+        if !verified_content(&dest, digest_hex) {
+            remove_any(&dest);
+            bail!(
+                "content changed while it was being snapshotted — {} does not hash to {digest_hex}",
+                root.display()
+            );
         }
         Ok(())
     }
@@ -878,15 +1108,25 @@ pub(crate) fn verified_snapshot(dest: &Path, digest_hex: &str) -> bool {
 
 /// [`verified_snapshot`] for readers that cannot know which pin family a hex
 /// digest belongs to. Skill pins are tree digests (`dir_digest`); instruction
-/// pins are a plain SHA-256 over one file's bytes, deposited as
-/// `content/<hex>/<file name>`. A snapshot verifies if it matches its name
-/// under EITHER family; symlinks anywhere disqualify under both. Used by the
-/// re-gate diff reader (F4/F19): a diff rendered from a tampered snapshot
-/// would present bytes the user never approved as "the approved version",
-/// which corrupts the consent surface itself — the honest degrade is
-/// `NoSnapshot`.
+/// and blueprint pins are a plain SHA-256 over one file's bytes, deposited as
+/// `content/<hex>/<file name>`; extension and workflow pins are the strict
+/// integrity-root digest, deposited by
+/// [`Store::deposit_integrity_root`]. A snapshot verifies if it matches its
+/// name under ANY family; symlinks anywhere disqualify under all of them.
+///
+/// Accepting any family is safe and is not a widening: every family re-derives
+/// the digest from the bytes actually on disk, so a pass means "these bytes
+/// hash to this address" no matter which one answered. The families carry
+/// distinct domain separators precisely so they cannot be confused for each
+/// other. Used by the re-gate diff reader (F4/F19): a diff rendered from a
+/// tampered snapshot would present bytes the user never approved as "the
+/// approved version", which corrupts the consent surface itself — the honest
+/// degrade is `NoSnapshot`.
 pub(crate) fn verified_content(dest: &Path, digest_hex: &str) -> bool {
     if verified_snapshot(dest, digest_hex) {
+        return true;
+    }
+    if verified_integrity_root(dest, digest_hex) {
         return true;
     }
     // Instruction family: exactly one regular file whose raw bytes hash to
@@ -913,6 +1153,49 @@ pub(crate) fn verified_content(dest: &Path, digest_hex: &str) -> bool {
                 .unwrap_or(false)
         }
         _ => false,
+    }
+}
+
+/// [`verified_snapshot`] for the integrity-root family (extensions, governed
+/// workflows). Two framings, because the family has two shapes and they are
+/// deliberately non-colliding: a DIRECTORY root frames each member's relative
+/// path, while a SINGLE-FILE root frames the empty relative path (see
+/// `integrity_root_digest`). The deposit stores both shapes as a directory, so
+/// this re-derives the digest under each framing and accepts either — a
+/// one-file directory root and a single-file root look identical on disk but
+/// hash differently, and only the bytes present are ever hashed.
+///
+/// `integrity_root_digest` is used rather than a local walk so there is exactly
+/// one implementation of the framing, and so its refusals (a symlink anywhere,
+/// a missing path) disqualify a deposit here for free.
+fn verified_integrity_root(dest: &Path, digest_hex: &str) -> bool {
+    use agentstack_core::digest::integrity_root_digest;
+    let matches = |root: &Path, declared: &str| {
+        integrity_root_digest(root, declared)
+            .map(|d| d.hex() == digest_hex)
+            .unwrap_or(false)
+    };
+    // Directory framing: the deposit dir walked from the content root.
+    if let (Some(parent), Some(name)) = (dest.parent(), dest.file_name().and_then(|n| n.to_str())) {
+        if matches(parent, name) {
+            return true;
+        }
+    }
+    // Single-file framing: the deposit holds exactly one regular file, which
+    // IS the pinned root.
+    let Ok(entries) = fs::read_dir(dest) else {
+        return false;
+    };
+    let files: Vec<_> = entries.flatten().collect();
+    let [only] = files.as_slice() else {
+        return false;
+    };
+    if !only.file_type().map(|t| t.is_file()).unwrap_or(false) {
+        return false;
+    }
+    match only.file_name().to_str() {
+        Some(name) => matches(dest, name),
+        None => false,
     }
 }
 
@@ -1042,6 +1325,235 @@ mod tests {
         assert!(
             !verified_content(&frag, &frag_hex),
             "a symlinked snapshot body verified"
+        );
+    }
+
+    /// G21 WITNESS — an extension (a directory integrity root) deposits at pin
+    /// time, and the re-gate can then produce the APPROVED side and show which
+    /// lines moved. Before this, the extension checksum went straight into the
+    /// lockfile with no store object, so a re-gate had a pin and nothing to
+    /// diff it against.
+    #[test]
+    fn an_extension_deposits_at_pin_time_and_a_regate_can_diff_it() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        tmp.child("ext/index.ts")
+            .write_str("export default function (pi) {} // v1\n")
+            .unwrap();
+        tmp.child("ext/package.json")
+            .write_str("{\"name\":\"checkpoint\"}\n")
+            .unwrap();
+        let store = Store::with_root(tmp.child("store").path().to_path_buf());
+
+        // The digest the resolver computes — the strict integrity-root family.
+        let hex = agentstack_core::digest::integrity_root_digest(tmp.path(), "ext")
+            .unwrap()
+            .hex()
+            .to_string();
+        let pin = store.pin_integrity_root(tmp.path(), "ext", &hex).unwrap();
+        assert_eq!(pin.hex(), hex, "the pin value must not change");
+
+        // The approved bytes are on disk, under exactly the lockfile's key,
+        // and they verify against their own name.
+        let dest = store.root().join("content").join(&hex);
+        assert_eq!(
+            fs::read_to_string(dest.join("index.ts")).unwrap(),
+            "export default function (pi) {} // v1\n"
+        );
+        assert!(dest.join("package.json").is_file(), "every member deposits");
+        assert!(
+            verified_content(&dest, &hex),
+            "an integrity-root deposit must verify under its own family"
+        );
+
+        // Drift the live source; the re-gate now has both sides.
+        tmp.child("ext/index.ts")
+            .write_str("export default function (pi) {} // v2\n")
+            .unwrap();
+        assert_eq!(
+            fs::read_to_string(dest.join("index.ts")).unwrap(),
+            "export default function (pi) {} // v1\n",
+            "the deposit tracked a later edit — it must be a copy, never a link"
+        );
+        let d = crate::regate::diff_against_pin(store.root(), &hex, &tmp.path().join("ext"));
+        let rendered = crate::regate::render_lines(&d, crate::regate::DIFF_LINE_CAP).join("\n");
+        assert!(rendered.contains("index.ts"), "{rendered}");
+        assert!(
+            rendered.contains("- export default function (pi) {} // v1"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("+ export default function (pi) {} // v2"),
+            "{rendered}"
+        );
+    }
+
+    /// G21 WITNESS — a workflow is usually ONE script, which is a single-file
+    /// integrity root. Its deposit takes the `content/<hex>/<file name>` shape
+    /// so the re-gate reader lines the stored directory up against the live
+    /// FILE without a second code path, and the two framings of the
+    /// integrity-root digest stay distinguishable.
+    #[test]
+    fn a_single_file_workflow_deposits_and_a_regate_can_diff_it() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        tmp.child("wf/pipeline.js")
+            .write_str("exports.run = () => 1;\n")
+            .unwrap();
+        let store = Store::with_root(tmp.child("store").path().to_path_buf());
+
+        let hex = agentstack_core::digest::integrity_root_digest(tmp.path(), "wf/pipeline.js")
+            .unwrap()
+            .hex()
+            .to_string();
+        let pin = store
+            .pin_integrity_root(tmp.path(), "wf/pipeline.js", &hex)
+            .unwrap();
+        assert_eq!(pin.hex(), hex);
+
+        let dest = store.root().join("content").join(&hex);
+        assert_eq!(
+            fs::read_to_string(dest.join("pipeline.js")).unwrap(),
+            "exports.run = () => 1;\n",
+            "a single-file root deposits under its own file name"
+        );
+        assert!(verified_content(&dest, &hex));
+
+        tmp.child("wf/pipeline.js")
+            .write_str("exports.run = () => 2;\n")
+            .unwrap();
+        let d =
+            crate::regate::diff_against_pin(store.root(), &hex, &tmp.path().join("wf/pipeline.js"));
+        let rendered = crate::regate::render_lines(&d, crate::regate::DIFF_LINE_CAP).join("\n");
+        assert!(rendered.contains("pipeline.js"), "{rendered}");
+        assert!(rendered.contains("- exports.run = () => 1;"), "{rendered}");
+        assert!(rendered.contains("+ exports.run = () => 2;"), "{rendered}");
+    }
+
+    /// G21 WITNESS — a workflow's approved blueprint is the raw-SHA-256 family,
+    /// identical to an instruction fragment, so it reuses that deposit shape
+    /// exactly. The digest must stay byte-for-byte what `contained_file_digest`
+    /// produced before this deposited anything.
+    #[test]
+    fn a_blueprint_deposits_without_changing_its_digest() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let before = "{\"pattern\":\"fan-out\",\"goal\":\"review\"}\n";
+        tmp.child("wf/p.blueprint.json").write_str(before).unwrap();
+        let store = Store::with_root(tmp.child("store").path().to_path_buf());
+
+        let expected =
+            agentstack_core::digest::contained_file_digest(tmp.path(), "wf/p.blueprint.json")
+                .unwrap();
+        let pin = store
+            .pin_blueprint(tmp.path(), "wf/p.blueprint.json")
+            .unwrap();
+        assert_eq!(pin, expected, "the blueprint pin value must not change");
+
+        let dest = store.root().join("content").join(pin.hex());
+        assert_eq!(
+            fs::read_to_string(dest.join("p.blueprint.json")).unwrap(),
+            before
+        );
+        assert!(verified_content(&dest, pin.hex()));
+
+        tmp.child("wf/p.blueprint.json")
+            .write_str("{\"pattern\":\"fan-out\",\"goal\":\"ship\"}\n")
+            .unwrap();
+        let d = crate::regate::diff_against_pin(
+            store.root(),
+            pin.hex(),
+            &tmp.path().join("wf/p.blueprint.json"),
+        );
+        let rendered = crate::regate::render_lines(&d, crate::regate::DIFF_LINE_CAP).join("\n");
+        assert!(rendered.contains("review"), "{rendered}");
+        assert!(rendered.contains("ship"), "{rendered}");
+
+        // The containment rules in front of the digest are unchanged: an
+        // escaping or symlinked blueprint is still a hard refusal, never a
+        // silent deposit of foreign bytes.
+        assert!(store.pin_blueprint(tmp.path(), "../outside.json").is_err());
+    }
+
+    /// G21 WITNESS, the size decision — a source past the deposit ceiling is
+    /// NOT copied, the pin still succeeds, and the re-gate degrades to the same
+    /// honest no-snapshot answer a never-captured pin gets. Storing bytes the
+    /// card could never show is permanent cost for no review value.
+    #[test]
+    fn an_oversized_integrity_root_skips_the_deposit_without_failing_the_pin() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let big = vec![b'x'; (MAX_DEPOSIT_BYTES + 1) as usize];
+        tmp.child("ext").create_dir_all().unwrap();
+        fs::write(tmp.path().join("ext/blob.bin"), &big).unwrap();
+        let store = Store::with_root(tmp.child("store").path().to_path_buf());
+
+        let hex = agentstack_core::digest::integrity_root_digest(tmp.path(), "ext")
+            .unwrap()
+            .hex()
+            .to_string();
+        // The pin is never blocked by a refused deposit.
+        let pin = store.pin_integrity_root(tmp.path(), "ext", &hex).unwrap();
+        assert_eq!(pin.hex(), hex);
+        assert!(
+            !store.root().join("content").join(&hex).exists(),
+            "an oversized source was deposited anyway"
+        );
+        // And the degrade is the honest one, not a fabricated diff.
+        assert_eq!(
+            crate::regate::diff_against_pin(store.root(), &hex, &tmp.path().join("ext")),
+            crate::regate::PinDiff::NoSnapshot
+        );
+    }
+
+    /// G21 WITNESS, backward compatibility — a pin written before deposits
+    /// existed has no store object, and that must read as today's behaviour
+    /// (the honest no-snapshot message) rather than an error. Nothing about the
+    /// lockfile format changed, so this is the whole compatibility surface.
+    #[test]
+    fn an_older_pin_with_no_deposit_degrades_instead_of_failing() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        tmp.child("ext/index.ts").write_str("// v1\n").unwrap();
+        let store = Store::with_root(tmp.child("store").path().to_path_buf());
+        let hex = agentstack_core::digest::integrity_root_digest(tmp.path(), "ext")
+            .unwrap()
+            .hex()
+            .to_string();
+        // No pin call at all: exactly an entry an older `lock` wrote.
+        assert_eq!(
+            crate::regate::diff_against_pin(store.root(), &hex, &tmp.path().join("ext")),
+            crate::regate::PinDiff::NoSnapshot
+        );
+        // And a later re-pin backfills it — nothing has to be migrated.
+        store.pin_integrity_root(tmp.path(), "ext", &hex).unwrap();
+        assert!(verified_content(
+            &store.root().join("content").join(&hex),
+            &hex
+        ));
+    }
+
+    /// A tampered integrity-root deposit is never presented as the approved
+    /// bytes — the same F4 rule the other two families hold, extended to the
+    /// family that had no verification at all.
+    #[test]
+    fn a_tampered_integrity_root_deposit_does_not_verify() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        tmp.child("ext/index.ts")
+            .write_str("// approved\n")
+            .unwrap();
+        let store = Store::with_root(tmp.child("store").path().to_path_buf());
+        let hex = agentstack_core::digest::integrity_root_digest(tmp.path(), "ext")
+            .unwrap()
+            .hex()
+            .to_string();
+        store.pin_integrity_root(tmp.path(), "ext", &hex).unwrap();
+        let dest = store.root().join("content").join(&hex);
+        assert!(verified_content(&dest, &hex));
+
+        fs::write(dest.join("index.ts"), "// EVIL\n").unwrap();
+        assert!(
+            !verified_content(&dest, &hex),
+            "edited deposit bytes still verified as approved"
+        );
+        assert_eq!(
+            crate::regate::diff_against_pin(store.root(), &hex, &tmp.path().join("ext")),
+            crate::regate::PinDiff::NoSnapshot
         );
     }
 

@@ -448,11 +448,17 @@ toolset containing it.
   Recording never gates the block: an unwritable audit log loses the evidence,
   never the denial. The ceiling is the
   legend's: the harness must honor its own hook protocol — this catches
-  accidents, not malice. Three CLIs sit in `NO_HOOK_SURFACE` and their cells
-  are effectively *unsupported*, for two different reasons: Claude Desktop has
-  no PreToolUse-style hook and Junie has only a static action allowlist —
-  there is nothing to ride — while Kiro's hooks nest inside per-agent config
-  files and are simply not wired yet. Config unreadable →
+  accidents, not malice. Three CLIs are reported as NOT protected, and the code
+  keeps the two reasons apart because they are not the same promise.
+  `NO_HOOK_SURFACE` is a fact about the CLI — Claude Desktop has no
+  PreToolUse-style hook and Junie has only a static action allowlist, so there
+  is nothing to ride and nothing to wait for. `NOT_WIRED` is a fact about
+  agentstack: Kiro is unprotected because no guard hook has been built for it,
+  not because none could be. Kiro's descriptor records its MCP config only, so
+  this repo knows no hook file to install into and no entry shape uninstall
+  could find again; a hook format guessed from outside the descriptors would be
+  one the guard cannot honestly claim. Both cells are *unsupported* today; only
+  the second one can change. Config unreadable →
   the hook fails CLOSED; unrecognized payload shapes fail open (a guard
   that wedges the harness gets uninstalled, not fixed).
   (`crates/cli/src/guard.rs`, `crates/cli/src/commands/guard.rs`)
@@ -1138,13 +1144,16 @@ review of identical content gets shorter.
 
 - **The content snapshot store**, `~/.agentstack/store/content/<sha256>/`. The
   bytes a pin covers, deposited at pin time as part of producing the pin
-  itself: for the kinds that deposit, the checksum a lockfile entry carries
-  comes from the depositing function and from nowhere else — `Store::pin` for
-  skills, `Store::pin_instruction` for instruction fragments,
-  `Store::pin_server_definition` for server definitions. Three kinds do not
-  deposit at all: extension, workflow, and workflow-blueprint checksums are
-  digested straight into the lockfile with no store object behind them, so a
-  re-gate on those has a pin to compare against and no approved copy to diff.
+  itself: the checksum a lockfile entry carries comes from the depositing
+  function and from nowhere else — `Store::pin` for skills,
+  `Store::pin_instruction` for instruction fragments,
+  `Store::pin_server_definition` for server definitions,
+  `Store::pin_integrity_root` for extensions and workflows, and
+  `Store::pin_blueprint` for a workflow's approved blueprint. The
+  integrity-root kinds deposit only while the pinned byte set stays within the
+  store's deposit ceiling (500 files, 8 MiB); a larger source is not copied,
+  because the diff renderer would refuse to show it anyway, and the re-gate
+  degrades to the honest no-snapshot message.
   Write-once, keyed by exactly the checksum the lockfile records,
   never evicted — which is what lets both sides of a re-lock coexist so a diff
   has something to compare. Copies, never links, so a delivered or compared
