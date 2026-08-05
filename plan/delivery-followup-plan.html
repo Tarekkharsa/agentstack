@@ -201,18 +201,20 @@
 <header class="doc-header">
   <p class="meta">2026-08-04 &middot; HEAD <code>e3936bb</code> on <code>main</code></p>
   <h1>Delivery follow-up — what is left, in order</h1>
-  <p class="subtitle">Twenty items from the delivery lane, hardest and most urgent first.</p>
+  <p class="subtitle">Thirty-eight items across five parts, hardest and most urgent first.</p>
 </header>
 
-<p><strong>Status as of 2026-08-05 — HEAD <code>34c0db9</code> on <code>main</code>.</strong>
-Fourteen of the twenty items are done and named to the commit that closed them. Seven are still
-open — P2, P5b, P6, P8, P9, R1 and R2 — and three of those, P2, R1 and R2, are maintainer-owned by
-construction. Three items found on 2026-08-05 are added as N1, N2 and N3. A second review pass the
-same day — three independent reviews (idea and strategy, developer experience, architecture and
-code) plus a fourth external one, all read against this same HEAD — added ten more, gathered at the
-end as <a href="#part-four">Part four</a>, F1 … F10. <strong>Twenty items are open in
-total.</strong> Every item below carries its own status, and every summary table matches those
-statuses.</p>
+<p><strong>Status as of 2026-08-05 — HEAD <code>3ec17e1</code> on <code>main</code>, plus one
+unmerged branch.</strong> Thirty-eight items now exist across five parts. Twenty are done and named
+to the commit that closed them; eighteen are open. Of the twenty done, <strong>six closed today are
+committed on a branch and not merged</strong>: F1, F2, F3, F4 and F7 sit on
+<code>review-fixes-2026-08-05</code> in this repository — six commits, cut from <code>main</code> at
+<code>3ec17e1</code>, nothing pushed — and P5b sits on <code>t3code-contract-migration</code> in the
+t3code repository, five commits, also unpushed. Nothing below is finally closed until those two
+branches land. Four further items, found on 2026-08-05 by running the product rather than by reading
+it, are added as N4 … N7 and gathered as <a href="#part-five">Part five</a>.
+<strong>Eighteen items are open in total.</strong> Every item below carries its own status, and every
+summary table matches those statuses.</p>
 
 <p><strong>What landed.</strong> Thirteen rounds made the delivery lane honest.
 <code>apply</code>, <code>use</code>, <code>session</code> and <code>diff</code> now consult one
@@ -228,8 +230,9 @@ byte-identical.</p>
 that same correct change, and both hit everyone. Both are now fixed — P0 in <code>8e48305</code>
 and <code>299a88b</code>, P1 in <code>a435c4f</code>.</p>
 
-<p><strong>How to read this.</strong> Twenty items, hardest and most urgent first. Each one carries
-the evidence, what &ldquo;done&rdquo; looks like, a rough size, and its status.</p>
+<p><strong>How to read this.</strong> Thirty-eight items across five parts, hardest and most urgent
+first. Each one carries the evidence, what &ldquo;done&rdquo; looks like, a rough size, and its
+status.</p>
 
 <nav class="toc">
   <h2>Contents</h2>
@@ -281,30 +284,42 @@ the evidence, what &ldquo;done&rdquo; looks like, a rough size, and its status.<
         <li><a href="#f10">F10 — the enforcement code lives in the CLI crate, not in the small review boundaries.</a></li>
       </ol>
     </li>
+    <li><a href="#part-five">Part five — found by running the product, 2026-08-05</a>
+      <ol>
+        <li><a href="#n4">N4 — <code>init</code> imports servers another application owns.</a></li>
+        <li><a href="#n5">N5 — <code>doctor --json</code> answers differently depending on the working directory.</a></li>
+        <li><a href="#n6">N6 — two t3code end-to-end tests fail against the newer binary.</a></li>
+        <li><a href="#n7">N7 — four stale lines in the activation study document.</a></li>
+      </ol>
+    </li>
     <li><a href="#pattern">The pattern</a></li>
   </ol>
 </nav>
 
 <h2 id="next">What to do next, in order</h2>
 
-<p>Twenty items are open across four parts. This is the order to take them in, and why each one
+<p>Eighteen items are open across five parts. This is the order to take them in, and why each one
 sits where it does.</p>
 
 <ol>
-  <li><strong><a href="#f1">F1</a> — the SNI fail-open fix.</strong> Security-relevant, an
-    hour.</li>
-  <li><strong><a href="#f2">F2</a> — the README/Homebrew version mismatch.</strong> It breaks the
-    documented happy path for exactly the strangers <a href="#p9">P9</a> needs.</li>
-  <li><strong><a href="#f7">F7</a> then <a href="#p9">P9</a></strong> — amend the activation study
-    with a demand question, then run it with five cold users on rc.2, with a two-week retention
-    follow-up. This is the highest-value open item; every week of polish before contact compounds
-    assumption risk.</li>
+  <li><strong>Land the two branches.</strong> Six commits on
+    <code>review-fixes-2026-08-05</code> here and five on <code>t3code-contract-migration</code> in
+    t3code close F1, F2, F3, F4, F7 and P5b. Neither branch is merged and neither is pushed, so
+    every &ldquo;DONE&rdquo; below is provisional until they land.</li>
+  <li><strong><a href="#n4">N4</a> — <code>init</code> imports servers another application
+    owns.</strong> Half a day, and it fires on the most common first run — which is the run the
+    strangers <a href="#p9">P9</a> needs will make.</li>
+  <li><strong><a href="#n7">N7</a> then <a href="#p9">P9</a></strong> — correct the four stale
+    lines in the study document, then run it with five cold users on rc.2, with the two-week
+    retention follow-up <a href="#f7">F7</a> added. This is the highest-value open item; every week
+    of polish before contact compounds assumption risk.</li>
   <li><strong>The maintainer-decision batch</strong>, about an hour in total:
     <a href="#p2">P2</a>, <a href="#r1">R1</a>, <a href="#r2">R2</a>, <a href="#f6">F6</a>,
     <a href="#n1">N1</a>.</li>
-  <li><strong><a href="#f3">F3</a> with <a href="#p5b">P5b</a></strong> — the panel contract
-    document must match <code>FEATURES</code> before any consumer migrates.</li>
-  <li><strong><a href="#f4">F4</a> and <a href="#f5">F5</a></strong> — small hardening.</li>
+  <li><strong><a href="#n5">N5</a></strong> — scope the <code>doctor --json</code> working-directory
+    dependence, because it decides whether the panel and the terminal can ever agree.</li>
+  <li><strong><a href="#f5">F5</a></strong> — small hardening, and
+    <strong><a href="#n6">N6</a></strong> downstream in t3code.</li>
   <li><strong>Everything else</strong> — <a href="#p6">P6</a>, <a href="#p8">P8</a>,
     <a href="#n2">N2</a>, <a href="#n3">N3</a>, <a href="#f8">F8</a>, <a href="#f9">F9</a>,
     <a href="#f10">F10</a> — after the study, re-prioritized by what the five participants
@@ -362,7 +377,8 @@ sits where it does.</p>
       <td><a href="#p5b">P5b</a></td>
       <td>The t3code panel migration — four consumer-side changes.</td>
       <td>Half a day</td>
-      <td><strong>OPEN</strong></td>
+      <td><strong>DONE</strong> — <code>465ca718e</code> (t3code branch
+        <code>t3code-contract-migration</code>, not merged)</td>
     </tr>
     <tr>
       <td><a href="#p6">P6</a></td>
@@ -508,10 +524,14 @@ second half is P5b, and it stays open — writing the contract down does not mig
 
 <h2 id="p5b">P5b — the t3code panel migration.</h2>
 
-<p><strong>Size:</strong> half a day. <strong>Status: OPEN.</strong></p>
+<p><strong>Size:</strong> half a day. <strong>Status: DONE</strong> — five commits on branch
+<code>t3code-contract-migration</code> in the t3code repository
+(<code>/Users/tarek.k/Documents/GitHub/t3code</code>), HEAD <code>465ca718e</code>.
+<strong>Not merged, not pushed.</strong></p>
 
 <p>t3code itself must absorb four changes. The third is the dangerous one — it is the only one that
-does not announce itself.</p>
+does not announce itself. That was the prediction; the table below is what this document predicted,
+kept unedited, because three of the four turned out to differ from it.</p>
 
 <div class="table-wrap" style="overflow-x: auto;">
 <table>
@@ -551,6 +571,46 @@ does not announce itself.</p>
 </div>
 
 <p>Panel action names are unchanged, so no argv breaks.</p>
+
+<p><strong>What the migration actually found.</strong> Three of the four rows above were wrong, and
+the corrections all run the same way — the real defect was worse than the predicted one, and
+quieter.</p>
+
+<ul>
+  <li><strong>(a) <code>doctor --json</code>.</strong> A null <code>next_action</code> was already
+    tolerated. The real gap was that <code>next_step</code> was <strong>not consumed at all</strong>,
+    so a healthy project whose honest next move is a placeholder shape rendered
+    <em>nothing</em> in the panel.</li>
+  <li><strong>(b) <code>status --json</code> does not apply.</strong> t3code never invokes it; its
+    status RPC runs <code>doctor --json</code>. The row was a prediction about a call that is not
+    made.</li>
+  <li><strong>(c) <code>drifted</code> was worse than predicted, not silent.</strong> The item schema
+    was a <strong>strict three-literal decode</strong>, so a drifted item failed the whole preview
+    and the panel said &ldquo;Couldn&rsquo;t load the review&rdquo; — on precisely the state that
+    most needs review. Behind that, the badge ternary filed <code>drifted</code> under its
+    <em>null</em> arm, and the trust-state description&rsquo;s else-branch printed the
+    <em>untrusted first review</em> copy for unknown states. Now: an exhaustive switch, a visible
+    <code>unknown</code> badge plus a <code>console.warn</code>, a fail-closed description, and drift
+    weighted above changed.</li>
+  <li><strong>(d) <code>diff --json</code> warnings were decoded but rendered nowhere</strong>, so a
+    project with seven withheld live-routed targets read &ldquo;Everything is in sync&rdquo;. Now a
+    &ldquo;N things were not compared&rdquo; counter, and the CLI&rsquo;s warnings verbatim.</li>
+</ul>
+
+<p><strong>One prediction held without a change.</strong> The panel already gates on
+<code>FEATURES</code> names rather than on the schema number — confirmed by reading it, not
+altered.</p>
+
+<p><strong>The browser check earned its keep.</strong> It caught a dead &ldquo;0 servers … kept&rdquo;
+block carrying a live <em>Adopt</em> button, reachable for the first time because withheld targets
+became a third render reason; fixed in <code>8018475c9</code>. The markup tests did not catch it
+because no test rendered that component with warnings-only input. That is the same shape as
+<a href="#p0">P0</a>&rsquo;s vacuous assertions: green because nothing exercised the path.</p>
+
+<p><strong>Verification.</strong> 2048 web plus 236 contract plus 38 server tests green; three
+payload shapes captured from the real <code>0.18.0-rc.2</code> binary and decoded through the real
+schemas; all three surfaces verified in a running browser with screenshots, and again through the
+built production bundle.</p>
 
 <h2 id="p6">P6 — <code>docs/tutorial/</code> has no markdown source.</h2>
 
@@ -1037,7 +1097,8 @@ a fourth external review read the repository at HEAD <code>34c0db9</code> on 202
 survived that pass. Each claim below was re-checked against the code or the document it names before
 it was written here; where a review&rsquo;s own figure did not survive the check, the measured figure
 is given instead and the substitution is stated. The items are labelled <strong>F1 … F10</strong> so
-they cannot collide with P0–P9, R1–R10 or N1–N3. All ten are open.</p>
+they cannot collide with P0–P9, R1–R10 or N1–N3. <strong>Five of the ten closed on 2026-08-05, on
+the unmerged branch <code>review-fixes-2026-08-05</code>; five remain open.</strong></p>
 
 <div class="table-wrap" style="overflow-x: auto;">
 <table>
@@ -1057,14 +1118,14 @@ they cannot collide with P0–P9, R1–R10 or N1–N3. All ten are open.</p>
         happen. <strong>Security-relevant.</strong></td>
       <td>First, in part four</td>
       <td>An hour</td>
-      <td><strong>OPEN</strong></td>
+      <td><strong>DONE</strong> — <code>310be27</code> (branch, not merged)</td>
     </tr>
     <tr>
       <td><a href="#f2">F2</a></td>
       <td>The README advertises verbs the pinned stable release does not have.</td>
       <td>Before P9</td>
       <td>An hour, or ship v0.18.0</td>
-      <td><strong>OPEN</strong></td>
+      <td><strong>DONE</strong> — <code>8fc012f</code> (branch, not merged)</td>
     </tr>
     <tr>
       <td><a href="#f3">F3</a></td>
@@ -1072,14 +1133,14 @@ they cannot collide with P0–P9, R1–R10 or N1–N3. All ten are open.</p>
         no check ties them.</td>
       <td>With P5b</td>
       <td>Half a day</td>
-      <td><strong>OPEN</strong></td>
+      <td><strong>DONE</strong> — <code>c9534e7</code> (branch, not merged)</td>
     </tr>
     <tr>
       <td><a href="#f4">F4</a></td>
       <td><code>with_store_lock</code> in <code>crates/trust</code> is not panic-safe.</td>
       <td>After the study</td>
       <td>An hour</td>
-      <td><strong>OPEN</strong></td>
+      <td><strong>DONE</strong> — <code>977b5d5</code> (branch, not merged)</td>
     </tr>
     <tr>
       <td><a href="#f5">F5</a></td>
@@ -1101,7 +1162,7 @@ they cannot collide with P0–P9, R1–R10 or N1–N3. All ten are open.</p>
       <td>The activation study measures usability, not demand. <strong>Maintainer-owned.</strong></td>
       <td>Immediately before P9</td>
       <td>Ten minutes to amend the instrument</td>
-      <td><strong>OPEN</strong> — maintainer</td>
+      <td><strong>DONE</strong> — <code>361a4ec</code> (branch, not merged)</td>
     </tr>
     <tr>
       <td><a href="#f8">F8</a></td>
@@ -1133,7 +1194,8 @@ they cannot collide with P0–P9, R1–R10 or N1–N3. All ten are open.</p>
 <h3 id="f1">F1 — <code>crates/egress/src/sni.rs</code> fails open on a case its own comment says cannot happen.</h3>
 
 <p><strong>Slot:</strong> do this first among part four. <strong>Size:</strong> an hour.
-<strong>Security-relevant. Status: OPEN.</strong></p>
+<strong>Security-relevant. Status: DONE</strong> — <code>310be27</code>, on branch
+<code>review-fixes-2026-08-05</code>, <strong>not merged</strong>.</p>
 
 <p>The cursor&rsquo;s <code>u16()</code> (<code>crates/egress/src/sni.rs:33-37</code>) calls
 <code>u8()?</code> twice. With exactly one byte remaining in the handshake body the first call
@@ -1167,10 +1229,25 @@ header promises &ldquo;never a silent <code>Absent</code>&rdquo;.</p>
 latter returning <code>Unverifiable</code>; and a witness test that feeds a ClientHello with one
 stray trailing byte and asserts <code>Unverifiable</code>.</p>
 
+<p><strong>What shipped.</strong> One guard —
+<code>if c.is_empty() { return Absent }</code> — placed before
+<code>let ext_total = c.u16()?</code>. Zero bytes remaining still reads <code>Absent</code>, which is
+the provably-no-SNI case; one byte remaining now reads <code>Unverifiable</code>. The witness
+<code>one_stray_trailing_byte_is_unverifiable_not_absent</code> covers both directions, with the
+zero-byte case as its negative control — the same discipline
+<a href="#r9">R9</a> applies to the adversarial suite.</p>
+
+<p>The commit carries an <code>ENFORCEMENT-WAIVER</code> trailer, and the reason is worth recording:
+<a href="#r8">R8</a>&rsquo;s gate demands a paired claim update for any change under
+<code>crates/egress</code>, and there was nothing to update. The fix makes the code match the
+&ldquo;never a silent <code>Absent</code>&rdquo; claim the module header already made. The claim was
+right; the code was not.</p>
+
 <h3 id="f2">F2 — the README advertises verbs the pinned stable release does not have.</h3>
 
 <p><strong>Slot:</strong> before P9 — the strangers the study needs will install via Homebrew.
-<strong>Size:</strong> an hour, or ship v0.18.0. <strong>Status: OPEN.</strong></p>
+<strong>Size:</strong> an hour, or ship v0.18.0. <strong>Status: DONE</strong> —
+<code>8fc012f</code>, same branch, <strong>not merged</strong>.</p>
 
 <p><code>README.md:205-214</code> lists <code>yes</code>, <code>undo</code> and <code>why</code>
 among the seventeen everyday verbs with no version guard of any kind.
@@ -1191,9 +1268,15 @@ from a distance and the second was invisible while the first was being repaired.
 <p><strong>Done looks like:</strong> the <code>start.md</code>-style guard applied to the README, or
 v0.18.0 shipped and the tap bumped.</p>
 
+<p><strong>What shipped:</strong> the guard, not the release. The README&rsquo;s seventeen now name
+<code>yes</code>, <code>undo</code>, <code>why</code> and <code>x unrender</code> as v0.18.0 and
+later, in the same shape <code>start.md</code> already used, against the v0.17.1 that the tap and the
+installer actually serve.</p>
+
 <h3 id="f3">F3 — <code>docs/integrations.md</code> contradicts the shipped <code>FEATURES</code> list, and no check ties them.</h3>
 
-<p><strong>Slot:</strong> with P5b. <strong>Size:</strong> half a day. <strong>Status: OPEN.</strong></p>
+<p><strong>Slot:</strong> with P5b. <strong>Size:</strong> half a day. <strong>Status: DONE</strong> —
+<code>c9534e7</code>, same branch, <strong>not merged</strong>.</p>
 
 <p><code>crates/cli/src/ui_contract.rs:756-800</code> declares <strong>43</strong>
 <code>FEATURES</code> names. The table in <code>docs/integrations.md</code> tabulates
@@ -1229,9 +1312,23 @@ the <code>FEATURES</code>/<code>SUPERSEDED</code> disjointness test
 (<code>crates/cli/src/ui_contract.rs:1109</code>), asserting that every <code>FEATURES</code> name
 appears in <code>docs/integrations.md</code> with a correct availability column.</p>
 
+<p><strong>What shipped, and the correction the fix itself needed.</strong> Six rows corrected,
+fourteen names added — and the column renamed from &ldquo;In released v0.17.0&rdquo; to &ldquo;In
+this build&rdquo;. The rename was not tidying. <code>git show v0.17.1</code> proved that four of the
+six rows were <em>already wrong for that release</em>, and that sixteen of the names post-date it, so
+a column headed by a released version could not be made true by editing cells. The heading was the
+false claim.</p>
+
+<p>The witness is <code>every_served_contract_is_documented</code> in
+<code>ui_contract.rs</code>. It reads <code>docs/integrations.md</code> at test time and fails on
+drift in either direction — a served name missing from the table, and a tabulated name no longer
+served. It was verified by being broken both ways on a temporary copy, because a check that has
+never been watched to fail is <a href="#p0">P0</a>&rsquo;s vacuous assertion again.</p>
+
 <h3 id="f4">F4 — <code>with_store_lock</code> in <code>crates/trust</code> is not panic-safe.</h3>
 
-<p><strong>Size:</strong> an hour. <strong>Status: OPEN.</strong></p>
+<p><strong>Size:</strong> an hour. <strong>Status: DONE</strong> — <code>977b5d5</code>, same branch,
+<strong>not merged</strong>.</p>
 
 <p><code>crates/trust/src/lib.rs</code> ends <code>with_store_lock</code> like this:</p>
 
@@ -1249,6 +1346,13 @@ so it is partially mitigated already.</p>
 the directory — about five lines, and it removes the whole class rather than this instance. Note for
 a TypeScript reader: <code>Drop</code> runs during panic unwinding, which is exactly why moving the
 cleanup into it is a fix and not a restyling.</p>
+
+<p><strong>What shipped:</strong> a private <code>LockGuard(PathBuf)</code> with a <code>Drop</code>
+impl, replacing the manual <code>remove_dir</code>. The witness
+<code>a_panic_inside_the_store_lock_still_releases_it</code> catches the unwind and re-takes the lock
+in under a second — where the unfixed code made it wait out the five-second
+<code>STORE_LOCK_WAIT</code> first. The timing is the assertion: it fails if the guard is ever
+removed.</p>
 
 <h3 id="f5">F5 — the dependency-edge rule has no gate.</h3>
 
@@ -1286,7 +1390,8 @@ rather than started.</p>
 <h3 id="f7">F7 — the activation study measures usability, not demand.</h3>
 
 <p><strong>Slot:</strong> immediately before P9. <strong>Size:</strong> ten minutes to amend the
-instrument. <strong>Maintainer-owned. Status: OPEN.</strong></p>
+instrument. <strong>Maintainer-owned. Status: DONE</strong> — <code>361a4ec</code>, same branch,
+<strong>not merged</strong>.</p>
 
 <p>Every gate metric in <code>docs/design/activation-study.md</code> §7 is a usability threshold:
 finished unaided, median install→clean doctor, &ldquo;one setup across CLIs&rdquo;, zero advanced
@@ -1301,6 +1406,20 @@ says it is &ldquo;the one planned activity that can falsify the product thesis&r
 next week, and why or why not?&rdquo; — and a scheduled two-week follow-up — &ldquo;is it still
 installed; did you run it?&rdquo; — both recorded as part of the study result. Then run
 <a href="#p9">P9</a>.</p>
+
+<p><strong>What shipped, and what deliberately did not.</strong> The amendment is
+<strong>additive only; no threshold moved.</strong> That was the constraint, because a gate metric
+changed at the same time as a new dimension is added can no longer falsify anything. Four additions:
+a D1 exit question — &ldquo;would you keep this installed next week — why or why not&rdquo;, asked
+verbatim and marked explicitly non-gating; a D2 re-trust friction watch carrying a count, which is
+the aggregate <a href="#f9">F9</a> names; a two-week follow-up section in which
+<strong>no reply is itself an outcome</strong>, not a missing data point; and the printed observer
+sheet and runbook updated to match.</p>
+
+<p><code>plan/study-kit.md</code> is the one-page run sheet. It pins participants to
+<code>AGENTSTACK_VERSION=v0.18.0-rc.2</code> and tells the maintainer <strong>not</strong> to give
+them the Homebrew path — which is <a href="#f2">F2</a> handled operationally while the release is
+still unshipped.</p>
 
 <h3 id="f8">F8 — <code>--yes</code> on <code>trust</code> means &ldquo;I read the review&rdquo;, the opposite of its universal meaning.</h3>
 
@@ -1370,6 +1489,149 @@ line count.</p>
 judges, and STRATEGY v3 does not open lanes before the bar is met. Recorded so it is not
 rediscovered.</p>
 
+<h2 id="part-five">Part five — found by running the product, 2026-08-05</h2>
+
+<p>Four items surfaced on 2026-08-05 while closing part four and migrating the t3code panel. None
+came from reading the repository. Each came from running the real binary, or from reading the
+machine&rsquo;s own configuration as the product reads it. They are labelled
+<strong>N4 … N7</strong> so they cannot collide with P0–P9, R1–R10, N1–N3 or F1–F10. All four are
+open, and one of them belongs to another repository.</p>
+
+<div class="table-wrap" style="overflow-x: auto;">
+<table>
+  <thead>
+    <tr>
+      <th>Item</th>
+      <th>What it is</th>
+      <th>Size</th>
+      <th>Status</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><a href="#n4">N4</a></td>
+      <td><code>init</code> imports servers another application owns.
+        <strong>Highest value in this part.</strong></td>
+      <td>Half a day</td>
+      <td><strong>OPEN</strong></td>
+    </tr>
+    <tr>
+      <td><a href="#n5">N5</a></td>
+      <td><code>doctor --json</code> answers differently depending on the working directory.</td>
+      <td>Unknown until scoped</td>
+      <td><strong>OPEN</strong></td>
+    </tr>
+    <tr>
+      <td><a href="#n6">N6</a></td>
+      <td>Two t3code end-to-end tests fail against the newer binary.
+        <strong>Consumer-owned.</strong></td>
+      <td>An hour to scope</td>
+      <td><strong>OPEN</strong> — t3code</td>
+    </tr>
+    <tr>
+      <td><a href="#n7">N7</a></td>
+      <td>Four stale lines in the activation study document.</td>
+      <td>Ten minutes</td>
+      <td><strong>OPEN</strong></td>
+    </tr>
+  </tbody>
+</table>
+</div>
+
+<h3 id="n4">N4 — <code>init</code> imports servers another application owns.</h3>
+
+<p><strong>Size:</strong> half a day. <strong>Status: OPEN.</strong> This is the highest-value item
+in this part, and the reason is where it was found: on the most common first run there is.</p>
+
+<p>The setup dialog for every project reports <code>node_repl</code> and <code>computer-use</code> as
+&ldquo;defined more than once&rdquo;. Their commands, read from the machine&rsquo;s own
+configuration, are
+<code>/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl</code> and
+<code>sh -c "… 'Codex Computer Use.app/Contents/SharedSupport/SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient' mcp"</code>.
+Both are installed and updated by the ChatGPT and Codex desktop applications, and both appear in six
+global tool configs — <code>~/.claude.json</code>, Claude Desktop&rsquo;s config,
+<code>~/.codex/config.toml</code>, <code>~/.gemini/settings.json</code>, OpenCode&rsquo;s and
+Copilot&rsquo;s. <strong>The maintainer authored neither.</strong></p>
+
+<p><strong>Why importing them is wrong, in three parts.</strong> The vendor application rewrites
+those entries on its own update schedule, so a content-bound pin churns and re-gates on something the
+user never chose — which is <a href="#f9">F9</a>&rsquo;s re-trust friction, spent on somebody
+else&rsquo;s release cadence. <code>apply</code> would then write one application&rsquo;s plumbing
+into tools that vendor never targeted. And it makes AgentStack a second owner of an entry that
+already has one — the same single-owner reasoning invariant 6 applies to authority and dispatch,
+applied here to somebody else&rsquo;s plumbing.</p>
+
+<p><strong>Done looks like:</strong> <code>init</code> classifies a server whose command resolves
+inside another application&rsquo;s bundle as tool-managed and leaves it out of the import by default;
+the exclusion is <strong>never silent</strong> — one line naming the count, and <code>--plan</code>
+JSON carrying the list with a reason per entry; and a flag opts them in for the user who genuinely
+wants one.</p>
+
+<p><strong>The honesty rule it must follow:</strong> &ldquo;left alone&rdquo; and &ldquo;not
+found&rdquo; are different claims. A misclassified user server must be visible, never quietly
+dropped — the same rule <a href="#p7">P7</a> carries for &ldquo;no data&rdquo; against &ldquo;0
+uses&rdquo;.</p>
+
+<h3 id="n5">N5 — <code>doctor --json</code> answers differently depending on the working directory.</h3>
+
+<p><strong>Size:</strong> unknown until scoped. <strong>Status: OPEN.</strong></p>
+
+<p>Captured from the real <code>0.18.0-rc.2</code> binary during the <a href="#p5b">P5b</a>
+verification. For the same project, with the same absolute <code>--manifest-dir</code>: run from
+inside the project directory it reports <code>next_action: null</code> and zero warnings; run from
+<code>/</code> — which is what t3code&rsquo;s server spawns from — it reports
+<code>next_action: "agentstack x unrender --write"</code> and seven warnings.</p>
+
+<p>The panel renders faithfully what it is given, so this is CLI behaviour, not a consumer bug. The
+consequence is that the panel and the terminal can describe the same project differently, and only
+one of them can be right.</p>
+
+<p><strong>Done looks like:</strong> either the reading is working-directory-independent when
+<code>--manifest-dir</code> is absolute, or the dependence is deliberate, documented, and the JSON
+says which scope it answered for.</p>
+
+<p>Note the shape: this is the engagement&rsquo;s own pattern once more — a claim computed from
+ambient state rather than from the named project.</p>
+
+<h3 id="n6">N6 — two t3code end-to-end tests fail against the newer binary.</h3>
+
+<p><strong>Size:</strong> an hour to scope. <strong>Status: OPEN — and it belongs to the t3code
+repository, not this one.</strong></p>
+
+<p><code>AgentstackCli.e2e.test.ts</code> fails with &ldquo;nothing was delivered: every capability
+here is routed to the live lane and no bridge is registered&rdquo;. Confirmed identical on a stashed
+clean tree, so it predates the contract migration and is not caused by it.</p>
+
+<p>It reflects the v3 delivery defaults this document&rsquo;s thirteen rounds established: the
+fixture expects rendered output that default routing no longer produces. It is recorded here because
+the cause is this repository&rsquo;s change and the failure is the consumer&rsquo;s — that asymmetry
+is the whole reason to write it down somewhere the cause can see it.</p>
+
+<p><strong>Done looks like:</strong> the fixture opts into the rendered lane deliberately, or asserts
+the live-lane close — the same decision <a href="#p0">P0</a> made for each example script, taken
+again downstream.</p>
+
+<h3 id="n7">N7 — four stale lines in the activation study document.</h3>
+
+<p><strong>Size:</strong> ten minutes. <strong>Status: OPEN.</strong></p>
+
+<p>Found while adding <a href="#f7">F7</a>&rsquo;s demand dimension, and reported rather than fixed,
+because the study instrument is maintainer-owned:</p>
+
+<ul>
+  <li>&sect;8.1&rsquo;s warning block says participants run <code>v0.18.0-rc.1</code>, while
+    &sect;3, &sect;8.1&rsquo;s own closing paragraph and &sect;B3 all pin <code>rc.2</code>.</li>
+  <li>&sect;3 warns only about the bare installer and never names the Homebrew tap as a second way to
+    receive an old binary — which <code>README.md:164-175</code> shows it can be.</li>
+  <li>Appendix A is titled for two v2 observation prompts, while &sect;5 defines four.</li>
+  <li>Appendix A&rsquo;s V1 text still says the participant will stall &ldquo;because it is not&rdquo;
+    live, which &sect;5&rsquo;s rewrite superseded when the drop-a-file path arrived.</li>
+</ul>
+
+<p><strong>Done looks like:</strong> the four lines corrected before a participant ever reads from
+the sheet. <strong>None of them changes a threshold</strong>, which is what makes this a ten-minute
+item rather than a decision.</p>
+
 <h2 id="pattern">The pattern</h2>
 
 <p>Every defect in this engagement had one shape: <strong>a claim computed from a record instead of
@@ -1407,6 +1669,14 @@ while four lines below it the code returns <code>Absent</code> for a length of e
 name except one &ldquo;appears above&rdquo;, while fourteen do not (<a href="#f3">F3</a>). Neither
 claim was ever checked against the thing it described; both were computed from a record. Both were
 found the only way this kind of defect is ever found — by going and looking.</p>
+
+<p>The N-series found it twice more, and this time neither was found by reading.
+<a href="#n4">N4</a>: the import treats a vendor-owned entry as if the user had authored it, because
+it reads a config file and not the question of who owns what is in it. <a href="#n5">N5</a>:
+<code>doctor</code> computes its answer from ambient state — the working directory — instead of from
+the named project, so the same project has two answers. Both took minutes to find, and both were
+found by opening the product like a stranger. That is exactly the argument <a href="#p9">P9</a>
+makes, arriving one part early.</p>
 
 </main>
 </body>
