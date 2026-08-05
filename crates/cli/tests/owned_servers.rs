@@ -82,6 +82,11 @@ fn project_with_stale_manifest(tmp: &Path) -> std::path::PathBuf {
     let proj = tmp.join("proj");
     fs::create_dir_all(&proj).unwrap();
     fs::write(proj.join("agentstack.toml"), STALE_MANIFEST).unwrap();
+    // The owner refresh is this file's subject, not consent: grant so the
+    // rendered lane's trust gate (`render::apply::trust_refusal`) is out of the
+    // way. The refresh's own re-pin behaviour is witnessed separately, in
+    // `trust_is_repinned_only_when_it_was_valid_before_the_refresh`.
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
     proj
 }
 

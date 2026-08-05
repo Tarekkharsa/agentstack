@@ -210,6 +210,21 @@ fn apply_without_instructions_leaves_a_foreign_region_alone() {
          [servers.demo]\ntype = \"http\"\nurl = \"https://demo/mcp\"\n",
     )
     .unwrap();
+    // Consent is not this test's subject: pin, then grant, so the rendered
+    // lane's trust gate (`render::apply::trust_refusal` /
+    // `render::skills::trust_refusal`) is out of the way. Pinning FIRST is the
+    // order a human takes, and it keeps the grant valid: lock bytes are part of
+    // the consent digest, so a first pin recorded by a later write would
+    // re-gate the project mid-test.
+    agentstack::commands::lock::run(
+        &agentstack::cli::LockArgs {
+            write: true,
+            ..Default::default()
+        },
+        Some(&proj),
+    )
+    .unwrap();
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
 
     apply::run(&args(true), Some(&proj)).unwrap();
     let after = fs::read_to_string(home.join(".claude/CLAUDE.md")).unwrap();
@@ -251,6 +266,21 @@ fn project_scope_apply_never_empties_a_region_over_inherited_fragments() {
          [servers.demo]\ntype = \"http\"\nurl = \"https://demo/mcp\"\n",
     )
     .unwrap();
+    // Consent is not this test's subject: pin, then grant, so the rendered
+    // lane's trust gate (`render::apply::trust_refusal` /
+    // `render::skills::trust_refusal`) is out of the way. Pinning FIRST is the
+    // order a human takes, and it keeps the grant valid: lock bytes are part of
+    // the consent digest, so a first pin recorded by a later write would
+    // re-gate the project mid-test.
+    agentstack::commands::lock::run(
+        &agentstack::cli::LockArgs {
+            write: true,
+            ..Default::default()
+        },
+        Some(&proj),
+    )
+    .unwrap();
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
     let existing =
         "# Repo\n\n<!-- agentstack:start -->\nCommitted rules.\n<!-- agentstack:end -->\n";
     fs::write(proj.join("CLAUDE.md"), existing).unwrap();
@@ -452,6 +482,21 @@ fn machine_layer_instructions_do_not_gitignore_a_project_instruction_file() {
          [servers.demo]\ntype = \"http\"\nurl = \"https://x/mcp\"\n",
     )
     .unwrap();
+    // Consent is not this test's subject: pin, then grant, so the rendered
+    // lane's trust gate (`render::apply::trust_refusal` /
+    // `render::skills::trust_refusal`) is out of the way. Pinning FIRST is the
+    // order a human takes, and it keeps the grant valid: lock bytes are part of
+    // the consent digest, so a first pin recorded by a later write would
+    // re-gate the project mid-test.
+    agentstack::commands::lock::run(
+        &agentstack::cli::LockArgs {
+            write: true,
+            ..Default::default()
+        },
+        Some(&proj),
+    )
+    .unwrap();
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
 
     let mut a = args(true);
     a.scope = Some(Scope::Project);

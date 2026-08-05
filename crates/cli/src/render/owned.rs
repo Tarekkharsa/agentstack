@@ -312,6 +312,7 @@ APP_VERSION = "141536"
             &["node_repl".to_string()],
             Scope::Global,
             proj.path(),
+            crate::render::PriorTrust::STRICT,
         )
         .unwrap()
         .unwrap();
@@ -332,6 +333,7 @@ APP_VERSION = "141536"
             &[],
             Scope::Global,
             proj.path(),
+            crate::render::PriorTrust::STRICT,
         )
         .unwrap()
         .unwrap();

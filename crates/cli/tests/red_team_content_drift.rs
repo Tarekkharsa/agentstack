@@ -200,7 +200,33 @@ fn accepting_drift_requires_relocking_and_re_gates_trust() {
         "the re-gate must be visible to a driver: {p}"
     );
 
-    // And only now can the new bytes be delivered at all.
+    // Re-locking accepts the CONTENT; it does not answer the consent question
+    // it just re-opened. Until a human does, the new bytes stay off disk —
+    // `render::skills::trust_refusal` is the gate, and the state asserted two
+    // lines above is exactly the one it refuses on.
+    let (text, ok) = run(&["use", "--write", "--no-gitignore"], &home, &proj);
+    assert!(!ok, "a re-gated project delivered the new bytes:\n{text}");
+    assert!(
+        text.contains("refusing to materialize skills") && text.contains("agentstack trust"),
+        "the refusal must say what it refused and how to clear it:\n{text}"
+    );
+    assert_eq!(
+        fs::read_to_string(&delivered).unwrap(),
+        REVIEWED,
+        "the refusal must leave the reviewed delivery exactly as it was"
+    );
+
+    // And only after the re-review can the new bytes be delivered at all.
+    let digest = json(&["trust", "--preview"], &home, &proj)["surface_digest"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let (text, ok) = run(
+        &["trust", "--yes", "--consented-digest", &digest],
+        &home,
+        &proj,
+    );
+    assert!(ok, "re-grant failed:\n{text}");
     let (text, ok) = run(&["use", "--write", "--no-gitignore"], &home, &proj);
     assert!(ok, "activation after acceptance failed:\n{text}");
     assert_eq!(fs::read_to_string(&delivered).unwrap(), DRIFTED);

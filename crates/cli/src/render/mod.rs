@@ -10,6 +10,7 @@ pub mod merge_json;
 pub mod merge_md;
 pub mod merge_toml;
 pub mod owned;
+pub mod prior_trust;
 pub mod settings;
 pub mod skills;
 
@@ -21,4 +22,5 @@ pub use apply::{
 };
 pub use hooks::{plan_hooks, HooksPlan};
 pub use owned::{refresh_owned_servers, OwnedStatus};
+pub use prior_trust::PriorTrust;
 pub use settings::{plan_settings, SettingsPlan};

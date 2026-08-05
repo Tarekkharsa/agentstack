@@ -1376,6 +1376,15 @@ fn preview_and_commit(
     profile: Option<&str>,
 ) -> Result<()> {
     let act = ActivationCtx::detect(ctx)?;
+    // Captured for exactly the same reason, one line later because it answers
+    // the same shape of question: the manifest and lock writes below ARE the
+    // consent digest, so reading trust after them would have this command
+    // refuse the delivery it was typed to perform. Judged against the state
+    // that held HERE instead — which authorizes nothing new, since these bytes
+    // are the ones the human just asked for — and deliberately never re-pinned,
+    // so the project is left `Changed` and the next command re-gates it
+    // (`render::PriorTrust`).
+    let prior = crate::render::PriorTrust::at_command_start(&ctx.dir);
     let manifest_path = &ctx.loaded.manifest_path;
     let original = fs::read_to_string(manifest_path)
         .with_context(|| format!("reading {}", manifest_path.display()))?;
@@ -1481,6 +1490,7 @@ fn preview_and_commit(
             &act.target_ids,
             &new_skills,
             false,
+            prior,
         )?;
         for (id, dir) in &outcome.written {
             println!(
@@ -1513,9 +1523,16 @@ fn preview_and_commit(
             );
         }
         if !outcome.failed.is_empty() {
+            // The ✗ lines above carry the real blocker, and one of them is now
+            // routinely the trust gate: this very command rewrote the manifest
+            // and the lock, which ARE the consent digest, so the project reads
+            // `Changed` by the time the skills would land. Naming `use --write`
+            // alone would be a command that refuses again — say the review step
+            // first, in the order it has to happen.
             anyhow::bail!(
                 "{} failed to materialize (the manifest and lock writes stand — \
-                 retry with `agentstack use{} --write`)",
+                 each ✗ above names the blocker; if it is consent, review with \
+                 `agentstack trust .`, then `agentstack use{} --write`)",
                 super::count(outcome.failed.len(), "target"),
                 profile.map(|p| format!(" {p}")).unwrap_or_default()
             );

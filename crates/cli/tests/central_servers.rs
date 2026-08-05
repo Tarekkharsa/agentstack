@@ -79,6 +79,10 @@ fn apply_renders_library_server_ref() {
          [profiles.design]\nservers = [\"kibana\"]\n",
     )
     .unwrap();
+    // Consent is not this test's subject: grant so the rendered lane's
+    // trust gate (`render::apply::trust_refusal` /
+    // `render::skills::trust_refusal`) is out of the way.
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
 
     apply::run(&apply_args("design"), Some(&proj)).unwrap();
 
@@ -133,6 +137,10 @@ fn bare_apply_renders_a_library_first_manifest() {
          [toolsets.default]\nservers = [\"kibana\"]\n",
     )
     .unwrap();
+    // Consent is not this test's subject: grant so the rendered lane's
+    // trust gate (`render::apply::trust_refusal` /
+    // `render::skills::trust_refusal`) is out of the way.
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
 
     let mut bare = apply_args("default");
     bare.profile = None; // the point of the test: no --toolset
@@ -172,6 +180,10 @@ fn inline_server_overrides_library_in_apply() {
          [profiles.design]\nservers = [\"kibana\"]\n",
     )
     .unwrap();
+    // Consent is not this test's subject: grant so the rendered lane's
+    // trust gate (`render::apply::trust_refusal` /
+    // `render::skills::trust_refusal`) is out of the way.
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
 
     apply::run(&apply_args("design"), Some(&proj)).unwrap();
 

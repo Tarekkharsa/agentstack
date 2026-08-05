@@ -205,6 +205,21 @@ fn unmentioned_server_is_unaffected() {
          headers = { Authorization = \"Bearer ${FINE_TOKEN}\" }\n",
     )
     .unwrap();
+    // Consent is not this test's subject: pin, then grant, so the rendered
+    // lane's trust gate (`render::apply::trust_refusal` /
+    // `render::skills::trust_refusal`) is out of the way. Pinning FIRST is the
+    // order a human takes, and it keeps the grant valid: lock bytes are part of
+    // the consent digest, so a first pin recorded by a later write would
+    // re-gate the project mid-test.
+    agentstack::commands::lock::run(
+        &agentstack::cli::LockArgs {
+            write: true,
+            ..Default::default()
+        },
+        Some(&proj),
+    )
+    .unwrap();
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
 
     let claude_cfg = home.join(".claude.json");
     apply::run(&apply_args(), Some(&proj)).unwrap();

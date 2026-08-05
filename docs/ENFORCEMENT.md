@@ -639,13 +639,34 @@ reminder: a refusal with no record is still a refusal.
   An untrusted or drifted project **spawns nothing through agentstack**:
   `session start`, the protected `run`, and the MCP server's auto-project gate
   all refuse, and `Gateway::from_frozen` refuses to build for a sandboxed run
-  at all. Its server *config is nonetheless written* — `apply --write` blocks a
-  server target only on an unresolved `${REF}`, a failed secret read, or a
-  policy refusal, and consults trust nowhere. The enforcement point is launch,
-  not render, and the qualifier is load-bearing: a harness that reads those
-  rendered bytes on its own starts the server outside agentstack entirely,
-  which is the accepted host-mode fact (ARCHITECTURE Layer 1) and not a
-  promise this row makes.
+  at all. **Its server config is not written either.** A `[servers.*]` entry is
+  a command line (stdio) or an endpoint (http) that the harness spawns or dials
+  *itself*, at its own startup, outside agentstack — so none of those
+  launch-time gates is in the path, and the rendered file is the delivery. What
+  the gate does, exactly (`render::apply::trust_refusal`, witnessed by
+  `crates/cli/tests/red_team_servers_trust_gate.rs`): a project that is
+  untrusted, or whose consent surface changed since it was trusted, renders
+  **zero** server bytes — the destination file is left untouched, the refusal is
+  recorded on the plan and re-enforced at the write choke point
+  (`TargetPlan::write`), `apply --write` and `use --write` exit nonzero naming
+  `agentstack trust`, and `--allow-unresolved` does not reach it (that flag
+  forgives a missing secret, never a missing consent). The gate is on the
+  content's provenance, not on the destination, so it is identical at project
+  scope (`.mcp.json`) and global scope (`~/.claude.json`) — the global case
+  being the sharper half, since a repository's command line otherwise lands
+  where every project the user opens reads it. Two things are deliberately
+  outside it, each because it is not the project's content: pruning entries
+  agentstack already owns (the inert direction — a plan that manages nothing
+  and only removes still writes), and the machine manifest at
+  `$AGENTSTACK_HOME` — which `manifest::discover_project_base` refuses to
+  discover as a project, so no `trust` command could ever satisfy a gate on it.
+  `doctor` names `agentstack trust .` rather than `apply --write` when the gate
+  is what holds delivery back, and `doctor --fix` refuses the same way instead
+  of writing. **The honest limit:** a harness that reads *already-rendered*
+  bytes on its own starts the server outside agentstack entirely, which is the
+  accepted host-mode fact (ARCHITECTURE Layer 1) and not a promise this row
+  makes; the gate governs what reaches the file, not what a file already on
+  disk does.
   A stdio server's *executable* is a separate pin: repo-local commands and
   interpreter-script args are pinned as D3 `LockedExecutable` entries, which
   a protected `run` re-verifies before launch.
@@ -661,27 +682,42 @@ reminder: a refusal with no record is still a refusal.
 
 ### Skills
 
-- **pre-delivery — content-pinned, pin-gated at materialization, trust-gated
-  at every path that serves the content.** A skill is instructional text an
-  agent reads, not code agentstack executes. `agentstack.lock` pins each
-  skill's bytes (`LockedSkill`, carrying its source — path, git, or library),
-  and the manifest bytes are trust-bound. Where the gate sits is worth stating
-  exactly, because it is not at materialization: `agentstack use <toolset>
-  --write` gates on the **lock** — `verify::ensure_activatable` blocks a
-  drifted or broken pin and deliberately lets an `Unpinned` entry through,
-  because recording that first pin is itself the consenting act — and it reads
-  trust state only to print a word. Trust is enforced one step later, on every
-  path that puts a skill in front of an agent: `session start` refuses an
-  untrusted or drifted project outright and is stricter still
-  (`ensure_session_startable` refuses `Unpinned` too, being the verb external
-  UIs drive headlessly), the protected `run` refuses before launch, and the
-  MCP server leaves an untrusted auto-project with control-plane tools only —
-  `agentstack_list_loadable` returns skill *names*, and no skill body loads.
-  So `use --write` at a human's keyboard can put skill files into an untrusted
-  project's own directory; no session, no protected run, and no MCP surface
-  will then serve them. Skills land on disk through `agentstack use <toolset>
-  --write`, not `apply`, and pruning is scoped by the ownership ledger to what
-  agentstack placed. (`crates/cli/src/verify.rs`, `crates/cli/src/session.rs`,
+- **pre-delivery — content-pinned, pin-gated AND trust-gated at
+  materialization, trust-gated again at every path that serves the content.** A
+  skill is instructional text an agent reads, not code agentstack executes.
+  `agentstack.lock` pins each skill's bytes (`LockedSkill`, carrying its source
+  — path, git, or library), and the manifest bytes are trust-bound. Two
+  independent gates stand at materialization, and keeping them apart matters:
+  * the **lock** gate — `verify::ensure_activatable` blocks a drifted or broken
+    pin and deliberately lets an `Unpinned` entry through, because recording
+    that first pin is itself the consenting act. Unchanged.
+  * the **trust** gate — `render::skills::trust_refusal`, witnessed by
+    `crates/cli/tests/red_team_skills_trust_gate.rs`. A project that is
+    untrusted, or whose consent surface changed since it was trusted,
+    materializes **zero** skill files: the refusal is recorded on the plan and
+    re-enforced at the write choke point (`render::skills::materialize`), so a
+    caller that ignores the field still cannot reach disk; the delivered set is
+    left exactly as the human last approved it; and `agentstack use <toolset>
+    --write` exits nonzero naming `agentstack trust`. The same choke point
+    governs the additive materialization `agentstack add skill --write`
+    performs, which is what makes it un-bypassable rather than a rule `use`
+    happens to follow.
+  Two things are deliberately outside the trust gate, each because it is not
+  the project's content: removing skills agentstack already placed (the inert
+  direction — deactivation and `x unrender` keep working untrusted), and the
+  machine manifest at `$AGENTSTACK_HOME` — which
+  `manifest::discover_project_base` refuses to discover as a project, so no
+  `trust` command could ever satisfy a gate on it.
+  Trust is then enforced *again* on every path that puts a skill in front of an
+  agent: `session start` refuses an untrusted or drifted project outright and
+  is stricter still (`ensure_session_startable` refuses `Unpinned` too, being
+  the verb external UIs drive headlessly), the protected `run` refuses before
+  launch, and the MCP server leaves an untrusted auto-project with
+  control-plane tools only — `agentstack_list_loadable` returns skill *names*,
+  and no skill body loads. Skills land on disk through `agentstack use
+  <toolset> --write`, not `apply`, and pruning is scoped by the ownership
+  ledger to what agentstack placed. (`crates/cli/src/render/skills.rs`,
+  `crates/cli/src/verify.rs`, `crates/cli/src/session.rs`,
   `crates/cli/src/commands/locked.rs`, `crates/cli/src/mcp_server.rs`)
 - **runtime — unsupported, and the honest reason matters.** A skill's content
   is prose the model reads. No mode inspects, filters, or contains it, because

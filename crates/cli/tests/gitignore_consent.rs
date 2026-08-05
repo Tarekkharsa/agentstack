@@ -58,6 +58,27 @@ fn agentstack(home: &Path, proj: &Path, args: &[&str]) -> Output {
         .expect("run agentstack binary")
 }
 
+/// Test-only grant, the two-step a panel drives: pin the surface, review it,
+/// then bind the yes to the digest of exactly those bytes. The managed block is
+/// this file's subject, so consent must not be what stops the writes that
+/// produce it — and it has to be re-run after every manifest or overlay edit,
+/// since those bytes ARE the consent digest (`render::apply::trust_refusal`).
+fn grant(home: &Path, proj: &Path) {
+    agentstack(home, proj, &["lock", "--write"]);
+    let preview = agentstack(home, proj, &["trust", "--preview"]);
+    let text = String::from_utf8_lossy(&preview.stdout).into_owned();
+    let digest = serde_json::from_str::<serde_json::Value>(&text)
+        .unwrap_or_else(|e| panic!("trust --preview is not JSON ({e}):\n{text}"))["surface_digest"]
+        .as_str()
+        .expect("preview carries a surface digest")
+        .to_string();
+    agentstack(
+        home,
+        proj,
+        &["trust", "--yes", "--consented-digest", &digest],
+    );
+}
+
 /// Record the durable opt-out by hand, the way a committed manifest carries it.
 fn opt_out(proj: &Path) {
     let path = proj.join("agentstack.toml");
@@ -96,6 +117,7 @@ fn plain(s: &str) -> String {
 fn dry_run_previews_the_gitignore_edit_without_making_it() {
     let tmp = assert_fs::TempDir::new().unwrap();
     let (home, proj) = setup(tmp.path());
+    grant(&home, &proj);
 
     let out = agentstack(&home, &proj, &["apply"]);
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -124,6 +146,7 @@ fn dry_run_previews_the_gitignore_edit_without_making_it() {
 fn previewed_entries_are_exactly_the_written_entries() {
     let tmp = assert_fs::TempDir::new().unwrap();
     let (home, proj) = setup(tmp.path());
+    grant(&home, &proj);
 
     let preview = agentstack(&home, &proj, &["apply"]);
     let preview_out = plain(&String::from_utf8_lossy(&preview.stdout));
@@ -174,6 +197,7 @@ fn previewed_entries_are_exactly_the_written_entries() {
 fn manifest_opt_out_silences_preview_and_write() {
     let tmp = assert_fs::TempDir::new().unwrap();
     let (home, proj) = setup(tmp.path());
+    grant(&home, &proj);
     opt_out(&proj);
 
     let preview = plain(&String::from_utf8_lossy(
@@ -208,12 +232,14 @@ fn manifest_opt_out_silences_preview_and_write() {
 fn leftover_block_is_reported_not_stripped() {
     let tmp = assert_fs::TempDir::new().unwrap();
     let (home, proj) = setup(tmp.path());
+    grant(&home, &proj);
 
     agentstack(&home, &proj, &["apply", "--write"]);
     let before = fs::read_to_string(proj.join(".gitignore")).unwrap();
     assert!(before.contains("/.mcp.json"), "expected a block first");
 
     opt_out(&proj);
+    grant(&home, &proj);
     let out = plain(&String::from_utf8_lossy(
         &agentstack(&home, &proj, &["apply", "--write"]).stdout,
     ));
@@ -236,12 +262,14 @@ fn leftover_block_is_reported_not_stripped() {
 fn local_overlay_can_re_enable_for_one_checkout() {
     let tmp = assert_fs::TempDir::new().unwrap();
     let (home, proj) = setup(tmp.path());
+    grant(&home, &proj);
     opt_out(&proj);
     fs::write(
         proj.join("agentstack.local.toml"),
         "[meta]\ngitignore = true\n",
     )
     .unwrap();
+    grant(&home, &proj);
 
     agentstack(&home, &proj, &["apply", "--write"]);
     let block = fs::read_to_string(proj.join(".gitignore")).unwrap_or_default();
@@ -257,6 +285,7 @@ fn local_overlay_can_re_enable_for_one_checkout() {
 fn panel_verb_is_digest_bound_and_removes_the_block() {
     let tmp = assert_fs::TempDir::new().unwrap();
     let (home, proj) = setup(tmp.path());
+    grant(&home, &proj);
     agentstack(&home, &proj, &["apply", "--write"]);
     assert!(proj.join(".gitignore").exists(), "expected a block first");
 
@@ -322,6 +351,7 @@ fn panel_verb_is_digest_bound_and_removes_the_block() {
 fn activation_dry_run_previews_the_gitignore_edit() {
     let tmp = assert_fs::TempDir::new().unwrap();
     let (home, proj) = setup(tmp.path());
+    grant(&home, &proj);
 
     let out = agentstack(&home, &proj, &["use", "default"]);
     let stdout = plain(&String::from_utf8_lossy(&out.stdout));
@@ -346,6 +376,7 @@ fn activation_dry_run_previews_the_gitignore_edit() {
 fn no_gitignore_suppresses_both_the_preview_and_the_write() {
     let tmp = assert_fs::TempDir::new().unwrap();
     let (home, proj) = setup(tmp.path());
+    grant(&home, &proj);
 
     let preview = agentstack(&home, &proj, &["apply", "--no-gitignore"]);
     let preview_out = String::from_utf8_lossy(&preview.stdout);

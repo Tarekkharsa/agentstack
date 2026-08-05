@@ -59,6 +59,11 @@ fn unresolved_secret_blocks_write_unless_allowed() {
     let proj = tmp.path().join("proj");
     fs::create_dir_all(&proj).unwrap();
     write_unresolved_manifest(&proj);
+    // The subject is the unresolved-secret gate, not consent — grant so the
+    // rendered lane's trust gate (`render::apply::trust_refusal`,
+    // `render::skills::trust_refusal`) is out of the way and the blockage under
+    // test is the only one left.
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
 
     let claude_cfg = home.join(".claude.json");
 
@@ -335,6 +340,11 @@ fn partially_blocked_use_still_pins_the_lock() {
          [profiles.p]\nservers = [\"kibana\"]\nskills = [\"demo\"]\n",
     )
     .unwrap();
+    // The subject is the unresolved-secret gate, not consent — grant so the
+    // rendered lane's trust gate (`render::apply::trust_refusal`,
+    // `render::skills::trust_refusal`) is out of the way and the blockage under
+    // test is the only one left.
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
 
     let uargs = agentstack::cli::UseArgs {
         profile: Some("p".into()),

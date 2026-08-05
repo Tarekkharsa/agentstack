@@ -192,6 +192,25 @@ default = ["claude-code"]
     root
 }
 
+/// Test-only grant, the two-step a panel drives: pin the surface, review it,
+/// then bind the yes to the digest of exactly those bytes. Routing is this
+/// file's subject, so consent must not be what stops a write it asks for.
+fn grant(proj: &Path, home: &Path) {
+    run(&["lock", "--write"], proj, home);
+    let preview = run(&["trust", "--preview"], proj, home);
+    let digest = serde_json::from_str::<Value>(&preview)
+        .unwrap_or_else(|e| panic!("trust --preview is not JSON ({e}):\n{preview}"))
+        ["surface_digest"]
+        .as_str()
+        .expect("preview carries a surface digest")
+        .to_string();
+    run(
+        &["trust", "--yes", "--consented-digest", &digest],
+        proj,
+        home,
+    );
+}
+
 fn run(args: &[&str], cwd: &Path, home: &Path) -> String {
     let out = Command::new(BIN)
         .args(args)
@@ -259,6 +278,7 @@ fn render_locally_writes_files_where_the_lease_would_have_worked() {
     assert_eq!(lane(claude, "skills"), "rendered");
 
     // And the files really appear: the escape hatch exists to produce them.
+    grant(&local, &home);
     let applied = run(&["apply", "--write", "--allow-unresolved"], &local, &home);
     assert!(
         local.join(".mcp.json").exists(),

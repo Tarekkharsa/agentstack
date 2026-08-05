@@ -660,6 +660,7 @@ fn render_drift_targets(
             &prev,
             scope,
             &ctx.dir,
+            crate::render::PriorTrust::STRICT,
         )? {
             Some(plan) => out.push(DriftTarget {
                 id,

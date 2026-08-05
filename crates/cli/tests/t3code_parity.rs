@@ -375,6 +375,21 @@ fn panel_remove_capability_updates_manifest_and_rendered_config() {
          [servers.remove-me]\ntype = \"http\"\nurl = \"https://remove.example/mcp\"\n",
     )
     .unwrap();
+    // Consent is not this test's subject: pin, then grant, so the rendered
+    // lane's trust gate (`render::apply::trust_refusal` /
+    // `render::skills::trust_refusal`) is out of the way. Pinning FIRST is the
+    // order a human takes, and it keeps the grant valid: lock bytes are part of
+    // the consent digest, so a first pin recorded by a later write would
+    // re-gate the project mid-test.
+    agentstack::commands::lock::run(
+        &agentstack::cli::LockArgs {
+            write: true,
+            ..Default::default()
+        },
+        Some(&proj),
+    )
+    .unwrap();
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
     let proj_root = proj.to_str().unwrap();
 
     commands::apply::run(
@@ -416,6 +431,13 @@ fn panel_remove_capability_updates_manifest_and_rendered_config() {
         }
         _ => panic!("argv names remove-capability"),
     };
+    // This verb rewrites the manifest — the consent digest — and then re-renders
+    // in the same run, so its own edit leaves the project `Changed`. It renders
+    // anyway, and deliberately without a mid-test re-grant: the gate is judged
+    // against the trust state from BEFORE the verb wrote, because a command
+    // cannot be allowed to refuse itself (`render::PriorTrust`). Nothing is
+    // re-pinned, so the project is left `Changed` and the next command re-gates
+    // it — witnessed at the end of this test.
     dispatch(&[
         "agentstack",
         "--manifest-dir",
@@ -436,6 +458,16 @@ fn panel_remove_capability_updates_manifest_and_rendered_config() {
     let rendered_after = fs::read_to_string(proj.join(".mcp.json")).unwrap();
     assert!(!rendered_after.contains("remove-me"));
     assert!(rendered_after.contains("keep"));
+
+    // The other half of the rule, and the reason this is not the owned-server
+    // refresh: the verb delivered its own change and did NOT re-pin trust for
+    // it. The project reads `Changed`, so the human still meets the review
+    // before anything else moves.
+    assert_eq!(
+        agentstack::trust::check(&proj),
+        agentstack::trust::TrustState::Changed,
+        "remove-capability re-pinned trust — the bytes it wrote still owe a review"
+    );
 
     std::env::remove_var("HOME");
     std::env::remove_var("AGENTSTACK_HOME");
@@ -476,6 +508,21 @@ fn set_mode_is_retired_and_says_so() {
          [servers.search]\ntype = \"http\"\nurl = \"https://search.example/mcp\"\n",
     )
     .unwrap();
+    // Consent is not this test's subject: pin, then grant, so the rendered
+    // lane's trust gate (`render::apply::trust_refusal` /
+    // `render::skills::trust_refusal`) is out of the way. Pinning FIRST is the
+    // order a human takes, and it keeps the grant valid: lock bytes are part of
+    // the consent digest, so a first pin recorded by a later write would
+    // re-gate the project mid-test.
+    agentstack::commands::lock::run(
+        &agentstack::cli::LockArgs {
+            write: true,
+            ..Default::default()
+        },
+        Some(&proj),
+    )
+    .unwrap();
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
     let proj_root = proj.to_str().unwrap();
 
     // Render first, so "changed nothing" is a claim with something to lose.

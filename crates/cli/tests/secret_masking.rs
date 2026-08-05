@@ -46,6 +46,26 @@ fn run(proj: &std::path::Path, home: &std::path::Path, args: &[&str]) -> String 
     strip_ansi(&raw)
 }
 
+/// Test-only grant, the two-step a panel drives: pin the surface, review it,
+/// then bind the yes to the digest of exactly those bytes. Masking is this
+/// file's subject, so the consent gate (`render::apply::trust_refusal`) must
+/// not be what stops the write under test.
+fn grant(proj: &std::path::Path, home: &std::path::Path) {
+    run(proj, home, &["lock", "--write"]);
+    let preview = run(proj, home, &["trust", "--preview"]);
+    let digest = serde_json::from_str::<serde_json::Value>(&preview)
+        .unwrap_or_else(|e| panic!("trust --preview is not JSON ({e}):\n{preview}"))
+        ["surface_digest"]
+        .as_str()
+        .expect("preview carries a surface digest")
+        .to_string();
+    run(
+        proj,
+        home,
+        &["trust", "--yes", "--consented-digest", &digest],
+    );
+}
+
 fn strip_ansi(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut chars = s.chars();
@@ -72,6 +92,7 @@ fn apply_dry_run_masks_secret_but_write_persists_it() {
     let proj = tmp.path().join("proj");
     fs::create_dir_all(&proj).unwrap();
     write_manifest(&proj);
+    grant(&proj, &home);
 
     // 1. Dry-run preview: the resolved secret must NOT appear in stdout…
     // (--scope global: the assertions read ~/.claude.json, and a repo

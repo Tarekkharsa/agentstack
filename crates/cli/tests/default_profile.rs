@@ -54,6 +54,22 @@ fn profile_less_manifest_activates_and_locks_the_full_inline_set() {
     .unwrap();
     fs::write(proj.join("skills/helper/SKILL.md"), "# helper\n").unwrap();
 
+    // Consent is not this test's subject: pin, then grant, so the rendered
+    // lane's trust gate (`render::apply::trust_refusal` /
+    // `render::skills::trust_refusal`) is out of the way. Pinning FIRST is the
+    // order a human takes, and it keeps the grant valid: lock bytes are part of
+    // the consent digest, so a first pin recorded by a later write would
+    // re-gate the project mid-test.
+    agentstack::commands::lock::run(
+        &agentstack::cli::LockArgs {
+            write: true,
+            ..Default::default()
+        },
+        Some(&proj),
+    )
+    .unwrap();
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
+
     // No profiles declared: `use --write` with no name activates everything.
     use_profile::run(&use_args(None), Some(&proj)).unwrap();
     assert!(
@@ -111,6 +127,21 @@ fn a_single_declared_profile_is_selected_automatically() {
     )
     .unwrap();
     fs::write(proj.join("skills/solo/SKILL.md"), "# solo\n").unwrap();
+    // Consent is not this test's subject: pin, then grant, so the rendered
+    // lane's trust gate (`render::apply::trust_refusal` /
+    // `render::skills::trust_refusal`) is out of the way. Pinning FIRST is the
+    // order a human takes, and it keeps the grant valid: lock bytes are part of
+    // the consent digest, so a first pin recorded by a later write would
+    // re-gate the project mid-test.
+    agentstack::commands::lock::run(
+        &agentstack::cli::LockArgs {
+            write: true,
+            ..Default::default()
+        },
+        Some(&proj),
+    )
+    .unwrap();
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
 
     use_profile::run(&use_args(None), Some(&proj)).unwrap();
     assert!(
