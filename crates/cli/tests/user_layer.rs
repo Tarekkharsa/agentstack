@@ -85,6 +85,7 @@ fn machine_instructions_merge_beneath_project_loads_global_scope_only() {
         &ctx.dir,
         &[],
         &agentstack::instructions::Selecting::none(),
+        agentstack::render::PriorTrust::STRICT,
     )
     .unwrap();
     assert_eq!(gp.fragments, ["style", "house"]);
@@ -97,6 +98,7 @@ fn machine_instructions_merge_beneath_project_loads_global_scope_only() {
         &ctx.dir,
         &[],
         &agentstack::instructions::Selecting::none(),
+        agentstack::render::PriorTrust::STRICT,
     )
     .unwrap();
     assert_eq!(pp.fragments, ["house"]);

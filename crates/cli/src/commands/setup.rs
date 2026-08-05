@@ -950,6 +950,11 @@ fn offer_house_rules_inner(ctx: &super::Context, target_ids: &[String]) -> Resul
                 // The machine layer: no project lock, so no package members.
                 &[],
                 &crate::instructions::Selecting::for_command(None),
+                // `home` IS the machine manifest dir, so the gate exempts this
+                // compile outright — no project's review governs the user's own
+                // house rules. STRICT is therefore the honest value: nothing
+                // here relies on a relaxation.
+                crate::render::PriorTrust::STRICT,
             ) else {
                 continue;
             };

@@ -1143,6 +1143,12 @@ fn render(
                     &ctx.dir,
                     crate::package::effective_members(&pinned),
                     &sel,
+                    // `apply` authors nothing the consent digest covers before
+                    // this point — the owned-server manifest refresh and the
+                    // instruction pins both happen after the whole render loop
+                    // — so it is judged against the state on disk, like every
+                    // other gate it runs.
+                    crate::render::PriorTrust::STRICT,
                 )
                 // An excluded-only plan still compiles (to a region without
                 // the refused fragment): skipping it would leave a blocked
@@ -1151,7 +1157,8 @@ fn render(
                 .filter(|ip| {
                     !ip.fragments.is_empty() || !ip.missing.is_empty() || !ip.excluded.is_empty()
                 }) {
-                    rendered_content = rendered_content || !ip.fragments.is_empty();
+                    rendered_content =
+                        rendered_content || (!ip.fragments.is_empty() && ip.refusal.is_none());
                     for m in &ip.missing {
                         crate::outln!("  {} instruction fragment '{m}' source missing", "✗".red());
                         error_count += 1;
@@ -1159,11 +1166,22 @@ fn render(
                     for (name, why) in &ip.excluded {
                         crate::outln!("  {} instruction fragment '{name}' {why}", "⊘".dimmed());
                     }
+                    // Trust: a fragment's bytes land in the managed region a
+                    // harness reads straight into a model's context, so an
+                    // untrusted or drifted project compiles none of its own
+                    // (`render::instructions::trust_refusal`). It blocks the
+                    // write through the same seam a missing source does — the
+                    // diff is still shown, so what is being withheld stays
+                    // reviewable.
+                    if let Some(why) = &ip.refusal {
+                        crate::outln!("  {} {why}", "✗".red());
+                        error_count += 1;
+                    }
                     // A missing source already dropped its content from the
                     // compile — writing now would delete previously compiled
                     // fragments (all sources missing empties the whole region).
                     // Block the write, mirroring the unresolved-secret path.
-                    let iblocked = !ip.missing.is_empty();
+                    let iblocked = !ip.missing.is_empty() || ip.refusal.is_some();
                     if iblocked {
                         write_blockers += 1;
                     }
@@ -1177,8 +1195,13 @@ fn render(
                         if will_write && iblocked {
                             blocked_targets.insert(desc.display.clone());
                             crate::outln!(
-                                "  {} instructions not written — missing fragment sources",
-                                "✗".red()
+                                "  {} instructions not written — {}",
+                                "✗".red(),
+                                if ip.refusal.is_some() {
+                                    "the project has not been trusted for this content"
+                                } else {
+                                    "missing fragment sources"
+                                }
                             );
                         } else if will_write {
                             let capture = crate::history::capture(

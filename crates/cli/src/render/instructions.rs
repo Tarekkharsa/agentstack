@@ -9,6 +9,7 @@ use anyhow::Result;
 
 use crate::adapter::{AdapterDescriptor, Registry};
 use crate::manifest::Manifest;
+use crate::render::PriorTrust;
 use crate::scope::Scope;
 use crate::util::diff;
 
@@ -34,6 +35,12 @@ pub struct InstrPlan {
     /// ordinary case. Reported rather than derived so a surface names the same
     /// selection the compile actually made.
     pub selected: Vec<(String, String, String)>,
+    /// Set when the project's trust state forbids compiling the project-content
+    /// fragments this plan carries (see the gate in [`trust_refusal`]). The plan
+    /// is still built so the caller can SHOW what is being withheld;
+    /// [`InstrPlan::write`] refuses, so a plan in this state can never reach
+    /// disk.
+    pub refusal: Option<String>,
 }
 
 impl InstrPlan {
@@ -45,7 +52,16 @@ impl InstrPlan {
         diff::render(&self.existing, &self.proposed)
     }
 
+    /// The write choke point. The trust refusal is enforced HERE, not only at
+    /// the call sites, so a caller that forgets to read `refusal` still cannot
+    /// put an untrusted project's prose into the managed region a harness reads
+    /// straight into a model's context. A refused plan writes nothing at all,
+    /// which leaves an existing region exactly as the human last approved it —
+    /// withholding unreviewed prose, never deleting reviewed prose.
     pub fn write(&self) -> Result<()> {
+        if let Some(why) = &self.refusal {
+            anyhow::bail!("{why}");
+        }
         crate::util::atomic::write(&self.path, &self.proposed)
     }
 }
@@ -68,6 +84,15 @@ impl InstrPlan {
 /// (`docs/design/instruction-variants.md`). It is built once per command
 /// because the library is one read that must not be repeated per harness per
 /// scope.
+///
+/// `prior` is the trust state as of the calling command's START —
+/// [`PriorTrust::STRICT`] unless the caller captured one before writing its own
+/// manifest/lock bytes (`lock` and `upgrade` do; see [`trust_refusal`]).
+// Seven arguments, and the seventh is the trust answer this plan is judged
+// against. Passing it explicitly is the point: `PriorTrust::STRICT` is the
+// `Default`, so a call site that forgets costs a refusal it will print, never a
+// delivery it should not have made.
+#[allow(clippy::too_many_arguments)]
 pub fn plan_instructions(
     manifest: &Manifest,
     desc: &AdapterDescriptor,
@@ -75,6 +100,7 @@ pub fn plan_instructions(
     project_dir: &Path,
     packages: &[LockedPackage],
     sel: &crate::instructions::Selecting,
+    prior: PriorTrust,
 ) -> Option<InstrPlan> {
     let spec = desc.instructions.as_ref()?;
     let path = spec.path_for(scope, project_dir)?;
@@ -94,6 +120,26 @@ pub fn plan_instructions(
     let base = crate::manifest::project_root_of(project_dir);
     let decisions = crate::trust::decisions_for(&base);
     let store = crate::store::Store::default_store();
+
+    // The gate is judged BEFORE anything is compiled, over exactly the
+    // fragments that are the PROJECT's content — the manifest's own (never the
+    // machine layer's) plus every package instruction member. Naming them here,
+    // rather than counting whatever the loop below happened to compile, keeps
+    // the verdict independent of standing decisions and missing sources: a
+    // fragment excluded for another reason must not also relax the gate.
+    let gated: Vec<String> = manifest
+        .instructions
+        .iter()
+        .filter(|(_, i)| !i.from_user_layer && i.compiles_at(&desc.id, scope))
+        .map(|(name, _)| name.clone())
+        .chain(packages.iter().flat_map(|pkg| {
+            pkg.members
+                .iter()
+                .filter(|m| m.kind == PackageMemberKind::Instruction)
+                .map(|m| format!("{}:{}", pkg.name, m.name))
+        }))
+        .collect();
+    let refusal = trust_refusal(&gated, project_dir, prior);
 
     let mut blocks: Vec<String> = Vec::new();
     let mut fragments: Vec<String> = Vec::new();
@@ -206,7 +252,97 @@ pub fn plan_instructions(
         missing,
         excluded,
         selected,
+        refusal,
     })
+}
+
+/// The trust gate for instruction delivery — the same rule `render::extensions`
+/// states as "untrusted means inert" (invariant 3), and `render::hooks`,
+/// `render::apply` and `render::skills` apply to the other three kinds, applied
+/// to the one that is not executable at all.
+///
+/// That is the whole reason it belongs here rather than being excused. An
+/// instruction fragment is prose, and the managed region of `CLAUDE.md` /
+/// `AGENTS.md` is read by the harness itself, at its own startup, straight into
+/// a model's context — no agentstack process is in the path and there is
+/// nothing to intercept at run time (`docs/ENFORCEMENT.md`, Instructions,
+/// runtime). Compilation is therefore the delivery moment, and it is exactly
+/// the injection channel the consent ceremony exists to gate: a repository that
+/// nobody reviewed does not get to write the model's standing orders.
+///
+/// The LOCK gate stays exactly as it was: the pre-compile drift check in
+/// `commands::apply` lets an unpinned fragment through because recording that
+/// first pin IS the consenting act. This is a second, orthogonal question —
+/// "did a human review this project?" — not a stricter version of the first.
+///
+/// Returns the refusal message, or `None` when there is nothing to refuse.
+/// Deliberately NOT gated:
+///   * an empty `gated` set — a prune (an empty manifest, `unrender`,
+///     `uninstall`) plans the region AWAY, which is the inert direction and
+///     must keep working for an untrusted project, exactly as hook, server and
+///     extension pruning does;
+///   * machine-layer fragments (`Instruction::from_user_layer`) — merged in
+///     from `$AGENTSTACK_HOME/agentstack.toml`, they are the USER's house
+///     rules, never the project's content, and they are deliberately not
+///     pinned into any project's consent digest (`docs/ENFORCEMENT.md`, Layer
+///     scope). They are filtered out of the trust walk for that reason, so a
+///     review of this repository has nothing to say about them and cannot be
+///     allowed to withhold them. They ride along either way: the caller passes
+///     the same merged table both layers live in, and forgetting the
+///     `from_user_layer` filter here would take the user's own notes hostage
+///     to a repo they happened to be standing in;
+///   * the machine manifest itself — `$AGENTSTACK_HOME/agentstack.toml` is that
+///     same personal layer. It is deliberately undiscoverable as a project
+///     (`manifest::discover_project_base`), so `trust` can never reach it: its
+///     base resolves to `$HOME`, which no code path can put in the trust store.
+///     Gating it would make machine-level instructions permanently uncompilable
+///     rather than merely pending a review no command can perform. One spelling
+///     of the rule across the capability kinds — keep this in step with
+///     `render::hooks::trust_refusal`, `render::apply::trust_refusal` and
+///     `render::skills::trust_refusal`.
+///
+/// Package instruction members ARE gated, and that is a decision rather than an
+/// oversight. A package's prose arrives WITH THE REPOSITORY — its pin lives in
+/// the project's `agentstack.lock`, which is part of the consent surface — and
+/// it compiles into the very same managed region, indistinguishable to the
+/// model from a fragment the project wrote by hand (W5). "The project's
+/// content" is about where the bytes came from and whose review covers them,
+/// not about who typed them; a hostile repo that moved its instructions behind
+/// a package would otherwise walk straight through this gate.
+///
+/// `prior` is the last exemption and the only conditional one: a command that
+/// WROTE the lock or manifest bytes this project is now `Changed` by is judged
+/// against the state that held before it wrote, because a command cannot be
+/// allowed to refuse itself. `lock` (which pins package members and then
+/// renders them) and `upgrade` (which rewrites the manifest and re-pins, then
+/// re-renders the region) are the two callers that need it. See [`PriorTrust`]
+/// for why that authorizes nothing new, and why nothing is re-pinned
+/// afterwards.
+fn trust_refusal(gated: &[String], project_dir: &Path, prior: PriorTrust) -> Option<String> {
+    if gated.is_empty() {
+        return None;
+    }
+    if crate::util::paths::is_machine_home(project_dir) {
+        return None;
+    }
+    let base = crate::manifest::project_root_of(project_dir);
+    let why = prior.refusal_reason(&base)?;
+    let names = gated
+        .iter()
+        .map(|n| format!("'{n}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    // "render", not "compile": `verify::ensure_instructions_compilable` already
+    // owns "refusing to compile instructions for <target>" for the LOCK gate,
+    // and two gates that answer different questions must not open with the same
+    // sentence. This wording also matches its siblings, "refusing to render
+    // hooks" and "refusing to render MCP servers".
+    Some(format!(
+        "refusing to render instructions: project at {} {why} — review and \
+         `agentstack trust .` before putting its words into the managed region \
+         a harness reads straight into an agent's context ({names})",
+        base.display()
+    ))
 }
 
 /// The approved bytes a keep-pinned instruction compiles from: the content

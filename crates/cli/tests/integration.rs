@@ -575,6 +575,7 @@ fn instructions_compile_shared_and_harness_specific_blocks() {
         tmp.path(),
         &[],
         &agentstack::instructions::Selecting::none(),
+        agentstack::render::PriorTrust::STRICT,
     )
     .unwrap();
     assert_eq!(
@@ -593,6 +594,7 @@ fn instructions_compile_shared_and_harness_specific_blocks() {
         tmp.path(),
         &[],
         &agentstack::instructions::Selecting::none(),
+        agentstack::render::PriorTrust::STRICT,
     )
     .unwrap();
     assert_eq!(xp.fragments, vec!["shared".to_string()]);

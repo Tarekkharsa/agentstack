@@ -104,18 +104,39 @@ pub fn run(args: &InstructionsArgs, manifest_dir: Option<&Path>) -> Result<()> {
     }
     let mut changed = 0;
     let mut blocked = 0;
+    // Blocked *by the trust gate* specifically: it changes both the closing
+    // sentence and whether first pins may be recorded below.
+    let mut refused = 0;
 
     for id in &target_ids {
         let Some(desc) = ctx.registry.get(id) else {
             continue;
         };
-        let Some(plan) = plan_instructions(manifest, desc, scope, &ctx.dir, packages, &sel) else {
+        // This command authors nothing the consent digest covers before it
+        // compiles (its first pins are recorded after the loop), so the gate is
+        // judged against the state on disk.
+        let Some(plan) = plan_instructions(
+            manifest,
+            desc,
+            scope,
+            &ctx.dir,
+            packages,
+            &sel,
+            crate::render::PriorTrust::STRICT,
+        ) else {
             continue;
         };
 
         println!("\n{} ({})", desc.display.bold(), plan.path.display());
         for m in &plan.missing {
             println!("  {} fragment '{m}' source missing", "✗".red());
+        }
+        // Trust: an untrusted or drifted project compiles none of its own
+        // prose into the region (`render::instructions::trust_refusal`). Said
+        // here, before the diff, so the user reads WHY the preview below will
+        // not be written.
+        if let Some(why) = &plan.refusal {
+            println!("  {} {why}", "✗".red());
         }
         for (name, why) in &plan.excluded {
             println!("  {} fragment '{name}' {why}", "⊘".dimmed());
@@ -187,10 +208,19 @@ pub fn run(args: &InstructionsArgs, manifest_dir: Option<&Path>) -> Result<()> {
             if args.write {
                 // A missing fragment source blocks the write, like apply:
                 // compiling without it would silently delete that fragment's
-                // previously compiled content from the managed region.
-                if plan.missing.is_empty() {
+                // previously compiled content from the managed region. A trust
+                // refusal blocks it through the same seam — and leaves the
+                // region as the human last approved it rather than emptying it.
+                if plan.missing.is_empty() && plan.refusal.is_none() {
                     plan.write()?;
                     println!("  {} wrote managed region", "✓".green());
+                } else if plan.refusal.is_some() {
+                    blocked += 1;
+                    refused += 1;
+                    println!(
+                        "  {} not written — the project has not been trusted for this content",
+                        "✗".red()
+                    );
                 } else {
                     blocked += 1;
                     println!("  {} not written — missing fragment sources", "✗".red());
@@ -234,6 +264,11 @@ pub fn run(args: &InstructionsArgs, manifest_dir: Option<&Path>) -> Result<()> {
     if args.write {
         // Record first pins for the readable project fragments (the gate
         // above blocked on drift, so nothing recorded here absorbed a change).
+        // A trust refusal does NOT suppress this, deliberately: pinning is not
+        // consenting — `lock --write` pins an untrusted project happily and
+        // always has — and `apply` records the same pins after a blocked write.
+        // Making the two commands differ here would only mean one of them left
+        // a project in a state the other could not reproduce.
         if manifest.instructions.values().any(|i| !i.from_user_layer) {
             super::lock::record_instruction_pins(&ctx.dir, manifest, false)?;
         }
@@ -246,8 +281,23 @@ pub fn run(args: &InstructionsArgs, manifest_dir: Option<&Path>) -> Result<()> {
         );
     }
     if blocked > 0 {
+        // Name the cause the user can act on. Two exist now — a missing source
+        // and the trust gate — and a summary that named only one would send
+        // them to the wrong fix, so a run that hit both defers to the ✗ line
+        // per file. The single-cause wording is unchanged in both directions.
+        let cause = match (refused > 0, blocked > refused) {
+            (true, true) => {
+                "missing fragment sources or an unreviewed project — \
+                             see the ✗ line for each"
+            }
+            (true, false) => {
+                "the project has not been trusted for this content — \
+                              review and `agentstack trust .`"
+            }
+            _ => "missing fragment sources",
+        };
         anyhow::bail!(
-            "{} not written — missing fragment sources",
+            "{} not written — {cause}",
             super::count(blocked, "instruction file")
         );
     }

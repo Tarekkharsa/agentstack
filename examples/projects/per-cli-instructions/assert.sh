@@ -62,6 +62,23 @@ say()  { printf '\n\033[1;35m▎ %s\033[0m\n' "$*"; }
 # the assertion could not hold because the product misbehaves, not the test.
 skip() { printf '  \033[1;33mSKIP (defect: %s)\033[0m\n' "$*"; }
 
+# The human yes. An instruction fragment is not executable, but its bytes land
+# in the managed region every harness reads straight into a model's context, so
+# nothing compiles until a person has reviewed this project. `trust .` is the
+# interactive review; unattended here, so it reads the surface with --preview
+# and presents that exact digest back, as the red-team tests do.
+#
+# Deliberately a helper called at each site rather than one grant at the top:
+# every call is a place a person actually stands. Lock FIRST at each of them —
+# trust pins the manifest layers AND the lockfile, so pinning after a grant
+# would invalidate it.
+consent() {
+  "$AS" lock --write >/dev/null 2>&1 || true
+  local digest
+  digest=$("$AS" trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')
+  "$AS" trust . --yes --consented-digest "$digest" >/dev/null 2>&1
+}
+
 # ── isolated sandbox (nothing touches your real config) ──────────────────────
 SBX="$(mktemp -d)"
 export AGENTSTACK_HOME="$SBX/home"
@@ -112,6 +129,14 @@ if [ ! -f "$PROJECT/AGENTS.md" ]; then
   ok "dry-run created no AGENTS.md on disk"
 else
   bad "dry-run must not write AGENTS.md"
+fi
+
+# ── 1b. the human yes, before a single byte reaches a model's context ────────
+say "Review and approve the project — a fragment's bytes go straight into an agent's context:"
+if consent; then
+  ok "consent granted against the reviewed surface digest (fragments may now compile)"
+else
+  bad "trust refused the digest that trust --preview just emitted"
 fi
 
 # ── 2. write for real ────────────────────────────────────────────────────────
@@ -195,8 +220,16 @@ else
   fi
 fi
 
-# Accept the edit, then recompile.
+# Accept the edit, then review it, then recompile. Re-locking rewrites the
+# lockfile, which is part of the consent digest — so the earlier yes no longer
+# covers these bytes and the project owes a fresh review. That is the gate
+# working, not a detour.
 "$AS" lock --write > "$SBX/relock.txt" 2>&1
+if consent; then
+  ok "the edit was re-reviewed and re-approved (re-locking re-gates the project)"
+else
+  bad "re-granting consent after the re-lock failed"
+fi
 "$AS" instructions --scope project --write > "$SBX/rewrite.txt" 2>&1
 sed 's/^/  /' "$SBX/rewrite.txt"
 
@@ -235,6 +268,11 @@ echo "SHARED-PROBE: reaches claude." > "$PROBE/.agentstack/instructions/shared.m
 echo "CURSOR-PROBE-MARKER: aimed at an adapter with no instructions file." \
   > "$PROBE/.agentstack/instructions/cursor_only.md"
 cd "$PROBE"
+# Approve the probe project too, so what it measures is the targeting rule and
+# not a consent refusal it never mentions. Never fatal: a probe's own subject is
+# what must decide its outcome, so a grant that cannot be given is left to the
+# assertions below to describe.
+consent || true
 PROBE_OUT="$SBX/probe.txt"
 "$AS" instructions --scope project --write > "$PROBE_OUT" 2>&1 || true
 sed 's/^/  /' "$PROBE_OUT"
@@ -266,6 +304,7 @@ targets = ["claude-kode"]
 TOML
 echo "TYPO-BODY: targets a misspelled adapter id." > "$TYPO/.agentstack/instructions/x.md"
 cd "$TYPO"
+consent || true
 TYPO_OUT="$SBX/typo.txt"
 "$AS" instructions --scope project --write > "$TYPO_OUT" 2>&1 || true
 sed 's/^/  /' "$TYPO_OUT"

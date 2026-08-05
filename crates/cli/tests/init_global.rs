@@ -128,6 +128,7 @@ fn house_rules_seed_is_idempotent_and_compiles() {
         &home,
         &[],
         &agentstack::instructions::Selecting::none(),
+        agentstack::render::PriorTrust::STRICT,
     )
     .unwrap();
     assert_eq!(plan.fragments, vec![init::HOUSE_RULES_NAME.to_string()]);

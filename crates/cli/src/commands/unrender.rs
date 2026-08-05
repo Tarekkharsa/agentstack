@@ -247,6 +247,11 @@ pub(crate) fn plan(
                 // Planning the region AWAY: nothing to select, so no library
                 // read and no toolset.
                 &crate::instructions::Selecting::none(),
+                // The empty manifest and empty package list leave the gate
+                // nothing to judge, which is the whole point: taking our own
+                // prose back off disk is the inert direction and must keep
+                // working for an untrusted project.
+                crate::render::PriorTrust::STRICT,
             ) {
                 if plan.changed() {
                     out.removes_instructions = true;
