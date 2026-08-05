@@ -64,7 +64,7 @@ pub fn run(args: &LibArgs, manifest_dir: Option<&Path>) -> Result<()> {
         LibKind::AddServer(a) => add_server_cli(a, manifest_dir),
         LibKind::AddExtension(a) => add_extension_cli(a),
         LibKind::AddHook(a) => add_hook_cli(a, manifest_dir),
-        LibKind::List => list(),
+        LibKind::List => list(manifest_dir),
         LibKind::Remove(a) => remove(a),
         LibKind::RemoveServer(a) => remove_server_cli(a),
         LibKind::RemoveExtension(a) => remove_extension_cli(a),
@@ -1704,7 +1704,7 @@ fn contained_lib_extension_dir(lib_home: &Path, path: &str) -> Option<PathBuf> {
 
 /// `lib list` — a plain read of the index. No resolver, no store, no filesystem
 /// validation: it reports what `library.toml` records, nothing more.
-fn list() -> Result<()> {
+fn list(manifest_dir: Option<&Path>) -> Result<()> {
     let sources = Sources::load_or_warn();
     let lib_home = sources.primary().root;
     // The merged view, so browsing shows what a project would actually get —
@@ -1714,6 +1714,13 @@ fn list() -> Result<()> {
     let library = Library::load_linked(&sources.linked())?;
     print!("{}", render_list(&library, &lib_home));
     print!("{}", render_collisions(&library));
+    // The rot view. Not behind a flag because `lib list` is the one place a
+    // person asks "what is in here?", and the answer is incomplete without
+    // "and what is dead?". It stays cheap: the meters are three bounded log
+    // reads done once, and the only expensive part — resolving content to
+    // compare against a pin — runs for pinned names only (see `skill_pin`).
+    let rows = rot_rows(&library, &lib_home, manifest_dir);
+    print!("{}", render_rot(&rows, crate::calllog::now_epoch()));
     Ok(())
 }
 
@@ -2969,6 +2976,655 @@ fn human_bytes(bytes: u64) -> String {
         format!("{bytes} B")
     } else {
         format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// The rot view (P7): "what is in here, and what is dead?"
+//
+// A central library solves distribution but makes CAPABILITY ROT worse: an
+// index that only ever grows becomes the mess the scattered static configs
+// were. `lib list` is where a person looks, so the staleness reading belongs
+// here rather than three hops away in `agentstack x report calls`.
+//
+// Two rules shape everything below.
+//
+// 1. HONESTY (invariant 8 at the library level). "never used" and "no data"
+//    are different claims, and the difference decides whether someone deletes
+//    a skill. [`Uses`] therefore has three states, never one integer: no meter
+//    exists for this kind at all, a meter exists but holds no history, or a
+//    real count from recorded history. Nothing here ever renders "0 uses".
+// 2. ONE DRIFT OPINION. Drift is read through `resolve::{skill,server}
+//    _lock_status` — the same seam the trust gate and `trust --preview` read.
+//    There is no second drift computation in this file.
+// ─────────────────────────────────────────────────────────────────────────
+
+/// How often a library entry was used, kept honest about *why* a number is
+/// absent. Rendering must distinguish all three.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Uses {
+    /// Nothing in the product measures this kind of entry. Hooks and
+    /// extensions have no meter — saying "never used" about them would be a
+    /// claim we cannot support.
+    Unmeasured,
+    /// A meter exists for this kind, but it holds no history at all (the log
+    /// or counter file is absent/empty). "Never used" is unsupportable here
+    /// too: the absence is ours, not the entry's.
+    NoData,
+    /// A count from recorded history. `0` means the meter has history and this
+    /// entry is not in it — the only case that earns "NEVER USED".
+    Count(u64),
+}
+
+/// A library entry's relation to the current project's pin, taken verbatim
+/// from the shared lock-status seam.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Pin {
+    /// No lock entry for this name in this project (or no project at all).
+    /// Not a drift claim — there is nothing to have drifted from.
+    NotPinned,
+    /// Matches the pin.
+    Matches,
+    /// Content or rev moved since it was pinned.
+    Drifted(String),
+    /// The seam could not decide (git body not cached, resolve failed).
+    Unknown(String),
+}
+
+/// One row of the rot view.
+#[derive(Debug, Clone)]
+pub struct RotRow {
+    pub kind: Kind,
+    pub name: String,
+    /// The linked source the merged view took this entry from.
+    pub source: String,
+    pub uses: Uses,
+    /// Epoch seconds of the most recent recorded use, when any timestamped
+    /// history exists for this entry. `None` is always "no data" — never zero.
+    pub last_used: Option<u64>,
+    pub pin: Pin,
+}
+
+/// The usage meters, read once per `lib list` rather than per entry.
+///
+/// Deliberately three separate readings, because they answer different
+/// questions and have different silences:
+/// * `activations` — `usage.json` counts how often agentstack materialized a
+///   capability. It carries no timestamps, so it can never answer "last used".
+/// * `loads` — `loads.jsonl` timestamps on-demand skill loads. It can only
+///   ever *confirm* a use; its silence is not evidence of absence.
+/// * `calls` — `calls.jsonl` timestamps brokered server calls.
+struct Meters {
+    /// `None` when `usage.json` does not exist: the meter itself is missing.
+    activations: Option<crate::usage::Usage>,
+    /// name → (loads, latest ts). A skill load only ever *confirms* a use;
+    /// its silence is never evidence of absence, so there is no "seen" flag
+    /// here — an absent load simply leaves `last_used` at "no data".
+    loads: std::collections::BTreeMap<String, (u64, u64)>,
+    /// server → (calls, latest ts).
+    calls: std::collections::BTreeMap<String, (u64, u64)>,
+    calls_seen: bool,
+}
+
+impl Meters {
+    fn read() -> Self {
+        let mut loads = std::collections::BTreeMap::new();
+        let load_records = crate::calllog::read_loads_all();
+        for l in &load_records {
+            let e = loads.entry(l.name.clone()).or_insert((0u64, 0u64));
+            e.0 += 1;
+            e.1 = e.1.max(l.ts);
+        }
+        let mut calls = std::collections::BTreeMap::new();
+        let call_records = crate::calllog::read_all();
+        for c in &call_records {
+            let e = calls.entry(c.server.clone()).or_insert((0u64, 0u64));
+            e.0 += 1;
+            e.1 = e.1.max(c.ts);
+        }
+        Meters {
+            activations: crate::usage::Usage::path()
+                .exists()
+                .then(|| crate::usage::Usage::load().unwrap_or_default()),
+            loads,
+            calls,
+            calls_seen: !call_records.is_empty(),
+        }
+    }
+
+    /// A skill's use count. Activations are the meter; on-demand loads add to
+    /// it only when the activation meter exists, so the two never disagree
+    /// about whether we have history.
+    fn skill_uses(&self, name: &str) -> Uses {
+        match (&self.activations, self.loads.get(name)) {
+            (Some(u), loaded) => Uses::Count(u.count(name) + loaded.map(|l| l.0).unwrap_or(0)),
+            // No activation meter, but a load proves at least this many uses.
+            (None, Some((n, _))) => Uses::Count(*n),
+            (None, None) => Uses::NoData,
+        }
+    }
+
+    fn skill_last_used(&self, name: &str) -> Option<u64> {
+        self.loads.get(name).map(|l| l.1)
+    }
+
+    fn server_uses(&self, name: &str) -> Uses {
+        match self.calls.get(name) {
+            Some((n, _)) => Uses::Count(*n),
+            None if self.calls_seen => Uses::Count(0),
+            None => Uses::NoData,
+        }
+    }
+
+    fn server_last_used(&self, name: &str) -> Option<u64> {
+        self.calls.get(name).map(|c| c.1)
+    }
+}
+
+/// Which linked source a merged entry came from, or `"-"` for a single-file
+/// library that has no linked view.
+fn entry_source(library: &Library, kind: Kind, name: &str) -> String {
+    match library.linked.find(kind, name) {
+        Some((index, _)) => index.name.clone(),
+        None => "-".to_string(),
+    }
+}
+
+/// The project inputs the drift reading needs. `None` when there is no
+/// readable project here, in which case every row is [`Pin::NotPinned`].
+struct PinCtx {
+    dir: PathBuf,
+    manifest: crate::manifest::Manifest,
+    lock: crate::lock::Lock,
+    store: crate::store::Store,
+}
+
+impl PinCtx {
+    fn load(manifest_dir: Option<&Path>) -> Option<Self> {
+        let ctx = crate::commands::load(manifest_dir).ok()?;
+        let lock = crate::lock::Lock::load(&ctx.dir).unwrap_or_default();
+        Some(PinCtx {
+            dir: ctx.dir,
+            manifest: ctx.loaded.manifest,
+            lock,
+            store: crate::store::Store::default_store(),
+        })
+    }
+}
+
+/// Read one skill's pin state through the shared seam.
+///
+/// COST: this resolves and digests the skill body, so it runs ONLY for names
+/// the current project actually pinned — `lock.get(name)` is checked first.
+/// A `lib list` outside a project, or of an entry this project never locked,
+/// does no resolution work at all and stays as fast as it was before.
+fn skill_pin(ctx: &PinCtx, library: &Library, lib_home: &Path, name: &str) -> Pin {
+    if ctx.lock.get(name).is_none() {
+        return Pin::NotPinned;
+    }
+    use crate::resolve::SkillLockStatus as S;
+    let report = crate::resolve::skill_lock_status(
+        name,
+        &ctx.manifest,
+        &ctx.dir,
+        library,
+        lib_home,
+        &ctx.store,
+        &ctx.lock,
+        crate::resolve::ResolveMode::NoFetch,
+    );
+    match report.status {
+        S::Matches => Pin::Matches,
+        S::MissingLockEntry => Pin::NotPinned,
+        S::ChecksumDrift { .. } => Pin::Drifted("content changed since it was pinned".into()),
+        S::RevDrift { locked, current } => Pin::Drifted(format!(
+            "rev changed since it was pinned: {} → {}",
+            short(&locked),
+            short(&current)
+        )),
+        S::NotAvailableOffline { .. } => Pin::Unknown("git body not cached — can't tell".into()),
+        S::ResolveFailed { error } => Pin::Unknown(crate::text::sanitize_line(&error)),
+    }
+}
+
+/// Read one server's pin state through the shared seam. Same cost rule as
+/// [`skill_pin`]: unpinned names are never resolved.
+fn server_pin(ctx: &PinCtx, library: &Library, lib_home: &Path, name: &str) -> Pin {
+    if ctx.lock.get_server(name).is_none() {
+        return Pin::NotPinned;
+    }
+    use crate::resolve::ServerLockStatus as S;
+    let report =
+        crate::resolve::server_lock_status(name, &ctx.manifest, library, lib_home, &ctx.lock);
+    match report.status {
+        S::Matches => Pin::Matches,
+        S::MissingLockEntry => Pin::NotPinned,
+        S::ChecksumDrift { .. } => Pin::Drifted("definition changed since it was pinned".into()),
+        S::ResolveFailed { error } => Pin::Unknown(crate::text::sanitize_line(&error)),
+    }
+}
+
+/// Build the rot view for a merged library. Read-only; no network, no writes.
+fn rot_rows(library: &Library, lib_home: &Path, manifest_dir: Option<&Path>) -> Vec<RotRow> {
+    let meters = Meters::read();
+    let pins = PinCtx::load(manifest_dir);
+    let mut rows = Vec::new();
+
+    let mut skills = library.skills.clone();
+    skills.sort_by(|a, b| a.name.cmp(&b.name));
+    for s in &skills {
+        rows.push(RotRow {
+            kind: Kind::Skill,
+            name: s.name.clone(),
+            source: entry_source(library, Kind::Skill, &s.name),
+            uses: meters.skill_uses(&s.name),
+            last_used: meters.skill_last_used(&s.name),
+            pin: pins
+                .as_ref()
+                .map(|c| skill_pin(c, library, lib_home, &s.name))
+                .unwrap_or(Pin::NotPinned),
+        });
+    }
+
+    let mut servers = library.servers.clone();
+    servers.sort_by(|a, b| a.name.cmp(&b.name));
+    for s in &servers {
+        rows.push(RotRow {
+            kind: Kind::Server,
+            name: s.name.clone(),
+            source: entry_source(library, Kind::Server, &s.name),
+            uses: meters.server_uses(&s.name),
+            last_used: meters.server_last_used(&s.name),
+            pin: pins
+                .as_ref()
+                .map(|c| server_pin(c, library, lib_home, &s.name))
+                .unwrap_or(Pin::NotPinned),
+        });
+    }
+
+    // Extensions and hooks are listed for completeness but carry NO usage
+    // meter. `Unmeasured` says exactly that rather than implying they are dead.
+    let mut extensions = library.extensions.clone();
+    extensions.sort_by(|a, b| a.name.cmp(&b.name));
+    for e in &extensions {
+        rows.push(RotRow {
+            kind: Kind::Extension,
+            name: e.name.clone(),
+            source: entry_source(library, Kind::Extension, &e.name),
+            uses: Uses::Unmeasured,
+            last_used: None,
+            pin: Pin::NotPinned,
+        });
+    }
+    let mut hooks = library.hooks.clone();
+    hooks.sort_by(|a, b| a.name.cmp(&b.name));
+    for h in &hooks {
+        rows.push(RotRow {
+            kind: Kind::Hook,
+            name: h.name.clone(),
+            source: entry_source(library, Kind::Hook, &h.name),
+            uses: Uses::Unmeasured,
+            last_used: None,
+            pin: Pin::NotPinned,
+        });
+    }
+    rows
+}
+
+/// "3d ago" / "today" for an epoch-second timestamp, relative to `now`.
+fn ago(ts: u64, now: u64) -> String {
+    let days = now.saturating_sub(ts) / 86_400;
+    match days {
+        0 => "today".to_string(),
+        1 => "yesterday".to_string(),
+        d => format!("{d}d ago"),
+    }
+}
+
+/// The usage cell. Never renders "0 uses" — see the honesty rule above.
+fn uses_cell(uses: Uses) -> String {
+    match uses {
+        Uses::Unmeasured => "no data (not measured)".to_string(),
+        Uses::NoData => "no data".to_string(),
+        Uses::Count(0) => "NEVER USED".to_string(),
+        Uses::Count(1) => "1 use".to_string(),
+        Uses::Count(n) => format!("{n} uses"),
+    }
+}
+
+/// The "last used" cell. `None` is "no data", never a zero or a dash that
+/// could read as "never".
+fn last_used_cell(row: &RotRow, now: u64) -> String {
+    match row.last_used {
+        Some(ts) => format!("last {}", ago(ts, now)),
+        None => "last: no data".to_string(),
+    }
+}
+
+fn pin_cell(pin: &Pin) -> String {
+    match pin {
+        Pin::NotPinned => "not pinned here".to_string(),
+        Pin::Matches => "matches lock".to_string(),
+        Pin::Drifted(why) => format!("DRIFTED — {why}"),
+        Pin::Unknown(why) => format!("can't tell — {why}"),
+    }
+}
+
+/// Render the rot view. Pure over `rows` + `now` so the honesty rules have a
+/// witness that never touches the filesystem or the clock.
+fn render_rot(rows: &[RotRow], now: u64) -> String {
+    if rows.is_empty() {
+        return String::new();
+    }
+    let mut o = String::from("\nWhat is dead in here\n");
+    for r in rows {
+        o.push_str(&format!(
+            "  {:<10} {:<20} {:<10} {:<22} {:<14} {}\n",
+            r.kind.noun(),
+            crate::text::sanitize_line(&r.name),
+            crate::text::sanitize_line(&r.source),
+            uses_cell(r.uses),
+            last_used_cell(r, now),
+            pin_cell(&r.pin),
+        ));
+    }
+    o.push('\n');
+    for line in rot_summary(rows, now) {
+        o.push_str(&format!("  {line}\n"));
+    }
+    o.push_str("  Retire one (reversible — it lands in the library trash):\n");
+    o.push_str("    agentstack lib remove <name> --write\n");
+    o.push_str("    agentstack lib trash                (review or restore what you retired)\n");
+    o
+}
+
+/// Window for the "unused lately" line, in days.
+const STALE_DAYS: u64 = 30;
+
+/// The one-line summaries under the table. Each is scoped to the entries it
+/// can actually speak for — a count of "unused in 30 days" that silently
+/// included entries with no history would be the dishonest number this whole
+/// view exists to avoid.
+fn rot_summary(rows: &[RotRow], now: u64) -> Vec<String> {
+    let mut out = Vec::new();
+    let measured: Vec<&RotRow> = rows
+        .iter()
+        .filter(|r| !matches!(r.uses, Uses::Unmeasured))
+        .collect();
+    let never = measured
+        .iter()
+        .filter(|r| matches!(r.uses, Uses::Count(0)))
+        .count();
+    if !measured.is_empty() {
+        out.push(format!(
+            "{never} of {} measurable {} never used.",
+            measured.len(),
+            plural_entry(measured.len())
+        ));
+    }
+    let no_data = measured
+        .iter()
+        .filter(|r| matches!(r.uses, Uses::NoData))
+        .count();
+    if no_data > 0 {
+        out.push(format!(
+            "{no_data} {} no usage history at all — no data, not \"unused\".",
+            if no_data == 1 {
+                "entry has"
+            } else {
+                "entries have"
+            }
+        ));
+    }
+    let timestamped: Vec<&&RotRow> = measured.iter().filter(|r| r.last_used.is_some()).collect();
+    if !timestamped.is_empty() {
+        let stale = timestamped
+            .iter()
+            .filter(|r| now.saturating_sub(r.last_used.unwrap_or(now)) > STALE_DAYS * 86_400)
+            .count();
+        out.push(format!(
+            "{stale} of {} {} with a recorded last-use unused in {STALE_DAYS} days.",
+            timestamped.len(),
+            plural_entry(timestamped.len()),
+        ));
+    }
+    let drifted = rows
+        .iter()
+        .filter(|r| matches!(r.pin, Pin::Drifted(_)))
+        .count();
+    if drifted > 0 {
+        out.push(format!(
+            "{drifted} {} drifted from this project's lock — `agentstack trust --preview`.",
+            if drifted == 1 { "entry" } else { "entries" }
+        ));
+    }
+    let unmeasured = rows.len() - measured.len();
+    if unmeasured > 0 {
+        out.push(format!(
+            "{unmeasured} {} (hooks/extensions) have no usage meter — nothing here claims they are dead.",
+            plural_entry(unmeasured)
+        ));
+    }
+    out.push("Counts come from recorded history only; the call log rotates.".to_string());
+    out
+}
+
+#[cfg(test)]
+mod rot_tests {
+    use super::*;
+
+    const DAY: u64 = 86_400;
+    const NOW: u64 = 1_000 * DAY;
+
+    fn row(kind: Kind, name: &str, uses: Uses, last_used: Option<u64>, pin: Pin) -> RotRow {
+        RotRow {
+            kind,
+            name: name.into(),
+            source: "personal".into(),
+            uses,
+            last_used,
+            pin,
+        }
+    }
+
+    /// The honesty rule, stated as a test: no rendering path may turn an
+    /// absence of data into a zero. "no data" and "NEVER USED" are different
+    /// claims and the difference decides whether someone deletes a skill.
+    #[test]
+    fn absent_usage_data_never_renders_as_zero_uses() {
+        assert_eq!(uses_cell(Uses::NoData), "no data");
+        assert_eq!(uses_cell(Uses::Unmeasured), "no data (not measured)");
+        assert_eq!(uses_cell(Uses::Count(0)), "NEVER USED");
+        assert_eq!(uses_cell(Uses::Count(1)), "1 use");
+        assert_eq!(uses_cell(Uses::Count(7)), "7 uses");
+
+        let rows = vec![
+            row(
+                Kind::Skill,
+                "no-history",
+                Uses::NoData,
+                None,
+                Pin::NotPinned,
+            ),
+            row(Kind::Hook, "guard", Uses::Unmeasured, None, Pin::NotPinned),
+        ];
+        let out = render_rot(&rows, NOW);
+        assert!(
+            !out.contains("0 uses"),
+            "rendered a zero for missing data:\n{out}"
+        );
+        assert!(out.contains("no data"));
+        assert!(out.contains("last: no data"));
+    }
+
+    /// A never-used entry is marked, and it is only ever counted among the
+    /// entries the meters can actually speak for.
+    #[test]
+    fn never_used_is_marked_and_summarized_over_measurable_entries_only() {
+        let rows = vec![
+            row(Kind::Skill, "dead", Uses::Count(0), None, Pin::NotPinned),
+            row(
+                Kind::Skill,
+                "live",
+                Uses::Count(4),
+                Some(NOW - DAY),
+                Pin::Matches,
+            ),
+            row(Kind::Skill, "unknown", Uses::NoData, None, Pin::NotPinned),
+            row(Kind::Hook, "guard", Uses::Unmeasured, None, Pin::NotPinned),
+        ];
+        let out = render_rot(&rows, NOW);
+        assert!(out.contains("NEVER USED"));
+        // 3 measurable (the hook is excluded), 1 of them never used.
+        assert!(
+            out.contains("1 of 3 measurable entries never used."),
+            "{out}"
+        );
+        assert!(out.contains("1 entry has no usage history at all"), "{out}");
+        assert!(
+            out.contains("1 entry (hooks/extensions) have no usage meter"),
+            "{out}"
+        );
+        // The action is the reversible one.
+        assert!(out.contains("agentstack lib remove <name> --write"));
+        assert!(out.contains("agentstack lib trash"));
+    }
+
+    /// The staleness line is scoped to entries that have a recorded last-use.
+    /// An entry with no timestamp is never silently counted as "stale".
+    #[test]
+    fn stale_window_speaks_only_for_timestamped_entries() {
+        let rows = vec![
+            row(
+                Kind::Skill,
+                "old",
+                Uses::Count(2),
+                Some(NOW - 40 * DAY),
+                Pin::Matches,
+            ),
+            row(
+                Kind::Skill,
+                "fresh",
+                Uses::Count(9),
+                Some(NOW - 2 * DAY),
+                Pin::Matches,
+            ),
+            row(Kind::Skill, "countless", Uses::Count(5), None, Pin::Matches),
+        ];
+        let out = render_rot(&rows, NOW);
+        assert!(
+            out.contains("1 of 2 entries with a recorded last-use unused in 30 days."),
+            "{out}"
+        );
+        assert!(out.contains("last 40d ago"));
+        assert!(out.contains("last 2d ago"));
+        assert!(out.contains("last: no data"));
+    }
+
+    /// Drift is reported in the row and counted in the summary, and it points
+    /// at the one drift reading in the product rather than inventing a second.
+    #[test]
+    fn drift_is_marked_and_points_at_the_shared_reading() {
+        let rows = vec![
+            row(
+                Kind::Skill,
+                "moved",
+                Uses::Count(1),
+                Some(NOW),
+                Pin::Drifted("content changed since it was pinned".into()),
+            ),
+            row(
+                Kind::Server,
+                "figma",
+                Uses::Count(3),
+                Some(NOW),
+                Pin::Matches,
+            ),
+        ];
+        let out = render_rot(&rows, NOW);
+        assert!(out.contains("DRIFTED — content changed since it was pinned"));
+        assert!(out.contains("1 entry drifted from this project's lock"));
+        assert!(out.contains("agentstack trust --preview"));
+        assert!(out.contains("matches lock"));
+    }
+
+    /// An unresolvable pin says so; it never falls through to "matches".
+    #[test]
+    fn undecidable_pin_says_so() {
+        let rows = vec![row(
+            Kind::Skill,
+            "cached-nowhere",
+            Uses::NoData,
+            None,
+            Pin::Unknown("git body not cached — can't tell".into()),
+        )];
+        let out = render_rot(&rows, NOW);
+        assert!(out.contains("can't tell — git body not cached"), "{out}");
+        assert!(!out.contains("matches lock"));
+    }
+
+    /// An empty library prints no rot section at all — `lib list` already
+    /// says the library is empty, and a health report about nothing is noise.
+    #[test]
+    fn empty_library_renders_no_rot_section() {
+        assert_eq!(render_rot(&[], NOW), "");
+    }
+
+    #[test]
+    fn ago_reads_in_days() {
+        assert_eq!(ago(NOW, NOW), "today");
+        assert_eq!(ago(NOW - DAY, NOW), "yesterday");
+        assert_eq!(ago(NOW - 9 * DAY, NOW), "9d ago");
+        // A timestamp from the future must not underflow into a huge number.
+        assert_eq!(ago(NOW + DAY, NOW), "today");
+    }
+
+    /// The activation meter's absence is a different fact from an entry that
+    /// the meter has never counted.
+    #[test]
+    fn meters_distinguish_a_missing_meter_from_an_uncounted_entry() {
+        let mut usage = crate::usage::Usage::default();
+        usage.activations.insert("used".into(), 3);
+        let with_meter = Meters {
+            activations: Some(usage),
+            loads: Default::default(),
+            calls: Default::default(),
+            calls_seen: false,
+        };
+        assert_eq!(with_meter.skill_uses("used"), Uses::Count(3));
+        assert_eq!(with_meter.skill_uses("other"), Uses::Count(0));
+
+        let no_meter = Meters {
+            activations: None,
+            loads: Default::default(),
+            calls: Default::default(),
+            calls_seen: false,
+        };
+        assert_eq!(no_meter.skill_uses("used"), Uses::NoData);
+        assert_eq!(no_meter.skill_last_used("used"), None);
+
+        // A brokered call log with history can say "never called"; an empty
+        // one cannot.
+        let mut calls = std::collections::BTreeMap::new();
+        calls.insert("figma".to_string(), (2u64, 500u64));
+        let called = Meters {
+            activations: None,
+            loads: Default::default(),
+            calls,
+            calls_seen: true,
+        };
+        assert_eq!(called.server_uses("figma"), Uses::Count(2));
+        assert_eq!(called.server_last_used("figma"), Some(500));
+        assert_eq!(called.server_uses("github"), Uses::Count(0));
+
+        let silent = Meters {
+            activations: None,
+            loads: Default::default(),
+            calls: Default::default(),
+            calls_seen: false,
+        };
+        assert_eq!(silent.server_uses("github"), Uses::NoData);
+        assert_eq!(silent.server_last_used("github"), None);
     }
 }
 
