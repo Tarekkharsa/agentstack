@@ -1,19 +1,20 @@
 name: docs
 
+# Decision, not oversight (TODO.md, 2026-08-02): "the docs site rides with this
+# release, not before it" — `main` documents behaviour no installable version
+# has, and publishing earlier would describe a product nobody can run. So `push`
+# stays, but it reaches `verify` only; `deploy` is gated below to `release`
+# (published) and `workflow_dispatch`.
 on:
   push:
     branches: [main]
     paths: ["docs/**", "tools/**", ".github/workflows/docs.yml"]
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: true
 
 jobs:
   # Gate deployment on the docs regression checks: broken links/fragments,
@@ -48,13 +49,26 @@ jobs:
 
   deploy:
     needs: verify
-    # Publish by hand only, for now. `main` documents behaviour that no
-    # installable release carries yet, so an automatic push-to-main deploy
-    # would put a page live that describes a build nobody can get (decided
-    # 2026-08-02; TODO.md item 10). `verify` above still runs on every push,
-    # so the docs regression checks keep catching drift while the site is
-    # frozen. Delete this one condition when the release ships.
-    if: github.event_name == 'workflow_dispatch'
+    # Publish with a release, or by hand — never from a push. `main` documents
+    # behaviour that no installable release carries yet, so an automatic
+    # push-to-main deploy would put a page live that describes a build nobody
+    # can get (decided 2026-08-02; TODO.md item 11). `verify` above still runs
+    # on every push, so the docs regression checks keep catching drift while
+    # the site waits for the release.
+    if: >-
+      github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+    # Pages credentials live on this job alone: `verify` never needs them, and
+    # a push-triggered run must not hold a write token for the live site.
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    # Job-scoped so a push-triggered `verify` cannot queue behind — or cancel —
+    # a deployment. `cancel-in-progress: false` because interrupting a deploy
+    # mid-upload leaves the live site half-published.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
