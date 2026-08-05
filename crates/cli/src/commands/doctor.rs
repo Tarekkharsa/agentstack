@@ -2220,6 +2220,8 @@ fn run_checks(
             let pinned = crate::lock::Lock::load(&ctx.dir).unwrap_or_default();
             let packages = crate::package::effective_members(&pinned);
             let sel = crate::instructions::Selecting::for_command(None);
+            // `doctor` never wrote a manifest byte of its own, so the gate is
+            // judged against the state on disk right now.
             let global = crate::render::instructions::plan_instructions(
                 manifest,
                 desc,
@@ -2227,6 +2229,7 @@ fn run_checks(
                 &ctx.dir,
                 packages,
                 &sel,
+                crate::render::PriorTrust::STRICT,
             );
             let project = crate::render::instructions::plan_instructions(
                 manifest,
@@ -2235,6 +2238,7 @@ fn run_checks(
                 &ctx.dir,
                 packages,
                 &sel,
+                crate::render::PriorTrust::STRICT,
             );
             // Missing sources are scope-independent; the global plan sees
             // every declared fragment (project scope filters out inherited

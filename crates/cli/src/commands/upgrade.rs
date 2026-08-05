@@ -66,6 +66,15 @@ pub fn run(args: &UpgradeArgs, manifest_dir: Option<&Path>) -> Result<()> {
         return Ok(());
     }
 
+    // The trust state as of THIS command's start, captured before any pack
+    // writes a manifest, an asset, or a lock entry. `rerender_managed_regions`
+    // at the end of each upgrade compiles the project's own prose, and the
+    // bytes an upgrade writes are part of the consent digest — without this the
+    // command would refuse the very delivery it was typed to make
+    // (`render::PriorTrust`). Captured once, outside the `--all` loop, so pack
+    // two is judged by the same pre-command answer as pack one.
+    let prior = crate::render::PriorTrust::at_command_start(&ctx.dir);
+
     let mut failures = 0;
     for name in &targets {
         let Some(recipe) = remove::pack_ledger(manifest, name) else {
@@ -77,7 +86,7 @@ pub fn run(args: &UpgradeArgs, manifest_dir: Option<&Path>) -> Result<()> {
                  Use `agentstack remove` for single capabilities."
             );
         };
-        if let Err(e) = upgrade_one(&ctx, manifest_dir, name, recipe, args) {
+        if let Err(e) = upgrade_one(&ctx, manifest_dir, name, recipe, args, prior) {
             if args.all {
                 eprintln!("{} {name}: {e:#}", "✗".red());
                 failures += 1;
@@ -93,12 +102,14 @@ pub fn run(args: &UpgradeArgs, manifest_dir: Option<&Path>) -> Result<()> {
 }
 
 /// Re-resolve one pack from its ledger source and hand off to `upgrade_pack`.
+#[allow(clippy::too_many_arguments)]
 fn upgrade_one(
     ctx: &super::Context,
     manifest_dir: Option<&Path>,
     pack: &str,
     recipe: &PackInstall,
     args: &UpgradeArgs,
+    prior: crate::render::PriorTrust,
 ) -> Result<()> {
     let source = recipe
         .source
@@ -154,6 +165,7 @@ fn upgrade_one(
             &spec,
             args,
             &origin,
+            prior,
         );
     }
 
@@ -182,6 +194,7 @@ fn upgrade_one(
         spec,
         args,
         &origin,
+        prior,
     )
 }
 
@@ -224,6 +237,7 @@ fn upgrade_pack(
     spec: &PackSpec,
     args: &UpgradeArgs,
     origin: &add::PackOrigin,
+    prior: crate::render::PriorTrust,
 ) -> Result<()> {
     let manifest = &ctx.loaded.manifest;
 
@@ -315,6 +329,7 @@ fn upgrade_pack(
         &original,
         &new_text,
         origin,
+        prior,
     )?;
 
     print_result_report(ctx, pack, recipe, origin, &diff_result, &outcome);
@@ -531,6 +546,11 @@ struct LaneOutcome {
     /// rewritten. Empty means **no file was written**, which the report says
     /// out loud rather than implying a write happened.
     rendered: Vec<PathBuf>,
+    /// Set when the trust gate is what held the region back. Kept apart from
+    /// an empty `rendered` because the two negatives have different fixes, and
+    /// the report must not send a refused project to a command that will
+    /// refuse it again for the same reason.
+    render_refused: Option<String>,
 }
 
 /// Apply the upgrade atomically: back up everything the run can touch, write
@@ -553,6 +573,7 @@ fn apply_upgrade(
     original: &str,
     new_text: &str,
     origin: &add::PackOrigin,
+    prior: crate::render::PriorTrust,
 ) -> Result<LaneOutcome> {
     let manifest = &ctx.loaded.manifest;
 
@@ -676,7 +697,9 @@ fn apply_upgrade(
             outcome.instr_pinned =
                 super::lock::record_instruction_pins(&fresh.dir, &fresh.loaded.manifest, true)?;
         }
-        outcome.rendered = rerender_managed_regions(&fresh)?;
+        let (rendered, render_refused) = rerender_managed_regions(&fresh, prior)?;
+        outcome.rendered = rendered;
+        outcome.render_refused = render_refused;
         Ok(outcome)
     })();
 
@@ -777,7 +800,15 @@ fn managed_region_snapshot(ctx: &super::Context) -> Vec<(PathBuf, Vec<u8>)> {
 ///
 /// Region merging is `render::merge_md`'s job via `plan_instructions`, not
 /// reimplemented here: prose outside the markers must survive untouched.
-fn rerender_managed_regions(ctx: &super::Context) -> Result<Vec<PathBuf>> {
+///
+/// Returns the files written, and the trust refusal when that is what stopped
+/// the write — the caller reports the two negatives separately, because "no
+/// managed region here" and "this project has not been reviewed" want different
+/// next commands.
+fn rerender_managed_regions(
+    ctx: &super::Context,
+    prior: crate::render::PriorTrust,
+) -> Result<(Vec<PathBuf>, Option<String>)> {
     let manifest = &ctx.loaded.manifest;
     // W5: a package's instruction members compile into the same region, so an
     // upgrade in a project whose house rules arrive only through a package
@@ -785,20 +816,32 @@ fn rerender_managed_regions(ctx: &super::Context) -> Result<Vec<PathBuf>> {
     let pinned = Lock::load(&ctx.dir).unwrap_or_default();
     let packages = crate::package::effective_members(&pinned);
     if manifest.instructions.is_empty() && packages.iter().all(|p| p.members.is_empty()) {
-        return Ok(Vec::new());
+        return Ok((Vec::new(), None));
     }
     let scope = Scope::default_for(&ctx.dir);
     let target_ids = resolve_targets(manifest, &ctx.registry, &[], &ctx.dir)?;
     let sel = crate::instructions::Selecting::for_command(None);
     let mut written = Vec::new();
+    let mut refused: Option<String> = None;
     for id in &target_ids {
         let Some(desc) = ctx.registry.get(id) else {
             continue;
         };
-        let Some(plan) = plan_instructions(manifest, desc, scope, &ctx.dir, packages, &sel) else {
+        let Some(plan) = plan_instructions(manifest, desc, scope, &ctx.dir, packages, &sel, prior)
+        else {
             continue;
         };
         if !manages_file(&plan.path) {
+            continue;
+        }
+        // The trust gate. A project that was untrusted or already drifted when
+        // the upgrade STARTED gets no fresh prose compiled into its region; the
+        // pack's files are still on disk and the next `apply` after a review
+        // renders them. Skipped rather than raised, so the refusal does not
+        // roll back an upgrade that otherwise succeeded — `plan.write` would
+        // bail anyway, which is what makes this un-bypassable.
+        if let Some(why) = &plan.refusal {
+            refused.get_or_insert_with(|| why.clone());
             continue;
         }
         // A missing fragment source would silently delete that fragment's
@@ -812,7 +855,7 @@ fn rerender_managed_regions(ctx: &super::Context) -> Result<Vec<PathBuf>> {
             .with_context(|| format!("re-rendering {}", plan.path.display()))?;
         written.push(plan.path.clone());
     }
-    Ok(written)
+    Ok((written, refused))
 }
 
 /// Re-pin the lockfile for the pack's skills after an upgrade; returns how many
@@ -1005,7 +1048,16 @@ fn rendered_lane_result(dir: &Path, d: &PackDiff, out: &LaneOutcome) -> Vec<Stri
         super::count(out.fragments.len(), "house-rule fragment"),
         list(&out.fragments)
     );
-    if out.rendered.is_empty() {
+    if let Some(why) = &out.render_refused {
+        // The honest negative when the TRUST gate is what held the write back.
+        // Never the "no managed region here" sentence below, which would send
+        // the user to a command that refuses for the same reason.
+        lines.push(format!(
+            "rendered lane: {wrote}; the managed region was NOT updated — the project has not \
+             been trusted for this content"
+        ));
+        lines.push(format!("  ↳ {why}"));
+    } else if out.rendered.is_empty() {
         // The honest negative: fragments moved, but nothing rendered. Say it,
         // and name the command that would.
         lines.push(format!(
@@ -1083,6 +1135,7 @@ mod tests {
             instr_pinned: 3,
             fragments: Vec::new(), // this pack carried no house rule
             rendered: Vec::new(),
+            render_refused: None,
         };
         let line = repin_scope_line(&out).expect("a re-pin that happened is reported");
         assert!(line.contains("3 instruction fragments"), "{line}");

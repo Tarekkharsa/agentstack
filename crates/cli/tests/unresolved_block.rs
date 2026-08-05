@@ -215,6 +215,37 @@ fn partially_blocked_apply_counts_once_and_exits_nonzero() {
     )
     .unwrap();
 
+    // Consent is not this test's subject: pin, then grant, so the trust gates
+    // on the server render and the managed region are out of the way and the
+    // ONLY thing blocking the server half is the unresolved secret. Two
+    // subprocesses, because the grant must be bound to the surface digest the
+    // preview reports.
+    let ast = |args: &[&str]| -> String {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_agentstack"))
+            .args(args)
+            .current_dir(&proj)
+            .env("HOME", &home)
+            .env("AGENTSTACK_HOME", home.join(".agentstack"))
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "agentstack {args:?} failed:\n{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+    ast(&["lock", "--write"]);
+    let preview = ast(&["trust", "--preview"]);
+    let digest = preview
+        .split("\"surface_digest\"")
+        .nth(1)
+        .and_then(|rest| rest.split('"').nth(1))
+        .expect("trust --preview carries a surface digest")
+        .to_string();
+    ast(&["trust", "--yes", "--consented-digest", &digest]);
+
     // --scope global: the assertions read ~/.claude/CLAUDE.md, and a repo
     // manifest defaults to project scope.
     let out = std::process::Command::new(env!("CARGO_BIN_EXE_agentstack"))

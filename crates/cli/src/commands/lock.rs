@@ -406,6 +406,13 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
     // than let the user infer that a green lock covered it.
     crate::intake::print_notice(&ctx.dir, &trust_base, manifest);
     let was_trusted = crate::trust::check(&trust_base) == crate::trust::TrustState::Trusted;
+    // The same "before we write" reading, in the form the render gates take.
+    // Captured HERE, beside the P9 snapshot and before `pin_all`, because the
+    // lock bytes are part of the consent digest: the rendered lane below
+    // compiles package prose in the same run, and without this the command
+    // would refuse the very delivery it was typed to make
+    // (`render::PriorTrust`).
+    let prior = crate::render::PriorTrust::at_command_start(&ctx.dir);
     let lock_before = std::fs::read(Lock::path(&ctx.dir)).ok();
 
     let Pinned {
@@ -425,7 +432,7 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
     // W5, the rendered lane. A package's instruction members are pinned above;
     // this is where the pinned bytes reach a file. Deliberately BEFORE the
     // `args.quiet` early return: quiet suppresses narration, never a write.
-    let rendered_lane = render_package_instructions(&ctx)?;
+    let rendered_lane = render_package_instructions(&ctx, prior)?;
 
     if args.quiet {
         // Composed into the funnel's single card: the pin happened, and the
@@ -851,7 +858,20 @@ pub(crate) fn record_package_pins(
 /// The lane vocabulary is binding: this is the RENDERED lane. A package's
 /// instruction member is never described as going live "via gateway", because
 /// it does not — it goes into a file, and this says which one.
-fn render_package_instructions(ctx: &super::Context) -> Result<Vec<String>> {
+///
+/// `prior` MUST be the trust state captured before `pin_all` wrote the
+/// lockfile. A package's prose is the project's content and the compile is
+/// gated on trust like any other fragment's — but the lock bytes are part of
+/// the consent digest, so pinning flips a trusted project to `Changed` and this
+/// render, in the same run, would refuse the very delivery the human typed
+/// `lock --write` to get. A command cannot be allowed to refuse itself
+/// (`render::PriorTrust`). A project that was untrusted or already drifted when
+/// the command STARTED is still refused, and nothing is re-pinned, so the next
+/// command re-gates it.
+fn render_package_instructions(
+    ctx: &super::Context,
+    prior: crate::render::PriorTrust,
+) -> Result<Vec<String>> {
     let pinned = Lock::load(&ctx.dir).unwrap_or_default();
     let members =
         crate::package::members_of_kind(&pinned, crate::lock::PackageMemberKind::Instruction, None);
@@ -866,16 +886,26 @@ fn render_package_instructions(ctx: &super::Context) -> Result<Vec<String>> {
     let sel = crate::instructions::Selecting::for_command(None);
     let mut written: Vec<String> = Vec::new();
     let mut unverifiable: Vec<String> = Vec::new();
+    let mut refused: Vec<String> = Vec::new();
     for id in &target_ids {
         let Some(desc) = ctx.registry.get(id) else {
             continue;
         };
         let Some(plan) = crate::render::instructions::plan_instructions(
-            manifest, desc, scope, &ctx.dir, packages, &sel,
+            manifest, desc, scope, &ctx.dir, packages, &sel, prior,
         ) else {
             continue;
         };
         if !crate::render::instructions::manages_file(&plan.path) {
+            continue;
+        }
+        // The trust gate. Reported like an unverifiable member rather than
+        // raised: `lock` pinned successfully, and failing the whole command
+        // over a render it was right to withhold would hide that.
+        if let Some(why) = &plan.refusal {
+            if !refused.contains(why) {
+                refused.push(why.clone());
+            }
             continue;
         }
         // A member whose pinned bytes are missing or fail verification lands in
@@ -904,7 +934,15 @@ fn render_package_instructions(ctx: &super::Context) -> Result<Vec<String>> {
 
     let count = super::count(members.len(), "package house-rule fragment");
     let mut lines = Vec::new();
-    if written.is_empty() {
+    if written.is_empty() && !refused.is_empty() {
+        // The honest negative when the GATE is what held the write back —
+        // never the "no managed region here" sentence below, which would send
+        // the user to a command that will refuse for the same reason.
+        lines.push(format!(
+            "rendered lane: {count} pinned; nothing was written — the project has not been \
+             trusted for this content"
+        ));
+    } else if written.is_empty() {
         // The honest negative, and the one command that would render it.
         lines.push(format!(
             "rendered lane: {count} pinned; no instruction file here carries agentstack's \
@@ -925,6 +963,9 @@ fn render_package_instructions(ctx: &super::Context) -> Result<Vec<String>> {
             "  ↳ {} could not be served from the content store — re-run `agentstack lock --write`",
             unverifiable.join(", ")
         ));
+    }
+    for why in &refused {
+        lines.push(format!("  ↳ {why}"));
     }
     Ok(lines)
 }

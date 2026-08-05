@@ -215,6 +215,7 @@ fn pack_instruction_carries_provenance_into_rendered_region() {
         dir,
         &[],
         &agentstack::instructions::Selecting::none(),
+        agentstack::render::PriorTrust::STRICT,
     )
     .unwrap();
 

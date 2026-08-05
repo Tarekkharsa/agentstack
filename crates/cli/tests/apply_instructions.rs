@@ -45,6 +45,24 @@ fn args(write: bool) -> ApplyArgs {
     }
 }
 
+/// Consent is not most of these tests' subject: pin, then grant, so the
+/// delivery gates — `render::instructions::trust_refusal` for the managed
+/// region, and its siblings for servers and skills — are out of the way.
+/// Pinning FIRST is the order a human takes, and it keeps the grant valid: lock
+/// bytes are part of the consent digest, so a first pin recorded by a later
+/// write would re-gate the project mid-test.
+fn pin_and_trust(proj: &std::path::Path) {
+    agentstack::commands::lock::run(
+        &agentstack::cli::LockArgs {
+            write: true,
+            ..Default::default()
+        },
+        Some(proj),
+    )
+    .unwrap();
+    agentstack::trust::trust_unreviewed(proj).unwrap();
+}
+
 #[test]
 fn apply_write_compiles_instructions_into_the_global_file() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -61,6 +79,7 @@ fn apply_write_compiles_instructions_into_the_global_file() {
          [instructions.house]\npath = \"./instructions/house.md\"\n",
     )
     .unwrap();
+    pin_and_trust(&proj);
 
     // Dry-run: nothing written.
     apply::run(&args(false), Some(&proj)).unwrap();
@@ -127,6 +146,7 @@ fn apply_write_blocks_on_a_missing_fragment_source() {
          [instructions.house]\npath = \"./instructions/house.md\"\n",
     )
     .unwrap();
+    pin_and_trust(&proj);
     apply::run(&args(true), Some(&proj)).unwrap();
     let before = fs::read_to_string(home.join(".claude/CLAUDE.md")).unwrap();
     assert!(before.contains("House rule one."));
@@ -316,6 +336,7 @@ fn doctor_accepts_a_project_compiled_at_project_scope() {
          [instructions.house]\npath = \"./instructions/house.md\"\n",
     )
     .unwrap();
+    pin_and_trust(&proj);
 
     // The project compiles at PROJECT scope — it never writes the global file.
     let mut a = args(true);
@@ -422,6 +443,7 @@ fn standalone_instructions_write_blocks_on_missing_fragment_sources() {
          [instructions.extra]\npath = \"./instructions/extra.md\"\n",
     )
     .unwrap();
+    pin_and_trust(&proj);
     let iargs = agentstack::cli::InstructionsArgs {
         toolset: None,
         targets: vec!["claude-code".into()],
@@ -535,6 +557,7 @@ fn project_apply_gitignores_the_compiled_instruction_file() {
          [instructions.house]\npath = \"./instructions/house.md\"\n",
     )
     .unwrap();
+    pin_and_trust(&proj);
 
     // Apply at project scope with gitignore management ON (the default).
     let mut a = args(true);

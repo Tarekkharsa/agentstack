@@ -323,6 +323,15 @@ fn apply_args() -> ApplyArgs {
 /// Instruction fragments walk the same re-gate chain as skills: first apply
 /// pins, trust requires the pin, drift blocks the compile and the re-grant,
 /// `agentstack lock` accepts (flipping trust to Changed), re-trust restores.
+///
+/// The first apply is where the two gates are visibly ORTHOGONAL, and the test
+/// is written to keep them apart. The LOCK gate lets an unpinned fragment
+/// through because recording that first pin is itself the consenting act — so
+/// the pin lands. The TRUST gate asks a different question, "did a human review
+/// this project?", and nobody has, so the region stays empty. Neither is a
+/// stricter version of the other, and a fixture that granted trust up front
+/// would hide the distinction (see
+/// `crates/cli/tests/red_team_instructions_trust_gate.rs`).
 #[test]
 fn instruction_drift_blocks_apply_until_relocked() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -349,8 +358,13 @@ fn instruction_drift_blocks_apply_until_relocked() {
     assert!(err.contains("isn't fully pinned"), "{err}");
     assert!(err.contains("house"), "{err}");
 
-    // First apply --write compiles AND records the first pin.
-    apply::run(&apply_args(), Some(&proj)).unwrap();
+    // First apply --write records the first pin — and refuses the COMPILE,
+    // because the project has not been reviewed. The pin is the lock gate's
+    // business; the region is the trust gate's.
+    let err = apply::run(&apply_args(), Some(&proj))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("blocked write"), "{err}");
     let lock_path = proj.join("agentstack.lock");
     let lock_before = fs::read_to_string(&lock_path).unwrap();
     assert!(
@@ -359,13 +373,20 @@ fn instruction_drift_blocks_apply_until_relocked() {
     );
     let compiled = home.join(".claude/CLAUDE.md");
     assert!(
+        !fs::read_to_string(&compiled)
+            .unwrap_or_default()
+            .contains("Be kind."),
+        "an unreviewed project's fragment reached the managed region"
+    );
+
+    // Pinned → trust grants, and only then does the fragment compile.
+    trust_cmd::run(&grant_args(&proj), None).unwrap();
+    assert_eq!(trust::check(&proj), TrustState::Trusted);
+    apply::run(&apply_args(), Some(&proj)).unwrap();
+    assert!(
         fs::read_to_string(&compiled).unwrap().contains("Be kind."),
         "fragment compiled into the instruction file"
     );
-
-    // Pinned → trust grants.
-    trust_cmd::run(&grant_args(&proj), None).unwrap();
-    assert_eq!(trust::check(&proj), TrustState::Trusted);
 
     // Drift the fragment: manifest + lock untouched → trust digest holds.
     fs::write(proj.join("instructions/house.md"), "Be EVIL.\n").unwrap();

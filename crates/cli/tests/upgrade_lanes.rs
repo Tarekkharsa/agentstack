@@ -145,6 +145,26 @@ impl Sandbox {
     fn read(&self, rel: &str) -> String {
         std::fs::read_to_string(self.proj.join(rel)).unwrap_or_default()
     }
+
+    /// The two-step grant a panel drives: review the surface, then bind the yes
+    /// to the digest of exactly those bytes. Needed because compiling a
+    /// project's prose into a managed region is trust-gated
+    /// (`render::instructions::trust_refusal`), and consent is not what these
+    /// lane tests are about — they are about the transaction.
+    fn grant(&self) {
+        // Pin FIRST: `trust` refuses an unpinned loadable surface, so the two
+        // steps are one act. It also keeps the grant valid — lock bytes are
+        // part of the consent digest, so a first pin recorded by a later write
+        // would re-gate the project mid-test.
+        self.ok(&["lock", "--write"]);
+        let preview = self.ok(&["trust", "--preview"]);
+        let digest = serde_json::from_str::<serde_json::Value>(&preview)
+            .expect("trust --preview is JSON")["surface_digest"]
+            .as_str()
+            .expect("preview carries a surface digest")
+            .to_string();
+        self.ok(&["trust", "--yes", "--consented-digest", &digest]);
+    }
 }
 
 /// The result report is the block after the `✓ upgraded …` headline; the
@@ -192,6 +212,9 @@ fn an_upgrade_updates_the_lock_and_the_rendered_region_or_neither() {
     // way a user would. The upgrade is only ever allowed to refresh a region
     // that already exists.
     sb.ok(&["install"]);
+    // The pins are settled; review them, so the managed-region compiles below
+    // are not held by the trust gate.
+    sb.grant();
     sb.ok(&["instructions", "--write"]);
     assert!(sb.read("CLAUDE.md").contains("Always use transactions."));
     assert!(sb
@@ -235,6 +258,12 @@ fn an_upgrade_updates_the_lock_and_the_rendered_region_or_neither() {
         "the managed region must be re-rendered: {}",
         sb.read("CLAUDE.md")
     );
+
+    // The upgrade rewrote the manifest and the lock, so the project now reads
+    // `Changed` — it owes a review, and nothing re-pinned it. Give it one, or
+    // the second half below would be judged against stale consent rather than
+    // against the write failure it means to inject.
+    sb.grant();
 
     // ---- "or it does neither" -------------------------------------------
     //
@@ -333,6 +362,7 @@ fn the_report_names_each_lane_separately_and_never_claims_a_file_went_live_via_g
         "--with-instructions",
         "--write",
     ]);
+    sb.grant();
     sb.ok(&["instructions", "--write"]);
     publish_v2(&repo);
 

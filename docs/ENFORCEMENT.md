@@ -739,24 +739,50 @@ reminder: a refusal with no record is still a refusal.
 
 ### Instructions
 
-- **pre-delivery — content-pinned per fragment, pin-gated and decision-gated,
-  compiled into managed regions.** Each `[instructions.*]` fragment is a local
-  file pinned by the SHA-256 of its raw bytes (`LockedInstruction`), and
-  `doctor`'s `check_instruction_reproducibility` reports drift between pin and
-  file. The gate before compilation is the **lock**: every readable declared
-  fragment must still match its pin, and an unpinned fragment passes — the
-  successful write records its first pin. Compilation then honours the standing
-  re-gate answers per fragment: `blocked` excludes the fragment, `keep-pinned`
-  compiles the approved snapshot instead of the live file and excludes the
-  fragment if that snapshot cannot be re-verified. What compilation does **not**
-  do is call `trust::check`. Unlike hooks and native extensions, whose render
-  paths refuse outright for an untrusted or drifted project, a fragment with no
-  standing decision against it compiles from the live file whatever the
-  project's trust state. Manifest bytes are still trust-bound, so declaring or
-  editing a fragment *entry* re-gates consent; the compilation step itself does
-  not re-ask. Compilation writes only into agentstack's managed region of
-  `CLAUDE.md` / `AGENTS.md`, leaving hand-written content outside that region
-  untouched and restorable. (`crates/cli/src/commands/apply.rs`,
+- **pre-delivery — content-pinned per fragment, pin-gated, decision-gated AND
+  trust-gated, compiled into managed regions.** Each `[instructions.*]` fragment
+  is a local file pinned by the SHA-256 of its raw bytes (`LockedInstruction`),
+  and `doctor`'s `check_instruction_reproducibility` reports drift between pin
+  and file. Three independent gates stand before the region is written, and
+  keeping them apart matters:
+  * the **lock** gate — every readable declared fragment must still match its
+    pin, and an unpinned fragment deliberately passes, because recording that
+    first pin is itself the consenting act. Unchanged.
+  * the **decision** gate — compilation honours the standing re-gate answers
+    per fragment: `blocked` excludes the fragment, `keep-pinned` compiles the
+    approved snapshot instead of the live file and excludes the fragment if
+    that snapshot cannot be re-verified.
+  * the **trust** gate — `render::instructions::trust_refusal`, witnessed by
+    `crates/cli/tests/red_team_instructions_trust_gate.rs`. A fragment is not
+    executable, and that is exactly why it is gated rather than excused: its
+    bytes go into the managed region every harness reads at its own startup,
+    straight into a model's context, with no agentstack process in the path and
+    nothing to intercept at run time (see **runtime** below). A project that is
+    untrusted, or whose consent surface changed since it was trusted, compiles
+    **zero** of its own fragment bytes: the refusal is recorded on the plan and
+    re-enforced at the write choke point (`render::instructions::InstrPlan::
+    write`), so a caller that ignores the field still cannot reach disk; an
+    existing region is left exactly as the human last approved it rather than
+    emptied; and `apply --write` and `agentstack x instructions --write` both
+    exit nonzero naming `agentstack trust .`. The gate is on the content's
+    provenance, not on the destination, so it is identical at project scope
+    (`./CLAUDE.md`) and global scope (`~/.claude/CLAUDE.md`).
+  A package's instruction members are gated **as the project's content**: their
+  pins live in the project's `agentstack.lock` and they compile into the same
+  region, indistinguishable to the model from prose the repo wrote by hand, so
+  moving instructions behind a package buys no exemption. Four things are
+  deliberately outside the trust gate, each because it is not the project's
+  content: emptying a managed region (the inert direction — `unrender` /
+  `uninstall` keep working untrusted), machine-layer fragments (the next
+  bullet), the machine manifest at `$AGENTSTACK_HOME` — which
+  `manifest::discover_project_base` refuses to discover as a project, so no
+  `trust` command could ever satisfy a gate on it — and the pre-command trust
+  state a self-authoring command is judged against (`render::PriorTrust`), which
+  is what lets `lock --write` and `upgrade` render the bytes they were just told
+  to pin instead of refusing their own delivery. Compilation writes only into
+  agentstack's managed region of `CLAUDE.md` / `AGENTS.md`, leaving hand-written
+  content outside that region untouched and restorable.
+  (`crates/cli/src/commands/apply.rs`,
   `crates/cli/src/render/instructions.rs`)
 - **Layer scope — machine fragments are not repo content.** User/global-layer
   fragments are deliberately *not* pinned: they are yours, not the project's,

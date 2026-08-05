@@ -105,6 +105,7 @@ fn compiled(proj: &Path, cli: &str, toolset: Option<&str>) -> String {
         &proj.join(".agentstack"),
         &[],
         &sel,
+        agentstack::render::PriorTrust::STRICT,
     )
     .expect("this harness has an instruction file");
     plan.proposed

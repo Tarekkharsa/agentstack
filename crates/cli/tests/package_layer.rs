@@ -961,6 +961,12 @@ fn a_package_instruction_member_renders_into_an_existing_managed_region_only() {
         "# House\n\nOur own prose.\n\n<!-- agentstack:start -->\nstale\n<!-- agentstack:end -->\n\nTrailing prose.\n",
     )
     .unwrap();
+    // A package's prose arrives WITH the repository and compiles into the same
+    // managed region as a fragment the project wrote by hand, so it is gated on
+    // trust like one (`render::instructions::trust_refusal`). W3 scoping is
+    // this test's subject, not consent — grant here, after the pins above are
+    // settled, so the gate is out of the way rather than silently answered.
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
     let out = std::process::Command::new(env!("CARGO_BIN_EXE_agentstack"))
         .args(["lock", "--write", "--manifest-dir"])
         .arg(&proj)
