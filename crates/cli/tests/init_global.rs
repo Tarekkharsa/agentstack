@@ -25,6 +25,7 @@ fn args(force: bool) -> InitArgs {
         secrets: None,
         no_keychain: false,
         project_servers: false,
+        include_tool_managed: false,
         yes: false,
         consented_plan: None,
     }

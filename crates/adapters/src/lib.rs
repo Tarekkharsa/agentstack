@@ -16,7 +16,10 @@ pub use descriptor::{
     AdapterDescriptor, AdapterSource, Confirmation, Dimension, Format, LiveInstructionChannel,
     Selection,
 };
-pub use import::{extract_servers, extract_servers_with_skips, extract_settings, SkippedImport};
+pub use import::{
+    extract_servers, extract_servers_with_skips, extract_settings, tool_managed, SkippedImport,
+    ToolManaged,
+};
 pub use registry::Registry;
 pub use render::{render_server, Rendered};
 

@@ -97,6 +97,9 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
                 // `agentstack init` routes here, so hardcoding `false` made
                 // `--project-servers` a flag that parsed and then did nothing.
                 project_servers: args.project_servers,
+                // Same reasoning: the flag shapes the import, and the wizard
+                // performs the import.
+                include_tool_managed: args.include_tool_managed,
                 // The wizard's write gate lives inside `run_for_setup` (which
                 // never re-checks the TTY gate), so this field is irrelevant
                 // here.

@@ -35,6 +35,7 @@ fn init_args() -> InitArgs {
         secrets: None,
         no_keychain: true,
         project_servers: false,
+        include_tool_managed: false,
         yes: true,
         consented_plan: None,
     }

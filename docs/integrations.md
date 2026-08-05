@@ -35,6 +35,7 @@ to its older wording; it never guesses:
 | Panel capability | Contract | In this build |
 | --- | --- | --- |
 | Setup — render the plan, apply it | `init-plan`, `apply-setup` | yes |
+| Setup — servers another app owns, left out and named | `init-tool-managed-v1` | yes |
 | Status — one state, one next action | `status-v1`, `doctor-advisories-v1` | yes |
 | Status — `state` honest over unverified coverage | `status-honesty-v1` | yes |
 | Status — a consent something is actually waiting on | `needs-your-yes-v1` | yes |

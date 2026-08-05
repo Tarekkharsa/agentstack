@@ -49,6 +49,7 @@ fn restore_undoes_manifest_env_and_gitignore_from_one_init() {
             secrets: Some(SecretStore::Env),
             no_keychain: false,
             project_servers: false,
+            include_tool_managed: false,
             yes: true,
             consented_plan: None,
         },
@@ -250,6 +251,7 @@ fn library_first_args() -> InitArgs {
         secrets: Some(SecretStore::Env),
         no_keychain: true,
         project_servers: false,
+        include_tool_managed: false,
         yes: true,
         consented_plan: None,
     }

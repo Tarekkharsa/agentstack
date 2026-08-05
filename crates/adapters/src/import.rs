@@ -173,6 +173,263 @@ pub fn extract_servers_with_skips(
     (out, skipped)
 }
 
+/// An imported server whose executable path lies inside another application's
+/// bundle — the application that installed it owns the entry and rewrites it
+/// on its own schedule.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolManaged {
+    /// The bundle's name without its `.app` suffix, exactly as it appears on
+    /// the path (`ChatGPT`). Display only: it is a directory name, never a
+    /// verified publisher identity.
+    pub application: String,
+    /// The path the rule matched, verbatim — the evidence behind the reading,
+    /// so a user can check it rather than take the classification on faith.
+    pub evidence: String,
+}
+
+/// Bounds on the wrapper parse below. Every value here comes from another
+/// tool's config file, which is hostile input: the parse costs a fixed amount
+/// of work, and anything past a bound is simply not classified — which, given
+/// the bias stated in [`tool_managed`], means it imports.
+const MAX_PATH_BYTES: usize = 4096;
+const MAX_SCRIPT_BYTES: usize = 4096;
+const MAX_SCRIPT_WORDS: usize = 256;
+
+/// Classify an imported server as TOOL-MANAGED — installed, owned and updated
+/// by another desktop application rather than chosen by this user — from its
+/// command line alone.
+///
+/// # The rule
+///
+/// One of these paths must lie inside an application bundle:
+///
+/// - the `command` itself; or
+/// - for a POSIX shell wrapper (`sh`/`bash`/`zsh`/`dash`/`ksh` invoked with
+///   `-c`), the *command words* of the script it carries — the script's first
+///   word, the word after each `&&`, `||`, `;` or `|`, and the word after
+///   `exec`.
+///
+/// A path lies inside a bundle when one of its components ends in `.app`
+/// (case-insensitively, and is more than that suffix), that component is not
+/// the last one, and either the next component is `Contents` or the path
+/// starts with `/Applications/` or `~/Applications/` (literal or expanded).
+///
+/// # Limits — read these before trusting the answer
+///
+/// **This is a heuristic over path TEXT, not a claim of provenance.** Nothing
+/// here executes, resolves, stats, follows or verifies anything: no `PATH`
+/// lookup, no symlink resolution, no variable expansion, no code signature. It
+/// does not know who published a binary, who signed it, or who will update it.
+/// It knows that a string looks like a path into a `.app` bundle.
+///
+/// So it misses, by construction: a bundle reached through `$VAR`, through a
+/// symlink, through a bare name found on `PATH`, or through a `cwd` plus a
+/// relative `command` (`cwd` is not consulted). It reads only the *program*
+/// being launched, so `node /Applications/Foo.app/…/server.js` reads as the
+/// user's — the bundle path there is data handed to `node`. A wrapper written
+/// for a shell this does not know, or past the bounds above, reads as the
+/// user's too.
+///
+/// The bias is deliberate and one-directional: **an uncertain answer is the
+/// user's server.** A wrong "tool-managed" silently loses something someone
+/// chose; a wrong "user's" is only the behaviour that shipped before this
+/// existed.
+pub fn tool_managed(server: &Server) -> Option<ToolManaged> {
+    let command = server.command.as_deref()?;
+    if let Some(found) = in_app_bundle(command) {
+        return Some(found);
+    }
+    shell_wrapper_programs(command, &server.args)
+        .iter()
+        .find_map(|word| in_app_bundle(word))
+}
+
+/// The bundle test itself. Returns the owning bundle's name and the matched
+/// path when `path` points inside an application bundle.
+fn in_app_bundle(path: &str) -> Option<ToolManaged> {
+    if path.len() > MAX_PATH_BYTES {
+        return None;
+    }
+    let under_applications = under_applications_dir(path);
+    let parts: Vec<&str> = path.split('/').collect();
+    for (i, part) in parts.iter().enumerate() {
+        let Some(stem) = bundle_stem(part) else {
+            continue;
+        };
+        // A `.app` component must be a DIRECTORY on the way to the executable.
+        // A file literally named `Foo.app` IS the program, not a bundle around
+        // one, and `/home/x/my.app.js` never reaches here at all — its last
+        // component ends in `.js`.
+        if i + 1 >= parts.len() {
+            continue;
+        }
+        if parts[i + 1] == "Contents" || under_applications {
+            return Some(ToolManaged {
+                application: stem.to_string(),
+                evidence: path.to_string(),
+            });
+        }
+    }
+    None
+}
+
+/// `Foo.app` → `Foo`. Case-insensitive because the macOS filesystem is, and
+/// `.app` alone is a hidden file, not a bundle.
+fn bundle_stem(component: &str) -> Option<&str> {
+    let cut = component.len().checked_sub(4)?;
+    // `.app` is ASCII, but `component` need not be: never slice mid-character.
+    if !component.is_char_boundary(cut) || !component[cut..].eq_ignore_ascii_case(".app") {
+        return None;
+    }
+    let stem = &component[..cut];
+    (!stem.is_empty()).then_some(stem)
+}
+
+/// Whether `path` starts in one of the two directories macOS installs
+/// applications into. `~` is honoured both unexpanded (as configs often write
+/// it) and expanded against `HOME`.
+fn under_applications_dir(path: &str) -> bool {
+    const SUFFIX: &str = "/Applications/";
+    if path.starts_with(SUFFIX) || path.starts_with("~/Applications/") {
+        return true;
+    }
+    std::env::var("HOME").is_ok_and(|home| {
+        let home = home.trim_end_matches('/');
+        !home.is_empty()
+            && path
+                .strip_prefix(home)
+                .is_some_and(|rest| rest.starts_with(SUFFIX))
+    })
+}
+
+/// For a `sh -c "…"` wrapper, the words the script would run as PROGRAMS.
+/// Empty for anything that is not such a wrapper.
+fn shell_wrapper_programs(command: &str, args: &[String]) -> Vec<String> {
+    let base = command.rsplit('/').next().unwrap_or(command);
+    if !matches!(base, "sh" | "bash" | "zsh" | "dash" | "ksh") {
+        return Vec::new();
+    }
+    // The script is the argument straight after the first bare `-c`.
+    let Some(script) = args
+        .iter()
+        .position(|a| a == "-c")
+        .and_then(|i| args.get(i + 1))
+    else {
+        return Vec::new();
+    };
+    if script.len() > MAX_SCRIPT_BYTES {
+        return Vec::new();
+    }
+    program_words(&split_script(script))
+}
+
+/// One word of a `-c` script, and whether it is a command separator.
+struct ScriptWord {
+    text: String,
+    separator: bool,
+}
+
+/// Split a `-c` script the way a shell SEPARATES words — whitespace, single
+/// quotes, double quotes, backslash escapes — and nothing else.
+///
+/// This is deliberately not a shell. There is no variable expansion, no
+/// command substitution, no globbing, no `eval`, and nothing is run: an
+/// unexpanded `$VAR` stays the literal text `$VAR`, which then simply fails to
+/// match a bundle path. `&&`, `||`, `;` and `|` come back as separator words
+/// so the caller can tell where one command ends and the next begins; a
+/// quoted `';'` does not, because it is an argument.
+fn split_script(script: &str) -> Vec<ScriptWord> {
+    fn flush(cur: &mut String, quoted: &mut bool, out: &mut Vec<ScriptWord>) {
+        if !cur.is_empty() || *quoted {
+            out.push(ScriptWord {
+                text: std::mem::take(cur),
+                separator: false,
+            });
+        }
+        *quoted = false;
+    }
+
+    let mut out: Vec<ScriptWord> = Vec::new();
+    let mut cur = String::new();
+    // Tracks "this word carried quotes", so an empty `''` still becomes a word.
+    let mut quoted = false;
+    let mut chars = script.chars().peekable();
+    while let Some(c) = chars.next() {
+        if out.len() >= MAX_SCRIPT_WORDS {
+            return out;
+        }
+        match c {
+            '\'' => {
+                quoted = true;
+                for q in chars.by_ref() {
+                    if q == '\'' {
+                        break;
+                    }
+                    cur.push(q);
+                }
+            }
+            '"' => {
+                quoted = true;
+                while let Some(q) = chars.next() {
+                    match q {
+                        '"' => break,
+                        '\\' => {
+                            if let Some(escaped) = chars.next() {
+                                cur.push(escaped);
+                            }
+                        }
+                        _ => cur.push(q),
+                    }
+                }
+            }
+            '\\' => {
+                if let Some(escaped) = chars.next() {
+                    cur.push(escaped);
+                }
+            }
+            c if c.is_whitespace() => flush(&mut cur, &mut quoted, &mut out),
+            '&' | '|' | ';' => {
+                flush(&mut cur, &mut quoted, &mut out);
+                let mut op = String::from(c);
+                while chars.peek() == Some(&c) {
+                    op.push(c);
+                    chars.next();
+                }
+                out.push(ScriptWord {
+                    text: op,
+                    separator: true,
+                });
+            }
+            _ => cur.push(c),
+        }
+    }
+    flush(&mut cur, &mut quoted, &mut out);
+    out.truncate(MAX_SCRIPT_WORDS);
+    out
+}
+
+/// The words a shell would run as programs: the first, every word after a
+/// separator, and the word after `exec`. Arguments are skipped on purpose —
+/// `echo /Applications/Foo.app/Contents/x` must not read as launching it.
+fn program_words(words: &[ScriptWord]) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut expect_program = true;
+    for word in words {
+        if word.separator {
+            expect_program = true;
+            continue;
+        }
+        if expect_program {
+            out.push(word.text.clone());
+            // `exec PROGRAM` still leads to a program word. Only `exec` is
+            // honoured: every extra prefix (`env`, `nice`, …) widens the rule
+            // in the direction that loses a user's server.
+            expect_program = word.text == "exec";
+        }
+    }
+    out
+}
+
 /// Determine transport: prefer an explicit tag (Claude's `type`), else infer
 /// from which fields are present.
 fn infer_type(
@@ -348,6 +605,129 @@ mod tests {
         assert!(not_a_table.reason.contains("not a table"));
         // The wrapper keeps its original shape for existing callers.
         assert_eq!(extract_servers(desc, &root).len(), 1);
+    }
+
+    /// Build a stdio server from a command line, the way an imported entry
+    /// arrives.
+    fn stdio(command: &str, args: &[&str]) -> Server {
+        serde_json::from_value(json!({
+            "type": "stdio",
+            "command": command,
+            "args": args,
+        }))
+        .expect("valid server literal")
+    }
+
+    /// The two entries that motivated the classifier, copied from real global
+    /// configs on a machine with the ChatGPT and Codex desktop apps installed.
+    /// Both are owned by the application that installed them.
+    #[test]
+    fn the_real_desktop_app_servers_read_as_tool_managed() {
+        let node_repl = stdio(
+            "/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl",
+            &[],
+        );
+        let found = tool_managed(&node_repl).expect("a plain bundle path is tool-managed");
+        assert_eq!(found.application, "ChatGPT");
+        assert!(found.evidence.contains("ChatGPT.app"), "{found:?}");
+
+        // The wrapper case: the executable is inside a quoted `-c` script, and
+        // the bundle sits behind a RELATIVE path. Nothing is executed to find
+        // it — the script is split, never run.
+        let computer_use = stdio(
+            "sh",
+            &[
+                "-c",
+                "cd '.' && exec './Codex Computer Use.app/Contents/SharedSupport/\
+                 SkyComputerUseClient.app/Contents/MacOS/SkyComputerUseClient' 'mcp'",
+            ],
+        );
+        let found = tool_managed(&computer_use).expect("a wrapped bundle path is tool-managed");
+        // The OUTERMOST bundle on the path is the owner.
+        assert_eq!(found.application, "Codex Computer Use");
+    }
+
+    /// The bias: anything the rule is not sure about is the USER'S server. A
+    /// wrong "tool-managed" loses a server someone chose, so every one of
+    /// these must import.
+    #[test]
+    fn ordinary_commands_read_as_the_users_own() {
+        for server in [
+            stdio("npx", &["-y", "some-server"]),
+            stdio("/usr/local/bin/foo", &[]),
+            stdio("node", &["./scripts/local.js"]),
+            // ".app" as a SUBSTRING of a file name is not a bundle.
+            stdio("/home/x/my.app.js", &[]),
+            stdio("node", &["/home/x/my.app.js"]),
+            // A bundle path handed to another program as DATA: `node` is what
+            // runs, so this is the user's choice of interpreter.
+            stdio("node", &["/Applications/Foo.app/Contents/Resources/s.js"]),
+            // A bundle path echoed inside a wrapper is an argument, not a
+            // program word.
+            stdio(
+                "sh",
+                &["-c", "echo '/Applications/Foo.app/Contents/MacOS/Foo'"],
+            ),
+            // A shell wrapper with no `-c` script to read.
+            stdio("sh", &["/Applications/Foo.app/Contents/MacOS/run.sh"]),
+        ] {
+            assert_eq!(
+                tool_managed(&server),
+                None,
+                "must import: {:?} {:?}",
+                server.command,
+                server.args
+            );
+        }
+    }
+
+    /// An http server has no executable to place, and a bare `.app` component
+    /// or a trailing one is not a bundle a program lives inside.
+    #[test]
+    fn shapes_with_no_bundle_executable_read_as_the_users_own() {
+        let http: Server = serde_json::from_value(json!({
+            "type": "http",
+            "url": "https://mcp.example.com/mcp",
+        }))
+        .expect("valid server literal");
+        assert_eq!(tool_managed(&http), None);
+        // `Foo.app` as the LAST component is the program itself, not a bundle.
+        assert_eq!(tool_managed(&stdio("/opt/tools/Foo.app", &[])), None);
+        // `.app` with an empty stem is a hidden file.
+        assert_eq!(tool_managed(&stdio("/opt/.app/Contents/x", &[])), None);
+    }
+
+    /// `/Applications` and `~/Applications` are bundle roots on their own, so a
+    /// layout that does not use `Contents` still reads as tool-managed.
+    #[test]
+    fn the_applications_directories_are_bundle_roots() {
+        let found = tool_managed(&stdio("/Applications/Weird.app/bin/server", &[]))
+            .expect("under /Applications");
+        assert_eq!(found.application, "Weird");
+        let found = tool_managed(&stdio("~/Applications/Weird.app/bin/server", &[]))
+            .expect("under ~/Applications");
+        assert_eq!(found.application, "Weird");
+    }
+
+    /// Hostile input, bounded: a pathological `-c` script costs a fixed amount
+    /// of work and, past the bound, is not classified at all — which imports
+    /// it, the safe direction.
+    #[test]
+    fn an_oversized_wrapper_script_is_not_classified() {
+        let script = format!(
+            "exec '/Applications/Foo.app/Contents/MacOS/Foo'{}",
+            " x".repeat(MAX_SCRIPT_BYTES)
+        );
+        assert_eq!(tool_managed(&stdio("sh", &["-c", &script])), None);
+        // An unterminated quote must terminate the parse, not loop it.
+        assert_eq!(
+            tool_managed(&stdio(
+                "sh",
+                &["-c", "exec '/Applications/Foo.app/Contents/MacOS/Foo"]
+            ))
+            .map(|f| f.application),
+            Some("Foo".to_string())
+        );
     }
 
     #[test]
