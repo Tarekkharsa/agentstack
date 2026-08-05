@@ -264,31 +264,47 @@
 <h2 id="t3code">t3code<a class="hlink" href="#t3code" aria-label="Link to this section">#</a></h2>
 <p>t3code is AgentStack's optional graphical companion. The obtainable AgentStack CLI is the launch channel; as of v0.17.0 the integrated t3code fork has no public download, so this page documents the compatibility contract for source users rather than presenting an unavailable app as the way to begin. When a packaged t3code build becomes public, it can make AgentStack useful where people already start and supervise coding agents without becoming a second authority system.</p>
 <h3 id="the-released-cli-serves-the-whole-panel">The released CLI serves the whole panel<a class="hlink" href="#the-released-cli-serves-the-whole-panel" aria-label="Link to this section">#</a></h3>
-<p>The half that is public — the CLI — is already complete for this integration. The panel gates each of its features on a contract the CLI advertises, and the <strong>published <code>v0.17.0</code> release serves every affordance the panel gates a button on</strong>, so a source-built t3code needs no locally-built AgentStack behind it. The two <code>no</code> rows sharpen wording only (typed fields replacing prose inference), and the panel degrades to its older wording where they are absent:</p>
+<p>The half that is public — the CLI — is already complete for this integration. The panel gates each of its features on a contract the CLI advertises, and the <strong>published <code>v0.17.0</code> release serves every affordance the panel gates a button on</strong>, so a source-built t3code needs no locally-built AgentStack behind it. The table below is what <strong>this build</strong> advertises in <code>FEATURES</code>. A panel negotiating against an older release does not see the newer names and degrades to its older wording; it never guesses:</p>
 <div class="tblwrap"><table>
-<thead><tr><th>Panel capability</th><th>Contract</th><th>In released v0.17.0</th></tr></thead><tbody>
+<thead><tr><th>Panel capability</th><th>Contract</th><th>In this build</th></tr></thead><tbody>
 <tr><td>Setup — render the plan, apply it</td><td><code>init-plan</code>, <code>apply-setup</code></td><td>yes</td></tr>
 <tr><td>Status — one state, one next action</td><td><code>status-v1</code>, <code>doctor-advisories-v1</code></td><td>yes</td></tr>
-<tr><td>Status — <code>state</code> honest over unverified coverage</td><td><code>status-honesty-v1</code></td><td>no — next release</td></tr>
+<tr><td>Status — <code>state</code> honest over unverified coverage</td><td><code>status-honesty-v1</code></td><td>yes</td></tr>
+<tr><td>Status — a consent something is actually waiting on</td><td><code>needs-your-yes-v1</code></td><td>yes</td></tr>
+<tr><td>Status — pinned packs with a newer tag already fetched</td><td><code>update-offer-v1</code></td><td>yes</td></tr>
+<tr><td>Status — the effective members of each pinned package</td><td><code>package-members-v1</code></td><td>yes</td></tr>
+<tr><td>Status — names more than one linked library source holds</td><td><code>library-sources-v1</code></td><td>yes</td></tr>
+<tr><td>Status — where house rules reach each targeted CLI</td><td><code>instruction-channels-v1</code></td><td>yes</td></tr>
 <tr><td>Undo — revert this project's last write</td><td><code>restore-last</code></td><td>yes</td></tr>
 <tr><td>Toolsets — browse, create, add, activate</td><td><code>profiles-v1</code>, <code>profiles-edit-v1</code>, <code>toolset-create-v2</code></td><td>yes</td></tr>
 <tr><td>Toolsets — edit membership, rename, delete</td><td><code>profiles-edit-batch-v1</code>, <code>toolset-rename-v1</code>, <code>toolset-delete-v1</code></td><td>yes</td></tr>
 <tr><td>Use temporarily</td><td><code>sessions-v1</code></td><td>yes</td></tr>
 <tr><td>Review this project</td><td><code>trust-preview</code>, <code>trust-server-blockers-v1</code>, <code>trust-consent</code></td><td>yes</td></tr>
-<tr><td>Review this project — per-item consent card + re-gate diff</td><td><code>trust-review-card-v1</code></td><td>no — next release</td></tr>
+<tr><td>Review this project — per-item consent card + re-gate diff</td><td><code>trust-review-card-v1</code></td><td>yes</td></tr>
+<tr><td>Review this project — the consent card itself, structured</td><td><code>trust-card-diff-v1</code></td><td>yes</td></tr>
+<tr><td>Review this project — the card body grouped, one closing question</td><td><code>trust-card-groups-v1</code></td><td>yes</td></tr>
+<tr><td>Review this project — content edited away from its pin</td><td><code>trust-content-drift-v1</code></td><td>yes</td></tr>
 <tr><td>Drift review</td><td><code>diff-v1</code>, <code>diff-ownership-v1</code></td><td>yes</td></tr>
+<tr><td>Drift review — first render vs moved-ahead</td><td><code>diff-existence-v1</code></td><td>yes</td></tr>
+<tr><td>Drift review — a render the live lane left behind</td><td><code>abandoned-render-v1</code></td><td>yes</td></tr>
 <tr><td>Library remove</td><td><code>library-remove-v1</code></td><td>yes</td></tr>
 <tr><td>Project server/skill remove</td><td><code>manifest-remove-v1</code></td><td>yes</td></tr>
 <tr><td>Workflow monitor (read-only)</td><td><code>workflow-observe-v1</code></td><td>yes</td></tr>
 <tr><td>Serial-role scheduling warning</td><td><code>workflow-serial-roles-v1</code></td><td>yes</td></tr>
+<tr><td>Workflow monitor — per-role model and effort</td><td><code>workflow-role-selection-v1</code></td><td>yes</td></tr>
+<tr><td>Activity feed — on-demand skill loads beside calls</td><td><code>activity-skill-load-v1</code></td><td>yes</td></tr>
+<tr><td>Runtime leases — one row each, with derived liveness</td><td><code>lease-status-v1</code></td><td>yes</td></tr>
+<tr><td>Delivery routing — the lane per capability kind</td><td><code>delivery-routing-v1</code></td><td>yes</td></tr>
+<tr><td>Image plan — one toolset's packaging plan</td><td><code>image-plan-v1</code></td><td>yes</td></tr>
 <tr><td>Startup test — actually start the servers</td><td><code>doctor-probe-v1</code></td><td>yes</td></tr>
-<tr><td>Status — typed delivery mode + activation</td><td><code>doctor-mode-v1</code></td><td>no — next release</td></tr>
-<tr><td>Drift review — first render vs moved-ahead</td><td><code>diff-existence-v1</code></td><td>no — next release</td></tr>
-<tr><td>Gitignore opt-out (durable, previewed)</td><td><code>gitignore-opt-out-v1</code></td><td>no — next release</td></tr>
+<tr><td>Status — typed delivery mode + activation</td><td><code>doctor-mode-v1</code></td><td>yes</td></tr>
+<tr><td>Gitignore opt-out (durable, previewed)</td><td><code>gitignore-opt-out-v1</code></td><td>yes</td></tr>
 <tr><td>Delivery-mode switch</td><td><code>set-mode-v1</code> — superseded</td><td>retired; do not build a mode picker</td></tr>
-<tr><td>Footer CLI count / live-delivery coverage</td><td><code>doctor-cli-coverage-v1</code></td><td>no — next release</td></tr>
+<tr><td>Footer CLI count / live-delivery coverage</td><td><code>doctor-cli-coverage-v1</code></td><td>yes</td></tr>
 </tbody></table></div>
+<p>Sixteen of those names post-date the published <code>v0.17.1</code>: <code>status-honesty-v1</code>, <code>needs-your-yes-v1</code>, <code>update-offer-v1</code>, <code>package-members-v1</code>, <code>library-sources-v1</code>, <code>instruction-channels-v1</code>, <code>trust-review-card-v1</code>, <code>trust-card-diff-v1</code>, <code>trust-card-groups-v1</code>, <code>trust-content-drift-v1</code>, <code>abandoned-render-v1</code>, <code>workflow-role-selection-v1</code>, <code>activity-skill-load-v1</code>, <code>lease-status-v1</code>, <code>delivery-routing-v1</code> and <code>image-plan-v1</code>. A panel negotiating against that release sees none of them.</p>
 <p>One name in <code>FEATURES</code> is deliberately absent from this table. <code>json-reads-v1</code> names the <code>--json</code> form of <code>status</code>, <code>search</code>, <code>adapters list</code> and <code>session list</code> — an integrator contract for callers that scrape those screens, which the panel does not use because it reads the richer payloads directly. Every other name appears above; <code>profiles-edit-v1</code> covers the digest-bound add verbs and is listed with the toolset rows.</p>
+<p>The table is checked against <code>FEATURES</code> by <code>crates/cli/src/ui_contract.rs::tests::every_served_contract_is_documented</code>, so a contract added to the binary without a row here fails the build rather than reaching an integrator as a name nobody wrote down.</p>
 <p>Check any build yourself — the envelope is part of the read:</p>
 <pre class="block"><code>agentstack doctor --json | jq '{schema_version, features}'</code></pre>
 <p>A panel feature whose contract is absent disables that action with upgrade guidance; it never guesses or degrades silently.</p>

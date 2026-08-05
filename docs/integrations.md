@@ -28,31 +28,54 @@ The half that is public — the CLI — is already complete for this integration
 The panel gates each of its features on a contract the CLI advertises, and the
 **published `v0.17.0` release serves every affordance the panel gates a button
 on**, so a source-built t3code needs no locally-built AgentStack behind it.
-The two `no` rows sharpen wording only (typed fields replacing prose
-inference), and the panel degrades to its older wording where they are absent:
+The table below is what **this build** advertises in `FEATURES`. A panel
+negotiating against an older release does not see the newer names and degrades
+to its older wording; it never guesses:
 
-| Panel capability | Contract | In released v0.17.0 |
+| Panel capability | Contract | In this build |
 | --- | --- | --- |
 | Setup — render the plan, apply it | `init-plan`, `apply-setup` | yes |
 | Status — one state, one next action | `status-v1`, `doctor-advisories-v1` | yes |
-| Status — `state` honest over unverified coverage | `status-honesty-v1` | no — next release |
+| Status — `state` honest over unverified coverage | `status-honesty-v1` | yes |
+| Status — a consent something is actually waiting on | `needs-your-yes-v1` | yes |
+| Status — pinned packs with a newer tag already fetched | `update-offer-v1` | yes |
+| Status — the effective members of each pinned package | `package-members-v1` | yes |
+| Status — names more than one linked library source holds | `library-sources-v1` | yes |
+| Status — where house rules reach each targeted CLI | `instruction-channels-v1` | yes |
 | Undo — revert this project's last write | `restore-last` | yes |
 | Toolsets — browse, create, add, activate | `profiles-v1`, `profiles-edit-v1`, `toolset-create-v2` | yes |
 | Toolsets — edit membership, rename, delete | `profiles-edit-batch-v1`, `toolset-rename-v1`, `toolset-delete-v1` | yes |
 | Use temporarily | `sessions-v1` | yes |
 | Review this project | `trust-preview`, `trust-server-blockers-v1`, `trust-consent` | yes |
-| Review this project — per-item consent card + re-gate diff | `trust-review-card-v1` | no — next release |
+| Review this project — per-item consent card + re-gate diff | `trust-review-card-v1` | yes |
+| Review this project — the consent card itself, structured | `trust-card-diff-v1` | yes |
+| Review this project — the card body grouped, one closing question | `trust-card-groups-v1` | yes |
+| Review this project — content edited away from its pin | `trust-content-drift-v1` | yes |
 | Drift review | `diff-v1`, `diff-ownership-v1` | yes |
+| Drift review — first render vs moved-ahead | `diff-existence-v1` | yes |
+| Drift review — a render the live lane left behind | `abandoned-render-v1` | yes |
 | Library remove | `library-remove-v1` | yes |
 | Project server/skill remove | `manifest-remove-v1` | yes |
 | Workflow monitor (read-only) | `workflow-observe-v1` | yes |
 | Serial-role scheduling warning | `workflow-serial-roles-v1` | yes |
+| Workflow monitor — per-role model and effort | `workflow-role-selection-v1` | yes |
+| Activity feed — on-demand skill loads beside calls | `activity-skill-load-v1` | yes |
+| Runtime leases — one row each, with derived liveness | `lease-status-v1` | yes |
+| Delivery routing — the lane per capability kind | `delivery-routing-v1` | yes |
+| Image plan — one toolset's packaging plan | `image-plan-v1` | yes |
 | Startup test — actually start the servers | `doctor-probe-v1` | yes |
-| Status — typed delivery mode + activation | `doctor-mode-v1` | no — next release |
-| Drift review — first render vs moved-ahead | `diff-existence-v1` | no — next release |
-| Gitignore opt-out (durable, previewed) | `gitignore-opt-out-v1` | no — next release |
+| Status — typed delivery mode + activation | `doctor-mode-v1` | yes |
+| Gitignore opt-out (durable, previewed) | `gitignore-opt-out-v1` | yes |
 | Delivery-mode switch | `set-mode-v1` — superseded | retired; do not build a mode picker |
-| Footer CLI count / live-delivery coverage | `doctor-cli-coverage-v1` | no — next release |
+| Footer CLI count / live-delivery coverage | `doctor-cli-coverage-v1` | yes |
+
+Sixteen of those names post-date the published `v0.17.1`: `status-honesty-v1`,
+`needs-your-yes-v1`, `update-offer-v1`, `package-members-v1`,
+`library-sources-v1`, `instruction-channels-v1`, `trust-review-card-v1`,
+`trust-card-diff-v1`, `trust-card-groups-v1`, `trust-content-drift-v1`,
+`abandoned-render-v1`, `workflow-role-selection-v1`, `activity-skill-load-v1`,
+`lease-status-v1`, `delivery-routing-v1` and `image-plan-v1`. A panel
+negotiating against that release sees none of them.
 
 One name in `FEATURES` is deliberately absent from this table.
 `json-reads-v1` names the `--json` form of `status`, `search`, `adapters list`
@@ -60,6 +83,11 @@ and `session list` — an integrator contract for callers that scrape those
 screens, which the panel does not use because it reads the richer payloads
 directly. Every other name appears above; `profiles-edit-v1` covers the
 digest-bound add verbs and is listed with the toolset rows.
+
+The table is checked against `FEATURES` by
+`crates/cli/src/ui_contract.rs::tests::every_served_contract_is_documented`,
+so a contract added to the binary without a row here fails the build rather
+than reaching an integrator as a name nobody wrote down.
 
 Check any build yourself — the envelope is part of the read:
 
