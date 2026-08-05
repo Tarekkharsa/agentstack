@@ -246,6 +246,11 @@ mkdir -p .agentstack
 printf 'version = 1\n[instructions.team]\npath = "./team.md"\n[targets]\ndefault = ["claude-code"]\n' > .agentstack/agentstack.toml
 render_locally   # this fixture asserts on rendered files
 printf 'Team rules from agentstack.\n' > .agentstack/team.md
+# The fragment is the repo's words, and they land in the managed region a
+# harness reads straight into an agent's context — so they wait for a yes like
+# every other kind. Last, because the lock pins the fragment and the lock is
+# part of what is consented to.
+consent
 "$AS" apply --scope project --write >/dev/null 2>&1
 grep -q "my-hand-server" .mcp.json && ok "hand-written server survived apply" || bad "hand server gone"
 grep -q "Hand-written intro prose" CLAUDE.md && ok "hand prose survived" || bad "prose clobbered"
