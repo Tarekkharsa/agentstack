@@ -315,26 +315,53 @@ fn resolve_inputs(ctx: &Context, profile: Option<&str>) -> Result<LockedInputs> 
     // were restored to the approved ones passes every drift check — the
     // human's refusal is not a drift check. Locked runs are the strictest
     // path in the product, so a blocked item refuses the run loudly rather
-    // than being silently excluded from the grant. (Keep-pinned needs no
-    // arm here: drifted keep-pinned content already fails strict
-    // verification, and matching content IS the approved bytes.)
+    // than being silently excluded from the grant.
+    //
+    // G11 — keep-pinned needs no SAFETY arm here, and deliberately does not
+    // get one. Unlike `use`, `skill_load` and the instruction compiler, this
+    // path never reads the content snapshot at all: the grant binds the LIVE
+    // resolution, so the snapshot's health cannot change what a locked run
+    // delivers, and a check on it would be a refusal reason with no safety
+    // behind it. What holds the line instead is the lock: keep-pinned leaves
+    // the pin on the APPROVED bytes while the project copy is the declined
+    // ones, so strict verification below already refuses every drifted
+    // keep-pinned item, snapshot or no snapshot.
+    //
+    // What that generic refusal got WRONG is the remedy. It reports plain
+    // drift and sends the user to `agentstack lock --write` — which will not
+    // move a decided pin, by design. So the refusal fires here instead,
+    // naming the standing decision and the review that can actually clear it.
+    // An item whose live bytes match its pin is untouched: those bytes ARE the
+    // approved ones, and that run still proceeds.
     let decision_base = crate::manifest::project_root_of(&ctx.dir);
     for d in crate::trust::decisions_for(&decision_base) {
-        if !matches!(d.answer, crate::trust::Decision::Blocked) {
-            continue;
-        }
         let held = match d.kind.as_str() {
-            "skill" => skill_statuses.iter().any(|(n, _)| *n == d.name),
-            "instruction" => instruction_statuses.iter().any(|(n, _)| *n == d.name),
-            _ => false,
+            "skill" => skill_statuses
+                .iter()
+                .find(|(n, _)| *n == d.name)
+                .map(|(_, s)| matches!(s, SkillLockStatus::Matches)),
+            "instruction" => instruction_statuses
+                .iter()
+                .find(|(n, _)| *n == d.name)
+                .map(|(_, s)| matches!(s, InstructionLockStatus::Matches)),
+            _ => None,
         };
-        if held {
-            anyhow::bail!(
+        match (&d.answer, held) {
+            (crate::trust::Decision::Blocked, Some(_)) => anyhow::bail!(
                 "refusing the locked run: {} '{}' is blocked by your standing decision — \
                  remove it from the surface or revisit with `agentstack trust`",
                 d.kind,
                 d.name
-            );
+            ),
+            (crate::trust::Decision::KeepPinned { .. }, Some(false)) => anyhow::bail!(
+                "refusing the locked run: you chose to keep the approved version of {} '{}', \
+                 but the project copy has changed. A protected run delivers the project copy, \
+                 so it cannot honour that decision — review the live content with \
+                 `agentstack trust` (`agentstack lock --write` will not move a decided pin)",
+                d.kind,
+                d.name
+            ),
+            _ => {}
         }
     }
 

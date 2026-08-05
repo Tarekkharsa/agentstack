@@ -2270,6 +2270,18 @@ fn list_loadable(dir: Option<&Path>, trust_note: Option<&str>) -> Result<String>
 const INDEX_MAX_ENTRIES: usize = 50;
 const INDEX_MAX_DESC_CHARS: usize = 160;
 
+/// What a keep-pinned skill's catalog entry says when its approved copy cannot
+/// be produced (G11). The `description` slot deliberately holds no pseudo-
+/// description: the approved frontmatter is exactly the thing that is missing,
+/// and the LIVE frontmatter is part of the change the human declined, so
+/// borrowing it would put declined bytes in the index.
+const UNAVAILABLE_PINNED_DESC: &str = "(not loadable — the approved copy is unavailable)";
+/// The machine-readable reason on the same entry, and the wording every other
+/// keep-pinned failure path uses, so one incident reads the same everywhere.
+const UNAVAILABLE_PINNED_REASON: &str =
+    "you chose to keep the approved version, but its stored copy is missing or failed \
+     verification — loading is refused until you review the live content with `agentstack trust`";
+
 /// First line of `s`, capped at `max` characters (shared impl, §A.2 #7).
 fn one_line(s: &str, max: usize) -> String {
     crate::text::one_line(s, max)
@@ -2320,7 +2332,20 @@ fn initialize_instructions(
             .and_then(Value::as_str)
             .unwrap_or("");
         let desc = one_line(desc, INDEX_MAX_DESC_CHARS);
-        if !desc.is_empty() {
+        // G11 — the index is headed "Loadable now", so an entry the loader will
+        // refuse has to say so on its own line. Without this it would render as
+        // a plain name (or, worse, fall into the "loads fine by name" branch
+        // below) under a heading that promises the opposite.
+        if entry.get("loadable").and_then(Value::as_bool) == Some(false) {
+            let why = entry
+                .get("unavailable")
+                .and_then(Value::as_str)
+                .unwrap_or("it cannot be served right now");
+            out.push_str(&format!(
+                "- {name} — NOT LOADABLE: {}\n",
+                one_line(why, INDEX_MAX_DESC_CHARS)
+            ));
+        } else if !desc.is_empty() {
             out.push_str(&format!("- {name} — {desc}\n"));
         } else if trust_note.is_none() {
             // Genuinely undescribed (on the untrusted path descriptions are
@@ -2469,6 +2494,10 @@ fn list_loadable_with_lease(
     // the live frontmatter is part of the change the human declined.
     let decision_base = crate::manifest::project_root_of(&ctx.dir);
     let decisions = crate::trust::decisions_for(&decision_base);
+    // Names listed but NOT loadable (G11): reported in the note, so the answer
+    // itself says what is wrong and what to do — an agent that only reads prose
+    // gets the same fact as one that reads `loadable: false`.
+    let mut unavailable: Vec<String> = Vec::new();
     for name in loadable_skill_names(m, &libctx.library, profile) {
         match decisions
             .iter()
@@ -2482,16 +2511,37 @@ fn list_loadable_with_lease(
                     .root()
                     .join("content")
                     .join(&hex);
-                let desc = if crate::store::verified_snapshot(&snap, &hex) {
-                    read_skill_md(&snap).0.unwrap_or_default()
-                } else {
-                    "(approved copy unavailable — review with `agentstack trust`)".to_string()
-                };
+                if crate::store::verified_snapshot(&snap, &hex) {
+                    entries.push(json!({
+                        "name": name,
+                        "description": read_skill_md(&snap).0.unwrap_or_default(),
+                        "kind": "skill",
+                        "origin": "approved-copy",
+                        "loaded": loaded.contains(&name),
+                    }));
+                    continue;
+                }
+                // G11 — the approved copy cannot be produced. This is a
+                // CATALOG, not a delivery, so the name stays: dropping it
+                // would hide that the skill exists at all, which is the same
+                // silent omission every delivery path here was hardened
+                // against. What must not stay is the OFFER — a bare entry
+                // under `loadable` reads as "call agentstack_load(name)", and
+                // that call now refuses. So the entry is demoted to an honest
+                // non-offer: `loadable: false` plus the reason and the action,
+                // machine-readable rather than hidden in prose. `skill_load`
+                // is the enforcement boundary either way (it re-verifies the
+                // snapshot and refuses); this only stops the index from
+                // advertising something the loader will not serve.
+                unavailable.push(name.clone());
                 entries.push(json!({
                     "name": name,
-                    "description": desc,
+                    "description": UNAVAILABLE_PINNED_DESC,
                     "kind": "skill",
                     "origin": "approved-copy",
+                    "loadable": false,
+                    "unavailable": UNAVAILABLE_PINNED_REASON,
+                    "action": "agentstack trust",
                     "loaded": loaded.contains(&name),
                 }));
                 continue;
@@ -2635,7 +2685,26 @@ fn list_loadable_with_lease(
     } else {
         "No active lease or native session — manifest + central-library skills are loadable (dev-open). Open an MCP lease to fence + record loads without writing native files."
     };
-    let note = loadable_note(query, &entries, default_note);
+    let mut note = loadable_note(query, &entries, default_note);
+    // Only for entries that SURVIVED the query filter — a note about something
+    // the caller cannot see in the list would be noise.
+    let shown: Vec<&String> = unavailable
+        .iter()
+        .filter(|n| entries.iter().any(|e| e["name"] == n.as_str()))
+        .collect();
+    if !shown.is_empty() {
+        note.push_str(&format!(
+            " {} listed but NOT loadable: {} — you chose to keep the approved version, and its \
+             stored copy is missing or failed verification. Loading is refused until you review \
+             the live content with `agentstack trust`.",
+            crate::commands::count(shown.len(), "skill"),
+            shown
+                .iter()
+                .map(|n| n.as_str())
+                .collect::<Vec<_>>()
+                .join(", "),
+        ));
+    }
     Ok(serde_json::to_string_pretty(&json!({
         "loadable": entries,
         "fenced": profile.is_some(),

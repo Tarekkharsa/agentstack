@@ -410,13 +410,22 @@ toolset containing it.
   exact reach, worth naming. **Shell** writes reach it on every wired CLI — a
   redirect, `rm`/`mv`/`cp`/`tee`, `sed -i` — because they arrive as commands
   and route through the same write-target check. **File-tool** writes reach it
-  only when the guard recognizes the tool name as a writer (`WRITERS`:
-  `Write`, `Edit`, `MultiEdit`, `NotebookEdit`, `write_file`, `replace`,
-  `edit_file`, `fs_write`, `create_file`, `str_replace_editor`,
-  `replace_string_in_file`, `multi_replace_string_in_file`, `apply_patch`); a
-  path-bearing tool under any other name degrades to the read path and gets
-  the deny-glob check only — the safe default, chosen so an unfamiliar tool
-  name cannot wedge a harness. Cursor is confined for shell writes and for
+  on two signals. The tool NAME is the floor (`WRITERS`: `Write`, `Edit`,
+  `MultiEdit`, `NotebookEdit`, `write_file`, `replace`, `edit_file`,
+  `fs_write`, `create_file`, `str_replace_editor`, `replace_string_in_file`,
+  `multi_replace_string_in_file`, `apply_patch`) — every name on it is a
+  write, as before. Beyond the list the PAYLOAD decides, so a tool this build
+  has never heard of is still confined when its call plainly intends a write:
+  an edit structure (`old_string`/`new_string`, a patch, a list of edits), an
+  explicit write mode or an `append`/`overwrite`/`create` flag, a body of
+  content for the file it names, or an editor verb (`create`, `str_replace`,
+  `insert`) in `command`. Key spellings are matched normalized, so the snake,
+  camel and Pascal dialects all land. The residual is real and named: a write
+  whose call carries none of those signals — a path and nothing else, or
+  content passed by handle — still degrades to the read path and gets the
+  deny-glob check only, and a path under a field name the guard does not read
+  is not judged at all. That degradation stays the safe default, chosen so an
+  unfamiliar tool cannot wedge a harness. Cursor is confined for shell writes and for
   nothing else: its surface offers no pre-write file hook, so the installer
   wires only `beforeShellExecution` and `beforeReadFile` and no Cursor file
   write is ever presented for a decision. `[guard.project_roots]`
@@ -503,7 +512,7 @@ Which is which, per denial family:
 |---|---|---|---|
 | Gateway tool block | **enforced** (gateway/sandbox/lockdown) | yes | `calls.jsonl` + run `events.jsonl` (`ToolCall`, `outcome: denied`) |
 | Egress refusal — sandbox proxy | **enforced** under `--lockdown`, `coarse`/proxied under plain `--sandbox` | yes | run `events.jsonl` (`Egress`, `allowed: false`) |
-| Egress refusal — host path | **coarse** — a write-time check on the declared host, not a wire-level fence | the gateway-build one only | `calls.jsonl` (`tool: egress`) + run `events.jsonl` (`Egress`) when inside a run. The refusal raised while *rendering* config (`apply` / `use` / `doctor`) is printed and discarded — no line, no event |
+| Egress refusal — host path | **coarse** — a write-time check on the declared host, not a wire-level fence | yes, both halves — the render-time one **new in G9** | `calls.jsonl` (`tool: egress`) + run `events.jsonl` (`Egress`) when inside a run, for the gateway-build refusal and the one raised while *rendering* config (`apply` / `use` / `doctor`) alike. The render-time record names the server and the declared HOST, never the URL |
 | Secret-scope refusal | **enforced** — the ref reaches no backing store | yes, **new in Phase 3** | `calls.jsonl` (`tool: secret`) + run `events.jsonl` (`SecretDenied`) |
 | Filesystem guard | **cooperative** — the harness chose to ask | yes | `calls.jsonl` (`server: host-guard`, `run: None`) |
 | Content-pin refusal | **enforced** — the server is dropped before it is spawned or dialled | yes, **new in Phase 4** | `calls.jsonl` (`tool: pin`) + run `events.jsonl` (`PinRejected`) |
@@ -579,24 +588,28 @@ Phase 4 row: `Gateway::build` drops exactly the servers it dropped before, and
 `refuse` still returns `()`. The host-path egress row in
 particular stays `coarse` — recording a write-time decision does not make it a
 runtime fence, and reading this table as though it did is the exact error the
-paragraph above exists to prevent. Its render-time half is the reverse
-reminder: a refusal with no record is still a refusal.
+paragraph above exists to prevent. G9 gave its render-time half the same two
+destinations, on the same seam and with the same discipline: still `coarse`,
+still fail-closed, and still only evidence that the check ran.
 
 - **host — unsupported for MCP tool calls.** Native host-mode runs never call
   `calllog::record` for tool traffic because the harness talks to upstream MCP
   servers directly, bypassing AgentStack entirely. Audit of *calls* happens only
   if the harness is separately configured to route via the gateway (`agentstack
-  mcp`). Since Phase 3 the host path does record *some* of its own
-  **refusals** — secret-scope denials, and the egress refusal raised while the
-  gateway is being built — which is why this cell is `unsupported` for the
+  mcp`). Since Phase 3 the host path does record its own
+  **refusals** — secret-scope denials, the egress refusal raised while the
+  gateway is being built, and, since G9, the write-time egress refusal raised
+  while *rendering* config — which is why this cell is `unsupported` for the
   dimension (what the agent did) while those denials are nonetheless
-  retrievable (what agentstack refused). One host-path refusal is not
-  retrievable, and the table above says so: the write-time egress check in
-  `render::apply` pushes a reason string that `apply`, `use`, and `doctor`
-  print as "blocked by policy" and then drop. Nothing under
-  `crates/cli/src/render/` calls the seatbelt at all, so the refusal that most
-  users actually meet leaves no line in `calls.jsonl` and no run event. It
-  still refuses — the write does not happen — it is simply not written down.
+  retrievable (what agentstack refused). The render-time one is the refusal
+  most users actually meet: `render::apply` still pushes the reason string
+  that `apply`, `use`, and `doctor` print as "blocked by policy", and now also
+  files it through the same seatbelt recorders the gateway uses — the
+  `calls.jsonl` line (`tool: egress`) and the `RunEvent::Egress` mirror. The
+  record carries the server and the declared HOST, never the URL, because a
+  declared URL can carry a credential in its userinfo, path, or query.
+  Recording never gates it: an unwritable log loses the evidence, never the
+  refusal.
   (`crates/cli/src/runs.rs`, `crates/cli/src/seatbelt.rs`,
   `crates/cli/src/gateway.rs`, `crates/cli/src/render/apply.rs`)
 - **gateway — enforced.** `Gateway::try_call` logs every outcome (denied / ok /
@@ -1136,14 +1149,19 @@ review of identical content gets shorter.
   not. Standing decisions are read on five delivery paths — skill
   materialization under `use --write`, the MCP loadable-skill catalog,
   `skill_load`, instruction compilation, and the protected `run`, which refuses
-  outright rather than partially when an item is `blocked`. And a
+  outright rather than partially: when an item is `blocked`, and when a
+  `keep-pinned` item's project copy has drifted, since a protected run delivers
+  the project copy and so cannot honour that decision. The protected run is the
+  one of the five that reads no snapshot at all — the lock holds its line,
+  because `keep-pinned` leaves the pin on the approved bytes. And a
   `keep-pinned` item is served **from** the snapshot store, by the digest the
   decision names, with the read re-proving the address first. So deleting
   `~/.agentstack/store/` drops every keep-pinned skill from materialization,
   excludes every keep-pinned instruction fragment from the compiled region,
-  and makes `skill_load` refuse; the MCP catalog is the one place that
-  degrades to display only, still listing the name under an honest "approved
-  copy unavailable". That is fail-closed and deliberately so — the approved
+  and makes `skill_load` refuse; the MCP catalog still lists the name — it is
+  an inventory, and hiding it would conceal that the item exists at all — but
+  the entry is marked `loadable: false`, carrying the reason and the action, so
+  it is no longer an offer the loader would refuse. That is fail-closed and deliberately so — the approved
   bytes are what agents load, or nothing is. It is nevertheless a change in
   what is *delivered*, not only in what is *shown*.
   (`crates/cli/src/store.rs` `verified_snapshot`,

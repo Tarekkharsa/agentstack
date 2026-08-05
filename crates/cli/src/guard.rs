@@ -918,7 +918,9 @@ impl Protocol {
                 }
                 let action = str_at(payload, "agent_action_name").unwrap_or_default();
                 if let Some(path) = path_from_input(&info) {
-                    let write = action.contains("write");
+                    // The action name is the fast path; the payload shape adds
+                    // the edit actions that don't spell "write" (G6).
+                    let write = action.contains("write") || payload_is_write(&info);
                     return Some((
                         if write {
                             GuardEvent::FileWrite { path }
@@ -1023,10 +1025,29 @@ impl Protocol {
     }
 }
 
-/// Map (tool name, tool input) to an event. Tool names come from each
-/// harness; unknown tools with a path are treated as reads (deny globs still
-/// apply — the safe default that can't wedge legitimate tools).
+/// Map (tool name, tool input) to an event. Two signals decide, in order: the
+/// known-writer NAME list (a fast path and a floor — every name on it is a
+/// write, as it always was), then the payload SHAPE, which adds reach for
+/// tools this build has never heard of. A path-bearing tool that matches
+/// neither is still treated as a read (deny globs apply, workspace
+/// confinement does not) — the safe default that can't wedge a harness.
 fn classify_tool(tool: &str, input: &Value) -> GuardEvent {
+    let path = path_from_input(input);
+    // The text-editor dialect (`str_replace_based_edit_tool` and its clones)
+    // puts an editor VERB in `command` alongside the path it edits. Judge it
+    // by the verb: without this it reaches the shell branch below and gets
+    // analysed as the harmless command `create`, so the file it names is
+    // never write-checked. A real shell payload never carries a path field,
+    // so the guard here is exact.
+    if let (Some(path), Some(verb)) = (&path, input.get("command").and_then(Value::as_str)) {
+        match normalize_key(verb).as_str() {
+            "create" | "strreplace" | "insert" | "undoedit" | "append" | "write" => {
+                return GuardEvent::FileWrite { path: path.clone() }
+            }
+            "view" | "read" => return GuardEvent::FileRead { path: path.clone() },
+            _ => {}
+        }
+    }
     if let Some(cmd) = input.get("command").and_then(Value::as_str) {
         // Shell-shaped input regardless of the tool's name (Bash,
         // run_shell_command, execute_bash, run_in_terminal …).
@@ -1034,7 +1055,7 @@ fn classify_tool(tool: &str, input: &Value) -> GuardEvent {
             command: cmd.to_string(),
         };
     }
-    let Some(path) = path_from_input(input) else {
+    let Some(path) = path else {
         return GuardEvent::Other;
     };
     const WRITERS: &[&str] = &[
@@ -1055,23 +1076,126 @@ fn classify_tool(tool: &str, input: &Value) -> GuardEvent {
         "multi_replace_string_in_file",
         "apply_patch",
     ];
-    if WRITERS.iter().any(|w| tool.eq_ignore_ascii_case(w)) {
+    if WRITERS.iter().any(|w| tool.eq_ignore_ascii_case(w)) || payload_is_write(input) {
         GuardEvent::FileWrite { path }
     } else {
         GuardEvent::FileRead { path }
     }
 }
 
+/// Lowercase a payload key or verb and drop `_`/`-`, so one table covers the
+/// snake, camel and Pascal spellings the harnesses use (`new_string`,
+/// `newStr`, `CodeContent`).
+fn normalize_key(key: &str) -> String {
+    key.chars()
+        .filter(|c| *c != '_' && *c != '-')
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+/// Does this payload SHAPE intend a write, whatever the tool is called?
+///
+/// The false-positive budget here is tight: calling a READ a write would deny
+/// legitimate out-of-workspace reads and wedge the harness, which is exactly
+/// what the read-path default protects against. Three things keep it tight.
+/// First, a pre-tool-use hook sees the call's INPUT, never its result — so
+/// content in the payload is content the caller is supplying, not a file it
+/// is fetching. Second, only fields that carry that supplied content, or an
+/// edit structure, or an explicit write mode count; a bare path, an
+/// offset/limit window or a recursion flag does not. Third, the weakest
+/// signal (a plain body field, which a search tool could plausibly use for
+/// its needle) is vetoed whenever the payload also looks like a search.
+fn payload_is_write(input: &Value) -> bool {
+    let Some(obj) = input.as_object() else {
+        return false;
+    };
+    let keys: Vec<String> = obj.keys().map(|k| normalize_key(k)).collect();
+    let has = |name: &str| keys.iter().any(|k| k == name);
+
+    // 1. An edit/patch structure. Unambiguous: nothing reads a file by
+    //    handing over the old and new text, a diff, or a list of edits.
+    const EDIT_SHAPE: &[&str] = &[
+        "oldstring",
+        "oldstr",
+        "oldtext",
+        "newstring",
+        "newstr",
+        "newtext",
+        "newcontent",
+        "replacement",
+        "replacements",
+        "patch",
+        "diff",
+        "edits",
+        "insertline",
+    ];
+    if EDIT_SHAPE.iter().any(|k| has(k)) {
+        return true;
+    }
+
+    // 2. An explicit write mode or intent flag.
+    const WRITE_VERBS: &[&str] = &[
+        "write",
+        "append",
+        "overwrite",
+        "create",
+        "edit",
+        "insert",
+        "strreplace",
+        "modify",
+        "patch",
+    ];
+    for (key, value) in obj {
+        match normalize_key(key).as_str() {
+            "mode" | "operation" | "action" | "editmode" => {
+                if value
+                    .as_str()
+                    .is_some_and(|v| WRITE_VERBS.contains(&normalize_key(v).as_str()))
+                {
+                    return true;
+                }
+            }
+            "append" | "overwrite" | "create" | "truncate" if value.as_bool() == Some(true) => {
+                return true
+            }
+            _ => {}
+        }
+    }
+
+    // 3. A body of content for the named file — the weakest signal, so a
+    //    search-shaped payload (whose needle may also be called `text`) opts
+    //    out rather than risking a denied read.
+    const SEARCH_MARKERS: &[&str] = &["pattern", "query", "regex", "search", "outputmode"];
+    if SEARCH_MARKERS.iter().any(|k| has(k)) {
+        return false;
+    }
+    // `*content`/`*contents` covers `content`, `Contents`, `CodeContent`,
+    // `file_content`; the bare-body names are listed rather than suffixed, so
+    // a read tool's `context` argument can never be mistaken for `text`.
+    const BODY_KEYS: &[&str] = &["text", "filetext", "sourcetext", "filecontent"];
+    obj.iter().any(|(key, value)| {
+        let key = normalize_key(key);
+        value.is_string()
+            && (key.ends_with("content")
+                || key.ends_with("contents")
+                || BODY_KEYS.contains(&key.as_str()))
+    })
+}
+
+/// The path a file tool names, in the key spellings the harnesses use. Keys
+/// are matched normalized, so one entry covers `file_path`, `filePath` and
+/// `FilePath` — the Pascal-case dialects (Windsurf's `TargetFile`) reached no
+/// entry at all before, and a payload with no path at all is `Other`, i.e.
+/// allowed. Order is priority, not payload order.
 fn path_from_input(input: &Value) -> Option<String> {
-    for key in [
-        "file_path",
-        "filePath",
-        "path",
-        "notebook_path",
-        "target_file",
-    ] {
-        if let Some(p) = input.get(key).and_then(Value::as_str) {
-            return Some(p.to_string());
+    let obj = input.as_object()?;
+    for want in ["filepath", "path", "notebookpath", "targetfile"] {
+        for (key, value) in obj {
+            if normalize_key(key) == want {
+                if let Some(p) = value.as_str() {
+                    return Some(p.to_string());
+                }
+            }
         }
     }
     None
@@ -1268,6 +1392,153 @@ mod tests {
                 "{tool} in-workspace"
             );
         }
+    }
+
+    /// G6: write confinement must not depend on knowing the tool's NAME. A
+    /// payload that plainly carries content for the file it names is a write
+    /// whatever the harness calls the tool, so an unfamiliar (or renamed)
+    /// write tool no longer slips through as a read.
+    #[test]
+    fn payload_shaped_writes_are_confined_under_unknown_tool_names() {
+        let c = ctx();
+        let outside = "/Users/me/.zshrc";
+        for input in [
+            // whole-file content, in each spelling harnesses use
+            json!({"file_path": outside, "content": "x"}),
+            json!({"path": outside, "contents": "x"}),
+            json!({"path": outside, "file_text": "x"}),
+            json!({"path": outside, "text": "x"}),
+            json!({"filePath": outside, "CodeContent": "x"}),
+            json!({"TargetFile": outside, "CodeContent": "x"}),
+            // str-replace / patch structures
+            json!({"path": outside, "old_string": "a", "new_string": "b"}),
+            json!({"path": outside, "oldStr": "a", "newStr": "b"}),
+            json!({"path": outside, "patch": "@@ -1 +1 @@"}),
+            json!({"path": outside, "edits": [{"a": 1}]}),
+            // mode / intent flags
+            json!({"path": outside, "mode": "append"}),
+            json!({"path": outside, "append": true}),
+        ] {
+            let ev = classify_tool("conjure_file", &input);
+            assert_eq!(
+                ev,
+                GuardEvent::FileWrite {
+                    path: outside.into()
+                },
+                "{input} must classify as a write"
+            );
+            assert!(
+                denied(check_event(&c, &ev)),
+                "{input} outside the workspace should be denied"
+            );
+            // The same payload inside the workspace stays allowed.
+            let mut inside = input.clone();
+            for k in ["file_path", "path", "filePath", "TargetFile"] {
+                if inside.get(k).is_some() {
+                    inside[k] = json!("src/main.rs");
+                }
+            }
+            assert_eq!(
+                check_event(&c, &classify_tool("conjure_file", &inside)),
+                Decision::Allow,
+                "{inside} in-workspace"
+            );
+        }
+    }
+
+    /// The anti-wedge control, stated as a test: a READ under an unknown tool
+    /// name must NOT become a write. Classifying a read as a write would deny
+    /// legitimate reads outside the workspace and wedge the harness — the
+    /// exact failure the read-path default exists to avoid.
+    #[test]
+    fn payload_shaped_reads_under_unknown_names_stay_reads() {
+        let c = ctx();
+        let outside = "/Users/me/.zshrc";
+        for input in [
+            json!({"file_path": outside}),
+            json!({"file_path": outside, "offset": 0, "limit": 100}),
+            json!({"path": outside, "pattern": "TODO"}),
+            // a search whose needle happens to be called `text`
+            json!({"path": outside, "query": "TODO", "text": "TODO"}),
+            json!({"path": outside, "regex": "^a", "output_mode": "content"}),
+            json!({"path": outside, "mode": "read"}),
+            json!({"path": outside, "recursive": true}),
+        ] {
+            let ev = classify_tool("peer_at_file", &input);
+            assert_eq!(
+                ev,
+                GuardEvent::FileRead {
+                    path: outside.into()
+                },
+                "{input} must stay a read"
+            );
+            assert_eq!(check_event(&c, &ev), Decision::Allow, "{input} allowed");
+        }
+    }
+
+    /// The name list stays a FLOOR: every `WRITERS` entry keeps classifying as
+    /// a write on a bare path payload, exactly as before the payload signal.
+    #[test]
+    fn every_known_writer_name_still_classifies_as_a_write() {
+        for tool in [
+            "Write",
+            "Edit",
+            "MultiEdit",
+            "NotebookEdit",
+            "write_file",
+            "replace",
+            "edit_file",
+            "fs_write",
+            "create_file",
+            "str_replace_editor",
+            "replace_string_in_file",
+            "multi_replace_string_in_file",
+            "apply_patch",
+        ] {
+            assert_eq!(
+                classify_tool(tool, &json!({"file_path": "/Users/me/.zshrc"})),
+                GuardEvent::FileWrite {
+                    path: "/Users/me/.zshrc".into()
+                },
+                "{tool} must still be a write"
+            );
+        }
+    }
+
+    /// The text-editor dialect (`command` is an editor VERB, not a shell
+    /// line). Before G6 these short-circuited to the Bash branch and were
+    /// judged as the harmless command `create`/`str_replace`, so workspace
+    /// confinement never ran on the file they name.
+    #[test]
+    fn text_editor_verbs_are_classified_by_verb_not_as_shell() {
+        let outside = "/Users/me/.zshrc";
+        for verb in ["create", "str_replace", "insert", "undo_edit"] {
+            assert_eq!(
+                classify_tool(
+                    "str_replace_editor",
+                    &json!({"command": verb, "path": outside, "file_text": "x"})
+                ),
+                GuardEvent::FileWrite {
+                    path: outside.into()
+                },
+                "{verb} must be a write"
+            );
+        }
+        assert_eq!(
+            classify_tool(
+                "str_replace_editor",
+                &json!({"command": "view", "path": outside})
+            ),
+            GuardEvent::FileRead {
+                path: outside.into()
+            }
+        );
+        // A real shell payload is untouched: no path field, so it still
+        // routes to the command analysis.
+        assert_eq!(
+            classify_tool("Bash", &json!({"command": "rm -rf /"})),
+            bash("rm -rf /")
+        );
     }
 
     // ── bash: rm ────────────────────────────────────────────────────────

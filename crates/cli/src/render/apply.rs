@@ -465,20 +465,39 @@ pub fn plan_target_with_servers(
         // statically — fail closed only when a rule actually constrains this
         // server (allow-by-default otherwise). Runtime egress filtering is
         // the Phase-2 proxy's job; this covers what is knowable at write time.
+        //
+        // Both arms leave evidence (G9). The refusal the user READS comes from
+        // here, and until now it was the one refusal nobody could look up
+        // afterwards — its gateway twin (`gateway.rs`, the build-time egress
+        // check) was filed, this one was not. Same seam, not a second one:
+        // `record_egress_refusal` below calls the same two seatbelt recorders
+        // the gateway calls. The `denied` string is unchanged, and it is
+        // pushed BEFORE the recorder runs, so the fail-closed `continue` can
+        // never be reached through the recorder's success.
         if server.server_type == crate::manifest::ServerType::Http {
             if let Some(url) = &server.url {
                 match declared_host(url) {
                     Some(host) => {
                         if let Err(rule) = ruleset.egress_decision(name, &host, None) {
-                            denied.push(format!("server '{name}' declared host {host} — {rule}"));
+                            let shown = format!("server '{name}' declared host {host} — {rule}");
+                            denied.push(shown.clone());
+                            record_egress_refusal(
+                                project_dir,
+                                name,
+                                Some(&host),
+                                &rule.to_string(),
+                                &shown,
+                            );
                             continue;
                         }
                     }
                     None => {
                         if ruleset.egress_constrained(name) {
-                            denied.push(format!(
+                            let shown = format!(
                                 "server '{name}' has an egress policy but its declared URL host can't be verified (it contains a ${{REF}} or is malformed)"
-                            ));
+                            );
+                            denied.push(shown.clone());
+                            record_egress_refusal(project_dir, name, None, "", &shown);
                             continue;
                         }
                     }
@@ -601,6 +620,83 @@ pub fn ruleset_for(manifest: &Manifest) -> Result<agentstack_policy::CompiledRul
         &manifest.policy,
         &names,
     ))
+}
+
+/// File a write-time egress refusal as evidence — and nothing else.
+///
+/// The same two seatbelt recorders the gateway's build-time egress check uses:
+/// [`crate::seatbelt::record`] for the machine-global audit row (`tool:
+/// "egress"`, outcome `Denied`), and [`crate::seatbelt::record_egress_denied`]
+/// for the run-scoped mirror when this render happens inside a tracked run.
+/// One evidence channel for the family, two destinations, exactly as
+/// `docs/ENFORCEMENT.md` describes it.
+///
+/// `record`, not `refuse`: `refuse` also prints the seatbelt sentence, and this
+/// path already has a caller that prints one (`apply` and `use` render
+/// `TargetPlan::denied`). Printing here would both duplicate that line and put
+/// it on stderr for the read-only planners that share this function — `diff`,
+/// `doctor`, `unrender`, `adopt`, the JSON APIs. This is the same split
+/// `secret::ScopedResolver` already makes for the secret family: the sentence
+/// belongs to the surface that consumes the denial, the evidence belongs to the
+/// decision.
+///
+/// **Identity, not the URL.** `host` is what `declared_host` extracted —
+/// scheme, userinfo, path and query already dropped — so a `${REF}`-free
+/// credential sitting in `https://user:tok@h/mcp?api_key=…` cannot reach the
+/// log through either destination. The gateway records the host for the same
+/// reason; here the risk is sharper still, because this check runs on the RAW
+/// declared URL. And when the host is not knowable (the `None` arm) no host is
+/// recorded at all: inventing one would put a fact in the log that nothing
+/// established, which is the choice the gateway made at its own `None` arm.
+///
+/// **Never gating.** Both recorders return `()` and swallow every failure
+/// inside `agentstack_recorder`, so there is no error for a caller to branch
+/// on; the refusal (`denied.push` + `continue`) is already committed before
+/// this is called.
+///
+/// `shown` is the exact sentence the user is given, so the audit row and the
+/// terminal agree; it is bounded here rather than at the push site because
+/// bounding is a property of what goes in the log, and the pre-existing
+/// terminal line must not change. Bounded at all because — unlike the gateway's
+/// `why`, which is policy text this machine authored — this string is composed
+/// from a server name and a URL host taken straight from unreviewed manifest
+/// bytes (invariant 7), and `agentstack report` renders `detail` on a terminal
+/// later. Same discipline as `record_pin_rejected`.
+fn record_egress_refusal(
+    project_dir: &Path,
+    server: &str,
+    host: Option<&str>,
+    rule: &str,
+    shown: &str,
+) {
+    // Host-mode `agentstack run` exports the run id to everything it spawns;
+    // outside a run this is `None` and the run-scoped mirror is a no-op.
+    let run = std::env::var(crate::calllog::RUN_ID_ENV).ok();
+    let server = crate::seatbelt::bounded_reason(server);
+    let reason = crate::seatbelt::bounded_reason(shown);
+    let attempted = match host {
+        Some(h) => format!("reach {}", crate::seatbelt::bounded_reason(h)),
+        None => "open its declared URL".to_string(),
+    };
+    crate::seatbelt::record(
+        &crate::seatbelt::Denial {
+            family: crate::seatbelt::Family::Egress,
+            subject: &server,
+            attempted: &attempted,
+            why: &reason,
+            next_step: "allow the host in [policy.egress] if you meant to, or drop the server",
+        },
+        Some(project_dir.display().to_string()),
+        run.as_deref(),
+    );
+    if let Some(host) = host {
+        crate::seatbelt::record_egress_denied(
+            run.as_deref(),
+            &server,
+            &crate::seatbelt::bounded_reason(host),
+            &crate::seatbelt::bounded_reason(rule),
+        );
+    }
 }
 
 /// The host of a DECLARED server URL, statically: scheme stripped, userinfo
