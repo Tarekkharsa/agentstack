@@ -2480,6 +2480,19 @@ fn run_checks(
                 &ctx.dir,
                 &machine_hooks,
             ) {
+                // Trust first: when the gate refuses the hooks, `apply --write`
+                // is not the next action — it would refuse too. Name the action
+                // that actually unblocks it (one next action, honestly).
+                Ok(Some(hp)) if hp.refusal.is_some() => {
+                    hook_issues += 1;
+                    report.line(
+                        Level::Warn,
+                        format!(
+                            "{:<14} hooks not delivered — project not trusted ↳ agentstack trust .",
+                            desc.display
+                        ),
+                    );
+                }
                 Ok(Some(hp)) if hp.changed() => {
                     hook_issues += 1;
                     report.line(

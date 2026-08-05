@@ -35,6 +35,11 @@ pub struct HooksPlan {
     /// Resolved secret values (`(ref-name, value)`) to redact from the diff
     /// preview. The real values stay in `proposed` and are what `write` persists.
     pub secrets: Vec<(String, String)>,
+    /// Set when the project's trust state forbids delivering the manifest hooks
+    /// this plan carries (see the gate in [`plan_hooks`]). The plan is still
+    /// built so the caller can SHOW what is being withheld; [`HooksPlan::write`]
+    /// refuses, so a plan in this state can never reach disk.
+    pub refusal: Option<String>,
 }
 
 impl HooksPlan {
@@ -44,7 +49,13 @@ impl HooksPlan {
     pub fn diff(&self) -> String {
         diff::mask_secrets(&diff::render(&self.existing, &self.proposed), &self.secrets)
     }
+    /// The write choke point. The trust refusal is enforced HERE, not only at
+    /// the call sites, so a caller that forgets to read `refusal` still cannot
+    /// put an untrusted project's hook commands into a harness config.
     pub fn write(&self) -> Result<()> {
+        if let Some(why) = &self.refusal {
+            anyhow::bail!("{why}");
+        }
         crate::util::atomic::write(&self.path, &self.proposed)
     }
 }
@@ -75,16 +86,18 @@ pub fn plan_hooks(
         .hooks
         .as_ref()
         .expect("hooks_for returned Some, so desc.hooks is Some");
-    let mut selected: Vec<(&String, &Hook)> = manifest
+    // The two layers stay separate until the gate below has judged them: only
+    // the manifest's hooks are the project's content, and only they are gated.
+    let mut declared: Vec<(&String, &Hook)> = manifest
         .hooks
         .iter()
         .filter(|(_, h)| h.targets.iter().any(|t| t == "*" || t == &desc.id))
         .collect();
-    for (name, hook) in machine_hooks {
-        if hook.targets.iter().any(|t| t == "*" || t == &desc.id) {
-            selected.push((name, hook));
-        }
-    }
+    let mut machine: Vec<(&String, &Hook)> = machine_hooks
+        .iter()
+        .filter(|(_, h)| h.targets.iter().any(|t| t == "*" || t == &desc.id))
+        .map(|(name, hook)| (name, hook))
+        .collect();
     // Codex loads hooks from BOTH `config.toml [hooks]` (this renderer) AND
     // `~/.codex/hooks.json` (written by `guard guard install`). The guard hook
     // lives in hooks.json — a file `apply` never owns, so it survives without a
@@ -92,8 +105,12 @@ pub fn plan_hooks(
     // here. Defer any guard hook to the hooks.json seam for Codex so it is
     // registered exactly once. (Every other CLI has a single hook destination.)
     if desc.id == "codex" {
-        selected.retain(|(_, h)| !is_guard_hook(&h.command));
+        declared.retain(|(_, h)| !is_guard_hook(&h.command));
+        machine.retain(|(_, h)| !is_guard_hook(&h.command));
     }
+    let refusal = trust_refusal(&declared, project_dir);
+    let mut selected = declared;
+    selected.extend(machine);
     if selected.is_empty() && !previously_managed {
         return Ok(None);
     }
@@ -134,7 +151,63 @@ pub fn plan_hooks(
         managed,
         unresolved,
         secrets,
+        refusal,
     }))
+}
+
+/// The trust gate for hook delivery — the same rule `render::extensions` states
+/// as "untrusted means inert" (invariant 3), applied to the other executable
+/// capability kind.
+///
+/// A `[hooks.*]` entry is a command the harness runs in its own process at full
+/// user permission (`docs/ENFORCEMENT.md`, Hooks), so it is executable content:
+/// a project that is untrusted, or whose consent surface changed since it was
+/// trusted, delivers ZERO of it. The gate is on the CONTENT's provenance, not on
+/// the destination, so it holds identically at project scope
+/// (`.claude/settings.json`) and at global scope (`~/.claude/settings.json`) —
+/// `apply --scope global` on an untrusted repo was the sharper half of the hole
+/// this closes.
+///
+/// Returns the refusal message, or `None` when there is nothing to refuse.
+/// Deliberately NOT gated:
+///   * an empty `declared` — a prune (or a machine-hooks-only plan) removes or
+///     re-emits bytes we already own, which is the inert direction and must
+///     keep working for an untrusted project, exactly as extension pruning does;
+///   * machine-layer hooks (today the `[guard]` hook) — they are the user's own
+///     machine configuration, never the project's content, so they ride along
+///     either way and a refused project cannot strip them;
+///   * the machine manifest itself — `$AGENTSTACK_HOME/agentstack.toml` is that
+///     same personal layer. It is deliberately undiscoverable as a project
+///     (`manifest::discover_project_base`), so `trust` can never reach it: its
+///     base resolves to `$HOME`, which no code path can put in the trust store.
+///     Gating it would make machine-level hooks permanently unrenderable rather
+///     than merely pending a review no command can perform. Same exemption
+///     shape the trust walk already gives machine-layer instruction fragments
+///     (`render::instructions`).
+fn trust_refusal(declared: &[(&String, &Hook)], project_dir: &Path) -> Option<String> {
+    if declared.is_empty() {
+        return None;
+    }
+    if crate::util::paths::is_machine_home(project_dir) {
+        return None;
+    }
+    let base = crate::manifest::project_root_of(project_dir);
+    let why = match crate::trust::check(&base) {
+        crate::trust::TrustState::Trusted => return None,
+        crate::trust::TrustState::Untrusted => "is not trusted",
+        crate::trust::TrustState::Changed => "changed since it was trusted",
+    };
+    let names = declared
+        .iter()
+        .map(|(n, _)| format!("'{n}'"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    Some(format!(
+        "refusing to render hooks: project at {} {why} — review and \
+         `agentstack trust .` before rendering hook commands the harness runs \
+         at full user permission ({names})",
+        base.display()
+    ))
 }
 
 /// Does this hook command invoke `agentstack guard check`? Recognizes the

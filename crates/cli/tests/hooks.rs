@@ -6,8 +6,14 @@
 //! Hooks compile into Claude Code's settings.json `hooks` key, render the exact
 //! nested schema, preserve other keys, resolve secrets, and prune when removed.
 //! Own test file so the HOME override runs isolated.
+//!
+//! Every fixture here is a TRUSTED project, because rendering a manifest's
+//! hooks now requires consent (`render::hooks::trust_refusal`) — these tests are
+//! about the render schema, and the gate has its own red-team witnesses in
+//! `red_team_hooks_trust_gate.rs`.
 
 use std::fs;
+use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
 use agentstack::adapter::Registry;
@@ -26,7 +32,24 @@ fn codex(reg: &Registry) -> &agentstack::adapter::AdapterDescriptor {
 
 fn env_lock() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(())).lock().unwrap()
+    // `unwrap_or_else(PoisonError::into_inner)`: one failing test must not turn
+    // every later test in this file into an unrelated PoisonError, which hides
+    // the real failure behind three fake ones.
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The manifest under test, on disk and consented to.
+///
+/// Trust binds to manifest BYTES, so the fixture writes the same TOML it parses
+/// and then records consent for it — the state a human reaches with
+/// `agentstack trust .`. Without this the renderer refuses, which is the point
+/// of the gate and the subject of a different test file.
+fn trusted_manifest(proj: &Path, text: &str) -> Manifest {
+    fs::write(proj.join("agentstack.toml"), text).unwrap();
+    agentstack::trust::trust_unreviewed(proj).expect("fixture must be trusted");
+    toml::from_str(text).unwrap()
 }
 
 #[test]
@@ -48,7 +71,8 @@ fn hooks_render_prune_and_preserve() {
     let resolver = MapResolver::from([("TOK", "sekret")]);
     let proj = tmp.path();
 
-    let manifest: Manifest = toml::from_str(
+    let manifest = trusted_manifest(
+        proj,
         r#"
         version = 1
         [hooks.fmt]
@@ -60,8 +84,7 @@ fn hooks_render_prune_and_preserve() {
         command = "notify ${TOK}"
         timeout = 5
         "#,
-    )
-    .unwrap();
+    );
 
     // Render: builds the hooks key, preserves model, resolves the secret.
     let plan = plan_hooks(
@@ -146,10 +169,10 @@ fn machine_hooks_ride_along_and_survive_the_manifest() {
     )];
 
     // Manifest hooks + machine hook → both render.
-    let manifest: Manifest = toml::from_str(
+    let manifest = trusted_manifest(
+        proj,
         "version = 1\n[hooks.fmt]\nevent = \"PostToolUse\"\ncommand = \"prettier --write\"\n",
-    )
-    .unwrap();
+    );
     let plan = plan_hooks(
         &manifest,
         claude(&reg),
@@ -223,7 +246,8 @@ fn codex_guard_is_registered_exactly_once_across_both_hook_files() {
 
     // A manifest [hooks.*] with BOTH a normal hook and a guard-check hook,
     // both targeting codex.
-    let manifest: Manifest = toml::from_str(
+    let manifest = trusted_manifest(
+        proj,
         r#"
         version = 1
         [hooks.fmt]
@@ -235,8 +259,7 @@ fn codex_guard_is_registered_exactly_once_across_both_hook_files() {
         command = "/bin/agentstack guard check --protocol codex"
         targets = ["codex"]
         "#,
-    )
-    .unwrap();
+    );
 
     let plan = plan_hooks(
         &manifest,
@@ -283,7 +306,8 @@ fn codex_hooks_render_to_config_toml_and_preserve_mcp() {
     let resolver = MapResolver::from([("TOK", "sekret")]);
     let proj = tmp.path();
 
-    let manifest: Manifest = toml::from_str(
+    let manifest = trusted_manifest(
+        proj,
         r#"
         version = 1
         [hooks.fmt]
@@ -293,8 +317,7 @@ fn codex_hooks_render_to_config_toml_and_preserve_mcp() {
         timeout = 5
         targets = ["codex"]
         "#,
-    )
-    .unwrap();
+    );
 
     let plan = plan_hooks(
         &manifest,

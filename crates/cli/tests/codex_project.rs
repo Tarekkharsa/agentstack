@@ -99,6 +99,12 @@ model = "gpt-5.5"
     fs::create_dir_all(cfg.parent().unwrap()).unwrap();
     fs::write(&cfg, "# my note\npersonality = \"pragmatic\"\n").unwrap();
 
+    // The `[hooks.fmt]` above is executable content, so `apply` only delivers
+    // it for a consented project (`render::hooks::trust_refusal`; the gate's
+    // own witnesses live in `red_team_hooks_trust_gate.rs`). This test is about
+    // what lands in the one config file, so the fixture starts from a yes.
+    agentstack::trust::trust_unreviewed(&proj).expect("fixture must be trusted");
+
     apply::run(&args(true), Some(&proj)).unwrap();
     let text = fs::read_to_string(&cfg).unwrap();
     assert!(
