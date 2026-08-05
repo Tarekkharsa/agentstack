@@ -182,8 +182,10 @@ jobs:
   # against (force-push, squash merge, first push of a branch), and the waiver
   # can live in the PR body, which does not exist on a push. Test-only and
   # comment-only changes in those crates are exempt so the gate does not cry
-  # wolf; the checker's docstring explains the trade. Fast and dependency-light,
-  # same rationale as docs-checks above.
+  # wolf — including tests written as an inline `#[cfg(test)]` item, which is
+  # how nearly every test in this repository is written; the checker's docstring
+  # explains how that is computed and where it deliberately fails toward firing.
+  # Fast and dependency-light, same rationale as docs-checks above.
   enforcement-pairing:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
