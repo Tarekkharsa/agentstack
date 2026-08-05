@@ -689,6 +689,16 @@ pub(crate) fn record_extension_pins(
             ResolveMode::Fetch,
         )
         .with_context(|| format!("pinning extension '{name}'"))?;
+        // The pin comes from `Store::pin_integrity_root`, which deposits the
+        // byte set it covers into the content store as part of producing the
+        // checksum — so a later re-gate can show WHICH LINES of this extension
+        // moved instead of only "DRIFTED from lock". Routing it here makes the
+        // deposit a property of pinning rather than of call-site discipline,
+        // exactly as `Store::pin` does for skills. The digest is unchanged: the
+        // resolver computed it from this same `(anchor, declared)` pair.
+        let checksum = store
+            .pin_integrity_root(&resolved.anchor, &resolved.declared, &resolved.checksum)
+            .with_context(|| format!("pinning extension '{name}'"))?;
         lock.upsert_extension(agentstack_core::lock::LockedExtension {
             name: name.clone(),
             target: resolved.target.clone(),
@@ -696,7 +706,7 @@ pub(crate) fn record_extension_pins(
             path: resolved.path.clone(),
             git: resolved.git.clone(),
             rev: resolved.rev.clone(),
-            checksum: resolved.checksum,
+            checksum: checksum.hex().to_string(),
         });
         pinned += 1;
     }
@@ -732,8 +742,19 @@ pub(crate) fn record_extension_pins(
 /// `integrity_root_digest`), and the blueprint sits beside the script it
 /// belongs to. Anchoring the two differently would make `./workflows/x.js` and
 /// `./workflows/x.blueprint.json` mean two different directories.
-fn pin_blueprint(dir: &Path, name: &str, declared: &str) -> Result<Sha256Hex> {
-    agentstack_core::digest::contained_file_digest(dir, declared).with_context(|| {
+///
+/// The digest comes from `Store::pin_blueprint`, which wraps exactly that
+/// `contained_file_digest` call and deposits the bytes it hashed — so a re-gate
+/// on a drifted blueprint can show the graph that was approved beside the graph
+/// on disk, instead of a bare "DRIFTED from lock" for the one artifact whose
+/// whole point is that a human looked at it.
+fn pin_blueprint(
+    store: &crate::store::Store,
+    dir: &Path,
+    name: &str,
+    declared: &str,
+) -> Result<Sha256Hex> {
+    store.pin_blueprint(dir, declared).with_context(|| {
         format!("pinning the approved blueprint '{declared}' for workflow '{name}'")
     })
 }
@@ -758,7 +779,7 @@ pub(crate) fn record_workflow_pins(
         // an error, never a silently-dropped pin, or "approved graph" would
         // become a claim the lockfile does not actually carry.
         let blueprint_checksum = match &wf.blueprint {
-            Some(rel) => Some(pin_blueprint(dir, name, rel)?),
+            Some(rel) => Some(pin_blueprint(store, dir, name, rel)?),
             None => None,
         };
         lock.upsert_workflow(agentstack_core::lock::LockedWorkflow {
@@ -768,7 +789,11 @@ pub(crate) fn record_workflow_pins(
             path: resolved.path.clone(),
             git: resolved.git.clone(),
             rev: resolved.rev.clone(),
-            checksum: Sha256Hex::parse(&resolved.checksum)
+            // Same depositing pin the extension path takes, and for the same
+            // reason: a workflow is orchestration code agentstack itself runs,
+            // so a re-gate on it must be able to show what moved.
+            checksum: store
+                .pin_integrity_root(&resolved.anchor, &resolved.declared, &resolved.checksum)
                 .with_context(|| format!("pinning workflow '{name}'"))?,
             blueprint: wf.blueprint.clone(),
             blueprint_checksum,

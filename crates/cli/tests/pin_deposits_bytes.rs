@@ -99,6 +99,31 @@ fn instruction_entries(lock_text: &str) -> Vec<(String, String)> {
     out
 }
 
+/// Every checksum a `[[table]]` kind pins, as `(label, checksum)`. Same
+/// deliberately dumb scanner as the two above, and the same reason: this
+/// witness must not go green because a parser tolerated a shape change.
+/// `keys` names the checksum fields to collect, because a `[[workflow]]` row
+/// pins TWO — its source and its approved blueprint.
+fn table_entries(lock_text: &str, table: &str, keys: &[&str]) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for block in lock_text.split(table).skip(1) {
+        let block = block.split("\n[[").next().unwrap_or(block);
+        let field = |key: &str| -> Option<String> {
+            block.lines().find_map(|l| {
+                let rest = l.trim().strip_prefix(key)?.trim_start();
+                Some(rest.strip_prefix('=')?.trim().trim_matches('"').to_string())
+            })
+        };
+        let name = field("name").unwrap_or_else(|| table.to_string());
+        for key in keys {
+            if let Some(checksum) = field(key) {
+                out.push((format!("{name} ({key})"), checksum));
+            }
+        }
+    }
+    out
+}
+
 fn write_project(proj: &std::path::Path) {
     let a = proj.join(".agentstack");
     fs::create_dir_all(a.join("skills/summarize")).unwrap();
@@ -115,6 +140,27 @@ fn write_project(proj: &std::path::Path) {
     .unwrap();
     fs::create_dir_all(a.join("instructions")).unwrap();
     fs::write(a.join("instructions/house.md"), "Prefer boring code.\n").unwrap();
+    // G21: the three kinds that used to pin with no store object behind them —
+    // an extension (a directory tree), a workflow (one script), and that
+    // workflow's approved blueprint.
+    fs::create_dir_all(a.join("extensions/checkpoint")).unwrap();
+    fs::write(
+        a.join("extensions/checkpoint/index.ts"),
+        "export default function (pi) {} // v1\n",
+    )
+    .unwrap();
+    fs::write(
+        a.join("extensions/checkpoint/package.json"),
+        "{\"name\":\"checkpoint\"}\n",
+    )
+    .unwrap();
+    fs::create_dir_all(a.join("workflows")).unwrap();
+    fs::write(a.join("workflows/pipeline.js"), "exports.run = () => 1;\n").unwrap();
+    fs::write(
+        a.join("workflows/pipeline.blueprint.json"),
+        "{\"pattern\":\"fan-out\",\"goal\":\"review a diff\",\"nodes\":[]}\n",
+    )
+    .unwrap();
     fs::write(
         a.join("agentstack.toml"),
         r#"version = 1
@@ -127,6 +173,18 @@ path = "./skills/review"
 
 [instructions.house]
 path = "./instructions/house.md"
+
+[extensions.checkpoint]
+path = "./extensions/checkpoint"
+target = "pi"
+
+[workflows.pipeline]
+path = "./workflows/pipeline.js"
+roles = ["planner"]
+blueprint = "./workflows/pipeline.blueprint.json"
+
+[toolsets.planner]
+skills = ["summarize"]
 "#,
     )
     .unwrap();
@@ -141,13 +199,28 @@ fn assert_every_path_pin_has_bytes(home: &std::path::Path, proj: &std::path::Pat
     // re-gate cannot show what changed.
     let mut entries = path_entries(&lock_text);
     let instructions = instruction_entries(&lock_text);
+    // G21: extensions and workflows pin the STRICT integrity-root digest and a
+    // workflow additionally pins its approved blueprint. All three used to be
+    // digested straight into the lockfile with no store object, so a re-gate on
+    // them had a pin and no approved copy to diff against.
+    let extensions = table_entries(&lock_text, "[[extension]]", &["checksum"]);
+    let workflows = table_entries(
+        &lock_text,
+        "[[workflow]]",
+        &["checksum", "blueprint_checksum"],
+    );
     assert!(
-        !entries.is_empty() && !instructions.is_empty(),
-        "after {after} the lock recorded no path-sourced skills or no instructions, \
-         so this witness would be vacuous — the fixture or the lock format \
+        !entries.is_empty()
+            && !instructions.is_empty()
+            && !extensions.is_empty()
+            && workflows.len() >= 2,
+        "after {after} the lock is missing one of the pinned kinds, so this \
+         witness would be vacuous — the fixture or the lock format \
          changed:\n{lock_text}"
     );
     entries.extend(instructions);
+    entries.extend(extensions);
+    entries.extend(workflows);
     let content_root = home.join(".agentstack/store/content");
     let mut missing = Vec::new();
     for (name, checksum) in &entries {
@@ -161,9 +234,55 @@ fn assert_every_path_pin_has_bytes(home: &std::path::Path, proj: &std::path::Pat
     }
     assert!(
         missing.is_empty(),
-        "after {after}, these path-sourced pins have no bytes in \
+        "after {after}, these pins have no bytes in \
          store/content/ — a later re-gate could not show what changed: {missing:?}"
     );
+}
+
+/// G21 BACKWARD-COMPATIBILITY WITNESS: a lockfile written before deposits
+/// existed carries pins with no store object, and a project that upgraded
+/// mid-flight must keep working — the missing copy degrades to the honest
+/// "not recorded" answer, never a failure.
+///
+/// Simulated by emptying `store/content/` after a lock. That is exactly the
+/// on-disk state an older lock leaves (and the state a pruned store leaves),
+/// and the lockfile format is unchanged, so it is the whole compatibility
+/// surface there is to test.
+#[test]
+fn a_lock_whose_deposits_are_absent_still_works() {
+    let bin = env!("CARGO_BIN_EXE_agentstack");
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&proj).unwrap();
+    write_project(&proj);
+
+    let (out, ok) = run(bin, &["lock", "--write"], &home, &proj);
+    assert!(ok, "lock failed:\n{out}");
+    let lock_before = fs::read_to_string(proj.join(".agentstack/agentstack.lock")).unwrap();
+
+    // Every deposit disappears — the "older lock" state.
+    let content_root = home.join(".agentstack/store/content");
+    assert!(content_root.is_dir(), "nothing was deposited to remove");
+    fs::remove_dir_all(&content_root).unwrap();
+
+    // A read path still answers.
+    let (out, ok) = run(bin, &["trust", ".", "--preview"], &home, &proj);
+    assert!(ok, "trust --preview failed with no deposits:\n{out}");
+    assert!(out.contains("surface_digest"), "{out}");
+
+    // And re-locking is a no-op on the pins: the deposit is a side effect of
+    // pinning, not a lockfile field, so the bytes on disk do not move.
+    let (out, ok) = run(bin, &["lock", "--write"], &home, &proj);
+    assert!(ok, "re-lock failed:\n{out}");
+    assert_eq!(
+        fs::read_to_string(proj.join(".agentstack/agentstack.lock")).unwrap(),
+        lock_before,
+        "adding deposits changed the lockfile format"
+    );
+    // The re-lock also backfilled what was removed — no migration needed.
+    assert_every_path_pin_has_bytes(&home, &proj, "a re-lock over an older lock");
 }
 
 /// CONSENT WITNESS (Phase 2, prior bytes). NEVER weaken this to a per-command

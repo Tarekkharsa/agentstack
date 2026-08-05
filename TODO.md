@@ -44,7 +44,7 @@
         - **G16** `set_decision` mutates the trust store and appends nothing.
         - **G17** `Family::Fence` has no `RunEvent`, so fence refusals never reach a run report.
         - **G18** settings are not pinned at all — `LockedSetting`, a re-gate on change, a doctor probe, a witness. On no queue item until now.
-        - **G19** Kiro gets no host guard: its hooks nest inside per-agent config files.
+        - **[~] G19** Kiro gets no host guard. The claim that "its hooks nest inside per-agent config files" was never supported by anything in this repo — the descriptor records Kiro's MCP config only, so there is no hook path and no entry shape uninstall could find again. The code now says which kind of gap it is (`NOT_WIRED`, a fact about agentstack) instead of implying none could exist; wiring it still needs a descriptor that records the hook surface, and that needs a source.
         - **G21** extension, workflow and blueprint checksums never deposit into the content store, so a re-gate can show a pin with no approved copy to diff.
         - **G5** there is no headless path for unsigned content, since `receive --yes` refuses it — add a `--consented-digest` acceptance bound to previewed bytes, if that path is wanted at all.
       - **Yours to decide, not to schedule:** the verb count (the binary ships seventeen, `TODO.md:21` and `main.rs:29` say fifteen) · R2 the positioning flip · R1 the private APM disclosure · the Mode-axis leftovers still in `doctor --json` and `ui_contract.rs` · P2 `automatic-delivery.md` · O2 · O3 · F6 · F8 · `x diff --profile`.

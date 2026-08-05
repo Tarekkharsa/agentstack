@@ -662,18 +662,51 @@ fn targets() -> Vec<Target> {
     ]
 }
 
-/// CLIs with no per-call hook surface at all — reported, never touched.
+/// CLIs the guard does not protect, split by WHY — because the two reasons
+/// are not the same promise to a user, and a security list that blurs them
+/// reads as "impossible" when the truth is "unbuilt".
+///
+/// [`NO_HOOK_SURFACE`] is a fact about the CLI: it exposes no per-call hook,
+/// so there is nothing for a guard to ride and nothing to wait for.
+/// [`NOT_WIRED`] is a fact about agentstack: the CLI is simply not covered
+/// yet, and could be.
+///
+/// A member leaves [`NOT_WIRED`] only when this repo knows all three things a
+/// [`Target`] needs — a detect path, the concrete hook file, and the per-entry
+/// shape [`value_mentions_guard`] can find again at uninstall. Descriptors in
+/// `crates/adapters/descriptors/` are the authority for that knowledge; a hook
+/// format guessed from outside them would be a hook the guard cannot honestly
+/// claim.
 const NO_HOOK_SURFACE: &[(&str, &str)] = &[
     (
         "claude-desktop",
         "no PreToolUse-style hook exists on this surface",
     ),
     ("junie", "only a static action allowlist; no per-call hook"),
-    (
-        "kiro",
-        "hooks nest inside per-agent config files; not wired yet",
-    ),
 ];
+
+/// CLIs with no guard hook because agentstack has not built one — NOT because
+/// none could exist. See [`NO_HOOK_SURFACE`] for the contrast and the bar for
+/// leaving this list.
+const NOT_WIRED: &[(&str, &str)] = &[(
+    "kiro",
+    "agentstack has not wired one; this repo's descriptor records Kiro's MCP \
+     config only, not a hook file it could install into",
+)];
+
+/// The unguarded CLIs as printed: `(id, short status, why)`. One iterator so
+/// `install` and `status` cannot drift apart on which CLIs are unprotected or
+/// on which kind of unprotected each one is.
+fn unguarded() -> impl Iterator<Item = (&'static str, &'static str, &'static str)> {
+    NO_HOOK_SURFACE
+        .iter()
+        .map(|(id, why)| (*id, "no hook surface exists", *why))
+        .chain(
+            NOT_WIRED
+                .iter()
+                .map(|(id, why)| (*id, "not wired yet", *why)),
+        )
+}
 
 fn exe() -> String {
     std::env::current_exe()
@@ -849,8 +882,12 @@ pub(crate) fn install() -> Result<()> {
             Err(e) => println!("  {} {} — {e:#}", "✗".red(), t.id),
         }
     }
-    for (id, why) in NO_HOOK_SURFACE {
-        println!("  {} {id} — {why}", "○".dimmed());
+    for (id, status, why) in unguarded() {
+        println!(
+            "  {} {id} — {} ({status}: {why})",
+            "○".dimmed(),
+            "NOT protected".yellow()
+        );
     }
     let clis = super::count(wrote, "CLI");
     println!(
@@ -979,8 +1016,11 @@ fn status() -> Result<()> {
         };
         println!("  {:<32} {mark}", t.id);
     }
-    for (id, why) in NO_HOOK_SURFACE {
-        println!("  {id:<32} {} ({why})", "○ no hook surface".dimmed());
+    for (id, status, why) in unguarded() {
+        println!(
+            "  {id:<32} {} ({why})",
+            format!("○ NOT protected — {status}").dimmed()
+        );
     }
     Ok(())
 }
@@ -1446,6 +1486,58 @@ mod tests {
         assert_eq!(arr.len(), 1);
         assert!(!value_mentions_guard(&v));
         assert_eq!(v["model"], "opus");
+    }
+
+    /// G19 witness: an unguarded CLI is told WHICH kind of unguarded it is.
+    /// The list a user reads must never let "agentstack hasn't built this yet"
+    /// pass as "no such thing can be built" — nor the reverse. It must also
+    /// never let an unguarded CLI look guarded: the three sets are disjoint.
+    #[test]
+    fn unguarded_clis_say_whether_protection_is_impossible_or_merely_unbuilt() {
+        // Kiro's reason is about agentstack, not about Kiro's surface, so it
+        // belongs on the unbuilt side — and must not sit with the permanent
+        // facts, where it would read as "nothing can be done".
+        assert!(NOT_WIRED.iter().any(|(id, _)| *id == "kiro"));
+        assert!(!NO_HOOK_SURFACE.iter().any(|(id, _)| *id == "kiro"));
+
+        // No CLI is both claimed-guarded and listed-unguarded, and none is
+        // listed twice — either would be a contradiction a user could act on.
+        let mut seen: Vec<&str> = Vec::new();
+        for (id, status, why) in unguarded() {
+            assert!(!seen.contains(&id), "{id} is listed twice");
+            seen.push(id);
+            assert!(
+                !targets().iter().any(|t| t.id.starts_with(id)),
+                "{id} is listed as unguarded but also has an install target"
+            );
+            // Every line names the CLI, its kind of unprotected, and a reason.
+            assert!(!why.is_empty(), "{id} has no reason");
+            assert!(
+                status == "no hook surface exists" || status == "not wired yet",
+                "unknown unguarded status for {id}: {status}"
+            );
+        }
+        assert_eq!(
+            seen.len(),
+            NO_HOOK_SURFACE.len() + NOT_WIRED.len(),
+            "every unguarded CLI must be reported exactly once"
+        );
+
+        // The distinction survives into the words, not just the data: a
+        // permanent fact says the surface does not exist; an unbuilt one says
+        // agentstack has not wired it, and never claims impossibility.
+        for (id, why) in NO_HOOK_SURFACE {
+            assert!(
+                why.contains("no ") || why.contains("only a static"),
+                "{id}: a permanent reason must say what does not exist: {why}"
+            );
+        }
+        for (id, why) in NOT_WIRED {
+            assert!(
+                why.contains("agentstack has not wired"),
+                "{id}: an unbuilt reason must name agentstack as the gap: {why}"
+            );
+        }
     }
 
     fn tempdir() -> PathBuf {

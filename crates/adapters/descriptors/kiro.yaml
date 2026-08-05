@@ -11,6 +11,13 @@
 # Kiro additionally supports "steering" files (.kiro/steering/*.md and
 # ~/.kiro/steering/) for instructions — a directory of markdown, not a single
 # AGENTS.md, so it is not mapped to the single-file `instructions` section.
+# HOOKS: this descriptor records NO hook surface for Kiro — no hook file path
+# and no per-entry shape. That is a gap in what we have verified, not a claim
+# that Kiro cannot be hooked. `agentstack guard` therefore lists kiro under
+# NOT_WIRED (crates/cli/src/commands/guard.rs), not NO_HOOK_SURFACE, and
+# installs nothing. To wire it, add the verified hook file and entry shape
+# here first; the guard target must be derivable from a descriptor, never
+# guessed, or uninstall cannot find its own work again.
 # Source: https://kiro.dev/docs/mcp/configuration/
 id: kiro
 display: Kiro
