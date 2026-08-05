@@ -219,8 +219,10 @@ guard binary — that is why the filesystem rows above top out at
 **cooperative**.) What agentstack governs happens before delivery, and it is a
 *narrower* surface than the extensions pipeline: the hook's declaration — its
 event, matcher, command line, and targets — is part of the manifest bytes, so
-declaring or editing a hook re-gates trust review; rendering is fail-closed
-for untrusted projects; and `doctor` reports declared-vs-installed drift. But
+declaring or editing a hook re-gates trust review; rendering is fail-closed for
+untrusted *and* stale-trust projects, at project and global scope alike
+(`crates/cli/tests/red_team_hooks_trust_gate.rs`); and `doctor` reports
+declared-vs-installed drift. But
 when a hook's command names a local script, the *script file's bytes are not
 content-pinned* — no lock entry digests them, so editing the script after
 consent changes what runs without re-gating anything. That gap is documented
@@ -649,8 +651,23 @@ paragraph above exists to prevent.
   line, args, timeout, and targets live in the manifest, whose bytes are
   bound into the trust digest — adding a hook or editing its command line
   re-gates trust review, and rendering into a harness's native hooks config is
-  fail-closed for untrusted or drifted projects. `doctor`'s Hooks section
-  reports declared-vs-installed render drift. **The honest limit:** unlike a
+  fail-closed for untrusted or drifted projects. What that gate does, exactly
+  (`render::hooks::trust_refusal`, witnessed by
+  `crates/cli/tests/red_team_hooks_trust_gate.rs`): a project that is untrusted,
+  or whose consent surface changed since it was trusted, renders **zero** hook
+  bytes — the destination file is left untouched, `apply --write` exits nonzero
+  naming `agentstack trust`, and `--allow-unresolved` does not reach it (that
+  flag forgives a missing secret, never a missing consent). The gate is on the
+  content's provenance, not on the destination, so it is identical at project
+  scope (`.claude/settings.json`) and global scope (`~/.claude/settings.json`).
+  Three things are deliberately outside it, each because it is not the
+  project's content: pruning hooks agentstack already owns (the inert
+  direction), the machine layer's own guard hook, and the machine manifest at
+  `$AGENTSTACK_HOME` — which `manifest::discover_project_base` refuses to
+  discover as a project, so no `trust` command could ever satisfy a gate on it.
+  `doctor`'s Hooks section reports declared-vs-installed render drift, and
+  names `agentstack trust .` rather than `apply --write` when the gate is what
+  holds delivery back. **The honest limit:** unlike a
   native extension, whose source tree is digest-pinned in `agentstack.lock`, a
   hook's command typically *names* a script whose file bytes have no lock
   entry — editing that script after consent changes what the harness executes

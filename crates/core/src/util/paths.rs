@@ -38,6 +38,24 @@ pub fn agentstack_home() -> PathBuf {
         .join(".agentstack")
 }
 
+/// Is `dir` the machine home itself — the personal layer's own manifest dir?
+///
+/// The single spelling of a rule three call sites depend on and must never
+/// disagree about: [`crate::manifest::discover_project_base`] refuses to
+/// discover this dir as a project (so it can never be trusted),
+/// [`crate::scope::Scope::default_for`] defaults it to global scope, and the
+/// hooks trust gate exempts it for exactly that reason — a layer no `trust`
+/// command can reach must not be gated on trust. Compared raw first, then
+/// canonicalized, so a symlinked spelling still matches.
+pub fn is_machine_home(dir: &std::path::Path) -> bool {
+    let home = agentstack_home();
+    dir == home
+        || matches!(
+            (dir.canonicalize(), home.canonicalize()),
+            (Ok(a), Ok(b)) if a == b
+        )
+}
+
 /// `~/.agentstack/adapters` — user-supplied descriptor overrides/additions.
 pub fn user_adapters_dir() -> PathBuf {
     agentstack_home().join("adapters")

@@ -1018,7 +1018,8 @@ fn render(
                 &ctx.dir,
                 &machine_hooks,
             )? {
-                rendered_content = rendered_content || !hp.managed.is_empty();
+                rendered_content =
+                    rendered_content || (!hp.managed.is_empty() && hp.refusal.is_none());
                 for u in &hp.unresolved {
                     let name = u.split_whitespace().next().unwrap_or(u.as_str());
                     crate::outln!(
@@ -1028,7 +1029,19 @@ fn render(
                     missing_secrets.insert(name.to_string());
                     error_count += 1;
                 }
-                let hblocked = !hp.unresolved.is_empty() && !args.allow_unresolved;
+                // Trust: a hook is a command the harness runs at full user
+                // permission, so an untrusted or drifted project renders none
+                // of them (`render::hooks::trust_refusal`). It blocks the write
+                // through the same seam an unresolved secret does — the diff is
+                // still shown, so what is being withheld stays reviewable — and
+                // `--allow-unresolved` does NOT reach it: that flag forgives a
+                // missing secret, never a missing consent.
+                if let Some(why) = &hp.refusal {
+                    crate::outln!("  {} {why}", "✗".red());
+                    error_count += 1;
+                }
+                let hblocked =
+                    (!hp.unresolved.is_empty() && !args.allow_unresolved) || hp.refusal.is_some();
                 if hblocked {
                     write_blockers += 1;
                 }
@@ -1041,7 +1054,15 @@ fn render(
                     }
                     if will_write && hblocked {
                         blocked_targets.insert(desc.display.clone());
-                        crate::outln!("  {} hooks not written — unresolved secrets", "✗".red());
+                        crate::outln!(
+                            "  {} hooks not written — {}",
+                            "✗".red(),
+                            if hp.refusal.is_some() {
+                                "the project has not been trusted for this content"
+                            } else {
+                                "unresolved secrets"
+                            }
+                        );
                     } else if will_write {
                         let capture =
                             crate::history::capture(&hp.path, format!("{} · hooks", desc.display));
