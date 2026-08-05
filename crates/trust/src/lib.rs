@@ -594,9 +594,21 @@ fn with_store_lock<T>(f: impl FnOnce() -> Result<T>) -> Result<T> {
             Err(e) => return Err(TrustError::Store(e.to_string())),
         }
     }
-    let out = f();
-    let _ = std::fs::remove_dir(&lock_dir);
-    out
+    // RAII, not a manual `remove_dir` after the call: `f` is caller code that
+    // may panic, and a panic unwinds past a plain statement while it still runs
+    // `Drop`. Without the guard a panicking writer leaks the sentinel, and every
+    // later trust mutation waits STORE_LOCK_WAIT and then fails closed until the
+    // STORE_LOCK_STALE window passes.
+    struct LockGuard(std::path::PathBuf);
+    impl Drop for LockGuard {
+        fn drop(&mut self) {
+            // Best-effort: a failed removal leaves the stale-break path to
+            // recover, exactly as a crashed process would.
+            let _ = std::fs::remove_dir(&self.0);
+        }
+    }
+    let _guard = LockGuard(lock_dir);
+    f()
 }
 
 fn now_secs() -> u64 {
@@ -1230,6 +1242,31 @@ mod tests {
                     Just(delta),
                 )
             })
+    }
+
+    #[test]
+    fn a_panic_inside_the_store_lock_still_releases_it() {
+        with_home(|home| {
+            let lock_dir = home.path().join("trust.lock.d");
+            let caught = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                with_store_lock(|| -> Result<()> { panic!("writer exploded mid-save") })
+            }));
+            assert!(caught.is_err(), "the panic must propagate");
+            assert!(
+                !lock_dir.exists(),
+                "the sentinel must not survive an unwinding writer"
+            );
+            // The witness that matters: the next mutation acquires the lock at
+            // once instead of waiting out STORE_LOCK_WAIT (5s) and failing
+            // closed until the STORE_LOCK_STALE window (30s) passes.
+            let start = std::time::Instant::now();
+            with_store_lock(|| Ok(())).unwrap();
+            assert!(
+                start.elapsed() < std::time::Duration::from_secs(1),
+                "a leaked lock made the next writer wait {:?}",
+                start.elapsed()
+            );
+        });
     }
 
     proptest! {
