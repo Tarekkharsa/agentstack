@@ -114,6 +114,9 @@ device() { # fresh fake device; $1 (optional): project dir name
 # rendered file. So each manifest here carries `[delivery] render_locally =
 # true`, which is the single supported override (`agentstack delivery
 # render-locally --write` writes the same block).
+#
+# Opting into files does NOT opt out of the review that precedes them: see
+# consent() below, which each scenario calls at its own point in the journey.
 DELIVERY_BLOCK='
 # This fixture asserts on rendered native files, so it opts out of the live
 # lane — see the note beside seed_manifest() in assert.sh.
@@ -127,6 +130,31 @@ seed_manifest() {
   printf 'version = 1\n[servers.docs]\ntype = "http"\nurl = "https://docs.example/mcp"\n[targets]\ndefault = ["claude-code"]\n' \
     > .agentstack/agentstack.toml
   render_locally
+}
+
+# The human yes — the two commands a person actually runs, spelled once because
+# this matrix walks a dozen fresh devices through the same moment.
+#
+# It is deliberately NOT folded into device() or seed_manifest(): a `[servers.*]`
+# entry is a command line the harness dials or spawns ITSELF, at its own startup,
+# outside agentstack, and a materialized skill is text an agent is told to
+# follow. Neither is delivered until a human has reviewed what this project
+# declares. Every call site below is that review, standing exactly where the
+# person stands — after the manifest is what it is going to be, before the first
+# render. Hide it in a setup helper and the matrix stops showing where the yes
+# belongs.
+#
+# Lock first, always: the grant is bound to the manifest layers AND the lockfile,
+# so pinning after a grant invalidates it. Same rule the other way — any later
+# edit to the manifest is drift, and needs a fresh review (see B5 and D2).
+#
+# `trust .` is the interactive review. Unattended here, so it reads the surface
+# with `--preview` and presents that exact digest back to `--yes`, which is what
+# the red-team tests do; the grant refuses if a byte moved in between.
+consent() {
+  "$AS" lock --write >/dev/null 2>&1
+  "$AS" trust . --yes --consented-digest \
+    "$("$AS" trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')" >/dev/null 2>&1
 }
 
 printf '\033[1;36m  agentstack — device onboarding matrix\033[0m\n'
@@ -176,6 +204,9 @@ grep -q 'ghp_FAKE' "$LIBDEF" && bad "PLAINTEXT TOKEN IN THE LIBRARY DEFINITION" 
 # lifted value: it names the unstored ref and the exact command to store it.
 grep -qi "not stored" <<<"$OUT" && ok "--no-keychain names the unstored ref (no silent drop)" || bad "--no-keychain silent drop: $OUT"
 grep -q "agentstack secret set" <<<"$OUT" && ok "--no-keychain prints the store one-liner per ref" || bad "no store one-liner in: $OUT"
+# The import is reviewed and approved before anything is rendered from it — so
+# the block asserted next is genuinely about the unresolved ref, not about trust.
+consent
 # `use <toolset>` is the render for library-referenced servers; bare `apply`
 # selects the manifest's own [servers], which an import no longer fills.
 "$AS" use default --write >/dev/null 2>&1 && bad "use exited 0 despite unresolved ref" || ok "use --write blocks the unresolved ref (nonzero exit)"
@@ -228,8 +259,11 @@ hdr "B4) manifest is the truth: apply re-renders over a rogue edit"
 device
 echo '{}' > "$H/.claude.json"
 seed_manifest
+consent
 "$AS" apply --scope project --write >/dev/null 2>&1
 python3 -c "import json; d=json.load(open('.mcp.json')); d['mcpServers']['docs']['url']='https://rogue.example/mcp'; json.dump(d,open('.mcp.json','w'))"
+# The rogue edit is to the RENDERED file, not to the manifest, so consent still
+# holds — re-rendering the approved truth over it needs no second review.
 "$AS" apply --scope project --write >/dev/null 2>&1
 grep -q "docs.example" .mcp.json && ok "manifest's truth re-rendered over the edit" || bad "rogue edit survived apply --write"
 
@@ -241,12 +275,16 @@ echo '{"mcpServers":{"my-hand-server":{"type":"http","url":"https://hand.example
 mkdir -p .agentstack
 printf 'version = 1\n[servers.managed-a]\ntype = "http"\nurl = "https://a.example/mcp"\n[servers.managed-b]\ntype = "http"\nurl = "https://b.example/mcp"\n[targets]\ndefault = ["claude-code"]\n' > .agentstack/agentstack.toml
 render_locally   # this fixture asserts on rendered files
+consent
 "$AS" apply --scope project --write >/dev/null 2>&1
 python3 - <<'EOF'
 text = open(".agentstack/agentstack.toml").read()
 open(".agentstack/agentstack.toml","w").write(
     text.replace('[servers.managed-b]\ntype = "http"\nurl = "https://b.example/mcp"\n', ""))
 EOF
+# De-manifesting a server EDITS the approved surface, so the prune render is a
+# fresh review — trust is bound to the bytes, and these bytes changed.
+consent
 "$AS" apply --scope project --write >/dev/null 2>&1
 grep -q "managed-b" .mcp.json && bad "managed-b not pruned" || ok "de-manifested server pruned"
 grep -q "managed-a" .mcp.json && ok "still-manifested server kept" || bad "managed-a lost"
@@ -259,6 +297,7 @@ echo '{"mcpServers":{"docs":{"type":"http","url":"https://docs.example/mcp"}}}' 
 # render is `use`, and so is the re-render this section round-trips.
 "$AS" init --yes >/dev/null 2>&1
 render_locally   # this fixture asserts on rendered files
+consent
 "$AS" use default --write >/dev/null 2>&1
 OUT=$("$AS" use default 2>&1)
 grep -qiE "up to date|no changes|0 target" <<<"$OUT" && ok "second use reports nothing to do" || bad "not idempotent: $(tail -2 <<<"$OUT")"
@@ -273,14 +312,17 @@ hdr "C1) project path with spaces (through lock → trust → locked --plan)"
 device "My Projects/app one"
 echo '{}' > "$H/.claude.json"
 seed_manifest
-"$AS" apply --scope project --write >/dev/null 2>&1 && grep -q docs .mcp.json && ok "apply in a spaced path" || bad "apply failed"
+# lock → trust → apply, in that order: the render is downstream of the yes, and
+# the spaced path has to survive every hop, quoting included.
 "$AS" lock --write >/dev/null 2>&1 && "$AS" trust . --yes --consented-digest "$("$AS" trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')" >/dev/null 2>&1 && ok "lock + trust in a spaced path" || bad "lock/trust failed"
+"$AS" apply --scope project --write >/dev/null 2>&1 && grep -q docs .mcp.json && ok "apply in a spaced path" || bad "apply failed"
 "$AS" run claude-code --locked --plan 2>&1 | grep -q "would proceed" && ok "locked --plan green in a spaced path" || bad "locked plan failed"
 
 hdr "C2) unicode project path"
 device "wörk/项目"
 echo '{}' > "$H/.claude.json"
 seed_manifest
+consent
 "$AS" apply --scope project --write >/dev/null 2>&1 && grep -q docs .mcp.json && ok "apply in a unicode path" || bad "apply failed"
 "$AS" doctor >/dev/null 2>&1 && ok "doctor green in a unicode path" || bad "doctor failed"
 
@@ -289,16 +331,19 @@ device "legacy"
 echo '{}' > "$H/.claude.json"
 printf 'version = 1\n[servers.docs]\ntype = "http"\nurl = "https://docs.example/mcp"\n[targets]\ndefault = ["claude-code"]\n' > agentstack.toml
 render_locally agentstack.toml   # this fixture asserts on rendered files
-"$AS" apply --scope project --write >/dev/null 2>&1 && grep -q docs .mcp.json && ok "legacy layout applies" || bad "apply failed"
+# lock → trust → apply here too. The lock is asserted on its own because the
+# legacy layout is exactly where it could land in the wrong directory.
 "$AS" lock --write >/dev/null 2>&1 && [ -f agentstack.lock ] && ok "lock lands beside the legacy manifest" || bad "lock misplaced"
-consent=$("$AS" trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')
-"$AS" trust . --yes --consented-digest "$consent" >/dev/null 2>&1
+digest=$("$AS" trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')
+"$AS" trust . --yes --consented-digest "$digest" >/dev/null 2>&1
+"$AS" apply --scope project --write >/dev/null 2>&1 && grep -q docs .mcp.json && ok "legacy layout applies" || bad "apply failed"
 "$AS" run claude-code --locked --plan 2>&1 | grep -q "would proceed" && ok "locked --plan green on the legacy layout" || bad "legacy locked plan failed"
 
 hdr "C4) non-git project"
 device "plain"
 echo '{}' > "$H/.claude.json"
 seed_manifest
+consent
 "$AS" apply --scope project --write >/dev/null 2>&1 && ok "apply without git" || bad "apply failed"
 "$AS" doctor >/dev/null 2>&1 && ok "doctor green without git" || bad "doctor failed"
 
@@ -319,6 +364,7 @@ device "proj"
 echo '{}' > "$H/.claude.json"
 seed_manifest
 git init -q .
+consent   # reviewed at the project root, where the person is, before descending
 mkdir -p src/deep && cd src/deep
 "$AS" 2>&1 | grep -q "agentstack.toml" && ok "bare agentstack finds the root manifest from src/deep" || bad "overview lost the root manifest from a subdir"
 "$AS" doctor >/dev/null 2>&1 && ok "doctor resolves the root manifest from src/deep" || bad "doctor errored from a subdir"
@@ -330,10 +376,15 @@ hdr "D2) adopt pulls a hand-EDITED field of a manifest-known server"
 device "proj2"
 echo '{}' > "$H/.claude.json"
 seed_manifest
+consent
 "$AS" apply --scope project --write >/dev/null 2>&1
 python3 -c "import json; d=json.load(open('.mcp.json')); d['mcpServers']['docs']['url']='https://docs-eu.example/mcp'; json.dump(d,open('.mcp.json','w'), indent=2)"
 "$AS" adopt --scope project --write >/dev/null 2>&1
 grep -q "docs-eu.example" .agentstack/agentstack.toml && ok "adopt pulled the hand-edited url into the manifest" || bad "adopt ignored the hand-edit"
+# adopt just rewrote the server's url INTO the manifest — a new endpoint the
+# harness would dial. It is a changed surface, so it is reviewed again before
+# the render that would ship it.
+consent
 "$AS" apply --scope project --write >/dev/null 2>&1
 grep -q "docs-eu.example" .mcp.json && ok "the hand-edit survives the next apply (not reverted)" || bad "next apply reverted the adopted edit"
 
@@ -348,6 +399,10 @@ printf 'version = 1\n[servers.docs]\ntype = "http"\nurl = "https://docs.example/
 render_locally   # this fixture asserts on rendered files
 "$AS" lock --write >/dev/null 2>&1
 [ -f .agentstack/agentstack.lock ] && ok "the checkout carries a lockfile" || bad "nothing to land with — lock never written"
+# A checkout arriving from elsewhere is exactly the case the gate exists for:
+# the lockfile travels, consent does not. Trust is per-machine, so the person
+# sitting at THIS machine reviews the servers before `up` writes any of them.
+consent
 OUT=$("$AS" up 2>&1) && ok "up exits 0 on a machine that has never seen this project" || bad "up failed: $OUT"
 grep -q "Claude Code" <<<"$OUT" && ok "up names the harnesses this machine actually has" || bad "no harness line: $OUT"
 [ -f .mcp.json ] && ok "up rendered the native config" || bad "up rendered no config at all"
@@ -363,6 +418,7 @@ render_locally   # this fixture asserts on rendered files
 printf -- '---\nname: sql-review\ndescription: Review SQL migrations before they ship.\n---\nCheck every migration for missing indexes.\n' \
   > .agentstack/skills/sql-review/SKILL.md
 "$AS" lock --write >/dev/null 2>&1
+consent   # same fresh-machine review as E1 — the servers and the pinned skill
 OUT=$("$AS" up 2>&1)
 grep -q 'DEVICE_UP_TOKEN' <<<"$OUT" && ok "up names the ref this machine cannot resolve" || bad "unresolvable ref went unmentioned: $OUT"
 grep -q 'agentstack secret set DEVICE_UP_TOKEN' <<<"$OUT" && ok "...alongside the exact command that stores it" || bad "no per-ref store command: $OUT"

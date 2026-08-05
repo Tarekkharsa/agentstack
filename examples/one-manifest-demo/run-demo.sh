@@ -21,9 +21,12 @@
 # The demo:
 #   1. Shows the single committed manifest and proves it holds NO secret value,
 #      only a `${GITHUB_TOKEN}` placeholder.
-#   2. Runs `agentstack apply` as a read-only PREVIEW — the per-CLI plan, three
+#   2. Pins the surface (`lock --write`) and grants consent (`trust`). A
+#      `[servers.*]` entry is a command the harness launches on its own, so no
+#      render writes one until a human has reviewed the project and said yes.
+#   3. Runs `agentstack apply` as a read-only PREVIEW — the per-CLI plan, three
 #      different native files at three different paths, from one source.
-#   3. Runs `agentstack apply --write` with the token resolved from the env,
+#   4. Runs `agentstack apply --write` with the token resolved from the env,
 #      then shows the rendered native files and ASSERTS the outcome:
 #        - each CLI got the server, in its own native shape;
 #        - the instruction fragment landed in CLAUDE.md and AGENTS.md;
@@ -112,7 +115,17 @@ else
   bad "the manifest should hold only the placeholder, never the resolved token"
 fi
 
+say "Pin the surface, then approve it — the yes that has to come before any render:"
+run "agentstack lock --write && agentstack trust ."
 "$AS" lock --write --manifest-dir "$PROJECT" >/dev/null
+# `trust .` is the interactive review. This demo is unattended, so it takes the
+# same grant the CI red-team tests take: read the surface with --preview, then
+# present that exact digest back. The grant refuses if a byte moved in between.
+CONSENT="$("$AS" trust "$PROJECT" --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')"
+"$AS" trust "$PROJECT" --yes --consented-digest "$CONSENT" >/dev/null
+note "A server definition is a command line the harness launches on its own, at its"
+note "own startup, outside agentstack — so it is written only after a human has"
+note "reviewed this project and said yes. Lock first: pinning changes what you approve."
 
 say "Ask for the files — preview first: one manifest, three CLIs, three paths:"
 run "agentstack apply --scope project        # read-only; writes nothing"
