@@ -183,6 +183,9 @@ path = "./workflows/pipeline.js"
 roles = ["planner"]
 blueprint = "./workflows/pipeline.blueprint.json"
 
+[settings.claude-code]
+model = "opus"
+
 [toolsets.planner]
 skills = ["summarize"]
 "#,
@@ -209,10 +212,17 @@ fn assert_every_path_pin_has_bytes(home: &std::path::Path, proj: &std::path::Pat
         "[[workflow]]",
         &["checksum", "blueprint_checksum"],
     );
+    // G18: a settings key pins the canonical bytes of its DECLARED value, which
+    // live in the manifest rather than in a file — the same shape a server
+    // definition pins. It belongs to this universal property for the same
+    // reason: a re-gate over an edited `permissions` block can only show what
+    // moved if the approved bytes are still on disk.
+    let settings = table_entries(&lock_text, "[[setting]]", &["checksum"]);
     assert!(
         !entries.is_empty()
             && !instructions.is_empty()
             && !extensions.is_empty()
+            && !settings.is_empty()
             && workflows.len() >= 2,
         "after {after} the lock is missing one of the pinned kinds, so this \
          witness would be vacuous — the fixture or the lock format \
@@ -221,6 +231,7 @@ fn assert_every_path_pin_has_bytes(home: &std::path::Path, proj: &std::path::Pat
     entries.extend(instructions);
     entries.extend(extensions);
     entries.extend(workflows);
+    entries.extend(settings);
     let content_root = home.join(".agentstack/store/content");
     let mut missing = Vec::new();
     for (name, checksum) in &entries {

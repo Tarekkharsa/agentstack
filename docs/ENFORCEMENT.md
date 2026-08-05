@@ -816,31 +816,66 @@ still fail-closed, and still only evidence that the check ran.
 
 ### Settings
 
-- **Not pinned, not drift-probed — the one capability kind with no binding of
-  its own.** `[settings.*]` values are merged into native CLI configuration as
-  raw JSON. There is no `LockedSetting`, so settings content never reaches
-  `agentstack.lock`, and no `doctor` check compares the delivered bytes against
-  the reviewed ones in either direction. (`doctor` DOES open a Settings section
-  — it validates that each `[settings.<id>]` targets a known CLI and is a table
-  of keys, and reports what merged where — but that is shape and destination
-  validation, not drift detection.) Every other kind on this page can answer
-  "are the delivered bytes the reviewed bytes?" — settings cannot.
-- **Why this is stated rather than fixed here.** The gap was surfaced by the
-  P0.3 structural lint. It is **not currently on the queue**: `TODO.md` was
-  re-seeded from `STRATEGY.md` v3 on 2026-08-02 and carries no settings-pinning
-  item, so this section is the only place it stands recorded. Closing it is
-  a behavior change — pinning settings values, re-gating on change, adding a
-  probe and a witness — and belongs in a supervised item of its own whenever it
-  is queued. Until
-  then, treat a settings value the way you would treat any un-pinned config:
-  read it at review time, and expect no machinery to tell you if it moves.
-- **What still applies, precisely.** Settings live in the manifest, and
-  manifest bytes are bound into the trust digest — so editing a
-  `[settings.*]` value *in the manifest* does re-gate consent, exactly like
-  any other manifest edit. What is missing is everything downstream of that:
-  no pin means a rendered value that is changed, or a lock that is
-  regenerated, is checked against nothing, and no probe will tell you.
-  (`crates/core/src/manifest/model.rs`)
+- **pre-delivery — pinned per owned key, and drift-probed.** A `[settings.*]`
+  value is merged into a named CLI's own configuration file, and
+  `permissions.defaultMode` lives there, so a settings value is
+  security-relevant. Each **top-level key** the manifest declares is pinned
+  separately in `agentstack.lock` as a `[[setting]]` row carrying
+  `target`, `key` and a SHA-256 checksum, and `doctor`'s Settings section
+  reports drift against it. (`crates/core/src/lock.rs` `LockedSetting`,
+  `crates/cli/src/commands/lock.rs` `record_setting_pins`,
+  `crates/cli/src/commands/doctor.rs` `check_setting_pins`, witnessed by
+  `crates/cli/tests/settings_pinning.rs`.)
+- **The grain is the key, because the key is the unit AgentStack owns.**
+  `render/settings.rs` merges one top-level key at a time, replaces it
+  wholesale, prunes one it used to own, and leaves every other byte of the
+  harness's file untouched. Pinning at that same grain is what lets a probe name
+  *which* key moved, and what makes the coverage boundary structural rather than
+  a promise: a key AgentStack does not declare has no row in the lock and can
+  never be read as drift. **Your own unrelated edits to `settings.json` are not
+  drift and are never reported as such.**
+- **What the checksum covers: the value as DECLARED, `${REF}`s unresolved** —
+  the same rule `LockedServer` follows. A resolved value is machine-specific
+  (one committed lockfile would disagree with itself across two developers'
+  machines) and can contain a secret (which must never reach a committed file).
+  So "the delivered bytes are the reviewed bytes" is a chain of two legs, and
+  `doctor` reports them separately because they have different fixes:
+  **declaration ↔ pin** (the declared value still digests to what the lock
+  records; fix: `agentstack lock --write`), and **declaration ↔ disk**
+  (re-merging that key into the live file would change nothing; fix:
+  `agentstack apply --write`). The clean line — "N keys in <path> match
+  agentstack.lock" — is printed only when both hold.
+- **Re-gate on change.** Settings live in the manifest, and manifest bytes are
+  bound into the trust digest, so editing a `[settings.*]` value re-gates
+  consent exactly like any other manifest edit; the consent card discloses each
+  `[settings.<id>]` block by its canonical, key-sorted identity, so a changed
+  value reads as `~ changed` while a mere re-ordering of the same keys does not
+  (`crates/cli/src/commands/trust.rs` `settings_identity`). The pin now moves
+  with it: a re-lock after a settings edit changes the lock bytes, which are
+  consent material too. The pinning act deposits the canonical bytes it hashed
+  into the content store (`Store::pin_settings_key`), so a re-gate can show
+  which lines of a value moved rather than only that it moved.
+- **delivery — NOT a fail-closed gate, deliberately.** Unlike an unpinned skill,
+  instruction, extension or workflow, an unpinned or drifted settings key does
+  **not** refuse a render, and `doctor` reports it as a warning rather than an
+  error. Settings are inert configuration merged into a file the *harness* owns;
+  refusing there would leave a user's own harness config half-written, for a
+  class of change the trust gate already re-gates through the manifest bytes.
+  What you get is a named finding and a named fix, not a stop.
+- **runtime — unsupported, and this is the honest limit.** A settings value
+  reaches the harness's own configuration file and the harness reads it
+  directly. Nothing intercepts that at run time: if a `permissions` block is
+  edited on disk after consent, the harness obeys the edited file until the next
+  `apply --write` puts the declared value back. AgentStack **detects** that
+  divergence and names the fix; it does not prevent it.
+- **Backward compatibility.** A lockfile written before settings pins existed
+  carries no `[[setting]]` rows. It keeps working: the section degrades to the
+  pre-pin behaviour (the disk leg alone), reports the unpinned state as a
+  warning naming `agentstack lock --write`, and never errors. The next
+  `lock --write` backfills; there is no migration step. An empty pin list
+  serializes to nothing, so a project that declares no settings keeps a
+  byte-identical lockfile and is not re-gated by the arrival of the pin kind.
+  (`crates/core/src/manifest/model.rs`, `crates/core/src/lock.rs`)
 
 ### Hooks
 

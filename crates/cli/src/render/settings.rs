@@ -39,11 +39,57 @@ pub struct SettingsPlan {
     /// Resolved secret values (`(ref-name, value)`) to redact from the diff
     /// preview. The real values stay in `proposed` and are what `write` persists.
     pub secrets: Vec<(String, String)>,
+    /// The declared entries with their `${REF}`s resolved, in declaration order
+    /// — exactly what was merged to produce `proposed`. Kept so a caller can ask
+    /// the per-key question ([`SettingsPlan::drifted_keys`]) instead of only the
+    /// whole-file one; never rendered anywhere, because a resolved value can
+    /// carry a secret.
+    resolved: Vec<(String, Value)>,
+    /// Which merge dialect `settings_path` speaks. Needed to re-run the merge
+    /// one key at a time.
+    format: Format,
 }
 
 impl SettingsPlan {
     pub fn changed(&self) -> bool {
         diff::differs(&self.existing, &self.proposed)
+    }
+
+    /// The managed keys whose value in the live settings file is not what this
+    /// plan would write — i.e. per-key drift, named.
+    ///
+    /// **Only keys we declare are examined, which is the whole point.**
+    /// AgentStack owns a set of top-level keys and leaves the rest of the
+    /// harness's file alone, so a user's unrelated edit elsewhere in that file
+    /// must never read as drift. Asking the question one declared key at a time
+    /// is what makes that structural rather than a promise.
+    ///
+    /// The comparison re-runs the real merge for a single entry and asks whether
+    /// it would change anything. That is deliberate: it borrows the merge's own
+    /// definition of "this key already holds this value" — including how each
+    /// format spells nesting — instead of growing a second, subtly different
+    /// notion of equality that could disagree with what `apply --write` does.
+    /// A merge that errors (an existing settings file that no longer parses) is
+    /// reported as drift on every declared key rather than silently as none:
+    /// an unreadable destination is exactly when a caller must not be told
+    /// "matches the pin".
+    ///
+    /// Returns key names only. Values are never included — they are resolved,
+    /// and a resolved value can be a secret.
+    pub fn drifted_keys(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        for (key, value) in &self.resolved {
+            let one = [(key.clone(), value.clone())];
+            let merged = match self.format {
+                Format::Json => merge_json::merge_top_level(&self.existing, &one, &[]),
+                Format::Toml => merge_toml::merge_top_level(&self.existing, &one, &[]),
+            };
+            match merged {
+                Ok(text) if !diff::differs(&self.existing, &text) => {}
+                _ => out.push(key.clone()),
+            }
+        }
+        out
     }
     pub fn diff(&self) -> String {
         diff::mask_secrets(&diff::render(&self.existing, &self.proposed), &self.secrets)
@@ -120,6 +166,8 @@ pub fn plan_settings(
         removed,
         unresolved,
         secrets,
+        resolved: entries,
+        format,
     }))
 }
 

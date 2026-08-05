@@ -77,6 +77,20 @@ pub struct Lock {
     /// downstream.
     #[serde(default, rename = "package")]
     pub packages: Vec<LockedPackage>,
+    /// Native-settings key pins (G18). Additive `#[serde(default)]` at version
+    /// 2, on the same justification as the executable, extension, workflow and
+    /// package pins above — with one difference worth stating: this list also
+    /// carries `skip_serializing_if`, like [`LockedInstruction::variants`], so a
+    /// project that declares no `[settings.*]` keeps a byte-identical lock and
+    /// is never re-gated by the mere arrival of a new pin kind.
+    ///
+    /// Silent unpinning by an older binary is not a hole here for the same
+    /// reason it is not one above: rewriting these away changes the lock bytes,
+    /// which flips the trust digest and forces a review. What it does NOT do is
+    /// block delivery — see [`LockedSetting`] for exactly what a settings pin
+    /// claims and what it does not.
+    #[serde(default, rename = "setting", skip_serializing_if = "Vec::is_empty")]
+    pub settings: Vec<LockedSetting>,
 }
 
 impl Default for Lock {
@@ -90,6 +104,7 @@ impl Default for Lock {
             extensions: Vec::new(),
             workflows: Vec::new(),
             packages: Vec::new(),
+            settings: Vec::new(),
         }
     }
 }
@@ -400,6 +415,103 @@ pub struct LockedExecutable {
     pub checksum: Sha256Hex,
 }
 
+/// A pinned native-settings key (G18): one top-level key of one CLI's own
+/// settings file, checksummed over the **declared** value.
+///
+/// **The grain is the key, not the block, because the key is the unit
+/// AgentStack owns.** `crates/cli/src/render/settings.rs` says it in its own
+/// header — "we own a *set of top-level keys*" — and `merge_top_level` acts one
+/// key at a time: it replaces a key wholesale, prunes a key it used to own, and
+/// leaves every other byte of the file alone. Pinning at that same grain buys
+/// two things a single digest over the whole `[settings.<target>]` block could
+/// not: a probe can name *which* key moved instead of saying "something in this
+/// block changed", and the pin's coverage boundary is expressible at all — a
+/// key AgentStack does not declare has no row here, so it can never be read as
+/// drift. The cost is a few extra lines in the lockfile for values that are
+/// small scalars and shallow tables; that is the cheap side of the trade.
+///
+/// **What the checksum covers: the value as DECLARED, `${REF}`s unresolved.**
+/// The same rule [`LockedServer`] follows, and for the same two reasons. A
+/// resolved value is machine-specific, so pinning it would make one committed
+/// lockfile disagree with itself across two developers' machines; and a
+/// resolved value can contain a secret, which must never reach a file that gets
+/// committed. The consequence is stated rather than hidden: a pin match proves
+/// the declaration is the reviewed declaration, and the *rendered* comparison
+/// is a second, separate leg that `doctor` performs against the live file.
+///
+/// **What a settings pin does NOT claim.** It says nothing about bytes of the
+/// harness's settings file that AgentStack did not declare — that is the point
+/// of the per-key grain, and the reason a user's own unrelated edit is not
+/// drift. It is also not a delivery gate: unlike an unpinned skill or
+/// instruction, an unpinned or drifted settings key does not refuse a render.
+/// Settings are inert configuration merged into a file the harness owns, and a
+/// fail-closed refusal there would leave the user's own harness config
+/// half-written for a class of change that trust review already re-gates
+/// through the manifest bytes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct LockedSetting {
+    /// The adapter id whose native settings file this key is merged into
+    /// (`claude-code`, `codex`, …). Recorded like [`LockedExtension::target`]
+    /// so the pin is self-describing in a review diff.
+    pub target: String,
+    /// The top-level key AgentStack owns in that file (`permissions`, `env`, …).
+    pub key: String,
+    pub checksum: Sha256Hex,
+}
+
+impl LockedSetting {
+    /// The checksum a pin for `value` must carry. The single formula: SHA-256
+    /// over [`canonical_settings_json`]. Both the pinning side
+    /// (`Store::pin_settings_key`, which additionally deposits these bytes) and
+    /// the probing side (`doctor`) go through here, so the two can never drift
+    /// into disagreeing about what a settings digest is.
+    pub fn checksum_of(value: &serde_json::Value) -> Sha256Hex {
+        Sha256Hex::of(canonical_settings_json(value).as_bytes())
+    }
+}
+
+/// The canonical JSON form of a settings value — object keys sorted
+/// recursively, no insignificant whitespace. This exact byte string is what a
+/// [`LockedSetting`] checksum covers and what the content store deposits.
+///
+/// Object key order is not meaning: two manifests that type the same keys in a
+/// different order declare the same settings, and a pin that flipped on
+/// re-ordering would push people through a re-review that says nothing. Array
+/// order IS meaning — element order in an allow/deny list is precedence — so
+/// arrays keep theirs. Same rule the consent card's `settings_identity` already
+/// applies (`crates/cli/src/commands/trust.rs`); this is the digest-bearing
+/// twin of it, in valid JSON so the deposited bytes are readable content rather
+/// than an internal display string.
+pub fn canonical_settings_json(value: &serde_json::Value) -> String {
+    use serde_json::Value;
+    match value {
+        Value::Object(map) => {
+            let mut keys: Vec<&String> = map.keys().collect();
+            keys.sort_unstable();
+            let inner: Vec<String> = keys
+                .iter()
+                .map(|k| {
+                    format!(
+                        // `Value::String(..).to_string()` is the JSON string
+                        // escape, so a key containing `"` cannot forge a
+                        // separator and collide two distinct values onto one
+                        // digest.
+                        "{}:{}",
+                        Value::String((*k).to_string()),
+                        canonical_settings_json(&map[*k])
+                    )
+                })
+                .collect();
+            format!("{{{}}}", inner.join(","))
+        }
+        Value::Array(items) => {
+            let inner: Vec<String> = items.iter().map(canonical_settings_json).collect();
+            format!("[{}]", inner.join(","))
+        }
+        other => other.to_string(),
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LockedSkill {
     pub name: String,
@@ -551,6 +663,41 @@ impl Lock {
 
     pub fn get_server(&self, name: &str) -> Option<&LockedServer> {
         self.servers.iter().find(|s| s.name == name)
+    }
+
+    /// The pin for one owned settings key, if this lock records it. Identity is
+    /// `(target, key)`: the same key name in two harnesses' settings files is
+    /// two independent declarations that may legitimately hold different values.
+    pub fn get_setting(&self, target: &str, key: &str) -> Option<&LockedSetting> {
+        self.settings
+            .iter()
+            .find(|s| s.target == target && s.key == key)
+    }
+
+    /// Insert or replace a settings-key pin, keeping entries sorted by
+    /// `(target, key)` so declaration order in the manifest never shows up as a
+    /// lockfile diff.
+    pub fn upsert_setting(&mut self, entry: LockedSetting) {
+        if let Some(existing) = self
+            .settings
+            .iter_mut()
+            .find(|s| s.target == entry.target && s.key == entry.key)
+        {
+            *existing = entry;
+        } else {
+            self.settings.push(entry);
+        }
+        self.settings
+            .sort_by(|a, b| (&a.target, &a.key).cmp(&(&b.target, &b.key)));
+    }
+
+    /// Drop settings pins no longer in `keep` — a key removed from the manifest
+    /// must not leave a pin behind, or `doctor` would keep measuring drift
+    /// against a value nobody declares (the mirror of
+    /// [`Lock::retain_instruction_names`]).
+    pub fn retain_settings(&mut self, keep: &[(String, String)]) {
+        self.settings
+            .retain(|s| keep.iter().any(|(t, k)| *t == s.target && *k == s.key));
     }
 
     pub fn get_executable(&self, path: &str, kind: ExecutableKind) -> Option<&LockedExecutable> {
@@ -1166,5 +1313,110 @@ mod tests {
         lock.retain_instruction_names(&["style".to_string()]);
         assert!(lock.get_instruction("house").is_none());
         assert!(lock.get_instruction("style").is_some());
+    }
+
+    /// The settings digest keys on MEANING, not on how the value was typed:
+    /// re-ordering object keys is the same consent, changing a value is not.
+    /// Without this a cosmetic re-order would re-gate every trusted project and
+    /// train the re-review into a reflex.
+    #[test]
+    fn settings_checksum_ignores_key_order_but_not_values() {
+        use serde_json::json;
+        let a = json!({"permissions": {"defaultMode": "plan", "allow": ["Bash"]}});
+        let b = json!({"permissions": {"allow": ["Bash"], "defaultMode": "plan"}});
+        assert_eq!(
+            LockedSetting::checksum_of(&a),
+            LockedSetting::checksum_of(&b)
+        );
+
+        let changed = json!({"permissions": {"allow": ["Bash"], "defaultMode": "acceptEdits"}});
+        assert_ne!(
+            LockedSetting::checksum_of(&a),
+            LockedSetting::checksum_of(&changed),
+            "a changed permission mode must move the pin"
+        );
+
+        // Array order IS meaning (precedence in an allow/deny list).
+        let one = json!(["a", "b"]);
+        let other = json!(["b", "a"]);
+        assert_ne!(
+            LockedSetting::checksum_of(&one),
+            LockedSetting::checksum_of(&other)
+        );
+
+        // The canonical form is real JSON, so the deposited bytes are readable
+        // content rather than an internal display string.
+        let canonical = canonical_settings_json(&a);
+        let _: serde_json::Value = serde_json::from_str(&canonical).unwrap();
+
+        // A key containing the separator characters cannot forge a collision.
+        let sneaky = json!({"a\":1,\"b": 0});
+        let plain = json!({"a": 1, "b": 0});
+        assert_ne!(
+            LockedSetting::checksum_of(&sneaky),
+            LockedSetting::checksum_of(&plain)
+        );
+    }
+
+    /// `[[setting]]` round-trips, sorts by `(target, key)`, upserts in place,
+    /// prunes to the declared set — and, crucially, serializes to NOTHING when
+    /// empty, so a project that declares no settings keeps a byte-identical
+    /// lockfile and is not re-gated by the arrival of a new pin kind.
+    #[test]
+    fn setting_pins_round_trip_and_stay_absent_when_empty() {
+        let mut lock = Lock::default();
+        assert!(
+            !toml::to_string_pretty(&lock).unwrap().contains("setting"),
+            "an empty settings pin list must not appear in the lockfile"
+        );
+
+        lock.upsert_setting(LockedSetting {
+            target: "codex".into(),
+            key: "sandbox".into(),
+            checksum: Sha256Hex::of(b"5b0x"),
+        });
+        lock.upsert_setting(LockedSetting {
+            target: "claude-code".into(),
+            key: "permissions".into(),
+            checksum: Sha256Hex::of(b"p3rm"),
+        });
+        assert_eq!(lock.settings[0].target, "claude-code", "sorted by target");
+
+        // Same key name under a different target is a different pin.
+        lock.upsert_setting(LockedSetting {
+            target: "codex".into(),
+            key: "permissions".into(),
+            checksum: Sha256Hex::of(b"0th3r"),
+        });
+        assert_eq!(lock.settings.len(), 3);
+
+        // Upsert replaces in place.
+        lock.upsert_setting(LockedSetting {
+            target: "claude-code".into(),
+            key: "permissions".into(),
+            checksum: Sha256Hex::of(b"n3w"),
+        });
+        assert_eq!(
+            lock.get_setting("claude-code", "permissions")
+                .unwrap()
+                .checksum,
+            Sha256Hex::of(b"n3w")
+        );
+
+        let text = toml::to_string_pretty(&lock).unwrap();
+        assert!(text.contains("[[setting]]"));
+        let parsed: Lock = toml::from_str(&text).unwrap();
+        assert_eq!(parsed.settings, lock.settings);
+
+        // A lock written before settings pins existed parses with none, and is
+        // not an error — the backward-compatibility guarantee, pinned.
+        let old: Lock = toml::from_str("version = 2\n").unwrap();
+        assert!(old.settings.is_empty());
+
+        // Prune to the declared set.
+        lock.retain_settings(&[("codex".to_string(), "sandbox".to_string())]);
+        assert_eq!(lock.settings.len(), 1);
+        assert!(lock.get_setting("codex", "sandbox").is_some());
+        assert!(lock.get_setting("claude-code", "permissions").is_none());
     }
 }

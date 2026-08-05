@@ -167,8 +167,9 @@ CONFIG_ALLOWLIST: frozenset[str] = frozenset(
 # this lint exists to catch.
 #
 # A capability kind with NO entry here is a witness gap by definition (the
-# baseline records it, same as any other gap) — this covers hooks, settings,
-# and packs today, none of which have a drift/pin witness at all.
+# baseline records it, same as any other gap) — this covers hooks and packs
+# today, neither of which has a drift/pin witness at all. Settings joined the
+# registry on 2026-08-05 when G18 gave them a pin and a probe to witness.
 WITNESS_REGISTRY: dict[str, list[tuple[str, str]]] = {
     "skills": [
         ("crates/cli/tests/content_pinning.rs", "inline_skill_drift_blocks_activation_until_relocked"),
@@ -186,6 +187,15 @@ WITNESS_REGISTRY: dict[str, list[tuple[str, str]]] = {
     "servers": [
         ("crates/cli/src/resolve.rs", "server_definition_change_is_checksum_drift"),
         ("crates/cli/src/resolve.rs", "server_checksum_reflects_definition_file"),
+    ],
+    # G18. Two witnesses because a settings pin makes two separable claims and
+    # the second one is the easy one to lose: the first walks pin -> approve ->
+    # deliver -> tamper on each leg, the second holds the compatibility promise
+    # that a lock written before `[[setting]]` existed keeps working and is
+    # backfilled rather than migrated.
+    "settings": [
+        ("crates/cli/tests/settings_pinning.rs", "settings_keys_are_pinned_and_disk_drift_is_reported"),
+        ("crates/cli/tests/settings_pinning.rs", "a_lock_without_settings_pins_still_works_and_is_backfilled"),
     ],
 }
 
