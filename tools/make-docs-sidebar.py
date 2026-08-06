@@ -38,7 +38,7 @@ TREE = [
         ("Interactive tutorial", "tutorial/", "tutorial"),
         ("Install", "index.html#install", "install"),
         ("Concepts", "concepts.html", "concepts"),
-        ("Which mode do I need?", "choose.html", "choose"),
+        ("Which protection do I need?", "choose.html", "choose"),
         ("Examples", "examples.html", "examples"),
         ("Cookbook", "cookbook.html", "cookbook"),
     ], "open"),

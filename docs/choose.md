@@ -2,16 +2,18 @@
      https://tarekkharsa.github.io/agentstack/ — readers go to the site.
      Edit here, then run: python3 tools/make-docs-pages.py -->
 
-# Which mode do I need?
+# Which protection do I need?
 
-AgentStack has two decisions to make: where the rendered files should live,
-and how much protection you want. This page picks both from what you are trying
-to do. New to a word below? Every term is defined in [concepts](concepts.md).
+This page used to ask you two questions. Only one of them is still yours:
+**how much protection you want**. Where capabilities land is no longer a
+decision — delivery is routed for you, and the first section below says what
+that routing is so the second one makes sense. New to a word below? Every term
+is defined in [concepts](concepts.md).
 
 Your *CLIs* are the agent tools you run — Claude Code, Codex, Cursor, and the
 rest.
 
-## First: how do capabilities reach your CLIs?
+## First, already decided: how capabilities reach your CLIs
 
 **You do not have to choose.** Since 2026-08-03 delivery is *routed*, not
 picked: AgentStack decides per capability, from what kind it is and which CLI it
@@ -47,10 +49,10 @@ The older per-project delivery modes (`static`, `clean-at-rest`, `zero-files`)
 are readings of a project's current shape, not choices: `agentstack set-mode`
 is retired and delivery is routed for you. See
 [delivery modes in concepts](concepts.md) for what each still means, and
-[ARCHITECTURE — operating model](ARCHITECTURE.md#operating-model--choose-the-boundary-you-need)
-for how delivery sits beside selection and isolation.
+[ARCHITECTURE — delivery is routed, not chosen](ARCHITECTURE.md#delivery-is-routed-not-chosen)
+for the routing itself and how delivery sits beside selection and isolation.
 
-## Then: how much protection?
+## Then, your decision: how much protection?
 
 Find the row that sounds like you. The last column says how strongly each
 option is *actually* enforced, in the [enforcement matrix's](ENFORCEMENT.md)

@@ -4,8 +4,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Which mode do I need? — agentstack</title>
-<meta name="description" content="AgentStack has two decisions to make: where the rendered files should live, and how much protection you want. This page picks both from what you are trying">
+<title>Which protection do I need? — agentstack</title>
+<meta name="description" content="This page used to ask you two questions. Only one of them is still yours: how much protection you want. Where capabilities land is no longer a decision — d">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="canonical" href="https://tarekkharsa.github.io/agentstack/choose.html">
@@ -131,7 +131,7 @@
       </li>
       <li><a href="concepts.html">Concepts</a>
       </li>
-      <li><a class="on-page" href="choose.html">Which mode do I need?</a>
+      <li><a class="on-page" href="choose.html">Which protection do I need?</a>
       </li>
       <li><a href="examples.html">Examples</a>
       </li>
@@ -258,10 +258,10 @@
 </aside>
   <main id="main-content" tabindex="-1">
 <p class="versionbar">These pages describe <b>unreleased <code>main</code></b>, which is ahead of the latest release (<b>v0.18.0</b>) — and the release is what <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">the installer gives you</a>. Commands and flags documented here may not exist in your build; <code>agentstack --version</code> says which one you have.</p>
-<h1 id="which-mode-do-i-need">Which mode do I need?</h1>
-<p>AgentStack has two decisions to make: where the rendered files should live, and how much protection you want. This page picks both from what you are trying to do. New to a word below? Every term is defined in <a href="concepts.html">concepts</a>.</p>
+<h1 id="which-protection-do-i-need">Which protection do I need?</h1>
+<p>This page used to ask you two questions. Only one of them is still yours: <strong>how much protection you want</strong>. Where capabilities land is no longer a decision — delivery is routed for you, and the first section below says what that routing is so the second one makes sense. New to a word below? Every term is defined in <a href="concepts.html">concepts</a>.</p>
 <p>Your <em>CLIs</em> are the agent tools you run — Claude Code, Codex, Cursor, and the rest.</p>
-<h2 id="first-how-do-capabilities-reach-your-clis">First: how do capabilities reach your CLIs?<a class="hlink" href="#first-how-do-capabilities-reach-your-clis" aria-label="Link to this section">#</a></h2>
+<h2 id="first-already-decided-how-capabilities-reach-your-clis">First, already decided: how capabilities reach your CLIs<a class="hlink" href="#first-already-decided-how-capabilities-reach-your-clis" aria-label="Link to this section">#</a></h2>
 <p><strong>You do not have to choose.</strong> Since 2026-08-03 delivery is <em>routed</em>, not picked: AgentStack decides per capability, from what kind it is and which CLI it is going to, and says what it decided. <code>agentstack x delivery</code> shows the routing for your project.</p>
 <div class="tblwrap"><table>
 <thead><tr><th>Capability</th><th>Where it goes</th><th>Why</th></tr></thead><tbody>
@@ -273,8 +273,8 @@
 <p>A project is normally in <strong>both</strong> lanes at once, and that is the ordinary case, not a compromise.</p>
 <p><strong>The one escape hatch: render locally.</strong> <code>agentstack x delivery render-locally --write</code> (add <code>--harness &lt;id&gt;</code> for a single CLI) writes files even where the live channel would have worked. Pick it for offline work, deterministic native files, inspection with ordinary filesystem tools, a rule against a persistent background process, debugging without another runtime dependency, or testing a CLI's own behaviour. Switching it changes only <em>where the bytes go</em> — never what you trust or what your policy allows, and it costs you no review: a preference declares no capability, so a grant that was valid before the write is carried across it.</p>
 <p>Either lane still passes the trust gate. On an untrusted or drifted project neither the live channel nor the file lane delivers servers, skills, instructions, hooks or extensions — see <a href="concepts.html#trust-and-the-consent-digest">concepts — trust</a>.</p>
-<p>The older per-project delivery modes (<code>static</code>, <code>clean-at-rest</code>, <code>zero-files</code>) are readings of a project's current shape, not choices: <code>agentstack set-mode</code> is retired and delivery is routed for you. See <a href="concepts.html">delivery modes in concepts</a> for what each still means, and <a href="architecture.html#operating-model--choose-the-boundary-you-need">ARCHITECTURE — operating model</a> for how delivery sits beside selection and isolation.</p>
-<h2 id="then-how-much-protection">Then: how much protection?<a class="hlink" href="#then-how-much-protection" aria-label="Link to this section">#</a></h2>
+<p>The older per-project delivery modes (<code>static</code>, <code>clean-at-rest</code>, <code>zero-files</code>) are readings of a project's current shape, not choices: <code>agentstack set-mode</code> is retired and delivery is routed for you. See <a href="concepts.html">delivery modes in concepts</a> for what each still means, and <a href="architecture.html#delivery-is-routed-not-chosen">ARCHITECTURE — delivery is routed, not chosen</a> for the routing itself and how delivery sits beside selection and isolation.</p>
+<h2 id="then-your-decision-how-much-protection">Then, your decision: how much protection?<a class="hlink" href="#then-your-decision-how-much-protection" aria-label="Link to this section">#</a></h2>
 <p>Find the row that sounds like you. The last column says how strongly each option is <em>actually</em> enforced, in the <a href="enforcement.html">enforcement matrix's</a> own words.</p>
 <div class="tblwrap"><table>
 <thead><tr><th>You are…</th><th>You need</th><th>Command</th><th>What it actually does</th></tr></thead><tbody>
