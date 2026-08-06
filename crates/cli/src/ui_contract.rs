@@ -296,7 +296,9 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   fail-closed (refuses untrusted or unpinned surfaces) and `session end`
 ///   reverts — including a session an interrupted UI left behind.
 /// - `profiles-edit-v1`: `library-index` emits the central-library catalog
-///   (skills + servers) for the browser; `add-skill-to-profile`,
+///   (skills + servers) for the browser, **merged across linked sources** —
+///   the fact `library-sources-v1` added, and what the action's own help now
+///   says, so a browser sees one list rather than one per source; `add-skill-to-profile`,
 ///   `add-server-to-profile`, `create-profile`, and `use-profile` mutate the
 ///   toolset then re-lock + re-render, each bound to a `consent_digest` a prior
 ///   `--preview` returned (apply refuses on drift) and failing closed on an

@@ -311,7 +311,7 @@ details[open]>summary::before{content:"▾ "}
   <aside class="rail">
     <div class="rail-top">
       <div class="brandrow"><span class="mark"></span><h1 class="title">The AgentStack panel</h1></div>
-      <span class="sub">Every question a user might arrive with, answered by the panel and the command side by side. The panel is live — do the step and the state really changes. Start anywhere, or press → to walk every frame. The graphical panel is an optional companion app that isn't publicly downloadable yet — every action it shows maps to a CLI command that ships today. Terminal transcripts are captured from agentstack 0.18.0-rc.2 — write ceremonies are labelled “reconstructed”; the panel screens are re-created from the panel’s source, not screenshots.</span>
+      <span class="sub">Every question a user might arrive with, answered by the panel and the command side by side. The panel is live — do the step and the state really changes. Start anywhere, or press → to walk every frame. The graphical panel is an optional companion app that isn't publicly downloadable yet — every action it shows maps to a CLI command that ships today. Terminal transcripts carry their own provenance, one badge each: “captured” was re-run against agentstack 0.18.0-rc.2 on 2026-08-06, “reconstructed” is a write ceremony read from the source, and “not re-checked” was captured against an earlier build and has not been verified since — the CLI tab counts all three. The panel screens are re-created from the panel’s source, not screenshots.</span>
       <div class="modes">
         <button data-mode="guided" aria-pressed="true">Guided</button>
         <button data-mode="sheet" aria-pressed="false">All frames</button>
@@ -333,9 +333,21 @@ details[open]>summary::before{content:"▾ "}
 "use strict";
 /* ══════════════════════════════════════════════════════════════════════
    Sources. Panel copy is transcribed from the shipped panel components;
-   terminal output is captured from ./target/release/agentstack
-   (0.18.0-rc.2) — read commands on the live machine, write ceremonies in a
-   disposable sandbox HOME; the few not exercised are labelled "reconstructed".
+   terminal output comes from ./target/release/agentstack — read commands on
+   the live machine, write ceremonies in a disposable sandbox HOME.
+
+   Every sample carries which of three things it is, and the badge never
+   claims more than that:
+     cap:1      re-run against 0.18.0-rc.2 on 2026-08-06 and transcribed
+                verbatim from that run ("captured").
+     recon:true a write ceremony not executed during the review; the output
+                is read from the source ("reconstructed").
+     neither    captured against an EARLIER build and not re-run since
+                ("not re-checked"). Believable, not verified — the honest
+                label for a sample nobody has stood behind on this build.
+   TODO.md item 11 (G26) is where the re-check backlog lives; a sample moves
+   to cap:1 only when someone actually ran the command again.
+
    Guarantees quote the product's own claims; each ✕ is a limit the code
    or docs state explicitly, not an inference.
    ════════════════════════════════════════════════════════════════════ */
@@ -993,48 +1005,71 @@ function viewBlueprint(){
 
 /* ══ TERMINAL CONTENT ═══════════════════════════════════════════════ */
 const CLI = {
- status:{cmd:'agentstack status', cwd:'~/Documents/GitHub/agentstack',
+ status:{cmd:'agentstack status', cwd:'/private/tmp/agentstack-panel-capture/checkout', cap:1,
   out:`<b>agentstack</b> 0.18.0-rc.2 — one portable manifest, every agent CLI
 
-  <b>CLIs    </b>  8 of 13 supported detected here: Claude Code · Claude Desktop · Codex CLI · GitHub Copilot CLI · Gemini CLI · OpenCode · Pi · VS Code
-  <b>Setup   </b>  .agentstack/agentstack.toml — 2 servers · 3 skills → 8 detected CLIs, no CLIs pinned
+  <b>CLIs    </b>  6 of 13 supported detected here: Claude Code · Codex CLI · GitHub Copilot CLI · Gemini CLI · OpenCode · Pi
+  <b>Setup</b>  /private/tmp/agentstack-panel-capture/checkout/.agentstack/agentstack.toml — 2 servers · 3 skills → 6 detected CLIs, no CLIs pinned
   <b>Toolsets</b>  rust
   <b>Status  </b>  locked · untrusted
             <span class="dm">its servers are inert — the gateway serves control-plane tools only until you review it</span>
-  <b>Mode    </b>  static <span class="dm">— config files on disk, kept out of git</span>
+  <b>Delivery</b>  Claude Code — skills + MCP servers served live · house rules + settings + hooks written to files
+  <b>        </b>  Codex CLI — skills + MCP servers served live · house rules + settings + hooks written to files
+  <b>        </b>  GitHub Copilot CLI — skills + MCP servers served live · house rules written to files
+  <b>        </b>  Gemini CLI — skills + MCP servers served live
+  <b>        </b>  OpenCode — skills + MCP servers served live · house rules + extensions written to files
+  <b>        </b>  Pi — skills + house rules + settings + extensions written to files — this tool reads files only
+            <span class="dm">0 project artifacts for the capabilities served live (the manifest and lock stay, and so does any managed region in a house-rules file)</span>
+            <span class="dm">rendered lane: Claude Code — house rules + settings + hooks · Codex CLI — house rules + settings + hooks · GitHub Copilot CLI — house rules · OpenCode — house rules + extensions · Pi — skills + house rules + settings + extensions</span>
+  <b>Context </b>  ~20 tokens per session (estimate)
+            <span class="dm">plus 2 declared servers never measured — the total above excludes them</span>
+            <span class="dm">detail: \`agentstack x report usage\`</span>
   <b>Secrets </b>  <span class="er">✗</span> GITHUB_TOKEN not set   <span class="dm">fix: agentstack secret set GITHUB_TOKEN</span>
 
   <b>Next:</b>  <span class="ok">agentstack trust .</span>   <span class="dm">review it to unlock its servers</span>
   <span class="dm">All commands: agentstack --help</span>
   <span class="dm">Deep check (drift, quirks, supply chain): agentstack doctor</span>`},
- doctor:{cmd:'agentstack doctor', cwd:'~/Documents/GitHub/agentstack',
+ doctor:{cmd:'agentstack doctor', cwd:'/private/tmp/agentstack-panel-capture/checkout', cap:1,
   out:`<b>Adapters &amp; CLIs</b>
   <span class="ok">✓</span> Claude Code    installed · ~/.claude.json parses
-  <span class="dm">·</span> Claude Desktop config present but binary not on PATH
   <span class="ok">✓</span> Codex CLI      installed · ~/.codex/config.toml parses
-  <span class="ok">✓</span> Gemini CLI     installed · ~/.gemini/settings.json parses
-  <span class="dm">·</span> VS Code        config present but binary not on PATH
+  <span class="ok">✓</span> GitHub Copilot CLI installed · ~/.copilot/mcp-config.json parses
+  <span class="dm">·</span> Gemini CLI     config present but binary not on PATH
+  <span class="ok">✓</span> OpenCode       installed · ~/.config/opencode/opencode.json parses
+  <span class="ok">✓</span> Pi             installed · no MCP config to check
+<b>t3code (supervisor)</b>
+  <span class="ok">✓</span> detected (/private/tmp/agentstack-panel-capture/home/.t3) — t3code sessions run CLIs agentstack already governs (Claude Code, Codex, Cursor, OpenCode); nothing extra to render
+  <span class="wr">⚠</span> guard not enabled — t3code's Full-access mode disables the providers' own approval prompts, so those sessions run with no pre-tool-use gate at all ↳ agentstack x guard install
+  <span class="ok">✓</span> no provider-instance home overrides — global artifacts apply to every t3code session
+  <span class="dm">·</span> <span class="dm">sessions attribute to the global audit only — for per-run evidence: agentstack x shim make &lt;cli&gt;, then point the instance's binary path at it</span>
 <b>Zero-files gateway</b>
   <span class="ok">✓</span> Claude Code    gateway registered (agentstack mcp)
-  <span class="ok">✓</span> this project is trusted for auto mode
+  <span class="ok">✓</span> Codex CLI      gateway registered (agentstack mcp)
+  <span class="ok">✓</span> GitHub Copilot CLI gateway registered (agentstack mcp)
+  <span class="ok">✓</span> Gemini CLI     gateway registered (agentstack mcp)
+  <span class="ok">✓</span> OpenCode       gateway registered (agentstack mcp)
+  <span class="wr">⚠</span> trusted, but the manifest or lockfile changed since it was last reviewed ↳ agentstack trust
 <b>Drift</b>
-  <span class="wr">⚠</span> Claude Code    no longer matches what agentstack last wrote ↳ review: agentstack diff --scope global · adopt the on-disk version: agentstack adopt --scope global
-  <span class="wr">⚠</span> Claude Code    would REMOVE gha-search, tldraw, miro, figma, gumlet ↳ keep them: agentstack adopt --scope global · prune them: agentstack apply --write --scope global
+  <span class="ok">✓</span> Claude Code, Codex CLI, GitHub Copilot CLI, Gemini CLI, OpenCode — MCP servers served live, nothing NEW rendered to compare
+  <span class="ok">✓</span> all targets in sync
 <b>Quirks</b>
-  <span class="ok">✓</span> no unsupported syntax for any target
+  <span class="dm">·</span> 1 server uses a bare launcher that resolves via PATH: github (npx). A GUI-launched harness (Claude Code.app, Claude Desktop, VS Code) may inherit a minimal PATH and fail to spawn it. Terminal-launched CLIs are unaffected. To pin it, use an absolute path or a login-shell wrapper: command = "zsh", args = ["-lc", "exec &lt;launcher&gt; …"]
+<b>Settings</b>
+  <span class="wr">⚠</span> Claude Code    1 declared key moved since the lock was written (permissions) ↳ agentstack lock --write
+  <span class="wr">⚠</span> Claude Code    1 owned key in /private/tmp/agentstack-panel-capture/checkout/.claude/settings.json drifted from the declared value (permissions) ↳ agentstack apply --write
 <b>Skills</b>
   <span class="ok">✓</span> rust-best-practices  present · SKILL.md ok
+  <span class="ok">✓</span> rust-async-patterns  present · SKILL.md ok
+  <span class="ok">✓</span> rust-testing         present · SKILL.md ok
 <b>Content scan</b>
   <span class="dm">–</span> not scanned (reads every skill body) ↳ agentstack doctor --deep — always on in --ci
 <b>Reproducibility</b>
-  <span class="ok">✓</span> rust-best-practices  library · matches lock
-<b>Machine policy</b>
-  <span class="ok">✓</span> restrictive — a rename-proof "*" rule (or a filesystem scope) constrains every server
-<span class="dm">· 6 sections for features this project doesn't use are hidden — <b>agentstack doctor --all</b> shows everything.</span>
+  <span class="dm">–</span> reproducibility: nothing declared to check — no toolset here pulls a skill from the library
+<span class="dm">·</span> 7 sections for features this project doesn't use are hidden — <b>agentstack doctor --all</b> shows everything.
 
-0 errors, 2 warnings, 3 notes.
+0 errors, 4 warnings, 2 notes.
   needs attention: fix the findings above first
-  next: review: agentstack diff --scope global · adopt the on-disk version: agentstack adopt --scope global   <span class="dm">the finding to start with</span>`},
+  next: <b><span class="ok">agentstack trust .</span></b>   <span class="dm">the content changed since you last said yes — review what moved</span>`},
  trust:{cmd:'agentstack trust .', cwd:'~/GitHub/checkout',
   out:`Reviewing /Users/tarek.k/GitHub/checkout — approving this lets its capabilities activate.
 
@@ -1060,11 +1095,22 @@ Withdraw anytime with \`agentstack trust --revoke\`.
 
 <span class="dm"># no closing y/N: typing the command at a terminal is the consent — the
 # review prints first, and declining is Ctrl-C before it, --revoke after</span>`},
- trustAfter:{cmd:'agentstack status', cwd:'~/GitHub/checkout',
-  out:`  <b>Status  </b>  locked · <span class="ok">trusted</span>
-  <b>Mode    </b>  clean-at-rest <span class="dm">— active only while you work, then restored</span>
+ trustAfter:{cmd:'agentstack status', cwd:'/private/tmp/agentstack-panel-capture/checkout', cap:1,
+  out:`  <b>Status  </b>  locked · trusted
+  <b>Delivery</b>  Claude Code — skills + MCP servers served live · house rules + settings + hooks written to files
+  <b>        </b>  Codex CLI — skills + MCP servers served live · house rules + settings + hooks written to files
+  <b>        </b>  GitHub Copilot CLI — skills + MCP servers served live · house rules written to files
+  <b>        </b>  Gemini CLI — skills + MCP servers served live
+  <b>        </b>  OpenCode — skills + MCP servers served live · house rules + extensions written to files
+  <b>        </b>  Pi — skills + house rules + settings + extensions written to files — this tool reads files only
+            <span class="dm">0 project artifacts for the capabilities served live (the manifest and lock stay, and so does any managed region in a house-rules file)</span>
+            <span class="dm">rendered lane: Claude Code — house rules + settings + hooks · Codex CLI — house rules + settings + hooks · GitHub Copilot CLI — house rules · OpenCode — house rules + extensions · Pi — skills + house rules + settings + extensions</span>
+  <b>Context </b>  ~20 tokens per session (estimate)
+            <span class="dm">plus 2 declared servers never measured — the total above excludes them</span>
+            <span class="dm">detail: \`agentstack x report usage\`</span>
 
-<span class="dm"># pinned at sha256:3f9a…c0 — editing the manifest or lockfile re-gates it</span>`},
+<span class="dm"># excerpt — the CLIs/Setup/Toolsets lines above and the Next line below are unchanged by the review
+# pinned at sha256:710dae13694d89daab3bcede84d479892ae46bb8141bf248375c691be4f06e50 — editing the manifest or lockfile re-gates it</span>`},
  diff:{cmd:'agentstack diff', cwd:'~/Documents/GitHub/agentstack',
   out:`
 Claude Code (/Users/tarek.k/Documents/GitHub/agentstack/.mcp.json)
@@ -1476,27 +1522,38 @@ MCP registry
     ↳ agentstack add from ai.ai-akari/agent-trust-receipt
 
 4 more — agentstack search 'rust' --all`},
- help:{cmd:'agentstack --help', cwd:'~/Documents/GitHub/agentstack',
+ help:{cmd:'agentstack --help', cwd:'~/Documents/GitHub/agentstack', cap:1,
   out:`Set up your MCP servers and skills once, and use them across Claude Code, Codex, and every other coding CLI you have — switchable by task, and reversible.
+
+Usage: agentstack [OPTIONS] [COMMAND]
 
 Commands:
   init     Setup: find the CLIs you have and bring their setups together
-  up       Set this machine up from a setup that already exists: one command
   status   Status: where this project stands, on one screen, and the one next step
   add      Add a server or skill to this project's setup
   search   Search the capability catalog (and mark what's already added)
   apply    Write this setup into each CLI's own config
   doctor   Check the setup in depth: what is wired up, what is missing, what changed
-  share    Share this setup as a signed bundle others can review
-  receive  Review a shared bundle, then decide
+  lock     Resolve each toolset's skill + server refs and pin \`agentstack.lock\`
   toolset  Work with toolsets: name one that bundles what you already have
   use      Toolset: switch to one — its servers and skills go live in your CLIs
   yes      Review and activate the files you dropped into this project — one step
   run      Launch an agent CLI as a tracked run
   trust    Review and approve this project's declared capabilities — required before anything activates them
-  restore  Undo a recorded write: revert what apply/use/session changed
   undo     Take it back: pick a point from your recent changes and revert to it
   adopt    Keep a hand-edit: pull a change you made in a CLI back into this setup
+  secret   Manage secrets in the OS keychain
+  help     Print this message or the help of the given subcommand(s)
+
+Options:
+      --manifest-dir &lt;DIR&gt;
+          Project or manifest directory (prefers .agentstack/agentstack.toml)
+
+  -h, --help
+          Print help (see a summary with '-h')
+
+  -V, --version
+          Print version
 
 Start here:
   agentstack                     where this project stands, and the one next step
@@ -1508,37 +1565,49 @@ Start here:
 Four ideas cover the whole product: Setup (what you have) · Toolset (what this
 task needs) · Status (is it ready) · Undo (how to take it back).
 
-Every command, grouped by task: agentstack --help --all`},
- helpall:{cmd:'agentstack --help --all', cwd:'~/Documents/GitHub/agentstack',
+Everything else lives one hop away, grouped by task:
+  agentstack x                   the rest of the toolbox
+
+Every command, grouped by task — and what the pieces are called underneath:
+  agentstack --help --all`},
+ helpall:{cmd:'agentstack --help --all', cwd:'~/Documents/GitHub/agentstack', cap:1,
   out:`agentstack — every command, including the ones the default --help groups away.
 Run \`agentstack &lt;command&gt; --help\` for flags and details.
+
+Words, for when you want them: a CLI (a.k.a. harness) is the agent tool you
+run; an adapter compiles its native config; the manifest is the one file that
+declares your setup, and [targets] in it lists which CLIs commands act on;
+the lock pins the exact content you reviewed. None of these are needed to
+use the four ideas — they are here because this is the full map.
 
 The map, grouped by task:
 
   Set up      init · up · status · adapters · settings · self · completions
   Edit        add · set · search · remove · install · lib · toolset · adopt · export · import
   Share       share · receive · publisher
-  Render      apply · use · yes · instructions · lock · session · diff · uninstall
+  Render      apply · use · yes · instructions · lock · session · diff · unrender · uninstall · delivery
   Undo        undo · restore
-  Protect     trust · explain · secret · guard · sign · verify
-  Run         run · kill · shim · workflow · gateway · mcp · try
-  Inspect     doctor · report · optimize · proxy
+  Protect     trust · explain · why · secret · guard · sign · verify
+  Run         run · kill · shim · workflow · image · gateway · mcp · try
+  Inspect     doctor · report · lease · optimize · proxy
+
+<span class="dm"># “And in full:” follows here — the same capture's per-command inventory, 120 lines, elided on this page. It is reproduced whole in docs/reference.md.</span>
 
 Integration contract (t3code) — fixed actions a graphical panel invokes.
 Not part of the everyday surface; each is digest-bound and previews before it writes.
 
-  add-skill-to-profile   Add a skill to a toolset and activate it (panel action; digest-bound)
-  add-server-to-profile  Add a server to a toolset and activate it (panel action; digest-bound)
-  create-profile         Fixed-argv alias of \`agentstack toolset create\` (panel action)
-  set-gitignore          Record whether this project manages its .gitignore block (panel action; digest-bound)
-  set-mode               Switch this project's delivery mode (panel action; digest-bound)
-  edit-profile           Change one toolset's membership as a batch (panel action; digest-bound)
-  rename-profile         Fixed-argv alias of \`agentstack toolset rename\` (panel action)
-  delete-profile         Fixed-argv alias of \`agentstack toolset delete\` (panel action)
-  use-profile            Activate an existing toolset (panel action; digest-bound)
-  library-index          The central-library catalog (skills + servers) for the panel browser
-  remove-from-library    Remove a skill or server from the central library (panel action; digest-bound)
-  remove-capability      Remove a skill or server from this project's manifest (panel action; digest-bound)`},
+  add-skill-to-profile Add a skill to a toolset and activate it (panel action; digest-bound)
+  add-server-to-profile Add a server to a toolset and activate it (panel action; digest-bound)
+  create-profile   Fixed-argv alias of \`agentstack toolset create\` (panel action)
+  set-gitignore    Record whether this project manages its \`.gitignore\` block (panel action; digest-bound)
+  set-mode         Retired: delivery is routed, not a mode you pick
+  edit-profile     Change one toolset's membership as a batch (panel action; digest-bound)
+  rename-profile   Fixed-argv alias of \`agentstack toolset rename\` (panel action)
+  delete-profile   Fixed-argv alias of \`agentstack toolset delete\` (panel action)
+  use-profile      Activate an existing toolset (panel action; digest-bound)
+  library-index    The library catalog (skills + servers), merged across linked sources, for the panel browser
+  remove-from-library Remove a skill or server from the library (panel action; digest-bound). Moves it to the library trash — recoverable with \`agentstack lib trash --restore &lt;id&gt; --write\`
+  remove-capability Remove a skill or server from this project's manifest (panel action; digest-bound), then re-lock and re-render`},
  mcp:{cmd:'agentstack mcp --help', cwd:'~/Documents/GitHub/agentstack',
   out:`Run agentstack as an MCP server over stdio (for an agent to call)
 
@@ -1558,16 +1627,75 @@ Point the supervisor's binary path at the shim — e.g. in t3code:
 
 Each session it starts then records per-run evidence; inspect with
 \`agentstack report runs\` / \`agentstack report run &lt;id&gt;\`.`},
- degraded:{cmd:'agentstack doctor', cwd:'~/Documents/GitHub/agentstack',
-  out:`<span class="dm"># the panel negotiates per-contract, from the status envelope's feature list:</span>
-  sessions        <span class="ok">✓</span>  session start/end offered
-  profiles-edit   <span class="ok">✓</span>  library Add/Remove offered
-  restore         <span class="ok">✓</span>  Undo offered
-  trust-consent   <span class="er">✗</span>  Trust button disabled — "trust from a terminal where the review itself is the consent"
-  observe         <span class="er">✗</span>  "run details below may be limited"
+ degraded:{cmd:"agentstack status --json | jq -r '.features[]'", cwd:'~/Documents/GitHub/agentstack', cap:1,
+  out:`<span class="dm"># the contract names THIS build serves. The panel asks for this list and switches off
+# every action whose name is missing — it never approximates one with an older contract.</span>
+init-plan
+apply-setup
+init-tool-managed-v1
+trust-preview
+trust-consent
+status-v1
+profiles-v1
+diff-v1
+restore-last
+sessions-v1
+profiles-edit-v1
+diff-ownership-v1
+toolset-create-v2
+profiles-edit-batch-v1
+toolset-rename-v1
+toolset-delete-v1
+library-remove-v1
+manifest-remove-v1
+trust-server-blockers-v1
+trust-review-card-v1
+trust-card-diff-v1
+trust-card-groups-v1
+activity-skill-load-v1
+workflow-observe-v1
+workflow-serial-roles-v1
+doctor-advisories-v1
+doctor-mode-v1
+doctor-probe-v1
+diff-existence-v1
+json-reads-v1
+gitignore-opt-out-v1
+doctor-cli-coverage-v1
+status-honesty-v1
+needs-your-yes-v1
+update-offer-v1
+package-members-v1
+lease-status-v1
+delivery-routing-v1
+library-sources-v1
+trust-gate-reading-v1
+instruction-channels-v1
+image-plan-v1
+workflow-role-selection-v1
+trust-content-drift-v1
+abandoned-render-v1
 
-<span class="dm">an unsupported contract disables that action — it is never approximated with an older one</span>`},
+<span class="dm"># and the names that are retired, answered so an older panel learns the action is gone:</span>
+<span class="ps">$</span> <b>agentstack status --json | jq -r '.superseded[]'</b>
+set-mode-v1
+
+<span class="dm"># set-mode-v1 is the worked example: the Mode axis retired, so the CLI serves the
+# name only to say so, and a panel that offered a mode picker on it disables that button.</span>`},
 };
+
+/* How far each transcript is actually stood behind. Derived from the sample's
+   own flags rather than asserted once in prose, so the page cannot claim a
+   provenance that the entry does not carry. `cap` is set by hand, and only by
+   someone who re-ran the command — that is the whole value of the third
+   state: an unchecked sample says so instead of borrowing the green badge. */
+const PROV = {
+  cap:   {c:'g', t:'captured',       d:'Re-run against ./target/release/agentstack 0.18.0-rc.2 on 2026-08-06 and transcribed verbatim from that run.'},
+  recon: {c:'a', t:'reconstructed',  d:'A write command — not executed during the review; output read from the source instead.'},
+  stale: {c:'',  t:'not re-checked', d:'Captured against an earlier build and not re-run against 0.18.0-rc.2. Believable, not verified — check it against the CLI before you rely on it.'},
+};
+const prov = c => c.cap ? PROV.cap : c.recon ? PROV.recon : PROV.stale;
+const provCount = k => Object.values(CLI).filter(c => prov(c) === PROV[k]).length;
 
 /* ══ SCENARIOS ══════════════════════════════════════════════════════ */
 const H=(t,x,a)=>({t,x,a:a||'rgba(240,151,90,.5)'});
@@ -2191,7 +2319,7 @@ function renderGuided(){
       title="Drag to resize · double-click to reset · ← → when focused"></div>`:''}
     ${showCli?`<div class="clicol">
       <div class="colhead"><span class="k">THE SAME THING IN THE CLI</span>
-        <span class="c">${c.recon?'<span class="badge a" title="A write command — not executed during the review; output read from the source instead.">reconstructed</span>':'<span class="badge g" title="Captured from ./target/release/agentstack 0.18.0-rc.2">captured</span>'}</span></div>
+        <span class="c">${(p=>`<span class="badge ${p.c}" title="${esc(p.d)}">${p.t}</span>`)(prov(c))}</span></div>
       <div class="cliscroll" tabindex="0" role="region" aria-label="Command transcript">
         <div class="term-wrap">
           <div class="term-top"><i style="background:#F87171"></i><i style="background:#FBBF24"></i><i style="background:#34D399"></i>
@@ -2238,10 +2366,10 @@ function renderRef(){
   const keys=Object.keys(CLI).filter(k=>!q||CLI[k].cmd.toLowerCase().includes(q.toLowerCase()));
   document.getElementById('main-content').innerHTML = `<div class="scroller">
     <div class="refhead"><input id="refq" placeholder="Filter commands…" value="${esc(q)}">
-      <span class="xs dimt">${keys.length} of ${Object.keys(CLI).length} · <span class="badge g">captured</span> ran against the real binary · <span class="badge a">reconstructed</span> writes, read from the source instead</span></div>
-    ${keys.map(k=>{const c=CLI[k];return `<details class="refitem" ${keys.length<4?'open':''}>
+      <span class="xs dimt">${keys.length} of ${Object.keys(CLI).length} shown · <span class="badge g">captured</span> ${provCount('cap')} re-run against 0.18.0-rc.2 · <span class="badge a">reconstructed</span> ${provCount('recon')} writes, read from the source · <span class="badge">not re-checked</span> ${provCount('stale')} from an earlier build, still unverified</span></div>
+    ${keys.map(k=>{const c=CLI[k], p=prov(c);return `<details class="refitem" ${keys.length<4?'open':''}>
       <summary><span class="cmdname">${esc(c.cmd)}</span><span class="purpose">${esc(c.cwd||'')}</span>
-        <span class="flag badge ${c.recon?'a':'g'}">${c.recon?'reconstructed':'captured'}</span></summary>
+        <span class="flag badge ${p.c}" title="${esc(p.d)}">${p.t}</span></summary>
       <div class="refbody"><div class="term" style="max-height:none" tabindex="0" role="region" aria-label="Terminal output">${c.out}</div></div></details>`;}).join('')}</div>`;
   if(q){const i=document.getElementById('refq'); i.focus(); i.setSelectionRange(q.length,q.length);}
 }
