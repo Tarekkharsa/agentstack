@@ -3,10 +3,11 @@
 
 One tree, defined once below. make-docs-pages.py imports it and calls
 render() to build each generated page's sidebar at build time. (The
-hand-written pages — index, docs, examples, cookbook, start, tutorial — are
-standalone design-system pages with their own rails and do not embed this
-tree. how-it-works, primitives, library, and strategy were folded into the
-Markdown source of truth; their old URLs are redirect stubs.) Each page gets
+hand-written pages — index, docs, examples — are standalone design-system
+pages with their own rails and do not embed this tree. how-it-works,
+primitives, library, and strategy were folded into the Markdown source of
+truth, and cookbook and panel/ were retired outright; all of those old URLs
+are redirect stubs.) Each page gets
 the IDENTICAL tree; the only per-page differences are (a) the current entry
 is highlighted and (b) the current page's own sections expand inline beneath
 its entry (the nub-docs pattern). Links that point at the page being
@@ -40,7 +41,6 @@ TREE = [
         ("Concepts", "concepts.html", "concepts"),
         ("Which protection do I need?", "choose.html", "choose"),
         ("Examples", "examples.html", "examples"),
-        ("Cookbook", "cookbook.html", "cookbook"),
     ], "open"),
     ("When it breaks", "$ agentstack status · doctor", [
         ("Troubleshooting", "troubleshooting.html", "troubleshooting"),

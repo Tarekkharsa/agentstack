@@ -130,6 +130,13 @@ struct Report {
     /// Does the manifest name no toolset yet? `None`/`Some(true)` both read as
     /// "ungrouped", so a report that never set it behaves as it did before.
     no_toolsets: Option<bool>,
+    /// Would `agentstack lock --write` leave a lockfile behind here? The shared
+    /// predicate [`super::overview::lock_pins_something`], carried so
+    /// [`next_action`](Report::next_action) can put the lock rung ahead of the
+    /// review on exactly the projects where locking is a step that finishes.
+    /// `None` reads as `false` — a report that never set it keeps naming the
+    /// review, which is what it did before the rung existed.
+    lock_pins: Option<bool>,
     /// Have bytes this project already pinned moved since? The SAME shared
     /// reading `status` and `trust --preview` use
     /// ([`crate::commands::trust::content_drift`]) — not a second detector.
@@ -213,6 +220,7 @@ impl Report {
             rendered: None,
             apply_renders: None,
             no_toolsets: None,
+            lock_pins: None,
             content_drift: false,
             surface_unpinned: Vec::new(),
         }
@@ -438,6 +446,22 @@ impl Report {
     ///   sentence at a terminal rung, where neither surface has a command to
     ///   offer at all.
     fn next_action(&self) -> (String, &'static str) {
+        // The lock rung, applied to the ANSWER rather than to each of the two
+        // arms below that name the review — exactly as `status` applies it, and
+        // through the same shared function, so the two surfaces cannot disagree
+        // about the order of the ceremony. `trust` pins the manifest layers AND
+        // the lockfile, so a grant made before anything is pinned is void the
+        // moment `use --write` mints one; see `overview::correct_trust_rung`.
+        super::overview::correct_trust_rung(
+            self.unlocked_aware_next_action(),
+            // `None` reads as locked, which is how every report that never set
+            // the field behaved before this rung existed.
+            self.activation != Some("never_activated"),
+            self.lock_pins.unwrap_or(false),
+        )
+    }
+
+    fn unlocked_aware_next_action(&self) -> (String, &'static str) {
         // Errors stay on top: an outstanding error usually blocks the very
         // command the review or a warning fix would name. The one exception is
         // the unconnected-bridge error, which is held back below the consent
@@ -478,7 +502,15 @@ impl Report {
         if let Some(rung) = super::overview::unpinned_next_action(&self.surface_unpinned) {
             return rung;
         }
-        if self.trust == Some("untrusted") {
+        // …and not over a manifest that declares NOTHING. The residual G28
+        // named: an empty untrusted project heard `agentstack trust .` here and
+        // `agentstack search <query>` from `status`, for one identical state.
+        // `status` has the better answer — a review of nothing grants nothing,
+        // and the reason string ("nothing it declares is active") describes a
+        // project that declares something. So this arm now asks the question
+        // `status` already asks, and the Empty rung below answers both surfaces
+        // with one sentence.
+        if self.trust == Some("untrusted") && self.declares_anything != Some(false) {
             return (
                 "agentstack trust .".to_string(),
                 "review this project — nothing it declares is active until you do",
@@ -565,9 +597,17 @@ impl Report {
             // — the A↔B dead end the pilot hit (F21). The honest terminal is
             // the next RUNG, not a lateral hop to the other summary: the
             // wiring is verified, so the journey continues at Switch.
+            //
+            // Prose, and `null` in the machine field BY DESIGN — the same
+            // answer `status` gives from the same rung, and the same answer the
+            // Verified arm below already gave. A toolset's name is the argument
+            // nothing on disk can supply. Written as a command it was a shape
+            // that `machine_command` dropped, which left the largest healthy
+            // state on BOTH surfaces answering a panel with nothing and no
+            // reason why.
             super::overview::Rung::Group => (
-                "agentstack toolset create <name> --server <server>".to_string(),
-                "nothing to repair — group these for a task, then switch between toolsets",
+                "nothing to repair — name a toolset to group these servers, the name is yours to choose".to_string(),
+                "`agentstack toolset create <name> --server <server>`, then switch between toolsets",
             ),
             // Verified means the project is ALREADY grouped (a toolset is
             // named) or has no server to group. Both used to answer
@@ -1478,6 +1518,7 @@ fn run_checks(
     // ledger, not the lockfile — the same distinction `status` documents.
     report.rendered = Some(super::overview::has_rendered_artifacts(&ctx, &all_ids));
     report.apply_renders = Some(super::overview::apply_renders_something(manifest));
+    report.lock_pins = Some(super::overview::lock_pins_something(manifest));
     report.no_toolsets = Some(manifest.profiles.is_empty());
     report.gitignore = Some(manifest.meta.manages_gitignore());
     let (detected, capable, incapable) =

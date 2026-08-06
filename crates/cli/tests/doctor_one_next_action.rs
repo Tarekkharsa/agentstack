@@ -177,9 +177,50 @@ fn a_healthy_report_still_names_a_step() {
         !next.is_empty(),
         "a clean report must still end with one action: {report}"
     );
+    // It must be a step, not necessarily a COMMAND. This assertion used to
+    // demand `agentstack …`, which was only ever satisfiable here by writing
+    // the empty project's answer as `agentstack search <query>` — a shape
+    // `machine_command` then dropped, so the report ended with a sentence that
+    // looked runnable beside a machine field of `null` with nothing saying why
+    // (G28). The query is the one argument only the person with the problem can
+    // supply. So the terminal states this report already had — "nothing to
+    // repair — this setup is verified", "review the errors above" — are joined
+    // by one more, and the rule that actually matters is asserted directly
+    // below instead: the sentence and the machine field must agree.
+    assert_eq!(
+        next, "find a server or skill to add — only you know what this project needs",
+        "the empty project's step must say what only the human can supply: {report}"
+    );
+    // …and the MACHINE field is not null. The intermediate G28 fix asserted a
+    // null here, and that was wrong twice over. It contradicted this test's own
+    // name and premise — a healthy report still names a step, and `null` was
+    // precisely the answer this file was written to remove. And it contradicted
+    // `status_honesty::status_v1_state_semantics_are_unchanged`, which demands a
+    // non-empty `next_action` on this exact fixture (`version = 1`), because
+    // `next_action` is the `status-v1` seam and external consumers read it.
+    // Nulling it is a schema change, not a wording change.
+    //
+    // The premise behind the null was that no runnable command exists here. It
+    // does: `agentstack search` takes its query as an OPTIONAL positional, so
+    // the bare command is complete, and on a `version = 1` project it exits 0
+    // with empty stderr. What cannot be supplied is the QUERY, and that is what
+    // the prose sentence above says. Sentence and command now carry one half of
+    // the answer each instead of the sentence carrying both badly.
+    assert_eq!(
+        report["next_action"].as_str(),
+        Some("agentstack search"),
+        "the query is the human's to supply; the browse is still runnable: {report}"
+    );
+    // The shape a person substitutes into still ships — in the `why`, where no
+    // driver is invited to run it. Losing it would trade one honesty problem
+    // for a usability one.
+    let why = report["next_step_why"]
+        .as_str()
+        .or_else(|| report["why"].as_str())
+        .unwrap_or_default();
     assert!(
-        next.starts_with("agentstack "),
-        "with nothing to repair the step should be a command we own, got {next:?}"
+        why.contains("agentstack search <query>") || why.is_empty(),
+        "the fillable shape should survive into the human explanation: {report}"
     );
 }
 

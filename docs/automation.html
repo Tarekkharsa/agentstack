@@ -107,10 +107,8 @@
     <a class="wordmark" href="./"><img class="mark" src="theme/logo-mark.svg" alt=""><span>agent<span class="wm2">Stack</span></span></a>
     <nav class="top" aria-label="Project links">
       <a href="docs.html">Documentation</a>
-      <a href="cookbook.html">Cookbook</a>
       <a href="examples.html">Demos</a>
       <a href="tutorial/">Tutorial</a>
-      <a href="panel/">Panel</a>
       <a href="https://github.com/Tarekkharsa/agentstack">GitHub</a>
       <button class="themebtn" data-theme-toggle onclick="toggleTheme()">Light mode</button>
       <a class="ghost" href="start.html">Get&nbsp;started</a>
@@ -134,8 +132,6 @@
       <li><a href="choose.html">Which protection do I need?</a>
       </li>
       <li><a href="examples.html">Examples</a>
-      </li>
-      <li><a href="cookbook.html">Cookbook</a>
       </li>
     </ul>
   </div>
@@ -497,6 +493,29 @@ $ echo $?
 <li><code>bridge_registered</code> is <strong>this harness's own</strong> bridge state, never a project-wide any-of: one connected CLI delivers nothing to the harnesses that have no bridge. Branch on it whenever you would otherwise be tempted to read liveness out of the prose. It is still not a full activation reading — <code>lease-status-v1</code>, <code>doctor-cli-coverage-v1</code> and the trust surfaces answer the rest, each with its own limits.</li>
 <li><code>summary</code> and <code>why</code> are <strong>display copy, and both are conjugated by <code>bridge_registered</code></strong>. With no bridge a live route's <code>why</code> gives the rationale ("the live channel here can carry it on demand") instead of a delivery claim, and <code>summary</code> says "planned live (not connected)". Neither field's shape moved, so this stayed <code>delivery-routing-v1</code> — which is exactly why <strong>neither may be matched on</strong>: the same routing reads two ways.</li>
 <li><code>full_ceremony</code> says a kind is executable (hooks, extensions), never that a ceremony has happened.</li>
+</ul>
+<h3 id="edit-profile---preview-profiles-edit-batch-v1"><code>edit-profile --preview</code> (<code>profiles-edit-batch-v1</code>)<a class="hlink" href="#edit-profile---preview-profiles-edit-batch-v1" aria-label="Link to this section">#</a></h3>
+<p>The one membership verb that can also take things <em>out</em> of a toolset, and the only one whose cost does not scale with the number of changes: every add and every removal lands as one manifest write under one <code>consent_digest</code>, followed by a single re-lock and re-render.</p>
+<pre class="block"><code>{
+  "profile": "backend",
+  "add_skills": ["rust-testing"],
+  "add_servers": [],
+  "remove_skills": [],
+  "remove_servers": ["github"],
+  "skills": ["rust-testing"],
+  "servers": [],
+  "empties_toolset": false,
+  "action": "edit-profile",
+  "consent_digest": "sha256:b428c87f…2111d8",
+  "note": "Review, then apply with --yes --consented sha256:b428c87f…2111d8…",
+  "schema_version": 1,
+  "features": ["…"]
+}</code></pre>
+<p>Field notes:</p>
+<ul>
+<li><code>add_*</code> / <code>remove_*</code> echo the requested deltas; <strong><code>skills</code> and <code>servers</code> are the RESULT</strong> — the membership the toolset would have after the batch. A panel draws an end state, so the digest binds the picture the reader was looking at, not the list of operations that implies it.</li>
+<li><code>empties_toolset</code> marks the case where the batch would leave nothing behind. Emptying a toolset is allowed but is not a no-op: an empty toolset resolves to nothing, so activating it serves nothing. Say so rather than presenting it as an ordinary edit.</li>
+<li>Apply with <code>--yes --consented &lt;consent_digest&gt;</code>; the verb refuses if the manifest moved underneath the preview.</li>
 </ul>
 <h2 id="json-that-is-not-part-of-this-contract">JSON that is not part of this contract<a class="hlink" href="#json-that-is-not-part-of-this-contract" aria-label="Link to this section">#</a></h2>
 <p>Some commands emit JSON that is evidence or analysis rather than control-plane state. These carry <strong>no envelope</strong> and <strong>no feature name</strong>, and their shape may change without a <code>schema_version</code> bump. Treat them as reports, not APIs:</p>

@@ -380,8 +380,8 @@ MERGE INTO x · DELETE.
 
 | page | lines | disposition | reason | what is lost |
 |---|---:|---|---|---|
-| `panel/index.html` | **2,626** | **DELETE** | 2,293 lines of JavaScript simulating a second UI, which `CLAUDE.md` forbids building. Already wrong: `:1190-1214` shows AgentStack *writing* `[profiles.*]`, contradicting `concepts.md:95-96`. | The visual sense of what the panel looks like. Replace with 3 screenshots in `integrations.md` — a screenshot cannot silently drift into a false claim. |
-| `cookbook.html` | 901 | **DELETE** | 851 lines of hand-typed markup holding ~55 unverified transcripts. Every one is a drift candidate. | Genuinely: a browsable "here's a recipe" surface. The one page's §5 journeys are that surface, verified against the binary. |
+| `panel/index.html` | **2,626** | **DONE — DELETED 2026-08-06** (15-line redirect stub → `integrations.html#the-panel-journey`) | 2,293 lines of JavaScript simulating a second UI, which `CLAUDE.md` forbids building. Already wrong: `:1190-1214` shows AgentStack *writing* `[profiles.*]`, contradicting `concepts.md:95-96`. | The visual sense of what the panel looks like. Replace with 3 screenshots in `integrations.md` — a screenshot cannot silently drift into a false claim. **Salvaged first:** the `edit-profile --preview` payload shape, which existed nowhere else on the site — now `automation.md` §"Payload shapes". |
+| `cookbook.html` | 901 | **DONE — DELETED 2026-08-06** (15-line redirect stub → `reference.html`) | 851 lines of hand-typed markup holding ~55 unverified transcripts. Every one is a drift candidate. | Nothing: a full audit of all 26 recipes found every command, TOML table and flag already in `reference.md`, `adapters.md`, `ENFORCEMENT.md` or a how-to. A browsable "here's a recipe" surface is what the how-tos are; `docs.html`'s Cookbook card now points at them. |
 | `tutorial/index.html` | 901 | **KEEP, rebuild** | The only artifact that teaches by doing rather than telling — worth its cost, unlike the other simulations. | Nothing, if rebuilt. Today it duplicates its own toolset definition (`:315` and `:602`) and re-teaches trust at `:304`. |
 | `examples.html` | 434 | **MERGE INTO `tutorial/`** | 16 more hand-typed transcripts; overlapping purpose with `cookbook`. | The `#e20` anchor is deep-linked from the sidebar ("Reports & call audit"); re-point it. |
 | `security-review-2026-07-11.html` | 425 | **MOVE to `docs/archive/`** | A dated point-in-time report with **zero body inbound links**, sitting in the live site. It is history, and `CLAUDE.md` says history lives in `archive/`. | Nothing — it stays readable, it just stops looking like current documentation. |
@@ -499,6 +499,24 @@ near-zero body inbound links, so only the **sidebar `TREE`, `docs.html` and
 `sitemap.xml`** need editing. Add redirect stubs for the two deleted URLs. This
 is the largest single cut and it is also the safest — do it first for the
 morale.
+
+> **DONE (2026-08-06) — the two page deletions only.** `security-review-…html`
+> is untouched and still in the sitemap; the how-to merge is deliberately
+> deferred to the P9 study. Both URLs kept as 15-line redirect stubs, so the
+> sitemap **loses** its `cookbook.html` and `panel/` entries (a stub in the
+> sitemap is a `check-docs-site.py` failure). Inbound edits actually needed,
+> which were more than the three named above: the nav template and the
+> `# design-system pages` comment in `make-docs-pages.py` (regenerating all 23
+> pages' navs), the `Cookbook` `TREE` row and the docstring in
+> `make-docs-sidebar.py`, the nav + footer of `index.html`, `docs.html` and
+> `examples.html`, `docs.html`'s Cookbook card (re-pointed to `#howtos`),
+> `examples.html`'s "how to use the CLI instead?" sentence, and three places in
+> `crates/cli/tests/docs_commands.rs` — the `panel/` scan subdirectory, the
+> `docs/cookbook.html` dynamic-command source, and the whole
+> `cookbook_toml_snippets_deserialize_as_manifest` gate with its helpers. That
+> test's extraction floor drops 30 → 10: the cookbook carried ~20 of the site's
+> copyable commands, so the floor had to be re-baselined rather than silently
+> passing on a gutted scan.
 
 **Step 2 — build the one page beside the old site (+1 page, nothing removed).**
 Land `docs/one-page.md`, generated into `one-page.html` by adding one row to

@@ -17,6 +17,15 @@
 //! writing path would be a second place for the consent and undo work of the
 //! last three phases to be got wrong.
 //!
+//! # Its exit code is `apply`'s
+//!
+//! Because the render IS [`super::apply::write_quiet`], `up` reports whatever
+//! that call reported: a refused write is a refused write whichever command a
+//! script ran. It finishes the transcript first — the closing next step prints
+//! even on a failure, since an exit code with no way forward is worse than none
+//! — and then exits nonzero. The one step that stays best-effort is the lock
+//! verification, and that softening is stated where it happens.
+//!
 //! # It ends through the next-action seam, not a summary line
 //!
 //! The last line is [`super::doctor`]'s `next_action`, unmodified. That matters
@@ -196,20 +205,10 @@ pub fn run(args: &UpArgs, manifest_dir: Option<&Path>) -> Result<()> {
         verbose: false,
     };
     crate::outln!("{}", "rendered".dimmed());
-    if let Err(err) = super::apply::write_quiet(&apply, Some(&dir)) {
-        // The most common cause on a fresh machine, by far, is that the
-        // checkout has never been reviewed on THIS machine — trust is
-        // per-machine by design. Say what happened rather than what we
-        // guessed; the closing next action already knows to send them to the
-        // review, because `doctor` reads the same trust state.
-        //
-        // "stopped early" not "nothing rendered": `apply` can fail on one
-        // target AFTER writing others (an IO error on the fourth of four),
-        // and claiming nothing happened over three written configs is the
-        // kind of false all-or-nothing this doc pass exists to remove. The
-        // closing `doctor` reads the real on-disk state.
-        crate::outln!("  {} {err:#}", "rendering stopped early —".yellow());
-    }
+    // Held, not returned yet: the closing next step below is the whole reason
+    // `up` keeps going after a failed render, and it must still print. What is
+    // NOT deferred is the verdict — see the bail at the end of this function.
+    let render_failed = super::apply::write_quiet(&apply, Some(&dir)).err();
 
     // ------------------------------------------------------- one next step
     // The P3.1 seam, not a summary of our own. See the module docs: `up` ends
@@ -223,6 +222,36 @@ pub fn run(args: &UpArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let report = super::doctor::collect(Some(&dir))?;
     if let Some(next) = report["next_step"].as_str() {
         crate::outln!("\n{} {}", "next:".bold(), next.bold());
+    }
+
+    // ------------------------------------------------------------ the verdict
+    // `up`'s render step IS `apply --write`, so the two may not disagree about
+    // whether it worked. They did: on a project where every capability routes
+    // live with no bridge registered, `apply` calls that a refused delivery and
+    // exits 1, while `up` printed the same refusal and exited 0 — and `up` is
+    // the documented new-machine command, so the reading a script gets from it
+    // is the one that matters most.
+    //
+    // Adopting apply's code rather than classifying failures here is deliberate:
+    // `apply` refuses a write for a blocked target, a hard IO failure, or a
+    // delivery of nothing, and telling those apart from this side means matching
+    // on its error text — a second, drifting copy of apply's exit policy inside
+    // the command whose design rule is that it composes and owns no policy of
+    // its own. Every one of those states means the environment did not
+    // materialize, which is the single claim `up` exists to make.
+    //
+    // The failure is stated ONCE, here, rather than printed above and repeated
+    // as the process error: `apply`'s message already names the repair for each
+    // of those states (the bridge command, the override, `agentstack secret set
+    // <REF>`), and the closing next step has already printed above it, so the
+    // user ends with an exit code, a reason, and two things to do.
+    //
+    // "stopped early", not "nothing rendered": `apply` can fail on one target
+    // AFTER writing others (an IO error on the fourth of four), and claiming
+    // nothing happened over three written configs would be its own false
+    // report. What is on disk is whatever the closing `doctor` just read.
+    if let Some(err) = render_failed {
+        anyhow::bail!("rendering stopped early — {err:#}");
     }
     Ok(())
 }

@@ -165,6 +165,9 @@ fn add_from_server(a: &AddFromArgs, ctx: &super::Context, candidate: &Candidate)
         "add",
     )?;
     if a.write {
+        // Same family, same gap: `add from <id>` resolving to a server wrote
+        // the manifest and left the pin to whatever ran next.
+        pin_server_write(ctx)?;
         println!(
             "{} review secrets with `agentstack secret list`, then `agentstack apply`.",
             "↳".cyan()
@@ -749,6 +752,60 @@ fn sanitize_ref(name: &str) -> String {
         .to_ascii_uppercase()
 }
 
+/// Pin what a server write just declared, in the same command that declared it.
+///
+/// **G29, and the whole reason this exists.** `add skill --write` has always
+/// recorded its lock entries inline (see [`preview_and_commit`]); `add server
+/// --write` did not, so the lockfile gained its `[[server]]` entry later, during
+/// `use --write`. Same verb, same flag, opposite behaviour — and the gap was not
+/// cosmetic. `trust` binds to the manifest layers AND the lockfile, so the
+/// ladder's `agentstack trust .` over an unpinned project bought a grant that
+/// `use --write` then voided by minting the lock (measured: `add server` →
+/// `trust` → `use` ends at `locked · trust stale`; `add server` → `lock` →
+/// `trust` → `use` ends at `locked · trusted`).
+///
+/// The family is made consistent in the direction that LOCKS, not the one that
+/// drops locking from `add skill`, because locking is what makes the consent
+/// that follows durable. Dropping it would leave both verbs handing the user a
+/// grant with a short life, and would also throw away the digest `add skill`
+/// pins at the exact bytes it staged — the invariant-4 binding between a
+/// rendered artifact and the digest it was gated at.
+///
+/// Reuses `lock`'s own entry point rather than upserting a `[[server]]` row by
+/// hand: pinning a server means resolving the effective runtime set through the
+/// library, deriving its executable surface, and pruning stale rows, and a
+/// second implementation of that here is how two pinning paths come to disagree.
+/// `quiet` composes it into this command's output as one `✓ pinned …` line, the
+/// same way `agentstack yes` composes it.
+fn pin_server_write(ctx: &super::Context) -> Result<()> {
+    super::lock::run(
+        &crate::cli::LockArgs {
+            quiet: true,
+            ..Default::default()
+        },
+        Some(&ctx.dir),
+    )
+    .with_context(|| {
+        format!(
+            "the manifest was written but the lockfile at {} could not be — \
+             run `agentstack lock --write` to reconcile",
+            crate::lock::Lock::path(&ctx.dir).display()
+        )
+    })?;
+    // Read AFTER the writes, for the reason `add skill`'s footer documents: the
+    // manifest and lock bytes this command just wrote ARE the consent digest,
+    // so the state the user is standing in is the one left behind. Naming the
+    // review here is now honest in a way it was not before — the pins it will
+    // bind to are already on disk, so this grant survives `use --write`.
+    if super::lock::review_pending(&ctx.dir) {
+        println!(
+            "{} review it and consent before activating: `agentstack trust .`",
+            "↳".cyan()
+        );
+    }
+    Ok(())
+}
+
 fn add_server(a: &AddServerArgs, manifest_dir: Option<&Path>) -> Result<()> {
     upsert_server(a, manifest_dir, false)
 }
@@ -821,7 +878,14 @@ fn upsert_server(a: &AddServerArgs, manifest_dir: Option<&Path>, allow_update: b
         &a.name,
         a.write,
         if exists { "update" } else { "add" },
-    )
+    )?;
+    // `set server` pins too, deliberately: it changes the very bytes the pin
+    // describes, so leaving the old pin behind is the same trap wearing a
+    // different verb.
+    if a.write {
+        pin_server_write(&ctx)?;
+    }
+    Ok(())
 }
 
 /// `agentstack add skill <source>` — the ecosystem-grammar acquisition verb.
