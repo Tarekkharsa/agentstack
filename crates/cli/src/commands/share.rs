@@ -314,8 +314,14 @@ pub fn run_receive(args: &ReceiveArgs, manifest_dir: Option<&Path>) -> Result<()
     if provenance.shortens_the_card() {
         // What recognition actually saves is the work of establishing WHO sent
         // this — not any part of the review below, which is identical either
-        // way. The first draft of this line said "the review below is shorter",
-        // which was false: a witness compares both runs and the bodies match.
+        // way. That identity is structural, not asserted: this line prints
+        // ABOVE the `summary_lines` loop, and that loop reads the bundle alone,
+        // never the publisher, so there is no branch for it to differ on.
+        // The first draft of this line said "the review below is shorter",
+        // which was false. The witness (`tests/share_round_trip.rs`) pins the
+        // OUTCOME byte for byte — the receiving project's whole file tree after
+        // a recognized and an unrecognized run — and probes this card only by
+        // substring; the two bodies are never compared to each other.
         // Claiming a saving that did not happen, on the consent card, is the
         // precise failure this phase exists to remove.
         crate::outln!(

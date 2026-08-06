@@ -370,7 +370,13 @@ toolset containing it.
   renderer keeps the literal `${NAME}` and that placeholder is what reaches the
   config file. Once allowed, the concrete value is written into the native config
   file on disk — that on-disk exposure is a separate, accepted fact (ARCHITECTURE
-  Layer 1), not a policy gap. (`crates/cli/src/secret/mod.rs`)
+  Layer 1), not a policy gap. Only the *refusal* leaves evidence here: a
+  render-time resolution that succeeds emits no `SecretAccess`, because
+  rendering happens outside any run and there is no run log to write one into.
+  A run's recorded secret surface is therefore what the gateway resolved for
+  that run, never what an earlier `apply` rendered into a config file.
+  (`crates/cli/src/secret/mod.rs`, `crates/cli/src/render/hooks.rs`,
+  `crates/cli/src/render/settings.rs`, `crates/adapters/src/render.rs`)
 - **gateway — enforced, fail-closed.** A per-server `ScopedResolver` substitutes
   every `${REF}` through `secret_decision`; a ref outside `[policy.secrets]` fails
   to resolve, and the call is refused outright if any refs remain unresolved for
@@ -620,8 +626,8 @@ still fail-closed, and still only evidence that the check ran.
   declared URL can carry a credential in its userinfo, path, or query.
   Recording never gates it: an unwritable log loses the evidence, never the
   refusal.
-  (`crates/cli/src/runs.rs`, `crates/cli/src/seatbelt.rs`,
-  `crates/cli/src/gateway.rs`, `crates/cli/src/render/apply.rs`)
+  (`crates/cli/src/render/apply.rs` `record_egress_refusal`,
+  `crates/cli/src/seatbelt.rs`, `crates/cli/src/gateway.rs`)
 - **gateway — enforced.** `Gateway::try_call` logs every outcome (denied / ok /
   error) via `calllog::record` to `~/.agentstack/audit/calls.jsonl`. Only an
   argument *digest* is stored, never raw values or resolved secrets, and upstream
@@ -1125,24 +1131,31 @@ uses is reported and **not** adopted: replacing a pinned declaration is a
 different act from bringing in something new, and it never happens behind a
 preview that presents it as an addition.
 
-Each item is classified by provenance. Inside a git work tree, tracking alone
-decides — untracked is the user's own work, tracked came with the project.
-Outside one, the clock is this project's last recorded grant in `trust.jsonl`
-(above): content modified since then is local work. The classification is shown
-to the user and gates only *compression* of the first-time adoption path; it
-never gates adoption itself, and a project with no recorded grant history
-always takes the full staged review.
+Each item is classified by provenance. Content already recorded as having
+arrived through `receive` or `add from` is settled first, before git is
+consulted at all: those bytes are a stranger's work whatever git would say, and
+adopting them lands them untracked, which is exactly how they would otherwise
+read as the user's own. After that, inside a git work tree tracking alone
+decides — untracked is the user's own work, tracked came with the project —
+read through a single hardened `git ls-files -z` over the intake directories.
+Outside a work tree there is no tracking signal and no fallback: every item is
+classified as arrived, for the stated reason "no git history to attest who
+authored this". The classification is shown to the user and gates only
+*compression* of the first-time adoption path; it never gates adoption itself,
+so a project outside git simply takes the full staged review.
 
 **What it is not:** provenance is a heuristic about origin, **not an integrity
 claim**. Untracked-in-git means git has not seen the file, which anything with
-write access to the working tree can arrange; the grant timestamp is read from
-the same user-writable log named above. Modification time is deliberately *not*
-consulted for tracked files, because git rewrites it on every checkout — but
-outside a work tree it is the only signal there is, and it is as forgeable as
-any other filesystem timestamp. Neither signal survives an attacker who already
-has local write access, and neither is a substitute for reading what you are
-adopting. Detection is also not a monitor: it runs when you run a command, so
-content dropped and removed between commands is never seen.
+write access to the working tree can arrange. Modification time is consulted
+*nowhere* — not for tracked files, because git rewrites it on every checkout,
+and not outside a work tree either, because `touch` is free to any process with
+filesystem access. That is why the absence of git yields no compressed path
+rather than a timestamp comparison: a signal an attacker can forge outright is
+worse than no signal. The signals that do remain still do not survive an
+attacker who already has local write access, and none of them is a substitute
+for reading what you are adopting. Detection is also not a monitor: it runs
+when you run a command, so content dropped and removed between commands is
+never seen.
 
 ### Single-action activation (`agentstack yes`)
 
@@ -1275,8 +1288,17 @@ What it does not prove, and must never be read as proving:
   based on whatever out-of-band check they did or did not perform.
 - **It is not a second way to say yes.** A valid signature from a recognized
   publisher changes the card's wording — the question of *whose* key it is is
-  settled — and changes nothing else. The review body is identical, and a
-  witness compares both runs byte for byte to keep that true.
+  settled — and changes nothing else. Recognition adds one dimmed line *above*
+  the review body; the body itself is then printed by the same `summary_lines`
+  loop either way, and that loop reads the bundle alone and never the
+  publisher, so the body cannot vary by construction. What the witness
+  (`crates/cli/tests/share_round_trip.rs`) pins byte for byte is the outcome
+  rather than the wording: the receiving project's whole `.agentstack/` tree,
+  path by path and byte by byte, must be identical after a recognized run and
+  an unrecognized one. The two cards are never compared to each other. They are
+  probed by substring instead — the recognized card must name the publisher and
+  say the content is still the reader's to review, and neither card may claim
+  the review got shorter.
 
 Interactively, an unsigned bundle and an invalid signature are both stated on
 the card and neither aborts: the full review stands in both cases. An invalid

@@ -596,7 +596,17 @@ fn normalize_dynamic(raw: &str) -> Option<Vec<String>> {
     if DYNAMIC_ALLOWLIST.contains(&s.as_str()) {
         return None;
     }
-    Some(s.split_whitespace().map(String::from).collect())
+    let tokens: Vec<String> = s.split_whitespace().map(String::from).collect();
+    // Strip the `x` namespace exactly as `main` does before clap sees argv
+    // (`cli::strip_namespace`). This test parses with clap directly, so without
+    // this a doc showing `agentstack x restore --last` reads as an unrecognized
+    // subcommand — even though the binary runs it. Since item 10 requires a
+    // surface to name commands through the namespace rather than at a spelling
+    // a reader cannot find in `--help`, the gate has to model the real argv
+    // path or it would forbid the very spelling the rule asks for.
+    // `strip_namespace` returns the whole argv, binary included, so it is used
+    // as-is rather than re-prepending the head.
+    Some(agentstack::cli::strip_namespace(&tokens).unwrap_or(tokens))
 }
 
 #[test]
