@@ -149,10 +149,11 @@ fn files_to_scan(root: &Path) -> Vec<(PathBuf, Kind)> {
     ];
 
     // docs/ itself, plus the reader-facing subdirectories. `howto/`,
-    // `tutorial/` and `panel/` are entry points a person actually reads, and
-    // two of them (`tutorial/index.html`, `panel/index.html`) are
-    // hand-authored with no Markdown source — so this scan is the only gate
-    // that ever reads the command names in them. Skipped on purpose:
+    // `tutorial/` and `panel/` are entry points a person actually reads.
+    // `panel/index.html` is still hand-authored with no Markdown source, so
+    // for that page this scan is the only gate that ever reads its command
+    // names. (`tutorial/` gained `docs/tutorial.md` and is now generated, so
+    // it is covered by the doc tooling like every other page.) Skipped on purpose:
     // `docs/design/` (contracts for maintainers), `docs/archive/` (history,
     // whose commands are allowed to be retired), and `spikes/`/`demos/`.
     let mut docs_entries: Vec<PathBuf> = vec![root.join("docs")];
