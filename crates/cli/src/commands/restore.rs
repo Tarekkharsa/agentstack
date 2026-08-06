@@ -5,6 +5,11 @@
 //! recorded event by id (`restore <id> --write`, unique prefix is enough, or
 //! `--last` for the most recent), or restore one adapter's config from its
 //! slot backup (`restore <adapter> --write`). Dry-run by default.
+//!
+//! Skill directories materialized by `use --write` are in NEITHER list, and the
+//! listing says so when this project has any. See the `history` module docs for
+//! why the ledger cannot carry them, and [`super::undo::print_skills_note`] for
+//! the wording both Undo doors share.
 
 use std::path::Path;
 
@@ -134,6 +139,11 @@ pub fn list_json_value(registry: &Registry, dir: &Path) -> serde_json::Value {
     serde_json::json!({
         "entries": entries_json,
         "adapter_backups": backups,
+        // The inventory's own boundary, machine-readable: a panel that draws
+        // an Undo affordance from `entries` would otherwise reproduce the same
+        // over-promise in its own words. Names, not a flag, so it can say
+        // WHICH skills its Undo will not reach.
+        "skills_not_recorded": super::undo::skills_outside_the_ledger(dir),
     })
 }
 
@@ -183,6 +193,10 @@ fn list(registry: &Registry, dir: &Path) -> Result<()> {
     let entries = history::list();
     if entries.is_empty() {
         println!("No recorded changes yet — history fills as `apply`/`use` write configs.\n");
+        // "…write configs" was already the narrow truth, but a user who just
+        // watched `use --write` materialize skills reads it as a bug. Name the
+        // boundary, and the commands that DO take those skills back.
+        super::undo::print_skills_note(dir);
     } else {
         println!("Recorded changes (newest first):\n");
         for e in entries.iter().take(15) {
@@ -210,6 +224,7 @@ fn list(registry: &Registry, dir: &Path) -> Result<()> {
             "agentstack x restore <id> --write".bold(),
             "--last".bold()
         );
+        super::undo::print_skills_note(dir);
     }
 
     // The per-adapter single-slot backups remain available as a fallback for

@@ -799,6 +799,21 @@ pub fn activate(
                 "  {} undo: `agentstack x restore --last --write`",
                 "↩".dimmed()
             );
+            // G31: that promise covers the FILES this activation writes. The
+            // skills below it are delivered as linked directories, which the
+            // history ledger cannot hold (see the `history` module docs), so
+            // saying so here — beside the promise, before the first byte moves
+            // — is the honest bound. Widening the ledger instead would mean an
+            // undo that deletes a directory whose contents it cannot prove are
+            // still ours.
+            if !active_skills.is_empty() {
+                println!(
+                    "  {} {}",
+                    "·".dimmed(),
+                    "server configs only — skills materialized below are not in that ledger"
+                        .dimmed()
+                );
+            }
         }
     }
 
@@ -1332,6 +1347,17 @@ pub fn activate(
                     label,
                     super::count(wrote_skill_dirs, "location")
                 );
+                // The exact line G31 was about: this activation wrote only
+                // skills, so the ledger recorded nothing and `undo` would have
+                // answered "nothing recorded to undo for this project". Say
+                // what happened and name the two real ways back.
+                println!(
+                    "  {}",
+                    "undo: not through the change ledger — it records files, and these are \
+                     linked directories"
+                        .dimmed()
+                );
+                println!("  {}", crate::history::SKILLS_COME_OFF_WITH.dimmed());
             } else {
                 // Coverage first, changes second — see `covered_targets`. A
                 // re-activation of an already-current toolset changes nothing,

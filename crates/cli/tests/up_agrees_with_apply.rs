@@ -31,6 +31,21 @@
 //! 2. On a project that delivers something — the same manifest plus one setting
 //!    for the rendered lane — both still exit 0. Live routing on its own is not
 //!    a failure; delivering nothing is.
+//!
+//! # The rest of `up`'s transcript is held to the same rule
+//!
+//! The render was not the only place `up` reported success it had not earned,
+//! and the other two are here because they are the same defect on the same
+//! screen — a surface claiming an outcome, or blaming the user for our failure:
+//!
+//! 3. **The lock verification.** `install --locked` is the step that makes the
+//!    environment the reviewed one, and `up`'s own source calls it "the one step
+//!    of `up` that must not be best-effort". It printed a yellow "could not
+//!    verify against lock" and exited 0 anyway. Witness + control below.
+//! 4. **The harness detection.** When the adapter registry failed to load, `up`
+//!    printed the sentence it prints for a machine with no CLI installed —
+//!    "none — install a supported CLI" — so our internal failure was reported as
+//!    the user's missing software. Witness + control below.
 
 use std::fs;
 use std::path::Path;
@@ -210,6 +225,229 @@ fn a_project_that_delivers_something_still_exits_zero_from_both() {
         !upped.text.contains("nothing was delivered"),
         "fixture: this project delivers a setting, so the refusal must not \
          appear:\n{}",
+        upped.text
+    );
+}
+
+// ------------------------------------------- 3. the lock verification's exit
+
+/// A project whose pinned skill body has moved on disk since the lockfile was
+/// written. `install --locked` refuses to re-pin it — that refusal is the whole
+/// point of `--locked` — so this is the state the verification exists to catch.
+///
+/// The settings key is deliberate: it gives the rendered lane real content, so
+/// the render SUCCEEDS and the only thing that can make `up` exit nonzero is the
+/// lock verification itself. Without it this test would pass on the render's
+/// exit code and say nothing about the lock at all.
+fn skewed_from_its_lock(root: &Path, name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+    let src = root.join(format!("{name}-skill"));
+    fs::create_dir_all(&src).unwrap();
+    fs::write(
+        src.join("SKILL.md"),
+        "---\nname: mine\ndescription: a skill\n---\nbody one\n",
+    )
+    .unwrap();
+    let manifest = format!(
+        "version = 1\n\
+         [targets]\n\
+         default = [\"claude-code\"]\n\
+         [skills.mine]\n\
+         path = \"{}\"\n\
+         [settings.claude-code]\n\
+         model = \"opus\"\n",
+        src.display()
+    );
+    let (home, proj) = project(root, name, &manifest);
+    // Break the pin AFTER the lockfile and the grant exist: the bytes on disk
+    // are no longer the bytes that were reviewed.
+    fs::write(
+        src.join("SKILL.md"),
+        "---\nname: mine\ndescription: a skill\n---\nbody two, written after the pin\n",
+    )
+    .unwrap();
+    (home, proj)
+}
+
+/// The defect: `up` verified nothing against the lock and reported success.
+///
+/// `--locked` is the difference between "you got what was reviewed" and "you got
+/// whatever was on disk this morning". `up` printed a yellow line saying it
+/// could not verify, four lines below its own comment calling this the one step
+/// that must not be best-effort, and exited 0 — so a CI job reading that exit
+/// code believed an environment had been checked against `agentstack.lock` when
+/// nothing had checked it.
+///
+/// Continuing and succeeding are separable, and both halves are asserted:
+/// `up` still renders and still prints its closing next step, and it still
+/// exits nonzero.
+#[test]
+fn up_does_not_report_success_over_a_lock_it_could_not_verify() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (i_home, i_proj) = skewed_from_its_lock(tmp.path(), "for-install");
+    let (u_home, u_proj) = skewed_from_its_lock(tmp.path(), "for-up");
+
+    // The premise: this is the unverifiable state, not some other failure.
+    let installed = run(&["install", "--locked"], &i_home, &i_proj);
+    assert_eq!(
+        installed.code, 1,
+        "fixture: `install --locked` must be refusing here, or this test is \
+         measuring something else:\n{}",
+        installed.text
+    );
+
+    let upped = run(&["up"], &u_home, &u_proj);
+    assert_ne!(
+        upped.code, 0,
+        "`up` delegates the verification to `install --locked`, which exited {} — \
+         reporting 0 here tells a CI job the environment was verified against the \
+         lock when nothing verified it:\n{}",
+        installed.code, upped.text
+    );
+
+    // The failure is not allowed to cost the user the rest of the command.
+    assert!(
+        upped.text.contains("next:"),
+        "`up` must still finish its transcript — an exit code with no way forward \
+         is worse than none:\n{}",
+        upped.text
+    );
+    assert!(
+        upped.text.contains("wrote 1 setting"),
+        "`up` must still attempt the render: a user on a new machine with one \
+         error and no configured CLI at all is worse off than before:\n{}",
+        upped.text
+    );
+    assert!(
+        !upped.text.contains("verified against lock —") || upped.text.contains("NOT verified"),
+        "the screen must not soften an unverified lock into a passing claim:\n{}",
+        upped.text
+    );
+}
+
+/// The control: a lock that DOES verify still exits 0.
+///
+/// Without this, the witness above is satisfied by making `up` fail whenever a
+/// skill is declared — which would fail every healthy pinned project. What is
+/// being reported is an unverifiable lock, not the presence of a lock.
+#[test]
+fn a_project_whose_lock_verifies_still_exits_zero() {
+    let tmp = tempfile::tempdir().unwrap();
+    let src = tmp.path().join("intact-skill");
+    fs::create_dir_all(&src).unwrap();
+    fs::write(
+        src.join("SKILL.md"),
+        "---\nname: mine\ndescription: a skill\n---\nbody one\n",
+    )
+    .unwrap();
+    let manifest = format!(
+        "version = 1\n\
+         [targets]\n\
+         default = [\"claude-code\"]\n\
+         [skills.mine]\n\
+         path = \"{}\"\n\
+         [settings.claude-code]\n\
+         model = \"opus\"\n",
+        src.display()
+    );
+    let (home, proj) = project(tmp.path(), "intact", &manifest);
+
+    let upped = run(&["up"], &home, &proj);
+    assert_eq!(
+        upped.code, 0,
+        "the pinned body is untouched, so the verification passes and `up` has \
+         nothing to report:\n{}",
+        upped.text
+    );
+    assert!(
+        upped.text.contains("verified against lock"),
+        "and it must still make the green claim when something backed it:\n{}",
+        upped.text
+    );
+}
+
+// ------------------------------------------ 4. whose failure is "no harness"?
+
+/// The defect: our failure, reported as the user's missing software.
+///
+/// `detected_harnesses` swallowed a failed `Registry::load()` into an empty
+/// list, and the empty list prints "none — install a supported CLI". Measured
+/// against a `~/.agentstack/adapters` this process cannot read, the line was
+/// byte-identical to the one a clean machine gets — so a user with every
+/// supported CLI installed was told to go and install one.
+///
+/// The environment guard is not a skip in disguise: it fires only where the
+/// sandbox cannot express an unreadable directory at all (a process running as
+/// root), and it says so rather than passing quietly.
+#[test]
+fn a_registry_that_will_not_load_is_not_reported_as_no_cli_installed() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (home, proj) = project(
+        tmp.path(),
+        "blamed",
+        "version = 1\n[settings.claude-code]\nmodel = \"opus\"\n",
+    );
+
+    let adapters = home.join(".agentstack/adapters");
+    fs::create_dir_all(&adapters).unwrap();
+    let mut perms = fs::metadata(&adapters).unwrap().permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o000);
+    fs::set_permissions(&adapters, perms).unwrap();
+    let unreadable = fs::read_dir(&adapters).is_err();
+
+    let upped = run(&["up"], &home, &proj);
+
+    // Restore before any assertion, so a failure cannot leave the tempdir
+    // undeletable.
+    let mut back = fs::metadata(&adapters).unwrap().permissions();
+    std::os::unix::fs::PermissionsExt::set_mode(&mut back, 0o755);
+    fs::set_permissions(&adapters, back).unwrap();
+
+    if !unreadable {
+        eprintln!(
+            "skipped: this process can read a 0o000 directory (running as root?), \
+             so the registry failure cannot be staged here"
+        );
+        return;
+    }
+
+    assert!(
+        !upped.text.contains("install a supported CLI"),
+        "the registry did not load, so nothing looked for a CLI — telling the user \
+         to install one blames them for our failure:\n{}",
+        upped.text
+    );
+    assert!(
+        upped.text.contains("adapter registry did not load"),
+        "`up` must say whose failure this was:\n{}",
+        upped.text
+    );
+}
+
+/// The control: a machine with genuinely no CLI installed still gets the
+/// sentence written for it.
+///
+/// Without this, the witness above is satisfied by deleting the "install a
+/// supported CLI" line outright — which would take away the one actionable
+/// thing said to a user on a bare machine.
+#[test]
+fn a_machine_with_no_cli_installed_still_hears_that_and_only_that() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (home, proj) = project(
+        tmp.path(),
+        "bare",
+        "version = 1\n[settings.claude-code]\nmodel = \"opus\"\n",
+    );
+
+    let upped = run(&["up"], &home, &proj);
+    assert!(
+        upped.text.contains("install a supported CLI"),
+        "an empty `PATH` and an empty HOME is the no-CLI machine, and it keeps \
+         its own sentence:\n{}",
+        upped.text
+    );
+    assert!(
+        !upped.text.contains("adapter registry did not load"),
+        "and it must not be told our registry failed when it loaded fine:\n{}",
         upped.text
     );
 }

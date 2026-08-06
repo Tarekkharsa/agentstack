@@ -17,14 +17,22 @@
 //! writing path would be a second place for the consent and undo work of the
 //! last three phases to be got wrong.
 //!
-//! # Its exit code is `apply`'s
+//! # Its exit code is `apply`'s, and the lock's
 //!
 //! Because the render IS [`super::apply::write_quiet`], `up` reports whatever
 //! that call reported: a refused write is a refused write whichever command a
 //! script ran. It finishes the transcript first — the closing next step prints
 //! even on a failure, since an exit code with no way forward is worse than none
-//! — and then exits nonzero. The one step that stays best-effort is the lock
-//! verification, and that softening is stated where it happens.
+//! — and then exits nonzero.
+//!
+//! The lock verification is judged the same way, and used not to be. It printed
+//! a yellow "could not verify against lock" and left the exit code at 0, four
+//! lines below a comment calling it "the one step of `up` that must not be
+//! best-effort" — so a CI job that ran `up` and read success had an environment
+//! nothing had ever checked against `agentstack.lock`, which is the single
+//! guarantee `--locked` exists to give. CONTINUING after a failure and
+//! SUCCEEDING are separable: `up` still runs the render and still prints the
+//! closing next step, and then reports the failure it saw.
 //!
 //! # It ends through the next-action seam, not a summary line
 //!
@@ -57,12 +65,21 @@ pub fn run(args: &UpArgs, manifest_dir: Option<&Path>) -> Result<()> {
     crate::outln!(
         "{:<20}{}",
         "found harnesses".dimmed(),
-        if harnesses.is_empty() {
-            "none — install a supported CLI, or run `agentstack doctor` to see what is looked for"
-                .dimmed()
-                .to_string()
-        } else {
-            harnesses.join(" · ")
+        match &harnesses {
+            // OUR failure, said as ours. An unreadable `~/.agentstack/adapters`
+            // — or any other reason the registry will not load — used to be
+            // swallowed into the empty list below, so the screen told the user
+            // to install a CLI they may well have installed already. "none"
+            // is a finding about THEIR machine and must only be printed when
+            // the lookup that produced it actually ran.
+            Err(err) => format!("unknown — the adapter registry did not load: {err:#}")
+                .red()
+                .to_string(),
+            Ok(found) if found.is_empty() =>
+                "none — install a supported CLI, or run `agentstack doctor` to see what is looked for"
+                    .dimmed()
+                    .to_string(),
+            Ok(found) => found.join(" · "),
         }
     );
 
@@ -82,6 +99,7 @@ pub fn run(args: &UpArgs, manifest_dir: Option<&Path>) -> Result<()> {
     // difference between "you got what was reviewed" and "you got whatever
     // upstream is today", and it is the one step of `up` that must not be
     // best-effort.
+    let mut lock_failed: Option<anyhow::Error> = None;
     let verified = super::install::run(
         &InstallArgs {
             locked: true,
@@ -89,7 +107,7 @@ pub fn run(args: &UpArgs, manifest_dir: Option<&Path>) -> Result<()> {
         },
         Some(&dir),
     );
-    match &verified {
+    match verified {
         // "Verified against lock" is a claim about what was EXAMINED, and
         // `install` examines skill sources. A manifest with no skills gives it
         // nothing to check, and printing the green claim anyway would be the
@@ -108,16 +126,17 @@ pub fn run(args: &UpArgs, manifest_dir: Option<&Path>) -> Result<()> {
             "verified against lock".green()
         ),
         Err(err) => {
-            // Not a bail: the render below is still worth attempting for the
-            // parts that do verify, and the closing next action will name the
-            // repair. Failing the whole command here would leave a user on a
-            // new machine with one error and no configured CLI at all.
+            // Not a bail HERE, and not a pass either — the same shape the
+            // render step below uses (see the verdict at the end). Bailing on
+            // the spot would leave a user on a new machine with one error and
+            // no configured CLI at all, so the render is still attempted and
+            // the closing next step still prints. What is NOT deferred is the
+            // verdict: `--locked` is the whole reason this step exists, and an
+            // exit code of 0 over an environment it never managed to check
+            // says "you got what was reviewed" when nothing established that.
             crate::outln!("{:<20}{shape}", "your environment".dimmed());
-            crate::outln!(
-                "{:<20}{} {err:#}",
-                "",
-                "could not verify against lock —".yellow()
-            );
+            crate::outln!("{:<20}{} {err:#}", "", "NOT verified against lock —".red());
+            lock_failed = Some(err);
         }
     }
 
@@ -250,25 +269,43 @@ pub fn run(args: &UpArgs, manifest_dir: Option<&Path>) -> Result<()> {
     // AFTER writing others (an IO error on the fourth of four), and claiming
     // nothing happened over three written configs would be its own false
     // report. What is on disk is whatever the closing `doctor` just read.
-    if let Some(err) = render_failed {
-        anyhow::bail!("rendering stopped early — {err:#}");
+    //
+    // The lock verification is judged here for the same reason and by the same
+    // rule. It is a SEPARATE claim from the render — "this is the environment
+    // that was reviewed" versus "it reached your CLIs" — so when both fail the
+    // user is told both rather than the first one to be noticed.
+    match (lock_failed, render_failed) {
+        (Some(lock), Some(render)) => anyhow::bail!(
+            "not verified against the lock ({lock:#}) — and rendering stopped early: {render:#}"
+        ),
+        (Some(lock), None) => anyhow::bail!(
+            "not verified against the lock — this is not established to be the environment that \
+             was reviewed: {lock:#}"
+        ),
+        (None, Some(render)) => anyhow::bail!("rendering stopped early — {render:#}"),
+        (None, None) => Ok(()),
     }
-    Ok(())
 }
 
 /// The CLIs this machine has, in registry order, by display name. Uses the
 /// same `detected` reading `init` imports from and `doctor` counts, so the
 /// three can never disagree about what is installed.
-fn detected_harnesses(dir: &Path) -> Vec<String> {
-    let Ok(registry) = crate::adapter::Registry::load() else {
-        return Vec::new();
-    };
+///
+/// Returns the registry's error rather than an empty list, because the two mean
+/// opposite things and the caller prints a different sentence for each. "no CLI
+/// is installed" is a fact about the user's machine that they can act on; "the
+/// registry did not load" is a fact about ours, and reporting it as the first
+/// was the surface blaming the user for our failure — measured with a
+/// `~/.agentstack/adapters` directory this process cannot read, which produced
+/// a line byte-identical to a clean machine with no CLI on it.
+fn detected_harnesses(dir: &Path) -> Result<Vec<String>> {
+    let registry = crate::adapter::Registry::load()?;
     let project = Scope::default_for(dir) == Scope::Project;
-    registry
+    Ok(registry
         .iter()
         .filter(|d| d.detected() || (project && d.project_config_present(dir)))
         .map(|d| d.display.clone())
-        .collect()
+        .collect())
 }
 
 /// "3 toolsets" / "1 skill" — pluralized, because a status line that says

@@ -1,6 +1,13 @@
-//! `agentstack search <query>` — discovery across all providers (PLAN §9g/§9h):
-//! the embedded catalog and the official MCP Registry. Marks what's already in
-//! the manifest and prints how to add the rest. The agent's discovery surface.
+//! `agentstack search [query]` — discovery across all providers (PLAN §9g/§9h):
+//! the central library, the embedded catalog and the official MCP Registry.
+//! Marks what's already in the manifest and prints how to add the rest. The
+//! agent's discovery surface.
+//!
+//! With no query it LISTS instead of searching, from the two local sources
+//! only, and names the one it left out. That is the reading its own `--help`
+//! always gave ("lists all if omitted"), and it is what makes bare `agentstack
+//! search` safe to offer as guidance: a rung that needs the network is a rung
+//! that fails on a plane.
 
 use std::path::Path;
 
@@ -10,28 +17,37 @@ use owo_colors::OwoColorize;
 use crate::cli::SearchArgs;
 use crate::provider::{self, CandidateKind};
 
+/// What a no-query listing consulted, and what it left out. Printed verbatim so
+/// nobody has to infer the second sentence from the absence of registry rows:
+/// a listing that silently dropped the registry would read as "the ecosystem
+/// has twelve things in it".
+const LISTING_SOURCES: &str = "sources: your central library and the built-in catalog — both local, no network. \
+The official MCP Registry is not listed here: it answers a term, so `agentstack search <query>` is what reaches it.";
+
 pub fn run(args: &SearchArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let query = args.query.clone().unwrap_or_default();
-    if query.trim().is_empty() {
-        // An empty query is not an error, so `--json` answers it the same way
-        // it answers "no matches": the echoed (empty) query and an empty result
-        // set. A caller that wanted results can see it never asked for any,
-        // without parsing a usage sentence written for a human.
-        if args.json {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&search_json(&query, &[], &[]))?
-            );
-            return Ok(());
-        }
-        println!(
-            "Usage: agentstack search <query>  (searches your central library + the catalog + official MCP Registry)"
-        );
-        return Ok(());
+    // No query is a request to LIST, which is what `--help` has always
+    // promised ("lists all if omitted"). It is served entirely from the two
+    // local sources: the central library reads files, the catalog is embedded,
+    // and `RegistryProvider` returns an empty set for an empty query without
+    // building a client — so this path makes no network call and cannot hang
+    // or fail offline. That matters beyond tidiness: `agentstack search` is
+    // the command an empty project's guidance offers, and guidance may not
+    // depend on the network.
+    let listing = query.trim().is_empty();
+    let mut results = provider::search_all(if listing { "" } else { &query }, 25);
+    if listing {
+        // With no query there is no relevance to rank on, so the order is the
+        // catalogue's own — source group, then name — and two runs list the
+        // same things in the same order.
+        results.sort_by(|a, b| {
+            source_rank(a.source)
+                .cmp(&source_rank(b.source))
+                .then_with(|| a.name.cmp(&b.name))
+        });
+    } else {
+        rank(&mut results, &query);
     }
-
-    let mut results = provider::search_all(&query, 25);
-    rank(&mut results, &query);
 
     // A capability is "installed" if its server is in the manifest, or — for a
     // pack — if its `[packs.<name>]` install ledger exists.
@@ -57,19 +73,35 @@ pub fn run(args: &SearchArgs, manifest_dir: Option<&Path>) -> Result<()> {
     }
 
     if results.is_empty() {
-        println!("No matches for '{query}' (library, catalog, or registry).");
+        if listing {
+            println!(
+                "Nothing to list: your central library is empty and the catalog answered nothing."
+            );
+            println!("{}", LISTING_SOURCES.dimmed());
+        } else {
+            println!("No matches for '{query}' (library, catalog, or registry).");
+        }
         return Ok(());
     }
 
     let total = results.len();
     let shown: Vec<&provider::Candidate> = if args.all {
         results.iter().collect()
+    } else if listing {
+        listing_page(&results)
     } else {
         page(&results)
     };
     let hidden = total - shown.len();
 
-    if hidden == 0 {
+    if listing {
+        if hidden == 0 {
+            println!("{} you can add:", capabilities(total));
+        } else {
+            println!("{} of {} you can add:", shown.len(), capabilities(total));
+        }
+        println!("{}\n", LISTING_SOURCES.dimmed());
+    } else if hidden == 0 {
         println!("{} for '{query}':\n", super::count(total, "result"));
     } else {
         println!(
@@ -201,10 +233,12 @@ pub fn run(args: &SearchArgs, manifest_dir: Option<&Path>) -> Result<()> {
     }
 
     if hidden > 0 {
-        println!(
-            "{}",
-            format!("{hidden} more — agentstack search '{query}' --all").dimmed()
-        );
+        let more = if listing {
+            format!("{hidden} more — agentstack search --all")
+        } else {
+            format!("{hidden} more — agentstack search '{query}' --all")
+        };
+        println!("{}", more.dimmed());
     }
     Ok(())
 }
@@ -298,6 +332,35 @@ fn page(results: &[provider::Candidate]) -> Vec<&provider::Candidate> {
     }
     // Print grouped: relevance decided membership, the source decides layout.
     out.sort_by_key(|c| source_rank(c.source));
+    out
+}
+
+/// "N capabilities" — the one noun in this file whose plural is not `+ "s"`,
+/// so `commands::count` cannot spell it.
+fn capabilities(n: usize) -> String {
+    format!("{n} {}", if n == 1 { "capability" } else { "capabilities" })
+}
+
+/// The no-query listing page: the first few of each local source.
+///
+/// [`page`] exists to settle a competition between sources for a short screen
+/// of the *best* answers, which is why it caps the total. A listing has no
+/// competition to settle — there is no query, so nothing is better than
+/// anything else — and its job is a menu: some of what each source holds, and
+/// an honest count of the rest. So the cap is per source only. Two local
+/// sources times five is a first screen, not a scroll.
+fn listing_page(results: &[provider::Candidate]) -> Vec<&provider::Candidate> {
+    const PER_SOURCE: usize = 5;
+
+    let mut taken: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
+    let mut out = Vec::new();
+    for c in results {
+        let n = taken.entry(c.source).or_insert(0);
+        if *n < PER_SOURCE {
+            *n += 1;
+            out.push(c);
+        }
+    }
     out
 }
 
