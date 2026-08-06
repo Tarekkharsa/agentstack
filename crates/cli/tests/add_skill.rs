@@ -651,3 +651,103 @@ fn scan_gate_blocks_hostile_content_before_any_offer() {
     );
     assert!(!proj.join("agentstack.lock").exists());
 }
+
+/// Run the real binary against the isolated HOME the caller just set. `add`'s
+/// activation footer is a printed line, so only a subprocess can witness it.
+///
+/// The bullet markers are coloured unconditionally, so assertions below match
+/// the sentence and not the `·` in front of it.
+fn cli(proj: &Path, args: &[&str]) -> String {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_agentstack"))
+        .args(args)
+        .current_dir(proj)
+        .env_clear()
+        .env("HOME", std::env::var("HOME").unwrap())
+        .env("AGENTSTACK_HOME", std::env::var("AGENTSTACK_HOME").unwrap())
+        .env("PATH", "/usr/bin:/bin")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("spawn agentstack");
+    format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    )
+}
+
+/// G22: the clean-at-rest footer must branch on the trust state this command's
+/// own write left behind, not on delivery mode alone.
+///
+/// `add skill --write` writes the manifest and the lock, and those bytes ARE
+/// the consent digest — so a project that was trusted a moment ago is
+/// `Changed` by the time the footer prints, and the `session start` it used to
+/// name refuses outright. The preview path writes nothing, so its wording is
+/// the control: it must still be the old sentence, byte for byte.
+#[test]
+fn clean_at_rest_footer_names_the_review_after_a_write_but_not_after_a_preview() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    set_home(&home);
+
+    // Clean at rest: pinned, trusted, nothing materialized anywhere.
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(proj.join("skills/seed")).unwrap();
+    fs::write(
+        proj.join("skills/seed/SKILL.md"),
+        "---\ndescription: seed\n---\n# seed\n",
+    )
+    .unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [skills.seed]\npath = \"./skills/seed\"\n\
+         [profiles.default]\nskills = [\"seed\"]\n",
+    )
+    .unwrap();
+    let extra = tmp.path().join("extra/gamma");
+    fs::create_dir_all(&extra).unwrap();
+    fs::write(
+        extra.join("SKILL.md"),
+        "---\ndescription: gamma\n---\n# gamma\n",
+    )
+    .unwrap();
+    cli(&proj, &["lock", "--write"]);
+    grant(&proj);
+    assert_eq!(
+        agentstack::trust::check(&proj),
+        agentstack::trust::TrustState::Trusted
+    );
+
+    // The control. A preview moved no consent bytes, so the review it would
+    // otherwise owe has not come due and the old sentence is still true.
+    let preview = cli(&proj, &["add", "skill", "../extra/gamma"]);
+    assert!(
+        preview.contains("next session picks this up: `agentstack x session start default`"),
+        "a preview leaves the project trusted, so its footer is untouched:\n{preview}"
+    );
+    assert_eq!(
+        agentstack::trust::check(&proj),
+        agentstack::trust::TrustState::Trusted,
+        "precondition: the preview wrote nothing"
+    );
+
+    // The defect's state. The write itself is what re-gates the project.
+    let written = cli(&proj, &["add", "skill", "../extra/gamma", "--write"]);
+    assert_eq!(
+        agentstack::trust::check(&proj),
+        agentstack::trust::TrustState::Changed,
+        "precondition: the write re-gated the project:\n{written}"
+    );
+    assert!(
+        written.contains(
+            "review with `agentstack trust .` first — until then \
+             `agentstack x session start default` refuses"
+        ),
+        "the footer must name the review that unblocks the session:\n{written}"
+    );
+    assert!(
+        !written.contains("next session picks this up:"),
+        "the old sentence promised a session that now refuses:\n{written}"
+    );
+}

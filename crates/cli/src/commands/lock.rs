@@ -220,6 +220,34 @@ pub(crate) fn relock_trust_notice(was_trusted: bool, pins_changed: bool) -> Opti
     }
 }
 
+/// Does the consent gate stand between the user and the step a footer is about
+/// to name?
+///
+/// **Read this AFTER the command's own write.** Every footer this answers for
+/// (`lock --write`, `toolset create`, `add … --write`) is printed once the
+/// manifest and lock are already on disk, and those bytes ARE the consent
+/// digest — so the state the user is actually in is the one left behind, not
+/// the one the command started from. A footer that names `use`/`session start`
+/// while this is true names a command that can only refuse (G22).
+///
+/// This is [`crate::trust::check`], the plain first way of asking, deliberately
+/// not a fourth way: [`crate::render::PriorTrust`] answers "may THIS command
+/// deliver what it just wrote?" and [`crate::trust_carry::TrustCarry`] answers
+/// "may the NEXT command deliver it without a review?". Both exist to relax a
+/// gate; neither says what to tell the user, and reusing either here would make
+/// a footer claim a project is fine when a review is exactly what it owes.
+///
+/// The machine-home exemption mirrors the gates being described
+/// (`render::apply::trust_refusal`, `render::skills`): nothing there is
+/// review-gated, so nothing there is unblocked by a review either.
+pub(crate) fn review_pending(manifest_dir: &Path) -> bool {
+    if crate::util::paths::is_machine_home(manifest_dir) {
+        return false;
+    }
+    let base = crate::manifest::project_root_of(manifest_dir);
+    crate::trust::check(&base) != crate::trust::TrustState::Trusted
+}
+
 /// The same P9 consequence as [`relock_trust_notice`], stated in the future
 /// tense for the preview — the whole point of the gate is that the user reads
 /// it while the grant is still live and can decide not to write.
@@ -477,33 +505,55 @@ pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {
     }
     let target_ids: Vec<String> = ctx.registry.ids().map(str::to_string).collect();
     let mode = super::overview::detect_mode(&ctx, &target_ids);
-    let trust = crate::trust::check(&trust_base);
-    match (mode, trust) {
-        (
-            super::overview::Mode::CleanAtRest | super::overview::Mode::ZeroFiles,
-            crate::trust::TrustState::Untrusted | crate::trust::TrustState::Changed,
-        ) => println!("\nNext: `agentstack trust .` to review and consent."),
-        (super::overview::Mode::CleanAtRest, crate::trust::TrustState::Trusted) => {
-            let profile = if manifest.profiles.len() == 1 {
-                manifest
-                    .profiles
-                    .keys()
-                    .next()
-                    .map(String::as_str)
-                    .unwrap_or("<toolset>")
-            } else {
-                "<toolset>"
-            };
-            println!("\nNext: `agentstack x session start {profile}` to load it for this session.");
+    let profile = if manifest.profiles.len() == 1 {
+        manifest
+            .profiles
+            .keys()
+            .next()
+            .map(String::as_str)
+            .unwrap_or("<toolset>")
+    } else {
+        "<toolset>"
+    };
+    // Judged from the state this command's OWN pins left behind, not from
+    // `was_trusted` above: the write that just landed is what re-gated the
+    // project, and the user is standing on the far side of it.
+    println!(
+        "\n{}",
+        next_step_line(mode, review_pending(&ctx.dir), profile)
+    );
+    Ok(())
+}
+
+/// The one `Next:` line `lock --write` prints: the mode it left the project in,
+/// narrowed by whether a review now stands in the way.
+///
+/// Pure over its inputs so both branches are witnessed without a project on
+/// disk — the same shape [`relock_trust_notice`] already uses.
+pub(crate) fn next_step_line(
+    mode: super::overview::Mode,
+    review_pending: bool,
+    profile: &str,
+) -> String {
+    use super::overview::Mode;
+    // G22. Every mode's own next step runs through a gate this project no
+    // longer passes: `session start` refuses outright, the bridge serves
+    // control-plane tools only, and `use --write` refuses to render servers or
+    // materialize skills. Naming any of them here — as the static lane did,
+    // because it branched on mode alone — sends the user to a command that can
+    // only fail. The review is what unblocks all three.
+    if review_pending {
+        return "Next: `agentstack trust .` to review and consent.".to_string();
+    }
+    match mode {
+        Mode::CleanAtRest => {
+            format!("Next: `agentstack x session start {profile}` to load it for this session.")
         }
-        (super::overview::Mode::ZeroFiles, crate::trust::TrustState::Trusted) => {
-            println!("\nNext: `agentstack doctor` to verify the gateway wiring.");
-        }
-        (super::overview::Mode::Static, _) => {
-            println!("\nNext: `agentstack use --write` to activate the pinned capabilities.");
+        Mode::ZeroFiles => "Next: `agentstack doctor` to verify the gateway wiring.".to_string(),
+        Mode::Static => {
+            "Next: `agentstack use --write` to activate the pinned capabilities.".to_string()
         }
     }
-    Ok(())
 }
 
 /// Digest every project-declared instruction fragment and pin it in the lock.

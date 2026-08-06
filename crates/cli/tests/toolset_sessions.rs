@@ -84,3 +84,116 @@ servers = ["srv"]
     std::env::remove_var("HOME");
     std::env::remove_var("AGENTSTACK_HOME");
 }
+
+/// Run the real binary against the isolated HOME the caller just set.
+/// `toolset create`'s footer is printed, so a subprocess is the only witness.
+/// Markers are coloured unconditionally, so assertions match the sentence and
+/// not the punctuation in front of it.
+fn cli(proj: &std::path::Path, args: &[&str]) -> String {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_agentstack"))
+        .args(args)
+        .current_dir(proj)
+        .env_clear()
+        .env("HOME", std::env::var("HOME").unwrap())
+        .env("AGENTSTACK_HOME", std::env::var("AGENTSTACK_HOME").unwrap())
+        .env("PATH", "/usr/bin:/bin")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("spawn agentstack");
+    format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    )
+}
+
+/// G22: `toolset create` names the command that unblocks the state it left.
+///
+/// Creating a toolset writes the manifest and re-locks, and both are the
+/// consent digest — so on a project that was trusted, the create itself makes
+/// the review come due, and the `use <name> --write` it used to offer as the
+/// one next step refuses every target. The review goes first now.
+///
+/// The other half of the contract — that a project needing no review keeps
+/// today's single "Switch to it" line, byte for byte — is a unit test on
+/// `panel_edit::switch_lines`, because no end-to-end create can produce that
+/// state: the create's own manifest write is what takes it away.
+#[test]
+fn create_names_the_review_it_just_made_come_due() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    let as_home = home.join(".agentstack");
+    fs::create_dir_all(&as_home).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::set_var("AGENTSTACK_HOME", &as_home);
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(proj.join("skills/seed")).unwrap();
+    fs::write(
+        proj.join("skills/seed/SKILL.md"),
+        "---\ndescription: seed\n---\n# seed\n",
+    )
+    .unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [skills.seed]\npath = \"./skills/seed\"\n\
+         [profiles.default]\nskills = [\"seed\"]\n",
+    )
+    .unwrap();
+    cli(&proj, &["lock", "--write"]);
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
+    assert_eq!(
+        agentstack::trust::check(&proj),
+        agentstack::trust::TrustState::Trusted
+    );
+
+    // The panel's two-step: review the plan, then apply the exact digest.
+    let preview = cli(
+        &proj,
+        &[
+            "toolset",
+            "create",
+            "backend",
+            "--skill",
+            "seed",
+            "--preview",
+        ],
+    );
+    let plan: serde_json::Value =
+        serde_json::from_str(&preview).unwrap_or_else(|e| panic!("{e}: {preview}"));
+    let digest = plan["consent_digest"].as_str().unwrap().to_string();
+    let out = cli(
+        &proj,
+        &[
+            "toolset",
+            "create",
+            "backend",
+            "--skill",
+            "seed",
+            "--yes",
+            "--consented",
+            &digest,
+        ],
+    );
+
+    assert!(out.contains("toolset"), "the create ran:\n{out}");
+    assert_eq!(
+        agentstack::trust::check(&proj),
+        agentstack::trust::TrustState::Changed,
+        "precondition: the create's own writes re-gated the project:\n{out}"
+    );
+    assert!(
+        out.contains("Review the new pins:  agentstack trust ."),
+        "the footer names the review first:\n{out}"
+    );
+    assert!(
+        out.contains("Then switch to it:  agentstack use backend --write"),
+        "and the switch after it, in the order it has to happen:\n{out}"
+    );
+    assert!(
+        !out.contains("Switch to it:  agentstack use backend --write"),
+        "the old single line offered a command that refuses every target:\n{out}"
+    );
+}

@@ -600,7 +600,16 @@ fn create_profile_gated(
         },
         dir,
     )?;
-    print_created(&args.name);
+    // Read AFTER the manifest write and the re-lock above: those bytes are the
+    // consent digest, so this is the state the human is now standing in.
+    // Re-loading is what resolves `dir` (which may be `None`, or a
+    // subdirectory) to the manifest dir the trust key is derived from; a bare
+    // `.` would key the wrong project from anywhere but the root. A failure
+    // here cannot mean "no review needed", so it falls closed.
+    let review_pending = crate::commands::load(dir)
+        .map(|ctx| crate::commands::lock::review_pending(&ctx.dir))
+        .unwrap_or(true);
+    print_created(&args.name, review_pending);
     Ok(())
 }
 
@@ -608,14 +617,16 @@ fn create_profile_gated(
 /// makes it take effect. `restore --last` is deliberately NOT offered — create
 /// writes only the manifest, and the undo ledger captures rendered config
 /// files, so pointing at it here would undo somebody else's earlier write.
-fn print_created(name: &str) {
+fn print_created(name: &str, review_pending: bool) {
     use owo_colors::OwoColorize;
     println!("\n{} toolset {} created.", "✓".green(), name.bold());
     println!(
         "  {}",
         "Nothing was rendered — your CLIs are unchanged.".dimmed()
     );
-    println!("  Switch to it:  agentstack use {name} --write");
+    for line in switch_lines(name, review_pending) {
+        println!("  {line}");
+    }
     println!(
         "  {}",
         format!("(or only for now: agentstack x session start {name})").dimmed()
@@ -624,6 +635,31 @@ fn print_created(name: &str) {
         "  {}",
         format!("Undo: agentstack toolset delete --name {name}").dimmed()
     );
+}
+
+/// How a human gets from "created" to "in effect", in order.
+///
+/// G22: creating a toolset writes the manifest and re-locks, and both are the
+/// consent digest — so on a project that WAS trusted, the create itself leaves
+/// the review pending, and `use <name> --write` refuses to render or
+/// materialize anything. Naming it alone was a next step that could only fail.
+/// The review goes first because it is the step that unblocks the other two
+/// (the dimmed `session start` line below refuses for exactly the same reason,
+/// and is unblocked by exactly the same command).
+///
+/// When no review is pending the wording is untouched: naming a toolset is
+/// still not switching to it, and `use --write` is still the switch.
+///
+/// Pure over its inputs so both branches are witnessed without a project on
+/// disk.
+fn switch_lines(name: &str, review_pending: bool) -> Vec<String> {
+    if review_pending {
+        return vec![
+            "Review the new pins:  agentstack trust .".to_string(),
+            format!("Then switch to it:  agentstack use {name} --write"),
+        ];
+    }
+    vec![format!("Switch to it:  agentstack use {name} --write")]
 }
 
 /// The interactive review: the same facts the JSON preview carries, in prose.
@@ -2261,6 +2297,27 @@ mod tests {
         assert!(
             crate::commands::remove::remove_from_profile(&text, "backend", "skills", "absent")
                 .is_ok()
+        );
+    }
+
+    /// G22, the half no end-to-end create can reach: a project that owes no
+    /// review keeps today's single line, byte for byte. `create` always writes
+    /// the manifest, so on a real project the review is always due by the time
+    /// the footer prints — the untouched wording survives for the cases where
+    /// it is not (a machine-home manifest, which the render gates exempt).
+    #[test]
+    fn switch_lines_keep_todays_wording_when_no_review_is_due() {
+        assert_eq!(
+            switch_lines("backend", false),
+            vec!["Switch to it:  agentstack use backend --write".to_string()],
+        );
+        assert_eq!(
+            switch_lines("backend", true),
+            vec![
+                "Review the new pins:  agentstack trust .".to_string(),
+                "Then switch to it:  agentstack use backend --write".to_string(),
+            ],
+            "a pending review is named first, because it is what unblocks the switch",
         );
     }
 }

@@ -1066,12 +1066,22 @@ fn render(
                 // still shown, so what is being withheld stays reviewable — and
                 // `--allow-unresolved` does NOT reach it: that flag forgives a
                 // missing secret, never a missing consent.
-                if let Some(why) = &hp.refusal {
-                    crate::outln!("  {} {why}", "✗".red());
+                //
+                // Reported only where something would actually be delivered,
+                // exactly as the servers path above states it: an unchanged
+                // plan writes nothing, so "refusing to render" printed over
+                // "already in sync" would be two contradictory claims about the
+                // same file — and the run exits 0, putting an error line above
+                // a success status. `HooksPlan::write` still refuses on
+                // `refusal` alone; only the REPORT is conditioned here.
+                let hrefused = hp.refusal.is_some() && hp.changed();
+                if hrefused {
+                    if let Some(why) = &hp.refusal {
+                        crate::outln!("  {} {why}", "✗".red());
+                    }
                     error_count += 1;
                 }
-                let hblocked =
-                    (!hp.unresolved.is_empty() && !args.allow_unresolved) || hp.refusal.is_some();
+                let hblocked = (!hp.unresolved.is_empty() && !args.allow_unresolved) || hrefused;
                 if hblocked {
                     write_blockers += 1;
                 }
@@ -1173,15 +1183,26 @@ fn render(
                     // write through the same seam a missing source does — the
                     // diff is still shown, so what is being withheld stays
                     // reviewable.
-                    if let Some(why) = &ip.refusal {
-                        crate::outln!("  {} {why}", "✗".red());
+                    //
+                    // Reported only where something would actually be
+                    // delivered, exactly as the servers path above states it:
+                    // an already-compiled region that the refusal would leave
+                    // byte-identical is not being withheld from anybody, and
+                    // the run exits 0 — an error line above a success status.
+                    // `InstrPlan::write` still refuses on `refusal` alone; only
+                    // the REPORT is conditioned here.
+                    let irefused = ip.refusal.is_some() && ip.changed();
+                    if irefused {
+                        if let Some(why) = &ip.refusal {
+                            crate::outln!("  {} {why}", "✗".red());
+                        }
                         error_count += 1;
                     }
                     // A missing source already dropped its content from the
                     // compile — writing now would delete previously compiled
                     // fragments (all sources missing empties the whole region).
                     // Block the write, mirroring the unresolved-secret path.
-                    let iblocked = !ip.missing.is_empty() || ip.refusal.is_some();
+                    let iblocked = !ip.missing.is_empty() || irefused;
                     if iblocked {
                         write_blockers += 1;
                     }
