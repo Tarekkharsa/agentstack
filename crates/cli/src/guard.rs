@@ -882,7 +882,7 @@ impl Protocol {
                 // carries a file path. Route each to its event; anything else
                 // is `Other` (allowed). `beforeMCPExecution` has no file/shell
                 // surface to judge, so it lands here as `Other` too.
-                if let Some(command) = str_at(payload, "command") {
+                if let Some(command) = command_line_at(payload, "command") {
                     Some((GuardEvent::Bash { command }, cwd))
                 } else if let Some(path) = path_from_input(payload) {
                     Some((GuardEvent::FileRead { path }, cwd))
@@ -894,13 +894,8 @@ impl Protocol {
                 let call = payload.get("toolCall")?;
                 let args = call.get("args").cloned().unwrap_or(Value::Null);
                 let cwd = args.get("Cwd").and_then(Value::as_str).map(str::to_string);
-                if let Some(cmd) = args.get("CommandLine").and_then(Value::as_str) {
-                    return Some((
-                        GuardEvent::Bash {
-                            command: cmd.to_string(),
-                        },
-                        cwd,
-                    ));
+                if let Some(command) = command_line_at(&args, "CommandLine") {
+                    return Some((GuardEvent::Bash { command }, cwd));
                 }
                 let tool = call.get("name").and_then(Value::as_str).unwrap_or_default();
                 Some((classify_tool(tool, &args), cwd))
@@ -908,13 +903,8 @@ impl Protocol {
             Protocol::Windsurf => {
                 let info = payload.get("tool_info").cloned().unwrap_or(Value::Null);
                 let cwd = info.get("cwd").and_then(Value::as_str).map(str::to_string);
-                if let Some(cmd) = info.get("command_line").and_then(Value::as_str) {
-                    return Some((
-                        GuardEvent::Bash {
-                            command: cmd.to_string(),
-                        },
-                        cwd,
-                    ));
+                if let Some(command) = command_line_at(&info, "command_line") {
+                    return Some((GuardEvent::Bash { command }, cwd));
                 }
                 let action = str_at(payload, "agent_action_name").unwrap_or_default();
                 if let Some(path) = path_from_input(&info) {
@@ -1048,12 +1038,10 @@ fn classify_tool(tool: &str, input: &Value) -> GuardEvent {
             _ => {}
         }
     }
-    if let Some(cmd) = input.get("command").and_then(Value::as_str) {
+    if let Some(command) = command_line_at(input, "command") {
         // Shell-shaped input regardless of the tool's name (Bash,
         // run_shell_command, execute_bash, run_in_terminal …).
-        return GuardEvent::Bash {
-            command: cmd.to_string(),
-        };
+        return GuardEvent::Bash { command };
     }
     let Some(path) = path else {
         return GuardEvent::Other;
@@ -1093,6 +1081,64 @@ fn normalize_key(key: &str) -> String {
         .collect()
 }
 
+/// The shell command a payload carries under `key`, in either shape a harness
+/// can send it: a command LINE (a string) or argv (an array of words). Both
+/// must reach the same analysis — reading only the string form let an
+/// argv-emitting harness skip the whole destructive-command check, because a
+/// list payload matched nothing and fell through to `Other`, i.e. allowed
+/// (G25).
+///
+/// Argv is joined into a line and handed to the SAME [`check_bash`] the string
+/// form uses, rather than analysed as pre-split tokens: one command path to
+/// review, and no vendor schema to be wrong about.
+fn command_line_at(value: &Value, key: &str) -> Option<String> {
+    match value.get(key)? {
+        Value::String(s) => Some(s.clone()),
+        Value::Array(argv) => argv_line(argv),
+        _ => None,
+    }
+}
+
+/// Join argv into a command line. Any string in the array is a word of the
+/// command — that is the whole assumption, and it holds for every harness that
+/// spells argv as a list. A non-string element carries no word we could
+/// reconstruct honestly, so it is dropped rather than guessed; a nested array
+/// is flattened, with a depth bound so a pathological payload cannot recurse
+/// us off the stack. No strings at all yields `None`: the pre-G25 outcome,
+/// unchanged.
+fn argv_line(argv: &[Value]) -> Option<String> {
+    let mut words = Vec::new();
+    collect_argv_words(argv, 0, &mut words);
+    (!words.is_empty()).then(|| words.join(" "))
+}
+
+fn collect_argv_words(argv: &[Value], depth: usize, out: &mut Vec<String>) {
+    if depth > 4 {
+        return;
+    }
+    for item in argv {
+        match item {
+            Value::String(s) => out.push(shell_quote(s)),
+            Value::Array(nested) => collect_argv_words(nested, depth + 1, out),
+            _ => {}
+        }
+    }
+}
+
+/// Quote one argv word so the analysis reads it as exactly one token. An argv
+/// word is LITERAL — a `;`, `|` or `>` inside one is data, not shell structure
+/// — so an unquoted join would invent segments and redirections that the
+/// harness never asked for (a commit message could deny its own commit). The
+/// POSIX single-quote form is used, which [`split_segments`] and [`tokenize`]
+/// both round-trip: they strip quotes without interpreting anything inside.
+fn shell_quote(word: &str) -> String {
+    let bare = |c: char| c.is_ascii_alphanumeric() || "_-./=:@+,%~".contains(c);
+    if !word.is_empty() && word.chars().all(bare) {
+        return word.to_string();
+    }
+    format!("'{}'", word.replace('\'', r#"'"'"'"#))
+}
+
 /// Does this payload SHAPE intend a write, whatever the tool is called?
 ///
 /// The false-positive budget here is tight: calling a READ a write would deny
@@ -1130,6 +1176,18 @@ fn payload_is_write(input: &Value) -> bool {
         "insertline",
     ];
     if EDIT_SHAPE.iter().any(|k| has(k)) {
+        return true;
+    }
+    // 1b. The same signal under a compound name. `replacements` was an exact
+    //     match; a harness that calls the identical list `ReplacementChunks`
+    //     (Antigravity's `replace_file_content`) or `replacement_chunks` is
+    //     supplying replacement content just as plainly, and the guard need
+    //     not know what a chunk contains to know that. Matching the
+    //     `replacement*` FAMILY (and nothing else by prefix) keeps the
+    //     false-positive budget: no read or search argument is named that,
+    //     whereas prefixing a mode word like `edit` would swallow
+    //     `edit_mode: "view"`.
+    if keys.iter().any(|k| k.starts_with("replacement")) {
         return true;
     }
 
@@ -1538,6 +1596,166 @@ mod tests {
         assert_eq!(
             classify_tool("Bash", &json!({"command": "rm -rf /"})),
             bash("rm -rf /")
+        );
+    }
+
+    /// G25: a harness that emits argv as an ARRAY must reach the same
+    /// destructive-command analysis as the string form. Before this, the
+    /// `as_str()` read returned `None`, the call fell through to `Other`, and
+    /// `rm -rf` outside the workspace was allowed outright.
+    #[test]
+    fn argv_array_commands_are_judged_like_the_string_form() {
+        let c = ctx();
+        // Outside the workspace: denied, exactly as the joined string is.
+        let outside = json!({"command": ["rm", "-rf", "/Users/me/Desktop"]});
+        let ev = classify_tool("shell", &outside);
+        assert_eq!(ev, bash("rm -rf /Users/me/Desktop"), "argv must join");
+        assert!(
+            denied(check_event(&c, &ev)),
+            "an argv-array rm outside the workspace must be denied"
+        );
+        // The same array inside the workspace stays allowed.
+        let inside = json!({"command": ["rm", "-rf", "/work/proj/build"]});
+        assert_eq!(
+            check_event(&c, &classify_tool("shell", &inside)),
+            Decision::Allow
+        );
+        // The rest of the destructive-command surface, reached the same way.
+        for argv in [
+            json!(["git", "reset", "--hard"]),
+            json!(["bash", "-lc", "cat", "/work/proj/.env"]), // a deny glob
+            json!(["sudo", "rm", "-rf", "/Users/me"]),
+        ] {
+            let ev = classify_tool("shell", &json!({ "command": argv }));
+            assert!(denied(check_event(&c, &ev)), "{argv} must be denied");
+        }
+        // A string command is unchanged — same event, same decision.
+        assert_eq!(
+            classify_tool("Bash", &json!({"command": "rm -rf /Users/me/Desktop"})),
+            bash("rm -rf /Users/me/Desktop")
+        );
+    }
+
+    /// Argv words are LITERAL: joining must not manufacture shell structure a
+    /// harness never asked for, or an innocent argument would deny its own
+    /// command (the wedge this fix must not introduce).
+    #[test]
+    fn argv_words_are_quoted_so_data_never_becomes_shell_structure() {
+        let c = ctx();
+        for argv in [
+            json!(["git", "commit", "-m", "fix; rm -rf /Users/me"]),
+            json!(["git", "commit", "-m", "wip && rm -rf ~"]),
+            json!(["echo", "> /Users/me/.zshrc"]),
+            json!(["echo", "it's fine"]),
+        ] {
+            let ev = classify_tool("shell", &json!({ "command": argv }));
+            assert_eq!(check_event(&c, &ev), Decision::Allow, "{argv} is data");
+        }
+        // …and the real thing is still caught when it IS the command.
+        let ev = classify_tool("shell", &json!({"command": ["git", "reset", "--hard"]}));
+        assert!(denied(check_event(&c, &ev)));
+    }
+
+    /// A malformed argv must degrade, never panic and never wedge: the words
+    /// we can read are still judged, and an array with nothing readable in it
+    /// behaves exactly as it did before (allowed).
+    #[test]
+    fn malformed_argv_degrades_without_panicking() {
+        let c = ctx();
+        // A nested array is flattened; a non-string element is dropped.
+        let ev = classify_tool(
+            "shell",
+            &json!({"command": ["rm", ["-rf"], 7, {"x": 1}, null, "/Users/me/Desktop"]}),
+        );
+        assert!(denied(check_event(&c, &ev)), "readable words still judged");
+        // Nothing readable at all: the pre-G25 outcome, unchanged.
+        for input in [
+            json!({"command": []}),
+            json!({"command": [1, 2, 3]}),
+            json!({"command": {"argv": ["rm", "-rf", "/"]}}),
+        ] {
+            assert_eq!(
+                classify_tool("mystery_tool", &input),
+                GuardEvent::Other,
+                "{input} must not be invented into a command"
+            );
+        }
+    }
+
+    /// The array shape must be handled in every dialect that reads a command
+    /// straight off the payload, not just the tool-input one.
+    #[test]
+    fn every_dialect_reads_argv_arrays_as_commands() {
+        let want = bash("rm -rf /Users/me/Desktop");
+        let argv = json!(["rm", "-rf", "/Users/me/Desktop"]);
+        let cases = [
+            (
+                Protocol::Claude,
+                json!({"tool_name": "shell", "tool_input": {"command": argv}, "cwd": "/w"}),
+            ),
+            (
+                Protocol::Codex,
+                json!({"turn_id": "t1", "tool_name": "shell",
+                       "tool_input": {"command": argv}, "cwd": "/w"}),
+            ),
+            (
+                Protocol::Copilot,
+                json!({"toolName": "bash", "toolArgs": {"command": argv}, "cwd": "/w"}),
+            ),
+            (Protocol::Cursor, json!({"command": argv, "cwd": "/w"})),
+            (
+                Protocol::Antigravity,
+                json!({"toolCall": {"name": "run_command",
+                       "args": {"CommandLine": argv, "Cwd": "/w"}}}),
+            ),
+            (
+                Protocol::Windsurf,
+                json!({"agent_action_name": "pre_run_command",
+                       "tool_info": {"command_line": argv, "cwd": "/w"}}),
+            ),
+        ];
+        for (protocol, payload) in cases {
+            let (ev, cwd) = protocol.parse_event(&payload).unwrap();
+            assert_eq!(ev, want, "{protocol:?} must read argv as a command");
+            assert_eq!(cwd.as_deref(), Some("/w"), "{protocol:?} cwd");
+        }
+    }
+
+    /// An array of edit chunks is supplied content, so the file it names is a
+    /// write — whatever the harness calls the tool or the field. This is the
+    /// `replace_file_content` hole: a `ReplacementChunks` array matched
+    /// neither the name list nor the body-key rule (which wants a string).
+    #[test]
+    fn replacement_chunk_arrays_are_writes() {
+        let c = ctx();
+        let outside = "/Users/me/.zshrc";
+        for input in [
+            json!({"TargetFile": outside, "ReplacementChunks": [{"TargetContent": "a"}]}),
+            json!({"path": outside, "replacement_chunks": [{"old": "a", "new": "b"}]}),
+        ] {
+            let ev = classify_tool("replace_file_content", &input);
+            assert_eq!(
+                ev,
+                GuardEvent::FileWrite {
+                    path: outside.into()
+                },
+                "{input} must classify as a write"
+            );
+            assert!(
+                denied(check_event(&c, &ev)),
+                "{input} outside the workspace"
+            );
+        }
+        // Inside the workspace it stays allowed — reach added, not denial.
+        assert_eq!(
+            check_event(
+                &c,
+                &classify_tool(
+                    "replace_file_content",
+                    &json!({"TargetFile": "src/main.rs", "ReplacementChunks": [{"a": 1}]})
+                )
+            ),
+            Decision::Allow
         );
     }
 

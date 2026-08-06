@@ -349,6 +349,68 @@ fn several_profiles_write_does_not_materialize() {
     );
 }
 
+/// **G29, the `add`-family half.** `add server --write` pins in the same
+/// command that declares, exactly as `add skill --write` above already does.
+///
+/// The gap this closes was a split inside one verb: `add skill --write` recorded
+/// its lock entries inline, `add server --write` left the `[[server]]` row to
+/// whatever ran next — normally `use --write`. That is not cosmetic, because
+/// `trust` binds to the manifest layers AND the lockfile: a grant taken between
+/// the two lands on a surface `use --write` then changes, and the project
+/// returns to `Changed` asking for the review it just got. Pinning here is what
+/// lets the ladder name `agentstack trust .` honestly.
+///
+/// Small on purpose — one server, one write, one assertion about the lockfile —
+/// because `add skill`'s witnesses above already cover the pinning machinery
+/// itself. What is unwitnessed until now is that the SERVER arm reaches it.
+#[test]
+fn add_server_write_pins_in_the_same_command_that_declares() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    set_home(&home);
+    let proj = seed_project(tmp.path());
+
+    let server = |write: bool| AddArgs {
+        kind: AddKind::Server(agentstack::cli::AddServerArgs {
+            name: "demo".to_string(),
+            transport: agentstack::manifest::ServerType::Stdio,
+            url: None,
+            headers: vec![],
+            command: Some("/bin/echo".to_string()),
+            args: vec![],
+            cwd: None,
+            env: vec![],
+            profile: None,
+            targets: vec![],
+            write,
+        }),
+    };
+
+    // A preview still pins nothing — the flag is what authorizes both writes.
+    add::run(&server(false), Some(&proj)).unwrap();
+    assert!(
+        !proj.join("agentstack.lock").exists(),
+        "a preview must not pin"
+    );
+
+    grant(&proj);
+    add::run(&server(true), Some(&proj)).unwrap();
+
+    assert!(
+        fs::read_to_string(proj.join("agentstack.toml"))
+            .unwrap()
+            .contains("[servers.demo]"),
+        "the declaration landed"
+    );
+    let lock = fs::read_to_string(proj.join("agentstack.lock"))
+        .expect("the pin lands in the SAME command, not in whatever runs next");
+    assert!(
+        lock.contains("demo"),
+        "the lockfile must name the server just declared: {lock}"
+    );
+}
+
 /// `lock --update` on a REV-LESS git skill used to be a silent no-op (cached
 /// clone + no rev → no network call at all). resolve_refresh re-tracks the
 /// remote head; this witnesses both the update and the deletion detection.

@@ -307,8 +307,38 @@ pub(crate) fn trust_blocks_delivery(
 /// doctor said "agentstack toolset create … --server <server>" over zero
 /// servers, and neither command moved the user forward. `search` runs in every
 /// state, including an empty project.
-pub(crate) const EMPTY_PROJECT_NEXT: (&str, &str) =
-    ("agentstack search <query>", "find a server or skill to add");
+/// The SENTENCE is stated as prose, not as `agentstack search <query>`: the
+/// shape was written as a command, `machine_command` filtered the angle
+/// brackets, and the screen then read as if a runnable command were on offer
+/// when none was. The query is the one thing only the person with the problem
+/// knows, and the sentence now says so.
+///
+/// The machine field beside it is NOT null. `next_action` is the `status-v1`
+/// seam with external consumers, so "no command" here is a schema decision, not
+/// a wording one — and one is not needed, because a runnable command does exist:
+/// [`EMPTY_PROJECT_MACHINE`]. See [`machine_command`], which maps this exact
+/// sentence onto it.
+pub(crate) const EMPTY_PROJECT_NEXT: (&str, &str) = (
+    "find a server or skill to add — only you know what this project needs",
+    "search for one with `agentstack search <query>`, then `agentstack add`",
+);
+
+/// The runnable half of [`EMPTY_PROJECT_NEXT`] — what a *driver* runs when the
+/// human half says "only you know what this project needs".
+///
+/// Bare, with no query, on purpose. `agentstack search`'s query is an OPTIONAL
+/// positional, so the command is complete as written; measured against a
+/// project whose manifest is only `version = 1`, it exits 0 with an empty
+/// stderr and prints the search shape across the library, catalog and official
+/// registry. That is the bar this rung has to clear and the only one it can:
+/// the command must not REFUSE in the state it is offered in (the G22/G24
+/// class), because a rung that names a command that errors here is a dead end
+/// no amount of polling escapes.
+///
+/// It is deliberately not `agentstack search <something>`. A query invented on
+/// the user's behalf is a guess about the problem they have, and the sentence
+/// above exists precisely to say that guess cannot be made.
+pub(crate) const EMPTY_PROJECT_MACHINE: &str = "agentstack search";
 
 /// Why the abandoned-render rung is the one next action when it fires.
 ///
@@ -340,12 +370,84 @@ pub(crate) const ABANDONED_RENDER_WHY: &str =
 /// `None` is a complete answer: "there is no command to run" is what a ready
 /// project's machine field should say. Both surfaces keep printing the full
 /// human sentence on screen; only the machine field narrows.
+///
+/// One sentence maps the other way. [`EMPTY_PROJECT_NEXT`] is prose *because*
+/// the query is the user's to supply — but the browse itself is runnable
+/// ([`EMPTY_PROJECT_MACHINE`]), so nulling this field would understate what a
+/// driver can do AND change `status-v1`'s shape in the one state an empty
+/// project always starts in. The mapping lives here rather than in the rung so
+/// that BOTH surfaces get it: `status` and `doctor` each derive the machine
+/// field from their sentence through this function, and a mapping added to one
+/// ladder is a mapping the other ladder disagrees with.
 pub(crate) fn machine_command(cmd: &str) -> Option<&str> {
     match cmd {
         "agentstack status" | "agentstack doctor" => None,
+        c if c == EMPTY_PROJECT_NEXT.0 => Some(EMPTY_PROJECT_MACHINE),
         c if c.starts_with("agentstack ") && !c.contains('<') => Some(c),
         _ => None,
     }
+}
+
+/// The rung that has to come BEFORE the review on a project that has never
+/// been pinned, and the reason it does.
+pub(crate) const LOCK_RUNG_FIX: &str = "agentstack lock --write";
+pub(crate) const LOCK_RUNG_WHY: &str =
+    "pin this content first — the grant binds to the lockfile, so one given now is void the moment `use --write` writes it";
+
+/// Would `agentstack lock --write` actually leave a lockfile behind here?
+///
+/// Deliberately NOT [`declares_capabilities`], which is the "is there anything
+/// to deliver?" reading and includes hooks. `lock` pins skills, servers,
+/// instructions, settings, extensions, workflows and toolset packages — it says
+/// so in its own empty-project sentence — and hooks are in none of those. A
+/// hooks-only manifest gets `lock --write`, exit 0, "pinned nothing new", and no
+/// `agentstack.lock` on disk (measured). Keying [`correct_trust_rung`] off the
+/// broader predicate would therefore route that project to `lock --write`
+/// forever, which is the same poll-and-run dead end the rung exists to remove —
+/// one rung earlier.
+pub(crate) fn lock_pins_something(m: &agentstack_core::manifest::Manifest) -> bool {
+    !m.skills.is_empty()
+        || !m.declared_server_names().is_empty()
+        || !m.instructions.is_empty()
+        || !m.settings.is_empty()
+        || !m.extensions.is_empty()
+        || !m.workflows.is_empty()
+        || m.profiles.values().any(|p| !p.packages.is_empty())
+}
+
+/// Rewrite a rung that names the review over a project nothing has pinned yet.
+/// Applied by BOTH surfaces to EVERY rung that names `trust`, so the two cannot
+/// disagree about the ceremony's order.
+///
+/// `trust` pins the content digest of the manifest layers **and the lockfile**
+/// — its own `--help` says so. So a grant made while no lockfile exists is
+/// bound to a surface the very next command changes: `use --write` mints the
+/// lock, the digest moves, and the project lands back in
+/// [`crate::trust::TrustState::Changed`] with `status` asking for the same
+/// review it asked for a minute ago. Measured: `add server --write` → `trust .`
+/// → `use --write` leaves `locked · trust stale (content changed)`, while
+/// `add server --write` → `lock --write` → `trust .` → `use --write` leaves
+/// `locked · trusted`. The grant survives only when the pins came first.
+///
+/// This is the order the product already states in its own words —
+/// `agentstack yes` prints "`agentstack adopt --write` → `agentstack lock
+/// --write` → `agentstack trust .`", and `lock --write`'s footer ends with
+/// "Next: `agentstack trust .`". Only the ladder disagreed.
+///
+/// It is a rewrite rather than a new arm inside [`next_step`] for the same
+/// reason [`correct_apply_rung`] is: `trust .` is named from four different
+/// places on `status` alone (untrusted, drifted, gate-blocks-delivery, and the
+/// refused-calls override) and from two more in `doctor`. Correcting the
+/// *answer* catches all six; correcting one arm catches one.
+pub(crate) fn correct_trust_rung(
+    step: (String, &'static str),
+    locked: bool,
+    lock_pins: bool,
+) -> (String, &'static str) {
+    if locked || !lock_pins || !step.0.starts_with("agentstack trust") {
+        return step;
+    }
+    (LOCK_RUNG_FIX.to_string(), LOCK_RUNG_WHY)
 }
 
 /// The `why` for a never-pinned surface that NO command repairs.
@@ -597,9 +699,22 @@ pub(crate) fn next_step(
                     // screen saying the journey continues (pilot Run A). The
                     // next rung of the ladder is Switch, and it is stated as
                     // one.
+                    // Prose, and a `null` machine field BY DESIGN — the same
+                    // answer the Verified rung below already gives, for the
+                    // same reason. `toolset create` takes a name, and a
+                    // toolset's name is the one argument nothing on disk can
+                    // supply: it is what the user is going to call this group
+                    // of servers. (`--server` could be filled in when exactly
+                    // one is declared; `<name>` never can, so the command stays
+                    // unrunnable either way.) Written as a command it was a
+                    // shape, `machine_command` dropped it, and the largest
+                    // healthy state on either surface answered a panel with
+                    // nothing. Written as a sentence it says why there is no
+                    // command, and the shape survives in the `why` for the
+                    // human who can substitute.
                     Rung::Group => (
-                        "agentstack toolset create <name> --server <server>",
-                        "group these for a task, then switch between toolsets",
+                        "name a toolset to group these servers — the name is yours to choose",
+                        "`agentstack toolset create <name> --server <server>`, then switch between toolsets",
                     ),
                     Rung::Verified => (
                         "agentstack doctor",
@@ -615,26 +730,64 @@ pub(crate) fn next_step(
 /// locked clean-at-rest project is ready to use; teach the session rhythm at
 /// the moment it matters instead of sending it back through another doctor
 /// pass. Active sessions point at their matching close operation.
+///
+/// Takes the declared toolset NAMES, not a pre-picked one, because the answer
+/// genuinely differs three ways and the caller cannot collapse them without
+/// lying. `session start` takes `<TOOLSET>` as a **required** positional (it
+/// exits 2 without one, measured), so:
+///
+/// - **exactly one declared** — there is nothing to choose. Name it, and the
+///   machine field carries a command a driver can run verbatim. This is the
+///   only one of the three where a concrete command exists, and it already
+///   worked; it is kept working here.
+/// - **two or more** — which one is the user's call, and picking for them would
+///   start the wrong toolset. The names are listed so the choice is one glance,
+///   and the machine field is `null` BY DESIGN.
+/// - **none declared** — `session start` cannot run at all: there is no toolset
+///   for it to load. Naming it was worse than a placeholder; it was a command
+///   this state refuses. The real step is to declare one, which needs a name
+///   only the human can choose, so again `null` by design.
+///
+/// The old signature took a single `profile: &str` that the caller had already
+/// flattened to the literal `"<toolset>"` for both the 0 and the 2+ case, which
+/// is exactly how one honest answer and one impossible one came to be printed
+/// with the same words.
 pub(crate) fn clean_at_rest_next_step(
     mode: Mode,
     trust: crate::trust::TrustState,
     locked: bool,
     session_active: bool,
-    profile: &str,
+    toolsets: &[String],
 ) -> Option<(String, &'static str)> {
     if mode != Mode::CleanAtRest || trust != crate::trust::TrustState::Trusted || !locked {
         return None;
     }
     if session_active {
-        Some((
+        return Some((
             "agentstack x session end".to_string(),
             "finish this session and restore the clean-at-rest state",
-        ))
-    } else {
-        Some((
-            format!("agentstack x session start {profile}"),
+        ));
+    }
+    match toolsets {
+        [one] => Some((
+            format!("agentstack x session start {}", crate::text::sanitize_line(one)),
             "materialize the toolset for this session",
-        ))
+        )),
+        [] => Some((
+            "declare a toolset before a session can load one — the name is yours to choose"
+                .to_string(),
+            "`agentstack toolset create <name> --server <server>`, then `agentstack x session start <name>`",
+        )),
+        many => Some((
+            format!(
+                "pick the toolset for this session: {}",
+                many.iter()
+                    .map(|n| crate::text::sanitize_line(n))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            "`agentstack x session start <toolset>` materializes it; `agentstack x session end` puts every file back",
+        )),
     }
 }
 
@@ -1900,21 +2053,23 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
     // `correct_apply_rung` — `doctor` applies the same correction to the same
     // rung, so the two surfaces still answer this state with one command.
     let fallback = correct_apply_rung(fallback, apply_renders_something(m));
-    let profile = if m.profiles.len() == 1 {
-        m.profiles
-            .keys()
-            .next()
-            .map(String::as_str)
-            .unwrap_or("<toolset>")
-    } else {
-        "<toolset>"
-    };
+    // The declared toolset names, whole. `clean_at_rest_next_step` needs to
+    // tell "one, so name it" from "several, so let the user pick" from "none,
+    // so `session start` cannot run"; flattening them here is what made the
+    // last two print the same impossible placeholder.
+    let toolset_names: Vec<String> = m.profiles.keys().cloned().collect();
     // A waiting drop also outranks the clean-at-rest session rhythm: starting
     // a session materializes only what is declared, so it would deliver
     // everything EXCEPT the file the user just dropped.
-    let next = clean_at_rest_next_step(mode, trust, locked, active_session.is_some(), profile)
-        .filter(|_| !undeclared_drops)
-        .unwrap_or_else(|| (fallback.0.to_string(), fallback.1));
+    let next = clean_at_rest_next_step(
+        mode,
+        trust,
+        locked,
+        active_session.is_some(),
+        &toolset_names,
+    )
+    .filter(|_| !undeclared_drops)
+    .unwrap_or_else(|| (fallback.0.to_string(), fallback.1));
     // ...and a refusal outranks the drop. `next_step`'s ladder puts a waiting
     // drop above an untrusted (not drifted) project, which is right when
     // nothing has tried to use the project yet. Once something HAS — and been
@@ -2054,6 +2209,15 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
     } else {
         unpinned_next_action(&surface_unpinned).unwrap_or(next)
     };
+
+    // LAST, and deliberately so: every rung above may name `agentstack trust
+    // .`, and on a project that has never been pinned all of them are one step
+    // early — the grant binds to a lockfile that does not exist yet, so `use
+    // --write` mints one and voids it. See `correct_trust_rung` for the
+    // measurement. Applied to the ANSWER rather than to each arm, and applied
+    // identically by `doctor`, so the two surfaces cannot disagree about the
+    // order of the ceremony.
+    let next = correct_trust_rung(next, locked, lock_pins_something(m));
 
     Ok(Orientation {
         catalog_size: ctx.registry.ids().count(),
@@ -2449,20 +2613,153 @@ mod tests {
     fn clean_at_rest_next_step_teaches_the_session_rhythm() {
         use crate::trust::TrustState;
 
+        let one = [String::from("dev")];
+
         let start =
-            clean_at_rest_next_step(Mode::CleanAtRest, TrustState::Trusted, true, false, "dev")
+            clean_at_rest_next_step(Mode::CleanAtRest, TrustState::Trusted, true, false, &one)
                 .expect("trusted clean-at-rest starts a session");
         assert_eq!(start.0, "agentstack x session start dev");
 
-        let end =
-            clean_at_rest_next_step(Mode::CleanAtRest, TrustState::Trusted, true, true, "dev")
-                .expect("active clean-at-rest session points at its close");
+        let end = clean_at_rest_next_step(Mode::CleanAtRest, TrustState::Trusted, true, true, &one)
+            .expect("active clean-at-rest session points at its close");
         assert_eq!(end.0, "agentstack x session end");
 
         assert!(
-            clean_at_rest_next_step(Mode::Static, TrustState::Trusted, true, false, "dev")
-                .is_none()
+            clean_at_rest_next_step(Mode::Static, TrustState::Trusted, true, false, &one).is_none()
         );
+    }
+
+    /// **G28**, the clean-at-rest rung — the one of the three where a concrete
+    /// command sometimes DOES exist, so "null by design" has to be earned per
+    /// state rather than declared once.
+    ///
+    /// Before this, 0 and 2+ toolsets both printed the literal
+    /// `agentstack x session start <toolset>`, and `machine_command` dropped it
+    /// for the brackets, so a panel got `null` with nothing saying why. The
+    /// zero case was the worse of the two: `session start` takes `<TOOLSET>` as
+    /// a REQUIRED positional (measured — it exits 2 without one), so the
+    /// sentence named a command that state refuses outright.
+    ///
+    /// The sentence and the machine field are asserted together, per state.
+    #[test]
+    fn the_session_rung_names_a_toolset_only_when_the_manifest_settles_which() {
+        use crate::trust::TrustState;
+
+        let step = |names: &[&str]| {
+            let owned: Vec<String> = names.iter().map(|s| (*s).to_string()).collect();
+            clean_at_rest_next_step(Mode::CleanAtRest, TrustState::Trusted, true, false, &owned)
+                .expect("trusted, locked, clean-at-rest, no session")
+        };
+
+        // Exactly one: nothing to choose, so a driver gets a real command.
+        let (sentence, _) = step(&["dev"]);
+        assert_eq!(sentence, "agentstack x session start dev");
+        assert!(
+            machine_command(&sentence).is_some(),
+            "the one state with a concrete answer must reach the machine field"
+        );
+
+        // Two or more: the pick is the user's, and the options are named so it
+        // is one glance rather than a trip to the manifest.
+        let (sentence, why) = step(&["dev", "prod"]);
+        assert!(
+            sentence.contains("dev") && sentence.contains("prod"),
+            "name the real choices: {sentence}"
+        );
+        assert!(
+            machine_command(&sentence).is_none(),
+            "picking for the user would start the wrong toolset: {sentence}"
+        );
+        assert!(
+            why.contains("agentstack x session start <toolset>"),
+            "the shape stays where a human reads it: {why}"
+        );
+
+        // None: `session start` cannot run at all here.
+        let (sentence, _) = step(&[]);
+        assert!(
+            !sentence.starts_with("agentstack x session start"),
+            "no toolset exists for it to load — naming it is a command that \
+             refuses: {sentence}"
+        );
+        assert!(
+            machine_command(&sentence).is_none(),
+            "null by design: {sentence}"
+        );
+    }
+
+    /// **G29**, as a property of the rewrite itself: every rung that names the
+    /// review becomes the pin while the project is unlocked, and nothing else
+    /// is touched.
+    #[test]
+    fn the_lock_rung_replaces_only_the_review_and_only_while_unlocked() {
+        let review = || ("agentstack trust .".to_string(), "review it");
+
+        // Unlocked, with something to pin: the review is one rung too early.
+        assert_eq!(
+            correct_trust_rung(review(), false, true).0,
+            LOCK_RUNG_FIX,
+            "a grant made before the pins exist is void once `use --write` writes them"
+        );
+        // Locked: the review is exactly right, and must survive untouched.
+        assert_eq!(
+            correct_trust_rung(review(), true, true).0,
+            "agentstack trust ."
+        );
+        // Unlocked, but locking would write nothing (a hooks-only manifest —
+        // measured: exit 0, no `agentstack.lock`). Naming the pin here is a
+        // rung that can never be satisfied.
+        assert_eq!(
+            correct_trust_rung(review(), false, false).0,
+            "agentstack trust .",
+            "the rung must terminate, or it is the dead end it was written to remove"
+        );
+        // Every other rung passes through. `correct_trust_rung` is applied to
+        // the ANSWER on both surfaces, so a greedy rewrite here would silently
+        // eat the drift, bridge and apply rungs.
+        for other in [
+            "agentstack lock --write",
+            "agentstack apply --write",
+            "agentstack yes",
+            "agentstack x gateway connect --all --write",
+            "find a server or skill to add — only you know what this project needs",
+        ] {
+            assert_eq!(
+                correct_trust_rung((other.to_string(), "why"), false, true).0,
+                other,
+                "only the review rung moves"
+            );
+        }
+    }
+
+    /// The predicate behind that rung, stated over manifests: it must be true
+    /// exactly where `lock --write` leaves a lockfile behind. Hooks are the
+    /// trap — they make `declares_capabilities` true and pin nothing.
+    #[test]
+    fn lock_pins_something_matches_what_lock_actually_writes() {
+        let parse = |s: &str| toml::from_str::<agentstack_core::manifest::Manifest>(s).unwrap();
+
+        assert!(!lock_pins_something(&parse("version = 1\n")));
+        assert!(!lock_pins_something(&parse(
+            "version = 1\n[hooks.pre]\nevent = \"PreToolUse\"\ncommand = \"/bin/echo\"\n"
+        )));
+        // …and `declares_capabilities` disagrees on exactly that manifest,
+        // which is why the two readings cannot be collapsed into one.
+        assert!(declares_capabilities(&parse(
+            "version = 1\n[hooks.pre]\nevent = \"PreToolUse\"\ncommand = \"/bin/echo\"\n"
+        )));
+
+        for pins in [
+            "version = 1\n[servers.demo]\ntype = \"stdio\"\ncommand = \"/bin/echo\"\n",
+            "version = 1\n[skills.s]\npath = \"./s\"\n",
+            "version = 1\n[instructions.hr]\npath = \"./hr.md\"\n",
+            "version = 1\n[settings.claude-code]\npermissions = { allow = [] }\n",
+        ] {
+            assert!(
+                lock_pins_something(&parse(pins)),
+                "lock writes a lockfile for this manifest: {pins}"
+            );
+        }
     }
 
     // P16 witness (refined): trust is the headline next-step only when trusting
@@ -2558,8 +2855,12 @@ mod tests {
             .0,
             "agentstack trust ."
         );
-        // Declaring NOTHING → `search`: there is nothing to render, group, or
-        // verify, and nothing for the gate to hold either.
+        // Declaring NOTHING → the Empty rung: there is nothing to render,
+        // group, or verify, and nothing for the gate to hold either. The
+        // expectation used to be the literal `agentstack search <query>`; that
+        // was a shape, and a shape read as a runnable command on screen while
+        // `machine_command` dropped it. The rung is now prose plus a runnable
+        // machine command (see `EMPTY_PROJECT_MACHINE`).
         assert_eq!(
             next_step(
                 TrustState::Untrusted,
@@ -2572,7 +2873,7 @@ mod tests {
                 true
             )
             .0,
-            "agentstack search <query>"
+            EMPTY_PROJECT_NEXT.0
         );
 
         // Trust-STALE is different, and routes to the review whatever the
@@ -2608,10 +2909,14 @@ mod tests {
             "agentstack trust ."
         );
 
-        // The wiring is done and nothing is grouped yet → the next rung is
-        // Switch, named as a runnable command. `doctor` here was a dead end: a
-        // user who ran it clean was offered it again (pilot Run A).
-        let (cmd, _) = next_step(
+        // The wiring is done and nothing is grouped yet → the Group rung.
+        // `doctor` here was a dead end: a user who ran it clean was offered it
+        // again (pilot Run A). The expectation used to be the literal
+        // `agentstack toolset create <name> --server <server>`; a toolset's name
+        // is the one argument nothing on disk can supply, so written as a
+        // command it was a shape `machine_command` then dropped (G28). The shape
+        // survives in the `why`, asserted below.
+        let (cmd, why) = next_step(
             TrustState::Trusted,
             true,
             true,
@@ -2621,7 +2926,14 @@ mod tests {
             false,
             true,
         );
-        assert_eq!(cmd, "agentstack toolset create <name> --server <server>");
+        assert_eq!(
+            cmd,
+            "name a toolset to group these servers — the name is yours to choose"
+        );
+        assert!(
+            why.contains("agentstack toolset create <name> --server <server>"),
+            "the fillable shape stays where a human reads it: {why}"
+        );
 
         // Servers configured here that the manifest doesn't cover outrank both
         // — rendering a manifest that omits half the setup is not the step
@@ -2670,7 +2982,7 @@ mod tests {
                     true
                 )
                 .0,
-                "agentstack search <query>"
+                EMPTY_PROJECT_NEXT.0
             );
             assert_eq!(
                 next_step(
@@ -2684,9 +2996,39 @@ mod tests {
                     true
                 )
                 .0,
-                "agentstack search <query>"
+                EMPTY_PROJECT_NEXT.0
             );
         }
+    }
+
+    /// The machine half of the Empty rung, pinned on its own: the sentence is
+    /// prose, and the field a driver reads is still a command.
+    ///
+    /// Worth its own witness because the two halves are computed in different
+    /// places — the sentence in [`next_step`], the command in
+    /// [`machine_command`] — so nothing but this test stops the mapping being
+    /// dropped and `next_action` silently going `null`. That field is
+    /// `status-v1` with external consumers; a `null` there is a schema change,
+    /// not a wording change.
+    #[test]
+    fn the_empty_rung_is_prose_on_screen_and_still_a_command_for_a_driver() {
+        assert!(
+            !EMPTY_PROJECT_NEXT.0.contains('<'),
+            "the sentence must not look like a command it is not: {}",
+            EMPTY_PROJECT_NEXT.0
+        );
+        assert_eq!(
+            machine_command(EMPTY_PROJECT_NEXT.0),
+            Some(EMPTY_PROJECT_MACHINE),
+            "the one next action must stay runnable for a driver"
+        );
+        // …and runnable means runnable: no placeholder, and nothing that
+        // `machine_command`'s own filter would reject if it were fed back in.
+        assert!(!EMPTY_PROJECT_MACHINE.contains('<'));
+        assert_eq!(
+            machine_command(EMPTY_PROJECT_MACHINE),
+            Some(EMPTY_PROJECT_MACHINE)
+        );
     }
 
     /// F9 witness (FINDINGS.md, rc.1 review): a dropped-but-undeclared file

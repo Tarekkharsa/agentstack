@@ -349,7 +349,7 @@ def convert(md, src_rel, out_rel, warnings):
 
 
 # ----------------------------------------------------------------- template --
-# The shell matches the design-system pages (index/docs/examples/cookbook):
+# The shell matches the design-system pages (index/docs/examples):
 # theme/organic.css supplies fonts and component tokens, theme/theme.js owns
 # the light/dark toggle (data-theme on <html>, dark default), and the token
 # blocks below pin the slate palette in both themes. Keep these overrides in
@@ -535,10 +535,8 @@ def build_page(src_rel, out_rel, key):
     <a class="wordmark" href="{base}./"><img class="mark" src="{base}theme/logo-mark.svg" alt=""><span>agent<span class="wm2">Stack</span></span></a>
     <nav class="top" aria-label="Project links">
       <a href="{base}docs.html">Documentation</a>
-      <a href="{base}cookbook.html">Cookbook</a>
       <a href="{base}examples.html">Demos</a>
       <a href="{base}tutorial/">Tutorial</a>
-      <a href="{base}panel/">Panel</a>
       <a href="https://github.com/Tarekkharsa/agentstack">GitHub</a>
       <button class="themebtn" data-theme-toggle onclick="toggleTheme()">Light mode</button>
       <a class="ghost" href="{base}start.html">Get&nbsp;started</a>

@@ -515,9 +515,24 @@ fn next_action(proj: &std::path::Path) -> (Option<String>, String, String) {
 fn the_gate_rung_names_the_review_and_leaves_every_other_rung_alone() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
-    // ── static lane, untrusted, content declared: the gate is the answer.
+    // ── static lane, untrusted, content declared, and NOT YET LOCKED: the gate
+    // is what blocks delivery, and the pin is what has to happen before the
+    // grant that lifts it.
+    //
+    // This row expected `agentstack trust .` until G29. That expectation was
+    // wrong, not merely superseded: a `trust` grant binds to the manifest
+    // layers AND the lockfile, and this fixture has no `agentstack.lock`. A
+    // grant bought here is void the moment `use --write` mints the lock the
+    // grant was bound to — measured as `locked · trust stale (content
+    // changed)`, i.e. the ladder sent the user to review, then asked them to
+    // review again. `lock --write` first is the order the product already
+    // states in `agentstack yes` and in `lock --write`'s own footer.
     let tmp = assert_fs::TempDir::new().unwrap();
     let proj = project(tmp.path(), ONE_SERVER);
+    assert!(
+        !proj.join(".agentstack/agentstack.lock").exists(),
+        "fixture: unlocked is what makes the review one rung too early"
+    );
     let body = agentstack::commands::overview::status_body(Some(&proj)).unwrap();
     assert_eq!(body["project"]["mode"], "static");
     assert_eq!(
@@ -528,11 +543,12 @@ fn the_gate_rung_names_the_review_and_leaves_every_other_rung_alone() {
     let (cmd, sentence, why) = next_action(&proj);
     assert_eq!(
         cmd.as_deref(),
-        Some("agentstack trust ."),
-        "a driver gets a command it can run verbatim, not null"
+        Some("agentstack lock --write"),
+        "a driver gets a command it can run verbatim, not null — and the one \
+         that actually terminates: `trust .` here buys a grant `use --write` voids"
     );
     assert_eq!(
-        sentence, "agentstack trust .",
+        sentence, "agentstack lock --write",
         "and the screen says the same thing: {why}"
     );
     assert!(
@@ -561,8 +577,29 @@ fn the_gate_rung_names_the_review_and_leaves_every_other_rung_alone() {
         format!("{ONE_SERVER}[servers.second]\ntype = \"stdio\"\ncommand = \"/bin/cat\"\n"),
     )
     .unwrap();
+    // …but this project is STILL unlocked, and the pin comes before the review
+    // whichever arm names it. G29's rewrite is applied to the ANSWER, not to one
+    // arm, exactly so the six places that say `trust .` cannot disagree about
+    // the order; drift is one of the six. The old expectation of `trust .` here
+    // was wrong for the same reason as the row above — a re-review bought while
+    // no lockfile exists is void once `use --write` mints one.
+    let (cmd, sentence, _) = next_action(&proj);
+    assert_eq!(cmd.as_deref(), Some("agentstack lock --write"));
+    assert_eq!(sentence, "agentstack lock --write");
+
+    // Pin it, and drift's OWN arm becomes observable — with its own re-review
+    // wording, which is what this row has always been here to protect. This is
+    // also the locked half of the rewrite: once the pins exist, the review is
+    // exactly right and `correct_trust_rung` must leave it alone.
+    agentstack::lock::Lock::default()
+        .save(&proj.join(".agentstack"))
+        .unwrap();
     let (cmd, sentence, why) = next_action(&proj);
-    assert_eq!(cmd.as_deref(), Some("agentstack trust ."));
+    assert_eq!(
+        cmd.as_deref(),
+        Some("agentstack trust ."),
+        "locked: the review is the answer again, untouched"
+    );
     assert_eq!(sentence, "agentstack trust .");
     assert!(
         why.contains("changed"),
@@ -600,8 +637,22 @@ fn the_gate_rung_names_the_review_and_leaves_every_other_rung_alone() {
         false
     );
     let (cmd, sentence, _) = next_action(&empty);
-    assert_eq!(cmd, None, "a shape is not a command a driver can run");
-    assert_eq!(sentence, "agentstack search <query>");
+    // The sentence is prose. It used to read `agentstack search <query>`, which
+    // looks runnable and is not (G28), so the screen promised a command the
+    // reader could not type.
+    assert_eq!(
+        sentence,
+        "find a server or skill to add — only you know what this project needs"
+    );
+    // The machine field beside it is NOT null, and must not become one: this is
+    // `status-v1`, and an empty project is the state every new project starts
+    // in. `agentstack search` takes its query as an optional positional, so the
+    // bare command is complete, and it neither refuses nor errors here.
+    assert_eq!(
+        cmd.as_deref(),
+        Some("agentstack search"),
+        "the shape is not runnable; the browse under it is"
+    );
 
     std::env::remove_var("HOME");
     std::env::remove_var("AGENTSTACK_HOME");
@@ -671,14 +722,191 @@ fn a_rendered_untrusted_project_names_the_review_its_refused_apply_needs() {
         .to_string();
     assert!(err.contains("blocked"), "a blocked write: {err}");
 
-    // ...and the one next action names the command that lifts it.
+    // ...and the one next action names the command that STARTS lifting it.
+    //
+    // Rendering does not pin: `apply --write` writes the CLIs' own config, it
+    // does not write `agentstack.lock`, so this project is rendered and still
+    // unlocked. That is why the answer here is the pin and not the review.
+    assert!(
+        !proj.join(".agentstack/agentstack.lock").exists(),
+        "a render is not a pin — that is the whole reason this row moved"
+    );
     let (cmd, sentence, _) = next_action(&proj);
     assert_eq!(
         cmd.as_deref(),
-        Some("agentstack trust ."),
-        "this field was `null` before G27, in the one state with a one-command answer"
+        Some("agentstack lock --write"),
+        // This field was `null` before G27 and `agentstack trust .` between G27
+        // and G29. Both were wrong for the same reason in the end: the grant
+        // binds to the lockfile, and a grant made before the pins exist is void
+        // the moment `use --write` writes them. The G27 fix — never answer
+        // `null` in a state that has a one-command answer — still holds; only
+        // WHICH command was wrong.
+        "the gate is real, but the pin comes first — a grant made now is void \
+         once `use --write` mints the lock it was bound to"
     );
-    assert_eq!(sentence, "agentstack trust .");
+    assert_eq!(sentence, "agentstack lock --write");
+
+    std::env::remove_var("HOME");
+    std::env::remove_var("AGENTSTACK_HOME");
+}
+
+// ------------------------------------------------ symptom 5 (G29): the order
+
+/// **G29.** The ladder must never send anyone to `trust` while the project is
+/// unlocked — on either surface.
+///
+/// The trap, measured before the fix: `add server --write` left the manifest
+/// declaring a server and no `agentstack.lock`, `status` printed
+/// `not locked (never activated)` and `Next: agentstack trust .` on consecutive
+/// lines, and obeying it bought a grant that the next `use --write` destroyed
+/// by minting the lockfile the grant was bound to. `agentstack trust --help`
+/// states the mechanism itself: the grant pins "the manifest layers AND the
+/// lockfile". The product already knew the order — `agentstack yes` prints
+/// `adopt --write` → `lock --write` → `trust .`, and `lock --write`'s own
+/// footer ends with "Next: `agentstack trust .`". Only the ladder disagreed.
+///
+/// The sentence and the machine command are pinned TOGETHER, and both surfaces
+/// are read in one test, because a fix that moved one of the four could leave
+/// the other three trapping users exactly as before.
+#[test]
+fn no_surface_names_the_review_before_anything_is_pinned() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let proj = project(tmp.path(), ONE_SERVER);
+
+    // Unlocked, with content a lock would pin: the state the trap lives in.
+    assert!(
+        !proj.join(".agentstack/agentstack.lock").exists(),
+        "fixture: this state is defined by having no lockfile"
+    );
+
+    let (cmd, sentence, why) = next_action(&proj);
+    assert_eq!(
+        cmd.as_deref(),
+        Some("agentstack lock --write"),
+        "an unlocked project's one next action is the pin, not the review"
+    );
+    assert_eq!(
+        sentence, "agentstack lock --write",
+        "sentence and command move together or they drift apart"
+    );
+    assert!(
+        !sentence.starts_with("agentstack trust"),
+        "the review is one rung too early here: {sentence}"
+    );
+    assert!(
+        why.contains("trust") || why.contains("grant"),
+        "the reason must say what the pin is FOR, or the user reads it as busywork: {why}"
+    );
+
+    // `doctor` answers the same state with the same command. Two surfaces, one
+    // ceremony — the disagreement class this whole file exists to catch.
+    let report = doctor::collect(Some(&proj)).unwrap();
+    assert_eq!(
+        report["next_action"].as_str(),
+        Some("agentstack lock --write"),
+        "doctor must not send the user to the review either: {report}"
+    );
+
+    std::env::remove_var("HOME");
+    std::env::remove_var("AGENTSTACK_HOME");
+}
+
+/// The other half of the same rung: it must TERMINATE.
+///
+/// A hooks-only manifest declares something, so the broad "does this project
+/// declare capabilities?" reading says yes — but `lock` pins skills, servers,
+/// instructions, settings, extensions, workflows and packages, and hooks are in
+/// none of them. Measured: `lock --write` over this manifest exits 0, prints
+/// "pinned nothing new", and writes no `agentstack.lock` at all. Had the rung
+/// keyed off the broad predicate it would name `lock --write` here forever —
+/// the same poll-and-run dead end it was written to remove, one rung earlier.
+#[test]
+fn the_lock_rung_never_fires_where_locking_would_change_nothing() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let proj = project(
+        tmp.path(),
+        "version = 1\n\
+         [targets]\ndefault = [\"claude-code\"]\n\
+         [hooks.pre]\nevent = \"PreToolUse\"\ncommand = \"/bin/echo\"\n",
+    );
+
+    let (_, sentence, _) = next_action(&proj);
+    assert_ne!(
+        sentence, "agentstack lock --write",
+        "nothing here pins, so the lock rung would never be satisfied: {sentence}"
+    );
+    let report = doctor::collect(Some(&proj)).unwrap();
+    assert_ne!(
+        report["next_action"].as_str(),
+        Some("agentstack lock --write"),
+        "doctor must not loop on the lock rung either: {report}"
+    );
+
+    std::env::remove_var("HOME");
+    std::env::remove_var("AGENTSTACK_HOME");
+}
+
+// ----------------------------------------- symptom 6 (G28): honest null-ness
+
+/// **G28.** Three rungs were written as command templates, so `machine_command`
+/// dropped them for the angle brackets and `next_action.command` was `null`
+/// while the sentence read like something you could type. The bracket rule is
+/// right and stays; what changes is that a rung with no runnable command now
+/// SAYS it needs an argument only the human can choose, so the empty machine
+/// field is a statement rather than an accident.
+///
+/// Every state pins the sentence and the machine command together — that pair
+/// is the contract, and a witness that reads one of them cannot see this class
+/// of bug at all.
+#[test]
+fn a_rung_with_no_runnable_command_says_why_the_machine_field_is_empty() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+    // ── The empty project. The SHAPE `agentstack search <query>` is what has no
+    //    runnable form — the query is the one thing only the person with the
+    //    problem knows — so the shape leaves the sentence. The machine field is
+    //    NOT null: `agentstack search` is complete without a query (optional
+    //    positional, exit 0 on a `version = 1` project), and this field is
+    //    `status-v1`, so emptying it is a schema decision rather than a wording
+    //    one. This row therefore pins a runnable command beside a prose
+    //    sentence; the rows below are the ones with a genuinely empty field.
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let empty = project(tmp.path(), "version = 1\n");
+    let (cmd, sentence, why) = next_action(&empty);
+    assert_eq!(
+        cmd.as_deref(),
+        Some("agentstack search"),
+        "the shape is unrunnable; the browse under it is not"
+    );
+    assert_eq!(
+        sentence,
+        "find a server or skill to add — only you know what this project needs"
+    );
+    assert!(
+        !sentence.contains('<'),
+        "the SENTENCE must stop looking like a command: {sentence}"
+    );
+    assert!(
+        why.contains("agentstack search <query>"),
+        "the fillable shape survives where a human reads it: {why}"
+    );
+    // The residual G28 named: `doctor` answered this identical state with
+    // `agentstack trust .` while `status` answered with the search shape. A
+    // review of a manifest that declares nothing grants nothing, so `status`
+    // had the better answer and `doctor` now gives it too.
+    let report = doctor::collect(Some(&empty)).unwrap();
+    assert_eq!(
+        report["next_action"].as_str(),
+        cmd.as_deref(),
+        "the two surfaces must agree on the empty project's machine field: {report}"
+    );
+    assert_eq!(
+        report["next_step"].as_str(),
+        Some("find a server or skill to add — only you know what this project needs"),
+        "…and on its sentence: {report}"
+    );
 
     std::env::remove_var("HOME");
     std::env::remove_var("AGENTSTACK_HOME");

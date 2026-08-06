@@ -379,6 +379,44 @@ Field notes:
 - `full_ceremony` says a kind is executable (hooks, extensions), never that a
   ceremony has happened.
 
+### `edit-profile --preview` (`profiles-edit-batch-v1`)
+
+The one membership verb that can also take things *out* of a toolset, and the
+only one whose cost does not scale with the number of changes: every add and
+every removal lands as one manifest write under one `consent_digest`, followed
+by a single re-lock and re-render.
+
+```json
+{
+  "profile": "backend",
+  "add_skills": ["rust-testing"],
+  "add_servers": [],
+  "remove_skills": [],
+  "remove_servers": ["github"],
+  "skills": ["rust-testing"],
+  "servers": [],
+  "empties_toolset": false,
+  "action": "edit-profile",
+  "consent_digest": "sha256:b428c87f…2111d8",
+  "note": "Review, then apply with --yes --consented sha256:b428c87f…2111d8…",
+  "schema_version": 1,
+  "features": ["…"]
+}
+```
+
+Field notes:
+
+- `add_*` / `remove_*` echo the requested deltas; **`skills` and `servers` are
+  the RESULT** — the membership the toolset would have after the batch. A panel
+  draws an end state, so the digest binds the picture the reader was looking at,
+  not the list of operations that implies it.
+- `empties_toolset` marks the case where the batch would leave nothing behind.
+  Emptying a toolset is allowed but is not a no-op: an empty toolset resolves to
+  nothing, so activating it serves nothing. Say so rather than presenting it as
+  an ordinary edit.
+- Apply with `--yes --consented <consent_digest>`; the verb refuses if the
+  manifest moved underneath the preview.
+
 ## JSON that is not part of this contract
 
 Some commands emit JSON that is evidence or analysis rather than control-plane
