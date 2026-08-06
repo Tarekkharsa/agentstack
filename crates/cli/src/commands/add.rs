@@ -1414,8 +1414,10 @@ fn preview_and_commit(
     }
     if !write {
         // A preview wrote nothing, so this reads the state the user is already
-        // in — and on a trusted project that is `Trusted`, which is why the
-        // preview's wording is untouched by G22.
+        // in — and on a trusted project that is `Trusted`, which is why every
+        // preview lane keeps its old wording there. Where it is NOT trusted,
+        // this is the same state the `--write` below would be judged against
+        // (G24), so the footer can say what that write would refuse.
         print_activation_footer(&act, profile, super::lock::review_pending(&ctx.dir));
         println!(
             "\nDry run. Re-run with {} to update the manifest.",
@@ -1591,6 +1593,17 @@ fn print_activation_footer(act: &ActivationCtx, profile: Option<&str>, review_pe
 /// lane was already naming `trust .`. And on the preview path nothing has been
 /// written, so a trusted project still reads `Trusted` and gets today's wording
 /// byte for byte.
+///
+/// G24 closes the one lane G22 left promising. The unambiguous static arm is
+/// reached ONLY from the preview — the write path reports its real outcome
+/// line by line instead of calling this — so `review_pending` there is the
+/// state as it stands, with nothing written to distort it. That is also the
+/// state `--write` will be judged against, because the skills gate reads the
+/// trust captured at command start ([`crate::render::PriorTrust`]): an
+/// unreviewed or drifted project gets `✗ refusing to materialize` and a
+/// nonzero exit, so `will materialize` was a promise the very next command
+/// broke. It still says how much would be delivered — a preview that goes
+/// silent is worse — but it names the review that has to come first.
 fn activation_footer_line(
     mode: super::overview::Mode,
     ambiguous: bool,
@@ -1601,6 +1614,12 @@ fn activation_footer_line(
     use super::overview::Mode;
     let profile_word = profile.map(|p| format!(" {p}")).unwrap_or_default();
     match mode {
+        Mode::Static if !ambiguous && review_pending => format!(
+            "{} {} would take the skill files — review with `agentstack trust .` first, \
+             or the write refuses to materialize",
+            "·".dimmed(),
+            super::count(target_count, "target")
+        ),
         Mode::Static if !ambiguous => format!(
             "{} will materialize into {}",
             "→".cyan(),

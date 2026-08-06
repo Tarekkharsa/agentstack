@@ -658,6 +658,12 @@ fn scan_gate_blocks_hostile_content_before_any_offer() {
 /// The bullet markers are coloured unconditionally, so assertions below match
 /// the sentence and not the `·` in front of it.
 fn cli(proj: &Path, args: &[&str]) -> String {
+    cli_exit(proj, args).0
+}
+
+/// The same run, with the status the shell would see. G24 is a contradiction
+/// between a printed promise and an exit code, so one witness needs both.
+fn cli_exit(proj: &Path, args: &[&str]) -> (String, Option<i32>) {
     let out = std::process::Command::new(env!("CARGO_BIN_EXE_agentstack"))
         .args(args)
         .current_dir(proj)
@@ -668,11 +674,35 @@ fn cli(proj: &Path, args: &[&str]) -> String {
         .stdin(std::process::Stdio::null())
         .output()
         .expect("spawn agentstack");
-    format!(
-        "{}{}",
-        String::from_utf8_lossy(&out.stdout),
-        String::from_utf8_lossy(&out.stderr)
+    (
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        ),
+        out.status.code(),
     )
+}
+
+/// A static, unambiguous project — nothing rendered, no lockfile, no toolsets —
+/// plus a loose skill directory beside it to add. The lane whose preview used to
+/// print `→ will materialize into N targets` whatever the trust state.
+fn seed_static_project(tmp: &Path) -> (PathBuf, PathBuf) {
+    let proj = tmp.join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n",
+    )
+    .unwrap();
+    let extra = tmp.join("extra/gamma");
+    fs::create_dir_all(&extra).unwrap();
+    fs::write(
+        extra.join("SKILL.md"),
+        "---\ndescription: gamma\n---\n# gamma\n",
+    )
+    .unwrap();
+    (proj, extra)
 }
 
 /// G22: the clean-at-rest footer must branch on the trust state this command's
@@ -749,5 +779,106 @@ fn clean_at_rest_footer_names_the_review_after_a_write_but_not_after_a_preview()
     assert!(
         !written.contains("next session picks this up:"),
         "the old sentence promised a session that now refuses:\n{written}"
+    );
+}
+
+/// G24: the static, unambiguous preview must not promise a materialization the
+/// write would refuse.
+///
+/// The skills gate judges `add --write` against the trust state captured at
+/// command start (`render::PriorTrust`), so an untrusted project's write lands
+/// the manifest and the lock and then refuses to materialize, exiting nonzero.
+/// The preview writes nothing, so the state it describes is simply the state as
+/// it stands — and that state already answers the question.
+#[test]
+fn static_preview_does_not_promise_what_an_untrusted_write_refuses() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    set_home(&home);
+    let (proj, _extra) = seed_static_project(tmp.path());
+    assert_eq!(
+        agentstack::trust::check(&proj),
+        agentstack::trust::TrustState::Untrusted,
+        "precondition: nobody has reviewed this project"
+    );
+
+    let (preview, code) = cli_exit(&proj, &["add", "skill", "../extra/gamma"]);
+    assert_eq!(code, Some(0), "a preview still succeeds:\n{preview}");
+    assert!(
+        !preview.contains("will materialize into"),
+        "the preview promised a materialization the write refuses:\n{preview}"
+    );
+    assert!(
+        preview.contains(
+            "1 target would take the skill files — review with `agentstack trust .` first, \
+             or the write refuses to materialize"
+        ),
+        "the preview must still say what would be delivered, and what clears the gate:\n{preview}"
+    );
+
+    // The other half of the contradiction, on the record: the write the preview
+    // was describing exits nonzero and delivers nothing to the target.
+    let (written, code) = cli_exit(&proj, &["add", "skill", "../extra/gamma", "--write"]);
+    assert_eq!(code, Some(1), "the write refuses:\n{written}");
+    assert!(
+        written.contains("refusing to materialize skills"),
+        "the write refuses on the trust gate:\n{written}"
+    );
+    assert!(!proj.join(".claude/skills/gamma").exists());
+}
+
+/// The control and the drift, in one project: a trusted static preview keeps
+/// today's sentence byte for byte, and the same preview stops promising the
+/// moment the manifest moves out from under the grant.
+#[test]
+fn static_preview_keeps_todays_line_when_trusted_and_drops_it_on_drift() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    set_home(&home);
+    let (proj, _extra) = seed_static_project(tmp.path());
+    grant(&proj);
+    assert_eq!(
+        agentstack::trust::check(&proj),
+        agentstack::trust::TrustState::Trusted
+    );
+
+    let trusted = cli(&proj, &["add", "skill", "../extra/gamma"]);
+    assert!(
+        trusted.contains("will materialize into 1 target"),
+        "a trusted project's preview is untouched:\n{trusted}"
+    );
+    assert!(
+        !trusted.contains("agentstack trust ."),
+        "nothing is owed, so nothing is named:\n{trusted}"
+    );
+    assert_eq!(
+        agentstack::trust::check(&proj),
+        agentstack::trust::TrustState::Trusted,
+        "precondition: the preview wrote nothing"
+    );
+
+    // A comment moves the consent digest and no rendered byte: the grant is now
+    // stale, and `--write` would hit the same refusal as the unreviewed lane.
+    let manifest = proj.join("agentstack.toml");
+    let text = fs::read_to_string(&manifest).unwrap();
+    fs::write(&manifest, format!("{text}\n# drift\n")).unwrap();
+    assert_eq!(
+        agentstack::trust::check(&proj),
+        agentstack::trust::TrustState::Changed
+    );
+
+    let drifted = cli(&proj, &["add", "skill", "../extra/gamma"]);
+    assert!(
+        !drifted.contains("will materialize into"),
+        "a stale grant still gets the refusal, so the promise is still false:\n{drifted}"
+    );
+    assert!(
+        drifted.contains(
+            "1 target would take the skill files — review with `agentstack trust .` first, \
+             or the write refuses to materialize"
+        ),
+        "the drifted preview names the review that clears it:\n{drifted}"
     );
 }
