@@ -272,18 +272,19 @@ pub(crate) fn trust_blocks_delivery(
 /// at `trust .` first, because until the digest is pinned the bridge serves
 /// control-plane tools only and no server runs — trusting is the gate. A
 /// static, no-gateway project has no bridge to unlock and no gate-dependent
-/// mode to leave, so it is not nagged toward a `trust .` that changes nothing
-/// about its shape — its untrusted state stays a true Status label, and the
-/// next step falls through to the normal ladder.
+/// mode to leave, so its untrusted state does not take the headline for a
+/// reason about the BRIDGE it has not got.
 ///
-/// What this must NOT be read as, and once was: that such a project renders
-/// "whatever the trust state". It does not. The trust gate reaches all of
-/// servers, instructions, hooks, extensions, settings and skill
-/// materialization, so an untrusted static project has every `apply --write`
-/// refused — measured, and pinned by
+/// What this must NOT be read as, and once was: that such a project therefore
+/// falls through to the setup ladder untouched, or renders "whatever the trust
+/// state". It does not. The trust gate reaches all of servers, instructions,
+/// hooks, extensions, settings and skill materialization, so an untrusted
+/// static project has every `apply --write` refused — measured, and pinned by
 /// [`the_trust_relevance_truth_table`]. `trust_relevant` is a prompting hint
-/// about delivery posture; `ProjectFacts::trust_blocks_delivery` is the field
-/// that says whether the gate is standing in the way.
+/// about delivery posture; [`trust_blocks_delivery`] is the reading that says
+/// whether the gate is standing in the way, and it is a rung of this ladder in
+/// its own right: below `adopt`, which still makes progress under the gate,
+/// and above every setup rung, which the gate refuses.
 ///
 /// That ladder: capabilities declared but nothing on
 /// disk yet → `apply --write`; otherwise the wiring is in place → `doctor`.
@@ -534,16 +535,51 @@ pub(crate) fn next_step(
             "agentstack trust .",
             "the content changed since you reviewed it — review and re-trust",
         ),
-        // Untrusted but trust changes nothing here (static, no gateway), or
-        // already trusted: fall through to the normal ladder.
+        // Untrusted but trust does not change this project's SHAPE (static, no
+        // gateway), or already trusted: fall through to the normal ladder.
         _ => {
             // Servers configured natively here that this manifest doesn't know
             // about. Ahead of `apply`, because rendering a manifest that omits
             // half the setup is not the step that helps.
+            //
+            // Deliberately still ahead of the gate rung below, even though the
+            // gate refuses this project's writes: `adopt` edits the manifest,
+            // which is exactly the surface a grant binds itself to. Reviewing
+            // first would approve a manifest the very next step rewrites, and
+            // the user would land in `TrustState::Changed` and review again.
             if unimported_native {
                 (
                     "agentstack adopt",
                     "servers are configured here that this setup doesn't cover yet",
+                )
+            } else if trust_blocks_delivery(trust, has_capabilities) {
+                // The gate rung, and it sits here because it gates everything
+                // below: `apply --write` is refused outright, `use --write` is
+                // refused, and grouping or verifying content no harness will
+                // ever receive is not the step that helps. Until this rung
+                // existed, a static, no-gateway, already-rendered project fell
+                // through to the Group rung and answered `agentstack toolset
+                // create <name> --server <server>` — a shape, which
+                // `machine_command` then filtered to `null`. So `status --json`
+                // named NO next action in the one state whose answer is a
+                // single concrete command, while `doctor`, whose ladder has had
+                // this rung all along, answered `agentstack trust .` for the
+                // same project. Two surfaces, one state, and the machine field
+                // empty on the surface a panel reads.
+                //
+                // The reading is `trust_blocks_delivery`, not a fourth way of
+                // asking: it is true exactly when content is declared AND the
+                // gate is up, which is the condition under which every rung
+                // below is refused. `trust_relevant` is NOT that question — it
+                // asks whether trusting changes the project's delivery posture,
+                // and it is false here by design (the arm above owns it).
+                //
+                // The command is concrete on purpose. `machine_command` drops
+                // placeholders because a driver cannot resolve `<name>`; a rung
+                // added to fix a `null` must not reintroduce one.
+                (
+                    "agentstack trust .",
+                    "nothing this project declares reaches a harness until you review it",
                 )
             } else {
                 // The shared setup ladder — the SAME rungs doctor's terminal
@@ -2502,11 +2538,12 @@ mod tests {
             "agentstack trust ."
         );
 
-        // Static, no-gateway (trust irrelevant): a NEVER-trusted project does
-        // NOT hijack the headline — it falls through to the normal ladder.
-        // Declared but unrendered → `apply --write`; declaring nothing →
-        // `search` (there is nothing to render, group, or verify). This is the
-        // fix for the never-converging trust nag.
+        // Static, no-gateway (trust irrelevant), and DECLARING something: the
+        // gate rung answers, because `apply --write` here is refused outright
+        // (G27). This used to read `agentstack apply --write` — the command the
+        // state cannot run. The never-converging trust nag it was written
+        // against is still fixed: this rung is guarded on declared content, and
+        // it converges, because granting turns it off.
         assert_eq!(
             next_step(
                 TrustState::Untrusted,
@@ -2519,8 +2556,10 @@ mod tests {
                 true
             )
             .0,
-            "agentstack apply --write"
+            "agentstack trust ."
         );
+        // Declaring NOTHING → `search`: there is nothing to render, group, or
+        // verify, and nothing for the gate to hold either.
         assert_eq!(
             next_step(
                 TrustState::Untrusted,
@@ -2746,9 +2785,25 @@ mod tests {
             }
         }
 
-        // And the specific shape that used to break: trusted or not, a project
-        // holding capabilities that are already on disk is set up — verify it,
-        // don't re-import it.
+        // And the specific shape that used to break: a project holding
+        // capabilities that are already on disk is set up — verify it, don't
+        // re-import it. Stated over the TRUSTED project, because the untrusted
+        // one now stops one rung earlier at the gate (G27) and never reaches
+        // the verify rung at all.
+        assert_eq!(
+            next_step(
+                TrustState::Trusted,
+                true,
+                true,
+                false,
+                false,
+                false,
+                false,
+                true
+            )
+            .0,
+            "agentstack doctor"
+        );
         assert_eq!(
             next_step(
                 TrustState::Untrusted,
@@ -2761,7 +2816,8 @@ mod tests {
                 true
             )
             .0,
-            "agentstack doctor"
+            "agentstack trust .",
+            "the gate refuses every write this rung's commands would make"
         );
     }
 

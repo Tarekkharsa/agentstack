@@ -463,3 +463,223 @@ fn the_same_project_stops_claiming_a_gate_once_it_is_trusted() {
     std::env::remove_var("HOME");
     std::env::remove_var("AGENTSTACK_HOME");
 }
+
+// --------------------------------------------------- symptom 4 (G27): routing
+
+/// A manifest that declares one server and renders locally — the `static` lane.
+const ONE_SERVER: &str = "version = 1\n\
+     [delivery]\nrender_locally = true\n\
+     [targets]\ndefault = [\"claude-code\"]\n\
+     [servers.demo]\ntype = \"stdio\"\ncommand = \"/bin/echo\"\n";
+
+/// The one next action as BOTH surfaces of `status --json` state it: the
+/// machine command a driver may run, and the human sentence the screen prints.
+///
+/// Returned as one tuple on purpose. The G27 defect was precisely a divergence
+/// between the two — the sentence named `agentstack toolset create <name>
+/// --server <server>` while the command was `null` — so a witness that reads
+/// only one of them cannot see the class of bug at all.
+fn next_action(proj: &std::path::Path) -> (Option<String>, String, String) {
+    let body = agentstack::commands::overview::status_body(Some(proj)).unwrap();
+    let n = &body["next_action"];
+    (
+        n["command"].as_str().map(str::to_string),
+        n["sentence"].as_str().unwrap().to_string(),
+        n["why"].as_str().unwrap().to_string(),
+    )
+}
+
+/// G27, stated as a property: when the trust gate is what blocks delivery, the
+/// one next action names the review — as a command a driver can run verbatim.
+///
+/// The defect: a static, rendered, UNTRUSTED project emitted `next_action:
+/// null`. Two things combined. `next_step`'s trust arm was guarded on
+/// `trust_relevant`, a DELIVERY-POSTURE hint that is false for a static project
+/// with no bridge, so routing fell through to the setup ladder and landed on
+/// the Group rung; that rung's honest human answer is a shape (`toolset create
+/// <name> --server <server>`), and `machine_command` drops shapes on purpose,
+/// because a driver cannot resolve `<name>`. So the one field a panel reads for
+/// "what should this person do" said nothing, in the exact state where the
+/// answer is a single concrete command — and `doctor`, whose ladder has carried
+/// this rung all along, answered `agentstack trust .` for the same project.
+///
+/// The fix is a rung, not a special case: `trust_blocks_delivery` — the reading
+/// the sibling field above already publishes — gates the whole setup ladder,
+/// because the gate refuses every write those rungs would ask for. It sits
+/// BELOW `adopt`, which still makes progress under the gate and rewrites the
+/// very manifest a grant binds itself to.
+///
+/// This table is the ladder across trust states and delivery lanes. Both fields
+/// are asserted on every row so they cannot drift apart again.
+#[test]
+fn the_gate_rung_names_the_review_and_leaves_every_other_rung_alone() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+    // ── static lane, untrusted, content declared: the gate is the answer.
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let proj = project(tmp.path(), ONE_SERVER);
+    let body = agentstack::commands::overview::status_body(Some(&proj)).unwrap();
+    assert_eq!(body["project"]["mode"], "static");
+    assert_eq!(
+        body["project"]["trust_relevant"], false,
+        "the posture hint is false here — routing must not depend on it"
+    );
+    assert_eq!(body["project"]["trust_blocks_delivery"], true);
+    let (cmd, sentence, why) = next_action(&proj);
+    assert_eq!(
+        cmd.as_deref(),
+        Some("agentstack trust ."),
+        "a driver gets a command it can run verbatim, not null"
+    );
+    assert_eq!(
+        sentence, "agentstack trust .",
+        "and the screen says the same thing: {why}"
+    );
+    assert!(
+        !sentence.contains('<'),
+        "a rung added to fix a dropped command must not name a placeholder: {sentence}"
+    );
+
+    // ── same project, TRUSTED: the gate is down and the setup ladder resumes,
+    // byte for byte. Without this row the new rung could answer everywhere.
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
+    assert_eq!(
+        next_action(&proj),
+        (
+            Some("agentstack apply --write".to_string()),
+            "agentstack apply --write".to_string(),
+            "render this setup into your CLIs".to_string()
+        ),
+        "a project the gate does not block keeps today's ladder"
+    );
+
+    // ── DRIFTED: content already approved has moved. Its own arm, above the
+    // gate rung, with its own re-review wording — pinned so the new rung cannot
+    // quietly take this state over.
+    fs::write(
+        proj.join(".agentstack/agentstack.toml"),
+        format!("{ONE_SERVER}[servers.second]\ntype = \"stdio\"\ncommand = \"/bin/cat\"\n"),
+    )
+    .unwrap();
+    let (cmd, sentence, why) = next_action(&proj);
+    assert_eq!(cmd.as_deref(), Some("agentstack trust ."));
+    assert_eq!(sentence, "agentstack trust .");
+    assert!(
+        why.contains("changed"),
+        "drift keeps the re-review wording, not the gate rung's: {why}"
+    );
+
+    // ── clean-at-rest lane, untrusted: a lockfile and nothing rendered. Trust
+    // IS posture-relevant here, so the arm ABOVE the gate rung owns this state
+    // and keeps its own wording. Pinned because both conditions now hold, and
+    // the order between them is the thing that decides the sentence.
+    let tmp2 = assert_fs::TempDir::new().unwrap();
+    let car = project(tmp2.path(), ONE_SERVER);
+    agentstack::lock::Lock::default()
+        .save(&car.join(".agentstack"))
+        .unwrap();
+    let body = agentstack::commands::overview::status_body(Some(&car)).unwrap();
+    assert_eq!(body["project"]["mode"], "clean-at-rest");
+    assert_eq!(body["project"]["trust_relevant"], true);
+    let (cmd, sentence, why) = next_action(&car);
+    assert_eq!(cmd.as_deref(), Some("agentstack trust ."));
+    assert_eq!(sentence, "agentstack trust .");
+    assert!(
+        why.contains("unlock"),
+        "the posture arm keeps its shipped reason: {why}"
+    );
+
+    // ── untrusted and declaring NOTHING: the gate is up but holds nothing, so
+    // this is a project the gate does not block and today's ladder stands —
+    // including its `null` command, which is the honest answer for a shape.
+    let tmp3 = assert_fs::TempDir::new().unwrap();
+    let empty = project(tmp3.path(), "version = 1\n");
+    assert_eq!(
+        agentstack::commands::overview::status_body(Some(&empty)).unwrap()["project"]
+            ["trust_blocks_delivery"],
+        false
+    );
+    let (cmd, sentence, _) = next_action(&empty);
+    assert_eq!(cmd, None, "a shape is not a command a driver can run");
+    assert_eq!(sentence, "agentstack search <query>");
+
+    std::env::remove_var("HOME");
+    std::env::remove_var("AGENTSTACK_HOME");
+}
+
+/// The end-to-end half: the exact shape the finding describes — static,
+/// RENDERED, untrusted — with the refusal it suffers measured in the same test.
+///
+/// The table above reaches the routing; it cannot reach this state, because
+/// "rendered" is a fact in the state ledger that only a real `apply --write`
+/// can write. That is what makes this row worth its cost: rendered is precisely
+/// what pushed the ladder past the Apply rung and onto the Group rung, whose
+/// placeholder `machine_command` then dropped.
+#[test]
+fn a_rendered_untrusted_project_names_the_review_its_refused_apply_needs() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let proj = project(tmp.path(), ONE_SERVER);
+
+    let apply = |proj: &std::path::Path| {
+        agentstack::commands::apply::run(
+            &agentstack::cli::ApplyArgs {
+                verbose: false,
+                targets: vec![],
+                profile: None,
+                dry_run: false,
+                write: true,
+                scope: Some(agentstack::scope::Scope::Project),
+                allow_unresolved: false,
+                prune_foreign: false,
+                no_gitignore: true,
+            },
+            Some(proj),
+        )
+    };
+
+    // Trust, render, then withdraw: the project is now rendered AND untrusted.
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
+    apply(&proj).expect("a trusted project renders");
+    assert!(proj.join(".mcp.json").exists(), "the render landed");
+    assert!(agentstack::trust::revoke(&proj).unwrap(), "trust withdrawn");
+
+    // Declare one more server, so there is a write outstanding for the gate to
+    // refuse rather than an "already in sync" no-op.
+    fs::write(
+        proj.join(".agentstack/agentstack.toml"),
+        format!("{ONE_SERVER}[servers.second]\ntype = \"stdio\"\ncommand = \"/bin/cat\"\n"),
+    )
+    .unwrap();
+
+    let body = agentstack::commands::overview::status_body(Some(&proj)).unwrap();
+    let p = &body["project"];
+    assert_eq!(p["mode"], "static", "the fixture is the static row: {p}");
+    assert_eq!(p["trust"], "untrusted");
+    assert_eq!(p["gateway_connected"], false);
+    assert_eq!(p["trust_relevant"], false);
+    assert_eq!(p["trust_blocks_delivery"], true);
+    assert_eq!(
+        p["toolsets"].as_array().map(Vec::len),
+        Some(0),
+        "ungrouped, which is what used to select the placeholder rung: {p}"
+    );
+
+    // The refusal, measured — not asserted about.
+    let err = apply(&proj)
+        .expect_err("an untrusted project's render is refused")
+        .to_string();
+    assert!(err.contains("blocked"), "a blocked write: {err}");
+
+    // ...and the one next action names the command that lifts it.
+    let (cmd, sentence, _) = next_action(&proj);
+    assert_eq!(
+        cmd.as_deref(),
+        Some("agentstack trust ."),
+        "this field was `null` before G27, in the one state with a one-command answer"
+    );
+    assert_eq!(sentence, "agentstack trust .");
+
+    std::env::remove_var("HOME");
+    std::env::remove_var("AGENTSTACK_HOME");
+}

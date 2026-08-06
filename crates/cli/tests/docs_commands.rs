@@ -1168,6 +1168,11 @@ const PROFILE_IDENTIFIERS: &[&str] = &[
     "_create_profile",
     // The panel capability ids (`profiles-edit`, `profiles-edit-batch-v1`).
     "profiles-edit",
+    // A served contract NAME in `ui_contract::FEATURES`, so it is frozen the
+    // same way the verbs above are: a page quoting `--help --all` verbatim
+    // reproduces it, and renaming it in prose would name a feature the binary
+    // does not serve.
+    "profiles-v1",
     // The flag as the fixed-argv panel verbs still spell it. On VISIBLE
     // commands the long form is now `--toolset`, with `--profile` kept as a
     // working alias — so prose showing a visible command should say

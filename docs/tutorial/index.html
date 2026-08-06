@@ -116,13 +116,8 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
 <body>
 <a class="skip-link" href="#main-content">Skip to content</a>
 <div role="note" style="padding:12px 24px;background:#fdf3d8;border-bottom:2px solid #d9b45f;color:#4a3a10;font-size:14px;line-height:1.5">
-  <strong>One part of this tour is still behind the binary.</strong> The sequences have been brought up to date: the
-  review gates <strong>five</strong> kinds of content — MCP servers, skills, house rules, hooks and native extensions —
-  so <code>apply --write</code> and <code>use --write</code> refuse on a project that is untrusted or has changed since
-  you approved it, and the lessons now show the <code>agentstack trust .</code> step where you would perform it.
-  <strong>What is not yet fixed:</strong> delivery is <em>routed</em> now, not chosen during <code>init</code>, so the
-  three-mode picker in the later lessons still describes an axis the product retired.
-  This page is hand-maintained with no markdown source, so nothing checks it for you — when in doubt, follow
+  <strong>This page is hand-maintained.</strong> It has no markdown source: a test parses every command it shows
+  against the real CLI, but nothing checks the prose around them. When in doubt, follow
   <a href="../start.html" style="color:#7a5b10;font-weight:600">Get started</a>, which is generated and tested.
 </div>
 <div id="app" style="display:flex;flex-direction:column;height:100vh;overflow:hidden;background:var(--paper);color:var(--ink)">
@@ -198,7 +193,7 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
   <section class="lesson-pane" id="lesson-2" hidden>
     <div class="kicker">LESSON 3 · RUNG 1 — UNIFY</div>
     <h1 class="lesson">One directory your CLIs all read from</h1>
-    <p class="lede"><code>agentstack init</code> scans your machine, imports the MCP servers your CLIs already have, and collects them into one directory in your project: <code>.agentstack/</code>. Then <code>apply --write</code> renders that back into every CLI's native config. Edit once, applied everywhere. One step sits between them and is not optional: <code>agentstack trust .</code>, where you read what this setup actually runs and say yes. Until you do, <code>apply --write</code> refuses.</p>
+    <p class="lede"><code>agentstack init</code> scans your machine, imports the MCP servers your CLIs already have, and collects them into one directory in your project: <code>.agentstack/</code>. Then <code>apply --write</code> renders whatever has to be a file back into each CLI's native config, while the rest is served live — the wizard below shows which is which. Edit once, applied everywhere. One step sits between them and is not optional: <code>agentstack trust .</code>, where you read what this setup actually runs and say yes. Until you do, <code>apply --write</code> refuses.</p>
     <div class="hint" style="margin-bottom:10px">▶ Run each command in order — this is a simulation, nothing touches your machine.</div>
     <div class="term" style="margin-bottom:8px" data-term="unify" data-title="your-project — zsh"></div>
     <div class="termout" style="margin-bottom:14px"><div style="color:var(--term-text);white-space:pre">your-project/
@@ -233,16 +228,17 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
           <div id="wizSecretOpts" style="display:flex;flex-direction:column;gap:8px;margin-bottom:6px"></div>
         </div>
         <div id="wiz-2" hidden>
-          <div style="font-size:14px;line-height:1.65;color:var(--body);margin-bottom:14px"><span style="color:var(--ok)">✓ <span id="wizSecretMsg"></span></span><br><strong>Delivery mode.</strong> An arrow-key choice, made <em>before any write</em> — it decides where rendered files live and forks the rest of the run:</div>
-          <div id="wizModeOpts" style="display:flex;flex-direction:column;gap:8px;margin-bottom:6px"></div>
+          <div style="font-size:14px;line-height:1.65;color:var(--body);margin-bottom:14px"><span style="color:var(--ok)">✓ <span id="wizSecretMsg"></span></span><br><strong>Delivery.</strong> Here the wizard does not ask — it <em>reports</em>. AgentStack <strong>routes</strong> every capability kind to one of two lanes, per kind and per tool, from two facts: what the kind is, and whether that tool speaks MCP. Pick a tool to read the line <code class="sm">init</code> printed for it:</div>
+          <div id="wizLaneOpts" style="display:flex;flex-direction:column;gap:8px;margin-bottom:6px"></div>
         </div>
         <div id="wiz-3" hidden>
-          <div style="font-size:14px;line-height:1.65;color:var(--body);margin-bottom:14px"><span style="color:var(--ok)">✓ secrets → <span id="wizSecretName"></span></span> · <span style="color:var(--ok)">✓ mode → <span id="wizModeName"></span></span></div>
+          <div style="font-size:14px;line-height:1.65;color:var(--body);margin-bottom:14px"><span style="color:var(--ok)">✓ secrets → <span id="wizSecretName"></span></span> · <span style="color:var(--ok)">✓ routing for <span id="wizLaneName"></span></span></div>
           <div id="wizForkLines" class="termout" style="margin-bottom:14px"></div>
           <div id="wizForkNote" class="callout" style="border-radius:12px;padding:12px 18px;font-size:13px"></div>
         </div>
       </div>
     </div>
+    <div class="callout" style="margin-top:14px"><strong>Ask the product which lane applies — never guess.</strong> <code class="sm">agentstack x delivery</code> prints the routing for every tool in your project, kind by kind, with the reason beside each one; <code class="sm">agentstack x delivery --json</code> emits the same thing as the <code class="sm">delivery-routing-v1</code> contract. Routing is the plan: a tool only really receives the live lane once its gateway bridge is registered, and until then <code class="sm">delivery</code> says <em>planned live (not connected)</em> rather than claiming a delivery that is not happening.</div>
   </section>
 
   <section class="lesson-pane" id="lesson-4" hidden>
@@ -526,7 +522,7 @@ TERM.undo=[
   {cmd:'agentstack x restore --last --write',out:[['reverting write w-4a02  (use backend)…',D],['✓ restored — the previous rendered configs are back',G]]}
 ];
 
-var state={lesson:0,visited:{0:true},openCard:-1,tgState:'start',wizStep:0,wizSecret:null,wizMode:null,driftPick:null,posturePick:'plain',callPick:null};
+var state={lesson:0,visited:{0:true},openCard:-1,tgState:'start',wizStep:0,wizSecret:null,wizLane:null,driftPick:null,posturePick:'plain',callPick:null};
 
 function $(id){return document.getElementById(id);}
 
@@ -635,19 +631,34 @@ function renderTermCards(){
 
 /* ---------- lesson 3: wizard ---------- */
 var SEC={keychain:{name:'OS keychain',msg:'value stored in the OS keychain',desc:'default — the value lives in macOS Keychain / Secret Service, resolved per machine at run time'},env:{name:'gitignored .env',msg:'value written to a gitignored .env',desc:'a plain .env next to the manifest, kept out of git by the managed block'},skip:{name:'skip',msg:'skipped — refs stay unresolved until you set them',desc:'--secrets skip: write only the manifest; set values later with agentstack secret set (the CI path)'}};
-var MODE={
-  static:{name:'static',desc:'default — rendered files on disk behind a managed .gitignore; zero moving parts, every CLI works',
-    lines:[['Preview: 1 server → 4 targets  (.mcp.json, .codex/config.toml, .gemini/settings.json, opencode.json)','w'],['Proceed? [Y/n] y','a'],['✓ apply --write — rendered to 4 target(s)','g'],['✓ skills activated · doctor: all green','g']],
-    note:'The render path: preview → confirm → apply --write → activate skills → doctor. Files sit ready on disk the moment a CLI starts.'},
-  clean:{name:'clean-at-rest',desc:'repo stays pristine between sessions — files exist only inside session start / session end',
-    lines:[['✓ agentstack lock --write — name refs pinned, nothing rendered','g'],['git status → clean','w'],['next: agentstack session start <toolset>   # renders for one session','d'],['      agentstack session end             # reverts every file','d']],
-    note:'Nothing is rendered now. The wizard teaches the session rhythm instead: capabilities arrive with session start and revert on session end.'},
-  zero:{name:'zero-files',desc:'nothing on disk — the gateway serves each trusted repo’s stack live (CLI must speak MCP)',
-    lines:[['✓ agentstack lock --write — pinned, nothing rendered','g'],['Register the gateway in your CLIs? [Y/n] y','a'],['✓ gateway connect --all --write — 4 CLIs registered','g'],['→ finish with:  agentstack trust .','w']],
-    note:'The wizard never runs trust for you — trust is human consent. Until you review and trust the repo, its stack stays inert.'}};
+var LANES={
+  claude:{name:'Claude Code',desc:'speaks MCP, and has house rules, settings and hooks of its own — so both lanes carry something',
+    lines:[['🚚  How each tool gets them:','w'],
+      ['      Claude Code   skills + MCP servers served live · house rules + settings + hooks written to files','g'],
+      ['                    hooks run code — reviewed in full every time','d'],
+      ['      rendered lane: Claude Code — house rules + settings + hooks','d']],
+    note:'Both lanes at once, which is the normal shape. Skills and MCP servers are brokered live through the gateway, so nothing generated lands on disk for them. The other three cannot travel live: no live channel here can vary a house rule by model, only its own file is read for settings, and a hook runs code — so it is always reviewed and written.'},
+  gemini:{name:'Gemini CLI',desc:'speaks MCP, and AgentStack writes nothing else for it — the live lane carries the lot',
+    lines:[['🚚  How each tool gets them:','w'],
+      ['      Gemini CLI    skills + MCP servers served live','g'],
+      ['      0 project artifacts for the capabilities served live','d'],
+      ['      (the manifest and lock stay, and so does any managed region in a house-rules file)','d']],
+    note:'The dynamic lane on its own. Read what AgentStack does not claim: never “0 files”. The manifest and the lockfile stay, and so does any managed region in a house-rules file — what the live lane removes is the generated files.'},
+  pi:{name:'Pi',desc:'reads files only — no MCP channel at all, so every kind renders, automatically',
+    lines:[['🚚  How each tool gets them:','w'],
+      ['      Pi            skills + house rules + settings + extensions written to files','g'],
+      ['                    this tool reads files only','d'],
+      ['                    extensions run code — reviewed in full every time','d']],
+    note:'Nothing was chosen here either. A tool with no live channel gets every kind rendered, which is why static rendering is not going away: it stays the only correct answer for a file-only CLI, and for anything no live channel can carry correctly.'},
+  local:{name:'Claude Code, render locally',desc:'the one override — force files even where the live channel would have worked',
+    lines:[['$ agentstack x delivery render-locally --harness claude-code --write','a'],
+      ['✓ render locally recorded for claude-code in this project','g'],
+      ['$ agentstack x delivery','a'],
+      ['      Claude Code   skills + MCP servers + house rules + settings + hooks written to files — render locally is set','w']],
+    note:'The only override there is, and it moves one way: towards files. It is recorded in the manifest, so every clone and every run answers the same. Drop --harness and it covers the whole project; add --off to go back to automatic. It cannot push the other way — nothing can carry a hook or a per-model house rule live, so there is no “prefer gateway” to set.'}};
 function wizColor(k){return {w:'var(--term-text)',g:'var(--term-ok)',a:'var(--term-warn)',d:'var(--term-muted)'}[k];}
 function renderWiz(){
-  var names=['scan','secrets','mode','result'];
+  var names=['scan','secrets','delivery','result'];
   var crumbs=$('wizCrumbs');crumbs.innerHTML='';
   names.forEach(function(n,i){
     var s=document.createElement('span');s.className='mono';
@@ -660,13 +671,13 @@ function renderWiz(){
   if(state.wizStep===2)$('wizSecretMsg').textContent=SEC[state.wizSecret].msg;
   if(state.wizStep===3){
     $('wizSecretName').textContent=SEC[state.wizSecret].name;
-    $('wizModeName').textContent=MODE[state.wizMode].name;
+    $('wizLaneName').textContent=LANES[state.wizLane].name;
     var fl=$('wizForkLines');fl.innerHTML='';
-    MODE[state.wizMode].lines.forEach(function(l){addLine(fl,l[0],wizColor(l[1]));});
-    $('wizForkNote').textContent=MODE[state.wizMode].note;
+    LANES[state.wizLane].lines.forEach(function(l){addLine(fl,l[0],wizColor(l[1]));});
+    $('wizForkNote').textContent=LANES[state.wizLane].note;
   }
 }
-function wizReset(){state.wizStep=0;state.wizSecret=null;state.wizMode=null;renderWiz();}
+function wizReset(){state.wizStep=0;state.wizSecret=null;state.wizLane=null;renderWiz();}
 function wizNext0(){state.wizStep=1;renderWiz();}
 function buildWizOpts(){
   var so=$('wizSecretOpts');
@@ -677,12 +688,12 @@ function buildWizOpts(){
     b.onclick=function(){state.wizSecret=k;state.wizStep=2;renderWiz();};
     so.appendChild(b);
   });
-  var mo=$('wizModeOpts');
-  Object.keys(MODE).forEach(function(k){
+  var mo=$('wizLaneOpts');
+  Object.keys(LANES).forEach(function(k){
     var b=document.createElement('button');b.className='opt';
     b.innerHTML='<span class="opt-name"></span><span class="opt-desc"></span>';
-    b.children[0].textContent=MODE[k].name;b.children[1].textContent=MODE[k].desc;
-    b.onclick=function(){state.wizMode=k;state.wizStep=3;renderWiz();};
+    b.children[0].textContent=LANES[k].name;b.children[1].textContent=LANES[k].desc;
+    b.onclick=function(){state.wizLane=k;state.wizStep=3;renderWiz();};
     mo.appendChild(b);
   });
 }
@@ -818,7 +829,7 @@ var RECAP=[
    explain:'Only --lockdown removes the direct route entirely. --sandbox proxies traffic but the container keeps a direct route a proxy-ignoring process could use.'},
   {q:'Where does a real secret value live — the source of truth?',
    options:['Encrypted inside the manifest','In .env / keychain / varlock — the manifest holds only ${REF}','In each CLI’s rendered config'],correct:1,
-   explain:'The source of truth is .env / keychain / varlock; the manifest and lockfile hold only ${REF}. A static apply --write may resolve a value into a native config whose format requires it — gateway and clean-at-rest delivery keep values out of project files. An unresolvable ref fails the write closed rather than leaking a placeholder.'},
+   explain:'The source of truth is .env / keychain / varlock; the manifest and lockfile hold only ${REF}. A rendered apply --write may resolve a value into a native config whose format requires it — for anything the gateway serves live nothing is written at all, so no value reaches a project file. An unresolvable ref fails the write closed rather than leaking a placeholder.'},
   {q:'A repo’s policy tries to allow more egress hosts than your machine policy does. What applies?',
    options:['The repo’s — it’s more specific','Your machine policy — the effective policy is the intersection','Whichever was written last'],correct:1,
    explain:'Machine ∩ project: a repo can only narrow a machine rule, never loosen it. A machine-layer refusal names its layer in the error and the audit log.'}];
@@ -826,6 +837,7 @@ var CHEATS=[
   ['init','rung 1 — scan CLIs → write one reviewed manifest; lift inline tokens to ${REF}s'],
   ['apply --write','rung 1 — render the manifest into every CLI’s native config'],
   ['status','rung 1 — one screen: what is here, whether it is ready, the one next step'],
+  ['x delivery','rung 1 — which lane each kind takes to each tool, and the one override'],
   ['yes','rung 1 — a file you dropped in: one review card, then it is pinned and live everywhere (v0.18.0+)'],
   ['use <toolset> --write','rung 2 — switch to one named subset of the manifest'],
   ['session start / end','rung 2 — use a toolset for now, then put every file back'],
@@ -840,7 +852,7 @@ var CHEATS=[
   ['receive <path>','rung 5 — the other side: the bundle is staged inert and carded before anything lands (v0.18.0+)'],
   ['up','rung 5 — a machine with the checkout and nothing else: detect, verify, render, name what is left (v0.18.0+)'],
   ['guard install','rung 6 — block rm -rf, git reset --hard, .env reads before they run'],
-  ['gateway connect','rung 6 — register the gateway once per CLI (zero-files mode)'],
+  ['gateway connect','rung 6 — register the gateway once per CLI, so the live lane actually carries'],
   ['trust . / --list / --revoke','rung 6 — review a repo, pin its digest; any edit re-gates it'],
   ['run --locked | --sandbox | --lockdown','rung 6 — climb the posture ladder to kernel-enforced'],
   ['report runs | calls · optimize · explain','rung 6 — flight recorder, audit log, evidence-backed fixes']];
