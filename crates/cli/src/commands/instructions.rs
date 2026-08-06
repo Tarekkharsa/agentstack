@@ -135,8 +135,17 @@ pub fn run(args: &InstructionsArgs, manifest_dir: Option<&Path>) -> Result<()> {
         // prose into the region (`render::instructions::trust_refusal`). Said
         // here, before the diff, so the user reads WHY the preview below will
         // not be written.
-        if let Some(why) = &plan.refusal {
-            println!("  {} {why}", "✗".red());
+        //
+        // Only when the compile would actually move bytes, the same guard
+        // `apply` applies (G23): an unchanged region is already what the
+        // manifest declares, so "refusing to render" printed above "✓ up to
+        // date" is two contradictory claims, and it would raise the issue
+        // count on a run that then exits 0. The gate itself is untouched —
+        // `InstrPlan::write` still refuses on `refusal` alone.
+        if plan.refusal.is_some() && plan.changed() {
+            if let Some(why) = &plan.refusal {
+                println!("  {} {why}", "✗".red());
+            }
         }
         for (name, why) in &plan.excluded {
             println!("  {} fragment '{name}' {why}", "⊘".dimmed());

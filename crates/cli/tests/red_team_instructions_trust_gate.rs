@@ -295,6 +295,105 @@ fn the_appended_fragment_lands_once_the_change_is_re_reviewed() {
     }
 }
 
+// ------------------------------------ a refusal is a claim about moving bytes
+
+/// The manifest the two tests below share: the fragment, plus one setting.
+///
+/// The setting is not decoration. A fragment-only project whose region is
+/// withheld has nothing left for the rendered lane, so `apply --write` ends on
+/// the unrelated "no bridge is registered" bail and its exit code stops being
+/// about the trust gate at all. One always-renderable declaration keeps these
+/// two tests measuring the gate.
+fn manifest_with_a_setting(fragments: &str) -> String {
+    format!(
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [settings.claude-code]\nmodel = \"opus\"\n{fragments}"
+    )
+}
+
+/// A reviewed project whose fragment is ALREADY in the managed region, then
+/// edited so that trust goes stale without a compiled byte moving: the appended
+/// line is a comment, which re-digests the consent surface
+/// (`trust::ConsentSnapshot::digest` hashes the manifest bytes) and compiles to
+/// nothing.
+fn compiled_then_stale(tmp: &Path) -> (PathBuf, PathBuf, String) {
+    let home = tmp.join("home");
+    let proj = tmp.join("proj");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(proj.join(".agentstack")).unwrap();
+    write_fragment(&proj.join(".agentstack"), "evil", EVIL_BODY);
+    let toml = manifest_with_a_setting(&fragment_block("evil"));
+    fs::write(proj.join(".agentstack/agentstack.toml"), &toml).unwrap();
+    grant(&home, &proj);
+
+    let (text, ok) = run(&["apply", "--write"], &home, &proj);
+    assert!(ok, "the reviewed apply must succeed first:\n{text}");
+    assert!(
+        region(&home, &proj, "project").contains(EVIL_BODY),
+        "fixture: the reviewed fragment must be compiled before staleness is tested"
+    );
+
+    let stale = format!("{toml}\n# a comment: re-gates trust, compiles to nothing\n");
+    fs::write(proj.join(".agentstack/agentstack.toml"), &stale).unwrap();
+    (home, proj, toml)
+}
+
+/// A refusal says bytes are being withheld. When the compiled region already
+/// matches what is declared, no bytes were going to move, so there is nothing
+/// to withhold — and printing `✗ refusing to render instructions` above a run
+/// that exits 0 is a script hazard as well as an untrue claim.
+#[test]
+fn an_already_compiled_region_reports_no_refusal_when_no_bytes_would_move() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (home, proj, _) = compiled_then_stale(tmp.path());
+
+    let (text, ok) = run(&["apply", "--write"], &home, &proj);
+    assert!(
+        ok,
+        "an unchanged compile blocks nothing, so this must exit 0:\n{text}"
+    );
+    assert!(
+        !text
+            .to_lowercase()
+            .contains("refusing to render instructions"),
+        "a refusal printed above a zero exit — nothing was going to be \
+         compiled, so nothing was withheld:\n{text}"
+    );
+    assert!(
+        region(&home, &proj, "project").contains(EVIL_BODY),
+        "fixture: the reviewed fragment must still be in the region:\n{}",
+        region(&home, &proj, "project")
+    );
+}
+
+/// The control, and the half that must NOT change: the same stale project, one
+/// fragment further on, so the compile would now move bytes. That still
+/// refuses, still counts as blocked, and still exits nonzero.
+#[test]
+fn the_same_stale_project_still_refuses_once_the_compile_would_write() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (home, proj, toml) = compiled_then_stale(tmp.path());
+    write_fragment(&proj.join(".agentstack"), "second-stage", APPENDED_BODY);
+    fs::write(
+        proj.join(".agentstack/agentstack.toml"),
+        format!("{toml}{}", fragment_block("second-stage")),
+    )
+    .unwrap();
+
+    let (text, ok) = run(&["apply", "--write"], &home, &proj);
+    assert_refused(&text, ok, "project");
+    assert!(
+        !region(&home, &proj, "project").contains(APPENDED_BODY),
+        "a fragment appended on stale consent was compiled:\n{}",
+        region(&home, &proj, "project")
+    );
+    assert!(
+        region(&home, &proj, "project").contains(EVIL_BODY),
+        "the refusal must not disturb the already-reviewed fragment:\n{}",
+        region(&home, &proj, "project")
+    );
+}
+
 // ------------------------------------------------------------- the exemptions
 
 /// The machine layer's fragments are the USER's house rules, merged in from

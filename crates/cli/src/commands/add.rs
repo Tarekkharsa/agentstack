@@ -1413,7 +1413,10 @@ fn preview_and_commit(
         println!("  {line}");
     }
     if !write {
-        print_activation_footer(&act, profile);
+        // A preview wrote nothing, so this reads the state the user is already
+        // in — and on a trusted project that is `Trusted`, which is why the
+        // preview's wording is untouched by G22.
+        print_activation_footer(&act, profile, super::lock::review_pending(&ctx.dir));
         println!(
             "\nDry run. Re-run with {} to update the manifest.",
             "--write".bold()
@@ -1538,42 +1541,96 @@ fn preview_and_commit(
             );
         }
     } else {
-        print_activation_footer(&act, profile);
+        // Read AFTER the manifest and lock writes above, unlike `act` and
+        // `prior`: those two exist so this command does not refuse its own
+        // delivery, while this one answers what the user must type NEXT — and
+        // that is judged from the state the writes actually left behind.
+        print_activation_footer(&act, profile, super::lock::review_pending(&ctx.dir));
     }
     Ok(())
 }
 
 /// The §3 footer matrix: what the write will (or did) do about activation,
 /// per pre-write mode and profile ambiguity.
-fn print_activation_footer(act: &ActivationCtx, profile: Option<&str>) {
+fn print_activation_footer(act: &ActivationCtx, profile: Option<&str>, review_pending: bool) {
+    use super::overview::Mode;
+    println!(
+        "{}",
+        activation_footer_line(
+            act.mode,
+            act.ambiguous,
+            act.target_ids.len(),
+            profile,
+            review_pending
+        )
+    );
+    if act.mode == Mode::CleanAtRest && act.session_active {
+        println!(
+            "{} a session is active — it won't see this until the next `session start`",
+            "⚠".yellow()
+        );
+    }
+}
+
+/// The footer's single next-step line.
+///
+/// Pure over its inputs (the colour markers aside) so both trust branches are
+/// witnessed without a project on disk.
+///
+/// G22: `review_pending` is the state the caller's own write left behind, and
+/// it narrows the two lanes that name a *later* command. `session start`
+/// refuses outright on an unreviewed project, and `use --write` refuses to
+/// render servers or materialize skills — so on the write path, where this
+/// command's manifest and lock bytes are themselves the consent digest, both
+/// lanes used to end at a command that could only fail. The review is what
+/// unblocks either one, so the review is what gets named.
+///
+/// The two lanes that do NOT name a later command are untouched. The
+/// unambiguous static lane reports what this run already did through
+/// [`crate::render::PriorTrust`], not a command to type next; the zero-files
+/// lane was already naming `trust .`. And on the preview path nothing has been
+/// written, so a trusted project still reads `Trusted` and gets today's wording
+/// byte for byte.
+fn activation_footer_line(
+    mode: super::overview::Mode,
+    ambiguous: bool,
+    target_count: usize,
+    profile: Option<&str>,
+    review_pending: bool,
+) -> String {
     use super::overview::Mode;
     let profile_word = profile.map(|p| format!(" {p}")).unwrap_or_default();
-    match act.mode {
-        Mode::Static if !act.ambiguous => println!(
+    match mode {
+        Mode::Static if !ambiguous => format!(
             "{} will materialize into {}",
             "→".cyan(),
-            super::count(act.target_ids.len(), "target")
+            super::count(target_count, "target")
         ),
-        Mode::Static => println!(
+        Mode::Static if review_pending => format!(
+            "{} several toolsets declared — review with `agentstack trust .`, then \
+             `agentstack use{profile_word} --write`",
+            "·".dimmed()
+        ),
+        Mode::Static => format!(
             "{} several toolsets declared — activate with `agentstack use{profile_word} --write`",
             "·".dimmed()
         ),
-        Mode::CleanAtRest => {
-            println!(
-                "{} next session picks this up: `agentstack x session start{}`",
-                "·".dimmed(),
-                profile
-                    .map(|p| format!(" {p}"))
-                    .unwrap_or(" <toolset>".into())
-            );
-            if act.session_active {
-                println!(
-                    "{} a session is active — it won't see this until the next `session start`",
-                    "⚠".yellow()
-                );
-            }
-        }
-        Mode::ZeroFiles => println!(
+        Mode::CleanAtRest if review_pending => format!(
+            "{} review with `agentstack trust .` first — until then \
+             `agentstack x session start{}` refuses",
+            "·".dimmed(),
+            profile
+                .map(|p| format!(" {p}"))
+                .unwrap_or(" <toolset>".into())
+        ),
+        Mode::CleanAtRest => format!(
+            "{} next session picks this up: `agentstack x session start{}`",
+            "·".dimmed(),
+            profile
+                .map(|p| format!(" {p}"))
+                .unwrap_or(" <toolset>".into())
+        ),
+        Mode::ZeroFiles => format!(
             "{} trust re-gates on this edit: run `agentstack trust .` to re-consent",
             "·".dimmed()
         ),

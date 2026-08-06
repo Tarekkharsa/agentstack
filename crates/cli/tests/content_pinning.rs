@@ -608,3 +608,96 @@ fn workflow_drift_and_roles_widening_block_trust_until_relocked() {
     trust_cmd::run(&grant_args(&proj), None).unwrap();
     assert_eq!(trust::check(&proj), TrustState::Trusted);
 }
+
+/// Run the real binary against whatever isolated HOME the caller just set, and
+/// return everything it printed. `lock --write`'s footer is a printed line, so
+/// only a subprocess can witness it — the library entry point writes it to the
+/// test harness's own stdout.
+fn cli(proj: &Path, args: &[&str]) -> String {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_agentstack"))
+        .args(args)
+        .current_dir(proj)
+        .env_clear()
+        .env("HOME", std::env::var("HOME").unwrap())
+        .env("AGENTSTACK_HOME", std::env::var("AGENTSTACK_HOME").unwrap())
+        .env("PATH", "/usr/bin:/bin")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("spawn agentstack");
+    format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    )
+}
+
+/// The `Next:` line, isolated. Asserting on `contains("agentstack use
+/// --write")` would pass on the wrong footer: the summary two lines above says
+/// "that stays `agentstack use --write`" in every case.
+fn next_line(out: &str) -> String {
+    out.lines()
+        .find(|l| l.starts_with("Next:"))
+        .unwrap_or_else(|| panic!("no Next: line in:\n{out}"))
+        .to_string()
+}
+
+/// G22: `lock --write` must name the command that unblocks the state its own
+/// write left behind.
+///
+/// The rendered (static) lane used to branch on delivery mode alone, so a
+/// re-lock that re-gated the project — the ordinary case, since lock bytes ARE
+/// the consent digest — printed `Next: agentstack use --write` immediately
+/// under its own "trust is now stale" warning. That `use --write` then refused
+/// every target. Both halves are asserted here: the stale project is sent to
+/// the review, and a project the write left trusted keeps the old sentence
+/// exactly.
+#[test]
+fn lock_write_names_the_review_when_its_own_pins_go_stale() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&proj).unwrap();
+    write_project(&proj);
+    trust::trust_unreviewed(&proj).unwrap();
+    // Materializing is what puts this project in the STATIC lane — the one
+    // whose footer had no trust branch at all. Run through the binary, like
+    // every step below it: the write ledger `detect_mode` reads is keyed by
+    // the manifest path as the writing process spelled it, and an in-process
+    // `/var/...` write is not the `/private/var/...` the subprocess resolves.
+    let out = cli(&proj, &["use", "p", "--write", "--no-gitignore"]);
+    assert!(
+        out.contains("skill"),
+        "precondition — the project rendered something:\n{out}"
+    );
+    trust::trust_unreviewed(&proj).unwrap();
+    assert_eq!(trust::check(&proj), TrustState::Trusted);
+
+    // A re-lock with nothing to move leaves trust intact, so the pinned
+    // capabilities really are one `use --write` away. Unchanged wording.
+    let out = cli(&proj, &["lock", "--write"]);
+    assert_eq!(
+        next_line(&out),
+        "Next: `agentstack use --write` to activate the pinned capabilities.",
+        "a project still trusted after the write keeps today's next step:\n{out}"
+    );
+
+    // Now the defect's state: the body drifts, and this command's own re-pin
+    // is what makes the project stale.
+    fs::write(proj.join("skills/helper/SKILL.md"), "# helper v2\n").unwrap();
+    let out = cli(&proj, &["lock", "--write"]);
+    assert!(
+        out.contains("its trust is now stale"),
+        "precondition — the write re-gated the project it just pinned:\n{out}"
+    );
+    assert_eq!(trust::check(&proj), TrustState::Changed);
+    assert_eq!(
+        next_line(&out),
+        "Next: `agentstack trust .` to review and consent.",
+        "the footer must name the review, not the `use --write` it blocks:\n{out}"
+    );
+}
