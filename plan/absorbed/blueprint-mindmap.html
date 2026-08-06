@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentStack — blueprint mind map v3</title>
+<style>
+:root{
+  --bg:#faf7f0;--card:#fffdf8;--ink:#211e1a;--soft:#6f6656;--hair:#e8dfcd;--hair2:#f1ead9;
+  --blue:#3f56a8;--red:#ae4437;--green:#3f7048;--orange:#b8642f;--violet:#5f68a6;
+  --gold:#96751c;--grey:#7c7362;--sage:#6d7c51;--amberbg:#faf0d7;--takebg:#f4eee0;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:15px/1.65 -apple-system,"SF Pro Text","Segoe UI",Helvetica,Arial,sans-serif;
+  padding:56px 24px 80px;-webkit-font-smoothing:antialiased;}
+.wrap{max-width:1160px;margin:0 auto;}
+header{text-align:center;margin-bottom:44px;}
+h1{font-family:"Iowan Old Style","Palatino Linotype",Georgia,serif;
+  font-size:34px;font-weight:600;margin:0 0 10px;letter-spacing:.2px;}
+h1 small{font-size:15px;color:var(--soft);font-family:inherit;vertical-align:super;}
+.motto{display:inline-block;background:var(--ink);color:#f6f0e4;border-radius:999px;
+  padding:9px 24px;font-size:13.5px;letter-spacing:.4px;}
+.legend{margin-top:16px;font-size:12px;color:var(--soft);letter-spacing:.2px;}
+.legend span{font-weight:700;font-size:10px;letter-spacing:1.2px;}
+.k-do{color:var(--blue)} .k-see{color:var(--green)} .k-how{color:var(--violet)} .k-files{color:var(--orange)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(350px,1fr));gap:22px;}
+.card{background:var(--card);border:1px solid var(--hair);border-radius:14px;overflow:hidden;
+  box-shadow:0 1px 2px rgba(33,30,26,.05);}
+.head{padding:16px 20px 8px;border-top:4px solid var(--ac,var(--grey));}
+.head .num{font-size:10px;font-weight:800;letter-spacing:2px;color:var(--ac,var(--grey));display:block;margin-bottom:2px;}
+.head h2{margin:0;font-size:16px;font-weight:700;letter-spacing:.2px;}
+.card ul{margin:0;padding:8px 20px 18px;list-style:none;}
+.card li{padding:6px 0;font-size:13.5px;border-bottom:1px solid var(--hair2);}
+.card li:last-child{border-bottom:0;}
+.card li .k{display:inline-block;min-width:46px;font-size:9.5px;font-weight:800;letter-spacing:1.2px;margin-right:6px;}
+ol.q{margin:0;padding:8px 20px 12px 38px;font-size:13.5px;}
+ol.q li{margin:5px 0;}
+code{background:#efe8d8;padding:1px 6px;border-radius:5px;font-size:12px;
+  font-family:ui-monospace,"SF Mono",Menlo,monospace;}
+.risk{color:var(--red);font-weight:600;}
+.flag{margin:12px 20px;background:var(--amberbg);border:1px solid #dcc98e;border-radius:10px;
+  padding:10px 14px;font-size:12.5px;line-height:1.55;}
+.flag b{color:#7a5b10;}
+.qa{grid-column:1/-1;}
+.qa .item{padding:18px 22px;border-bottom:1px solid var(--hair2);}
+.qa .item:last-child{border-bottom:0;}
+.qa .q{font-size:15px;font-weight:700;margin-bottom:6px;}
+.qa .a{font-size:13.5px;color:#3a352c;}
+.qa ol{margin:6px 0 0;padding-left:20px;}
+.qa ol li{margin:3px 0;}
+.take{margin-top:12px;background:var(--takebg);border-left:3px solid var(--ink);
+  border-radius:0 10px 10px 0;padding:10px 16px;font-size:13.5px;}
+.take b{font-size:10px;letter-spacing:1.6px;display:block;margin-bottom:4px;color:var(--soft);}
+.chip{display:inline-block;font-size:9.5px;font-weight:800;letter-spacing:1px;color:#fff;
+  border-radius:6px;padding:2.5px 9px;margin-left:8px;vertical-align:2px;}
+.c-ship{background:var(--green)} .c-idea{background:var(--gold)} .c-open{background:var(--violet)}
+.a1{--ac:var(--blue)} .a2{--ac:var(--red)} .a3{--ac:var(--green)} .a4{--ac:var(--orange)}
+.a5{--ac:var(--violet)} .a6{--ac:var(--green)} .a7{--ac:var(--gold)} .a8{--ac:var(--grey)} .a9{--ac:var(--sage)}
+.aq{--ac:var(--ink)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>AgentStack — blueprint mind map <small>v3</small></h1>
+  <p class="motto">one manifest → every CLI &nbsp;·&nbsp; governs what runs</p>
+  <p class="legend">Row keys inside each area —
+    <span class="k-do">DO</span> commands&ensp;·&ensp;
+    <span class="k-see">SEE</span> what appears&ensp;·&ensp;
+    <span class="k-how">HOW</span> on the device&ensp;·&ensp;
+    <span class="k-files">FILES</span> where it lives</p>
+</header>
+
+<div class="grid">
+
+<section class="card qa aq">
+  <div class="head"><span class="num">YOUR QUESTIONS</span>
+  <h2>Answers, short — with my evaluation where you asked for one</h2></div>
+
+  <div class="item">
+    <div class="q">Q1 · Do I have to run <code>lib sync</code> in my skills folder?<span class="chip c-ship">SHIPPED</span></div>
+    <div class="a"><b>No.</b> Three steps, nothing else:
+    <ol>
+      <li>Put skills in any folder — a git clone is just a folder (<code>git clone …/skills ~/skills</code>).</li>
+      <li>Link that folder once. It becomes a library source.</li>
+      <li>Pick skills in a project. The exact bytes are pinned in the project lock.</li>
+    </ol>
+    <code>lib sync</code> is optional. It is a convenience for pull/push when the folder happens to be a git repo. Plain folders work exactly the same.</div>
+  </div>
+
+  <div class="item">
+    <div class="q">Q2 · Is a separate <code>init</code> step the right design for the live lease?</div>
+    <div class="a">Today: the lease serves <b>what the manifest declares</b>, so a manifest must exist,
+    and <code>init</code> is the step that creates it (and imports your existing CLI configs).</div>
+    <div class="take"><b>MY TAKE</b>
+    The <i>manifest</i> is right — without a declaration there is nothing to pin, nothing to trust, nothing to serve.
+    The <i>ceremony</i> is not. The strategy's own design law says: <b>automate everything except the yes</b>, and it calls the
+    manifest machine-written. So a fresh project should not need an explicit init: the first real action
+    (<code>use</code>, <code>add</code>, <code>apply</code>) can materialize <code>.agentstack/</code> silently, and the only stop is the yes.
+    Recommendation: fold init's project-side half into the first action; keep <code>init</code> as the machine-adoption verb.
+    This touches open decision <b>F6</b> (where <code>gateway connect</code> belongs) — same family: fewer ceremonies, same guarantees.</div>
+  </div>
+
+  <div class="item">
+    <div class="q">Q3 · Nested folders become toolsets automatically (<code>web/web-design-skill</code> → toolset <code>web</code>)?<span class="chip c-idea">IDEA</span></div>
+    <div class="a">Not in any document today. Linked folders are shipped; the auto-toolset mapping is new.</div>
+    <div class="take"><b>MY TAKE</b>
+    I support it — it is the identity line made real: <i>“feels like a filesystem, thinks like a vault.”</i>
+    A folder is already how you think in groups; the toolset should follow. Three guards make it safe:
+    (1) the mapping <b>materializes into the manifest with a preview</b> — a suggestion at link time, never ambient magic at runtime;
+    (2) only first-level folders map to toolsets, so deep nesting stays unambiguous;
+    (3) a folder rename prompts — it never silently rewrites toolset names in the lock.
+    Route it into the named design-doc slot for source precedence rules, and it needs your adoption first.</div>
+  </div>
+
+  <div class="item">
+    <div class="q">Q4 · I trusted a skills repo once — trusting it again per project is bad DX.<span class="chip c-open">OPEN</span></div>
+    <div class="a">Per-project consent is deliberate: the project is the blast radius, and one yes covers exactly one project's use of exact bytes.</div>
+    <div class="take"><b>MY TAKE</b>
+    You can get the DX without touching the invariant. The strategy already promises it:
+    consent <i>“compressed into a single glanceable, content-bound moment — compressed, never removed.”</i>
+    Concretely: when the digest you are approving is already trusted in another project, the card should open as one glance —
+    <i>“identical to what you approved in project X — unchanged”</i> — one yes, zero re-reading. Recognition state for this
+    already exists on disk (<code>~/.agentstack/recognition.json</code>). That is presentation compression, not consent removal.
+    A true per-source global grant is also possible, but it widens what one yes covers — only you can trade that, and it presses
+    on invariant 4. Recommendation: glanceable re-trust now; measure the residual friction inside <b>F9</b>; revisit global grants
+    only if the study shows the friction still bites.</div>
+  </div>
+</section>
+
+<section class="card a1">
+  <div class="head"><span class="num">AREA 1</span><h2>The core</h2></div>
+  <ul>
+    <li>manifest + lock — digests pin bytes</li>
+    <li>live lease (0 files) / rendered managed regions</li>
+    <li>toolset → session → lease</li>
+    <li>13 adapters: 5 verified · 8 best-effort</li>
+    <li>init imports · secrets → <code>${REF}</code></li>
+    <li><span class="k k-do">DO</span><code>init</code> · <code>status</code> · <code>apply --write</code> · <code>use &lt;toolset&gt;</code></li>
+    <li><span class="k k-see">SEE</span>detected CLIs → preview diff → applied · status per harness</li>
+    <li><span class="k k-how">HOW</span>adapters compile per CLI · live = MCP lease, zero files · rendered = managed regions</li>
+    <li><span class="k k-files">FILES</span><code>.agentstack/</code> · regions in <code>CLAUDE.md</code>/<code>AGENTS.md</code> · linked folders + <code>~/.agentstack/lib/</code></li>
+  </ul>
+</section>
+
+<section class="card a2">
+  <div class="head"><span class="num">AREA 2</span><h2>The security plane</h2></div>
+  <ul>
+    <li>spine: bytes → trust → policy ∩ → gateway → egress → recorder</li>
+    <li>one yes bound to bytes — any change re-gates</li>
+    <li>gateway = the only door, re-checked every call</li>
+    <li class="risk">18 witnesses · F1 SNI hole = queue #1</li>
+    <li><span class="k k-do">DO</span><code>trust</code> · <code>yes</code> — then just work</li>
+    <li><span class="k k-see">SEE</span>full review card → ONE yes (real terminal only) · denials name the rule + next step</li>
+    <li><span class="k k-how">HOW</span>grant = digest of exact bytes · egress proxy filters network · recorder writes evidence</li>
+    <li><span class="k k-files">FILES</span><code>~/.agentstack/trust.json</code> · <code>audit/</code> · <code>runs.json</code></li>
+  </ul>
+</section>
+
+<section class="card a3">
+  <div class="head"><span class="num">AREA 3</span><h2>The surface — with examples</h2></div>
+  <div class="flag"><b>Mismatch found in this review:</b> TODO #10 (2026-08-04) fixes <b>fifteen</b> visible verbs;
+  the blueprint (2026-08-05) says <b>seventeen</b>. One document is stale — yours to reconcile.</div>
+  <ul>
+    <li><b>The visibility rule:</b> a verb stays visible only when a first-run surface, a doctor fix line,
+    or a machine-readable field can name it. The rest: <code>agentstack x &lt;cmd&gt;</code> — nothing removed, same exit codes.</li>
+    <li><code>status</code> → per-harness table: what is delivered, which lane, ready or not</li>
+    <li><code>add &lt;server&gt;</code> → shows the change · does nothing until <code>--write</code></li>
+    <li><code>doctor</code> → findings, each with an inline ↳ next step (102 hints in doctor.rs)</li>
+    <li><code>why &lt;capability&gt;</code> → origin, pin, approval, reach — the verb for when nothing is on disk</li>
+    <li><code>undo</code> → takes back anything the tool wrote</li>
+    <li><code>search &lt;term&gt;</code> → catalog + live registry, trust labels — results never look pre-approved</li>
+    <li><span class="k k-files">FILES</span><code>~/.agentstack/history</code> · <code>backups/</code> · contract: <code>cli/src/ui_contract.rs</code></li>
+  </ul>
+</section>
+
+<section class="card a4">
+  <div class="head"><span class="num">AREA 4</span><h2>Beyond the core</h2></div>
+  <ul>
+    <li>workflow engine: Boa, caged — modules off, eval denied, limits bound</li>
+    <li>roles carry model + effort · continuous dispatch</li>
+    <li>packaging: toolset → Docker image</li>
+    <li>rot view: last-used / never-used / drifted</li>
+    <li class="risk">P8: run + workflow are least verified — and the thesis puts them on the critical path</li>
+    <li><span class="k k-do">DO</span><code>run &lt;task&gt;</code> · <code>x workflow</code> · <code>image build</code> · <code>x report</code></li>
+    <li><span class="k k-see">SEE</span>posture string names what stays open · per-step evidence · ReDoS named, not hidden</li>
+    <li><span class="k k-how">HOW</span>run gated fail-closed by default · the power move (Q6): close P8 → per-role model/effort → un-hide</li>
+    <li><span class="k k-files">FILES</span><code>crates/workflow</code> · <code>crates/runtime</code> · <code>usage.json</code></li>
+  </ul>
+</section>
+
+<section class="card a5">
+  <div class="head"><span class="num">AREA 5</span><h2>The open queue — every item</h2></div>
+  <ol class="q">
+    <li><b>F1</b> — SNI trailing-byte fails open. A hole that fails open goes first, always.</li>
+    <li><b>F2</b> — version guard: Homebrew pins 0.17.1, README teaches 0.18. Blocks the study.</li>
+    <li><b>F7</b> — add the demand question to the study (did they <i>want</i> it, not just finish it).</li>
+    <li><b>P9</b> — the study: 5 strangers + 2-week retention. <b>THE BAR.</b> <code>docs/design/activation-study.md</code></li>
+    <li><b>F3 + P5b</b> — panel doc drift (20 of 43 rows wrong) + the witness that stops recurrence.</li>
+    <li><b>F4</b> — trust-store lock becomes RAII.</li>
+    <li><b>F5</b> — dependency-edge CI gate.</li>
+    <li><b>After the study:</b> P6 · P8 · F8 · F9 · F10 — re-prioritized by what it says.</li>
+  </ol>
+  <ul>
+    <li><b>Maintainer decisions</b> — move only on your yes:</li>
+    <li><b>P2</b> delivery-contract paragraph needs your wording</li>
+    <li class="risk"><b>R1</b> private APM disclosure — time-sensitive</li>
+    <li><b>R2</b> adopt the Area 6 direction as strategy</li>
+    <li><b>F6</b> <code>gateway connect</code>: promote or fold into init</li>
+    <li><b>N1</b> demo cast stale: re-record or retire</li>
+  </ul>
+</section>
+
+<section class="card a6">
+  <div class="head"><span class="num">AREA 6</span><h2>Adopted direction — how it works</h2></div>
+  <ul>
+    <li><b>Status:</b> drafted + argued · binds nothing until you adopt R2</li>
+    <li><b>Concede install:</b> no transitive resolution · no semver · no update tooling · no registry race</li>
+    <li><b>Govern intake:</b> external ecosystems (APM, vercel-labs/skills, MCP registry) are machine-readable supply →
+    <code>search</code>/<code>add-from</code> stage it <b>inert</b> → trust gate shows the full review → your yes → digest pinned.
+    You never own their shelf; everything off it passes your gate.</li>
+    <li><b>Positioning flip:</b> lead “governs what is allowed to run”, portability second — portability is copyable, the plane is not.
+    Honesty rider: “governs” never outruns <code>docs/ENFORCEMENT.md</code>. Depends on P8.</li>
+    <li><b>Beachhead unchanged:</b> one developer, 2+ CLIs · enterprise = named trigger, not a lane</li>
+    <li class="risk"><b>Tripwires:</b> APM ships runtime enforcement · vendor config-import convergence</li>
+  </ul>
+</section>
+
+<section class="card a7">
+  <div class="head"><span class="num">AREA 7</span><h2>Future ideas — all trigger-gated</h2></div>
+  <ul>
+    <li>execution harness: agent declares intent, harness plans · seeds adopted: A1 digest-keyed cache · A3 batching</li>
+    <li>enterprise runtime governance: fleet policy, central audit — a buyer, not a lane</li>
+    <li>first-run copy: “everything in Claude Code — governed in Codex in one command”</li>
+    <li>nothing starts before the bar (P9)</li>
+  </ul>
+</section>
+
+<section class="card a8">
+  <div class="head"><span class="num">AREA 8</span><h2>Rules that do not move — all eight</h2></div>
+  <ol class="q">
+    <li>No new unsafe code (sole exception <code>cli/src/sys.rs</code>)</li>
+    <li>Policy only narrows — effective ⊆ machine ceiling</li>
+    <li>Untrusted content is inert until the gate succeeds</li>
+    <li>Pinned byte changes re-gate — no cache, no partial trust</li>
+    <li>Secrets never serialize — <code>${REF}</code> only, fails closed</li>
+    <li>Single authority constructor · single upstream dispatch</li>
+    <li>All repository content is hostile input</li>
+    <li>Claims match enforcement — the register is #8 in practice</li>
+  </ol>
+  <ul>
+    <li><b>Honesty register:</b> advisory ≠ confinement · recording ≠ prevention · allowed ≠ safe · tier-2 ≠ “supported”</li>
+    <li><b>Why it sells:</b> a tool that tells you its limits is a tool you can reason with</li>
+  </ul>
+</section>
+
+<section class="card a9">
+  <div class="head"><span class="num">AREA 9</span><h2>Edges — all nine</h2></div>
+  <ul>
+    <li><b>blocks</b> · F2 version guard → P9 (strangers install through Homebrew)</li>
+    <li><b>blocks</b> · F7 demand question → P9 (fix the instrument before using it)</li>
+    <li><b>gates</b> · P9 → everything post-bar</li>
+    <li><b>blocks</b> · F3 contract drift → P5b panel migration</li>
+    <li><b>depends</b> · governance positioning → P8 verification</li>
+    <li><b>builds on</b> · governed intake → trust gate + search/add-from</li>
+    <li><b>builds on</b> · execution harness → recorder + digests + gateway</li>
+    <li><b>starts on</b> · execution harness → study signal or runner measurements</li>
+    <li><b>feeds</b> · digests → trust → gateway → recorder — the spine</li>
+  </ul>
+</section>
+
+</div>
+</div>
+</body>
+</html>

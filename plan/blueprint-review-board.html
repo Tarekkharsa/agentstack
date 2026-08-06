@@ -1,0 +1,582 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentStack — review board</title>
+<style>
+:root{
+  --bg:#faf7f0;--card:#fffdf8;--ink:#211e1a;--soft:#6f6656;--hair:#e8dfcd;--hair2:#f1ead9;
+  --blue:#3f56a8;--red:#ae4437;--green:#3f7048;--orange:#b8642f;--violet:#5f68a6;
+  --gold:#96751c;--grey:#7c7362;--sage:#6d7c51;--takebg:#f4eee0;--codebg:#26221c;--codeink:#e9e0cd;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:15px/1.65 -apple-system,"SF Pro Text","Segoe UI",Helvetica,Arial,sans-serif;
+  padding:52px 24px 80px;-webkit-font-smoothing:antialiased;}
+.wrap{max-width:1160px;margin:0 auto;}
+header{text-align:center;margin-bottom:40px;}
+h1{font-family:"Iowan Old Style","Palatino Linotype",Georgia,serif;
+  font-size:32px;font-weight:600;margin:0 0 8px;}
+.motto{display:inline-block;background:var(--ink);color:#f6f0e4;border-radius:999px;
+  padding:8px 22px;font-size:13px;letter-spacing:.4px;}
+.part{font-family:"Iowan Old Style",Georgia,serif;font-size:22px;font-weight:600;
+  margin:44px 0 6px;padding-bottom:6px;border-bottom:2px solid var(--ink);}
+.part small{font-size:13px;color:var(--soft);font-family:-apple-system,"Segoe UI",sans-serif;font-weight:400;margin-left:10px;}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(350px,1fr));gap:20px;margin-top:18px;}
+.card{background:var(--card);border:1px solid var(--hair);border-radius:14px;overflow:hidden;
+  box-shadow:0 1px 2px rgba(33,30,26,.05);}
+.head{padding:14px 18px 6px;border-top:4px solid var(--ac,var(--grey));}
+.head .num{font-size:10px;font-weight:800;letter-spacing:2px;color:var(--ac,var(--grey));display:block;}
+.head h2{margin:2px 0 0;font-size:15.5px;font-weight:700;}
+.card ul{margin:0;padding:6px 18px 16px;list-style:none;}
+.card li{padding:5px 0;font-size:13px;border-bottom:1px solid var(--hair2);}
+.card li:last-child{border-bottom:0;}
+.card li .k{display:inline-block;min-width:44px;font-size:9.5px;font-weight:800;letter-spacing:1.2px;margin-right:6px;}
+.k-do{color:var(--blue)} .k-see{color:var(--green)} .k-how{color:var(--violet)} .k-files{color:var(--orange)}
+ol.q{margin:0;padding:6px 18px 12px 34px;font-size:13px;}
+ol.q li{margin:4px 0;}
+code{background:#efe8d8;padding:1px 6px;border-radius:5px;font-size:12px;
+  font-family:ui-monospace,"SF Mono",Menlo,monospace;}
+pre{background:var(--codebg);color:var(--codeink);border-radius:10px;padding:11px 15px;
+  font:12px/1.6 ui-monospace,"SF Mono",Menlo,monospace;overflow-x:auto;margin:8px 0;}
+pre b{color:#ffd9a8;font-weight:600;}
+.dim{color:#9b917c;}
+.risk{color:var(--red);font-weight:600;}
+.flag{margin:10px 18px;background:#faf0d7;border:1px solid #dcc98e;border-radius:10px;
+  padding:9px 13px;font-size:12.5px;}
+.flag b{color:#7a5b10;}
+.wide{grid-column:1/-1;}
+.body{padding:4px 20px 18px;font-size:13.5px;}
+.body p{margin:8px 0;}
+.guard{display:flex;gap:10px;margin:6px 0;font-size:13px;}
+.guard b{flex:0 0 20px;color:var(--orange);}
+.a1{--ac:var(--blue)} .a2{--ac:var(--red)} .a3{--ac:var(--green)} .a4{--ac:var(--orange)}
+.a5{--ac:var(--violet)} .a6{--ac:var(--green)} .a7{--ac:var(--gold)} .a8{--ac:var(--grey)} .a9{--ac:var(--sage)}
+.tC{--ac:var(--orange)} .tB{--ac:var(--blue)} .tA{--ac:var(--green)} .tD{--ac:var(--ink)}
+.chip{display:inline-block;font-size:9.5px;font-weight:800;letter-spacing:1px;color:#fff;
+  border-radius:6px;padding:2.5px 9px;margin-left:8px;vertical-align:2px;}
+.c-pick{background:var(--orange)} .c-fix{background:var(--blue)} .c-fix2{background:var(--green)}
+.c-open{background:var(--violet)} .c-idea{background:var(--gold)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>AgentStack — review board</h1>
+  <p class="motto">one manifest → every CLI · governs what runs</p>
+</header>
+
+<div class="part">Part 1 · The mind map <small>all nine areas of the blueprint</small></div>
+<div class="grid">
+
+<section class="card a1">
+  <div class="head"><span class="num">AREA 1</span><h2>The core</h2></div>
+  <ul>
+    <li>manifest + lock — digests pin bytes</li>
+    <li>live lease (0 files) / rendered managed regions</li>
+    <li>toolset → session → lease · 13 adapters (5 verified, 8 best-effort)</li>
+    <li><span class="k k-do">DO</span><code>init</code> · <code>status</code> · <code>apply --write</code> · <code>use &lt;toolset&gt;</code></li>
+    <li><span class="k k-see">SEE</span>detected CLIs → preview diff → applied</li>
+    <li><span class="k k-how">HOW</span>live = MCP lease, zero files · rendered = managed regions</li>
+    <li><span class="k k-files">FILES</span><code>.agentstack/</code> · <code>CLAUDE.md</code>/<code>AGENTS.md</code> regions · linked folders</li>
+  </ul>
+</section>
+
+<section class="card a2">
+  <div class="head"><span class="num">AREA 2</span><h2>The security plane</h2></div>
+  <ul>
+    <li>spine: bytes → trust → policy ∩ → gateway → egress → recorder</li>
+    <li>one yes bound to bytes · gateway = the only door</li>
+    <li class="risk">18 witnesses · F1 SNI hole fixed in <code>310be27</code> — on an unmerged branch</li>
+    <li><span class="k k-do">DO</span><code>trust</code> · <code>yes</code> — then just work</li>
+    <li><span class="k k-see">SEE</span>review card → one yes · denials name the next step</li>
+    <li><span class="k k-files">FILES</span><code>~/.agentstack/trust.json</code> · <code>audit/</code> · <code>runs.json</code></li>
+  </ul>
+</section>
+
+<section class="card a3">
+  <div class="head"><span class="num">AREA 3</span><h2>The surface</h2></div>
+  <div class="flag"><b>Mismatch resolved by the binary:</b> <code>agentstack --help</code> shows <b>17</b> verbs today — the blueprint is right; TODO #10 (“fifteen”) is the stale one. One-line TODO edit to make.</div>
+  <ul>
+    <li>visible verb rule: first-run surface, doctor fix line, or machine field names it — else <code>agentstack x</code></li>
+    <li><code>status</code> table · <code>add</code> previews · <code>doctor</code> hints · <code>why</code> explains · <code>undo</code> reverts · <code>search</code> labels trust</li>
+    <li><span class="k k-files">FILES</span><code>history</code> · <code>backups/</code> · <code>ui_contract.rs</code></li>
+  </ul>
+</section>
+
+<section class="card a4">
+  <div class="head"><span class="num">AREA 4</span><h2>Beyond the core</h2></div>
+  <ul>
+    <li>workflow engine: Boa, caged · roles carry model + effort</li>
+    <li>packaging: toolset → Docker image · rot view</li>
+    <li class="risk">P8: run + workflow least verified — on the critical path</li>
+    <li><span class="k k-how">HOW</span>the power move: close P8 → per-role model/effort → un-hide workflows</li>
+  </ul>
+</section>
+
+<section class="card a5">
+  <div class="head"><span class="num">AREA 5</span><h2>The open queue</h2></div>
+  <ol class="q">
+    <li><b>Merge the two branches</b> — F1, F2, F3, F4, F7, N4 and P5b are done, and only there</li>
+    <li><b>N5</b> doctor answers by cwd · <b>N7</b> stale study lines (blocks P9)</li>
+    <li><b>P9</b> the study = <b>THE BAR</b> (5 strangers + 2-week retention)</li>
+    <li><b>F5</b> CI dep gate · <b>F9</b> re-trust friction in the docs · <b>N6</b> t3code e2e (consumer-owned)</li>
+    <li>after the study: P6 · P8 · F8 · F10</li>
+  </ol>
+  <ul>
+    <li><b>Decisions:</b> P2 wording · <span class="risk">R1 disclosure (time-sensitive)</span> · R2 adopt direction · F6 gateway connect · F8 <code>--yes</code> rename · N1 demo cast</li>
+  </ul>
+</section>
+
+<section class="card a6">
+  <div class="head"><span class="num">AREA 6</span><h2>Adopted direction</h2></div>
+  <ul>
+    <li>concede install · govern intake: external registries → staged inert → your gate → pinned</li>
+    <li>lead “governs what runs”, portability second · honesty rider: never outrun ENFORCEMENT.md</li>
+    <li>beachhead: dev with 2+ CLIs · enterprise = trigger</li>
+    <li class="risk">tripwires: APM runtime plane · vendor import convergence</li>
+  </ul>
+</section>
+
+<section class="card a7">
+  <div class="head"><span class="num">AREA 7</span><h2>Future ideas — trigger-gated</h2></div>
+  <ul>
+    <li>execution harness (seeds: A1 cache, A3 batching)</li>
+    <li>enterprise governance — a buyer, not a lane</li>
+    <li>first-run copy candidate line · nothing before the bar</li>
+  </ul>
+</section>
+
+<section class="card a8">
+  <div class="head"><span class="num">AREA 8</span><h2>Rules that do not move</h2></div>
+  <ol class="q">
+    <li>no new unsafe · 2 policy only narrows · 3 untrusted is inert</li>
+    <li>4 byte change re-gates · 5 secrets never serialize</li>
+    <li>6 single authority/dispatch · 7 hostile input · 8 claims = enforcement</li>
+  </ol>
+  <ul><li><b>Honesty:</b> advisory ≠ confinement · recording ≠ prevention · allowed ≠ safe · tier-2 ≠ supported</li></ul>
+</section>
+
+<section class="card a9">
+  <div class="head"><span class="num">AREA 9</span><h2>Edges</h2></div>
+  <ul>
+    <li>F2, F7 <b>cleared</b> · N7 is the last <b>block</b> on P9 · P9 <b>gates</b> everything post-bar</li>
+    <li>F3 <b>unblocked</b> P5b — both landed, on branches · positioning <b>depends on</b> P8</li>
+    <li>intake <b>builds on</b> trust gate · harness <b>builds on</b> recorder + digests + gateway</li>
+    <li>the spine <b>feeds</b>: digests → trust → gateway → recorder</li>
+  </ul>
+</section>
+
+</div>
+
+<div class="part">Part 2 · Trust DX — the plan <small>simplified · your pick first</small></div>
+<div class="grid">
+
+<section class="card wide tD">
+  <div class="head"><span class="num">THE PROBLEM</span><h2>Two sentences</h2></div>
+  <div class="body">
+    <p>The tool re-gates <b>its own edits</b>: <code>add --write</code> flips the digest and demands a fresh <code>trust .</code> for a change you just previewed. And every new project pays the <b>full card</b> even when every byte is already approved elsewhere.</p>
+  </div>
+</section>
+
+<section class="card wide tC">
+  <div class="head"><span class="num">YOUR PICK</span><h2>Trust happens at <code>lib link</code><span class="chip c-pick">CHOSEN DIRECTION — DRAFT</span></h2></div>
+  <div class="body">
+<pre>$ agentstack lib link ~/skills --write
+<span class="dim">[ full review of the source's content — once, here ]</span>
+✓ linked + trusted: source “skills”, 14 pinned digests
+
+$ cd ~/any-project && agentstack use web --write
+<b>✓ all content trusted at source “skills” — activated</b></pre>
+    <p>Linking <i>is</i> the review moment. The one deliberate yes moves to where you adopt the source — after that, projects consuming only source-trusted digests activate without a card.</p>
+    <p><b>And <code>--write</code> moves nothing.</b> The folder stays exactly where it is (<code>unlink</code> leaves it alone too). Without <code>--write</code> the command only previews; with it, it records the link. One universal rule across the whole CLI: preview first, <code>--write</code> commits. So yes — <code>agentstack lib link ~/skills</code> alone is enough to see exactly what will happen; add <code>--write</code> to make it so.</p>
+    <p><b>Three guards keep it safe:</b></p>
+    <div class="guard"><b>1</b><span>Still byte-bound: the grant covers the <b>digests reviewed at link time</b>. New or changed content in the folder re-gates at the source — one diff-first review, not per project.</span></div>
+    <div class="guard"><b>2</b><span>Revocation: <code>lib untrust &lt;source&gt;</code> kills every inherited activation at the next dispatch (trust is re-checked at the gateway on every call — already built).</span></div>
+    <div class="guard"><b>3</b><span>Executable kinds (hooks, extensions) keep the full per-project ceremony — a skill reads; a hook runs. Different risk, different yes.</span></div>
+  </div>
+</section>
+
+<section class="card tB">
+  <div class="head"><span class="num">FIX 2</span><h2>The tool's own writes re-pin<span class="chip c-fix">COMPANION</span></h2></div>
+  <div class="body">
+<pre>$ agentstack add server github --write
+✓ added
+<b>✓ trust re-pinned — 1 change: + server github</b></pre>
+    <p>You previewed it, you wrote it — that was the yes. <code>apply</code> already re-pins this way; extend it to <code>add</code>, <code>lock</code>, <code>use</code>. External edits (git pull, editor) still re-gate.</p>
+  </div>
+</section>
+
+<section class="card tA">
+  <div class="head"><span class="num">FIX 3</span><h2>Cards only expand what changed<span class="chip c-fix2">COMPANION</span></h2></div>
+  <div class="body">
+<pre>$ agentstack trust .
+<b>✓ 12 unchanged (collapsed) · 2 changed:</b>
+  ~ skill web-design   <span class="dim">[diff inline]</span>
+  + server github
+Trust this project?  <span class="dim">[Enter · d = detail]</span></pre>
+    <p>Unchanged and already-approved content collapses to one line. The two re-gate styles become one diff-first card.</p>
+  </div>
+</section>
+
+<section class="card wide tD">
+  <div class="head"><span class="num">WHAT MOVES</span><h2>To make your pick real</h2></div>
+  <div class="body">
+    <ol class="q">
+      <li>New grant kind: per-source, digest-set, in <code>trust.json</code> — beside per-project grants, not replacing them.</li>
+      <li><code>lib link</code> gains the review card + yes; <code>lib untrust</code> and <code>lib sources --trust-status</code> follow.</li>
+      <li>The consent-card design doc's fence (“machine-level standing approval is not built here”) is <b>replaced by this decision</b> — it was a decision, and it is yours to reverse.</li>
+      <li>The activation study's D2 watch then measures what friction remains.</li>
+    </ol>
+  </div>
+</section>
+
+</div>
+
+<div class="part">Part 3 · The commands <small>day-to-day first, then the whole map — from the live binary</small></div>
+<div class="grid">
+
+<section class="card wide tD">
+  <div class="head"><span class="num">WHY --WRITE</span><h2>Why it exists — and your challenge to it<span class="chip c-fix2">ADOPTED — EVERYWHERE</span></h2></div>
+  <div class="body">
+    <p><b>Why it exists:</b> every command that would change something shows the change and stops. <code>--write</code> is the one uniform way to commit. One rule for the whole CLI — you never wonder which commands are dangerous, because none are without it.</p>
+    <p><b>Your challenge is fair:</b> in the daily loop it doubles the typing. The honest middle:</p>
+<pre>$ agentstack add server github
+<span class="dim">[ preview: + server github, pinned bytes ]</span>
+<b>Apply? [y/N]</b> y
+✓ added · ✓ trust re-pinned</pre>
+    <p><b>Proposal:</b> in an interactive terminal, the preview flows straight into a y/N confirm — one command, still nothing silent. Same guarantee, half the ceremony. <b>Decision recorded in this review: adopt it everywhere.</b> <code>--write</code> stays as the explicit form for scripts and agents.</p>
+  </div>
+</section>
+
+<section class="card wide tD">
+  <div class="head"><span class="num">IN ORDER</span><h2>The full path — machine → library → project → every day</h2></div>
+  <div class="body">
+<pre><span class="dim"># 1 · once per machine</span>
+agentstack init                        <span class="dim">find your CLIs, adopt their setups — secrets lift to ${REF}</span>
+agentstack lib link ~/skills --write   <span class="dim">link your skill folders / cloned repos (repeat per folder)</span>
+agentstack secret set GITHUB_TOKEN     <span class="dim">store secrets in the OS keychain</span>
+agentstack x gateway connect claude    <span class="dim">register the zero-files gateway once per CLI</span>
+
+<span class="dim"># 2 · once per project</span>
+cd ~/my-project
+agentstack init                        <span class="dim">adopt what this project already has</span>
+agentstack search github               <span class="dim">find what's missing (marks what you already have)</span>
+agentstack add server github --write   <span class="dim">add it — preview shows first</span>
+agentstack toolset create web --write  <span class="dim">name the subset this kind of work uses</span>
+agentstack lock --write                <span class="dim">resolve + pin exact bytes</span>
+agentstack trust .                     <span class="dim">the review, the one yes</span>
+agentstack use web --write             <span class="dim">go live — lease where possible, files where not</span>
+
+<span class="dim"># 3 · every day</span>
+agentstack status                      <span class="dim">where am I · the one next step</span>
+agentstack use &lt;toolset&gt; --write       <span class="dim">switch per task</span>
+agentstack yes                         <span class="dim">review + activate files you dropped in</span>
+agentstack doctor                      <span class="dim">deep check, fixes named</span>
+agentstack undo                        <span class="dim">take any of it back</span></pre>
+  </div>
+</section>
+
+<section class="card a1">
+  <div class="head"><span class="num">FRONT DOOR</span><h2>The 17 visible verbs</h2></div>
+  <ul>
+    <li><code>init</code> — find your CLIs, bring their setups together</li>
+    <li><code>status</code> — one screen, one next step</li>
+    <li><code>add</code> · <code>search</code> — add and find capabilities</li>
+    <li><code>apply</code> — write the setup into each CLI's config</li>
+    <li><code>doctor</code> — deep check, every finding names a fix</li>
+    <li><code>lock</code> — resolve refs, pin exact content</li>
+    <li><code>lib</code> — the central library: link · list · sync · new</li>
+    <li><code>toolset</code> · <code>use</code> — name a subset, switch to it</li>
+    <li><code>yes</code> — activate dropped files, one step</li>
+    <li><code>run</code> — launch an agent CLI as a tracked run</li>
+    <li><code>trust</code> — the review and the yes</li>
+    <li><code>undo</code> · <code>adopt</code> — take back / keep a hand-edit</li>
+    <li><code>why</code> — where did this come from, where is it live</li>
+    <li><code>secret</code> — keychain-backed secrets, <code>${REF}</code> resolution</li>
+  </ul>
+</section>
+
+<section class="card a4">
+  <div class="head"><span class="num">WORTH KNOWING</span><h2>Hidden gems</h2></div>
+  <ul>
+    <li><code>up</code> — set a new machine up from an existing setup, one command</li>
+    <li><code>try</code> — try a skill without installing anything</li>
+    <li><code>guard test rm -rf /</code> — judge a command against the machine guard</li>
+    <li><code>report usage</code> · <code>report calls</code> — where your setup actually gets used, and the dead weight</li>
+    <li><code>workflow explain</code> — what a workflow costs BEFORE running it</li>
+    <li><code>self update</code> — checksum-verified upgrade of the binary itself</li>
+  </ul>
+</section>
+
+<section class="card wide a9">
+  <div class="head"><span class="num">THE WHOLE MAP</span><h2>Every command, grouped by task — hidden ones still run at their own name or under <code>agentstack x</code></h2></div>
+  <ul>
+    <li><b>Set up</b> — init · up · status · adapters · settings · self · completions</li>
+    <li><b>Edit</b> — add · set · search · remove · install · lib · toolset · adopt · export · import</li>
+    <li><b>Share</b> — share · receive · publisher</li>
+    <li><b>Render</b> — apply · use · yes · instructions · lock · session · diff · unrender · uninstall · delivery</li>
+    <li><b>Undo</b> — undo · restore</li>
+    <li><b>Protect</b> — trust · explain · why · secret · guard · sign · verify</li>
+    <li><b>Run</b> — run · kill · shim · workflow · image · gateway · mcp · try</li>
+    <li><b>Inspect</b> — doctor · report · lease · optimize · proxy</li>
+    <li><span class="dim">Panel-contract actions (add-skill-to-profile, use-profile, …) exist for t3code, digest-bound — not part of the everyday surface.</span></li>
+  </ul>
+</section>
+
+</div>
+
+<style>.two{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:760px){.two{grid-template-columns:1fr}}.lbl{font-size:10px;font-weight:800;letter-spacing:1.4px;color:var(--soft);margin:8px 0 2px}</style>
+<div class="part">Part 4 · Answers, round 2 <small>secrets · x · project start · search &amp; agents · the manifest · policy reality</small></div>
+<div class="grid">
+
+<section class="card a2">
+  <div class="head"><span class="num">SECRETS</span><h2>Multiple secrets, .env, varlock</h2></div>
+  <div class="body">
+    <p>You rarely run <code>secret set</code> at all. Resolution walks a chain; first hit wins:</p>
+<pre>env var → varlock vault → OS keychain → .env</pre>
+    <p>Already on <code>.env</code> or varlock? Nothing to do — <code>${GITHUB_TOKEN}</code> in the manifest resolves from there at use time. <code>secret list</code> shows every reference the manifest makes and whether each resolves on this machine. <code>secret set</code> is only for values you want in the OS keychain. Unresolved fails closed — never an empty string.</p>
+  </div>
+</section>
+
+<section class="card a3">
+  <div class="head"><span class="num">WHAT IS X</span><h2><code>agentstack x</code>, in one paragraph</h2></div>
+  <div class="body">
+    <p>Not dynamic, not magic: one static namespace. The front door shows 17 verbs; every other command sits one hop behind <code>agentstack x &lt;cmd&gt;</code> — same parse tree, same flags, same exit codes. Every hidden command also runs at its own name: <code>agentstack gateway connect</code> and <code>agentstack x gateway connect</code> are the same command. <code>--help --all</code> prints the whole map.</p>
+    <p>And not Claude-only: <code>gateway connect &lt;cli&gt;</code> runs once per CLI — claude, codex, cursor… <code>x adapters list</code> shows all 13 known CLIs and which look installed.</p>
+  </div>
+</section>
+
+<section class="card wide tC">
+  <div class="head"><span class="num">PROJECT START</span><h2>With trusted libs — and without</h2></div>
+  <div class="body">
+    <div class="two">
+      <div><div class="lbl">SOURCES ALREADY TRUSTED — your pick, paying off</div>
+<pre>cd ~/new-project
+agentstack use web
+<span class="dim">[ toolset web — all content trusted at source “skills” ]</span>
+<b>Apply? [y]  ✓ live — no card, no init ceremony</b></pre></div>
+      <div><div class="lbl">SOURCE NOT YET TRUSTED</div>
+<pre>cd ~/new-project
+agentstack use web
+<span class="dim">[ source “skills” is not trusted yet — full review, once ]</span>
+<b>Trust source “skills”? [y]  ✓ then live everywhere</b></pre></div>
+    </div>
+    <p>Either way the manifest materializes on the first action (the init-fold decision). The only difference is whether the one source review already happened. <code>init</code> remains for adopting a machine's existing CLI configs — not a required project step.</p>
+  </div>
+</section>
+
+<section class="card a1">
+  <div class="head"><span class="num">SEARCH &amp; AGENTS</span><h2>Who searches, and what it writes</h2></div>
+  <div class="body">
+    <p><code>search</code> reads the local catalog plus the official MCP Registry, marks what you already have, and writes <b>nothing</b> — <code>add</code> is the verb that edits the manifest.</p>
+    <p>Your agent can do both: <code>agentstack mcp</code> runs agentstack itself as an MCP server, so an agent searches and proposes adds through the same governed surface — and whatever it adds lands inert until your yes.</p>
+  </div>
+</section>
+
+<section class="card wide a8">
+  <div class="head"><span class="num">THE MANIFEST</span><h2>One file, all cases — <code>.agentstack/agentstack.toml</code></h2></div>
+  <div class="body">
+<pre><span class="dim"># servers — the MCP servers this project may use</span>
+[servers.github]
+type = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-github"]
+env = { GITHUB_TOKEN = "${GITHUB_TOKEN}" }   <span class="dim"># ${REF} — never a value</span>
+
+<span class="dim"># skills — inline (in this repo) or from a linked library source</span>
+[skills.code-review]
+path = "./skills/code-review"          <span class="dim"># inline: overrides any library name</span>
+[skills.web-design]
+source = "skills"                      <span class="dim"># library ref: resolved from the linked source, pinned at lock</span>
+
+<span class="dim"># instructions — one base file; variants override per (CLI, model)</span>
+[instructions.house]
+path = "./instructions/house.md"                <span class="dim"># the default EVERY CLI gets</span>
+
+[[instructions.house.variant]]
+cli = "claude-code"
+model = "opus"
+path = "./instructions/house.claude-opus.md"    <span class="dim"># only Claude Code on Opus gets this</span>
+
+[[instructions.house.variant]]
+cli = "codex"
+path = "./instructions/house.codex.md"          <span class="dim"># any Codex, any model</span>
+
+<span class="dim"># pick order: exact (cli, model) match → cli match → base file.
+# delivered per harness over its best channel (MCP initialize, global file,
+# flag). Only 6 of 13 adapters have an instruction channel — `status` says
+# which one is actually active where.</span>
+
+<span class="dim"># toolsets — ONE table on purpose. The strategy makes toolset the single
+# selection concept: project selection, lease unit, and workflow role are
+# one noun. Which fields you fill decides how it is worn.</span>
+[toolsets.web]                          <span class="dim"># worn for selection: `use web` activates these</span>
+servers = ["github"]
+skills  = ["web-design", "code-review"]
+
+[toolsets.reader]                       <span class="dim"># worn as a workflow role: who runs it, and how</span>
+harness = "codex"                       <span class="dim"># which CLI runs this role</span>
+model = "gpt-5.5"
+effort = "high"
+skills  = ["code-review"]               <span class="dim"># a role can carry members too</span>
+
+<span class="dim"># hooks &amp; extensions — executable kinds: full consent ceremony, always</span>
+[hooks.format-on-stop]
+<span class="dim"># event + matcher + command — rendered into each harness's native hook config</span>
+
+<span class="dim"># per-harness native settings</span>
+[settings.claude-code]
+<span class="dim"># dotted keys, e.g. permissions.defaultMode</span>
+
+<span class="dim"># policy — can only narrow the machine ceiling</span>
+[policy.tools]
+"*" = ["!delete_*"]
+github = ["get_*", "list_*"]</pre>
+    <p><code>agentstack.lock</code> sits beside it and pins every resolved ref to exact bytes. The machine file <code>~/.agentstack/agentstack.toml</code> holds the ceiling (<code>[policy]</code>, <code>[guard]</code>) that no project can widen.</p>
+  </div>
+</section>
+
+<section class="card wide a2">
+  <div class="head"><span class="num">POLICY — THE HONEST ANSWER</span><h2>Can a CLI work around <code>[policy.tools]</code> or the trust logic?</h2></div>
+  <div class="body">
+    <p>Checked against <code>docs/ENFORCEMENT.md</code> (the Tools row of the matrix). The answer depends on the lane — and the docs say so plainly:</p>
+    <ul>
+      <li><b>Gateway / lease lane — enforced.</b> Every call passes <code>Gateway::try_call</code>: a denied tool is filtered out of discovery <i>and</i> refused if called anyway. Trust is re-read from disk on every call — a revoked yes stops the next call. No workaround through the gateway.</li>
+      <li><b class="risk">Host-rendered lane — unsupported, by declaration.</b> When <code>apply</code> writes a server into a CLI's native config, that CLI talks to the server <i>directly</i> — the policy decision is never called on that path. A harness in host mode can simply use what its own config holds. This is invariant 8 in action: the docs refuse to claim enforcement where there is none.</li>
+      <li><b>Sandbox — enforced for gateway-routed traffic, with a named ceiling:</b> an agent that opens its own connection to an upstream the egress policy allows bypasses the gateway. <b>Lockdown</b> closes that: the egress sidecar's relay is the sole MCP route and direct connections to declared hosts are blocked.</li>
+    </ul>
+    <p><b>What else lives under <code>[policy.*]</code>:</b> <code>tools</code> (per-server allow/deny patterns, rename-proof <code>"*"</code> rules) · <code>filesystem</code> (read/write deny globs, enforced strictly in sandbox tiers, advisory on host) · egress rules (where each server's traffic may go — enforced at the proxy in sandboxed lanes). All of it intersects downward from the machine file: a project can only narrow.</p>
+    <p><b>Practical rule:</b> if the policy must hold against a hostile agent, run the gateway/lease lane or a sandbox tier. Host mode is convenience with honesty labels, not confinement.</p>
+  </div>
+</section>
+
+</div>
+
+<div class="part">Part 5 · The master to-do <small>every page absorbed · product ready first, study last</small></div>
+<div class="grid">
+
+<section class="card wide tD">
+  <div class="head"><span class="num">NOW</span><h2>Merge and correctness — nothing else lands before these</h2></div>
+  <div class="body"><ol class="q">
+    <li><b>Land the two branches.</b> <code>review-fixes-2026-08-05</code> in this repo — 8 commits, cut from main at <code>3ec17e1</code>, never pushed — holds F1, F2, F3, F4, F7 and N4. <code>t3code-contract-migration</code> in the t3code repo — 5 commits, HEAD <code>465ca718e</code> — holds P5b. Neither is merged; everything below assumes them in.</li>
+    <li><b>Read the trust and egress change line by line before merging.</b> <code>crates/trust/src/lib.rs</code> and <code>crates/egress/src/sni.rs</code> are the only touched review boundaries, and they are exactly what this repo's working rules reserve for maintainer reading. F1's commit also carries an <code>ENFORCEMENT-WAIVER</code> trailer — it makes the code match the never-a-silent-Absent claim the module header already made.</li>
+    <li><b>N5</b> — <code>doctor --json</code> answers differently depending on the working directory. Same project, same absolute <code>--manifest-dir</code>: from inside the project, <code>next_action: null</code> and 0 warnings; from <code>/</code>, which is what t3code's server spawns from, <code>agentstack x unrender --write</code> and 7 warnings. The panel renders what it is given faithfully, so this is CLI behaviour. Panel and terminal can describe the same project differently and only one of them can be right. Size unknown until scoped.</li>
+    <li><b>Bookkeeping truth-up.</b> TODO #10: fifteen → the binary's seventeen. And reconcile A1/A3: adopted by you, but the throughput plan still reads "not adopted" and TODO.md has no entry — three documents, one truth.</li>
+  </ol></div>
+</section>
+
+<section class="card wide a3">
+  <div class="head"><span class="num">CLOSED TODAY</span><h2>Seven items done — every one of them only on a branch<span class="chip c-fix2">BRANCH ONLY</span></h2></div>
+  <div class="body"><ol class="q">
+    <li><b>F1</b> <code>310be27</code> — the SNI fail-open. Zero bytes remaining stays Absent; one byte remaining now reads Unverifiable. The witness covers both, plus the negative control.</li>
+    <li><b>F2</b> <code>8fc012f</code> — the README verb guard. <code>yes</code>, <code>undo</code>, <code>why</code> and <code>x unrender</code> are named as v0.18.0+ against the v0.17.1 the tap and the installer actually serve.</li>
+    <li><b>F3</b> <code>c9534e7</code> — the panel contract table. Six rows corrected, fourteen names added, and the column renamed from "In released v0.17.0" to "In this build": four rows were already wrong for that release and sixteen names post-date it. The witness <code>every_served_contract_is_documented</code> fails on drift in either direction.</li>
+    <li><b>F4</b> <code>977b5d5</code> — the trust store lock. An RAII <code>LockGuard</code> with <code>Drop</code>; the witness panics on purpose and re-takes the lock in under a second instead of waiting out the 5 s.</li>
+    <li><b>F7</b> <code>361a4ec</code> — the study's demand dimension. Additive only, no threshold moved: exit question D1, the re-trust friction watch D2 with a count, and a two-week follow-up in which no reply is itself an outcome. <code>plan/study-kit.md</code> is the one-page run sheet and pins participants to v0.18.0-rc.2, never the Homebrew path.</li>
+    <li><b>N4</b> <code>02b1768</code> — servers another application owns are left out of the import. Found by opening the product: every project's first run reported <code>node_repl</code> and <code>computer-use</code> as "defined more than once", and both are installed and owned by the ChatGPT and Codex desktop apps and registered into six global tool configs. The classifier reads path text only — it executes nothing, resolves nothing, expands nothing, bounds the shell-wrapper parse, and treats every uncertain case as the user's own server. The exclusion is never silent: the review names each server, its application, the path evidence and the override; <code>init --plan</code> carries the same list as <code>tool_managed</code> for the panel; <code>--include-tool-managed</code> opts one back in and says so. New FEATURES name <code>init-tool-managed-v1</code>, documented, enforced by F3's witness.</li>
+    <li><b>P5b</b> t3code <code>465ca718e</code> — the panel contract migration. Three of the four predicted changes differed from the prediction: doctor's null was already tolerated, but <code>next_step</code> was consumed nowhere, so a healthy project rendered nothing; <code>status --json</code> does not apply at all, because t3code never calls it; <code>drifted</code> was a STRICT three-literal decode, so one drifted item failed the whole preview and the panel said "Couldn't load the review" on exactly the state that most needs reviewing; diff warnings were decoded but rendered nowhere, so seven withheld live-routed targets read as "Everything is in sync". A running-browser check then caught a dead "0 servers … kept" block with a live Adopt button that no markup test covered. A local unsigned DMG was built from that HEAD (<code>release/T3-Code-0.0.31-arm64.dmg</code>, 146 MB, arm64) and the drift review was verified in the production bundle.</li>
+  </ol></div>
+</section>
+
+<section class="card wide a2">
+  <div class="head"><span class="num">SCRATCH SWEEP</span><h2>Net-new from .scratch — the handoff's live escalations</h2></div>
+  <div class="body"><ol class="q">
+    <li><b class="risk">Consent question:</b> <code>apply --write</code> / <code>use --write</code> proceed on stale trust ("content changed") — verified against HEAD. Belongs inside the trust-DX design, not after it.</li>
+    <li><b class="risk">O1</b> — <code>lock</code> fetches git sources for skills no toolset selects, before the gate (invariant-3 posture call).</li>
+    <li><b class="risk">Egress question (MCP notes §4.2):</b> does a resolved secret in an <code>x-mcp-header</code> parameter pass the proxy unread? Invariant-5 check; the proxy/SNI code path is unread.</li>
+    <li><b>Mode-axis contradiction:</b> TODO #9 retired the Mode axis, but <code>status --json</code> still emits <code>"mode"</code>, <code>doctor-mode-v1</code> is live, and the tutorial teaches three modes.</li>
+    <li><b>P2 sharpened:</b> <code>automatic-delivery.md</code> "what default means" is now false — the contract edit is no longer wording polish, it is a correction.</li>
+    <li><b>Small fixes:</b> O2 doctor/status comment · O3 stale "run install" hint · <code>x diff</code> still says <code>--profile</code> · doctor Hooks check pinned to global scope · stale <code>delivery --json</code> route text · gap 6 (gateway self-registrations shown as drift) believed fixed in <code>e3936bb</code> — verify.</li>
+    <li><b>Design calls for you:</b> lockfile pinning for remote HTTP MCP under <code>ttlMs</code> · MCP 2026-07-28 statelessness migration (~8 sites) · O5 docs-pair re-verification · hidden-verb taste calls (<code>remove</code>, <code>explain</code>, <code>restore</code>).</li>
+    <li><b>P8 confirmation from the shape review:</b> six journey screens (use, up, run, workflow explain/report, image) are sketches, never observed — and nobody but you has ever run the product. P8 and P9 are the answer; this is their evidence.</li>
+  </ol></div>
+</section>
+
+<section class="card wide tC">
+  <div class="head"><span class="num">PRODUCT READY</span><h2>The DX wave — this review's decisions</h2></div>
+  <div class="body"><ol class="q">
+    <li><span class="chip c-fix2">ADOPTED</span> <b>y/N confirm everywhere</b> — interactive preview flows into confirm; <code>--write</code> stays for scripts and agents.</li>
+    <li><span class="chip c-pick">CHOSEN</span> <b>Trust at <code>lib link</code></b> — design doc → your explicit adoption → implement: per-source digest-set grants, link-time review card, <code>lib untrust</code>; hooks/extensions keep the per-project ceremony. Formally reverses the consent-card fence.</li>
+    <li><b>Init fold</b> — the first real action materializes <code>.agentstack/</code>; <code>init</code> stays the adoption verb. Decide together with F6.</li>
+    <li><span class="chip c-idea">IDEA</span> <b>Auto-toolsets from folders</b> — into the source-precedence design doc; adoption before code.</li>
+  </ol></div>
+</section>
+
+<section class="card wide a4">
+  <div class="head"><span class="num">WORKFLOWS READY</span><h2>The workflow items, gathered from every page</h2></div>
+  <div class="body"><ol class="q">
+    <li><b>P8</b> — verify the <code>run</code> and <code>workflow</code> entry points. The amendment's Block E raises it above the bar; the runtime-governance positioning depends on it.</li>
+    <li><b>R4 — answered, no work:</b> dispatch is already continuous (<code>StepOutcome::Awaiting</code>, wait_for = 1 on the live path, witnessed by a test). The throughput plan's parallelism workstream dies here.</li>
+    <li><b>Blocked until measured on our own runner:</b> B1 (concurrency 4→8) and B2 (finer partitioning — the real win, median agent &lt;8 min). Evidence so far came from Claude Code sessions, not our runner.</li>
+    <li><b>R7 constraint recorded:</b> any speculative execution needs per-branch git-worktree write isolation.</li>
+    <li><b>Throughput data defects before any cost claim:</b> the 16.5 s/call figure is derived not measured; the 57-agent vs 86-transcript populations are unreconciled.</li>
+  </ol></div>
+</section>
+
+<section class="card wide a8">
+  <div class="head"><span class="num">HARDENING + DECISIONS</span><h2>Then the batch that needs only you</h2></div>
+  <div class="body"><ol class="q">
+    <li><b>F5</b> — the dependency-edge rule has no gate. ARCHITECTURE.md says the listed internal crate edges are exact and anything unlisted is forbidden, but no CI check parses the <code>Cargo.toml</code> edge set: today the rule holds by discipline alone. ~20 lines in <code>check-structure.py</code>.</li>
+    <li><b>N6</b> — two t3code end-to-end tests fail against the newer binary ("nothing was delivered: every capability here is routed to the live lane and no bridge is registered"), confirmed identical on a clean tree, so it predates the migration. The cause is this repo's v3 delivery defaults; the failure is the consumer's. An hour to scope, and it belongs to the t3code repository. · <b>N3</b> SIGPIPE note in the example suite.</li>
+    <li><b>Maintainer batch:</b> P2 contract paragraph · <b class="risk">R1 private APM disclosure — time-sensitive, and embargoed: Microsoft's private security channel first, nothing public before they respond</b> · R2 adopt the amendment blocks A–E · F6 gateway connect placement · N1 demo cast · formal adoption of the A1/A3/B3 subset.</li>
+    <li><b>F8 — yours to decide.</b> <code>--yes</code> today means "I read the review" on <code>trust</code> and <code>yes</code>, the opposite of what it means everywhere else. Candidate: rename it <code>--reviewed</code> and keep <code>--yes</code> as a deprecated alias for one release.</li>
+    <li><b>Post-bar tail:</b> N2 enforcement backfill read · P6 tutorial source.</li>
+    <li><b>F9</b> — the docs never address re-trust friction in aggregate. Per event the friction is proportionate; on an active team repo it is the likely first abandonment point, and D2 now watches for it. A paragraph in <code>trust-a-repo.md</code>'s Limits section, for whatever the DX wave leaves behind.</li>
+    <li><b>F10</b> — the enforcement code lives in the 82k-line CLI crate, not in the small review boundaries. Recorded, deferred, not before the bar.</li>
+  </ol></div>
+</section>
+
+<section class="card wide" style="--ac:var(--violet)">
+  <div class="head"><span class="num">STUDY — LAST</span><h2>Your rule: the product is ready first</h2></div>
+  <div class="flag"><b>Why five strangers:</b> N4 and N5 are this engagement's only defects found by <i>running</i> the product rather than reading it — the import treated a vendor-owned entry as if you had authored it, and doctor computes its answer from ambient state instead of from the named project. Both surfaced within minutes of opening the product like a stranger would. That is the whole argument P9 makes.</div>
+  <div class="body"><ol class="q">
+    <li><b>N7</b> — four stale lines in the activation study. §8.1 says rc.1 while three other places pin rc.2; §3 warns about the bare installer but never names the Homebrew tap as a second way to receive an old binary; Appendix A is titled for two v2 observation prompts while §5 defines four; and Appendix A's V1 text was superseded by §5's rewrite. Ten minutes, and none of it moves a threshold. Blocks P9.</li>
+    <li><b>P9</b> — the study: five strangers + two-week retention. <b>THE BAR.</b> D2 additionally measures what trust friction remains after the DX wave.</li>
+    <li><b>Only if evidence then demands:</b> the install-plane wishlist from the APM comparison — transitive resolution, semver ranges, <code>outdated</code>/<code>update</code> — stays conceded until the study says otherwise.</li>
+  </ol></div>
+</section>
+
+</div>
+
+<div class="part">Part 6 · Absorbed documents <small>their essence lives above; the files moved to /tmp/plan-absorbed/</small></div>
+<div class="grid">
+
+<section class="card a1"><div class="head"><span class="num">ABSORBED</span><h2>product-blueprint.html</h2></div>
+<ul><li>The 9-area end-state blueprint (2026-08-05) → Part 1 is its map; the shipped/planned/idea/decision taxonomy carried over.</li></ul></section>
+
+<section class="card a5"><div class="head"><span class="num">ABSORBED</span><h2>delivery-followup-plan.html</h2></div>
+<ul><li>38 items, 18 open → every open one is in Part 5. Key fact: two unmerged branches hold F1–F4, F7, N4 and P5b; N5 and N7 are the live correctness items left.</li></ul></section>
+
+<section class="card a4"><div class="head"><span class="num">ABSORBED</span><h2>agent-throughput-plan.html</h2></div>
+<ul><li>Proposal, not adopted work. A1+A3 adopted by you (bookkeeping pending), B3 answered done, B1/B2 blocked on own-runner measurements, C2 blocked on worktree isolation, D-line cancelled (96.7% cache hit measured). Two data defects recorded.</li></ul></section>
+
+<section class="card a2"><div class="head"><span class="num">ABSORBED</span><h2>apm-comparison.html</h2></div>
+<ul><li>Fact-checked APM comparison → tripwire named, install-plane concession affirmed, R1 disclosure embargoed to the private channel first, post-bar wishlist parked in Part 5. The silent-extension gate and adversarial test dir it recommended already shipped.</li></ul></section>
+
+<section class="card a6"><div class="head"><span class="num">ABSORBED</span><h2>strategy-amendment-draft.html</h2></div>
+<ul><li>Five paste-ready blocks A–E for STRATEGY.md (concede install · APM tripwire · runtime-first copy with the honesty rider · team-buyer trigger · P8 above the bar). Operative only when you commit them — that is decision R2.</li></ul></section>
+
+<section class="card a7"><div class="head"><span class="num">ABSORBED</span><h2>execution-harness.html</h2></div>
+<ul><li>Deferred. Nine layers with verdicts; corrections 1–4 baked in (fall open on uncertain keys · delegate graphs to tools · worktree per branch · recorder is the memory); reopen triggers named, none met. Only A1/A3 adopted.</li></ul></section>
+
+<section class="card a3"><div class="head"><span class="num">ABSORBED</span><h2>.scratch/HANDOFF-review-fixes.md</h2></div>
+<ul><li>12-round fix ledger; its branch is merged (923ac8c, e3936bb). The live escalations moved into Part 5's scratch sweep.</li></ul></section>
+
+<section class="card a2"><div class="head"><span class="num">ABSORBED</span><h2>.scratch/mcp-2026-07-28-findings.md</h2></div>
+<ul><li>MCP 2026-07-28 + Skills spec research; authorizes nothing. Its open questions (x-mcp-header egress, ttlMs pinning, statelessness migration) are in the sweep.</li></ul></section>
+
+<section class="card a8"><div class="head"><span class="num">ABSORBED</span><h2>.scratch/page-captures.md · product-shape-review.html</h2></div>
+<ul><li>Terminal evidence at rc.2 plus the 12-round shape review. Framing superseded (the commit is on main); live remainder: verify gap 6, and the six unobserved journeys → P8.</li></ul></section>
+
+<section class="card a7"><div class="head"><span class="num">ARCHIVED</span><h2>.scratch/strategy-v3/</h2></div>
+<ul><li>The wayfinder that produced STRATEGY.md v3 — 13 tickets, all closed, destination reached 2026-08-02. Pure history; moved with the rest.</li></ul></section>
+
+<section class="card a6"><div class="head"><span class="num">KEPT</span><h2>plan/study-kit.md</h2></div>
+<ul><li>Operative run sheet for the P9 sessions — a pointer to <code>docs/design/activation-study.md</code>, which always wins. Stays in plan/.</li></ul></section>
+
+</div>
+</div>
+</body>
+</html>
