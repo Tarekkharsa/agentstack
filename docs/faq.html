@@ -125,13 +125,13 @@
     <ul>
       <li><a href="start.html">Get started</a>
       </li>
-      <li><a href="tutorial/">Interactive tutorial</a>
+      <li><a href="tutorial/">Tutorial</a>
       </li>
       <li><a href="index.html#install">Install</a>
       </li>
       <li><a href="concepts.html">Concepts</a>
       </li>
-      <li><a href="choose.html">Which mode do I need?</a>
+      <li><a href="choose.html">Which protection do I need?</a>
       </li>
       <li><a href="examples.html">Examples</a>
       </li>
@@ -282,7 +282,7 @@
   definition imported (the other stays in its CLI's own config)</code></pre>
 <p>Nothing is lost — the other definition stays in its own CLI's config until you apply. Review the merged entry, edit it if the wrong one won, then <code>agentstack apply --write</code> makes both CLIs agree. That is how they stop drifting apart.</p>
 <h2 id="do-i-need-docker">Do I need Docker?<a class="hlink" href="#do-i-need-docker" aria-label="Link to this section">#</a></h2>
-<p>No. Docker is only needed for <code>agentstack run --sandbox</code> and <code>--lockdown</code>, the top of the protection ladder. Importing, unifying, applying, naming toolsets, diagnosing, and undoing all work with no container runtime at all. See <a href="choose.html">which mode do I need?</a>.</p>
+<p>No. Docker is only needed for <code>agentstack run --sandbox</code> and <code>--lockdown</code>, the top of the protection ladder. Importing, unifying, applying, naming toolsets, diagnosing, and undoing all work with no container runtime at all. See <a href="choose.html">which protection do I need?</a>.</p>
 <h2 id="why-does-it-ask-me-to-trust-my-own-project">Why does it ask me to trust my own project?<a class="hlink" href="#why-does-it-ask-me-to-trust-my-own-project" aria-label="Link to this section">#</a></h2>
 <p>Usually it does not. A consented <code>agentstack init</code> records trust as part of setup, so the gate mainly appears in two situations: a repository you <strong>cloned</strong> (someone else wrote those declarations), and a manifest that <strong>changed</strong> since you approved it.</p>
 <p>Untrusted means inert — a repo's declarations cannot spawn servers, enter agent context, or resolve secrets until a human has read them, and nothing is written for them either: no native MCP server config, no skill files, no compiled <code>CLAUDE.md</code> / <code>AGENTS.md</code> region, no hooks, no extensions. Each refuses out loud and exits nonzero. Settings, removal and machine-level content stay outside the gate, because none of them authorizes new content.</p>

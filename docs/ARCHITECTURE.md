@@ -14,7 +14,7 @@ the [README](../README.md) and the [getting-started walkthrough](start.html).
 - [Vision](#vision)
 - [Where this starts](#where-this-starts)
 - [The flow](#the-flow)
-- [Operating model](#operating-model--choose-the-boundary-you-need)
+- [Operating model](#operating-model--one-question-per-boundary)
 - [Layer 1 — The bundle](#layer-1--the-bundle-cratescore)
 - [Layer 2 — Trust gate](#layer-2--trust-gate-cratestrust)
 - [Layer 3 — Policy engine](#layer-3--policy-engine-cratespolicy)
@@ -87,12 +87,15 @@ CLI's configured HTTP(S) traffic goes through the enforcing proxy; lockdown
 makes the proxy sidecar topologically the only route out. Lifecycle, limit,
 egress, brokered tool-call, and secret-reference events enter the per-run log.
 
-## Operating model — choose the boundary you need
+<a id="operating-model--choose-the-boundary-you-need"></a>
+## Operating model — one question per boundary
 
 Three orthogonal questions keep the rest of the system easy to reason about. A
-**toolset** answers *which capabilities does this task select?* The **delivery
-mode** answers *how does it reach the agent?* The **lifetime** answers *when
-does it go away?* Selection is not delivery, and delivery is not isolation.
+**toolset** answers *which capabilities does this task select?* **Delivery**
+answers *how does each selected capability reach the agent?* — and the system
+answers that one, per capability kind per harness, rather than offering it as a
+setting. The **lifetime** answers *when does it go away?* Selection is not
+delivery, and delivery is not isolation.
 
 Each primitive answers exactly one question and — just as importantly — does not
 answer the others. Mixing them up is the common category error (a lock is not
@@ -103,30 +106,67 @@ trust, trust is not policy, policy is not a sandbox, audit is not enforcement):
 | Bundle | What intent is declared? `agentstack.toml` names servers, skills, toolsets, and requested policy. | Does not certify the referenced code as safe. |
 | Integrity | Which capability bytes were reviewed? `agentstack.lock` pins resolved inputs; signatures can attest to the lock bytes. | Does not grant local consent to execute. |
 | Selection | What does this task need? A toolset names the intended server and skill set. | Does not decide how the harness receives it. |
-| Delivery | How does selection reach the harness? Static render, native session, or MCP lease. | Does not confine the agent process. |
+| Delivery | How does selection reach the harness? Routed into one of two lanes — served live through the gateway, or written into native config files. | Does not confine the agent process, and is not a per-project mode anyone picks. |
 | Consent | May this repo auto-activate here? `agentstack trust` binds local approval to manifest + overlay + lock. | Does not mean "safe to run unsandboxed." |
 | Authority | Which tools, hosts, secrets, and paths are allowed? Machine and project policy intersect, deny wins. | Does not create process isolation by itself. |
 | Isolation | Where may the process run and connect? Sandbox and lockdown provide the runtime boundary. | Allowed destinations can still receive sensitive data. |
 | Evidence | What happened? Call audit, run reports, and analysis record brokered activity. | Recording is not prevention. |
 
-The recommended default and its exceptions:
+### Delivery is routed, not chosen
+
+Delivery has no mode switch. The planner (`crates/cli/src/delivery.rs`) takes
+two facts — a capability's **kind**, and the **harness** it is going to — and
+routes it into one of two lanes: the **dynamic** lane, served live through the
+gateway, or the **rendered** lane, written into that harness's native config
+files. That is the whole decision. The planner is a pure function over the
+manifest's `[delivery]` table and the adapter registry: it decides and states
+the routing, and never writes.
+
+| Kind | Lane | Why |
+|---|---|---|
+| Skills · MCP servers, on an MCP-capable harness | dynamic | brokered, policy-checked, digest-verified per load, recorded |
+| Instructions (house rules) | rendered | no live channel a harness is *known* to consume can carry an instruction per model or behind a lease (`docs/design/instruction-variants.md`) |
+| Settings | rendered | only a native file carries them |
+| Hooks · extensions | rendered | executable kinds — they run code, so they are always written and always carry the full consent ceremony |
+| Any kind, on a harness with no live channel | rendered | there is nothing to serve it over |
+
+A project is normally in **both** lanes at once; that is the ordinary shape, not
+a compromise. Rendering is therefore not a legacy path being removed — it stays
+the only correct answer for what no live channel can carry, and for harnesses
+that have none.
+
+The single override is **render locally** (`[delivery] render_locally`, per
+project or per harness), which forces the rendered lane where the live channel
+would have worked — offline operation, deterministic native files, inspection
+with ordinary filesystem tools, a rule against a persistent background process,
+or compatibility testing against a harness's own behaviour. It moves capabilities
+only *towards* files, declares no capability, and changes neither trust nor
+authority. There is no "prefer gateway" counterpart and no per-project mode: the
+Mode axis was retired, `set-mode` refuses and explains, and `set-mode-v1` sits
+under `SUPERSEDED` in the UI contract. The names *static*, *clean-at-rest* and
+*zero-files* survive only as readings of a project's current shape
+([concepts.md](concepts.md#delivery-modes)).
+
+Both lanes sit behind the same gates. An untrusted or drifted project delivers
+through neither: the gateway serves nothing, and `apply --write` / `use --write`
+refuse rather than render.
+
+The boundaries an operator does still choose:
 
 | Situation | Use | Why |
 |---|---|---|
-| MCP-capable interactive work | Toolset lease | Smallest live surface, no project-native cleanup; policy and audit stay on the path. |
-| Native skills or instruction files | `use --write` | The harness reads those files itself, and no live channel it is *known* to consume carries house rules per model or behind a lease (`docs/design/instruction-variants.md`). |
-| Native, but clean between sessions | `session start`/`end` | Temporary compatibility with an explicit restore contract. |
-| Stable offline launches | Static render | No live gateway dependency; native config is ready at startup. |
+| Materialize the rendered lane | `apply --write` / `use --write` | Explicit, non-executing render; refused on an untrusted or drifted project. |
+| Narrow one live connection to part of a manifest | Toolset lease | Smallest live surface, nothing rendered; policy and audit stay on the path. |
+| Rendered files, clean between sessions | `session start`/`end` | A lifetime contract over the rendered lane, with an explicit restore step. |
+| Files required where the live channel would have served | `x delivery render-locally` | The one delivery override, recorded in the manifest so every clone reads the same. |
 | Unfamiliar repository | Trust gate first | Selection must never grant consent; unreviewed auto-project bundles stay inert. |
 | High-risk code or strict egress | Policy + lockdown | Policy defines authority; lockdown removes direct routes and confines the process. |
 | CI | `install --locked` + `doctor --ci` | Checks reproducibility, policy, drift, and content without interactive trust. |
 
-Those three delivery mechanisms are what the user-facing docs call **delivery
-modes**: a **static render** = *static*, a **native session** (`session
-start`/`end`) = *clean-at-rest*, an **MCP or toolset lease** = *zero-files*.
-[concepts.md](concepts.md#delivery-modes) defines each mode and
-[which mode do I need?](choose.md) is the decision page; this section is the
-architect's version of the same choice.
+`agentstack x delivery` states the routing per harness, and `--json` is the same
+reading for a UI (`delivery-routing-v1`). The reader-facing versions of this
+section are [concepts.md — delivery](concepts.md#delivery-modes) and
+[how capabilities reach your CLIs](choose.md).
 
 ### Product boundary and non-goals
 
@@ -429,8 +469,8 @@ bridge, code mode — dispatches through one function, `Gateway::try_call`,
 which consults the policy engine before any upstream I/O; the upstream
 transport is private to it, so no other module *can* reach a server directly.
 Any new brokered path must route through it — adding a second dispatch path
-is a security-review event, not a refactor. (Rendered-config modes hand the
-transport to the harness itself and are governed at write time — the
+is a security-review event, not a refactor. (The rendered lane hands the
+transport to the harness itself and is governed at write time — the
 advisory framing above.)
 
 **One enforcement-plan boundary for a sandbox run:** `run --sandbox` assembles

@@ -416,4 +416,4 @@ diagnostics, not tamper-evident forensic evidence. More:
 ---
 
 Have the words you needed? [Get started](start.html) is the guided path, and
-[which mode do I need?](choose.md) picks your two defaults.
+[which protection do I need?](choose.md) covers the one choice that is still yours — delivery is routed for you.

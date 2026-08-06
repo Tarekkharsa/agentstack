@@ -35,10 +35,10 @@ GH = "https://github.com/Tarekkharsa/agentstack"
 TREE = [
     ("Start", None, [
         ("Get started", "start.html", "start"),
-        ("Interactive tutorial", "tutorial/", "tutorial"),
+        ("Tutorial", "tutorial/", "tutorial"),
         ("Install", "index.html#install", "install"),
         ("Concepts", "concepts.html", "concepts"),
-        ("Which mode do I need?", "choose.html", "choose"),
+        ("Which protection do I need?", "choose.html", "choose"),
         ("Examples", "examples.html", "examples"),
         ("Cookbook", "cookbook.html", "cookbook"),
     ], "open"),

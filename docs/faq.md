@@ -94,7 +94,7 @@ drifting apart.
 No. Docker is only needed for `agentstack run --sandbox` and `--lockdown`, the
 top of the protection ladder. Importing, unifying, applying, naming toolsets,
 diagnosing, and undoing all work with no container runtime at all. See
-[which mode do I need?](choose.md).
+[which protection do I need?](choose.md).
 
 ## Why does it ask me to trust my own project?
 
