@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AgentStack — trust DX rethink</title>
+<style>
+:root{
+  --bg:#faf7f0;--card:#fffdf8;--ink:#211e1a;--soft:#6f6656;--hair:#e8dfcd;--hair2:#f1ead9;
+  --blue:#3f56a8;--red:#ae4437;--green:#3f7048;--orange:#b8642f;--violet:#5f68a6;
+  --gold:#96751c;--takebg:#f4eee0;--codebg:#26221c;--codeink:#e9e0cd;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:15px/1.65 -apple-system,"SF Pro Text","Segoe UI",Helvetica,Arial,sans-serif;
+  padding:56px 24px 80px;-webkit-font-smoothing:antialiased;}
+.wrap{max-width:980px;margin:0 auto;}
+header{text-align:center;margin-bottom:40px;}
+h1{font-family:"Iowan Old Style","Palatino Linotype",Georgia,serif;
+  font-size:32px;font-weight:600;margin:0 0 8px;}
+.sub{color:var(--soft);font-size:14px;}
+section{background:var(--card);border:1px solid var(--hair);border-radius:14px;
+  margin:22px 0;overflow:hidden;box-shadow:0 1px 2px rgba(33,30,26,.05);}
+.head{padding:16px 22px 8px;border-top:4px solid var(--ac,var(--ink));}
+.head .num{font-size:10px;font-weight:800;letter-spacing:2px;color:var(--ac,var(--ink));display:block;}
+.head h2{margin:2px 0 0;font-size:17px;font-weight:700;}
+.body{padding:6px 22px 20px;font-size:13.5px;}
+.body p{margin:8px 0;}
+ol,ul{margin:8px 0;padding-left:22px;}
+li{margin:5px 0;}
+code{background:#efe8d8;padding:1px 6px;border-radius:5px;font-size:12px;
+  font-family:ui-monospace,"SF Mono",Menlo,monospace;}
+pre{background:var(--codebg);color:var(--codeink);border-radius:10px;padding:12px 16px;
+  font:12px/1.6 ui-monospace,"SF Mono",Menlo,monospace;overflow-x:auto;margin:10px 0;}
+pre b{color:#ffd9a8;font-weight:600;}
+.dim{color:#9b917c;}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+@media(max-width:760px){.two{grid-template-columns:1fr}}
+.lbl{font-size:10px;font-weight:800;letter-spacing:1.4px;color:var(--soft);margin:10px 0 2px;}
+.take{margin-top:12px;background:var(--takebg);border-left:3px solid var(--ink);
+  border-radius:0 10px 10px 0;padding:10px 16px;}
+.take b{font-size:10px;letter-spacing:1.6px;display:block;margin-bottom:4px;color:var(--soft);}
+table{border-collapse:collapse;width:100%;font-size:13px;margin:8px 0;}
+th,td{text-align:left;padding:7px 10px;border-bottom:1px solid var(--hair2);vertical-align:top;}
+th{font-size:10.5px;letter-spacing:1px;color:var(--soft);}
+.risk{color:var(--red);font-weight:600;}
+.good{color:var(--green);font-weight:600;}
+.s0{--ac:var(--ink)} .s1{--ac:var(--grey,#7c7362)} .s2{--ac:var(--red)}
+.sA{--ac:var(--green)} .sB{--ac:var(--blue)} .sC{--ac:var(--orange)} .sR{--ac:var(--violet)}
+.chip{display:inline-block;font-size:9.5px;font-weight:800;letter-spacing:1px;color:#fff;
+  border-radius:6px;padding:2.5px 9px;margin-left:8px;vertical-align:2px;}
+.c-a{background:var(--green)} .c-b{background:var(--blue)} .c-c{background:var(--orange)}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>Trust DX — the rethink</h1>
+  <p class="sub">Everything below is changeable, including the invariants — they are the maintainer's, not the documents'.<br>
+  Facts are from the code as of today; every claim carries its file.</p>
+</header>
+
+<section class="s0">
+  <div class="head"><span class="num">1 · TODAY</span><h2>The flow as built — where the yes actually lives</h2></div>
+  <div class="body">
+    <ul>
+      <li><b>Only two verbs render a card and write a grant:</b> <code>agentstack trust [path]</code> and <code>agentstack yes</code>. Everything else refuses at use time and names <code>trust .</code> (session start, lease open, run).</li>
+      <li><b>One composed card per project, one yes.</b> The grant is stored per (project path, digest) in <code>~/.agentstack/trust.json</code> — never per capability, never per source. (trust.rs:365, lib.rs:76)</li>
+      <li><b>The card:</b> summary (“This project will: run N commands · contact N hosts · read N secrets”), a recognition line, then the full grouped body with <code>+ / ~ / −</code> diff markers, then blockers. (trust.rs:1667–2800)</li>
+      <li><b>Recognition today is one line of prose.</b> “all 4 items are already approved in 2 other projects” — and then the full body prints anyway. (recognition.rs:10–14)</li>
+      <li><b>Two different re-gate experiences.</b> Manifest/lock byte changes → diff banner on the next <code>trust</code>. Pinned content drift → inline line-diff + a per-item accept/keep/block prompt. One <code>git pull</code> can trigger both in one card. (regate.rs, trust.rs:2160)</li>
+      <li><b>Headless:</b> <code>--yes</code> requires a <code>--consented-digest</code> obtained from a separate <code>trust --preview</code> round-trip; <code>agentstack yes</code> refuses without a TTY entirely. (cli.rs:1016, yes.rs:98)</li>
+    </ul>
+  </div>
+</section>
+
+<section class="s2">
+  <div class="head"><span class="num">2 · THE PAIN</span><h2>Where the annoyance actually comes from</h2></div>
+  <div class="body">
+    <ol>
+      <li><b class="risk">The tool re-gates its own edits.</b> <code>add --write</code> and <code>lock --write</code> change manifest/lock bytes, which flips the consent digest — so the ordinary editing loop mechanically invalidates trust and tells you to run <code>trust .</code> again for a change <i>you just previewed and confirmed</i>. (add.rs:1560) This is the single biggest source of “again?”.</li>
+      <li><b>Every new project pays the full card</b> even when every byte is already approved elsewhere — recognition changes one line, not the work. </li>
+      <li><b>Two re-gate UXes</b> that look and behave differently for what feels like the same event (“something changed”).</li>
+      <li><b>Headless needs a two-step dance</b> (preview → digest → yes) that agents and CI stumble over.</li>
+      <li>The activation study already plans to measure exactly this: <b>D2 — the re-trust friction watch</b> — hypothesis: “cheap once, expensive in aggregate.” (activation-study.md:223)</li>
+    </ol>
+    <p>Note a precedent already in the code: when <i>agentstack itself</i> rewrites the manifest and trust was valid before, <code>apply</code> silently re-pins (<code>✓ trust re-pinned</code>, apply.rs:1295). The principle exists; it is just not applied to <code>add</code>/<code>lock</code>/<code>use</code>.</p>
+  </div>
+</section>
+
+<section class="sA">
+  <div class="head"><span class="num">OPTION A</span><h2>Glanceable re-trust — compress the presentation, keep every yes<span class="chip c-a">NO INVARIANT TOUCHED</span></h2></div>
+  <div class="body">
+    <p><b>Rule:</b> the card only <i>expands</i> what is new. Unchanged and recognized content collapses to one line; the yes stays.</p>
+    <div class="two">
+      <div><div class="lbl">TODAY — second project, same skills repo</div>
+<pre>$ agentstack trust .
+Reviewing ~/proj-b …
+This project will: run 2 commands · contact 1 host
+all 4 items already approved in 1 other project
+<span class="dim">[ full grouped body — 40+ lines,
+  every skill, every server, again ]</span>
+Trust this project?</pre></div>
+      <div><div class="lbl">OPTION A — same moment</div>
+<pre>$ agentstack trust .
+Reviewing ~/proj-b …
+<b>✓ all 4 items byte-identical to proj-a — unchanged</b>
+This project will: run 2 commands · contact 1 host
+Trust this project?  <span class="dim">[Enter = yes · d = full detail]</span></pre></div>
+    </div>
+    <p>Same rule on re-gates: a card after <code>git pull</code> opens with only the <code>~ changed</code> items expanded (their diffs inline), everything else one collapsed line. And the two re-gate paths merge into this single diff-first card.</p>
+    <table><tr><th>WINS</th><th>COSTS</th></tr>
+    <tr><td class="good">Kills pain 2 and 3 · zero security change — “compressed, never removed” is already the strategy's own promise</td>
+    <td>Rendering work in trust.rs · a collapsed card must still be expandable before the yes (d key), or the yes is less informed than today</td></tr></table>
+  </div>
+</section>
+
+<section class="sB">
+  <div class="head"><span class="num">OPTION B</span><h2>The tool's own writes re-pin — consent moves into the preview<span class="chip c-b">REDEFINES THE MOMENT, NOT THE GUARANTEE</span></h2></div>
+  <div class="body">
+    <p><b>Rule:</b> when a byte change was produced by an agentstack command the user just confirmed with <code>--write</code>, and the full change was shown in that preview, the same command re-pins trust in the same breath. Human edits and external changes (git pull, editor) still re-gate exactly as today.</p>
+    <div class="two">
+      <div><div class="lbl">TODAY</div>
+<pre>$ agentstack add server github --write
+✓ added
+· trust re-gates on this edit:
+  run `agentstack trust .` to re-consent
+$ agentstack trust .
+<span class="dim">[ full card again ]</span></pre></div>
+      <div><div class="lbl">OPTION B</div>
+<pre>$ agentstack add server github --write
+<span class="dim">[ preview showed: + server github, pinned bytes ]</span>
+✓ added
+<b>✓ trust re-pinned — 1 change: + server github</b></pre></div>
+    </div>
+    <p>This generalizes two things that already exist: <code>apply</code>'s silent re-pin (apply.rs:1295), and the F5 display rule — never pin bytes that were not displayed (trust.rs:2840). The preview <i>is</i> the review; <code>--write</code> <i>is</i> the yes for exactly those bytes.</p>
+    <table><tr><th>WINS</th><th>COSTS</th></tr>
+    <tr><td class="good">Kills pain 1 — the loop that generates most re-trust moments disappears · headless agents stop hitting the two-step dance for self-inflicted edits</td>
+    <td>The consent moment is now two shapes (card yes, preview-write yes) — docs must say so honestly · scope must be exact: only bytes fully shown in the preview, everything else re-gates</td></tr></table>
+  </div>
+</section>
+
+<section class="sC">
+  <div class="head"><span class="num">OPTION C</span><h2>Trust the source once — grants at the library, projects inherit<span class="chip c-c">WIDENS WHAT ONE YES COVERS</span></h2></div>
+  <div class="body">
+    <p><b>Rule:</b> review and approve a linked source's content once (at <code>lib link</code> or first use). A project consuming only source-trusted digests activates with a one-line confirm instead of a full card.</p>
+<pre>$ agentstack lib link ~/skills --write --trust
+<span class="dim">[ full review of the source's content — once ]</span>
+✓ source “skills” trusted at 14 pinned digests
+
+$ cd ~/any-new-project && agentstack use web --write
+<b>✓ all content trusted at source “skills” — activate here?</b>  [Enter]</pre>
+    <p>The consent-card design doc explicitly fenced this off: machine-level standing approval “is a widening of the gate, not a presentation of it, and gets its own review.” (consent-card.md:262). This page is that review's opening argument — the fence is a decision, and decisions are yours.</p>
+    <table><tr><th>WINS</th><th>COSTS</th></tr>
+    <tr><td class="good">Matches the mental model exactly — “I trusted this repo already” · new-project cost drops to one line</td>
+    <td class="risk">One yes now activates content in projects that did not exist when you gave it — with different secrets, different policy reach · byte-change re-gating must still hold per source · needs its own revocation story (<code>lib untrust</code>) and a per-project opt-out</td></tr></table>
+  </div>
+</section>
+
+<section class="sR">
+  <div class="head"><span class="num">RECOMMENDATION</span><h2>Sequence: B, then A, then measure — C only on evidence</h2></div>
+  <div class="body">
+    <ol>
+      <li><b>B first.</b> It removes the mechanical re-gate loop — the majority of all trust moments — and it is the smallest honest change: the user already said yes to those exact bytes seconds earlier.</li>
+      <li><b>A second.</b> Recognition becomes collapse, the two re-gate paths merge into one diff-first card. New projects become a glance.</li>
+      <li><b>Then measure.</b> D2 in the activation study already counts the remaining re-trust moments. If the aggregate still bites after A+B, that is the evidence C needs.</li>
+      <li><b>C is a real option, not a taboo</b> — but taken on evidence, with its own revocation and opt-out design, because it changes whose future projects a yes reaches.</li>
+    </ol>
+    <div class="take"><b>ONE MORE THING</b>
+    Headless deserves its own small fix regardless: <code>agentstack yes --preview-and-consent</code> — one command that prints the surface, computes the digest, and consents to exactly what it printed, for CI and agents. The two-step dance today exists to keep the reviewed bytes and the consented bytes identical; one command can hold that property by construction.</div>
+  </div>
+</section>
+
+</div>
+</body>
+</html>
