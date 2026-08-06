@@ -251,10 +251,15 @@ def convert(md, src_rel, out_rel, warnings):
                 in_ul = True
             item = [m.group(1)]
             sub = []
+            tail = []
             i += 1
             # Continuation lines belong to the item; "  - " lines open a
             # nested list; deeper-indented continuations belong to the last
-            # nested item.
+            # nested item. A continuation that comes back to the item's own
+            # indent AFTER a nested list resumes the parent item's prose, so it
+            # becomes a trailing paragraph INSIDE the <li> — never a sibling of
+            # the <li>, which would put a <p> straight inside the <ul> and is
+            # the axe "list" (serious) violation.
             while i < len(lines):
                 nm = re.match(r"^  [-*] +(.*)$", lines[i])
                 if nm:
@@ -263,8 +268,8 @@ def convert(md, src_rel, out_rel, warnings):
                 elif re.match(r"^    \S", lines[i]) and sub:
                     sub[-1].append(lines[i].strip())
                     i += 1
-                elif re.match(r"^  \S", lines[i]) and not sub:
-                    item.append(lines[i].strip())
+                elif re.match(r"^  \S", lines[i]):
+                    (tail if sub else item).append(lines[i].strip())
                     i += 1
                 else:
                     break
@@ -274,6 +279,8 @@ def convert(md, src_rel, out_rel, warnings):
                     f"<li>{inline(' '.join(s), src_rel, out_rel, warnings)}</li>" for s in sub
                 )
                 li += f"<ul>{inner}</ul>"
+            if tail:
+                li += f"<p>{inline(' '.join(tail), src_rel, out_rel, warnings)}</p>"
             out.append(f"<li>{li}</li>")
             continue
 
