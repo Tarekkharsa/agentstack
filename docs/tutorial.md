@@ -188,7 +188,7 @@ one either runs code or puts words directly into an agent's context:
 
 Trust says *you read this*. It is not a claim that the code is safe, and it
 does not confine a server once it runs — see [what trusted does and does not
-mean](enforcement.md#what-trusted-does-and-does-not-mean). To vet one
+mean](ENFORCEMENT.md#what-trusted-does-and-does-not-mean). To vet one
 capability in depth before consenting, use `agentstack x explain postgres`.
 
 ## Step 4 — Activate it
@@ -298,7 +298,7 @@ out so the audited proxy is its only way to the network, and `--unprotected`
 opts out of the gates entirely. Each tier prints its own posture label; the
 four of them and what each actually enforces are in
 [Concepts](concepts.md#posture-and-the-machine-policy-summary) and the
-[enforcement matrix](enforcement.md).
+[enforcement matrix](ENFORCEMENT.md).
 
 ## Step 6 — Take it back, and set up the next machine
 
@@ -341,4 +341,4 @@ machine: nobody else's yes carries over, so you review there too.
 - [Concepts](concepts.md) — manifest, lockfile, trust, gateway, policy, posture, defined once.
 - [Every command](reference.md) — the full surface, including everything under `agentstack x`.
 - [Troubleshooting](troubleshooting.md) — when a command refuses and you want the reason.
-- [Enforcement matrix](enforcement.md) — what each protection really enforces, and where it stops.
+- [Enforcement matrix](ENFORCEMENT.md) — what each protection really enforces, and where it stops.

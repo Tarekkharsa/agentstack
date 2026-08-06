@@ -359,7 +359,7 @@ Editing the manifest or lockfile invalidates this — re-run `agentstack trust` 
 <tr><td>hooks</td><td>a hook is a command the harness runs</td></tr>
 <tr><td>native extensions</td><td>extensions run code inside the CLI</td></tr>
 </tbody></table></div>
-<p>Trust says <em>you read this</em>. It is not a claim that the code is safe, and it does not confine a server once it runs — see <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/enforcement.md#what-trusted-does-and-does-not-mean">what trusted does and does not mean</a>. To vet one capability in depth before consenting, use <code>agentstack x explain postgres</code>.</p>
+<p>Trust says <em>you read this</em>. It is not a claim that the code is safe, and it does not confine a server once it runs — see <a href="../enforcement.html#what-trusted-does-and-does-not-mean">what trusted does and does not mean</a>. To vet one capability in depth before consenting, use <code>agentstack x explain postgres</code>.</p>
 <h2 id="step-4--activate-it">Step 4 — Activate it<a class="hlink" href="#step-4--activate-it" aria-label="Link to this section">#</a></h2>
 <p>Two commands deliver a trusted setup. <code>agentstack apply --write</code> renders what belongs in files; <code>agentstack use --write</code> (or <code>agentstack use backend --write</code> when you have named toolsets) activates a toolset's servers and skills.</p>
 <p>Both refuse on a project you have not reviewed, or have edited since:</p>
@@ -409,7 +409,7 @@ Drift
 <p><strong>Drift</strong> is a mismatch between the manifest and what is on disk — usually a hand-edit in a CLI's own config. <code>agentstack diff</code> shows the consequence before anything changes, and then you answer one question: which side holds the truth? If the hand-edit does, <code>agentstack adopt --write</code> pulls it into the manifest (lifting any inline token on the way). If the manifest does, <code>agentstack apply --write</code> re-renders over it. Either way, the setup changed, so step 3 applies again: lock, then trust.</p>
 <p>To launch a CLI as a tracked run:</p>
 <pre class="block"><code>agentstack run claude-code</code></pre>
-<p>That is the Protected tier by default — pre-launch gates for trust, lock and policy, and a frozen tool surface. <code>--sandbox</code> moves it into a container behind the egress proxy, <code>--lockdown</code> removes the container's direct route out so the audited proxy is its only way to the network, and <code>--unprotected</code> opts out of the gates entirely. Each tier prints its own posture label; the four of them and what each actually enforces are in <a href="../concepts.html#posture-and-the-machine-policy-summary">Concepts</a> and the <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/enforcement.md">enforcement matrix</a>.</p>
+<p>That is the Protected tier by default — pre-launch gates for trust, lock and policy, and a frozen tool surface. <code>--sandbox</code> moves it into a container behind the egress proxy, <code>--lockdown</code> removes the container's direct route out so the audited proxy is its only way to the network, and <code>--unprotected</code> opts out of the gates entirely. Each tier prints its own posture label; the four of them and what each actually enforces are in <a href="../concepts.html#posture-and-the-machine-policy-summary">Concepts</a> and the <a href="../enforcement.html">enforcement matrix</a>.</p>
 <h2 id="step-6--take-it-back-and-set-up-the-next-machine">Step 6 — Take it back, and set up the next machine<a class="hlink" href="#step-6--take-it-back-and-set-up-the-next-machine" aria-label="Link to this section">#</a></h2>
 <p>Rendered writes are recorded as you go, so nothing here is a one-way door. <code>agentstack undo</code> is that record read as a timeline, newest first — with no <code>--write</code> it only shows you the list:</p>
 <pre class="block"><code>recent changes (newest first)
@@ -427,7 +427,7 @@ Drift
 <li><a href="../concepts.html">Concepts</a> — manifest, lockfile, trust, gateway, policy, posture, defined once.</li>
 <li><a href="../reference.html">Every command</a> — the full surface, including everything under <code>agentstack x</code>.</li>
 <li><a href="../troubleshooting.html">Troubleshooting</a> — when a command refuses and you want the reason.</li>
-<li><a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/enforcement.md">Enforcement matrix</a> — what each protection really enforces, and where it stops.</li>
+<li><a href="../enforcement.html">Enforcement matrix</a> — what each protection really enforces, and where it stops.</li>
 </ul>
   <p class="srcline">Source of truth: <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/tutorial.md">docs/tutorial.md</a> — this page is generated from it.</p>
   </main>
