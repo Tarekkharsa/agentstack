@@ -77,8 +77,9 @@ impl Kind {
 /// story.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Provenance {
-    /// Demonstrably written here: untracked in git, or modified after this
-    /// project's last recorded trust grant.
+    /// Demonstrably written here. Exactly one signal earns this: untracked
+    /// inside a git work tree. There is no timestamp fallback — see
+    /// [`ProvenanceClock::classify`].
     LocallyAuthored(&'static str),
     /// Arrived with the project, or carries no signal either way. Always takes
     /// the full staged review.
@@ -496,18 +497,20 @@ impl ProvenanceClock {
 
     /// Classify one path.
     ///
-    /// In a git work tree, git alone decides: untracked is the user's own work,
-    /// tracked came with the project. The mtime rule is deliberately NOT
-    /// consulted for tracked content, because git rewrites the mtime of every
-    /// file a `pull`, `checkout`, or `rebase` lands — so "newer than the last
-    /// review" would promote freshly pulled, remote-authored content to "your
-    /// own work", the exact inversion the provenance split exists to prevent.
+    /// Received content is settled FIRST, before git is consulted at all; the
+    /// git rule below is what remains once that check has not fired.
     ///
-    /// Outside a work tree there is no tracking signal, so the grant clock is
-    /// all there is: content modified since the last review is local work.
-    /// A project with no grant history has no clock to compare against either,
-    /// so it takes the full staged review — the conservative reading the
-    /// strategy asks for.
+    /// In a git work tree, git alone decides: untracked is the user's own work,
+    /// tracked came with the project. Mtime is consulted NOWHERE. Not for
+    /// tracked content, because git rewrites the mtime of every file a `pull`,
+    /// `checkout`, or `rebase` lands — so "newer than the last review" would
+    /// promote freshly pulled, remote-authored content to "your own work", the
+    /// exact inversion the provenance split exists to prevent.
+    ///
+    /// Outside a work tree there is no tracking signal and no fallback: every
+    /// path is `Arrived`, so it takes the full staged review — the conservative
+    /// reading the strategy asks for. The old grant-clock fallback was removed
+    /// rather than weakened; the body says why.
     fn classify(&self, _base: &Path, path: &Path) -> Provenance {
         // Received content first (F3): bytes that arrived through `receive` /
         // `add from` are a stranger's work whatever git says about them —
@@ -745,15 +748,13 @@ mod tests {
         assert_eq!(items[1].summary.as_deref(), Some("House rules go here."));
     }
 
-    /// The provenance split, witnessed the way the strategy specifies: one
-    /// directory, two items differing only in provenance, different paths.
-    /// Here the difference is the grant clock — one file predates the
-    /// project's only recorded review, the other postdates it — with git out
-    /// of the picture so the timestamp is the sole discriminator.
-    /// F3 witness: outside a git work tree there is NO compressed path — the
+    /// F3 witness: outside a git work tree there is NO compressed path. The
     /// old mtime-vs-last-grant fallback promoted anything a hostile process
-    /// could `touch`. The tamper here is the timestamp itself: a fresh mtime
-    /// (the forgeable signal) must no longer buy the "your own work" label.
+    /// could `touch`, and it was removed rather than weakened — so there is no
+    /// second item to contrast against here, because no timestamp can produce a
+    /// different answer any more. The tamper is the timestamp itself: a freshly
+    /// written file, the forgeable signal, must not buy the "your own work"
+    /// label, and the reason string must state the real ground for that.
     #[test]
     fn without_git_a_fresh_mtime_never_reads_as_local_work() {
         let tmp = assert_fs::TempDir::new().unwrap();

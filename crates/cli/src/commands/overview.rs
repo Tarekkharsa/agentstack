@@ -231,6 +231,39 @@ pub(crate) fn detect_mode(ctx: &super::Context, target_ids: &[String]) -> Mode {
     )
 }
 
+/// Would trusting this project change its DELIVERY POSTURE here?
+///
+/// The prompting hint behind `status --json`'s `trust_relevant` and the
+/// gateway-shaped "inert servers" note. `true` when a bridge is registered, or
+/// when the derived mode is one the trust gate itself produces.
+///
+/// A pure function rather than an inline expression at the one call site,
+/// because it is a machine-readable contract and
+/// [`tests::the_trust_relevance_truth_table`] has to pin its answers rather
+/// than restate its formula.
+pub(crate) fn trust_relevant(gateway: bool, mode: Mode) -> bool {
+    gateway || matches!(mode, Mode::ZeroFiles | Mode::CleanAtRest)
+}
+
+/// Is the trust gate currently standing between this project's declared
+/// content and every harness?
+///
+/// The sibling reading of [`trust_relevant`], and the one a consumer asking
+/// "do I need to mention trust to this user?" actually wants. Deliberately
+/// independent of [`Mode`]: the gate refuses servers, instructions, hooks,
+/// extensions, settings and skill materialization in all three modes, so mode
+/// tells you nothing about it.
+///
+/// Both halves are load-bearing. Without `has_capabilities` an empty untrusted
+/// project would claim a blockage it has nothing to suffer; without the trust
+/// test every project with content would.
+pub(crate) fn trust_blocks_delivery(
+    trust: crate::trust::TrustState,
+    has_capabilities: bool,
+) -> bool {
+    has_capabilities && trust != crate::trust::TrustState::Trusted
+}
+
 /// The single next command bare orientation recommends, from cheap signals.
 /// Trust routing is the headline *only when trusting buys something here*
 /// (`trust_relevant`, P16 refined): the gateway/bridge is registered for a
@@ -238,11 +271,21 @@ pub(crate) fn detect_mode(ctx: &super::Context, target_ids: &[String]) -> Mode {
 /// clean-at-rest). In those cases an untrusted or trust-stale manifest points
 /// at `trust .` first, because until the digest is pinned the bridge serves
 /// control-plane tools only and no server runs — trusting is the gate. A
-/// static, no-gateway project gains nothing from trusting: its configs render
-/// through `apply`/`use` whatever the trust state, and no bridge exists to
-/// unlock. So it is *not* nagged toward a `trust .` that never converges — its
-/// untrusted state stays a true Status label, and the next step falls through
-/// to the normal ladder. That ladder: capabilities declared but nothing on
+/// static, no-gateway project has no bridge to unlock and no gate-dependent
+/// mode to leave, so it is not nagged toward a `trust .` that changes nothing
+/// about its shape — its untrusted state stays a true Status label, and the
+/// next step falls through to the normal ladder.
+///
+/// What this must NOT be read as, and once was: that such a project renders
+/// "whatever the trust state". It does not. The trust gate reaches all of
+/// servers, instructions, hooks, extensions, settings and skill
+/// materialization, so an untrusted static project has every `apply --write`
+/// refused — measured, and pinned by
+/// [`the_trust_relevance_truth_table`]. `trust_relevant` is a prompting hint
+/// about delivery posture; `ProjectFacts::trust_blocks_delivery` is the field
+/// that says whether the gate is standing in the way.
+///
+/// That ladder: capabilities declared but nothing on
 /// disk yet → `apply --write`; otherwise the wiring is in place → `doctor`.
 /// Pure over its inputs so the routing is unit-tested without touching disk.
 ///
@@ -562,11 +605,14 @@ pub(crate) fn clean_at_rest_next_step(
 /// The one-line explanation of an untrusted (or trust-stale) manifest shown
 /// under the Status line (P16). `None` for a trusted manifest — there is
 /// nothing to teach. A `&'static str` because the sentence never varies. The
-/// caller shows it only when trust is *relevant* here (a bridge exists): the
-/// note describes the bridge serving control-plane tools only, which is simply
-/// untrue for a static, no-gateway project whose servers render regardless —
-/// so that project keeps the honest `· untrusted` Status label without this
-/// line.
+/// caller shows it only when trust is *relevant* here (a bridge exists),
+/// because the sentence is about the BRIDGE: it names the gateway serving
+/// control-plane tools only, and a static, no-gateway project has no gateway
+/// for that clause to describe. The withholding is about this sentence's
+/// subject, not about the gate — an untrusted static project's servers are
+/// every bit as blocked, they are simply blocked at `apply`/`use` rather than
+/// at a bridge. So that project keeps the honest `· untrusted` Status label
+/// without this line.
 pub(crate) fn orientation_trust_note(trust: crate::trust::TrustState) -> Option<&'static str> {
     use crate::trust::TrustState;
     match trust {
@@ -720,10 +766,42 @@ pub(crate) struct ProjectFacts {
     /// it is a different sentence: nothing here was ever approved, so it is
     /// not "drift". Deep reads only, like `content_drift`.
     surface_unpinned: Vec<crate::commands::trust::ContentDrift>,
-    /// Whether trusting this project would change what it can do here (a
-    /// bridge is registered, or the mode depends on the gate). Drives both the
-    /// "inert servers" note and whether trust is the headline next step.
+    /// Whether trusting this project would change its DELIVERY POSTURE here —
+    /// a bridge is registered, or the derived mode depends on the gate. A
+    /// prompting hint: it decides how loudly to ask, and drives both the
+    /// gateway-shaped "inert servers" note and whether trust is the headline
+    /// next step.
+    ///
+    /// It is deliberately NOT the answer to "can this project write?", and
+    /// `false` here has never meant "trust buys nothing". The trust gate
+    /// refuses servers, instructions, hooks, extensions, settings and skill
+    /// materialization in EVERY mode, so a static, no-gateway project reads
+    /// `trust_relevant: false` while `apply --write` refuses every one of its
+    /// declared kinds. [`ProjectFacts::trust_blocks_delivery`] is the field
+    /// that answers that question; this one keeps its shipped meaning byte for
+    /// byte, because changing it would be a meaning change under a name
+    /// external panels already gate on (`ui_contract::SCHEMA_VERSION`).
     trust_relevant: bool,
+    /// Whether the trust gate currently stands between this project's declared
+    /// content and every harness: the project declares at least one capability
+    /// AND its trust state is not `Trusted`.
+    ///
+    /// The reading `trust_relevant` was repeatedly mistaken for, held as its
+    /// own field because a consumer cannot derive it. `trust` alone
+    /// over-predicts — an untrusted project that declares nothing has nothing
+    /// to block — and the emitted counts cannot close the gap either: the JSON
+    /// carries `servers` and `skills` but not `instructions`, `settings`,
+    /// `hooks` or `extensions`, so an instructions-only project reads
+    /// `servers: 0, skills: 0, trust_relevant: false` while `apply --write`
+    /// refuses its one fragment.
+    ///
+    /// What it promises: the GATE, not a prediction about a particular
+    /// command's exit code. `true` says every path that puts this content in
+    /// front of an agent — the rendered lane's `apply`/`use`, the live lane's
+    /// gateway serve, `session start` — refuses until the content is reviewed.
+    /// An `apply --write` that exits 0 while this is `true` means there was
+    /// nothing left to write, not that the gate opened.
+    trust_blocks_delivery: bool,
     mode: Mode,
     gateway_connected: bool,
     /// Harnesses that registered the gateway but cannot launch it (W4
@@ -1136,6 +1214,10 @@ fn project_json(f: &ProjectFacts) -> serde_json::Value {
             "fix": d.fix,
         })).collect::<Vec<_>>(),
         "trust_relevant": f.trust_relevant,
+        // The reading `trust_relevant` does not give. Additive: a panel that
+        // never asks for it reads exactly what it read before, and the field
+        // above keeps its shipped value, so no schema-version bump is owed.
+        "trust_blocks_delivery": f.trust_blocks_delivery,
         "mode": f.mode.label(),
         "gateway_connected": f.gateway_connected,
         // W4 precondition 6. One sentence per broken harness, the SAME text the
@@ -1713,17 +1795,28 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
         Vec::new()
     };
 
-    // Trust genuinely gates capability delivery only through the bridge
-    // (zero-files) or the trust-gated run/session paths (clean-at-rest); a
-    // static, no-gateway project renders through `apply`/`use` regardless. So
-    // trust is the headline next-step, and the "inert servers" note is shown,
-    // only when a bridge is registered or the mode depends on the gate.
+    // Two different readings, deliberately kept apart.
+    //
+    // `trust_relevant` is about DELIVERY POSTURE: trusting changes what this
+    // project is *shaped like* only through the bridge (zero-files) or the
+    // trust-gated run/session paths (clean-at-rest). It is what decides whether
+    // trust is the headline next step and whether the gateway-shaped "inert
+    // servers" note is shown — a prompting hint, and nothing more. It does NOT
+    // say a static, no-gateway project is unaffected by trust: the gate refuses
+    // that project's servers, instructions, hooks, extensions, settings and
+    // skills too. That claim used to be written here, and it was false.
     let target_ids: Vec<String> = ctx.registry.ids().map(str::to_string).collect();
     let gateway = gateway_connected(&ctx, &target_ids);
     let mode = detect_mode(&ctx, &target_ids);
-    let trust_relevant = gateway || matches!(mode, Mode::ZeroFiles | Mode::CleanAtRest);
+    let trust_relevant = trust_relevant(gateway, mode);
 
     let has_capabilities = declares_capabilities(m);
+    // ...and this is the CAPABILITY reading: is the gate actually standing
+    // between declared content and every harness right now? Independent of
+    // mode on purpose. `trust_relevant` flips from false to true when a
+    // lockfile appears — even one a fully refused `apply --write` left behind —
+    // while nothing about what trust governs has moved; this one does not.
+    let trust_blocks_delivery = trust_blocks_delivery(trust, has_capabilities);
     // "Is anything on disk for these targets?" — the signal that actually
     // distinguishes "imported but not applied" from "set up and resting".
     // `locked` does not: a static project stays unlocked until `use`/`lock` runs.
@@ -1952,6 +2045,7 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
             content_drift,
             surface_unpinned,
             trust_relevant,
+            trust_blocks_delivery,
             mode,
             gateway_connected: gateway,
             gateway_outages: crate::commands::connect::gateway_outages(&ctx.registry, &target_ids),
@@ -2149,9 +2243,10 @@ fn print_orientation(o: &Orientation, status: bool) {
 
             // Untrusted (or trust-stale) teaches the human what that state
             // *means*, not just the label (P16). Only shown when trust is
-            // relevant — for a static, no-gateway project the note would be
-            // false (its servers are not inert), so the honest `· untrusted`
-            // Status label stands alone.
+            // relevant — the sentence names the gateway, and a static,
+            // no-gateway project has no gateway to describe, so the honest
+            // `· untrusted` Status label stands alone. Not because its servers
+            // are live: they are inert too, refused at `apply`/`use` instead.
             if f.trust_relevant {
                 if let Some(note) = orientation_trust_note(f.trust) {
                     println!("            {}", note.dimmed());
@@ -2338,10 +2433,12 @@ mod tests {
     // buys something here — a bridge is registered, or the mode depends on the
     // trust gate (`trust_relevant`). When it does, an untrusted or trust-stale
     // manifest routes to `trust .` ahead of `init`/`doctor` and teaches what the
-    // state means. When it does not (a static, no-gateway project whose configs
-    // render regardless of trust), the trust route is NOT the headline: the next
+    // state means. When it does not (a static, no-gateway project, whose SHAPE
+    // trusting does not change), the trust route is NOT the headline: the next
     // step falls through to the normal ladder, and the "inert servers" note is
-    // withheld — because it would be false — leaving only the true Status label.
+    // withheld — because that sentence names a gateway this project has not
+    // got — leaving only the true Status label. Its writes are still refused;
+    // `the_trust_relevance_truth_table` below is where that is pinned.
     #[test]
     fn untrusted_orientation_teaches_and_routes_to_trust() {
         use crate::trust::TrustState;
@@ -2731,6 +2828,7 @@ mod tests {
                 content_drift: Vec::new(),
                 surface_unpinned: Vec::new(),
                 trust_relevant: true,
+                trust_blocks_delivery: true,
                 mode: Mode::CleanAtRest,
                 gateway_connected: false,
                 gateway_outages: Vec::new(),
@@ -2748,6 +2846,117 @@ mod tests {
                 context: ContextCost::default(),
             })),
             next: ("agentstack trust .".into(), "review and re-trust"),
+        }
+    }
+
+    /// The two trust readings, pinned as a table rather than described.
+    ///
+    /// Measured against the shipped binary before it was written, one project
+    /// per row, each with a declared server and a declared instruction
+    /// fragment, and each row's `apply --write` outcome observed:
+    ///
+    /// ```text
+    ///  mode           trust      gw  | trust_relevant | blocks | apply --write
+    ///  static         untrusted  no  | false          | true   | REFUSED
+    ///  static         drifted    no  | false          | true   | REFUSED
+    ///  static         trusted    no  | false          | false  | wrote
+    ///  clean-at-rest  untrusted  no  | true           | true   | REFUSED
+    ///  clean-at-rest  drifted    no  | true           | true   | REFUSED
+    ///  clean-at-rest  trusted    no  | true           | false  | wrote
+    ///  static         untrusted  yes | true           | true   | REFUSED
+    ///  zero-files     trusted    yes | true           | false  | wrote
+    /// ```
+    ///
+    /// Three properties this exists to hold still.
+    ///
+    /// 1. **`trust_relevant` is false in states where trust blocks
+    ///    everything.** The three `static` rows are not a defect in the value —
+    ///    they are what a delivery-posture hint correctly says — but they are
+    ///    exactly why no consumer may read `false` as "trust is not an issue
+    ///    here". The doc comments that once claimed such a project "renders
+    ///    whatever the trust state" were wrong, and this row set is what
+    ///    stops them coming back.
+    /// 2. **`trust_blocks_delivery` tracks the gate and nothing else.** It is
+    ///    the same answer in all three modes, which is the point: mode is not
+    ///    an input.
+    /// 3. **The mode axis is not independent of the trust axis.**
+    ///    `zero-files` requires `trusted` in [`mode_from_signals`], so
+    ///    `zero-files × untrusted` is unreachable — a "for each mode, for each
+    ///    trust state" grid has holes, and a consumer must not infer one from
+    ///    the other.
+    #[test]
+    fn the_trust_relevance_truth_table() {
+        use crate::trust::TrustState;
+        const MODES: [Mode; 3] = [Mode::Static, Mode::CleanAtRest, Mode::ZeroFiles];
+        const STATES: [TrustState; 3] = [
+            TrustState::Trusted,
+            TrustState::Untrusted,
+            TrustState::Changed,
+        ];
+
+        // ── `trust_relevant`: a posture reading. Blind to trust, sensitive to
+        // the bridge and to the two gate-derived modes.
+        for mode in MODES {
+            for gateway in [true, false] {
+                let expected = gateway || mode != Mode::Static;
+                assert_eq!(
+                    trust_relevant(gateway, mode),
+                    expected,
+                    "trust_relevant({gateway}, {mode:?})"
+                );
+            }
+        }
+        // Stated once more as the literal rows, so a formula change that keeps
+        // the shape but moves an answer still breaks here.
+        assert!(!trust_relevant(false, Mode::Static));
+        assert!(trust_relevant(true, Mode::Static));
+        assert!(trust_relevant(false, Mode::CleanAtRest));
+        assert!(trust_relevant(false, Mode::ZeroFiles));
+
+        // ── `trust_blocks_delivery`: a gate reading. Sensitive to trust and to
+        // whether there is anything to block; blind to mode and to the bridge.
+        for trust in STATES {
+            let blocked = trust != TrustState::Trusted;
+            assert_eq!(
+                trust_blocks_delivery(trust, true),
+                blocked,
+                "declared content is blocked by every non-trusted state ({trust:?})"
+            );
+            assert!(
+                !trust_blocks_delivery(trust, false),
+                "a project declaring nothing has nothing for the gate to block ({trust:?})"
+            );
+        }
+
+        // ── The pairing that motivated the field: in every `static` row the
+        // posture hint says false while the gate says true. This is the
+        // sentence "an untrusted static project reports trust_relevant: false
+        // while apply --write refuses its servers", as an assertion.
+        for trust in [TrustState::Untrusted, TrustState::Changed] {
+            assert!(
+                !trust_relevant(false, Mode::Static),
+                "the posture hint stays false for a static, no-gateway project"
+            );
+            assert!(
+                trust_blocks_delivery(trust, true),
+                "...while the gate blocks every declared kind ({trust:?})"
+            );
+        }
+
+        // ── Mode is derived, so the grid has holes. `zero-files` is only ever
+        // reached with trust granted; nothing may read a mode as a trust state.
+        for trusted in [true, false] {
+            let mode = mode_from_signals(false, true, trusted, true);
+            if trusted {
+                assert_eq!(mode, Mode::ZeroFiles);
+            } else {
+                assert_ne!(
+                    mode,
+                    Mode::ZeroFiles,
+                    "zero-files x untrusted is unreachable: the bridge serves \
+                     control-plane tools only until the digest is pinned"
+                );
+            }
         }
     }
 
@@ -2873,6 +3082,7 @@ mod tests {
         assert_eq!(p["locked"], true);
         assert_eq!(p["trust"], "drifted");
         assert_eq!(p["trust_relevant"], true);
+        assert_eq!(p["trust_blocks_delivery"], true);
         assert_eq!(p["mode"], "clean-at-rest");
         assert_eq!(p["secrets"]["referenced"], 2);
         assert_eq!(p["secrets"]["unresolved"][0], "NOTION_TOKEN");

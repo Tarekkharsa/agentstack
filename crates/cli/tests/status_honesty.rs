@@ -312,3 +312,154 @@ fn the_new_contract_is_advertised_and_nothing_older_was_dropped() {
          panel to disable itself over fields none of them read yet"
     );
 }
+
+// ------------------------------------------- the two trust readings, paired
+
+/// The same honesty question, one field over: does `status --json` say
+/// something the trust gate contradicts?
+///
+/// It did. `trust_relevant` is a DELIVERY-POSTURE hint — true when a bridge is
+/// registered or the derived mode is one the gate itself produces — but the
+/// trust gate reaches all six declared kinds in every mode. So a static,
+/// no-gateway project reported `trust_relevant: false` while `apply --write`
+/// refused its servers and its instructions, and a consumer deciding "do I
+/// need to mention trust to this user?" was told no exactly when the answer
+/// was yes.
+///
+/// The fix is the one symptom 1 above already established as this file's
+/// pattern: **fixed additively.** `trust_relevant` keeps its shipped value
+/// byte for byte, because changing what an existing name MEANS is a
+/// schema-version bump under `ui_contract`'s own rule — and this file already
+/// pins `SCHEMA_VERSION == 1` on the grounds that bumping it tells every panel
+/// to disable itself. `trust_blocks_delivery` is the honest field beside it.
+///
+/// This is the end-to-end half of the witness: the pure truth table lives in
+/// `commands::overview::tests::the_trust_relevance_truth_table`, and what is
+/// pinned HERE is the pairing that table cannot reach — the two field values
+/// standing next to a real refusal from a real `apply --write`.
+#[test]
+fn a_static_untrusted_project_admits_the_gate_that_refuses_its_writes() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+
+    // Deliberately NOT a servers-only project: the emitted counts are
+    // `servers` and `skills`, so an instruction fragment is content a consumer
+    // provably cannot see in the payload. It is also the kind that makes
+    // "derive it yourself from the counts" impossible rather than merely
+    // awkward.
+    let proj = project(
+        tmp.path(),
+        "version = 1\n\
+         [delivery]\nrender_locally = true\n\
+         [targets]\ndefault = [\"claude-code\"]\n\
+         [servers.demo]\ntype = \"stdio\"\ncommand = \"/bin/echo\"\n\
+         [instructions.house]\npath = \"./house.md\"\n",
+    );
+    fs::write(proj.join(".agentstack/house.md"), "House rule one.\n").unwrap();
+
+    let body = agentstack::commands::overview::status_body(Some(&proj)).unwrap();
+    let p = &body["project"];
+
+    // Nothing is rendered and nothing is locked, so the derived mode is
+    // `static` and no bridge exists — the exact row the finding names.
+    assert_eq!(p["mode"], "static", "the fixture is the static row: {p}");
+    assert_eq!(p["gateway_connected"], false);
+    assert_eq!(p["trust"], "untrusted");
+
+    // The posture hint says false. That is its shipped answer and it stays.
+    assert_eq!(
+        p["trust_relevant"], false,
+        "trust_relevant keeps its delivery-posture meaning; changing it under \
+         the same name is the schema bump this file refuses: {p}"
+    );
+
+    // And a consumer cannot recover the truth from the rest of the payload:
+    // the instruction fragment the gate refuses is not counted anywhere in it.
+    assert_eq!(p["skills"], 0);
+    assert!(
+        p.get("instructions").is_none(),
+        "if this key ever appears, revisit whether the new field is still the \
+         only way to see declared-but-uncounted content: {p}"
+    );
+
+    // The honest field says what the gate is about to do.
+    assert_eq!(
+        p["trust_blocks_delivery"], true,
+        "the gate stands between this project's content and every harness: {p}"
+    );
+
+    // Now prove it, rather than asserting a claim about a claim.
+    let err = agentstack::commands::apply::run(
+        &agentstack::cli::ApplyArgs {
+            verbose: false,
+            targets: vec![],
+            profile: None,
+            dry_run: false,
+            write: true,
+            scope: Some(agentstack::scope::Scope::Project),
+            allow_unresolved: false,
+            prune_foreign: false,
+            no_gitignore: true,
+        },
+        Some(&proj),
+    )
+    .expect_err("an untrusted project's render is refused, not written");
+    let err = err.to_string();
+    assert!(
+        err.contains("blocked"),
+        "the refusal is a blocked write, not a partial success: {err}"
+    );
+
+    // The refusal reached the whole declared surface, not just the servers —
+    // which is why a mode-shaped hint could never have answered for it.
+    assert!(
+        !proj.join(".mcp.json").exists(),
+        "a refused render writes no server config"
+    );
+
+    std::env::remove_var("HOME");
+    std::env::remove_var("AGENTSTACK_HOME");
+}
+
+/// The counterpart, so the field is a discrimination rather than a constant.
+///
+/// Same project, same `static` mode, same `trust_relevant: false` — trusted.
+/// Without this, `trust_blocks_delivery: true` everywhere would pass the test
+/// above and mean nothing.
+#[test]
+fn the_same_project_stops_claiming_a_gate_once_it_is_trusted() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let proj = project(
+        tmp.path(),
+        "version = 1\n\
+         [delivery]\nrender_locally = true\n\
+         [targets]\ndefault = [\"claude-code\"]\n\
+         [servers.demo]\ntype = \"stdio\"\ncommand = \"/bin/echo\"\n",
+    );
+
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
+    let p = &agentstack::commands::overview::status_body(Some(&proj)).unwrap()["project"];
+    assert_eq!(p["trust"], "trusted");
+    assert_eq!(
+        p["trust_blocks_delivery"], false,
+        "a trusted project has no gate in the way: {p}"
+    );
+
+    // And an EMPTY project is false for the other reason: the gate is up, but
+    // there is nothing declared for it to block. Both halves of the predicate
+    // are load-bearing, so both are witnessed.
+    // Its own sandbox: `project` always writes `<tmp>/proj`, so reusing this
+    // one would overwrite the manifest just trusted above and read `drifted`.
+    let tmp2 = assert_fs::TempDir::new().unwrap();
+    let empty = project(tmp2.path(), "version = 1\n");
+    let p = &agentstack::commands::overview::status_body(Some(&empty)).unwrap()["project"];
+    assert_eq!(p["trust"], "untrusted");
+    assert_eq!(
+        p["trust_blocks_delivery"], false,
+        "an untrusted project that declares nothing has nothing blocked: {p}"
+    );
+
+    std::env::remove_var("HOME");
+    std::env::remove_var("AGENTSTACK_HOME");
+}

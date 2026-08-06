@@ -42,6 +42,7 @@ to its older wording; it never guesses:
 | Status — pinned packs with a newer tag already fetched | `update-offer-v1` | yes |
 | Status — the effective members of each pinned package | `package-members-v1` | yes |
 | Status — names more than one linked library source holds | `library-sources-v1` | yes |
+| Status — says whether the trust gate would refuse a write right now | `trust-gate-reading-v1` | yes |
 | Status — where house rules reach each targeted CLI | `instruction-channels-v1` | yes |
 | Undo — revert this project's last write | `restore-last` | yes |
 | Toolsets — browse, create, add, activate | `profiles-v1`, `profiles-edit-v1`, `toolset-create-v2` | yes |
@@ -72,7 +73,7 @@ to its older wording; it never guesses:
 
 Sixteen of those names post-date the published `v0.17.1`: `status-honesty-v1`,
 `needs-your-yes-v1`, `update-offer-v1`, `package-members-v1`,
-`library-sources-v1`, `instruction-channels-v1`, `trust-review-card-v1`,
+`library-sources-v1`, `trust-gate-reading-v1`, `instruction-channels-v1`, `trust-review-card-v1`,
 `trust-card-diff-v1`, `trust-card-groups-v1`, `trust-content-drift-v1`,
 `abandoned-render-v1`, `workflow-role-selection-v1`, `activity-skill-load-v1`,
 `lease-status-v1`, `delivery-routing-v1` and `image-plan-v1`. A panel

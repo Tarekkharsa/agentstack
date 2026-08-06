@@ -245,9 +245,13 @@ fn recognition_changes_the_cards_words_and_nothing_else() {
          recognition did and did not do:\n{known}"
     );
     // The claim the card makes about itself has to be true. It says the
-    // question of WHOSE key this is is settled — not that the review shrank —
-    // and the assertion below is what keeps those two honest, since the bodies
-    // are compared byte for byte just after this.
+    // question of WHOSE key this is is settled — not that the review shrank.
+    // Nothing in this test compares the two bodies to each other: the
+    // byte-for-byte assertion below is on the receiving project's file tree,
+    // not on the cards. The body is identical by construction instead — the
+    // recognition line prints above the `summary_lines` loop, which reads the
+    // bundle alone — so what is worth asserting here is only that the card
+    // does not overstate what recognition bought.
     assert!(
         !known.contains("review below is shorter"),
         "the card must not claim a saving it did not make:\n{known}"

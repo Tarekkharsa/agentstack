@@ -116,13 +116,14 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
 <body>
 <a class="skip-link" href="#main-content">Skip to content</a>
 <div role="note" style="padding:12px 24px;background:#fdf3d8;border-bottom:2px solid #d9b45f;color:#4a3a10;font-size:14px;line-height:1.5">
-  <strong>This tour is behind the binary.</strong> It was written against v0.17.1 and two things have changed since.
-  The review now gates <strong>five</strong> kinds of content — MCP servers, skills, house rules, hooks and native
-  extensions — so <code>apply --write</code> and <code>use --write</code> refuse on a project that is untrusted or has
-  changed since you approved it, and several sequences below are missing their <code>agentstack trust .</code> step.
-  Delivery is also <em>routed</em> now, not chosen during <code>init</code>, so the three-mode picker in the later
-  lessons describes an axis the product retired.
-  For what the current binary does, follow <a href="../start.html" style="color:#7a5b10;font-weight:600">Get started</a>.
+  <strong>One part of this tour is still behind the binary.</strong> The sequences have been brought up to date: the
+  review gates <strong>five</strong> kinds of content — MCP servers, skills, house rules, hooks and native extensions —
+  so <code>apply --write</code> and <code>use --write</code> refuse on a project that is untrusted or has changed since
+  you approved it, and the lessons now show the <code>agentstack trust .</code> step where you would perform it.
+  <strong>What is not yet fixed:</strong> delivery is <em>routed</em> now, not chosen during <code>init</code>, so the
+  three-mode picker in the later lessons still describes an axis the product retired.
+  This page is hand-maintained with no markdown source, so nothing checks it for you — when in doubt, follow
+  <a href="../start.html" style="color:#7a5b10;font-weight:600">Get started</a>, which is generated and tested.
 </div>
 <div id="app" style="display:flex;flex-direction:column;height:100vh;overflow:hidden;background:var(--paper);color:var(--ink)">
   <nav id="topnav" style="flex:none;display:flex;align-items:center;gap:20px;padding:12px 24px;background:var(--surface);border-bottom:1px solid var(--line)">
@@ -189,7 +190,7 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
       <div style="background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px"><div style="font-size:12.5px;font-weight:700;margin-bottom:3px">5 · Share</div><div style="font-size:12.5px;color:var(--muted)">locked, secret-free setups</div></div>
       <div style="background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px"><div style="font-size:12.5px;font-weight:700;margin-bottom:3px">6 · Govern</div><div style="font-size:12.5px;color:var(--muted)">trust, policy, confined runs</div></div>
     </div>
-    <div class="callout"><strong>Rung 6 has its own vocabulary</strong> — <span class="mono">manifest → lockfile → trust → policy → gateway → audit log</span> is the pipeline that governs work you didn't write. You meet each word at the lesson that needs it; nothing on rungs 1–5 requires any of them.</div>
+    <div class="callout"><strong>Rung 6 has its own vocabulary</strong> — <span class="mono">manifest → lockfile → trust → policy → gateway → audit log</span> is the pipeline that governs work you didn't write. You meet each word at the lesson that needs it. But two of them are load-bearing from rung 1 on: <strong>lockfile</strong> and <strong>trust</strong>. Nothing is written into a CLI's config and no skill enters an agent's context until this project's exact bytes are pinned and you have said yes to them — so <code class="sm">apply --write</code> and <code class="sm">use --write</code> both refuse, exit 1, on a project you have not reviewed or have edited since. Only policy, the gateway and the audit log really do wait for rung 6.</div>
     <div class="hint">Tap each term below to open its plain-English definition — these eight cover 90% of what you'll read anywhere else.</div>
     <div id="termCards" style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px"></div>
   </section>
@@ -197,7 +198,7 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
   <section class="lesson-pane" id="lesson-2" hidden>
     <div class="kicker">LESSON 3 · RUNG 1 — UNIFY</div>
     <h1 class="lesson">One directory your CLIs all read from</h1>
-    <p class="lede"><code>agentstack init</code> scans your machine, imports the MCP servers your CLIs already have, and collects them into one directory in your project: <code>.agentstack/</code>. Then <code>apply --write</code> renders that back into every CLI's native config. Edit once, applied everywhere.</p>
+    <p class="lede"><code>agentstack init</code> scans your machine, imports the MCP servers your CLIs already have, and collects them into one directory in your project: <code>.agentstack/</code>. Then <code>apply --write</code> renders that back into every CLI's native config. Edit once, applied everywhere. One step sits between them and is not optional: <code>agentstack trust .</code>, where you read what this setup actually runs and say yes. Until you do, <code>apply --write</code> refuses.</p>
     <div class="hint" style="margin-bottom:10px">▶ Run each command in order — this is a simulation, nothing touches your machine.</div>
     <div class="term" style="margin-bottom:8px" data-term="unify" data-title="your-project — zsh"></div>
     <div class="termout" style="margin-bottom:14px"><div style="color:var(--term-text);white-space:pre">your-project/
@@ -268,7 +269,7 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
       <div id="quizDriftOpts" style="display:flex;flex-direction:column;gap:8px"></div>
       <div id="quizDriftFb" hidden style="margin-top:12px;font-size:13px;line-height:1.55"></div>
     </div>
-    <div style="margin-top:16px;font-size:13px;color:var(--muted);line-height:1.6"><strong>Undo, two faces:</strong> every rendered-config write (<code class="sm">apply</code>, <code class="sm">use</code>, sessions) is recorded. <code class="sm">agentstack undo</code> (v0.18.0+) lists your recent changes newest-first and reverts to the point you pick — the revert is recorded too, so going one step too far is recoverable. <code class="sm">agentstack restore --last --write</code> is the same record as a one-shot, script-friendly command, and it is present in every release. The manifest itself is yours: an <code class="sm">adopt</code> you regret is undone in your editor or git.</div>
+    <div style="margin-top:16px;font-size:13px;color:var(--muted);line-height:1.6"><strong>Undo, two faces:</strong> every rendered-config write (<code class="sm">apply</code>, <code class="sm">use</code>, sessions) is recorded. <code class="sm">agentstack undo</code> (v0.18.0+) lists your recent changes newest-first and reverts to the point you pick — the revert is recorded too, so going one step too far is recoverable. <code class="sm">agentstack x restore --last --write</code> is the same record as a one-shot, script-friendly command, and it is present in every release. The manifest itself is yours: an <code class="sm">adopt</code> you regret is undone in your editor or git.</div>
   </section>
 
   <section class="lesson-pane" id="lesson-6" hidden>
@@ -286,8 +287,8 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
 
   <section class="lesson-pane" id="lesson-7" hidden>
     <div class="kicker">LESSON 8 · RUNG 6 — TRUST</div>
-    <h1 class="lesson">Cloned repos stay inert until you approve them</h1>
-    <p class="lede">Register the gateway once (<code>gateway connect --all --write</code>) and every repo serves its capabilities through it — but a fresh clone is <strong>inert</strong>: no server spawns, no skill enters context, no secret resolves, until you run <code>agentstack trust .</code></p>
+    <h1 class="lesson">Nothing activates until you approve the exact bytes</h1>
+    <p class="lede">Register the bridge once (<code>agentstack x gateway connect --all --write</code>) and every project serves its capabilities through it — behind one gate. A fresh clone is <strong>inert</strong>: no server spawns, no skill enters context, no secret resolves. So is <em>your own project</em>, the moment you edit its manifest or its lockfile — the refusal then reads <span class="mono">changed since it was trusted</span> instead of <span class="mono">is not trusted</span>, and it is the same gate. Both come back with <code>agentstack trust .</code> This lesson names what you have already been meeting since rung 1.</p>
     <div style="background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md,16px);padding:20px 22px;margin-bottom:18px">
       <div class="mono" style="font-size:11px;font-weight:600;letter-spacing:0.12em;color:var(--muted);margin-bottom:14px">TRY THE TRUST GATE — CLICK THE ACTIONS</div>
       <div class="mono" style="display:flex;gap:6px;align-items:center;font-size:12px;flex-wrap:wrap;margin-bottom:16px">
@@ -312,12 +313,12 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
     <h1 class="lesson">Switch by task, not by editing five config files</h1>
     <p class="lede">One setup is a start. What makes agentstack a daily tool is that the setup <strong>changes with the work</strong> — and changing it is one command, not five files.</p>
     <div class="term" style="margin-bottom:8px" data-term="switch" data-title="your-project — zsh"></div>
-    <div class="callout" style="margin-bottom:18px"><strong>Need it only for now?</strong> <code class="sm">agentstack session start backend</code> loads a toolset for this piece of work and <code class="sm">agentstack session end</code> puts every file back. That is also exactly what <em>clean-at-rest</em> mode automates — nothing generated exists between the two commands, so the repo stays pristine for git.</div>
+    <div class="callout" style="margin-bottom:18px"><strong>Need it only for now?</strong> <code class="sm">agentstack x session start backend</code> loads a toolset for this piece of work and <code class="sm">agentstack x session end</code> puts every file back — nothing generated survives the pair, so the repo is pristine for git again at the end. A session renders, so it meets the same gate: review with <code class="sm">agentstack trust .</code> first, or it refuses like <code class="sm">use --write</code> does.</div>
     <p class="lede">Three tools carry the same idea beyond a single project:</p>
     <div style="display:flex;flex-direction:column;gap:10px;margin-bottom:18px">
       <div class="rowcard" style="align-items:baseline"><span class="mono" style="font-size:13px;font-weight:700;color:var(--accent);flex:none;width:110px">toolsets</span><span style="font-size:13.5px;color:var(--body);line-height:1.55">Named subsets of the manifest ("backend", "design"). <code class="sm">use &lt;toolset&gt; --write</code> materializes only that toolset's skills and prunes the rest it owns.</span></div>
       <div class="rowcard" style="align-items:baseline"><span class="mono" style="font-size:13px;font-weight:700;color:var(--accent);flex:none;width:110px">library</span><span style="font-size:13.5px;color:var(--body);line-height:1.55">Your central home at <code class="sm">~/.agentstack/lib/</code> — skills and server definitions projects reference <em>by name</em> instead of copying. <code class="sm">lib sync</code> carries it across machines.</span></div>
-      <div class="rowcard" style="align-items:baseline"><span class="mono" style="font-size:13px;font-weight:700;color:var(--accent);flex:none;width:110px">search + add</span><span style="font-size:13.5px;color:var(--body);line-height:1.55">One search over your library, the bundled catalog, and the official MCP Registry. <code class="sm">add from &lt;id&gt; --write</code> adds it to the manifest with its secrets lifted to <code class="sm">${REF}</code>s; one <code class="sm">apply --write</code> then renders it to <strong>all your CLIs at once</strong>. Skills also install from any repo: <code class="sm">add skill owner/repo --write</code>.</span></div>
+      <div class="rowcard" style="align-items:baseline"><span class="mono" style="font-size:13px;font-weight:700;color:var(--accent);flex:none;width:110px">search + add</span><span style="font-size:13.5px;color:var(--body);line-height:1.55">One search over your library, the bundled catalog, and the official MCP Registry. <code class="sm">add from &lt;id&gt; --write</code> adds it to the manifest with its secrets lifted to <code class="sm">${REF}</code>s. Adding changed the bytes you consented to, so the next two commands are <code class="sm">agentstack lock --write</code> and <code class="sm">agentstack trust .</code>; only then does <code class="sm">apply --write</code> render it to <strong>all your CLIs at once</strong>. Skills also install from any repo: <code class="sm">add skill owner/repo --write</code>.</span></div>
       <div class="rowcard" style="align-items:baseline"><span class="mono" style="font-size:13px;font-weight:700;color:var(--accent);flex:none;width:110px">write your own</span><span style="font-size:13.5px;color:var(--body);line-height:1.55">Drop a folder with a <code class="sm">SKILL.md</code> under <code class="sm">.agentstack/skills/</code> and run <code class="sm">agentstack yes</code> (v0.18.0+) — one review, and it is pinned and live in every CLI; the manifest and lock update themselves. Content you wrote here gets the one-step review; anything that arrived with a clone always gets the full staged one.</span></div>
     </div>
     <div class="term" style="margin-bottom:8px" data-term="scale" data-title="your-project — zsh"></div>
@@ -381,15 +382,15 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
   </section>
 
   <section class="lesson-pane" id="lesson-5" hidden>
-    <div class="kicker">LESSON 6 · RUNG 5 — SHARE, MODES &amp; UNDO</div>
-    <h1 class="lesson">Where files live, how teams share, how anything reverts</h1>
-    <p class="lede">You always commit the <strong>intent</strong> — manifest + lockfile. Where the rendered artifacts live is a per-project <strong>delivery mode</strong>, chosen during init and switchable any time (switching never changes what you trust or what policy allows):</p>
+    <div class="kicker">LESSON 6 · RUNG 5 — SHARE, DELIVERY &amp; UNDO</div>
+    <h1 class="lesson">Where files land, how teams share, how anything reverts</h1>
+    <p class="lede">You always commit the <strong>intent</strong> — manifest + lockfile. Where each capability lands is not a mode you pick: <strong>delivery is routed, not chosen</strong>. AgentStack decides per capability and per tool, and <code>agentstack x delivery</code> shows you the routing it chose:</p>
     <div class="grid3" style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px">
-      <div style="background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md,16px);padding:14px 16px"><div class="mono" style="font-size:12.5px;font-weight:700;color:var(--accent);margin-bottom:5px">static</div><div style="font-size:12.5px;color:var(--muted);line-height:1.55">default — rendered files on disk behind a managed .gitignore block. Zero moving parts, works with every CLI.</div></div>
-      <div style="background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md,16px);padding:14px 16px"><div class="mono" style="font-size:12.5px;font-weight:700;color:var(--accent);margin-bottom:5px">clean-at-rest</div><div style="font-size:12.5px;color:var(--muted);line-height:1.55">files exist only between session start and session end — the repo stays pristine at rest.</div></div>
-      <div style="background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md,16px);padding:14px 16px"><div class="mono" style="font-size:12.5px;font-weight:700;color:var(--accent);margin-bottom:5px">zero-files</div><div style="font-size:12.5px;color:var(--muted);line-height:1.55">nothing on disk — the gateway serves each trusted repo’s stack live over MCP.</div></div>
+      <div style="background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md,16px);padding:14px 16px"><div class="mono" style="font-size:12.5px;font-weight:700;color:var(--accent);margin-bottom:5px">live lane</div><div style="font-size:12.5px;color:var(--muted);line-height:1.55">skills and MCP servers, served over the bridge to every tool that can take them — no project artifacts on disk for those.</div></div>
+      <div style="background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md,16px);padding:14px 16px"><div class="mono" style="font-size:12.5px;font-weight:700;color:var(--accent);margin-bottom:5px">rendered lane</div><div style="font-size:12.5px;color:var(--muted);line-height:1.55">house rules, settings, hooks and native extensions — written into real files, plus everything at all for a tool that reads files only.</div></div>
+      <div style="background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-md,16px);padding:14px 16px"><div class="mono" style="font-size:12.5px;font-weight:700;color:var(--accent);margin-bottom:5px">the one override</div><div style="font-size:12.5px;color:var(--muted);line-height:1.55"><code class="sm">agentstack x delivery render-locally</code> — write files even where the live channel would have worked.</div></div>
     </div>
-    <p class="lede" style="margin-bottom:12px"><strong>Teams</strong> commit .agentstack/ and never credentials: each teammate stores their own values with <code>secret set</code>, then <code>apply --write</code>. A maintainer can <code>sign</code> the lockfile (detached ed25519) and teammates <code>verify --pubkey</code> it. In zero-files mode trust stays per person, per machine.</p>
+    <p class="lede" style="margin-bottom:12px"><strong>Teams</strong> commit .agentstack/ and never credentials: each teammate stores their own values with <code>secret set</code>, reviews the repo with <code>agentstack trust .</code> — the gate is per person, per machine, and no one else's yes carries over — then <code>apply --write</code>. A maintainer can <code>x sign</code> the lockfile (detached ed25519) and teammates <code>x verify --pubkey</code> it.</p>
     <div class="term" data-term="undo" data-title="your-project — zsh" data-minh="130"></div>
     <div class="callout" style="border-radius:var(--radius-md,16px);padding:12px 20px"><strong>Limit:</strong> restore reverts agentstack’s own recorded writes — a file a server already deleted is not brought back.</div>
   </section>
@@ -402,7 +403,7 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
       <div class="mono" style="font-size:11px;font-weight:600;letter-spacing:0.12em;color:var(--term-muted);margin-bottom:14px">CHEAT SHEET — THE EVERYDAY COMMANDS, BY RUNG</div>
       <div id="cheats" class="mono" style="display:grid;grid-template-columns:auto 1fr;gap:6px 18px;font-size:12px;line-height:1.7"></div>
     </div>
-    <div style="margin-top:18px;font-size:13.5px;color:var(--muted);line-height:1.65">Real setup takes ~5 minutes: install, <code class="sm">agentstack init</code>, <code class="sm">apply --write</code>, <code class="sm">status</code> — then climb only as far as you need. The <a href="../start.html">docs site's "Get started" guide</a> shows expected output at every step.</div>
+    <div style="margin-top:18px;font-size:13.5px;color:var(--muted);line-height:1.65">Real setup takes ~5 minutes: install, <code class="sm">agentstack init</code>, <code class="sm">agentstack trust .</code>, <code class="sm">apply --write</code>, <code class="sm">status</code> — then climb only as far as you need. Skip the review and <code class="sm">apply --write</code> stops with <span class="mono">not written — the project has not been trusted for this content</span>. The <a href="../start.html">docs site's "Get started" guide</a> shows expected output at every step.</div>
   </section>
 
   <div style="display:flex;justify-content:space-between;margin-top:36px;padding-top:20px;border-top:1px solid var(--line)">
@@ -421,12 +422,58 @@ h2.lesson{margin:0 0 6px;font-family:var(--font-heading,Caprasimo,serif);font-we
 
 var LESSONS=['Welcome — the problem','The map — four ideas, six rungs','Rung 1 · Unify','Rung 2 · Switch','Rungs 3–4 · Diagnose & Recover','Rung 5 · Share','Rung 6 · Guard','Rung 6 · Trust','Rung 6 · Confine','Rung 6 · Policy & audit','Recap & cheat sheet'];
 var W='var(--term-text)',G='var(--term-ok)',R='var(--term-bad)',A='var(--term-warn)',D='var(--term-muted)';
-var VERSION='0.17.1'; /* one shared value — keep in sync with the released tag */
+/* The version this tour is written against. It is a pre-release: install.sh and
+   brew serve v0.17.1 until v0.18.0 is final, so the demo pins the tag
+   explicitly (install.sh honours AGENTSTACK_VERSION) rather than implying that
+   a plain `curl | sh` hands you these commands. */
+var VERSION='0.18.0-rc.2';
 var TERM={
   unify:[
-    {cmd:'curl -fsSL …/install.sh | sh',out:[['downloading agentstack v'+VERSION+'…',D],['verifying tarball against checksums.txt… ok',D],['✓ installed to ~/.local/bin/agentstack',G]]},
-    {cmd:'agentstack init --yes',out:[['🔍  6 CLI binaries on PATH: Claude Code · Codex CLI · Cursor · Gemini CLI · OpenCode · Pi',W],['📥  Imported 1 MCP server(s) from existing configs',W],['🔑  Lifted 1 inline token → ${GITHUB_TOKEN}  (stored in gitignored .env)',A],['✅  Wrote .agentstack/agentstack.toml',G]]},
-    {cmd:'agentstack apply --write',out:[['Claude Code (.mcp.json)              ✓ wrote 1 server(s)',G],['Codex CLI (.codex/config.toml)       ✓ wrote 1 server(s)',G],['Gemini CLI (.gemini/settings.json)   ✓ wrote 1 server(s)',G],['OpenCode (opencode.json)             ✓ wrote 1 server(s)',G],['4 target(s) in sync — wrote 4.',W]]}
+    {cmd:'AGENTSTACK_VERSION=v'+VERSION+' curl -fsSL …/install.sh | sh',out:[['downloading agentstack v'+VERSION+'…',D],['verifying tarball against checksums.txt… ok',D],['✓ installed to ~/.local/bin/agentstack',G]]},
+    {cmd:'agentstack init --yes --secrets env',out:[
+      ['🔍  Found 5 coding tools and their native configs:',W],
+      ['      Claude Code          .mcp.json',W],
+      ['      Codex CLI            binary on PATH — no config files found',D],
+      ['📥  Importing 1 MCP server from those configs:',W],
+      ['      github   runs npx -y @modelcontextprotocol/server-github',W],
+      ['🔐  Found 1 plaintext token in your live CLI configs — replaced with secure references here:',A],
+      ['      ${GITHUB_TOKEN}   server "github" (env GITHUB_TOKEN)',W],
+      ['      The manifest stays commit-safe; real values resolve locally at apply time.',D],
+      ['🚚  How each tool gets them:',W],
+      ['      Claude Code   skills + MCP servers planned live (not connected) · house rules + settings + hooks written to files',D],
+      ['  ✓ pinned 1 server',G],
+      ['  · servers from this repo’s own config were imported — review what they run: `agentstack trust .`',D],
+      ['🔑  Stored 1 token in .env (gitignored)',D],
+      ['✅  Wrote .agentstack/agentstack.toml',G]]},
+    {cmd:'agentstack apply --write',out:[
+      ['Scope: project',W],
+      ['Claude Code',W],
+      ['  ✗ refusing to render instructions: project at ~/your-project is not trusted — review and `agentstack trust .` before putting its words into the managed region a harness reads straight into an agent’s context ("house-rules")',R],
+      ['  ✗ instructions not written — the project has not been trusted for this content',R],
+      ['Wrote 0 of 1 target; 1 blocked — see the ✗ line for each.',W],
+      ['error: 1 blocked write on 1 target — each ✗ above names the blocker',R],
+      ['(exit 1 — the review is not optional)',D]]},
+    {cmd:'agentstack trust .',out:[
+      ['Reviewing ~/your-project — approving this lets its capabilities activate.',W],
+      ['This project will:',W],
+      ['  run 1 command on your machine — github',W],
+      ['  add 1 file to every agent’s context',W],
+      ['  …using exactly the content shown below, pinned to these bytes.',D],
+      ['  ▶ github: runs `npx -y @modelcontextprotocol/server-github`   [library, pinned]',A],
+      ['  · house-rules   [pinned]',W],
+      ['✓ trusted at sha256:578c82bb…98cf40.',G],
+      ['Editing the manifest or lockfile invalidates this — re-run `agentstack trust` after reviewing changes.',D]]},
+    {cmd:'agentstack apply --write  # again, now that you have said yes',out:[
+      ['Scope: project',W],
+      ['Claude Code',W],
+      ['  · MCP servers are planned live (not connected) — `apply` writes nothing here now.',D],
+      ['  · instructions → ~/your-project/CLAUDE.md',D],
+      ['  ~ +6 / -0 lines (new content)',D],
+      ['  ✓ wrote 1 instruction fragment',G],
+      ['✓ .gitignore: managed block updated — generated artifacts stay out of git',G],
+      ['1 target in sync — wrote 1.',W],
+      ['→ Restart or reopen your agent CLI so it picks up the new config.',W],
+      ['  undo: agentstack x restore --last --write',D]]}
   ],
   verify:[
     {cmd:'agentstack doctor',out:[['✓ manifest valid  (.agentstack/agentstack.toml)',G],['✓ secrets — 2/2 ${REF}s resolve on this machine',G],['⚠ drift — .mcp.json edited on disk since last apply',A],['   fix: agentstack diff  →  adopt (keep edit)  or  apply --write (keep manifest)',D],['✓ guard installed in 4 CLIs',G],['3 sections hidden (features you don’t use) — doctor --all shows everything',D]]},
@@ -446,13 +493,15 @@ var TERM={
     {cmd:'agentstack trust --revoke',out:[['✓ trust withdrawn — this repo is inert again',G]]}
   ],
   switch:[
-    {cmd:'agentstack toolset create --name backend --server github --server postgres',out:[['✓ named toolset "backend" — 2 server(s), 3 skill(s)',G],['✓ re-locked agentstack.lock',G],['naming does not activate: nothing was rendered',D]]},
-    {cmd:'agentstack use backend --write',out:[['✓ materialized 3 skill(s) for toolset "backend"',G],['✓ pruned 2 skill(s) owned by other toolsets  (hand-made dirs untouched)',D],['✓ 4 target(s) in sync — every CLI now sees only "backend"',G]]},
+    {cmd:'agentstack toolset create --name backend --server github --server postgres',out:[['✓ pinned 3 skills + 2 servers from 1 toolset in .agentstack/agentstack.lock',G],['  no configs rendered, no skills materialized — that stays `agentstack use --write`.',D],['✓ toolset backend created.',G],['  Review the new pins:  agentstack trust .',W],['  Then switch to it:  agentstack use backend --write',W]]},
+    {cmd:'agentstack use backend --write',out:[['Activating toolset "backend" (scope: project) — 2 servers, 3 skills',W],['  ✗ refusing to materialize skills: project at ~/your-project changed since it was trusted — review and `agentstack trust .` before putting its words into an agent’s context',R],['  ✗ skills not materialized — the project has not been trusted for this content',R],['error: 1 target blocked — each ✗ above names the blocker',R],['(naming the toolset re-locked, and the lockfile is part of what you consented to)',D]]},
+    {cmd:'agentstack trust .',out:[['This project declares — review what auto-mode may run/contact:',W],['  ▶ github · postgres   [library, pinned]',A],['  · 3 skills loadable over MCP   [pinned]',W],['✓ trusted at sha256:9f2c…41aa.',G]]},
+    {cmd:'agentstack use backend --write  # now it lands',out:[['Activating toolset "backend" (scope: project) — 2 servers, 3 skills',W],['✓ materialized 3 skills for toolset "backend"',G],['✓ pruned 2 skills owned by other toolsets  (hand-made dirs untouched)',D],['✓ activated "backend" on 4 targets — every CLI now sees only "backend"',G],['  undo: agentstack x restore --last --write',D]]},
     {cmd:'agentstack use --list',out:[['backend   2 server(s) · 3 skill(s)   ✓ ready   ← active',G],['design    1 server(s) · 4 skill(s)   ✓ ready',W],['incident  3 server(s) · 1 skill(s)   ⚠ 1 ${REF} unresolved',A]]}
   ],
   scale:[
-    {cmd:'agentstack search postgres',out:[['[library]   pg-tools        your central library  (~/.agentstack/lib/)',W],['[registry]  postgres-mcp    registry.modelcontextprotocol.io',W],['[catalog]   sql-skill       bundled catalog',W]]},
-    {cmd:'agentstack add from postgres-mcp --write',out:[['✓ resolved from the official MCP Registry',G],['🔑 secret lifted → ${DATABASE_URL}',A],['✓ added to .agentstack/agentstack.toml',G],['next: agentstack apply --write renders it to all 4 CLIs at once',D]]},
+    {cmd:'agentstack search postgres',out:[['4 of 5 results for "postgres", most relevant first:',W],['catalog',D],['  postgres  PostgreSQL — query and inspect a database (read-only)',W],['    trust: ⚠ runs code (npx) · needs secret',A],['    ↳ agentstack add from postgres',D],['MCP registry',D],['  postgres-mcp  io.github.YawLabs/postgres-mcp',W],['    trust: ✓ verified namespace · ⚠ runs code (npx)',A]]},
+    {cmd:'agentstack add from postgres --write',out:[['found postgres (catalog) — postgres',G],['→ add "postgres" in .agentstack/agentstack.toml',W],['  + [servers.postgres]',G],['  + POSTGRES_URL = "${POSTGRES_URL}"',G],['✓ added "postgres".',G],['↳ review secrets with `agentstack secret list`, then `agentstack apply`.',D],['next: agentstack lock --write · agentstack trust . · agentstack apply --write',W],['   the add changed the bytes you consented to, so apply refuses until you re-review',D]]},
     {cmd:'agentstack lib sync',out:[['✓ committed 2 local change(s) to the library repo',G],['✓ pulled 1 skill added on another machine',G],['server defs travel as ${REF}s — no secret value ever leaves this machine',D]]}
   ],
   run:[
@@ -470,11 +519,11 @@ var TERM={
 };
 /* lesson 10 terminal reuses its own command set */
 TERM.undo=[
-  {cmd:'agentstack session start backend',out:[['✓ session started — rendered toolset "backend" for now',G],['clean-at-rest rhythm: files exist only until session end',D]]},
-  {cmd:'agentstack session end',out:[['✓ session ended — rendered files reverted, repo pristine again',G]]},
-  {cmd:'agentstack sign',out:[['✓ lockfile signed — agentstack.lock.sig (detached ed25519)',G],['public key (64 hex — publish it, e.g. commit as team.pub): 9b1de40c…',D]]},
-  {cmd:'agentstack verify --pubkey $(cat team.pub)',out:[['✓ signature valid — lockfile matches the maintainer’s key',G]]},
-  {cmd:'agentstack restore --last --write',out:[['reverting write w-4a02  (use backend)…',D],['✓ restored — the previous rendered configs are back',G]]}
+  {cmd:'agentstack x session start backend',out:[['✓ session started — rendered toolset "backend" for now',G],['(a session renders, so it takes the same gate: untrusted or edited since, it refuses)',D],['files exist only until session end',D]]},
+  {cmd:'agentstack x session end',out:[['✓ session ended — rendered files reverted, repo pristine again',G]]},
+  {cmd:'agentstack x sign',out:[['✓ lockfile signed — agentstack.lock.sig (detached ed25519)',G],['public key (64 hex — publish it, e.g. commit as team.pub): 9b1de40c…',D],['a signature says who pinned it — each teammate still runs `agentstack trust .` on their own machine',D]]},
+  {cmd:'agentstack x verify --pubkey $(cat team.pub)',out:[['✓ signature valid — lockfile matches the maintainer’s key',G]]},
+  {cmd:'agentstack x restore --last --write',out:[['reverting write w-4a02  (use backend)…',D],['✓ restored — the previous rendered configs are back',G]]}
 ];
 
 var state={lesson:0,visited:{0:true},openCard:-1,tgState:'start',wizStep:0,wizSecret:null,wizMode:null,driftPick:null,posturePick:'plain',callPick:null};

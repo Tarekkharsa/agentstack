@@ -1203,9 +1203,9 @@ next: agentstack secret set GITHUB_TOKEN`},
   copilot-cli                      <span class="er">✗</span> detected, hook missing
   opencode                         <span class="er">✗</span> detected, hook missing
   pi                               <span class="er">✗</span> detected, hook missing
-  claude-desktop                   <span class="dm">○ no hook surface (no PreToolUse-style hook exists on this surface)</span>
-  junie                            <span class="dm">○ no hook surface (only a static action allowlist; no per-call hook)</span>
-  kiro                             <span class="dm">○ no hook surface (hooks nest inside per-agent config files; not wired yet)</span>`},
+  claude-desktop                   <span class="dm">○ NOT protected — no hook surface exists (no PreToolUse-style hook exists on this surface)</span>
+  junie                            <span class="dm">○ NOT protected — no hook surface exists (only a static action allowlist; no per-call hook)</span>
+  kiro                             <span class="dm">○ NOT protected — not wired yet (agentstack has not wired one; this repo's descriptor records Kiro's MCP config only, not a hook file it could install into)</span>`},
  guardinstall:{cmd:'agentstack guard install', cwd:'~/Documents/GitHub/agentstack', recon:true,
   out:`Installing guard hook…
   <span class="ok">✓</span> claude-code (+ vscode agent mode) → ~/.claude/settings.json
@@ -1217,9 +1217,9 @@ next: agentstack secret set GITHUB_TOKEN`},
   <span class="ok">✓</span> copilot-cli → ~/.copilot/hooks/agentstack-guard.json
   <span class="ok">✓</span> opencode → ~/.config/opencode/plugins/agentstack-guard.js
   <span class="ok">✓</span> pi → ~/.pi/agent/extensions/agentstack-guard.ts
-  <span class="dm">○ claude-desktop — no PreToolUse-style hook exists on this surface</span>
-  <span class="dm">○ junie — only a static action allowlist; no per-call hook</span>
-  <span class="dm">○ kiro — hooks nest inside per-agent config files; not wired yet</span>
+  <span class="dm">○ claude-desktop — <span class="wr">NOT protected</span> (no hook surface exists: no PreToolUse-style hook exists on this surface)</span>
+  <span class="dm">○ junie — <span class="wr">NOT protected</span> (no hook surface exists: only a static action allowlist; no per-call hook)</span>
+  <span class="dm">○ kiro — <span class="wr">NOT protected</span> (not wired yet: agentstack has not wired one; this repo's descriptor records Kiro's MCP config only, not a hook file it could install into)</span>
 
 <span class="ok">✓</span> guard wired into 7 CLIs. Blocks: destructive commands, reads/writes of
 [policy.filesystem] deny paths, writes outside the workspace/[guard] allow_roots.

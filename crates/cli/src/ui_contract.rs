@@ -589,6 +589,18 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   is a statement about hooks and extensions being executable kinds, never a
 ///   claim that a ceremony has happened. Its own name for the usual reason: a binary
 ///   predating it has no such command.
+/// - `trust-gate-reading-v1`: `status --json`'s `project` gains
+///   `trust_blocks_delivery` — true when the project declares content AND
+///   trust is not granted, i.e. the gate would refuse a write right now. It
+///   exists because a consumer CANNOT derive that from what is already
+///   emitted: the payload carries `servers` and `skills`, but not
+///   `instructions`, `settings`, `hooks` or `extensions`, so an
+///   instructions-only project reads `servers: 0, skills: 0` while
+///   `apply --write` refuses its fragment. `trust_relevant` is unchanged and
+///   keeps its meaning — a delivery-posture hint, true for the gateway and
+///   the file-light lanes — which is why it reads `false` for a static
+///   project whose every write the gate refuses. Decide on the new field, not
+///   on that one.
 /// - `library-sources-v1`: `status --json`'s `project` gains a
 ///   `shadowed_names` array (`project.shadowed_names`, beside the other
 ///   per-project readings, so one project card is read from one place) —
@@ -827,6 +839,7 @@ pub const FEATURES: &[&str] = &[
     "lease-status-v1",
     "delivery-routing-v1",
     "library-sources-v1",
+    "trust-gate-reading-v1",
     "instruction-channels-v1",
     "image-plan-v1",
     "workflow-role-selection-v1",
@@ -1092,6 +1105,7 @@ mod tests {
             "package-members-v1",
             "lease-status-v1",
             "library-sources-v1",
+            "trust-gate-reading-v1",
             "instruction-channels-v1",
             "image-plan-v1",
             "workflow-role-selection-v1",
