@@ -191,25 +191,27 @@ fn a_healthy_report_still_names_a_step() {
         next, "find a server or skill to add — only you know what this project needs",
         "the empty project's step must say what only the human can supply: {report}"
     );
-    // …and the MACHINE field is not null. The intermediate G28 fix asserted a
-    // null here, and that was wrong twice over. It contradicted this test's own
-    // name and premise — a healthy report still names a step, and `null` was
-    // precisely the answer this file was written to remove. And it contradicted
-    // `status_honesty::status_v1_state_semantics_are_unchanged`, which demands a
-    // non-empty `next_action` on this exact fixture (`version = 1`), because
-    // `next_action` is the `status-v1` seam and external consumers read it.
-    // Nulling it is a schema change, not a wording change.
+    // …and the MACHINE field is null, which does NOT contradict this file's
+    // premise. This test is `every_report_ends_with_exactly_one_next_action`
+    // and that property lives on `next_step`, the human sentence, asserted just
+    // above — the machine field answers the stricter "what may a program run
+    // verbatim?", and the module docs at the top of this file already say it is
+    // null wherever the honest human answer is not executable.
     //
-    // The premise behind the null was that no runnable command exists here. It
-    // does: `agentstack search` takes its query as an OPTIONAL positional, so
-    // the bare command is complete, and on a `version = 1` project it exits 0
-    // with empty stderr. What cannot be supplied is the QUERY, and that is what
-    // the prose sentence above says. Sentence and command now carry one half of
-    // the answer each instead of the sentence carrying both badly.
-    assert_eq!(
-        report["next_action"].as_str(),
-        Some("agentstack search"),
-        "the query is the human's to supply; the browse is still runnable: {report}"
+    // It briefly asserted `Some("agentstack search")` on the reasoning that a
+    // runnable command exists here: `search` takes its query as an optional
+    // positional, so the bare form is complete and exits 0. Complete, but not an
+    // ACTION — it is a read-only browse that leaves every observable field of
+    // the report identical, so a driver polling this field runs it and is handed
+    // it again forever, which `guidance_is_executable.rs` reproduces as a loop.
+    //
+    // The second half of that reasoning — that nulling breaks `status-v1` — was
+    // also wrong, and measurably: the Group and Verified rungs already answer
+    // null from this field on far commoner projects, so consumers handle it.
+    assert!(
+        report["next_action"].is_null(),
+        "the one missing input here is a human decision, so there is no command \
+         for a driver — and a browse that changes nothing is not one: {report}"
     );
     // The shape a person substitutes into still ships — in the `why`, where no
     // driver is invited to run it. Losing it would trade one honesty problem
@@ -534,5 +536,210 @@ fn a_never_pinned_body_absent_from_disk_names_no_command_in_the_machine_field() 
     assert!(
         sentence.contains("skills/orphan") && sentence.contains("not present on disk"),
         "the human sentence must still name the path and the condition: {report}"
+    );
+}
+
+// ------------------------------------------------------------------------
+// G32(c) — the rung must never name the command that just refused.
+// ------------------------------------------------------------------------
+
+/// Run the binary in a sealed environment and return `(stdout+stderr, code)`.
+///
+/// Subprocess, not `doctor::collect`, and deliberately: the rung under test
+/// branches on whether any harness on THIS machine can host the gateway, which
+/// `detect.bin` answers by looking for `claude` on `PATH`. An in-process test
+/// would inherit the developer's `PATH` and quietly measure a different rung on
+/// a machine that happens to have Claude Code installed. `env_clear` makes the
+/// state part of the fixture instead of part of the machine.
+fn sealed(args: &[&str], home: &std::path::Path, proj: &std::path::Path) -> (String, i32) {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_agentstack"))
+        .args(args)
+        .current_dir(proj)
+        .env_clear()
+        .env("HOME", home)
+        .env("AGENTSTACK_HOME", home.join(".agentstack"))
+        .env("PATH", "/usr/bin:/bin")
+        .env("NO_COLOR", "1")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("the binary must run");
+    (
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        ),
+        out.status.code().expect("the process must exit normally"),
+    )
+}
+
+/// A trusted, locked project carrying `manifest`, in its own sealed HOME.
+fn sealed_project(
+    root: &std::path::Path,
+    name: &str,
+    manifest: &str,
+) -> (std::path::PathBuf, std::path::PathBuf) {
+    let home = root.join(format!("{name}-home"));
+    let proj = root.join(name);
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(proj.join(".agentstack")).unwrap();
+    fs::write(proj.join(".agentstack/agentstack.toml"), manifest).unwrap();
+    let (_, code) = sealed(&["lock", "--write"], &home, &proj);
+    assert_eq!(code, 0, "fixture: lock --write must succeed");
+    let (preview, _) = sealed(&["trust", "--preview"], &home, &proj);
+    let json: serde_json::Value =
+        serde_json::from_str(&preview).expect("`trust --preview` must be JSON");
+    let digest = json["surface_digest"].as_str().unwrap().to_string();
+    let (_, code) = sealed(
+        &["trust", "--yes", "--consented-digest", &digest],
+        &home,
+        &proj,
+    );
+    assert_eq!(code, 0, "fixture: trust must succeed");
+    (home, proj)
+}
+
+fn next_action_of(json: &str) -> serde_json::Value {
+    let report: serde_json::Value = serde_json::from_str(json).expect("doctor --json must be JSON");
+    report["next_action"].clone()
+}
+
+/// Every capability routed live, and no CLI on this machine that can host a
+/// gateway for it.
+const UNDELIVERABLE: &str = "version = 1\n\
+                             [targets]\n\
+                             default = [\"claude-code\"]\n\
+                             [servers.docs]\n\
+                             type = \"stdio\"\n\
+                             command = \"echo\"\n";
+
+/// The same routing plus one declaration that lands on disk — so something IS
+/// delivered and `apply --write` exits 0.
+const DELIVERABLE: &str = "version = 1\n\
+                           [targets]\n\
+                           default = [\"claude-code\"]\n\
+                           [servers.docs]\n\
+                           type = \"stdio\"\n\
+                           command = \"echo\"\n\
+                           [settings.claude-code]\n\
+                           model = \"opus\"\n";
+
+/// The defect, and it is the G22/G24 class one rung further down: `doctor`
+/// answered `agentstack apply --write` on the exact state where `apply --write`
+/// refuses.
+///
+/// Measured before the fix: `apply --write` exits 1 with "nothing was
+/// delivered", and `doctor` on the same project printed "0 errors, 0 warnings",
+/// "ready: reviewed, activated, and verified", and `next: agentstack apply
+/// --write`. A driver reading `next_action` runs the command it was just handed,
+/// gets exit 1, re-reads the same field, and never leaves the state.
+///
+/// The command named instead is the one `apply`'s own refusal names, and it is
+/// the only one of the two that can run here: `x gateway connect` exits 1 with
+/// "no installed harness with MCP support detected", because the very condition
+/// this rung fires on is that no harness here can host a bridge.
+#[test]
+fn the_rung_for_a_project_that_delivers_nothing_names_a_command_that_runs() {
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let (a_home, a_proj) = sealed_project(tmp.path(), "for-apply", UNDELIVERABLE);
+    let (d_home, d_proj) = sealed_project(tmp.path(), "for-doctor", UNDELIVERABLE);
+
+    // The premise: this really is the state `apply` refuses.
+    let (applied, code) = sealed(&["apply", "--write"], &a_home, &a_proj);
+    assert_eq!(
+        code, 1,
+        "fixture: apply must be refusing the delivery here:\n{applied}"
+    );
+    assert!(
+        applied.contains("nothing was delivered"),
+        "fixture: for the refusal this rung is about:\n{applied}"
+    );
+
+    let (json, _) = sealed(&["doctor", "--json"], &d_home, &d_proj);
+    let next = next_action_of(&json);
+    assert_ne!(
+        next, "agentstack apply --write",
+        "`doctor` may not hand a driver the command that just exited 1 on this \
+         very project — that is a loop with no exit:\n{json}"
+    );
+    assert_eq!(
+        next, "agentstack x delivery render-locally --write",
+        "the rung must name the one way forward that runs here:\n{json}"
+    );
+
+    // Naming a runnable command is not enough — it has to end the state. The
+    // rung converges: run it, render, and the finding is gone.
+    let (_, code) = sealed(
+        &["x", "delivery", "render-locally", "--write"],
+        &d_home,
+        &d_proj,
+    );
+    assert_eq!(
+        code, 0,
+        "the named command must run in the state it is named"
+    );
+    let (_, code) = sealed(&["apply", "--write"], &d_home, &d_proj);
+    assert_eq!(code, 0, "and it must unblock the render it was blocking");
+    let (json, _) = sealed(&["doctor", "--json"], &d_home, &d_proj);
+    let report: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!(
+        report["errors"], 0,
+        "the finding must clear once obeyed, or the loop simply moved:\n{json}"
+    );
+}
+
+/// The first control: a project that DOES deliver something keeps its ordinary
+/// rung and gains no finding.
+///
+/// Without this, the witness above is satisfied by routing every live-lane
+/// project to `render-locally` — which would push a working zero-files setup
+/// into writing files it deliberately does not write.
+#[test]
+fn a_project_that_delivers_something_gains_no_undeliverable_finding() {
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let (home, proj) = sealed_project(tmp.path(), "delivers", DELIVERABLE);
+
+    let (applied, code) = sealed(&["apply", "--write"], &home, &proj);
+    assert_eq!(
+        code, 0,
+        "fixture: the rendered lane carries a setting, so this delivers:\n{applied}"
+    );
+
+    let (json, _) = sealed(&["doctor", "--json"], &home, &proj);
+    assert!(
+        !json.contains("nothing here can be delivered"),
+        "a project that delivered something must not be told it delivers \
+         nothing:\n{json}"
+    );
+    assert_ne!(
+        next_action_of(&json),
+        "agentstack x delivery render-locally --write",
+        "and it must not be pushed into writing files it already writes:\n{json}"
+    );
+}
+
+/// The second control: the finding stays BELOW the consent rung.
+///
+/// `render-locally` records an override; it renders nothing while the gate is
+/// up, so naming it over an untrusted project would be step 2 named while step
+/// 1 is outstanding — the same dead end the unconnected-bridge finding is
+/// already held back for. The same project, only untrusted, must still be sent
+/// to the review.
+#[test]
+fn the_undeliverable_finding_does_not_outrank_the_review() {
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("untrusted-home");
+    let proj = tmp.path().join("untrusted");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(proj.join(".agentstack")).unwrap();
+    fs::write(proj.join(".agentstack/agentstack.toml"), UNDELIVERABLE).unwrap();
+    let (_, code) = sealed(&["lock", "--write"], &home, &proj);
+    assert_eq!(code, 0, "fixture: lock --write must succeed");
+
+    let (json, _) = sealed(&["doctor", "--json"], &home, &proj);
+    assert_eq!(
+        next_action_of(&json),
+        "agentstack trust .",
+        "nothing is delivered here either, but the review comes first:\n{json}"
     );
 }

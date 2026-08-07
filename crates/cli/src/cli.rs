@@ -377,6 +377,11 @@ pub enum Command {
     ///
     /// Reverts a history entry (servers, settings, hooks, instructions), or
     /// restores one adapter's config from its single-slot backup.
+    ///
+    /// Skill directories that `use --write` materialized are NOT recorded: this
+    /// ledger holds a file and its pre-write bytes, and a delivered skill is a
+    /// linked directory. Take those off with `agentstack x uninstall --write`,
+    /// or by activating a toolset that omits them.
     #[command(
         hide = true,
         after_help = "\
@@ -391,6 +396,10 @@ Examples:
     /// The same recorded changes `restore` works with, asked the other way
     /// round — newest first, pick one. The revert is itself recorded, so
     /// going one step too far is recoverable.
+    ///
+    /// It reaches exactly what the ledger records: server configs, settings,
+    /// hooks and instructions. Skill directories materialized by `use --write`
+    /// are not in it — the listing names them when this project has any.
     #[command(after_help = "\
 Examples:
   agentstack undo                    what changed recently
@@ -3144,7 +3153,11 @@ pub struct ImportArgs {
 
 #[derive(Args, Debug)]
 pub struct SearchArgs {
-    /// Free-text query over name, description, and tags (lists all if omitted).
+    /// Free-text query over name, description, and tags. Omit it to list what
+    /// the two LOCAL sources hold — your central library and the built-in
+    /// catalog. The official MCP Registry answers a term, so only a query
+    /// reaches it; a bare listing names that rather than implying it searched
+    /// everything.
     pub query: Option<String>,
 
     /// Show every match instead of the most relevant few. The default page is

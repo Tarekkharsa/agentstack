@@ -28,11 +28,54 @@ use crate::util::paths;
 /// this finding cannot name three different fixes for one state.
 const BRIDGE_FIX: &str = "agentstack x gateway connect --all --write";
 
-/// Is this finding the unconnected-bridge one? Recognized by its fix, so the
-/// next-step ladder can hold it below the consent rung without a second flag
-/// travelling beside the finding.
-fn is_bridge_finding(msg: &str) -> bool {
-    msg.contains(BRIDGE_FIX)
+/// The one command that writes files for a project whose every capability is
+/// routed live. The same override [`super::apply`] names in its own refusal, so
+/// the command a user reads from the failure and the command `doctor` puts on
+/// the terminal line are one string.
+const LOCAL_DELIVERY_FIX: &str = "agentstack x delivery render-locally --write";
+
+/// Is this finding one of the two DELIVERY ones — the unconnected bridge, or
+/// nothing deliverable at all? Recognized by their fixes, so the next-step
+/// ladder can hold them below the consent rung without a second flag travelling
+/// beside each finding.
+///
+/// Both belong here for one reason: neither fix does anything while the review
+/// is outstanding. Registering a bridge for an untrusted project serves nothing,
+/// and recording a render-locally override for one renders nothing — so naming
+/// either above `agentstack trust .` would name step 2 while step 1 is
+/// outstanding, the dead-end class `tests/guidance_is_executable.rs` exists to
+/// catch.
+fn is_delivery_finding(msg: &str) -> bool {
+    msg.contains(BRIDGE_FIX) || msg.contains(LOCAL_DELIVERY_FIX)
+}
+
+/// Does this manifest declare anything the RENDERED lane would actually write
+/// for these targets? The mirror of
+/// [`super::delivery::declares_something_live`], and the second half of the
+/// question `apply --write` answers before it refuses with "nothing was
+/// delivered": it refuses only when the live lane has unreachable content AND
+/// the rendered lane had nothing of its own to carry.
+///
+/// Skills are excluded deliberately, and it is not an oversight about which
+/// lane routes them: `apply` never writes a skill in either lane — skills
+/// activate through `use --write` — so counting one here would report a
+/// delivery `apply` does not make, which is the exact overclaim this predicate
+/// is used to prevent.
+fn declares_something_rendered(
+    manifest: &agentstack_core::manifest::Manifest,
+    plan: &crate::delivery::Plan,
+) -> bool {
+    plan.harnesses
+        .iter()
+        .flat_map(|h| h.kinds_in(crate::delivery::Lane::Rendered))
+        .any(|k| match k {
+            crate::delivery::Kind::Skill => false,
+            crate::delivery::Kind::Server => !manifest.declared_server_names().is_empty(),
+            crate::delivery::Kind::Instruction => !manifest.instructions.is_empty(),
+            crate::delivery::Kind::Setting => !manifest.settings.is_empty(),
+            crate::delivery::Kind::Hook => !manifest.hooks.is_empty(),
+            crate::delivery::Kind::Extension => !manifest.extensions.is_empty(),
+        })
 }
 
 #[derive(PartialEq)]
@@ -359,21 +402,22 @@ impl Report {
         self.fix_at(want, false)
     }
 
-    /// [`first_fix`](Self::first_fix), with the option to skip the
-    /// unconnected-bridge finding.
+    /// [`first_fix`](Self::first_fix), with the option to skip the delivery
+    /// findings.
     ///
-    /// That finding is a real error and stays one in the list, but it must not
-    /// outrank the consent rung in [`next_action`](Self::next_action): on an
+    /// Those findings are real errors and stay errors in the list, but they must
+    /// not outrank the consent rung in [`next_action`](Self::next_action): on an
     /// untrusted or drifted project nothing would be served live *even with* a
-    /// bridge, so naming the bridge there contradicts `status` and asks for a
-    /// step that fixes nothing yet.
-    fn fix_at(&self, want: &str, skip_bridge: bool) -> Option<&str> {
+    /// bridge, and nothing would be written *even with* a render-locally
+    /// override, so naming either there contradicts `status` and asks for a step
+    /// that fixes nothing yet.
+    fn fix_at(&self, want: &str, skip_delivery: bool) -> Option<&str> {
         let candidates: Vec<&str> = self
             .sections
             .iter()
             .flat_map(|s| &s.lines)
             .filter(|(tag, _)| *tag == want)
-            .filter(|(_, msg)| !(skip_bridge && is_bridge_finding(msg)))
+            .filter(|(_, msg)| !(skip_delivery && is_delivery_finding(msg)))
             .filter_map(|(_, msg)| msg.split_once("↳ ").map(|(_, fix)| fix.trim()))
             .collect();
         candidates
@@ -383,19 +427,32 @@ impl Report {
             .copied()
     }
 
-    /// Is there an error finding that is *not* the unconnected-bridge one?
-    fn has_non_bridge_error(&self) -> bool {
+    /// Is there an error finding that is not one of the delivery ones?
+    fn has_non_delivery_error(&self) -> bool {
         self.sections
             .iter()
             .flat_map(|s| &s.lines)
-            .any(|(tag, msg)| *tag == "error" && !is_bridge_finding(msg))
+            .any(|(tag, msg)| *tag == "error" && !is_delivery_finding(msg))
     }
 
     fn has_bridge_error(&self) -> bool {
         self.sections
             .iter()
             .flat_map(|s| &s.lines)
-            .any(|(tag, msg)| *tag == "error" && is_bridge_finding(msg))
+            .any(|(tag, msg)| *tag == "error" && msg.contains(BRIDGE_FIX))
+    }
+
+    /// Is there an "it cannot be delivered at all" error? Kept apart from
+    /// [`has_bridge_error`](Self::has_bridge_error) because the two states have
+    /// DIFFERENT answers: the bridge one is repaired by registering a bridge,
+    /// and this one fires precisely when no harness here can host one, so
+    /// naming [`BRIDGE_FIX`] would be a command that refuses in the state it is
+    /// named in.
+    fn has_undeliverable_error(&self) -> bool {
+        self.sections
+            .iter()
+            .flat_map(|s| &s.lines)
+            .any(|(tag, msg)| *tag == "error" && msg.contains(LOCAL_DELIVERY_FIX))
     }
 
     /// Exactly one recommended step for the HUMAN reading the terminal, always
@@ -466,7 +523,7 @@ impl Report {
         // command the review or a warning fix would name. The one exception is
         // the unconnected-bridge error, which is held back below the consent
         // rung — see `fix_at`.
-        if self.has_non_bridge_error() {
+        if self.has_non_delivery_error() {
             if let Some(fix) = self.fix_at("error", true) {
                 return (fix.to_string(), "the finding to start with");
             }
@@ -528,6 +585,22 @@ impl Report {
             return (
                 BRIDGE_FIX.to_string(),
                 "nothing routed live is reaching those tools until the bridge is registered",
+            );
+        }
+        // …and the case the rung above cannot answer: everything this project
+        // declares is routed live, and NO harness on this machine can host a
+        // bridge for it. `apply --write` refuses here — "nothing was delivered",
+        // exit 1 — and `doctor` used to end this exact state with `ready:
+        // reviewed, activated, and verified` and a next step of `agentstack
+        // apply --write`, the command that had just failed. The two commands
+        // `apply`'s own refusal names are the only ways forward, and only one of
+        // them can run here: `x gateway connect` exits 1 with "no installed
+        // harness with MCP support detected" (measured), so the override is the
+        // step, and it is the same string `apply` prints.
+        if self.has_undeliverable_error() {
+            return (
+                LOCAL_DELIVERY_FIX.to_string(),
+                "nothing this project declares can reach a CLI until its files are written",
             );
         }
         // Trusted (or trust is not this report's concern): the warning-level
@@ -1375,11 +1448,38 @@ fn run_checks(
         // finding above cannot speak (it would name a CLI the user cannot
         // obey) and the friendly line above never runs, so without this the
         // whole section renders empty and the check looks like it did not run.
-        // `Unchecked`, not `Ok`: nothing was verified here.
-        report.line(
-            Level::Unchecked,
-            "no CLI here can host the gateway — nothing to connect",
-        );
+        //
+        // Two different states share that shape, and reporting them the same
+        // way was a green tick over a refusal. When the live lane carries
+        // something DECLARED and the rendered lane carries nothing of its own,
+        // `apply --write` refuses outright — "nothing was delivered", exit 1 —
+        // so this project delivers nothing to anything, and `doctor` said
+        // `ready` over it (measured: 0 errors, 0 warnings, next step `agentstack
+        // apply --write`, which is the command that had just exited 1).
+        //
+        // This is the same finding as its sibling above and carries the same
+        // level, differing only in the fix — and only because the sibling's fix
+        // cannot run here. It is `Level::Error` for the reason `apply` bails:
+        // exit 0 over an environment where nothing reached any tool is the false
+        // success the whole surface exists to prevent.
+        if super::delivery::declares_something_live(manifest, &plan)
+            && !declares_something_rendered(manifest, &plan)
+        {
+            report.line(
+                Level::Error,
+                format!(
+                    "nothing here can be delivered — every capability is routed live, no CLI on \
+                     this machine can host the gateway, and nothing lands on the rendered lane \
+                     ↳ {LOCAL_DELIVERY_FIX}"
+                ),
+            );
+        } else {
+            // `Unchecked`, not `Ok`: nothing was verified here.
+            report.line(
+                Level::Unchecked,
+                "no CLI here can host the gateway — nothing to connect",
+            );
+        }
     }
     // W4 precondition 6 — gateway unavailable. A registered bridge whose
     // command is not runnable is not "not connected": that harness gets no

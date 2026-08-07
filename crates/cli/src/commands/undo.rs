@@ -19,6 +19,13 @@
 //!   add/remove, and lockfile writes from `add`/`remove`/`install`/`upgrade`/
 //!   `lock` are not in that ledger, so they cannot appear here — offering a
 //!   revert we cannot perform is a worse failure than not offering one.
+//!   Materialized skills are the case where that silence was itself the
+//!   failure: `use --write` says "wrote skills to 3 locations" and this
+//!   timeline then says "nothing recorded", with nothing joining the two. The
+//!   ledger cannot hold them (see the `history` module docs — it stores a
+//!   file's bytes, and a delivered skill is a linked directory whose contents
+//!   an undo could not prove were still ours), so the honest repair is to name
+//!   the gap here rather than widen the ledger. [`skills_outside_the_ledger`].
 //! - **`restore` is unchanged.** Its flags, its JSON, and its behaviour are a
 //!   declared contract; this is a second door onto the same room, not a
 //!   replacement.
@@ -61,6 +68,66 @@ fn timeline(dir: &Path) -> Vec<Row> {
             index: i + 1,
         })
         .collect()
+}
+
+/// The skills `use --write` materialized for this project that no undo can
+/// take back, newest state first — deduplicated across targets, because one
+/// skill delivered to three CLIs is one thing the user thinks about.
+///
+/// Read from the state ledger (`managed_skills`), which is where skill
+/// ownership genuinely lives; the history ledger has no record of them at all.
+/// Project-scope keys only: a global key is shared by every manifest on the
+/// machine, so counting one here would let this project's Undo describe
+/// another project's delivery.
+///
+/// Empty when there is nothing to warn about, so the note is a fact about THIS
+/// project rather than a permanent disclaimer.
+pub(crate) fn skills_outside_the_ledger(dir: &Path) -> Vec<String> {
+    let Ok(state) = crate::state::State::load() else {
+        return Vec::new();
+    };
+    let suffix = format!(
+        "@project:{}",
+        crate::manifest::project_root_of(dir).display()
+    );
+    let mut names: Vec<String> = state
+        .targets
+        .iter()
+        .filter(|(key, _)| key.ends_with(&suffix))
+        .flat_map(|(_, t)| t.managed_skills.iter().cloned())
+        .collect();
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
+/// Print the boundary — the sentence from the ledger seam, the names it is
+/// about, and the commands that DO take them back — or print nothing when this
+/// project has no materialized skills.
+///
+/// Shared by both Undo doors (`undo` and `x restore`) so they cannot drift into
+/// two different promises.
+pub(crate) fn print_skills_note(dir: &Path) {
+    let names = skills_outside_the_ledger(dir);
+    if names.is_empty() {
+        return;
+    }
+    println!(
+        "  {} {} ({})",
+        "·".dimmed(),
+        crate::history::SKILLS_ARE_NOT_RECORDED.dimmed(),
+        names
+            .iter()
+            .map(|n| crate::text::sanitize_line(n))
+            .collect::<Vec<_>>()
+            .join(", ")
+            .dimmed()
+    );
+    println!(
+        "  {} {}",
+        "·".dimmed(),
+        crate::history::SKILLS_COME_OFF_WITH.dimmed()
+    );
 }
 
 /// "today 15:12" / "yesterday" / a date — the resolution a person actually
@@ -119,6 +186,9 @@ pub fn run(args: &UndoArgs, manifest_dir: Option<&Path>) -> Result<()> {
 
     if args.json {
         let out = serde_json::json!({
+            // A UI drawing an Undo affordance has to know the affordance is
+            // bounded, or it repeats the same over-promise in its own words.
+            "skills_not_recorded": skills_outside_the_ledger(&dir),
             "entries": rows.iter().map(|r| serde_json::json!({
                 "index": r.index,
                 "id": r.entry.id,
@@ -137,6 +207,11 @@ pub fn run(args: &UndoArgs, manifest_dir: Option<&Path>) -> Result<()> {
 
     if rows.is_empty() {
         println!("nothing recorded to undo for this project.");
+        // The line that closed G31. "Nothing recorded" straight after
+        // `use --write` reported writing skills to three locations reads as a
+        // bug in the ledger; it is a boundary of it, and the boundary has to be
+        // stated where the user meets it.
+        print_skills_note(&dir);
         println!(
             "  {}   {}",
             "agentstack status".green().bold(),
@@ -149,6 +224,9 @@ pub fn run(args: &UndoArgs, manifest_dir: Option<&Path>) -> Result<()> {
     // list above a confirmed revert buries the one line that matters.
     if !(args.to.is_some() && args.write) {
         print_timeline(&rows);
+        // A non-empty timeline over-promises in the other direction: it looks
+        // like the complete record of what changed. Bound it here too.
+        print_skills_note(&dir);
     }
 
     // Which point? Either named on the command line, or asked for.

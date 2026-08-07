@@ -5,6 +5,18 @@ in isolated `HOME`/`AGENTSTACK_HOME` temp dirs. Read-and-plan only: nothing in
 the codebase was changed to produce this. Raw commands, output and exit codes
 are in the appendix.
 
+> **Provenance correction, 2026-08-06.** The appendix below is headed *"raw
+> evidence"* but is **not raw**: it abbreviates 64-character digests to
+> `sha256:11a396cf…`, elides whole lines as `…`, and in E5 substitutes a
+> description for the output (`[the full BOUNDED / NOT BOUNDED block, printed
+> verbatim]`). Its **findings** were re-tested and reproduced; its
+> **transcripts** are reconstructions. Read it as the plan it is, and take
+> **`plan/p8-journey-screens.md`** as the capture of record — machine-captured
+> stdout for all six screens, plus a real Docker sandbox and lockdown run, with
+> its two transformations disclosed. Three specific corrections are listed
+> there; the largest is that E7's `x up … exit 0` became **exit 1** when commit
+> `c5a24a1` made `up` adopt `apply --write`'s exit.
+
 ## The headline
 
 P8's premise does not survive contact with the binary.

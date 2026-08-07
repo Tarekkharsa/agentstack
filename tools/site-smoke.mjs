@@ -8,8 +8,8 @@
 //   - WCAG A/AA violations through axe-core
 //   - a working theme control where the page exposes one
 //   - reduced-motion CSS behavior at the phone viewport
-// plus tutorial-specific structure (lesson heading in view, exactly one
-// lesson pane visible per nav button).
+// plus tutorial-specific structure (its H1 and every numbered step heading
+// rendered, in view, contiguously numbered, and carrying prose).
 //
 // Run in CI via:
 //   npm i playwright@1.54.0 @axe-core/playwright@4.10.2 --no-save --no-package-lock
@@ -175,53 +175,94 @@ async function checkReducedMotion(page, rel, widthLabel, failures) {
   }
 }
 
+// The tutorial is a generated Markdown page with no JavaScript of its own: one
+// H1 and a run of numbered "Step N — …" H2s, each with an anchor link and prose
+// beneath it. (It replaced an 11-pane JS lesson switcher; the old #lessonNav /
+// .lesson-pane assertions described a page that no longer exists.) What is
+// asserted here is what the page actually promises a reader, so a blank,
+// truncated, or half-generated tutorial still fails.
+const TUTORIAL_MIN_STEPS = 6;
+
 async function checkTutorial(page, widthLabel, failures) {
-  // The initially-visible lesson (user-facing "lesson 1") heading must sit
-  // within the viewport horizontally.
-  const headingBox = await page.evaluate(() => {
-    const pane = document.getElementById("lesson-0");
-    const h = pane && pane.querySelector("h1, h2");
-    if (!h) return null;
-    const r = h.getBoundingClientRect();
-    return { left: r.left, innerWidth: window.innerWidth };
+  const t = await page.evaluate(() => {
+    const main = document.querySelector("main, [role='main']");
+    if (!main) return { main: false };
+    const words = (el) => (el.innerText || el.textContent || "").trim().split(/\s+/).filter(Boolean).length;
+    const h1 = main.querySelector("h1");
+    const steps = [...main.querySelectorAll("h2[id]")]
+      .filter((h) => /^step-\d+/.test(h.id))
+      .map((h) => {
+        // Prose belonging to this step: everything up to the next H2.
+        let body = 0;
+        for (let n = h.nextElementSibling; n && n.tagName !== "H2"; n = n.nextElementSibling) {
+          body += words(n);
+        }
+        const r = h.getBoundingClientRect();
+        return {
+          id: h.id,
+          number: Number(h.id.match(/^step-(\d+)/)[1]),
+          text: h.textContent.replace(/#$/, "").trim(),
+          left: r.left,
+          shown: h.offsetParent !== null,
+          anchored: Boolean(h.querySelector(`a.hlink[href="#${h.id}"]`)),
+          body,
+        };
+      });
+    return {
+      main: true,
+      h1: h1 ? h1.textContent.trim() : null,
+      h1Left: h1 ? h1.getBoundingClientRect().left : null,
+      innerWidth: window.innerWidth,
+      steps,
+    };
   });
-  if (!headingBox) {
-    failures.push(`tutorial/ @ ${widthLabel} : lesson-1 heading not found`);
-  } else if (!(headingBox.left >= 0 && headingBox.left < headingBox.innerWidth)) {
+
+  if (!t.main) {
+    failures.push(`tutorial/ @ ${widthLabel} : no main landmark to read the tutorial from`);
+    return;
+  }
+  if (!t.h1) {
+    failures.push(`tutorial/ @ ${widthLabel} : tutorial H1 not found`);
+  } else if (!(t.h1Left >= 0 && t.h1Left < t.innerWidth)) {
     failures.push(
-      `tutorial/ @ ${widthLabel} : lesson-1 heading off-screen (left=${Math.round(headingBox.left)}, innerWidth=${headingBox.innerWidth})`,
+      `tutorial/ @ ${widthLabel} : tutorial H1 off-screen (left=${Math.round(t.h1Left)}, innerWidth=${t.innerWidth})`,
     );
   }
 
-  const navCount = await page.evaluate(
-    () => document.querySelectorAll("#lessonNav .navbtn").length,
-  );
-  if (navCount !== 11) {
-    failures.push(`tutorial/ @ ${widthLabel} : expected 11 nav buttons, found ${navCount}`);
+  if (t.steps.length < TUTORIAL_MIN_STEPS) {
+    failures.push(
+      `tutorial/ @ ${widthLabel} : expected at least ${TUTORIAL_MIN_STEPS} numbered step headings, found ${t.steps.length}`,
+    );
     return;
   }
 
-  for (let i = 0; i < 11; i++) {
-    await page.evaluate((idx) => {
-      document.querySelectorAll("#lessonNav .navbtn")[idx].click();
-    }, i);
-    // Let the pane-swap settle.
-    await page.waitForTimeout(60);
-    const vis = await page.evaluate(() => {
-      const panes = Array.from(document.querySelectorAll(".lesson-pane"));
-      const shown = panes.filter((p) => p.offsetParent !== null).map((p) => p.id);
-      return { count: shown.length, ids: shown };
-    });
-    if (vis.count !== 1) {
+  t.steps.forEach((step, index) => {
+    // Contiguous from 1 and in document order: a dropped or duplicated step
+    // heading is a broken tutorial, not a rewording.
+    if (step.number !== index + 1) {
       failures.push(
-        `tutorial/ @ ${widthLabel} : nav ${i + 1} -> ${vis.count} lesson-panes visible (${vis.ids.join(",") || "none"}), expected exactly 1`,
-      );
-    } else if (vis.ids[0] !== `lesson-${i}`) {
-      failures.push(
-        `tutorial/ @ ${widthLabel} : nav ${i + 1} -> showed ${vis.ids[0]}, expected lesson-${i}`,
+        `tutorial/ @ ${widthLabel} : step ${index + 1} in document order is "${step.id}" (expected step-${index + 1}-…)`,
       );
     }
-  }
+    if (!/^Step\s+\d+/.test(step.text)) {
+      failures.push(`tutorial/ @ ${widthLabel} : ${step.id} heading does not read "Step N …" (got "${step.text}")`);
+    }
+    if (!step.shown) {
+      failures.push(`tutorial/ @ ${widthLabel} : ${step.id} heading is not rendered`);
+    }
+    if (!step.anchored) {
+      failures.push(`tutorial/ @ ${widthLabel} : ${step.id} heading has no self-link anchor`);
+    }
+    if (!(step.left >= 0 && step.left < t.innerWidth)) {
+      failures.push(
+        `tutorial/ @ ${widthLabel} : ${step.id} heading off-screen (left=${Math.round(step.left)}, innerWidth=${t.innerWidth})`,
+      );
+    }
+    // A step that renders its heading and nothing else is a broken build.
+    if (step.body < 20) {
+      failures.push(`tutorial/ @ ${widthLabel} : ${step.id} has only ${step.body} words of content beneath it`);
+    }
+  });
 }
 
 // --- main ------------------------------------------------------------------

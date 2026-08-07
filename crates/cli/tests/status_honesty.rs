@@ -100,11 +100,31 @@ fn status_v1_state_semantics_are_unchanged() {
         "`state` must keep meaning 'no check found anything to repair' — it is \
          status-v1 and has external consumers: {report}"
     );
+    // The P3.1 seam must survive — but "survive" is about the FIELD, which is
+    // what this test was written to protect, and the old assertion overstated
+    // it into "and it is never null here".
+    //
+    // That extra clause encoded an accident of this one fixture, not the
+    // contract. `next_action` is `string | null` and always has been: the Group
+    // and Verified rungs — the largest healthy states on either surface — answer
+    // `null` from this same field, and `guidance_is_executable.rs` documents
+    // `null` as "the terminal answer, and a driver that reads it stops". A
+    // consumer that cannot take a null here was already broken on projects far
+    // commoner than an empty one.
+    //
+    // It also forced a wrong answer. The only command an empty project could be
+    // given was `agentstack search`, a read-only browse that changes nothing —
+    // so a driver polling this field ran it and was handed it again, forever.
+    // The honest answer in a state whose one missing input is a human decision
+    // is that there is no command, and that is what `null` says.
+    //
+    // So: the key is present, and its value is a non-empty command or an
+    // explicit null. Never a missing key, never an empty string.
+    let next = &report["next_action"];
     assert!(
-        report["next_action"]
-            .as_str()
-            .is_some_and(|s| !s.is_empty()),
-        "the P3.1 seam must survive this change untouched: {report}"
+        next.is_null() || next.as_str().is_some_and(|s| !s.is_empty()),
+        "the P3.1 seam must stay present and typed — a command, or an explicit \
+         null meaning there is none: {report}"
     );
 }
 
@@ -644,14 +664,14 @@ fn the_gate_rung_names_the_review_and_leaves_every_other_rung_alone() {
         sentence,
         "find a server or skill to add — only you know what this project needs"
     );
-    // The machine field beside it is NOT null, and must not become one: this is
-    // `status-v1`, and an empty project is the state every new project starts
-    // in. `agentstack search` takes its query as an optional positional, so the
-    // bare command is complete, and it neither refuses nor errors here.
+    // The machine field beside it is null. `agentstack search` used to sit here
+    // because it runs without a query — but running is not the bar for a next
+    // ACTION, moving the project is, and a read-only browse never does. The
+    // pair is pinned in full by
+    // `a_rung_with_no_runnable_command_says_why_the_machine_field_is_empty`.
     assert_eq!(
-        cmd.as_deref(),
-        Some("agentstack search"),
-        "the shape is not runnable; the browse under it is"
+        cmd, None,
+        "a browse that leaves every field identical is not the one next action"
     );
 
     std::env::remove_var("HOME");
@@ -864,21 +884,26 @@ fn the_lock_rung_never_fires_where_locking_would_change_nothing() {
 fn a_rung_with_no_runnable_command_says_why_the_machine_field_is_empty() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
-    // ── The empty project. The SHAPE `agentstack search <query>` is what has no
-    //    runnable form — the query is the one thing only the person with the
-    //    problem knows — so the shape leaves the sentence. The machine field is
-    //    NOT null: `agentstack search` is complete without a query (optional
-    //    positional, exit 0 on a `version = 1` project), and this field is
-    //    `status-v1`, so emptying it is a schema decision rather than a wording
-    //    one. This row therefore pins a runnable command beside a prose
-    //    sentence; the rows below are the ones with a genuinely empty field.
+    // ── The empty project, which now belongs to THIS test rather than beside
+    //    it. The SHAPE `agentstack search <query>` has no runnable form — the
+    //    query is the one thing only the person with the problem knows — so the
+    //    shape lives in the `why`, where a human reads it.
+    //
+    //    The machine field is null, and this row used to assert the opposite.
+    //    It held that `agentstack search` was complete without a query and so
+    //    belonged in the field. Complete, yes — but a next ACTION has to move
+    //    the project, and a read-only browse leaves every observable field of
+    //    the report identical, so a driver polling this field ran it and was
+    //    handed it again forever (`guidance_is_executable.rs` reproduces the
+    //    loop). Nor is emptying it a schema decision: the rows below already
+    //    answer null from the same `status-v1` field.
     let tmp = assert_fs::TempDir::new().unwrap();
     let empty = project(tmp.path(), "version = 1\n");
     let (cmd, sentence, why) = next_action(&empty);
     assert_eq!(
-        cmd.as_deref(),
-        Some("agentstack search"),
-        "the shape is unrunnable; the browse under it is not"
+        cmd, None,
+        "an empty project's one missing input is a human decision — there is no \
+         command, and a browse that changes nothing is not one"
     );
     assert_eq!(
         sentence,

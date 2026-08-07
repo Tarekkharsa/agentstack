@@ -313,32 +313,48 @@ pub(crate) fn trust_blocks_delivery(
 /// when none was. The query is the one thing only the person with the problem
 /// knows, and the sentence now says so.
 ///
-/// The machine field beside it is NOT null. `next_action` is the `status-v1`
-/// seam with external consumers, so "no command" here is a schema decision, not
-/// a wording one — and one is not needed, because a runnable command does exist:
-/// [`EMPTY_PROJECT_MACHINE`]. See [`machine_command`], which maps this exact
-/// sentence onto it.
+/// The machine field beside it is `null`, and this rung was the last one
+/// claiming otherwise. It used to map onto a bare `agentstack search`, on the
+/// reasoning that nulling would break `status-v1`. That reasoning was wrong on
+/// both counts, and both were measured rather than argued:
+///
+/// - `null` is already in-contract here. The Group and Verified rungs — the
+///   largest healthy states on either surface — answer `null` from this same
+///   field, so a consumer that cannot handle it is already broken on projects
+///   far more common than an empty one.
+/// - `agentstack search` was never a next ACTION. It is a read-only browse: it
+///   exits 0 and leaves every observable field of the report identical, so a
+///   driver polling this field runs it and is handed it again, forever.
+///   `tests/guidance_is_executable.rs` reproduces that loop.
+///
+/// The browse is genuinely useful, so it stays where it helps — the `why`
+/// below, read by a person who can act on a listing. See [`machine_command`].
+///
+/// # The `why` teaches shapes, and names no bare `add`
+///
+/// It used to end "then `agentstack add`", and that was this same bug wearing
+/// the fix's clothes: the sentence written to stop a rung naming a command that
+/// refuses, itself named one. Measured in the empty `version = 1` project this
+/// rung answers, every `add` form exits 2 — bare `add` wants a subcommand,
+/// `add server` wants `<NAME>`, `add skill` wants `<SOURCE>`, `add from` wants
+/// `<ID>`. There is no bare `add` that makes progress, because the argument is
+/// the one thing only the person with the problem can supply, which is what the
+/// human half of this pair already says.
+///
+/// So the add step is taught as a SHAPE. A placeholder is right in prose and
+/// wrong in the machine field, and that split is already enforced from both
+/// ends: [`machine_command`] drops any `<…>` (untouched here), and
+/// `tests/guidance_is_executable.rs` executes bare commands while skipping
+/// shapes — which is exactly why `agentstack add` was caught and
+/// `agentstack search <query>` was not.
+///
+/// Bare `agentstack search` stays, and is now worth naming on its own: it lists
+/// what the local library and built-in catalog hold, with no network call and
+/// no query, and exits 0 in this state (measured).
 pub(crate) const EMPTY_PROJECT_NEXT: (&str, &str) = (
     "find a server or skill to add — only you know what this project needs",
-    "search for one with `agentstack search <query>`, then `agentstack add`",
+    "`agentstack search` or `agentstack search <query>` lists what you can add — then name it: `agentstack add server <name>`, `agentstack add skill <source>`, or `agentstack add from <id>`",
 );
-
-/// The runnable half of [`EMPTY_PROJECT_NEXT`] — what a *driver* runs when the
-/// human half says "only you know what this project needs".
-///
-/// Bare, with no query, on purpose. `agentstack search`'s query is an OPTIONAL
-/// positional, so the command is complete as written; measured against a
-/// project whose manifest is only `version = 1`, it exits 0 with an empty
-/// stderr and prints the search shape across the library, catalog and official
-/// registry. That is the bar this rung has to clear and the only one it can:
-/// the command must not REFUSE in the state it is offered in (the G22/G24
-/// class), because a rung that names a command that errors here is a dead end
-/// no amount of polling escapes.
-///
-/// It is deliberately not `agentstack search <something>`. A query invented on
-/// the user's behalf is a guess about the problem they have, and the sentence
-/// above exists precisely to say that guess cannot be made.
-pub(crate) const EMPTY_PROJECT_MACHINE: &str = "agentstack search";
 
 /// Why the abandoned-render rung is the one next action when it fires.
 ///
@@ -371,18 +387,24 @@ pub(crate) const ABANDONED_RENDER_WHY: &str =
 /// project's machine field should say. Both surfaces keep printing the full
 /// human sentence on screen; only the machine field narrows.
 ///
-/// One sentence maps the other way. [`EMPTY_PROJECT_NEXT`] is prose *because*
-/// the query is the user's to supply — but the browse itself is runnable
-/// ([`EMPTY_PROJECT_MACHINE`]), so nulling this field would understate what a
-/// driver can do AND change `status-v1`'s shape in the one state an empty
-/// project always starts in. The mapping lives here rather than in the rung so
-/// that BOTH surfaces get it: `status` and `doctor` each derive the machine
-/// field from their sentence through this function, and a mapping added to one
-/// ladder is a mapping the other ladder disagrees with.
+/// The empty project answers `None` too, and used to be special-cased into
+/// `agentstack search`. That mapping was wrong for a reason no per-string rule
+/// could see: `search` is a read-only browse. It exits 0, lists what the local
+/// sources hold, and leaves every observable field of the report identical — so
+/// a driver that polls `next_action`, runs it, and polls again is handed the
+/// same command forever. `tests/guidance_is_executable.rs` reproduces exactly
+/// that loop, and it is right to.
+///
+/// Nulling it is not a `status-v1` break. The key stays present and its type is
+/// unchanged; `null` is already what this field answers from the Group and
+/// Verified rungs, which are the largest healthy states on either surface, so
+/// every consumer already handles it. `converge_once` in that same test names
+/// `null` "the terminal answer, and a driver that reads it stops". A browse
+/// worth running is still worth PRINTING — it stays in the human `why`, where a
+/// person can act on a listing and a poller cannot mistake it for progress.
 pub(crate) fn machine_command(cmd: &str) -> Option<&str> {
     match cmd {
         "agentstack status" | "agentstack doctor" => None,
-        c if c == EMPTY_PROJECT_NEXT.0 => Some(EMPTY_PROJECT_MACHINE),
         c if c.starts_with("agentstack ") && !c.contains('<') => Some(c),
         _ => None,
     }
@@ -2859,8 +2881,8 @@ mod tests {
         // group, or verify, and nothing for the gate to hold either. The
         // expectation used to be the literal `agentstack search <query>`; that
         // was a shape, and a shape read as a runnable command on screen while
-        // `machine_command` dropped it. The rung is now prose plus a runnable
-        // machine command (see `EMPTY_PROJECT_MACHINE`).
+        // `machine_command` dropped it. The rung is now prose, with the shapes
+        // taught in the `why` and a `null` machine field.
         assert_eq!(
             next_step(
                 TrustState::Untrusted,
@@ -3001,17 +3023,25 @@ mod tests {
         }
     }
 
-    /// The machine half of the Empty rung, pinned on its own: the sentence is
-    /// prose, and the field a driver reads is still a command.
+    /// The Empty rung is prose on screen and `null` for a driver, and every
+    /// command its `why` teaches is either a shape or one that runs.
     ///
-    /// Worth its own witness because the two halves are computed in different
-    /// places — the sentence in [`next_step`], the command in
-    /// [`machine_command`] — so nothing but this test stops the mapping being
-    /// dropped and `next_action` silently going `null`. That field is
-    /// `status-v1` with external consumers; a `null` there is a schema change,
-    /// not a wording change.
+    /// This used to assert the opposite — that the field stayed a runnable
+    /// command — on the belief that a `null` here was a `status-v1` schema
+    /// change. It is not: the Group and Verified rungs already answer `null`
+    /// from this field, so a consumer handles it or was already broken on the
+    /// commonest healthy projects. What the old mapping did produce was a loop:
+    /// `agentstack search` is a read-only browse that changes nothing, so a
+    /// driver ran it and was handed it again forever.
+    ///
+    /// So the property flipped, and the guard has to be stricter than "is it
+    /// null", or nulling everything would satisfy it. It pins the REASON: the
+    /// sentence carries no shape (it is not pretending to be a command), and
+    /// every backticked command in the `why` either carries a placeholder — a
+    /// shape, which is right for a human and filtered from the machine field —
+    /// or survives `machine_command`, which is what "it runs" looks like here.
     #[test]
-    fn the_empty_rung_is_prose_on_screen_and_still_a_command_for_a_driver() {
+    fn the_empty_rung_is_prose_on_screen_and_null_for_a_driver() {
         assert!(
             !EMPTY_PROJECT_NEXT.0.contains('<'),
             "the sentence must not look like a command it is not: {}",
@@ -3019,16 +3049,24 @@ mod tests {
         );
         assert_eq!(
             machine_command(EMPTY_PROJECT_NEXT.0),
-            Some(EMPTY_PROJECT_MACHINE),
-            "the one next action must stay runnable for a driver"
+            None,
+            "a read-only browse is not a next ACTION — a driver that runs it is \
+             handed it again forever"
         );
-        // …and runnable means runnable: no placeholder, and nothing that
-        // `machine_command`'s own filter would reject if it were fed back in.
-        assert!(!EMPTY_PROJECT_MACHINE.contains('<'));
-        assert_eq!(
-            machine_command(EMPTY_PROJECT_MACHINE),
-            Some(EMPTY_PROJECT_MACHINE)
-        );
+        // The `why` still has to be honest, or "null" just moved the dead end
+        // one field over: each command it teaches is a shape, or it runs.
+        for cmd in EMPTY_PROJECT_NEXT
+            .1
+            .split('`')
+            .skip(1)
+            .step_by(2)
+            .filter(|s| s.starts_with("agentstack "))
+        {
+            assert!(
+                cmd.contains('<') || machine_command(cmd).is_some(),
+                "`{cmd}` is offered as neither a shape nor a runnable command"
+            );
+        }
     }
 
     /// F9 witness (FINDINGS.md, rc.1 review): a dropped-but-undeclared file

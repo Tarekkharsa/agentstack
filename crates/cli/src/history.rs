@@ -6,6 +6,40 @@
 //! deletes a file that didn't exist before). The manifest is left untouched —
 //! undo reverts your tools, not your declared stack — so reverted changes simply
 //! show up as pending again.
+//!
+//! # What this ledger deliberately does not hold
+//!
+//! A recorded change is **a file and its pre-write bytes** ([`FileChange`]),
+//! and [`rollback`] either writes those bytes back or deletes a file that did
+//! not exist before. A skill materialized by `use --write` is neither: it is a
+//! SYMLINK to a directory (the default strategy) or a copied directory TREE.
+//! [`capture`] reads no content from either — `before` comes out `None` — and
+//! `rollback`'s `remove_file` cannot act on a directory at all. `x unrender`
+//! reached the same conclusion first and marks its skills leg `capture: false`
+//! for exactly this reason.
+//!
+//! Teaching the ledger to carry them would take more than a second entry kind.
+//! [`rollback`] acts on a path with **no ownership test**; the only proof that a
+//! skill directory is ours lives in [`crate::render::skills`] (it is a symlink,
+//! or it carries the `.agentstack-managed` marker). And even that marker proves
+//! only that WE CREATED the directory — never that its contents are still ours.
+//! An undo built on it would take a `SKILL.md` the user edited after delivery.
+//! Since an undo that cannot tell our bytes from the user's must not run, the
+//! ledger stays narrow and every Undo surface says so: see
+//! [`SKILLS_ARE_NOT_RECORDED`].
+
+/// Why a materialized skill never appears in an undo listing, in the words the
+/// Undo surfaces print. One sentence, one place, so `undo`, `x restore` and
+/// `use --write` cannot drift into three different promises.
+pub const SKILLS_ARE_NOT_RECORDED: &str =
+    "materialized skills are not recorded here — this ledger holds files, and a delivered skill \
+     is a linked directory";
+
+/// The way back for a materialized skill, since this ledger has none. Both are
+/// real, verified paths: `x uninstall` plans the skills leg through
+/// `unrender::plan`, and activating a toolset without a skill prunes it.
+pub const SKILLS_COME_OFF_WITH: &str =
+    "take them off with `agentstack x uninstall --write`, or activate a toolset that omits them";
 
 use std::cell::RefCell;
 use std::fs;
