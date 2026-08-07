@@ -24,195 +24,442 @@
 <meta name="twitter:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
 <link rel="stylesheet" href="theme/organic.css">
 <style>
-body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var(--font-body)}
-/* The hero leads with the product running, not with a logo tile: the left
-   column carries the promise and the one command that starts it, the right
-   carries the recorded proof. Below 940px the proof stacks under the copy
-   rather than shrinking into illegibility. */
-.hero-split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:calc(var(--space-6) * 1.2);align-items:center}
-/* The install line is the most important text on the page, so it wraps to stay
-   fully visible rather than scrolling off the right edge of a narrow column. */
-/* The hero's install line is a .term without the window chrome: on this page it
-   is the promise, not a screenshot of one. */
-.hero-cmd{padding:14px 18px;font-family:var(--mono);font-size:0.82rem;line-height:1.8;margin:0 0 var(--space-4);color:var(--term-text)}
-.term-lg .term-body{padding:18px 22px;font-size:0.85rem;line-height:2.1}
-.hero-proof{margin:0;border-radius:var(--radius-md);overflow:hidden;border:1px solid var(--color-divider);box-shadow:var(--shadow-lg);background:var(--term-bg)}
-.hero-proof img{display:block;width:100%;height:auto}
-.hero-proof figcaption{font-size:0.8rem;line-height:1.5;color:var(--term-muted);padding:10px 14px;border-top:1px solid var(--term-bd)}
-@media (max-width:940px){
-  .hero-split{grid-template-columns:1fr;gap:var(--space-6)}
+/* ══════════════════════════════════════════════════════════════════════════
+   Homepage layout — the structure ported from t3code's marketing home:
+   a full-bleed sticky nav, a hero over a masked grid backdrop, then a run of
+   full-width bands separated by single hairlines. Typography, buttons and the
+   terminal component are inherited from theme/organic.css and are NOT
+   restated here.
+
+   Widths, in one place:
+     --shell      the page shell — content is centred inside it, but the BANDS
+                  (backgrounds, hairlines, the grid backdrop) run edge to edge.
+     --measure    the reading column. Prose never uses the shell width: a
+                  1400px line of body text is unreadable, so paragraphs cap at
+                  roughly 68 characters no matter how wide the screen is.
+   The extra width goes to the multi-column grids — cards, steps, terminals —
+   which is where a wide screen actually buys something.
+   ══════════════════════════════════════════════════════════════════════ */
+:root{
+  --shell: 1400px;
+  --shell-pad: 32px;
+  --measure: 68ch;
+  /* The hero backdrop lines. Very low alpha in both themes: dark ink on the
+     light page, faint white on the dark one. They are masked out before they
+     reach any text, so they never enter a contrast calculation. */
+  --grid-line: rgba(27, 31, 36, 0.055);
 }
-/* Nav links follow t3code's rule: quiet by default, full foreground on hover.
-   They are styled here rather than inline so the :hover can actually win. */
-.nav-links a{color:var(--color-neutral-600);font-weight:500;font-size:0.9rem;letter-spacing:-0.01em}
-.nav-links a:hover{color:var(--color-text)}
-.nav-links a.btn{font-size:14px}
-.themebtn{font-family:var(--font-sans);font-size:0.8rem;font-weight:500;letter-spacing:-0.01em;padding:0.42rem 0.85rem;border-radius:8px;border:1px solid var(--color-divider);background:transparent;color:var(--color-neutral-600);cursor:pointer}
+[data-theme="dark"]{ --grid-line: rgba(255, 255, 255, 0.05); }
+
+body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var(--font-sans);overflow-x:hidden}
+
+/* — the shell — */
+.shell{width:100%;max-width:var(--shell);margin:0 auto;padding:0 var(--shell-pad)}
+.measure{max-width:var(--measure)}
+
+/* — a band: full-bleed, one hairline above it, generous vertical rhythm — */
+.band{position:relative;padding:96px 0;border-top:1px solid var(--color-divider)}
+
+/* — the tile: 1px alpha border, 12px radius, a barely-there top sheen and no
+     shadow. The edge separates it from the page; the gradient stops the edge
+     reading as a drawn box. — */
+.tile{
+  position:relative;
+  border:1px solid var(--color-divider);
+  border-radius:12px;
+  background-color:var(--color-surface);
+  background-image:linear-gradient(180deg,var(--card-sheen),transparent 60%);
+  overflow:hidden;
+}
+
+/* — sticky nav: translucent and blurred, with NO bottom border until the page
+     has actually scrolled. The border is the only thing that changes, so the
+     bar never jumps. — */
+.site-nav{
+  position:sticky;top:0;z-index:50;
+  backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+  background:color-mix(in srgb, var(--color-bg) 82%, transparent);
+  border-bottom:1px solid transparent;
+  transition:border-color 0.3s ease;
+}
+.site-nav.is-scrolled{border-bottom-color:var(--color-divider)}
+.nav-inner{display:flex;align-items:center;gap:var(--space-4);padding-top:12px;padding-bottom:12px}
+.nav-brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--color-text)}
+.nav-brand img{width:30px;height:30px}
+.nav-wordmark{font-family:var(--font-sans);font-weight:650;font-size:1.1rem;letter-spacing:-0.025em}
+.nav-wordmark span{color:var(--color-accent)}
+.nav-spacer{flex:1}
+.nav-links{display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap}
+.nav-actions{display:flex;align-items:center;gap:var(--space-3);margin-left:var(--space-4)}
+.nav-link{color:var(--color-neutral-600);font-weight:500;font-size:0.9rem;letter-spacing:-0.01em;text-decoration:none}
+.nav-link:hover{color:var(--color-text)}
+.themebtn{
+  font-family:var(--font-sans);font-size:0.8rem;font-weight:500;letter-spacing:-0.01em;
+  padding:0.42rem 0.85rem;border-radius:8px;border:1px solid var(--color-divider);
+  background:transparent;color:var(--color-neutral-600);cursor:pointer;
+}
 .themebtn:hover{color:var(--color-text);border-color:var(--color-divider-strong);background:var(--quiet-hover)}
-.step-num{font-family:var(--font-mono);font-weight:500;font-size:0.95rem}
-.closed-by{font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:0.12em;text-transform:uppercase}
-@media (max-width:720px){
-  .grid-gaps,.grid-steps{grid-template-columns:1fr !important}
-  .nav{flex-wrap:wrap}
-  .nav-links{flex-wrap:wrap}
+
+/* — hero — */
+.hero{position:relative;overflow:hidden;padding:72px 0 84px;border-top:0}
+/* Two 1px gradient lines on a 48px cell, then masked with a soft ellipse so
+   the grid dissolves before it reaches the edges of the band. Decorative and
+   inert: aria-hidden, pointer-events none, behind everything. */
+.hero-grid{
+  position:absolute;inset:0;pointer-events:none;z-index:0;
+  background-image:
+    linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
+  background-size:48px 48px;
+  mask-image:radial-gradient(ellipse 80% 60% at 50% 40%, black 40%, transparent 100%);
+  -webkit-mask-image:radial-gradient(ellipse 80% 60% at 50% 40%, black 40%, transparent 100%);
+}
+.hero .shell{position:relative;z-index:1}
+.hero-split{
+  display:grid;
+  grid-template-columns:minmax(0,0.95fr) minmax(0,1.05fr);
+  gap:clamp(32px,4vw,72px);
+  align-items:center;
+}
+.hero-copy{min-width:0}
+/* The eyebrow is a mono pill on a wide screen. Below 560px the string is
+   longer than the column, so the chrome comes off and it becomes plain
+   eyebrow text that wraps — rather than a two-line stadium. */
+.eyebrow-pill{
+  display:inline-flex;align-items:center;max-width:100%;
+  font-family:var(--font-mono);font-size:11px;font-weight:500;
+  letter-spacing:0.14em;text-transform:uppercase;line-height:1.5;
+  color:var(--color-neutral-600);
+  border:1px solid var(--color-divider);border-radius:999px;
+  padding:6px 14px;
+  background:color-mix(in srgb, var(--color-text) 3%, transparent);
+}
+.hero-title{
+  font-size:clamp(2.4rem,5.4vw,4.15rem);
+  font-weight:500;line-height:1.03;letter-spacing:-0.035em;
+  margin:var(--space-4) 0 var(--space-4);
+  text-wrap:balance;
+}
+.hero-lede{font-size:1.15rem;line-height:1.6;color:var(--color-neutral-600);margin:0 0 var(--space-5);max-width:60ch}
+/* The install line is the promise, not a screenshot of one: a terminal body
+   with no window chrome. It wraps rather than scrolling off the column. */
+.hero-cmd{padding:14px 18px;font-family:var(--font-mono);font-size:0.82rem;line-height:1.8;margin:0 0 var(--space-4);color:var(--term-text)}
+.hero-actions{display:flex;gap:var(--space-3);flex-wrap:wrap}
+/* The proof is already a terminal window — the SVG draws its own dots and
+   title bar — so it is framed by a hairline only, never a second chrome. */
+.hero-proof{margin:0;border-radius:12px;overflow:hidden;border:1px solid var(--color-divider);background:var(--term-bg)}
+.hero-proof img{display:block;width:100%;height:auto}
+.hero-proof figcaption{font-size:0.8rem;line-height:1.5;color:var(--term-muted);padding:10px 14px;border-top:1px solid var(--term-bd);margin:0}
+
+/* — section heads — */
+.section-head{margin-bottom:56px;max-width:760px}
+.section-head .eyebrow{display:block;margin-bottom:14px}
+.section-head h2{
+  font-size:clamp(1.9rem,3.6vw,2.85rem);
+  font-weight:500;letter-spacing:-0.035em;line-height:1.05;
+  margin:0 0 18px;
+}
+.section-head p{color:var(--color-neutral-600);font-size:1.05rem;line-height:1.6;max-width:62ch;letter-spacing:-0.005em;margin:0}
+.head-row{display:flex;align-items:flex-end;gap:var(--space-6);flex-wrap:wrap;margin-bottom:56px}
+.head-row .section-head{margin-bottom:0;flex:1 1 420px}
+.head-aside{margin-left:auto;font-weight:500;font-size:0.95rem;color:var(--color-neutral-600);text-decoration:none}
+.head-aside:hover{color:var(--color-accent)}
+
+/* — checklist: no bullets, an inline check glyph in the "ok" colour — */
+.checklist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
+.checklist li{display:flex;align-items:flex-start;gap:10px;color:var(--color-neutral-600);font-size:0.95rem;line-height:1.55}
+.checklist li svg{color:var(--color-accent-2);flex:none;margin-top:5px}
+
+/* — the problem cards —
+   Explicit column counts rather than auto-fit: both of these grids hold FOUR
+   items, and auto-fit lands on three across a wide range of widths, which
+   leaves a single orphan on a second row. 4 → 2 → 1 always fills its rows. */
+.grid-gaps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:20px}
+.gap-card{display:flex;flex-direction:column;gap:var(--space-3);padding:22px}
+.gap-head{display:flex;align-items:center;gap:var(--space-3)}
+.gap-mark{width:40px;height:40px;flex:none;border-radius:999px;display:flex;align-items:center;justify-content:center}
+.gap-mark-a{background:var(--color-accent-100)}
+.gap-mark-b{background:var(--color-accent-2-100)}
+.gap-title{font-family:var(--font-sans);font-weight:500;font-size:1.02rem;line-height:1.25;letter-spacing:-0.02em}
+.gap-body{font-size:0.92rem;line-height:1.6;color:var(--color-neutral-600);flex:1;margin:0}
+.gap-foot{display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap;padding-top:var(--space-3);border-top:1px solid var(--color-divider)}
+.closed-by{font-family:var(--font-mono);font-size:10px;font-weight:500;letter-spacing:0.14em;text-transform:uppercase}
+.closed-a{color:var(--color-accent-700)}
+.closed-b{color:var(--color-accent-2-700)}
+.gap-foot code{font-size:0.8rem;background:var(--color-neutral-100);border-radius:999px;padding:3px 11px}
+
+/* — the six steps — */
+.grid-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px}
+.step{display:flex;gap:var(--space-3);align-items:flex-start}
+.step-num{
+  width:42px;height:42px;flex:none;border-radius:999px;color:var(--color-bg);
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--font-mono);font-weight:500;font-size:0.95rem;
+}
+.step-a{background:var(--color-accent)}
+.step-b{background:var(--color-accent-2)}
+.step-name{font-weight:600;letter-spacing:-0.01em;margin-bottom:3px}
+.step-body{font-size:0.92rem;line-height:1.55;color:var(--color-neutral-600)}
+
+/* — quick start — */
+.start-grid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,0.9fr);gap:clamp(28px,3.5vw,56px);align-items:start}
+.start-col{display:flex;flex-direction:column;gap:var(--space-4);min-width:0}
+.term-lg .term-body{padding:18px 22px;font-size:0.85rem;line-height:2.1}
+.note{font-size:0.88rem;line-height:1.65;color:var(--color-neutral-600);margin:0;max-width:var(--measure)}
+
+/* — the everyday loop — */
+.grid-loop{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:24px}
+.loop-pane{display:flex;flex-direction:column;gap:var(--space-3);min-width:0}
+.loop-note{font-size:0.86rem;line-height:1.6;color:var(--color-neutral-600);margin:0}
+.loop-note b{color:var(--color-text);font-weight:600}
+
+/* — footer — */
+.site-foot{padding:40px 0}
+.foot-inner{display:flex;gap:var(--space-4);align-items:center;flex-wrap:wrap}
+.foot-wordmark{font-family:var(--font-sans);font-weight:650;letter-spacing:-0.025em}
+.foot-wordmark span{color:var(--color-accent)}
+.foot-line{color:var(--color-neutral-600);font-size:0.88rem}
+.foot-links{display:flex;gap:var(--space-4);flex-wrap:wrap;margin-left:auto}
+.foot-links a{font-size:0.9rem;color:var(--color-neutral-600);text-decoration:none}
+.foot-links a:hover{color:var(--color-text)}
+
+/* — collapse points —
+   980px: both two-column layouts become one column, so the hero copy and the
+          proof each get the full shell instead of two cramped halves.
+   820px: the shell gutters narrow, matching the rest of the site.
+   560px: the eyebrow pill sheds its chrome. */
+/* Six steps divide evenly by 3 and by 2, so the step grid never orphans. */
+@media (max-width:1180px){
+  .grid-gaps,.grid-loop{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:1000px){
+  .grid-steps{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media (max-width:980px){
+  .hero-split,.start-grid{grid-template-columns:1fr}
+  .hero-split{gap:40px}
+}
+@media (max-width:680px){
+  .grid-gaps,.grid-loop,.grid-steps{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width:820px){
+  :root{--shell-pad:20px}
+  /* The bar cannot fit brand + four links + two controls on one phone row, so
+     the links drop to a second row rather than being hidden behind a drawer:
+     every destination stays visible and in tab order. */
+  .nav-inner{flex-wrap:wrap;row-gap:10px;gap:var(--space-3)}
+  .nav-links{order:3;flex-basis:100%;gap:var(--space-4)}
+  .nav-actions{margin-left:0}
+  .band{padding:64px 0}
+  .hero{padding:48px 0 60px}
+  .section-head,.head-row{margin-bottom:40px}
+  .head-row .section-head{flex-basis:100%}
+}
+@media (max-width:560px){
+  .eyebrow-pill{border:0;background:none;padding:0;display:block}
+  /* Two rows, not three: at this width the brand plus both controls only fit
+     on one line once the controls give back their desktop padding. */
+  .nav-brand img{width:26px;height:26px}
+  .nav-wordmark{font-size:1rem}
+  .nav-actions{gap:var(--space-2)}
+  .themebtn{padding:0.34rem 0.6rem;font-size:0.75rem}
+  .nav-actions .btn{padding:8px 13px;font-size:13px}
 }
 </style>
 </head>
 <body>
 <a class="skip-link" href="#main-content">Skip to content</a>
-<div style="min-height:100vh;background:var(--color-bg);color:var(--color-text);font-family:var(--font-body)">
-  <nav class="nav" style="display:flex;align-items:center;gap:var(--space-4)">
-    <a href="index.html" class="nav-brand" style="display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--color-text)">
-      <img src="theme/logo-mark.svg" alt="" style="width:34px;height:34px">
-      <span style="font-family:var(--font-sans);font-weight:650;font-size:1.2rem;letter-spacing:-0.025em">agent<span style="color:var(--color-accent)">Stack</span></span>
+
+<nav class="site-nav">
+  <div class="shell nav-inner">
+    <a href="index.html" class="nav-brand">
+      <img src="theme/logo-mark.svg" alt="">
+      <span class="nav-wordmark">agent<span>Stack</span></span>
     </a>
-    <div style="flex:1"></div>
-    <div class="nav-links" style="display:flex;align-items:center;gap:var(--space-4)">
-      <a href="docs.html">Documentation</a>
-      <a href="examples.html">Demos</a>
-      <a href="tutorial/">Tutorial</a>
-      <a href="https://github.com/Tarekkharsa/agentstack">GitHub</a>
+    <div class="nav-spacer"></div>
+    <div class="nav-links">
+      <a class="nav-link" href="docs.html">Documentation</a>
+      <a class="nav-link" href="examples.html">Demos</a>
+      <a class="nav-link" href="tutorial/">Tutorial</a>
+      <a class="nav-link" href="https://github.com/Tarekkharsa/agentstack">GitHub</a>
+    </div>
+    <div class="nav-actions">
       <button class="themebtn" data-theme-toggle onclick="toggleTheme()">Light mode</button>
       <a href="docs.html#start" class="btn btn-primary">Get started</a>
     </div>
-  </nav>
+  </div>
+</nav>
 
-  <div id="main-content" role="main" tabindex="-1" style="max-width:1060px;margin:0 auto;padding:calc(var(--space-8) * 1.5) var(--space-6) var(--space-8);position:relative">
-    <div class="hero-split">
-      <div style="min-width:0">
-        <span class="tag tag-accent-2">open source · Rust · 13 CLI adapters · MIT / Apache-2.0</span>
-        <h1 style="font-family:var(--font-sans);font-weight:500;font-size:clamp(2.4rem,5.8vw,3.5rem);line-height:1.03;letter-spacing:-0.035em;margin:var(--space-4) 0 var(--space-4)">One agent setup. Every coding CLI.</h1>
-        <p style="font-size:1.15rem;line-height:1.65;color:var(--color-neutral-700);margin:0 0 var(--space-5)">AgentStack collects the MCP servers, skills and instructions you already use into one <code style="font-size:0.92em">.agentstack/</code> directory in your project, then renders them back as native configuration for every supported CLI. Named toolsets switch by project or task, and every change stays understandable and recoverable.</p>
-        <div class="term hero-cmd">
-          <div class="term-row"><span class="pr">$</span><span class="cmd">curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh</span></div>
-          <div class="term-row"><span class="pr">$</span><span class="cmd">agentstack init</span></div>
-        </div>
-        <div style="display:flex;gap:var(--space-3);flex-wrap:wrap">
-          <a href="tutorial/" class="btn btn-primary">Unify my setup</a>
-          <a href="docs.html" class="btn btn-secondary">Read the documentation</a>
-        </div>
-      </div>
-      <figure class="hero-proof">
-        <img src="demos/first-value.svg" alt="Recorded proof: two CLIs with different half-setups — import once, render both native formats, doctor clean, restore byte-for-byte" width="715" height="510">
-        <figcaption>Two CLIs, two half-setups → one import → both in sync → clean <code>doctor</code> → byte-for-byte restore. Condensed from a real run.</figcaption>
-      </figure>
-    </div>
+<main id="main-content" tabindex="-1">
 
-    <div style="margin-top:calc(var(--space-8) * 1.5)">
-      <h2 style="font-family:var(--font-sans);font-weight:500;font-size:clamp(1.7rem,3.4vw,2.15rem);line-height:1.08;letter-spacing:-0.035em;margin:0 0 var(--space-2)">Your tools should share one setup</h2>
-      <p style="color:var(--color-neutral-700);margin:0 0 var(--space-6);max-width:620px">AgentStack manages the complete lifecycle: import, activate, switch, diagnose, recover and share — with safety built underneath.</p>
-      <div class="grid-gaps" style="display:grid;grid-template-columns:repeat(2,1fr);gap:var(--space-4)">
-        <div class="card elev-sm" style="gap:var(--space-2)">
-          <div style="display:flex;align-items:center;gap:var(--space-3)">
-            <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-100);display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-700)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg></div>
-            <div class="card-title" style="font-size:1.05rem;font-family:var(--font-sans);font-weight:600">Every CLI spells setup differently</div>
+  <!-- ── Hero ────────────────────────────────────────────────────────────── -->
+  <section class="hero">
+    <div class="hero-grid" aria-hidden="true"></div>
+    <div class="shell">
+      <div class="hero-split">
+        <div class="hero-copy">
+          <span class="eyebrow-pill">open source · Rust · 13 CLI adapters · MIT / Apache-2.0</span>
+          <h1 class="hero-title">One agent setup. Every coding CLI.</h1>
+          <p class="hero-lede">AgentStack collects the MCP servers, skills and instructions you already use into one <code>.agentstack/</code> directory in your project, then renders them back as native configuration for every supported CLI. Named toolsets switch by project or task, and every change stays understandable and recoverable.</p>
+          <div class="term hero-cmd">
+            <div class="term-row"><span class="pr">$</span><span class="cmd">curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh</span></div>
+            <div class="term-row"><span class="pr">$</span><span class="cmd">agentstack init</span></div>
           </div>
-          <div class="card-body" style="font-size:0.95rem;line-height:1.6">Import your existing configuration once. It then renders the correct native format for every supported client.</div>
-          <div style="display:flex;align-items:center;gap:var(--space-2);margin-top:var(--space-1);padding-top:var(--space-2);border-top:1px solid var(--color-divider)">
-            <span class="closed-by" style="text-transform:uppercase;color:var(--color-accent-700)">closed by</span>
-            <code style="font-size:0.85rem;background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">agentstack init</code>
-          </div>
-        </div>
-        <div class="card elev-sm" style="gap:var(--space-2)">
-          <div style="display:flex;align-items:center;gap:var(--space-3)">
-            <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-2-100);display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-2-700)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path></svg></div>
-            <div class="card-title" style="font-size:1.05rem;font-family:var(--font-sans);font-weight:600">Switching tasks pollutes shared files</div>
-          </div>
-          <div class="card-body" style="font-size:0.95rem;line-height:1.6">A toolset selects the servers and skills one task needs. Temporary sessions activate it and restore the previous native configuration afterward.</div>
-          <div style="display:flex;align-items:center;gap:var(--space-2);margin-top:var(--space-1);padding-top:var(--space-2);border-top:1px solid var(--color-divider)">
-            <span class="closed-by" style="text-transform:uppercase;color:var(--color-accent-2-700)">closed by</span>
-            <code style="font-size:0.85rem;background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">agentstack session start</code>
+          <div class="hero-actions">
+            <a href="tutorial/" class="btn btn-primary btn-lg">Unify my setup</a>
+            <a href="docs.html" class="btn btn-secondary btn-lg">Read the documentation</a>
           </div>
         </div>
-        <div class="card elev-sm" style="gap:var(--space-2)">
-          <div style="display:flex;align-items:center;gap:var(--space-3)">
-            <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-2-100);display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-2-700)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" x2="20" y1="19" y2="19"></line></svg></div>
-            <div class="card-title" style="font-size:1.05rem;font-family:var(--font-sans);font-weight:600">Native configuration drifts</div>
-          </div>
-          <div class="card-body" style="font-size:0.95rem;line-height:1.6">Doctor finds the problem, diff shows what would change, adopt keeps an intentional hand edit, and restore undoes a bad write.</div>
-          <div style="display:flex;align-items:center;gap:var(--space-2);margin-top:var(--space-1);padding-top:var(--space-2);border-top:1px solid var(--color-divider)">
-            <span class="closed-by" style="text-transform:uppercase;color:var(--color-accent-2-700)">closed by</span>
-            <code style="font-size:0.85rem;background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">agentstack doctor</code>
-          </div>
-        </div>
-        <div class="card elev-sm" style="gap:var(--space-2)">
-          <div style="display:flex;align-items:center;gap:var(--space-3)">
-            <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-100);display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-700)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 20h16a2 2 0 0 0 1.73-2z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg></div>
-            <div class="card-title" style="font-size:1.05rem;font-family:var(--font-sans);font-weight:600">Portable must not mean automatic</div>
-          </div>
-          <div class="card-body" style="font-size:0.95rem;line-height:1.6">Unfamiliar repository configuration stays inert until reviewed. Any pinned change re-gates it, and machine policy always remains the ceiling.</div>
-          <div style="display:flex;align-items:center;gap:var(--space-2);margin-top:var(--space-1);padding-top:var(--space-2);border-top:1px solid var(--color-divider)">
-            <span class="closed-by" style="text-transform:uppercase;color:var(--color-accent-700)">closed by</span>
-            <code style="font-size:0.85rem;background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">agentstack trust .</code>
-          </div>
-        </div>
+        <figure class="hero-proof">
+          <img src="demos/first-value.svg" alt="Recorded proof: two CLIs with different half-setups — import once, render both native formats, doctor clean, restore byte-for-byte" width="715" height="510">
+          <figcaption>Two CLIs, two half-setups → one import → both in sync → clean <code>doctor</code> → byte-for-byte restore. Condensed from a real run.</figcaption>
+        </figure>
       </div>
     </div>
+  </section>
 
-    <div style="margin-top:calc(var(--space-8) * 1.5)">
-      <h2 id="climb" style="font-family:var(--font-sans);font-weight:500;font-size:clamp(1.7rem,3.4vw,2.15rem);line-height:1.08;letter-spacing:-0.035em;margin:0 0 var(--space-2)">Climb in six steps</h2>
-      <p style="color:var(--color-neutral-700);margin:0 0 var(--space-6);max-width:560px">Each step pays off on its own — nothing later is required to keep the earlier wins.</p>
-      <div class="grid-steps" style="display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-4)">
-        <div style="display:flex;gap:var(--space-3);align-items:flex-start">
-          <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent);color:#fff;display:flex;align-items:center;justify-content:center" class="step-num">1</div>
-          <div><div style="font-weight:600;letter-spacing:-0.01em;margin-bottom:2px">Unify</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Import once, render everywhere.</div></div>
+  <!-- ── The gaps ────────────────────────────────────────────────────────── -->
+  <section class="band">
+    <div class="shell">
+      <div class="section-head">
+        <span class="eyebrow">the gaps it closes</span>
+        <h2>Your tools should share one setup</h2>
+        <p>AgentStack manages the complete lifecycle: import, activate, switch, diagnose, recover and share — with safety built underneath.</p>
+      </div>
+      <div class="grid-gaps">
+        <div class="tile gap-card">
+          <div class="gap-head">
+            <div class="gap-mark gap-mark-a"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-700)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" x2="6" y1="3" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg></div>
+            <div class="gap-title">Every CLI spells setup differently</div>
+          </div>
+          <p class="gap-body">Import your existing configuration once. It then renders the correct native format for every supported client.</p>
+          <div class="gap-foot">
+            <span class="closed-by closed-a">closed by</span>
+            <code>agentstack init</code>
+          </div>
         </div>
-        <div style="display:flex;gap:var(--space-3);align-items:flex-start">
-          <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-2);color:#fff;display:flex;align-items:center;justify-content:center" class="step-num">2</div>
-          <div><div style="font-weight:600;letter-spacing:-0.01em;margin-bottom:2px">Switch</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Toolsets and temporary sessions.</div></div>
+        <div class="tile gap-card">
+          <div class="gap-head">
+            <div class="gap-mark gap-mark-b"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-2-700)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path></svg></div>
+            <div class="gap-title">Switching tasks pollutes shared files</div>
+          </div>
+          <p class="gap-body">A toolset selects the servers and skills one task needs. Temporary sessions activate it and restore the previous native configuration afterward.</p>
+          <div class="gap-foot">
+            <span class="closed-by closed-b">closed by</span>
+            <code>agentstack session start</code>
+          </div>
         </div>
-        <div style="display:flex;gap:var(--space-3);align-items:flex-start">
-          <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent);color:#fff;display:flex;align-items:center;justify-content:center" class="step-num">3</div>
-          <div><div style="font-weight:600;letter-spacing:-0.01em;margin-bottom:2px">Diagnose</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Doctor and diff explain drift.</div></div>
+        <div class="tile gap-card">
+          <div class="gap-head">
+            <div class="gap-mark gap-mark-b"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-2-700)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" x2="20" y1="19" y2="19"></line></svg></div>
+            <div class="gap-title">Native configuration drifts</div>
+          </div>
+          <p class="gap-body">Doctor finds the problem, diff shows what would change, adopt keeps an intentional hand edit, and restore undoes a bad write.</p>
+          <div class="gap-foot">
+            <span class="closed-by closed-b">closed by</span>
+            <code>agentstack doctor</code>
+          </div>
         </div>
-        <div style="display:flex;gap:var(--space-3);align-items:flex-start">
-          <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-2);color:#fff;display:flex;align-items:center;justify-content:center" class="step-num">4</div>
-          <div><div style="font-weight:600;letter-spacing:-0.01em;margin-bottom:2px">Recover</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Keep an edit, or undo the write.</div></div>
-        </div>
-        <div style="display:flex;gap:var(--space-3);align-items:flex-start">
-          <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent);color:#fff;display:flex;align-items:center;justify-content:center" class="step-num">5</div>
-          <div><div style="font-weight:600;letter-spacing:-0.01em;margin-bottom:2px">Share</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Locked, secret-free setups.</div></div>
-        </div>
-        <div style="display:flex;gap:var(--space-3);align-items:flex-start">
-          <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-2);color:#fff;display:flex;align-items:center;justify-content:center" class="step-num">6</div>
-          <div><div style="font-weight:600;letter-spacing:-0.01em;margin-bottom:2px">Govern</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Trust, policy, confined runs.</div></div>
+        <div class="tile gap-card">
+          <div class="gap-head">
+            <div class="gap-mark gap-mark-a"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-700)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 20h16a2 2 0 0 0 1.73-2z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg></div>
+            <div class="gap-title">Portable must not mean automatic</div>
+          </div>
+          <p class="gap-body">Unfamiliar repository configuration stays inert until reviewed. Any pinned change re-gates it, and machine policy always remains the ceiling.</p>
+          <div class="gap-foot">
+            <span class="closed-by closed-a">closed by</span>
+            <code>agentstack trust .</code>
+          </div>
         </div>
       </div>
     </div>
+  </section>
 
-    <div class="card elev-md" id="install" style="margin-top:calc(var(--space-8) * 1.5);border-radius:var(--radius-md)">
-      <div style="display:flex;align-items:baseline;gap:var(--space-4);flex-wrap:wrap;margin-bottom:var(--space-3)">
-        <div>
-          <div class="card-kicker">quick start</div>
-          <div class="card-title">Five minutes to first value</div>
-        </div>
-        <div style="flex:1"></div>
-        <a href="tutorial/" style="font-weight:600;font-size:0.95rem">Prefer guided? Take the tutorial →</a>
+  <!-- ── The climb ───────────────────────────────────────────────────────── -->
+  <section class="band">
+    <div class="shell">
+      <div class="section-head">
+        <span class="eyebrow">the climb</span>
+        <h2 id="climb">Climb in six steps</h2>
+        <p>Each step pays off on its own — nothing later is required to keep the earlier wins.</p>
       </div>
-      <div class="term term-lg"><div class="term-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="term-title">bash</span></div><div class="term-body">
-        <div class="term-row"><span class="pr">$</span><span class="cmd">curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh</span></div>
-        <div class="term-row"><span class="pr">$</span><span class="cmd">agentstack init</span><span class="cm"># guided wizard: your CLI configs → one manifest</span></div>
-        <div class="term-row"><span class="pr">$</span><span class="cmd">agentstack status</span><span class="cm"># is it ready — and the one thing that fixes it</span></div>
-      </div></div>
-      <p style="font-size:0.85rem;color:var(--color-neutral-700);margin:var(--space-2) 0 0"><code>agentstack yes</code>, <code>undo</code>, <code>up</code>, <code>share</code>, and <code>receive</code> are v0.18.0 and later; the install line above serves the current stable release. <code>agentstack --version</code> says which you have.</p>
-      <p style="font-size:0.9rem;color:var(--color-neutral-700);margin:var(--space-4) 0 var(--space-2)">Here is what that leaves in your project — plain files you can open, read and commit:</p>
-      <div class="term"><div class="term-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="term-title">your-project/</span></div><div class="term-body"><div class="term-lines">your-project/
+      <div class="grid-steps">
+        <div class="step">
+          <div class="step-num step-a">1</div>
+          <div><div class="step-name">Unify</div><div class="step-body">Import once, render everywhere.</div></div>
+        </div>
+        <div class="step">
+          <div class="step-num step-b">2</div>
+          <div><div class="step-name">Switch</div><div class="step-body">Toolsets and temporary sessions.</div></div>
+        </div>
+        <div class="step">
+          <div class="step-num step-a">3</div>
+          <div><div class="step-name">Diagnose</div><div class="step-body">Doctor and diff explain drift.</div></div>
+        </div>
+        <div class="step">
+          <div class="step-num step-b">4</div>
+          <div><div class="step-name">Recover</div><div class="step-body">Keep an edit, or undo the write.</div></div>
+        </div>
+        <div class="step">
+          <div class="step-num step-a">5</div>
+          <div><div class="step-name">Share</div><div class="step-body">Locked, secret-free setups.</div></div>
+        </div>
+        <div class="step">
+          <div class="step-num step-b">6</div>
+          <div><div class="step-name">Govern</div><div class="step-body">Trust, policy, confined runs.</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Quick start ─────────────────────────────────────────────────────── -->
+  <section class="band" id="install">
+    <div class="shell">
+      <div class="head-row">
+        <div class="section-head">
+          <span class="eyebrow">quick start</span>
+          <h2>Five minutes to first value</h2>
+          <p>Three commands, then plain files you can open, read and commit.</p>
+        </div>
+        <a class="head-aside" href="tutorial/">Prefer guided? Take the tutorial →</a>
+      </div>
+      <div class="start-grid">
+        <div class="start-col">
+          <div class="term term-lg"><div class="term-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="term-title">bash</span></div><div class="term-body">
+            <div class="term-row"><span class="pr">$</span><span class="cmd">curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh</span></div>
+            <div class="term-row"><span class="pr">$</span><span class="cmd">agentstack init</span><span class="cm"># guided wizard: your CLI configs → one manifest</span></div>
+            <div class="term-row"><span class="pr">$</span><span class="cmd">agentstack status</span><span class="cm"># is it ready — and the one thing that fixes it</span></div>
+          </div></div>
+          <div class="term"><div class="term-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="term-title">your-project/</span></div><div class="term-body"><div class="term-lines">your-project/
 ├── .agentstack/
 │   ├── agentstack.toml   <span class="cm"># everything your tools may run: servers, skills, instructions</span>
 │   └── .env              <span class="cm"># token values lifted out of your configs (only when init found any)</span>
 └── .gitignore            <span class="cm"># one managed line, so that .env is never committed</span></div></div></div>
-      <p style="font-size:0.9rem;color:var(--color-neutral-700);margin:var(--space-3) 0 0"><code>.agentstack/agentstack.toml</code> records your whole setup — the <a href="concepts.html">manifest</a>. Every CLI-specific file AgentStack writes is rendered from it, and can be regenerated or taken back off at any time. Mostly the system writes it for you — and when you write a skill of your own you don't open it at all: drop the folder under <code>.agentstack/skills/</code>, run <code>agentstack yes</code>, review once, and it is live in every CLI. It holds <code>${GITHUB_TOKEN}</code>-style placeholders, never the token values.</p>
-      <p style="font-size:0.9rem;color:var(--color-neutral-700);margin:var(--space-3) 0 0">That is the run replayed at the top of this page. Reproduce it fenced with <a href="https://github.com/Tarekkharsa/agentstack/blob/main/examples/first-value-demo/run-demo.sh"><code>examples/first-value-demo/run-demo.sh</code></a> — it asserts every step, so the recording stays accurate.</p>
-    </div>
-
-    <div class="card elev-md" id="everyday" style="margin-top:calc(var(--space-8) * 1.5);border-radius:var(--radius-md)">
-      <div style="margin-bottom:var(--space-4)">
-        <div class="card-kicker">the everyday loop · one deliberate yes</div>
-        <div class="card-title">What using it feels like</div>
-        <p style="font-size:0.92rem;color:var(--color-neutral-700);margin:var(--space-2) 0 0;max-width:70ch">Four moments, captured from v0.18.0-rc.2 exactly as it prints them &mdash; a capture, not a mockup. Everything is automated except the one thing that never is: your yes.</p>
+        </div>
+        <div class="start-col">
+          <ul class="checklist">
+            <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12l5 5L20 6"></path></svg><span>Guided wizard: your CLI configs → one manifest.</span></li>
+            <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12l5 5L20 6"></path></svg><span>Status says whether it is ready — and the one thing that fixes it.</span></li>
+            <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12l5 5L20 6"></path></svg><span>What it leaves behind is plain files you can open, read and commit.</span></li>
+          </ul>
+          <p class="note"><code>agentstack yes</code>, <code>undo</code>, <code>up</code>, <code>share</code>, and <code>receive</code> are v0.18.0 and later; the install line above serves the current stable release. <code>agentstack --version</code> says which you have.</p>
+          <p class="note"><code>.agentstack/agentstack.toml</code> records your whole setup — the <a href="concepts.html">manifest</a>. Every CLI-specific file AgentStack writes is rendered from it, and can be regenerated or taken back off at any time. Mostly the system writes it for you — and when you write a skill of your own you don't open it at all: drop the folder under <code>.agentstack/skills/</code>, run <code>agentstack yes</code>, review once, and it is live in every CLI. It holds <code>${GITHUB_TOKEN}</code>-style placeholders, never the token values.</p>
+          <p class="note">That is the run replayed at the top of this page. Reproduce it fenced with <a href="https://github.com/Tarekkharsa/agentstack/blob/main/examples/first-value-demo/run-demo.sh"><code>examples/first-value-demo/run-demo.sh</code></a> — it asserts every step, so the recording stays accurate.</p>
+        </div>
       </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:var(--space-4)">
-        <div>
+    </div>
+  </section>
+
+  <!-- ── The everyday loop ───────────────────────────────────────────────── -->
+  <section class="band" id="everyday">
+    <div class="shell">
+      <div class="section-head">
+        <span class="eyebrow">the everyday loop · one deliberate yes</span>
+        <h2>What using it feels like</h2>
+        <p>Four moments, captured from v0.18.0-rc.2 exactly as it prints them — a capture, not a mockup. Everything is automated except the one thing that never is: your yes.</p>
+      </div>
+      <div class="grid-loop">
+        <div class="loop-pane">
           <div class="term"><div class="term-body"><div class="term-lines"><span class="pr">$</span> <span>agentstack yes</span>
 <span>→ 1 dropped file ready to go live in this project:</span>
 <span class="ok">  +</span> <span>skill summarize</span> <span class="out">(./skills/summarize)</span>
@@ -224,44 +471,61 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
 <span>Codex CLI</span>
 <span>  → 1 skill to symlink into .agents/skills</span>
 <span class="out">  …</span></div></div></div>
-          <p style="font-size:0.85rem;color:var(--color-neutral-700);margin:var(--space-2) 0 0"><b>Write a skill: drop the folder, say yes.</b> No manifest edit — it is pinned, recorded, and live in every CLI. The one-step review is only for work that is provably yours; anything that arrived with a clone gets the full staged review. <a href="howto/add-a-skill.html">Add a skill →</a></p>
+          <p class="loop-note"><b>Write a skill: drop the folder, say yes.</b> No manifest edit — it is pinned, recorded, and live in every CLI. The one-step review is only for work that is provably yours; anything that arrived with a clone gets the full staged review. <a href="howto/add-a-skill.html">Add a skill →</a></p>
         </div>
-        <div>
+        <div class="loop-pane">
           <div class="term"><div class="term-body"><div class="term-lines"><span class="pr">$</span> <span>agentstack undo</span>
 <span>recent changes (newest first)</span>
 <span>  1  </span><span class="out">just now  </span><span>init</span><span class="out">  1 file · Claude Code, Codex CLI, Gemini CLI, …</span>
 <span>  pick a point: </span><span class="ok">agentstack undo --to &lt;n&gt; --write</span></div></div></div>
-          <p style="font-size:0.85rem;color:var(--color-neutral-700);margin:var(--space-2) 0 0"><b>Take it back, from a timeline.</b> Every write is recorded before it lands; pick a point and revert to it. The revert is recorded too — going one step too far is recoverable. <a href="howto/undo.html">Undo anything →</a></p>
+          <p class="loop-note"><b>Take it back, from a timeline.</b> Every write is recorded before it lands; pick a point and revert to it. The revert is recorded too — going one step too far is recoverable. <a href="howto/undo.html">Undo anything →</a></p>
         </div>
-        <div>
+        <div class="loop-pane">
           <div class="term"><div class="term-body"><div class="term-lines"><span class="bad">blocked:</span> <span>web-search tried to reach api.evil.example</span>
 <span>— not in this project's allowed hosts ([policy.egress])</span>
 <span class="out">  nothing was sent · add the host to [policy.egress] if you meant to allow it</span></div></div></div>
-          <p style="font-size:0.85rem;color:var(--color-neutral-700);margin:var(--space-2) 0 0"><b>The seatbelt speaks plainly.</b> A denial says what was stopped, why, that nothing happened, and the one safe next step — backed by a recorded event, on the <a href="enforcement.html">paths where enforcement really runs</a>.</p>
+          <p class="loop-note"><b>The seatbelt speaks plainly.</b> A denial says what was stopped, why, that nothing happened, and the one safe next step — backed by a recorded event, on the <a href="enforcement.html">paths where enforcement really runs</a>.</p>
         </div>
-        <div>
+        <div class="loop-pane">
           <div class="term"><div class="term-body"><div class="term-lines"><span class="pr">$</span> <span>agentstack share backend</span>
 <span class="out">  # signed as part of sharing — signing is not a flag</span>
 <span class="pr">$</span> <span>agentstack receive team.astack</span>
 <span class="out">  # staged inert and carded first; a recognized publisher</span>
 <span class="out">  # makes the card shorter — never optional</span></div></div></div>
-          <p style="font-size:0.85rem;color:var(--color-neutral-700);margin:var(--space-2) 0 0"><b>Sharing is signing; receiving is reviewing.</b> A bundle carries the manifest, lock, and pinned content. Nothing a teammate receives activates without their own yes. <a href="howto/team-setup.html">Share a setup →</a></p>
+          <p class="loop-note"><b>Sharing is signing; receiving is reviewing.</b> A bundle carries the manifest, lock, and pinned content. Nothing a teammate receives activates without their own yes. <a href="howto/team-setup.html">Share a setup →</a></p>
         </div>
       </div>
     </div>
-  </div>
+  </section>
+</main>
 
-  <div style="border-top:1px solid var(--color-neutral-200);margin-top:var(--space-8)">
-    <div style="max-width:1060px;margin:0 auto;padding:var(--space-6);display:flex;gap:var(--space-4);align-items:center;flex-wrap:wrap">
-      <span style="font-family:var(--font-sans);font-weight:650;letter-spacing:-0.025em">agent<span style="color:var(--color-accent)">Stack</span></span>
-      <span style="color:var(--color-neutral-700);font-size:0.9rem">Unify · Switch · Diagnose · Recover · Share · Govern — dual-licensed MIT / Apache-2.0</span>
-      <div style="flex:1"></div>
-      <a href="docs.html" style="font-size:0.92rem">Documentation</a>
-      <a href="examples.html" style="font-size:0.92rem">Demos</a>
-      <a href="tutorial/" style="font-size:0.92rem">Tutorial</a>
-      <a href="https://github.com/Tarekkharsa/agentstack" style="font-size:0.92rem">GitHub</a>
+<footer class="band site-foot">
+  <div class="shell foot-inner">
+    <span class="foot-wordmark">agent<span>Stack</span></span>
+    <span class="foot-line">Unify · Switch · Diagnose · Recover · Share · Govern — dual-licensed MIT / Apache-2.0</span>
+    <div class="foot-links">
+      <a href="docs.html">Documentation</a>
+      <a href="examples.html">Demos</a>
+      <a href="tutorial/">Tutorial</a>
+      <a href="https://github.com/Tarekkharsa/agentstack">GitHub</a>
     </div>
   </div>
-</div>
+</footer>
+
+<script>
+/* The nav carries no bottom border until the page has actually moved, so the
+   bar reads as part of the hero at rest and as a separate surface once content
+   slides under it. Border colour only — nothing that could reflow. */
+(function () {
+  var nav = document.querySelector('.site-nav');
+  if (!nav) return;
+  function onScroll() {
+    if (window.scrollY > 12) nav.classList.add('is-scrolled');
+    else nav.classList.remove('is-scrolled');
+  }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+})();
+</script>
 </body>
 </html>
