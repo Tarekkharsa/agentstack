@@ -1,5 +1,5 @@
 /* Organic — design-system tokens and component classes. This file is the source of truth for the system's look; retune it here and see readme.md. */
-@import url('https://fonts.googleapis.com/css2?family=Caprasimo:wght@400&family=Figtree:wght@400;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600&family=JetBrains+Mono:wght@400;500&display=swap');
 
 :root {
   --color-bg: #f5ead8;
@@ -7,7 +7,14 @@
   --color-text: #201e1d;
   --color-accent: #c67139;
   --color-accent-2: #7a8a5e;
-  --color-divider: color-mix(in srgb, #201e1d 16%, transparent);
+  /* Hairlines are alpha over the page, never a solid grey: they then sit
+     correctly on the card, the header and the page at once, and they darken
+     rather than disappear when something is layered over them. */
+  --color-divider: rgba(32, 30, 29, 0.12);
+  --color-divider-strong: rgba(32, 30, 29, 0.2);
+  --quiet-hover: rgba(32, 30, 29, 0.04);
+  --btn-primary-hover: #000;
+  --card-sheen: rgba(255, 255, 255, 0.5);
 
   /* Tonal ramps — generated in OKLCH on one shared lightness scale, so the
      same step of any role matches the others in visual value. */
@@ -41,9 +48,18 @@
   --color-accent-2-800: #3d472b;
   --color-accent-2-900: #272e1b;
 
-  --font-heading: "Caprasimo", system-ui, sans-serif;
-  --font-heading-weight: 400;
-  --font-body: "Figtree", system-ui, sans-serif;
+  /* One clean geometric sans carries everything — display, prose and UI — and
+     one mono carries code and every micro-label. Display type is weight 500
+     with negative tracking; micro-labels invert that with positive tracking on
+     the mono face. That opposition is the whole typographic idea; there is no
+     third family and no bold display weight. */
+  --font-sans: "DM Sans", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, monospace;
+  /* --font-heading/--font-body are the older spellings, kept so pages written
+     against them keep working. They now name the same face. */
+  --font-heading: var(--font-sans);
+  --font-heading-weight: 500;
+  --font-body: var(--font-sans);
 
   --space-1: 4.4px;
   --space-2: 8.8px;
@@ -66,9 +82,12 @@
 body {
   background: var(--color-bg);
   color: var(--color-text);
-  font-family: var(--font-body);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "ss02";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
-h1, h2, h3, h4 { font-family: var(--font-heading); font-weight: var(--font-heading-weight); }
+h1, h2, h3, h4 { font-family: var(--font-sans); font-weight: var(--font-heading-weight); }
 
 .washed{filter:saturate(0.6) contrast(0.85) brightness(1.1) opacity(0.94)}
 
@@ -79,31 +98,47 @@ h1, h2, h3, h4 { font-family: var(--font-heading); font-weight: var(--font-headi
    ══════════════════════════════════════════════════════════════════════ */
 
 *, *::before, *::after { box-sizing: border-box; }
-body { margin: 0; font-size: 15px; line-height: 1.55; font-weight: 400; }
+body { margin: 0; font-size: 15px; line-height: 1.5; font-weight: 400; }
 .skip-link {
   position: fixed; z-index: 10000; top: 10px; left: 10px;
   padding: 9px 13px; border-radius: var(--radius-sm); background: var(--color-text);
   color: var(--color-bg); font-weight: 700; transform: translateY(-180%);
 }
 .skip-link:focus { transform: translateY(0); }
-:focus-visible { outline: 3px solid var(--color-accent); outline-offset: 3px; }
+:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; border-radius: 4px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     scroll-behavior: auto !important; animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important; transition-duration: 0.01ms !important;
   }
 }
-h1, h2, h3, h4, h5, h6 {
-  font-family: var(--font-heading); font-weight: var(--font-heading-weight);
-  line-height: 1.12; letter-spacing: -0.015em; margin: 0 0 var(--space-2);
+/* Set by theme.js for one frame around a light/dark swap. Hover transitions
+   are for hovering; a theme change must land instantly and completely, or the
+   page spends a quarter-second in colours belonging to neither theme. */
+[data-theme-switching] *, [data-theme-switching] *::before, [data-theme-switching] *::after {
+  transition: none !important;
 }
-h1 { font-size: 42px; }
-h2 { font-size: 32px; }
-h3 { font-size: 25px; }
-h4 { font-size: 20px; }
-h5 { font-size: 16px; }
-h6 { font-size: 13px; }
-h6 { letter-spacing: 0.08em; text-transform: uppercase; }
+/* Display type: weight 500, never bold, tight negative tracking, and a line
+   height that closes up as the size grows. Sizes are fluid so the same scale
+   serves a 390px phone and a 1280px desktop without a second set of rules —
+   the clamp floors are chosen so the longest heading on the site still fits
+   inside 390px minus the page gutters. */
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-sans); font-weight: var(--font-heading-weight);
+  line-height: 1.1; letter-spacing: -0.03em; margin: 0 0 var(--space-2);
+  overflow-wrap: break-word;
+}
+h1 { font-size: clamp(2.15rem, 5.2vw, 3rem); letter-spacing: -0.035em; line-height: 1.04; }
+h2 { font-size: clamp(1.6rem, 3.4vw, 2.1rem); letter-spacing: -0.035em; line-height: 1.08; }
+h3 { font-size: 1.2rem; letter-spacing: -0.02em; }
+h4 { font-size: 1rem; font-weight: 600; letter-spacing: -0.015em; }
+h5 { font-size: 0.94rem; font-weight: 600; letter-spacing: -0.015em; }
+/* h6 is a micro-label, so it flips to the mono face and positive tracking. */
+h6, .eyebrow {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 500;
+  letter-spacing: 0.14em; text-transform: uppercase; line-height: 1.5;
+  color: var(--color-neutral-600);
+}
 p { margin: 0 0 var(--space-3); }
 /* Links carry no decoration by default — see the "links" section at the foot of
    this file, which adds an underline back inside prose only. */
@@ -117,7 +152,7 @@ figcaption {
 }
 .text-muted { color: color-mix(in srgb, var(--color-text) 55%, transparent); }
 :focus { outline: none; }
-:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; border-radius: 4px; }
 ::selection { background: color-mix(in srgb, var(--color-accent) 30%, transparent); }
 
 /* — rules — */
@@ -126,30 +161,55 @@ figcaption {
   background: var(--color-divider);
 }
 
-/* — buttons — */
+/* — buttons —
+   The primary call to action is the page's own foreground INVERTED — dark text
+   on a light slab in the dark theme, light text on a dark slab in the light
+   one. It is never the accent: the accent is reserved for state and detail
+   (list markers, the `$` prompt, focus rings, the active sidebar bar), so the
+   one loud element on a page is the thing you are meant to press, and the
+   accent keeps meaning "look here" rather than "this is a button".
+   The lift on hover is 1px — enough to feel live, small enough not to reflow. */
 .btn {
-  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  cursor: pointer; text-decoration: none;
-  font-family: var(--font-heading); font-weight: var(--font-heading-weight);
-  font-size: 14px; line-height: 1.2; color: var(--color-text); /* matches the .input's 14px —
-     the pair sits side by side in sign-up rows */
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  cursor: pointer; text-decoration: none; white-space: nowrap;
+  font-family: var(--font-sans); font-weight: 500;
+  font-size: 14px; line-height: 1.2; letter-spacing: -0.01em;
+  color: var(--color-text);
   background: transparent; border: 1px solid transparent;
-  padding: var(--space-2) calc(var(--space-3) * 1.2);
-  border-radius: var(--radius-md);
+  padding: 10px 18px;
+  border-radius: 8px;
+  transition: transform 0.18s ease, background 0.18s ease,
+    border-color 0.18s ease, color 0.18s ease;
 }
 .btn svg { display: block; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
-.btn-primary { background: var(--color-accent); color: var(--color-bg); }
-.btn-primary:hover { background: var(--color-accent-600); }
-.btn-primary:active { background: var(--color-accent-700); }
-.btn-secondary { border-color: var(--color-divider); }
-.btn-secondary:hover { background: color-mix(in srgb, var(--color-text) 7%, transparent); }
-.btn-secondary:active { background: color-mix(in srgb, var(--color-text) 14%, transparent); }
-.btn-ghost { color: var(--color-accent); padding-inline: var(--space-1); }
-.btn-ghost:hover { background: color-mix(in srgb, var(--color-accent) 10%, transparent); }
-.btn-ghost:active { background: color-mix(in srgb, var(--color-accent) 18%, transparent); }
+.btn-primary {
+  background: var(--color-text); color: var(--color-bg); font-weight: 600;
+  border-color: transparent;
+}
+.btn-primary:hover { transform: translateY(-1px); background: var(--btn-primary-hover); }
+.btn-primary:active { transform: translateY(0); }
+.btn-secondary {
+  color: var(--color-neutral-700);
+  border-color: var(--color-divider);
+  background: transparent;
+}
+.btn-secondary:hover {
+  color: var(--color-text);
+  border-color: var(--color-divider-strong);
+  background: var(--quiet-hover);
+}
+.btn-secondary:active { background: color-mix(in srgb, var(--color-text) 10%, transparent); }
+.btn-ghost {
+  color: var(--color-neutral-700);
+  border-color: transparent; padding-inline: var(--space-2);
+}
+.btn-ghost:hover { color: var(--color-text); background: var(--quiet-hover); }
+.btn-ghost:active { background: color-mix(in srgb, var(--color-text) 10%, transparent); }
+.btn-lg { padding: 14px 22px; font-size: 15px; border-radius: 10px; }
 .btn-icon { width: 36px; height: 36px; padding: 0; }
 .btn-block { width: 100%; margin-top: var(--space-2); }
+@media (prefers-reduced-motion: reduce) { .btn:hover { transform: none; } }
 
 /* — forms — */
 .field > label {
@@ -193,14 +253,23 @@ textarea.input { min-height: 90px; resize: vertical; }
 .seg-opt:has(input:focus-visible) { outline: 2px solid var(--color-accent); outline-offset: -2px; }
 
 /* — cards — */
+/* A card is a 1px hairline and a barely-there top sheen — no drop shadow. The
+   edge is what separates it from the page; the gradient is what stops the edge
+   from reading as a drawn box. */
 .card {
   display: flex; flex-direction: column; gap: var(--space-2);
-  padding: var(--space-3); border-radius: var(--radius-md); background: var(--color-surface);
+  padding: var(--space-3); border-radius: var(--radius-md);
+  border: 1px solid var(--color-divider);
+  background-color: var(--color-surface);
+  background-image: linear-gradient(180deg, var(--card-sheen), transparent 60%);
 }
-.card-kicker { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-accent); }
+.card-kicker {
+  font-family: var(--font-mono); font-size: 11px; font-weight: 500;
+  letter-spacing: 0.12em; text-transform: uppercase; color: var(--color-accent);
+}
 .card-title {
-  font-family: var(--font-heading); font-weight: var(--font-heading-weight);
-  font-size: 17px; line-height: 1.2;
+  font-family: var(--font-sans); font-weight: 500;
+  font-size: 17px; line-height: 1.25; letter-spacing: -0.02em;
 }
 .card-body { margin: 0; font-size: 13px; opacity: 0.8; flex: 1; }
 .card-meta {
@@ -213,8 +282,9 @@ textarea.input { min-height: 90px; resize: vertical; }
 
 /* — tags — */
 .tag {
-  display: inline-flex; align-items: center; font-size: 11px;
-  letter-spacing: 0.02em; padding: 3px 10px;
+  display: inline-flex; align-items: center;
+  font-family: var(--font-mono); font-size: 11px; font-weight: 500;
+  letter-spacing: 0.06em; padding: 4px 11px;
   border-radius: calc(var(--radius-md) * 0.75);
 }
 .tag-accent { background: var(--color-accent-100); color: var(--color-accent-800); }
@@ -229,8 +299,8 @@ textarea.input { min-height: 90px; resize: vertical; }
   border-bottom: none;
 }
 .nav-brand {
-  font-family: var(--font-heading); font-weight: var(--font-heading-weight);
-  font-size: 18px; margin-right: auto;
+  font-family: var(--font-sans); font-weight: 650;
+  font-size: 18px; letter-spacing: -0.025em; margin-right: auto;
 }
 .nav a { color: inherit; text-decoration: none; font-size: 14px; }
 .nav a:hover, .nav a[aria-current='page'] { color: var(--color-accent); }
@@ -238,8 +308,9 @@ textarea.input { min-height: 90px; resize: vertical; }
 /* — tables — */
 .table { width: 100%; border-collapse: collapse; font-size: 14px; }
 .table th {
-  text-align: left; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase;
-  color: var(--color-text);
+  text-align: left; font-family: var(--font-mono); font-size: 11px; font-weight: 500;
+  letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--color-neutral-600);
   padding: var(--space-2); border-bottom: 1px solid var(--color-divider);
 }
 .table td {
@@ -260,15 +331,18 @@ textarea.input { min-height: 90px; resize: vertical; }
   background: var(--color-surface); box-shadow: var(--shadow-lg);
 }
 .dialog-title {
-  font-family: var(--font-heading); font-weight: var(--font-heading-weight);
-  font-size: 20px;
+  font-family: var(--font-sans); font-weight: 500;
+  font-size: 20px; letter-spacing: -0.025em;
 }
 .dialog-body { font-size: 14px; opacity: 0.85; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-2); }
 
-/* — rounded frame: everything softens, small controls go pill — */
+/* — rounded frame: everything softens, small controls go pill —
+   Buttons are deliberately NOT in that list: they keep the 8px radius set
+   above. A pill reads as a chip; the square-ish slab is what makes the primary
+   action look pressable rather than decorative. */
 .card, .dialog { border-radius: calc(var(--radius-lg) * 1.15); }
-.btn, .tag, .seg, .input { border-radius: 999px; }
+.tag, .seg, .input { border-radius: 999px; }
 .input { padding-inline: 14px; }
 
 
@@ -289,7 +363,11 @@ textarea.input { min-height: 90px; resize: vertical; }
 
 [data-theme="dark"] {
   --color-bg: #211E1B; --color-surface: #2A2622; --color-text: #F5EAD8;
-  --color-divider: color-mix(in srgb, #F5EAD8 18%, transparent);
+  --color-divider: rgba(255, 255, 255, 0.09);
+  --color-divider-strong: rgba(255, 255, 255, 0.16);
+  --quiet-hover: rgba(255, 255, 255, 0.03);
+  --btn-primary-hover: #fff;
+  --card-sheen: rgba(255, 255, 255, 0.015);
   --color-accent: #D98A52; --color-accent-2: #97A876;
   --color-neutral-100: #332E29; --color-neutral-200: #3A342E; --color-neutral-300: #46403A;
   --color-neutral-400: #5C554C; --color-neutral-500: #847767; --color-neutral-600: #A89B87;
@@ -319,7 +397,13 @@ textarea.input { min-height: 90px; resize: vertical; }
   --term-ok: #7CC08B; --term-bad: #E5786B; --term-warn: #E0B04A;
 
   --color-bg: #FBFAF7; --color-surface: #FFFFFF; --color-text: #1B1F24;
-  --color-divider: rgba(27,31,36,0.16);
+  --color-divider: rgba(27, 31, 36, 0.12);
+  --color-divider-strong: rgba(27, 31, 36, 0.2);
+  --quiet-hover: rgba(27, 31, 36, 0.04);
+  --btn-primary-hover: #000;
+  --card-sheen: rgba(255, 255, 255, 0.5);
+  /* Depth on this site comes from the hairline, not from a drop shadow. */
+  --shadow-sm: none; --shadow-md: none; --shadow-lg: none;
   --color-accent: #B4540A; --color-accent-2: #2A6F4E;
   --color-neutral-100: #F3F0EA; --color-neutral-200: #E7E2D9; --color-neutral-300: #D8D2C7;
   --color-neutral-400: #B9B3A8; --color-neutral-500: #7E858D; --color-neutral-600: #5B6570;
@@ -333,7 +417,11 @@ textarea.input { min-height: 90px; resize: vertical; }
 
 [data-palette="slate"][data-theme="dark"] {
   --color-bg: #14171B; --color-surface: #1A1E23; --color-text: #E9E7E2;
-  --color-divider: rgba(233,231,226,0.16);
+  --color-divider: rgba(255, 255, 255, 0.08);
+  --color-divider-strong: rgba(255, 255, 255, 0.14);
+  --quiet-hover: rgba(255, 255, 255, 0.03);
+  --btn-primary-hover: #fff;
+  --card-sheen: rgba(255, 255, 255, 0.015);
   --color-accent: #F0975A; --color-accent-2: #7CC08B;
   --color-neutral-100: #1E2329; --color-neutral-200: #292E34; --color-neutral-300: #343B43;
   --color-neutral-400: #454D57; --color-neutral-500: #69727C; --color-neutral-600: #9AA3AC;
@@ -343,9 +431,7 @@ textarea.input { min-height: 90px; resize: vertical; }
   --color-accent-900: #FBDCC5;
   --color-accent-2-100: #16281C; --color-accent-2-200: #1E3626; --color-accent-2-700: #A8D4B3;
   --color-accent-2-800: #C2E2CA; --color-accent-2-900: #DCEFE1;
-  --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
-  --shadow-md: 0 3px 10px rgba(0,0,0,0.45);
-  --shadow-lg: 0 12px 32px rgba(0,0,0,0.55);
+  --shadow-sm: none; --shadow-md: none; --shadow-lg: none;
 }
 
 /* ── One vocabulary, two spellings ─────────────────────────────────────────
@@ -360,15 +446,23 @@ textarea.input { min-height: 90px; resize: vertical; }
   --surface: var(--color-surface);
   --ink: var(--color-text);
   --muted: var(--color-neutral-600);
+  /* Running prose sits one step back from the page's foreground, with <strong>
+     promoted to the full foreground — the same split t3code uses. This is the
+     step most likely to fail a contrast check, so it is pinned to the ramp's
+     600 level, which measures 7.0:1 on the dark page and 5.7:1 on the light
+     one. tools/site-smoke.mjs runs axe in BOTH themes and will say so if a
+     retune breaks it. */
+  --prose: var(--color-neutral-600);
   --accent: var(--color-accent);
   --accent-ink: var(--color-bg);
   --accent-soft: color-mix(in srgb, var(--color-accent) 10%, transparent);
   --accent-line: color-mix(in srgb, var(--color-accent) 28%, transparent);
-  --line: var(--color-neutral-200);
-  --line-soft: color-mix(in srgb, var(--color-neutral-200) 55%, var(--color-bg));
+  --line: var(--color-divider);
+  --line-soft: color-mix(in srgb, var(--color-divider) 60%, transparent);
+  --line-strong: var(--color-divider-strong);
   --code-bg: var(--color-neutral-100);
-  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
-  --sans: var(--font-body, Figtree, sans-serif);
+  --mono: var(--font-mono);
+  --sans: var(--font-sans);
 }
 /* --accent-ink is text ON the accent; in the light palettes white beats the
    page background against that mid-tone orange. */
@@ -385,18 +479,30 @@ textarea.input { min-height: 90px; resize: vertical; }
    colour on hover. Only links inside running prose get an underline, and it
    is a soft accent-tinted rule under body-coloured text — hover brightens the
    RULE, never the metrics: changing text-decoration-thickness on hover reflows
-   the line and makes the text shimmer. */
-main :is(p, li, td, dd, dt, blockquote, figcaption) a:not(.btn):not(.hlink),
-[role="main"] :is(p, li, td, dd, dt, blockquote, figcaption) a:not(.btn):not(.hlink) {
+   the line and makes the text shimmer.
+
+   `:where()` keeps the whole prose-link selector at single-element
+   specificity, so the ONE exception below — `.navlist`, a list of nothing but
+   links, which is navigation rather than prose — can switch the underline off
+   with an ordinary class instead of an escalation war. */
+:where(main, [role="main"]) :where(p, li, td, dd, dt, blockquote, figcaption)
+  a:where(:not(.btn):not(.hlink)) {
   text-decoration: underline;
   text-decoration-thickness: 1px;
   text-decoration-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
   text-underline-offset: 4px;
 }
-main :is(p, li, td, dd, dt, blockquote, figcaption) a:not(.btn):not(.hlink):hover,
-[role="main"] :is(p, li, td, dd, dt, blockquote, figcaption) a:not(.btn):not(.hlink):hover {
+:where(main, [role="main"]) :where(p, li, td, dd, dt, blockquote, figcaption)
+  a:where(:not(.btn):not(.hlink)):hover {
   text-decoration-color: var(--color-accent);
 }
+/* A contents list — every item is a bare link and nothing else — is a table of
+   contents, not running prose. tools/make-docs-pages.py marks such lists
+   structurally, at build time, from that same "link-only" property; this is
+   the only place the class is consumed. */
+:where(main, [role="main"]) .navlist a,
+:where(main, [role="main"]) .navlist a:hover { text-decoration: none; }
+:where(main, [role="main"]) .navlist a:hover { color: var(--color-accent); }
 a:not([class]):hover, .nav a:hover { color: var(--color-accent); }
 
 /* ── code blocks and terminals ────────────────────────────────────────────

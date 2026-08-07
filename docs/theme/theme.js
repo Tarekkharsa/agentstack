@@ -36,11 +36,23 @@
     makeScrollableRegionsFocusable();
   }
 
+  // Controls transition their colour on hover. A theme swap changes those same
+  // colours on every element at once, so without this the whole page would
+  // cross-fade for the length of a hover transition — and anything reading the
+  // page in that window (an accessibility checker, a screenshot) would sample
+  // colours that are neither theme. Transitions are suppressed for exactly one
+  // frame while the new values are applied, then handed back.
   window.toggleTheme = function () {
     var next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme-switching', '');
     root.setAttribute('data-theme', next);
     try { localStorage.setItem('agentstack-theme', next); } catch (e) {}
     relabel();
+    // Force a style flush so the new colours land while transitions are off.
+    void root.offsetWidth;
+    requestAnimationFrame(function () {
+      root.removeAttribute('data-theme-switching');
+    });
   };
 
   if (document.readyState === 'loading') {

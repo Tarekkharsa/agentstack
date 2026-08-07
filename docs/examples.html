@@ -25,6 +25,16 @@
 <!-- Palette, terminal tokens and the .cb/.term components live in
      theme/organic.css, linked above — this page adds only what is its own. -->
 <style>
+/* Nav links follow t3code's rule: quiet by default, full foreground on hover.
+   They are styled here rather than inline so the :hover can actually win. */
+.nav-links a{color:var(--color-neutral-600);font-weight:500;font-size:0.9rem;letter-spacing:-0.01em}
+.nav-links a:hover{color:var(--color-text)}
+.nav-links .here{font-weight:500;font-size:0.9rem;letter-spacing:-0.01em;color:var(--color-text)}
+.themebtn{font-family:var(--font-sans);font-size:0.8rem;font-weight:500;letter-spacing:-0.01em;padding:0.42rem 0.85rem;border-radius:8px;border:1px solid var(--color-divider);background:transparent;color:var(--color-neutral-600);cursor:pointer}
+.themebtn:hover{color:var(--color-text);border-color:var(--color-divider-strong);background:var(--quiet-hover)}
+.toc a{font-family:var(--font-mono);font-weight:500;font-size:0.8rem;letter-spacing:-0.005em;color:var(--color-neutral-600)}
+.toc a:hover{color:var(--color-text)}
+.eyebrow-label{font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-neutral-600)}
 /* Light responsive touch — collapse the two-column layout and wrap the nav. */
 @media (max-width:720px){
   .nav{flex-wrap:wrap;gap:var(--space-2)}
@@ -40,38 +50,38 @@
   <nav class="nav" style="display:flex;align-items:center;gap:var(--space-4)">
     <a href="index.html" class="nav-brand" style="display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--color-text)">
       <img src="theme/logo-mark.svg" alt="" style="width:34px;height:34px">
-      <span style="font-family:var(--font-heading);font-size:1.25rem">agent<span style="color:var(--color-accent)">Stack</span></span>
+      <span style="font-family:var(--font-sans);font-weight:650;font-size:1.2rem;letter-spacing:-0.025em">agent<span style="color:var(--color-accent)">Stack</span></span>
     </a>
     <div style="flex:1"></div>
     <div class="nav-links" style="display:flex;align-items:center;gap:var(--space-4)">
-      <a href="docs.html" style="text-decoration:none;font-weight:600;color:var(--color-text)">Documentation</a>
-      <span style="font-weight:700;color:var(--color-accent-700)">Demos</span>
-      <a href="tutorial/" style="text-decoration:none;font-weight:600;color:var(--color-text)">Tutorial</a>
-      <a href="https://github.com/Tarekkharsa/agentstack" style="text-decoration:none;font-weight:600;color:var(--color-text)">GitHub</a>
-      <button data-theme-toggle onclick="toggleTheme()" style="font-size:13px;font-weight:600;padding:7px 14px;border-radius:999px;border:1px solid var(--color-divider);background:var(--color-surface);color:var(--color-text);font-family:inherit">Light mode</button>
+      <a href="docs.html">Documentation</a>
+      <span class="here">Demos</span>
+      <a href="tutorial/">Tutorial</a>
+      <a href="https://github.com/Tarekkharsa/agentstack">GitHub</a>
+      <button class="themebtn" data-theme-toggle onclick="toggleTheme()">Light mode</button>
     </div>
   </nav>
 
   <div class="page" style="max-width:1060px;margin:0 auto;padding:var(--space-8) var(--space-6) var(--space-8);display:flex;gap:var(--space-8)">
     <div class="toc" style="width:210px;flex:none;position:sticky;top:24px;align-self:flex-start;display:flex;flex-direction:column;gap:var(--space-2)">
-      <div style="font-size:0.78rem;font-weight:700;letter-spacing:0.08em;color:var(--color-neutral-600);text-transform:uppercase;margin-bottom:var(--space-1)">On this page</div>
-      <a href="#everyday-loop" style="text-decoration:none;font-weight:600;color:var(--color-text);font-size:0.92rem">everyday-loop-demo</a>
-      <a href="#malicious" style="text-decoration:none;font-weight:600;color:var(--color-text);font-size:0.92rem">malicious-repo-demo</a>
-      <a href="#guard" style="text-decoration:none;font-weight:600;color:var(--color-text);font-size:0.92rem">guard-demo</a>
-      <a href="#one-manifest" style="text-decoration:none;font-weight:600;color:var(--color-text);font-size:0.92rem">one-manifest-demo</a>
-      <a href="#firstrun" style="text-decoration:none;font-weight:600;color:var(--color-text);font-size:0.92rem">sandbox · first run</a>
-      <a href="#library" style="text-decoration:none;font-weight:600;color:var(--color-text);font-size:0.92rem">sandbox · central library</a>
-      <a href="#lockdown" style="text-decoration:none;font-weight:600;color:var(--color-text);font-size:0.92rem">sandbox · lockdown</a>
-      <a href="#lease" style="text-decoration:none;font-weight:600;color:var(--color-text);font-size:0.92rem">mcp-profile-lease</a>
-      <a href="#policies" style="text-decoration:none;font-weight:600;color:var(--color-text);font-size:0.92rem">policy presets</a>
-      <a href="#projects" style="text-decoration:none;font-weight:600;color:var(--color-text);font-size:0.92rem">example projects</a>
+      <div class="eyebrow-label" style="margin-bottom:var(--space-1)">On this page</div>
+      <a href="#everyday-loop">everyday-loop-demo</a>
+      <a href="#malicious">malicious-repo-demo</a>
+      <a href="#guard">guard-demo</a>
+      <a href="#one-manifest">one-manifest-demo</a>
+      <a href="#firstrun">sandbox · first run</a>
+      <a href="#library">sandbox · central library</a>
+      <a href="#lockdown">sandbox · lockdown</a>
+      <a href="#lease">mcp-profile-lease</a>
+      <a href="#policies">policy presets</a>
+      <a href="#projects">example projects</a>
     </div>
 
     <div id="main-content" role="main" tabindex="-1" style="flex:1;min-width:0">
-      <h1 style="font-family:var(--font-heading);font-weight:400;font-size:2.6rem;margin:0 0 var(--space-3)">Demos — the promises, proven</h1>
+      <h1 style="font-family:var(--font-sans);font-weight:500;font-size:clamp(2.1rem,5vw,2.7rem);line-height:1.05;letter-spacing:-0.035em;margin:0 0 var(--space-3)">Demos — the promises, proven</h1>
       <p style="font-size:1.05rem;line-height:1.65;color:var(--color-neutral-700);margin:0 0 var(--space-8);max-width:640px">Each demo here proves a <strong>promise AgentStack makes</strong> — import once and render everywhere, undo byte-for-byte, and, deeper in, refuse an undeclared tool call and block an unapproved destination. Note the shape of that last one: AgentStack restricts <em>destinations</em> and records decisions. It does not inspect payloads, so an agent can still send data through a host you approved — see <a href="enforcement.html#claim-discipline">the claim discipline</a>. Everything comes from <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">examples/</code> in the repo: self-contained, self-asserting scripts that run in an isolated temp HOME, print PASS/FAIL per claim, and exit nonzero on any mismatch. Looking for <em>how to use the CLI</em> instead? That’s the <a href="docs.html#howtos">how-to guides</a> and the <a href="reference.html">command reference</a>.</p>
 
-      <h2 id="first-value" style="font-family:var(--font-heading);font-weight:400;font-size:1.6rem;margin:0 0 var(--space-3)">first-value-demo</h2>
+      <h2 id="first-value" style="font-family:var(--font-sans);font-weight:500;letter-spacing:-0.03em;font-size:1.6rem;margin:0 0 var(--space-3)">first-value-demo</h2>
       <div class="card elev-sm" style="margin-bottom:var(--space-8)">
         <div class="card-kicker">the core promise, proven</div>
         <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-3)">Two real native configs — Claude Code knows a <em>github</em> server (inline token), Codex knows <em>tldraw</em>, neither knows the other's. One <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">agentstack init</code> imports both into one manifest (the token lifted to <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">${GITHUB_TOKEN}</code> in a gitignored <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">.env</code>), one <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">apply --write</code> renders both native formats, <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">doctor</code> closes at 0 errors, and two <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">restore --last --write</code> return the machine byte-for-byte to where it started. Eight assertions, all green in the run replayed below.</div>
@@ -79,7 +89,7 @@
         <div style="margin-top:var(--space-3)"><code style="font-size:0.82rem;background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">examples/first-value-demo/run-demo.sh</code> <span style="font-size:0.82rem;color:var(--color-neutral-600)">· DEMO_PAUSE=2.5 paces it for a recording</span></div>
       </div>
 
-      <h2 id="everyday-loop" style="font-family:var(--font-heading);font-weight:400;font-size:1.6rem;margin:0 0 var(--space-3)">everyday-loop-demo</h2>
+      <h2 id="everyday-loop" style="font-family:var(--font-sans);font-weight:500;letter-spacing:-0.03em;font-size:1.6rem;margin:0 0 var(--space-3)">everyday-loop-demo</h2>
       <div class="card elev-sm" style="margin-bottom:var(--space-8)">
         <div class="card-kicker">the loop after the import, proven</div>
         <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-3)">Where <em>first-value</em> proves the import, this proves the loop you live in afterwards — the five verbs added in <strong>v0.18.0</strong>, across two isolated machines. A skill folder is dropped into <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">.agentstack/skills/</code> and activated: declared, pinned in the lock, and readable at <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">.claude/skills/</code> where the CLI actually looks. Then <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">undo --to 1 --write</code> returns <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">.mcp.json</code> byte-for-byte — hand-written server and all — while leaving the dropped file alone. <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">share</code> writes a signed <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">.astack</code> bundle; on a second machine with its own trust store, <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">receive</code> stages it <strong>inert</strong> (its manifest is deliberately not merged) and <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">up</code> verifies against the lock and renders that machine's config. Twenty assertions, every one an on-disk effect rather than a command's own summary line.</div>
@@ -87,14 +97,14 @@
         <div style="margin-top:var(--space-3)"><code style="font-size:0.82rem;background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">examples/everyday-loop-demo/run-demo.sh</code> <span style="font-size:0.82rem;color:var(--color-neutral-600)">· needs python3 · DEMO_PAUSE=2.5 paces it for a recording</span></div>
       </div>
 
-      <h2 id="malicious" style="font-family:var(--font-heading);font-weight:400;font-size:1.6rem;margin:0 0 var(--space-3)">malicious-repo-demo</h2>
+      <h2 id="malicious" style="font-family:var(--font-sans);font-weight:500;letter-spacing:-0.03em;font-size:1.6rem;margin:0 0 var(--space-3)">malicious-repo-demo</h2>
       <div class="card elev-sm" style="margin-bottom:var(--space-8)">
         <div class="card-kicker">the threat, proven</div>
         <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-3)">The ten-second proof of the gateway boundary. The villain is <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">evil_server.py</code>: an MCP server advertising a friendly <em>status</em> tool and a malicious <em>exfiltrate</em> tool that reads a planted credential and POSTs it to a localhost sink. Tellingly, its manifest declares <strong>no firewall of its own</strong> — a malicious repo won't constrain itself. The same hostile repo runs three ways:</div>
         <div id="mal-tabs" style="display:flex;gap:var(--space-2);flex-wrap:wrap;margin-bottom:var(--space-3)"></div>
         <div style="display:flex;gap:var(--space-4);align-items:center;flex-wrap:wrap;margin-bottom:var(--space-2)">
-          <div style="display:flex;align-items:center;gap:var(--space-2)"><span id="mal-dot" style="width:12px;height:12px;border-radius:999px;background:#C0392B"></span><span id="mal-sink" style="font-size:0.9rem;font-weight:700"></span></div>
-          <span id="mal-verdict" style="font-size:0.85rem;font-weight:700;padding:4px 14px;border-radius:999px"></span>
+          <div style="display:flex;align-items:center;gap:var(--space-2)"><span id="mal-dot" style="width:12px;height:12px;border-radius:999px;background:#C0392B"></span><span id="mal-sink" style="font-size:0.9rem;font-weight:600"></span></div>
+          <span id="mal-verdict" style="font-size:0.85rem;font-weight:600;padding:4px 14px;border-radius:999px"></span>
         </div>
         <div id="mal-detail" style="font-size:0.92rem;line-height:1.6;color:var(--color-neutral-800)"></div>
         <div id="mal-proves" style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700);margin-top:var(--space-2)"></div>
@@ -103,7 +113,7 @@
       </div>
 
       <span id="e20" aria-hidden="true"></span>
-      <h2 id="guard" style="font-family:var(--font-heading);font-weight:400;font-size:1.6rem;margin:0 0 var(--space-3)">guard-demo</h2>
+      <h2 id="guard" style="font-family:var(--font-sans);font-weight:500;letter-spacing:-0.03em;font-size:1.6rem;margin:0 0 var(--space-3)">guard-demo</h2>
       <div class="card elev-sm" style="margin-bottom:var(--space-8)">
         <div class="card-kicker">guard, asserted</div>
         <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-3)">Guard wires a <strong>cooperative</strong> pre-tool-use hook into the CLIs that support one (Claude Code, Codex, Gemini, Cursor, Windsurf, Copilot CLI, Antigravity, OpenCode, Pi). Before a tool runs, the pending call goes to <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">guard check</code>; every denial is recorded to <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">~/.agentstack/audit/calls.jsonl</code>. Hand it a pending call:</div>
@@ -112,7 +122,7 @@
         <div style="margin-top:var(--space-3)"><code style="font-size:0.82rem;background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">examples/guard-demo/run-demo.sh</code> <span style="font-size:0.82rem;color:var(--color-neutral-600)">· finishes by grepping the audit log to prove the denials landed</span></div>
       </div>
 
-      <h2 id="one-manifest" style="font-family:var(--font-heading);font-weight:400;font-size:1.6rem;margin:0 0 var(--space-3)">one-manifest-demo</h2>
+      <h2 id="one-manifest" style="font-family:var(--font-sans);font-weight:500;letter-spacing:-0.03em;font-size:1.6rem;margin:0 0 var(--space-3)">one-manifest-demo</h2>
       <div class="card elev-sm" style="margin-bottom:var(--space-8)">
         <div class="card-kicker">portability wedge</div>
         <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-3)">The committed manifest declares one stdio server, one portable instruction fragment, and holds only <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">${GITHUB_TOKEN}</code> — the demo greps it to prove it's secret-free <em>before</em> rendering anything. Then <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">apply</code> fans it out. Pick a CLI to see its native shape:</div>
@@ -122,35 +132,35 @@
         <div style="margin-top:var(--space-3)"><code style="font-size:0.82rem;background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">examples/one-manifest-demo/run-demo.sh</code></div>
       </div>
 
-      <h2 id="firstrun" style="font-family:var(--font-heading);font-weight:400;font-size:1.6rem;margin:0 0 var(--space-3)">sandbox · first run</h2>
+      <h2 id="firstrun" style="font-family:var(--font-sans);font-weight:500;letter-spacing:-0.03em;font-size:1.6rem;margin:0 0 var(--space-3)">sandbox · first run</h2>
       <div class="card elev-sm" style="margin-bottom:var(--space-8)">
         <div class="card-kicker">the clean adoption story</div>
         <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-3)"><code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">demo-firstrun.sh</code> builds a <strong>throwaway HOME each run</strong>, so it is always a genuine first run — a dev who already runs Claude Code with one MCP server, adopting agentstack to spread it across every other CLI. Step through it:</div>
         <div style="display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap;margin-bottom:var(--space-3)">
           <span id="fr-crumbs" style="display:contents"></span>
           <span style="flex:1"></span>
-          <button onclick="stepPrev('fr')" style="font-size:0.82rem;font-weight:700;padding:6px 14px;border-radius:999px;border:1px solid var(--color-divider);background:var(--color-surface);color:var(--color-text);font-family:inherit;cursor:pointer">←</button>
-          <button id="fr-next" onclick="stepNext('fr')" style="font-size:0.82rem;font-weight:700;padding:6px 16px;border-radius:999px;border:1px solid var(--color-accent);background:var(--color-accent);color:#FDF6EE;font-family:inherit;cursor:pointer">next →</button>
+          <button onclick="stepPrev('fr')" style="font-size:0.82rem;font-weight:600;padding:6px 14px;border-radius:8px;border:1px solid var(--color-divider);background:var(--color-surface);color:var(--color-text);font-family:inherit;cursor:pointer">←</button>
+          <button id="fr-next" onclick="stepNext('fr')" style="font-size:0.82rem;font-weight:600;padding:6px 16px;border-radius:8px;border:1px solid transparent;background:var(--color-text);color:var(--color-bg);font-family:inherit;cursor:pointer">next →</button>
         </div>
         <div id="fr-lines" class="term-flat" style="margin-bottom:var(--space-2)"></div>
         <div id="fr-note" style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700)"></div>
       </div>
 
-      <h2 id="library" style="font-family:var(--font-heading);font-weight:400;font-size:1.6rem;margin:0 0 var(--space-3)">sandbox · central library</h2>
+      <h2 id="library" style="font-family:var(--font-sans);font-weight:500;letter-spacing:-0.03em;font-size:1.6rem;margin:0 0 var(--space-3)">sandbox · central library</h2>
       <div class="card elev-sm" style="margin-bottom:var(--space-8)">
         <div class="card-kicker">by name, not by copy</div>
         <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-3)"><code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">central-demo/</code> is <strong>just a manifest</strong> — a toolset referencing a server + skill by name, no inline definitions, no capability files. Both resolve from the central library at <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">~/.agentstack/lib/</code>. Walk the flow:</div>
         <div style="display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap;margin-bottom:var(--space-3)">
           <span id="lib-crumbs" style="display:contents"></span>
           <span style="flex:1"></span>
-          <button onclick="stepPrev('lib')" style="font-size:0.82rem;font-weight:700;padding:6px 14px;border-radius:999px;border:1px solid var(--color-divider);background:var(--color-surface);color:var(--color-text);font-family:inherit;cursor:pointer">←</button>
-          <button id="lib-next" onclick="stepNext('lib')" style="font-size:0.82rem;font-weight:700;padding:6px 16px;border-radius:999px;border:1px solid var(--color-accent);background:var(--color-accent);color:#FDF6EE;font-family:inherit;cursor:pointer">next →</button>
+          <button onclick="stepPrev('lib')" style="font-size:0.82rem;font-weight:600;padding:6px 14px;border-radius:8px;border:1px solid var(--color-divider);background:var(--color-surface);color:var(--color-text);font-family:inherit;cursor:pointer">←</button>
+          <button id="lib-next" onclick="stepNext('lib')" style="font-size:0.82rem;font-weight:600;padding:6px 16px;border-radius:8px;border:1px solid transparent;background:var(--color-text);color:var(--color-bg);font-family:inherit;cursor:pointer">next →</button>
         </div>
         <div id="lib-lines" class="term-flat" style="margin-bottom:var(--space-2)"></div>
         <div id="lib-note" style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700)"></div>
       </div>
 
-      <h2 id="lockdown" style="font-family:var(--font-heading);font-weight:400;font-size:1.6rem;margin:0 0 var(--space-3)">sandbox · lockdown</h2>
+      <h2 id="lockdown" style="font-family:var(--font-sans);font-weight:500;letter-spacing:-0.03em;font-size:1.6rem;margin:0 0 var(--space-3)">sandbox · lockdown</h2>
       <div class="card elev-sm" style="margin-bottom:var(--space-8)">
         <div class="card-kicker">no direct route — needs Docker</div>
         <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-3)"><code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">demo-lockdown.sh</code> launches a real <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">run --sandbox --lockdown</code> container and then tries to get out of it. Click each attempt:</div>
@@ -159,21 +169,21 @@
         <div style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700);margin-top:var(--space-2)">The container sits on an internal-only network whose <strong>sole peer is the egress sidecar</strong> — posture <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">LOCKDOWN / ENFORCED · NO DIRECT ROUTE</code>. Point <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">AGENTSTACK_SANDBOX_IMAGE</code> at an image carrying your CLI; the sidecar is pulled from GHCR, pinned per release.</div>
       </div>
 
-      <h2 id="lease" style="font-family:var(--font-heading);font-weight:400;font-size:1.6rem;margin:0 0 var(--space-3)">mcp-profile-lease</h2>
+      <h2 id="lease" style="font-family:var(--font-sans);font-weight:500;letter-spacing:-0.03em;font-size:1.6rem;margin:0 0 var(--space-3)">mcp-profile-lease</h2>
       <div class="card elev-sm" style="margin-bottom:var(--space-8)">
         <div class="card-kicker">the zero-file workflow, proven</div>
         <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-3)">One real <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">agentstack mcp</code> stdio process: the agent opens the <em>backend</em> toolset, loads its skill, freezes what it observed into a new toolset, and closes — asserting that <strong>none</strong> of the native artifacts (.mcp.json, .claude/skills/, sessions.json) were ever created. Step through the lifecycle — these are MCP tool calls, not shell commands:</div>
         <div style="display:flex;gap:var(--space-2);align-items:center;flex-wrap:wrap;margin-bottom:var(--space-3)">
           <span id="le-crumbs" style="display:contents"></span>
           <span style="flex:1"></span>
-          <button onclick="stepPrev('le')" style="font-size:0.82rem;font-weight:700;padding:6px 14px;border-radius:999px;border:1px solid var(--color-divider);background:var(--color-surface);color:var(--color-text);font-family:inherit;cursor:pointer">←</button>
-          <button id="le-next" onclick="stepNext('le')" style="font-size:0.82rem;font-weight:700;padding:6px 16px;border-radius:999px;border:1px solid var(--color-accent);background:var(--color-accent);color:#FDF6EE;font-family:inherit;cursor:pointer">next →</button>
+          <button onclick="stepPrev('le')" style="font-size:0.82rem;font-weight:600;padding:6px 14px;border-radius:8px;border:1px solid var(--color-divider);background:var(--color-surface);color:var(--color-text);font-family:inherit;cursor:pointer">←</button>
+          <button id="le-next" onclick="stepNext('le')" style="font-size:0.82rem;font-weight:600;padding:6px 16px;border-radius:8px;border:1px solid transparent;background:var(--color-text);color:var(--color-bg);font-family:inherit;cursor:pointer">next →</button>
         </div>
         <div id="le-lines" class="term-flat" style="margin-bottom:var(--space-2)"></div>
         <div id="le-note" style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700)"></div>
       </div>
 
-      <h2 id="policies" style="font-family:var(--font-heading);font-weight:400;font-size:1.6rem;margin:0 0 var(--space-3)">Machine-policy presets</h2>
+      <h2 id="policies" style="font-family:var(--font-sans);font-weight:500;letter-spacing:-0.03em;font-size:1.6rem;margin:0 0 var(--space-3)">Machine-policy presets</h2>
       <div class="card elev-sm" style="margin-bottom:var(--space-8)">
         <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-3)">Four ready-to-use standing firewalls — each a complete machine manifest, validated by the CLI's own loader in CI. Copy one to <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">~/.agentstack/agentstack.toml</code>, then <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">doctor</code>. Pick one to see its stance:</div>
         <div id="pp-tabs" style="display:flex;gap:var(--space-2);flex-wrap:wrap;margin-bottom:var(--space-3)"></div>
@@ -182,7 +192,7 @@
         <div style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700);margin-top:var(--space-3)">All four read as <em>restrictive</em> in doctor because each carries at least one rename-proof <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">"*"</code> rule — it binds every server whatever a manifest calls it. Plain globs allow, a <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">!</code> prefix denies; any allow pattern turns the list into an allowlist. A later broken edit runs DEGRADED on the last-known-good snapshot; broken first-run state is BLOCKED, never project-only.</div>
       </div>
 
-      <h2 id="projects" style="font-family:var(--font-heading);font-weight:400;font-size:1.6rem;margin:0 0 var(--space-3)">Seven example projects</h2>
+      <h2 id="projects" style="font-family:var(--font-sans);font-weight:500;letter-spacing:-0.03em;font-size:1.6rem;margin:0 0 var(--space-3)">Seven example projects</h2>
       <p style="font-size:0.95rem;line-height:1.6;color:var(--color-neutral-700);margin:0 0 var(--space-3);max-width:640px">Fake-but-realistic projects, each exercising one use case end-to-end with an <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">assert.sh</code> that proves it. Click one for the full story:</p>
       <div id="pj-rows" style="display:flex;flex-direction:column;gap:var(--space-2);margin-bottom:var(--space-6)"></div>
       <p style="font-size:0.9rem;line-height:1.6;color:var(--color-neutral-700)">The dogfooding report these projects produced — the skill-indexing investigation, the CLI-differences matrix, the device test of run --locked — lives in <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">examples/projects/FINDINGS.md</code>.</p>
@@ -191,7 +201,7 @@
 
   <div style="border-top:1px solid var(--color-neutral-200)">
     <div style="max-width:1060px;margin:0 auto;padding:var(--space-6);display:flex;gap:var(--space-4);align-items:center;flex-wrap:wrap">
-      <span style="font-family:var(--font-heading)">agent<span style="color:var(--color-accent)">Stack</span></span>
+      <span style="font-family:var(--font-sans);font-weight:650;letter-spacing:-0.025em">agent<span style="color:var(--color-accent)">Stack</span></span>
       <div style="flex:1"></div>
       <a href="index.html" style="font-size:0.92rem">Home</a>
       <a href="docs.html" style="font-size:0.92rem">Documentation</a>
@@ -227,7 +237,7 @@
     var i = S.mal, m = MAL[i], t = '';
     for (var j = 0; j < MAL.length; j++) {
       var bg = j === i ? ACC : SURF, fg = j === i ? SEL : TXT;
-      t += '<button onclick="MAL_pick(' + j + ')" style="font-size:0.85rem;font-weight:700;padding:8px 16px;border-radius:999px;border:1px solid var(--color-divider);background:' + bg + ';color:' + fg + ';font-family:inherit;cursor:pointer">' + esc(MAL[j].label) + '</button>';
+      t += '<button onclick="MAL_pick(' + j + ')" style="font-size:0.85rem;font-weight:600;padding:8px 16px;border-radius:8px;border:1px solid var(--color-divider);background:' + bg + ';color:' + fg + ';font-family:inherit;cursor:pointer">' + esc(MAL[j].label) + '</button>';
     }
     el('mal-tabs').innerHTML = t;
     el('mal-dot').style.background = m.dot;
@@ -250,15 +260,15 @@
     var o = '';
     for (var j = 0; j < GUARD.length; j++) {
       var bd = j === S.guard ? 'var(--color-accent)' : 'var(--color-divider)';
-      o += '<button onclick="GUARD_pick(' + j + ')" style="font-size:0.85rem;padding:8px 16px;border-radius:999px;border:1px solid ' + bd + ';background:var(--color-surface);color:var(--color-text);font-family:ui-monospace,Menlo,monospace;cursor:pointer">' + esc(GUARD[j].label) + '</button>';
+      o += '<button onclick="GUARD_pick(' + j + ')" style="font-size:0.85rem;padding:8px 16px;border-radius:8px;border:1px solid ' + bd + ';background:var(--color-surface);color:var(--color-text);font-family:var(--font-mono);cursor:pointer">' + esc(GUARD[j].label) + '</button>';
     }
     el('guard-opts').innerHTML = o;
     var g = S.guard != null ? GUARD[S.guard] : null, r = el('guard-result');
     if (!g) { r.innerHTML = ''; return; }
     var vbg = g.bad ? BADB : OKB, vfg = g.bad ? BADF : OKF;
-    r.innerHTML = '<span style="display:inline-block;font-size:0.85rem;font-weight:700;padding:4px 14px;border-radius:999px;background:' + vbg + ';color:' + vfg + ';margin-bottom:var(--space-2)">' + esc(g.verdict) + '</span>' +
+    r.innerHTML = '<span style="display:inline-block;font-size:0.85rem;font-weight:600;padding:4px 14px;border-radius:999px;background:' + vbg + ';color:' + vfg + ';margin-bottom:var(--space-2)">' + esc(g.verdict) + '</span>' +
       '<div style="font-size:0.92rem;line-height:1.6;color:var(--color-neutral-800)">' + esc(g.why) + '</div>' +
-      '<div style="font-size:0.85rem;font-family:ui-monospace,Menlo,monospace;color:var(--color-neutral-600);margin-top:var(--space-1)">' + esc(g.audit) + '</div>';
+      '<div style="font-size:0.85rem;font-family:var(--font-mono);color:var(--color-neutral-600);margin-top:var(--space-1)">' + esc(g.audit) + '</div>';
   }
   window.GUARD_pick = function (i) { S.guard = i; renderGuard(); };
 
@@ -272,7 +282,7 @@
     var i = S.cli, o = OM[i], t = '';
     for (var j = 0; j < OM.length; j++) {
       var bg = j === i ? ACC : SURF, fg = j === i ? SEL : TXT;
-      t += '<button onclick="OM_pick(' + j + ')" style="font-size:0.85rem;font-weight:700;padding:8px 16px;border-radius:999px;border:1px solid var(--color-divider);background:' + bg + ';color:' + fg + ';font-family:inherit;cursor:pointer">' + esc(OM[j].label) + '</button>';
+      t += '<button onclick="OM_pick(' + j + ')" style="font-size:0.85rem;font-weight:600;padding:8px 16px;border-radius:8px;border:1px solid var(--color-divider);background:' + bg + ';color:' + fg + ';font-family:inherit;cursor:pointer">' + esc(OM[j].label) + '</button>';
     }
     el('om-tabs').innerHTML = t;
     var term = '<div style="color:var(--term-muted)">' + esc(o.path) + '</div>';
@@ -310,7 +320,7 @@
     for (var j = 0; j < steps.length; j++) {
       var bg = j === i ? ACC : (j < i ? 'var(--color-accent-100)' : 'var(--color-neutral-100)');
       var fg = j === i ? SEL : (j < i ? 'var(--color-accent-700)' : 'var(--color-neutral-600)');
-      cr += '<span style="font-size:0.78rem;font-weight:700;padding:4px 12px;border-radius:999px;background:' + bg + ';color:' + fg + '">' + esc((j + 1) + ' ' + steps[j].name) + '</span>';
+      cr += '<span style="font-size:0.78rem;font-weight:600;padding:4px 12px;border-radius:999px;background:' + bg + ';color:' + fg + '">' + esc((j + 1) + ' ' + steps[j].name) + '</span>';
     }
     el(key + '-crumbs').innerHTML = cr;
     var ln = '';
@@ -334,13 +344,13 @@
     var o = '';
     for (var j = 0; j < LD.length; j++) {
       var bd = j === S.ld ? 'var(--color-accent)' : 'var(--color-divider)';
-      o += '<button onclick="LD_pick(' + j + ')" style="font-size:0.85rem;padding:8px 16px;border-radius:999px;border:1px solid ' + bd + ';background:var(--color-surface);color:var(--color-text);font-family:ui-monospace,Menlo,monospace;cursor:pointer">' + esc(LD[j].label) + '</button>';
+      o += '<button onclick="LD_pick(' + j + ')" style="font-size:0.85rem;padding:8px 16px;border-radius:8px;border:1px solid ' + bd + ';background:var(--color-surface);color:var(--color-text);font-family:var(--font-mono);cursor:pointer">' + esc(LD[j].label) + '</button>';
     }
     el('ld-opts').innerHTML = o;
     var l = S.ld != null ? LD[S.ld] : null, r = el('ld-result');
     if (!l) { r.innerHTML = ''; return; }
     var vbg = l.bad ? BADB : OKB, vfg = l.bad ? BADF : OKF;
-    r.innerHTML = '<span style="display:inline-block;font-size:0.85rem;font-weight:700;padding:4px 14px;border-radius:999px;background:' + vbg + ';color:' + vfg + ';margin-bottom:var(--space-2)">' + esc(l.verdict) + '</span>' +
+    r.innerHTML = '<span style="display:inline-block;font-size:0.85rem;font-weight:600;padding:4px 14px;border-radius:999px;background:' + vbg + ';color:' + vfg + ';margin-bottom:var(--space-2)">' + esc(l.verdict) + '</span>' +
       '<div style="font-size:0.92rem;line-height:1.6;color:var(--color-neutral-800)">' + esc(l.why) + '</div>';
   }
   window.LD_pick = function (i) { S.ld = i; renderLd(); };
@@ -356,7 +366,7 @@
     var i = S.pp, p = PP[i], t = '';
     for (var j = 0; j < PP.length; j++) {
       var bg = j === i ? ACC : SURF, fg = j === i ? SEL : TXT;
-      t += '<button onclick="PP_pick(' + j + ')" style="font-size:0.85rem;font-weight:700;padding:8px 16px;border-radius:999px;border:1px solid var(--color-divider);background:' + bg + ';color:' + fg + ';font-family:ui-monospace,Menlo,monospace;cursor:pointer">' + esc(PP[j].label) + '</button>';
+      t += '<button onclick="PP_pick(' + j + ')" style="font-size:0.85rem;font-weight:600;padding:8px 16px;border-radius:8px;border:1px solid var(--color-divider);background:' + bg + ';color:' + fg + ';font-family:var(--font-mono);cursor:pointer">' + esc(PP[j].label) + '</button>';
     }
     el('pp-tabs').innerHTML = t;
     el('pp-when').innerHTML = '<strong>Use it when:</strong> ' + esc(p.when);
@@ -381,9 +391,9 @@
       var bd = open ? 'var(--color-accent)' : 'var(--color-divider)', chev = open ? '−' : '+';
       out += '<div class="card" style="padding:0;overflow:hidden;border:1px solid ' + bd + '">' +
         '<button onclick="PJ_toggle(' + j + ')" style="width:100%;display:flex;gap:var(--space-3);align-items:baseline;text-align:left;background:none;border:none;padding:14px 18px;cursor:pointer;font-family:inherit">' +
-        '<span style="font-family:ui-monospace,Menlo,monospace;font-size:0.88rem;font-weight:700;color:var(--color-accent-700);flex:none">' + esc(r.name) + '</span>' +
+        '<span style="font-family:var(--font-mono);font-size:0.88rem;font-weight:600;color:var(--color-accent-700);flex:none">' + esc(r.name) + '</span>' +
         '<span style="font-size:0.9rem;color:var(--color-neutral-700);flex:1">' + esc(r.short) + '</span>' +
-        '<span style="color:var(--color-accent);font-weight:700">' + chev + '</span>' +
+        '<span style="color:var(--color-accent);font-weight:600">' + chev + '</span>' +
         '</button>' +
         (open ? '<div style="padding:0 18px 16px;font-size:0.92rem;line-height:1.65;color:var(--color-neutral-800)">' + esc(r.detail) + '</div>' : '') +
         '</div>';
