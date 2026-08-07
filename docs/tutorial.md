@@ -83,7 +83,9 @@ your-project/
 The manifest holds `${REF}` placeholders and never a secret value. The real
 values go to the OS keychain or that gitignored `.env`. Scripting this, or
 running it in CI? `agentstack init --yes --secrets skip` writes the manifest
-and asks nothing.
+and asks nothing. Add `--connect` and the same run also registers the bridge
+your CLIs need, so the setup delivers the moment `init` returns; without that
+flag `init` writes nothing outside this project.
 
 ## Step 2 — Add a capability
 

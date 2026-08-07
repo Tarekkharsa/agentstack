@@ -87,16 +87,47 @@ impl Decision {
 pub fn check_event(ctx: &GuardContext, event: &GuardEvent) -> Decision {
     match event {
         GuardEvent::Other => Decision::Allow,
-        GuardEvent::FileRead { path } => deny_glob_check(ctx, path),
+        GuardEvent::FileRead { path } => deny_glob_check(ctx, Access::Read, path),
         GuardEvent::FileWrite { path } => write_target_check(ctx, path),
         GuardEvent::Bash { command } => check_bash(ctx, command),
+    }
+}
+
+/// What a denial STOPPED — wording only, never the decision. One deny-glob
+/// blocklist governs reads, writes and shell mentions alike, so every arm below
+/// reaches the identical `fs_deny_decision`; they differ solely in what the
+/// refusal says happened, because "nothing was written" is a false statement
+/// about a read that was never going to write anything.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Access {
+    /// A read-shaped file tool.
+    Read,
+    /// A write-shaped file tool, or a write reached through the shell.
+    Write,
+    /// A shell command that NAMES a refused path. The guard judges tokens, not
+    /// intent, so it says what it actually knows: the command did not run.
+    Command,
+}
+
+impl Access {
+    /// (what the denial stopped, what therefore did not happen).
+    fn phrasing(self) -> (&'static str, &'static str) {
+        match self {
+            Access::Read => ("a read of", "nothing was read"),
+            Access::Write => ("a write to", "nothing was written"),
+            Access::Command => ("a command naming", "the command did not run"),
+        }
     }
 }
 
 /// `[policy.filesystem] deny` for one path, matched in every spelling we
 /// know (absolute, workspace-relative, bare file name) — more spellings can
 /// only make a blocklist stricter.
-fn deny_glob_check(ctx: &GuardContext, path: &str) -> Decision {
+///
+/// `access` reaches the message and nothing else: the path spellings, the
+/// blocklist and the allow/deny answer are byte-identical for every value of
+/// it. A path denied to a write is denied to a read, and the reverse.
+fn deny_glob_check(ctx: &GuardContext, access: Access, path: &str) -> Decision {
     let abs = normalize(path, &ctx.workspace, &ctx.home);
     let mut spellings: Vec<String> = vec![abs.to_string_lossy().into_owned()];
     // The workspace-relative spelling, tried across the as-reported AND
@@ -132,10 +163,13 @@ fn deny_glob_check(ctx: &GuardContext, path: &str) -> Decision {
         // exact fix for a while, and this one had no reason not to. The rule
         // text already names its source file, so the next step is where to go
         // and change it.
-        Err(rule) => Decision::deny(format!(
-            "blocked: a write to {path} was refused — {rule}\n  \
-             nothing was written · edit that [policy.filesystem] rule if this path should be allowed"
-        )),
+        Err(rule) => {
+            let (stopped, outcome) = access.phrasing();
+            Decision::deny(format!(
+                "blocked: {stopped} {path} was refused — {rule}\n  \
+                 {outcome} · edit that [policy.filesystem] rule if this path should be allowed"
+            ))
+        }
     }
 }
 
@@ -188,7 +222,7 @@ fn cite_builtin(ctx: &GuardContext, decision: Decision) -> Decision {
 /// one primitive prevents spelling-specific command handlers from omitting
 /// half of the check.
 fn write_target_check(ctx: &GuardContext, path: &str) -> Decision {
-    if let d @ Decision::Deny { .. } = deny_glob_check(ctx, path) {
+    if let d @ Decision::Deny { .. } = deny_glob_check(ctx, Access::Write, path) {
         return d;
     }
     write_scope_check(ctx, path)
@@ -302,9 +336,12 @@ fn check_bash(ctx: &GuardContext, command: &str) -> Decision {
         }
         // Any token naming a deny-globbed path blocks the whole command —
         // this is what catches `cat .env`, `source .env`, `cp .env /tmp`.
+        // A token is judged as a NAME, not as a read or a write: `cat .env`
+        // and `echo x > .env` both land here, and only one of them would have
+        // written anything, so the refusal claims neither.
         for tok in &tokens {
             if !tok.starts_with('-') {
-                if let d @ Decision::Deny { .. } = deny_glob_check(ctx, tok) {
+                if let d @ Decision::Deny { .. } = deny_glob_check(ctx, Access::Command, tok) {
                     return d;
                 }
             }
@@ -682,7 +719,7 @@ fn check_mv_cp(ctx: &GuardContext, program: &str, args: &[String]) -> Decision {
         return Decision::deny(format!("{program} destination: {reason}"));
     }
     for s in sources {
-        if let d @ Decision::Deny { .. } = deny_glob_check(ctx, s) {
+        if let d @ Decision::Deny { .. } = deny_glob_check(ctx, Access::Command, s) {
             return d;
         }
         if program == "mv" {
@@ -1327,6 +1364,91 @@ mod tests {
             ),
             Decision::Allow
         );
+    }
+
+    /// The message must match the EVENT. A blocked READ used to claim
+    /// "a write to … was refused / nothing was written" — false twice over:
+    /// it was a read, and nothing was ever going to be written.
+    #[test]
+    fn a_denial_says_what_the_event_actually_was() {
+        let c = ctx();
+        let reason = |ev: &GuardEvent| match check_event(&c, ev) {
+            Decision::Deny { reason } => reason,
+            Decision::Allow => panic!("{ev:?} must be denied"),
+        };
+
+        let read = reason(&GuardEvent::FileRead {
+            path: ".env".into(),
+        });
+        assert!(read.contains("a read of .env was refused"), "{read}");
+        assert!(read.contains("nothing was read"), "{read}");
+        assert!(
+            !read.contains("was written"),
+            "a read writes nothing: {read}"
+        );
+        assert!(!read.contains("a write to"), "{read}");
+
+        let write = reason(&GuardEvent::FileWrite {
+            path: ".env".into(),
+        });
+        assert!(write.contains("a write to .env was refused"), "{write}");
+        assert!(write.contains("nothing was written"), "{write}");
+
+        // A shell token is judged as a NAME, not as a read or a write: `cat`
+        // and `>` both land on the same token pass, and only one of them would
+        // have written anything — so the refusal claims neither, and states
+        // the one thing that is true of both.
+        for cmd in ["cat .env", "echo x > .env", "source .env"] {
+            let r = reason(&bash(cmd));
+            assert!(
+                r.contains("a command naming .env was refused"),
+                "{cmd}: {r}"
+            );
+            assert!(r.contains("the command did not run"), "{cmd}: {r}");
+            assert!(!r.contains("nothing was written"), "{cmd}: {r}");
+        }
+
+        // The write-SCOPE refusal is untouched: that one is always a write.
+        let out = reason(&GuardEvent::FileWrite {
+            path: "/etc/hosts".into(),
+        });
+        assert!(out.contains("a write to /etc/hosts was refused"), "{out}");
+        assert!(out.contains("nothing was written"), "{out}");
+    }
+
+    /// The enforcement control for that wording change: [`Access`] reaches the
+    /// message and nothing else. Every path denied to one access is denied to
+    /// all three, and no path allowed before became denied — or the reverse.
+    #[test]
+    fn the_access_wording_never_moves_the_deny_decision() {
+        let c = ctx();
+        let each = [Access::Read, Access::Write, Access::Command];
+        for path in [
+            ".env",
+            "sub/dir/.env",
+            "/anywhere/else/.env",
+            ".env.local",
+            "/work/proj/.env",
+            "/Users/me/.ssh/id_rsa",
+        ] {
+            for access in each {
+                assert!(
+                    deny_glob_check(&c, access, path).is_deny(),
+                    "{path} must stay denied for {access:?}"
+                );
+            }
+        }
+        // The negative control: outside the blocklist, every access still
+        // passes — no denial was added anywhere.
+        for path in ["src/main.rs", "/etc/hosts", "README.md", ".env.example"] {
+            for access in each {
+                assert_eq!(
+                    deny_glob_check(&c, access, path),
+                    Decision::Allow,
+                    "{path} must stay allowed for {access:?}"
+                );
+            }
+        }
     }
 
     /// #23 — a payload can name the same file under two equivalent

@@ -52,6 +52,7 @@ fn restore_undoes_manifest_env_and_gitignore_from_one_init() {
             include_tool_managed: false,
             yes: true,
             consented_plan: None,
+            connect: false,
         },
         Some(&proj),
     )
@@ -254,6 +255,7 @@ fn library_first_args() -> InitArgs {
         include_tool_managed: false,
         yes: true,
         consented_plan: None,
+        connect: false,
     }
 }
 

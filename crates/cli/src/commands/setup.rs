@@ -105,6 +105,11 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
                 // here.
                 yes: false,
                 consented_plan: None,
+                // Never here: the wizard registers the bridge in its own
+                // ceremony, after the delivery routing is on screen. Setting
+                // it would also make the import confirm's promise ("your CLIs'
+                // own configs stay untouched") false at the moment it is read.
+                connect: false,
             },
             manifest_dir,
         )?;
@@ -234,7 +239,7 @@ fn configure(
 
     let proceeded = match choice {
         DeliveryChoice::Automatic => {
-            run_automatic(&ctx, &target_ids, manifest_dir)?;
+            run_automatic(&ctx, &target_ids, manifest_dir, args.connect)?;
             true
         }
         // Render locally is recorded first, so the render that follows is the
@@ -251,7 +256,7 @@ fn configure(
             true
         }
         DeliveryChoice::Legacy(super::overview::Mode::ZeroFiles) => {
-            run_zero_files(&ctx, manifest_dir)?;
+            run_zero_files(&ctx, manifest_dir, args.connect)?;
             true
         }
     };
@@ -584,7 +589,15 @@ fn run_clean_at_rest(ctx: &super::Context, manifest_dir: Option<&Path>) -> Resul
 /// files, the fork also points at `set-mode zero-files`, the switch that
 /// removes them — without that leg the derived mode keeps reading "static"
 /// however completely the gateway is wired.
-fn run_zero_files(ctx: &super::Context, manifest_dir: Option<&Path>) -> Result<()> {
+fn run_zero_files(
+    ctx: &super::Context,
+    manifest_dir: Option<&Path>,
+    // `agentstack init --connect`: the offer below is already answered. This
+    // legacy fork honours it for the same reason the automatic one does — a
+    // flag that works on one route and is silently ignored on another is worse
+    // than no flag.
+    preconsented: bool,
+) -> Result<()> {
     use super::overview::Mode;
     let _ = manifest_dir; // the ctx already carries the resolved dir
 
@@ -603,27 +616,21 @@ fn run_zero_files(ctx: &super::Context, manifest_dir: Option<&Path>) -> Result<(
     let (cmds, what) = mode_switch_plan(Mode::ZeroFiles, None);
     const CONNECT_LATER: &str = "agentstack x gateway connect --all --write";
 
-    let register = crate::util::confirm::is_interactive()
-        && crate::util::confirm::confirm(
-            "\n  Register the agentstack gateway in your installed harnesses now?",
-        )?;
+    if preconsented {
+        println!(
+            "\n  {} registering the gateway now — you asked for it with {}.",
+            "·".dimmed(),
+            "--connect".bold()
+        );
+    }
+    let register = preconsented
+        || (crate::util::confirm::is_interactive()
+            && crate::util::confirm::confirm(
+                "\n  Register the agentstack gateway in your installed harnesses now?",
+            )?);
     if register {
-        // Reuse the `gateway connect` code path as a library call. A failure
-        // here (no MCP-capable harness, say) must not sink the whole setup —
-        // surface it with the manual command, like the house-rules offer does.
-        if let Err(err) = super::connect::run_connect(&ConnectArgs {
-            harnesses: Vec::new(),
-            all: true,
-            transparent: false,
-            write: true,
-            command: None,
-        }) {
-            println!(
-                "  {} gateway registration failed ({err:#}) — register it later with:",
-                "⚠".yellow()
-            );
-            println!("    {}", CONNECT_LATER.bold());
-        }
+        // Reuse the `gateway connect` code path as a library call.
+        register_now(CONNECT_LATER)?;
     } else {
         println!("  {} register it later with:", "·".dimmed());
         println!("    {}", CONNECT_LATER.bold());
@@ -1214,6 +1221,10 @@ fn run_automatic(
     ctx: &super::Context,
     target_ids: &[String],
     manifest_dir: Option<&Path>,
+    // The user typed `agentstack init --connect`, so the bridge question is
+    // already answered and the wizard states the registration instead of
+    // asking it again.
+    preconsented: bool,
 ) -> Result<()> {
     let plan =
         crate::delivery::Plan::build(&ctx.loaded.manifest.delivery, &ctx.registry, target_ids);
@@ -1261,7 +1272,7 @@ fn run_automatic(
     // machine-wide write, so it is always a confirm and never happens without a
     // terminal — a scripted setup gets the command printed instead.
     if plan.has_dynamic_lane() {
-        offer_bridge()?;
+        offer_bridge(preconsented)?;
         println!(
             "\n  {} then review this repo once, so its capabilities can be served:",
             "·".dimmed()
@@ -1289,8 +1300,20 @@ fn run_automatic(
 /// thing the live lane needs that a project cannot provide for itself. Shared by
 /// the automatic fork and the legacy zero-files fork, so there is one copy of
 /// this offer and one failure message.
-fn offer_bridge() -> Result<()> {
+fn offer_bridge(preconsented: bool) -> Result<()> {
     const CONNECT_LATER: &str = "agentstack x gateway connect --all --write";
+    // `--connect` is an answer already given, in the same breath as the
+    // command that got here. Asking again would be theatre, not consent — but
+    // the run still SAYS what it is about to write, because a machine-wide
+    // change must never be silent even when it was asked for.
+    if preconsented {
+        println!(
+            "\n  {} registering the bridge now — you asked for it with {}.",
+            "·".dimmed(),
+            "--connect".bold()
+        );
+        return register_now(CONNECT_LATER);
+    }
     // The consequence belongs IN the question. This prompt keeps `confirm`'s
     // no-is-the-default contract — it is a machine-wide write, and the design
     // law automates everything except the yes — but a bare Enter used to
@@ -1317,8 +1340,15 @@ fn offer_bridge() -> Result<()> {
         println!("    {}", CONNECT_LATER.bold());
         return Ok(());
     }
-    // A failure here (no MCP-capable harness, say) must not sink the whole
-    // setup — surface it with the manual command, like the house-rules offer.
+    register_now(CONNECT_LATER)
+}
+
+/// The registration itself, shared by the answered-yes and the `--connect`
+/// paths so there is one call into `gateway connect` and one failure message.
+///
+/// A failure here (no MCP-capable harness, say) must not sink the whole setup —
+/// surface it with the manual command, like the house-rules offer.
+fn register_now(connect_later: &str) -> Result<()> {
     if let Err(err) = super::connect::run_connect(&ConnectArgs {
         harnesses: Vec::new(),
         all: true,
@@ -1330,7 +1360,7 @@ fn offer_bridge() -> Result<()> {
             "  {} bridge registration failed ({err:#}) — register it later with:",
             "⚠".yellow()
         );
-        println!("    {}", CONNECT_LATER.bold());
+        println!("    {}", connect_later.bold());
     }
     Ok(())
 }

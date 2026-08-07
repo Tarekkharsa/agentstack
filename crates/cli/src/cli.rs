@@ -1780,6 +1780,15 @@ pub struct SetupArgs {
     /// than no flag.
     #[arg(long)]
     pub include_tool_managed: bool,
+
+    /// The user already consented to registering the bridge (they typed
+    /// `agentstack init --connect`), so the wizard registers it instead of
+    /// asking again. Carried through for the same reason the two flags above
+    /// are: a flag that parses and then does nothing on one of two routes is
+    /// worse than no flag. It can only ever turn one question into a
+    /// statement — never widen what is written.
+    #[arg(long)]
+    pub connect: bool,
 }
 
 #[derive(Args, Debug)]
@@ -2020,6 +2029,20 @@ pub struct InitArgs {
     /// and apply forces a fresh review instead of importing unseen content.
     #[arg(long, value_name = "DIGEST")]
     pub consented_plan: Option<String>,
+
+    /// Also register the agentstack bridge in the CLIs installed here, in this
+    /// same run — the one step the live lane needs, so the setup delivers
+    /// something the moment `init` returns.
+    ///
+    /// This flag IS the consent for that write, and nothing else is. It names
+    /// a machine-wide change (each CLI's own global config, e.g.
+    /// `~/.claude.json`), so `--yes` never implies it: `--yes` acknowledges the
+    /// manifest and any lifted token values, and promises the CLIs' own configs
+    /// stay untouched. With `--dry-run` the registration is described and
+    /// nothing is written. Identical to running
+    /// `agentstack x gateway connect --all --write` afterwards.
+    #[arg(long)]
+    pub connect: bool,
 }
 
 /// Where `init` (and `secret set`) put lifted token values when the manifest's

@@ -28,6 +28,7 @@ fn args(force: bool) -> InitArgs {
         include_tool_managed: false,
         yes: false,
         consented_plan: None,
+        connect: false,
     }
 }
 
