@@ -12,36 +12,9 @@
 <script src="theme/theme.js"></script>
 <link rel="stylesheet" href="theme/organic.css">
 <style>
-  :root {
-    --paper: #F5EAD8; --surface: #FFFDF6; --ink: #201E1D; --muted: #6E6559;
-    --accent: #C67139; --accent-ink: #FFFFFF;
-    --accent-soft: color-mix(in srgb, var(--accent) 10%, transparent);
-    --accent-line: color-mix(in srgb, var(--accent) 28%, transparent);
-    --line: #E2D5BD; --line-soft: #EADFC9; --code-bg: #ECE0C8;
-    --radius-sm: 9px;
-    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
-    --sans: var(--font-body, Figtree, sans-serif);
-  }
-  [data-theme="dark"] {
-    --paper: #211E1B; --surface: #2A2622; --ink: #F5EAD8; --muted: #A89B87;
-    --accent: #D98A52; --accent-ink: #211406;
-    --line: #3A342E; --line-soft: #332E29; --code-bg: #332E29;
-  }
-  [data-palette="slate"] {
-    --paper: #FBFAF7; --surface: #FFFFFF; --ink: #1B1F24; --muted: #5B6570;
-    --accent: #B4540A; --accent-ink: #FFFFFF;
-    --line: #E7E2D9; --line-soft: #EFEBE3; --code-bg: #F3F0EA;
-  }
-  [data-palette="slate"][data-theme="dark"] {
-    --paper: #14171B; --surface: #1A1E23; --ink: #E9E7E2; --muted: #9AA3AC;
-    --accent: #F0975A; --accent-ink: #1A1206;
-    --line: #292E34; --line-soft: #23282E; --code-bg: #1E2329;
-  }
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.6 var(--sans); }
-  a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
-  a:hover { text-decoration-thickness: 2px; }
   a code { color: var(--ink); }
   code { font-family: var(--mono); font-size: 0.9em; background: var(--code-bg); border-radius: 5px; padding: 0.1em 0.35em; }
   header { position: sticky; top: 0; z-index: 50; background: color-mix(in srgb, var(--surface) 96%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
@@ -80,8 +53,8 @@
   h2:hover .hlink, h3:hover .hlink, h4:hover .hlink { opacity: 0.7; }
   main p, main li { max-width: 46rem; }
   main ul, main ol { padding-left: 1.4rem; }
-  pre.block { background: var(--code-bg); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); padding: 0.85rem 1rem; overflow-x: auto; font-size: 0.82rem; line-height: 1.55; }
-  pre.block code { background: none; padding: 0; font-size: 1em; }
+  /* Code blocks and terminals are the .cb component in theme/organic.css. */
+  main .cb { margin: 1.1rem 0; }
   /* Long inline code (paths, digests, command lines) wraps inside its own
      container instead of widening the page on narrow viewports. */
   main p code, main li code, main td code, main h2 code, main h3 code { overflow-wrap: anywhere; }
@@ -280,11 +253,11 @@
 <h2 id="where-this-starts">Where this starts<a class="hlink" href="#where-this-starts" aria-label="Link to this section">#</a></h2>
 <p>The current implementation is a ten-crate Rust workspace. It ships the manifest and lock resolver, 13 CLI adapters, a capability library of linked source folders, content-bound trust, machine-first policy, a single-dispatch MCP gateway, Docker sandbox and lockdown runtimes, egress enforcement, per-run recording, an experimental frozen-plan executor, and a self-contained workflow engine. This document describes the current boundaries. <a href="https://github.com/Tarekkharsa/agentstack/blob/main/STRATEGY.md"><code>../STRATEGY.md</code></a> defines the gated direction, and <a href="https://github.com/Tarekkharsa/agentstack/blob/main/TODO.md"><code>../TODO.md</code></a> names the current work.</p>
 <h2 id="the-flow">The flow<a class="hlink" href="#the-flow" aria-label="Link to this section">#</a></h2>
-<pre class="block"><code>manifest + library → resolve + lock → adapters → native CLI config
+<div class="cb"><pre class="block"><code>manifest + library → resolve + lock → adapters → native CLI config
                             │
                             └→ trust → policy → gateway/runtime → recorder
                                             ↑
-                                      machine rules</code></pre>
+                                      machine rules</code></pre></div>
 <p>Static config rendering and governed execution are sibling paths, and both are behind the trust gate. <code>apply</code> is still an explicit, non-executing render operation, but <code>apply --write</code> and <code>use --write</code> refuse an untrusted or drifted project rather than writing native config or materializing skill files. The exemptions are stated rather than implied: the machine layer, and the inert direction (removal and prune plans).</p>
 <p>Generated code follows the same path through a policy-agnostic execution domain: the CLI freezes an exact tool grant and limits into an immutable plan; the executor runs it inside the sandbox; and every capability call returns to the existing gateway. The executor never reads or interprets policy. The gateway remains the sole tool authority, the runtime owns isolation, the egress crate owns asynchronous relay transport, and the recorder owns evidence.</p>
 <p>A bundle arrives (cloned, pulled, copied) and is inert by construction. <code>agentstack trust</code> displays its declared runtime surface, verifies its lock, and pins the current manifest/local/lock digest in the machine-local trust store. At run time, the policy engine intersects the bundle's requested policy with the machine's rules and compiles the effective ruleset. In sandbox mode the CLI's configured HTTP(S) traffic goes through the enforcing proxy; lockdown makes the proxy sidecar topologically the only route out. Lifecycle, limit, egress, brokered tool-call, and secret-reference events enter the per-run log.</p>
@@ -333,17 +306,17 @@
 <p><em>Design lineage: the capability-layer framing behind <code>tools_execute</code> — discovery over disclosure, generation-then-determinism, primitives over workflows — draws on Adam Jones's "I was wrong about MCPs"; the diagrams and recommendations here are original to this repository.</em></p>
 <h2 id="layer-1--the-bundle-cratescore">Layer 1 — The bundle (<code>crates/core</code>)<a class="hlink" href="#layer-1--the-bundle-cratescore" aria-label="Link to this section">#</a></h2>
 <p>A bundle is a directory. It is <strong>declarative and inert</strong>: pure data, nothing executes.</p>
-<pre class="block"><code>my-agent/
+<div class="cb"><pre class="block"><code>my-agent/
   .agentstack/
     agentstack.toml        # preferred manifest
     agentstack.local.toml  # optional gitignored overlay
     agentstack.lock        # resolved, content-pinned inputs
     instructions/         # instruction files
     skills/               # skill directories (untrusted input)
-    extensions/           # native harness add-on code (executable; untrusted input)</code></pre>
+    extensions/           # native harness add-on code (executable; untrusted input)</code></pre></div>
 <p>Capability kinds a manifest declares: <strong>servers</strong> (MCP), <strong>skills</strong> (inert text), <strong>instructions</strong> (compiled into <code>CLAUDE.md</code>/<code>AGENTS.md</code>), <strong>settings</strong> (native per-CLI config), <strong>hooks</strong> (declarative, compiled per-CLI), and <strong>extensions</strong> (native executable add-ons). Extensions are the highest-risk kind and the one agentstack governs <em>only before delivery</em> — see Layer 4.</p>
 <p>Minimal <code>agentstack.toml</code> sketch:</p>
-<pre class="block"><code>version = 1
+<div class="cb" data-language="toml"><div class="cb-bar"><span class="cb-lang">toml</span></div><pre class="block"><code class="language-toml">version = 1
 
 [servers.web-search]
 type = "stdio"
@@ -358,7 +331,7 @@ path = "./skills/summarize"
 path = "./instructions/team.md"
 
 [policy.tools]
-web-search = ["*", "!*_delete"]</code></pre>
+web-search = ["*", "!*_delete"]</code></pre></div>
 <p><code>agentstack.lock</code> pins resolved server definitions, skill-directory content, instruction bytes, extension and workflow sources, and native settings to SHA-256 digests. Settings are pinned at the grain agentstack owns — one <code>[[setting]]</code> row per (target, key), checksummed over the canonical JSON of the value as declared with <code>${REF}</code> unresolved — so an undeclared key a user edited themselves can never read as drift. That pin is a review signal, not a delivery gate: unlike an unpinned skill or instruction, a drifted settings key warns rather than refusing a render, because settings are inert config merged into a file the harness owns. Trust separately binds the manifest, local overlay, and lockfile into one consent digest. Detached ed25519 signing and verification of the lockfile are available as distribution primitives.</p>
 <p>Each pin has a matching deposit. The machine-local content store keeps a verbatim, content-addressed copy of the bytes a pin covers, which is what lets a re-review show <em>which lines</em> moved rather than only that the digest did. The deposit siblings are one per digest family, never one function with branches, so no kind's pin format can silently change: <code>Store::pin</code> (skill trees), <code>pin_instruction</code> (raw file bytes), <code>pin_server_definition</code> (one-file definitions), <code>pin_settings_key</code> (canonical settings JSON), <code>pin_integrity_root</code> (the strict integrity-root digest extensions and workflows use), and <code>pin_blueprint</code> (a workflow's approved blueprint, the instruction family with containment rules in front of it). Every deposit is best-effort and never blocks its pin; reads re-prove the address, and a lockfile predating a deposit degrades to an honest "the bytes you approved were not recorded" line rather than failing the project.</p>
 <p>Key decisions:</p>
@@ -431,7 +404,7 @@ web-search = ["*", "!*_delete"]</code></pre>
 <p>Push/pull of signed bundles. The trust gate verifies signatures against publisher keys; content-pinning and review flow are inherited unchanged. Starts life as a curated Git repository of signed bundles — no infrastructure until demand proves it.</p>
 <h2 id="crate-dependency-rules">Crate dependency rules<a class="hlink" href="#crate-dependency-rules" aria-label="Link to this section">#</a></h2>
 <p>Exact internal edges (anything not listed is forbidden):</p>
-<pre class="block"><code>core     → (nothing)
+<div class="cb"><pre class="block"><code>core     → (nothing)
 trust    → core, recorder
 policy   → core
 recorder → core
@@ -440,7 +413,7 @@ runtime  → core, policy, recorder
 egress   → core, policy, recorder
 executor → (nothing)
 workflow → (nothing)
-cli      → everything</code></pre>
+cli      → everything</code></pre></div>
 <p><code>trust → recorder</code> is the one edge added for trust-mutation evidence (P0.2). It keeps <code>trust</code> a small review boundary: <code>recorder</code> depends on <code>core</code> alone and forbids unsafe code, so the edge adds no new external dependency and no new authority. The recording call sits <em>inside</em> the store lock, immediately after the successful save, which is what makes evidence unskippable by construction and makes log order equal store order. The alternative — a callback the caller supplies — was rejected: it is skippable by construction, and a mutation path that forgets to record would be silently unwitnessed.</p>
 <p><code>executor</code> holds no internal edges: it is a self-contained, policy-agnostic domain built on <code>serde</code>/<code>sha2</code>/<code>thiserror</code>, and the <code>cli</code> crate is what composes it with the runtime and recorder. That is why it "never reads or interprets policy" — it structurally cannot.</p>
 <p>The experimental execution boundary is specified in the <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/archive/design/tools-execute-threat-model.md"><code>tools_execute</code> threat model</a> and <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/archive/design/adr-tools-execute-runtime.md">runtime/ownership ADR</a>. Its user-visible claims are intentionally narrower than this architecture description and live in <a href="enforcement.html#experimental-tools_execute"><code>ENFORCEMENT.md</code></a>.</p>

@@ -12,36 +12,9 @@
 <script src="theme/theme.js"></script>
 <link rel="stylesheet" href="theme/organic.css">
 <style>
-  :root {
-    --paper: #F5EAD8; --surface: #FFFDF6; --ink: #201E1D; --muted: #6E6559;
-    --accent: #C67139; --accent-ink: #FFFFFF;
-    --accent-soft: color-mix(in srgb, var(--accent) 10%, transparent);
-    --accent-line: color-mix(in srgb, var(--accent) 28%, transparent);
-    --line: #E2D5BD; --line-soft: #EADFC9; --code-bg: #ECE0C8;
-    --radius-sm: 9px;
-    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
-    --sans: var(--font-body, Figtree, sans-serif);
-  }
-  [data-theme="dark"] {
-    --paper: #211E1B; --surface: #2A2622; --ink: #F5EAD8; --muted: #A89B87;
-    --accent: #D98A52; --accent-ink: #211406;
-    --line: #3A342E; --line-soft: #332E29; --code-bg: #332E29;
-  }
-  [data-palette="slate"] {
-    --paper: #FBFAF7; --surface: #FFFFFF; --ink: #1B1F24; --muted: #5B6570;
-    --accent: #B4540A; --accent-ink: #FFFFFF;
-    --line: #E7E2D9; --line-soft: #EFEBE3; --code-bg: #F3F0EA;
-  }
-  [data-palette="slate"][data-theme="dark"] {
-    --paper: #14171B; --surface: #1A1E23; --ink: #E9E7E2; --muted: #9AA3AC;
-    --accent: #F0975A; --accent-ink: #1A1206;
-    --line: #292E34; --line-soft: #23282E; --code-bg: #1E2329;
-  }
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.6 var(--sans); }
-  a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
-  a:hover { text-decoration-thickness: 2px; }
   a code { color: var(--ink); }
   code { font-family: var(--mono); font-size: 0.9em; background: var(--code-bg); border-radius: 5px; padding: 0.1em 0.35em; }
   header { position: sticky; top: 0; z-index: 50; background: color-mix(in srgb, var(--surface) 96%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
@@ -80,8 +53,8 @@
   h2:hover .hlink, h3:hover .hlink, h4:hover .hlink { opacity: 0.7; }
   main p, main li { max-width: 46rem; }
   main ul, main ol { padding-left: 1.4rem; }
-  pre.block { background: var(--code-bg); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); padding: 0.85rem 1rem; overflow-x: auto; font-size: 0.82rem; line-height: 1.55; }
-  pre.block code { background: none; padding: 0; font-size: 1em; }
+  /* Code blocks and terminals are the .cb component in theme/organic.css. */
+  main .cb { margin: 1.1rem 0; }
   /* Long inline code (paths, digests, command lines) wraps inside its own
      container instead of widening the page on narrow viewports. */
   main p code, main li code, main td code, main h2 code, main h3 code { overflow-wrap: anywhere; }
@@ -258,49 +231,49 @@
 <p>Bring the setup you already have. Every recipe starts with a read-only plan, writes only after review, checks the result, and names the way back out.</p>
 <h2 id="claude-code--codex">Claude Code + Codex<a class="hlink" href="#claude-code--codex" aria-label="Link to this section">#</a></h2>
 <p>Use this when the two CLIs already have different MCP servers or inline token values in their machine-wide configuration.</p>
-<pre class="block"><code>agentstack init --plan
-agentstack init --secrets env
-agentstack apply               # preview
-agentstack apply --write
-agentstack doctor</code></pre>
+<div class="cb cb-term" data-language="sh"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">sh</span></div><pre class="block"><code class="language-sh"><span class="pr">$ </span>agentstack init --plan
+<span class="pr">$ </span>agentstack init --secrets env
+<span class="pr">$ </span>agentstack apply               <span class="cm"># preview</span>
+<span class="pr">$ </span>agentstack apply --write
+<span class="pr">$ </span>agentstack doctor</code></pre></div>
 <p>The plan names the Claude Code and Codex files it read, every server it can map, unsupported fields it will leave alone, lifted secret reference <em>names</em>, and both native destinations. The write creates one manifest and renders only the targets that contributed configuration. Existing foreign entries are kept. An import consents to what it imported, so the new project is trusted at those bytes and the <a href="#the-review-step">review step</a> below does not apply here — it is for a setup arriving from somewhere else.</p>
 <p>One thing <code>apply --write</code> may tell you instead of writing: delivery is routed, and for an MCP-capable CLI servers are routed to the <strong>live</strong> lane, which <code>apply</code> does not render. With no bridge registered yet it therefore writes nothing and exits nonzero, naming the two ways forward — register the bridge (<code>agentstack x gateway connect --all --write</code>) or route those kinds to files (<code>agentstack x delivery render-locally --write</code>). <code>agentstack init</code> prints the same two options at the end of the import. This applies to the recipe below as well.</p>
 <p>To undo onboarding, list the labelled entries and restore them newest first:</p>
-<pre class="block"><code>agentstack x restore
-agentstack x restore --last --write</code></pre>
+<div class="cb cb-term" data-language="sh"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">sh</span></div><pre class="block"><code class="language-sh"><span class="pr">$ </span>agentstack x restore
+<span class="pr">$ </span>agentstack x restore --last --write</code></pre></div>
 <p>Repeat the last command for the preceding <code>init</code> entry if you also want to remove the imported manifest and its setup files.</p>
 <h2 id="cursor--gemini-cli">Cursor + Gemini CLI<a class="hlink" href="#cursor--gemini-cli" aria-label="Link to this section">#</a></h2>
 <p>The commands are the same because adapter selection comes from detection, not a migration-specific importer:</p>
-<pre class="block"><code>agentstack init --plan
-agentstack init --secrets keychain
-agentstack apply --write
-agentstack doctor</code></pre>
+<div class="cb cb-term" data-language="sh"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">sh</span></div><pre class="block"><code class="language-sh"><span class="pr">$ </span>agentstack init --plan
+<span class="pr">$ </span>agentstack init --secrets keychain
+<span class="pr">$ </span>agentstack apply --write
+<span class="pr">$ </span>agentstack doctor</code></pre></div>
 <p>Choose <code>keychain</code> when you do not want resolved values in a project <code>.env</code>. AgentStack imports fields it can represent and explicitly lists anything lossy or unsupported; it does not delete the original Cursor or Gemini fields. Run <code>agentstack x diff</code> after the write to see managed, foreign, and hand-edited entries separately.</p>
 <h2 id="from-dotfiles">From dotfiles<a class="hlink" href="#from-dotfiles" aria-label="Link to this section">#</a></h2>
 <p>Keep the portable inputs in dotfiles or the project repository:</p>
-<pre class="block"><code>.agentstack/agentstack.toml
+<div class="cb"><pre class="block"><code>.agentstack/agentstack.toml
 .agentstack/agentstack.lock
 .agentstack/instructions/   # when used
-.agentstack/skills/         # when used</code></pre>
+.agentstack/skills/         # when used</code></pre></div>
 <p>Do <strong>not</strong> copy machine trust, the keychain, resolved <code>.env</code> values, history, or <code>~/.agentstack/</code> between machines. Those records are machine-local by design. On each machine:</p>
-<pre class="block"><code>agentstack x install --locked
-agentstack trust .             # review — see "The review step" below
-agentstack apply               # preview
-agentstack apply --write
-agentstack doctor</code></pre>
+<div class="cb cb-term" data-language="sh"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">sh</span></div><pre class="block"><code class="language-sh"><span class="pr">$ </span>agentstack x install --locked
+<span class="pr">$ </span>agentstack trust .             <span class="cm"># review — see "The review step" below</span>
+<span class="pr">$ </span>agentstack apply               <span class="cm"># preview</span>
+<span class="pr">$ </span>agentstack apply --write
+<span class="pr">$ </span>agentstack doctor</code></pre></div>
 <p>If your dotfile manager currently owns native CLI files, choose one owner before the write. Keep AgentStack as source of truth and stop templating its managed entries, or keep the dotfile template and do not ask AgentStack to own the same region. A hand-added native entry you want to preserve can be pulled into the manifest with <code>agentstack adopt --write</code> after reviewing <code>agentstack x diff</code>.</p>
 <h2 id="a-team-without-shared-secrets">A team without shared secrets<a class="hlink" href="#a-team-without-shared-secrets" aria-label="Link to this section">#</a></h2>
 <p>Commit declarations and pins, never values:</p>
-<pre class="block"><code>git add .agentstack/agentstack.toml .agentstack/agentstack.lock
-git commit -m "share agent toolset"</code></pre>
+<div class="cb cb-term" data-language="sh"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">sh</span></div><pre class="block"><code class="language-sh"><span class="pr">$ </span>git add .agentstack/agentstack.toml .agentstack/agentstack.lock
+<span class="pr">$ </span>git commit -m "share agent toolset"</code></pre></div>
 <p>A teammate then runs:</p>
-<pre class="block"><code>agentstack x install --locked
-agentstack doctor              # list unresolved reference names
-agentstack secret set GITHUB_TOKEN   # repeat for each unresolved reference
-agentstack trust .             # review — see "The review step" below
-agentstack apply               # preview
-agentstack apply --write
-agentstack doctor</code></pre>
+<div class="cb cb-term" data-language="sh"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">sh</span></div><pre class="block"><code class="language-sh"><span class="pr">$ </span>agentstack x install --locked
+<span class="pr">$ </span>agentstack doctor              <span class="cm"># list unresolved reference names</span>
+<span class="pr">$ </span>agentstack secret set GITHUB_TOKEN   <span class="cm"># repeat for each unresolved reference</span>
+<span class="pr">$ </span>agentstack trust .             <span class="cm"># review — see "The review step" below</span>
+<span class="pr">$ </span>agentstack apply               <span class="cm"># preview</span>
+<span class="pr">$ </span>agentstack apply --write
+<span class="pr">$ </span>agentstack doctor</code></pre></div>
 <p>Each person supplies values on their own machine and reviews the cloned project before activation. Trust records are never copied. See <a href="howto/team-setup.html">share a setup with your team</a> for signatures, platform differences, and the full handoff checklist.</p>
 <h2 id="the-review-step">The review step<a class="hlink" href="#the-review-step" aria-label="Link to this section">#</a></h2>
 <p>Every recipe above that brings a setup to a machine ends at the same gate, so it is worth stating once rather than in each block. <strong>Trust is recorded per project directory and is never copied</strong>, so a clone, a second checkout, or a fresh git worktree of a project you already approved arrives <em>untrusted</em> at its new path — even with the manifest and lockfile committed and <code>agentstack x install --locked</code> already run.</p>
@@ -323,8 +296,8 @@ agentstack doctor</code></pre>
 <p><strong><code>~/.agentstack/audit/trust.jsonl</code> gained two actions.</strong> Beside <code>grant</code>, <code>regrant</code>, <code>repin</code> and <code>revoke</code>, a line's <code>action</code> can now be <code>decide</code> or <code>undecide</code> — a standing re-gate answer being recorded on an existing entry, or withdrawn from one. Neither re-pins anything: both carry the digest the entry already stood on. The file remains identity-only and append-only, and it is machine-local: like every trust record, it is not copied between machines.</p>
 <h2 id="remove-agentstack-completely">Remove AgentStack completely<a class="hlink" href="#remove-agentstack-completely" aria-label="Link to this section">#</a></h2>
 <p>First preview removal while the manifest still exists. This is the only point where AgentStack can identify and remove just its managed entries from every native file:</p>
-<pre class="block"><code>agentstack x uninstall           # preview
-agentstack x uninstall --write</code></pre>
+<div class="cb cb-term" data-language="sh"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">sh</span></div><pre class="block"><code class="language-sh"><span class="pr">$ </span>agentstack x uninstall           <span class="cm"># preview</span>
+<span class="pr">$ </span>agentstack x uninstall --write</code></pre></div>
 <p>The summary names what it removed and what it deliberately retained. The manifest, local <code>.env</code>, and capability source files are your inputs, so they are not silently deleted. Review and delete those yourself only if you no longer want the setup.</p>
 <p>If the project is already gone but machine state remains, run the same command from a directory without a manifest. It previews and removes <code>~/.agentstack</code> only; it does not guess which project files to edit.</p>
 <p>Finally remove the executable through the channel that installed it:</p>

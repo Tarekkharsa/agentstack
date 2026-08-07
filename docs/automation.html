@@ -12,36 +12,9 @@
 <script src="theme/theme.js"></script>
 <link rel="stylesheet" href="theme/organic.css">
 <style>
-  :root {
-    --paper: #F5EAD8; --surface: #FFFDF6; --ink: #201E1D; --muted: #6E6559;
-    --accent: #C67139; --accent-ink: #FFFFFF;
-    --accent-soft: color-mix(in srgb, var(--accent) 10%, transparent);
-    --accent-line: color-mix(in srgb, var(--accent) 28%, transparent);
-    --line: #E2D5BD; --line-soft: #EADFC9; --code-bg: #ECE0C8;
-    --radius-sm: 9px;
-    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
-    --sans: var(--font-body, Figtree, sans-serif);
-  }
-  [data-theme="dark"] {
-    --paper: #211E1B; --surface: #2A2622; --ink: #F5EAD8; --muted: #A89B87;
-    --accent: #D98A52; --accent-ink: #211406;
-    --line: #3A342E; --line-soft: #332E29; --code-bg: #332E29;
-  }
-  [data-palette="slate"] {
-    --paper: #FBFAF7; --surface: #FFFFFF; --ink: #1B1F24; --muted: #5B6570;
-    --accent: #B4540A; --accent-ink: #FFFFFF;
-    --line: #E7E2D9; --line-soft: #EFEBE3; --code-bg: #F3F0EA;
-  }
-  [data-palette="slate"][data-theme="dark"] {
-    --paper: #14171B; --surface: #1A1E23; --ink: #E9E7E2; --muted: #9AA3AC;
-    --accent: #F0975A; --accent-ink: #1A1206;
-    --line: #292E34; --line-soft: #23282E; --code-bg: #1E2329;
-  }
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.6 var(--sans); }
-  a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
-  a:hover { text-decoration-thickness: 2px; }
   a code { color: var(--ink); }
   code { font-family: var(--mono); font-size: 0.9em; background: var(--code-bg); border-radius: 5px; padding: 0.1em 0.35em; }
   header { position: sticky; top: 0; z-index: 50; background: color-mix(in srgb, var(--surface) 96%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
@@ -80,8 +53,8 @@
   h2:hover .hlink, h3:hover .hlink, h4:hover .hlink { opacity: 0.7; }
   main p, main li { max-width: 46rem; }
   main ul, main ol { padding-left: 1.4rem; }
-  pre.block { background: var(--code-bg); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); padding: 0.85rem 1rem; overflow-x: auto; font-size: 0.82rem; line-height: 1.55; }
-  pre.block code { background: none; padding: 0; font-size: 1em; }
+  /* Code blocks and terminals are the .cb component in theme/organic.css. */
+  main .cb { margin: 1.1rem 0; }
   /* Long inline code (paths, digests, command lines) wraps inside its own
      container instead of widening the page on narrow viewports. */
   main p code, main li code, main td code, main h2 code, main h3 code { overflow-wrap: anywhere; }
@@ -259,11 +232,11 @@
 <p>If you are driving the CLI from an agent, a script, or a graphical companion such as t3code, this is the page to read. If you want the human-facing flags, see <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.html">Every command</a>.</p>
 <h2 id="the-envelope">The envelope<a class="hlink" href="#the-envelope" aria-label="Link to this section">#</a></h2>
 <p>Every machine-readable <strong>read</strong> wraps its body in the same two fields:</p>
-<pre class="block"><code>{
+<div class="cb" data-language="json"><div class="cb-bar"><span class="cb-lang">json</span></div><pre class="block"><code class="language-json">{
   "schema_version": 1,
   "features": ["status-v1", "diff-v1", "json-reads-v1", "…"],
   "…": "the body's own fields, alongside these two"
-}</code></pre>
+}</code></pre></div>
 <ul>
 <li><strong><code>schema_version</code></strong> changes only when an existing field changes meaning or shape. Adding a field or a feature does not bump it. Decode this first: an unknown major means <em>disable and tell the user to upgrade</em>, never <em>guess</em>.</li>
 <li><strong><code>features</code></strong> names end-to-end contracts this binary actually serves. A name appears only when its full loop works, so gate an affordance on the name instead of sniffing for a field.</li>
@@ -277,12 +250,12 @@
 </ol>
 <h2 id="errors">Errors<a class="hlink" href="#errors" aria-label="Link to this section">#</a></h2>
 <p>A refusal is not a JSON body. When a command cannot answer, stdout stays <strong>empty</strong>, the reason goes to stderr as human text, and the exit code is non-zero. Parse stdout only when the exit code is <code>0</code>.</p>
-<pre class="block"><code>$ agentstack use --list --json --manifest-dir /var/empty
-error: no agentstack manifest in /var/empty
-(a project keeps one at .agentstack/agentstack.toml, or agentstack.toml at the repo root)
-…
-$ echo $?
-1</code></pre>
+<div class="cb cb-term" data-language="console"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">console</span></div><pre class="block"><code class="language-console"><span class="pr">$ </span>agentstack use --list --json --manifest-dir /var/empty
+<span class="out">error: no agentstack manifest in /var/empty</span>
+<span class="out">(a project keeps one at .agentstack/agentstack.toml, or agentstack.toml at the repo root)</span>
+<span class="out">…</span>
+<span class="pr">$ </span>echo $?
+<span class="out">1</span></code></pre></div>
 <h3 id="the-refusal-a-headless-run-meets-first-trust">The refusal a headless run meets first: trust<a class="hlink" href="#the-refusal-a-headless-run-meets-first-trust" aria-label="Link to this section">#</a></h3>
 <p>The reads on this page answer for a project in any trust state: <code>status --json</code> and <code>use --list --json</code> report <code>trust: "untrusted"</code> and still exit <code>0</code>. (The one exception is the read that spawns — <code>doctor --probe</code> refuses to start anything for a project that is not trusted at its current bytes.) <strong>Writes are different.</strong> For an untrusted or drifted project the trust gate covers five kinds, and each one refuses in place, names the item, and points at the same command:</p>
 <div class="tblwrap"><table>
@@ -356,7 +329,7 @@ $ echo $?
 <h2 id="payload-shapes">Payload shapes<a class="hlink" href="#payload-shapes" aria-label="Link to this section">#</a></h2>
 <h3 id="status---json"><code>status --json</code><a class="hlink" href="#status---json" aria-label="Link to this section">#</a></h3>
 <p>The orientation screen, keyed. Branch on <code>project</code>: it is <code>null</code> whenever the manifest is absent or unreadable, and <code>manifest.error</code> says which.</p>
-<pre class="block"><code>{
+<div class="cb" data-language="json"><div class="cb-bar"><span class="cb-lang">json</span></div><pre class="block"><code class="language-json">{
   "version": "0.17.1",
   "clis_detected": ["Claude Code", "Codex CLI", "Gemini CLI"],
   "manifest": {
@@ -388,7 +361,7 @@ $ echo $?
     "command": "agentstack doctor",
     "why": "verify the wiring — every warning names its fix"
   }
-}</code></pre>
+}</code></pre></div>
 <p>Field notes:</p>
 <ul>
 <li><code>targets.pinned</code> is <code>[targets].default</code>; <code>targets.fanout</code> is how many detected CLIs a command would reach when nothing is pinned. An empty <code>pinned</code> with a <code>fanout</code> of 6 is <em>"nothing pinned, six CLIs detected"</em> — one number cannot say that.</li>
@@ -399,7 +372,7 @@ $ echo $?
 <li><code>next_action</code> is the one step to surface. It is never a command that would refuse. On <code>status --json</code> it is an object; on <code>doctor --json</code> it is a bare command string <strong>or <code>null</code></strong> when no step is runnable verbatim, so a consumer must handle null there.</li>
 </ul>
 <h3 id="search---json"><code>search --json</code><a class="hlink" href="#search---json" aria-label="Link to this section">#</a></h3>
-<pre class="block"><code>{
+<div class="cb" data-language="json"><div class="cb-bar"><span class="cb-lang">json</span></div><pre class="block"><code class="language-json">{
   "query": "notion",
   "results": [
     {
@@ -418,7 +391,7 @@ $ echo $?
       "add_command": "agentstack add from ai.smithery/smithery-notion"
     }
   ]
-}</code></pre>
+}</code></pre></div>
 <p>Field notes:</p>
 <ul>
 <li><code>kind</code> is <code>"server"</code>, <code>"skill"</code>, <code>"pack"</code>, <code>"extension"</code>, or <code>"hook"</code>, and it decides the shape of <code>details</code>: <code>null</code> for a server, <code>{server, skills, instructions}</code> for a pack, <code>{path, git}</code> for a skill, <code>{target}</code> for an extension, <code>{event, matcher}</code> for a hook.</li>
@@ -428,7 +401,7 @@ $ echo $?
 <li>This read reaches the <strong>network</strong>: it queries the official MCP Registry alongside your linked library sources and the embedded catalog. It writes nothing.</li>
 </ul>
 <h3 id="adapters-list---json"><code>adapters list --json</code><a class="hlink" href="#adapters-list---json" aria-label="Link to this section">#</a></h3>
-<pre class="block"><code>{
+<div class="cb" data-language="json"><div class="cb-bar"><span class="cb-lang">json</span></div><pre class="block"><code class="language-json">{
   "adapters": [
     {
       "id": "claude-code",
@@ -439,14 +412,14 @@ $ echo $?
       "origin": "built-in"
     }
   ]
-}</code></pre>
+}</code></pre></div>
 <p>Field notes:</p>
 <ul>
 <li><code>status</code> is <code>"installed"</code>, <code>"config_only"</code> (a config exists but the binary is not on PATH), or <code>"not_detected"</code>. <code>installed</code> wins over <code>config_present</code>.</li>
 <li><code>origin</code> is <code>"built-in"</code>, <code>"user"</code>, or <code>"user-override"</code>. The last means a descriptor in <code>~/.agentstack/adapters/</code> is shadowing a built-in, so the behaviour you see is that file's.</li>
 </ul>
 <h3 id="session-list---json"><code>session list --json</code><a class="hlink" href="#session-list---json" aria-label="Link to this section">#</a></h3>
-<pre class="block"><code>{
+<div class="cb" data-language="json"><div class="cb-bar"><span class="cb-lang">json</span></div><pre class="block"><code class="language-json">{
   "sessions": [
     {
       "dir": "/repo/.agentstack",
@@ -457,14 +430,14 @@ $ echo $?
       "abandoned": false
     }
   ]
-}</code></pre>
+}</code></pre></div>
 <p>Field notes:</p>
 <ul>
 <li><code>abandoned</code> is the CLI's judgment, not a threshold to re-invent. It is the state a supervising UI died in — offer <code>agentstack x session end</code>, which restores every file the session touched.</li>
 <li>Both <code>started_unix</code> and <code>age_seconds</code> ship: a poller wants the stable start time, a one-shot caller wants the age.</li>
 </ul>
 <h3 id="delivery---json"><code>delivery --json</code><a class="hlink" href="#delivery---json" aria-label="Link to this section">#</a></h3>
-<pre class="block"><code>{
+<div class="cb" data-language="json"><div class="cb-bar"><span class="cb-lang">json</span></div><pre class="block"><code class="language-json">{
   "default": "automatic",
   "harnesses": [
     {
@@ -485,7 +458,7 @@ $ echo $?
       ]
     }
   ]
-}</code></pre>
+}</code></pre></div>
 <p><code>routes</code> carries one row per capability kind — skills, servers, instructions, settings, hooks — trimmed to one here.</p>
 <p>Field notes:</p>
 <ul>
@@ -496,7 +469,7 @@ $ echo $?
 </ul>
 <h3 id="edit-profile---preview-profiles-edit-batch-v1"><code>edit-profile --preview</code> (<code>profiles-edit-batch-v1</code>)<a class="hlink" href="#edit-profile---preview-profiles-edit-batch-v1" aria-label="Link to this section">#</a></h3>
 <p>The one membership verb that can also take things <em>out</em> of a toolset, and the only one whose cost does not scale with the number of changes: every add and every removal lands as one manifest write under one <code>consent_digest</code>, followed by a single re-lock and re-render.</p>
-<pre class="block"><code>{
+<div class="cb" data-language="json"><div class="cb-bar"><span class="cb-lang">json</span></div><pre class="block"><code class="language-json">{
   "profile": "backend",
   "add_skills": ["rust-testing"],
   "add_servers": [],
@@ -510,7 +483,7 @@ $ echo $?
   "note": "Review, then apply with --yes --consented sha256:b428c87f…2111d8…",
   "schema_version": 1,
   "features": ["…"]
-}</code></pre>
+}</code></pre></div>
 <p>Field notes:</p>
 <ul>
 <li><code>add_*</code> / <code>remove_*</code> echo the requested deltas; <strong><code>skills</code> and <code>servers</code> are the RESULT</strong> — the membership the toolset would have after the batch. A panel draws an end state, so the digest binds the picture the reader was looking at, not the list of operations that implies it.</li>

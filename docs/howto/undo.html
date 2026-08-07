@@ -12,36 +12,9 @@
 <script src="../theme/theme.js"></script>
 <link rel="stylesheet" href="../theme/organic.css">
 <style>
-  :root {
-    --paper: #F5EAD8; --surface: #FFFDF6; --ink: #201E1D; --muted: #6E6559;
-    --accent: #C67139; --accent-ink: #FFFFFF;
-    --accent-soft: color-mix(in srgb, var(--accent) 10%, transparent);
-    --accent-line: color-mix(in srgb, var(--accent) 28%, transparent);
-    --line: #E2D5BD; --line-soft: #EADFC9; --code-bg: #ECE0C8;
-    --radius-sm: 9px;
-    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
-    --sans: var(--font-body, Figtree, sans-serif);
-  }
-  [data-theme="dark"] {
-    --paper: #211E1B; --surface: #2A2622; --ink: #F5EAD8; --muted: #A89B87;
-    --accent: #D98A52; --accent-ink: #211406;
-    --line: #3A342E; --line-soft: #332E29; --code-bg: #332E29;
-  }
-  [data-palette="slate"] {
-    --paper: #FBFAF7; --surface: #FFFFFF; --ink: #1B1F24; --muted: #5B6570;
-    --accent: #B4540A; --accent-ink: #FFFFFF;
-    --line: #E7E2D9; --line-soft: #EFEBE3; --code-bg: #F3F0EA;
-  }
-  [data-palette="slate"][data-theme="dark"] {
-    --paper: #14171B; --surface: #1A1E23; --ink: #E9E7E2; --muted: #9AA3AC;
-    --accent: #F0975A; --accent-ink: #1A1206;
-    --line: #292E34; --line-soft: #23282E; --code-bg: #1E2329;
-  }
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.6 var(--sans); }
-  a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
-  a:hover { text-decoration-thickness: 2px; }
   a code { color: var(--ink); }
   code { font-family: var(--mono); font-size: 0.9em; background: var(--code-bg); border-radius: 5px; padding: 0.1em 0.35em; }
   header { position: sticky; top: 0; z-index: 50; background: color-mix(in srgb, var(--surface) 96%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
@@ -80,8 +53,8 @@
   h2:hover .hlink, h3:hover .hlink, h4:hover .hlink { opacity: 0.7; }
   main p, main li { max-width: 46rem; }
   main ul, main ol { padding-left: 1.4rem; }
-  pre.block { background: var(--code-bg); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); padding: 0.85rem 1rem; overflow-x: auto; font-size: 0.82rem; line-height: 1.55; }
-  pre.block code { background: none; padding: 0; font-size: 1em; }
+  /* Code blocks and terminals are the .cb component in theme/organic.css. */
+  main .cb { margin: 1.1rem 0; }
   /* Long inline code (paths, digests, command lines) wraps inside its own
      container instead of widening the page on narrow viewports. */
   main p code, main li code, main td code, main h2 code, main h3 code { overflow-wrap: anywhere; }
@@ -256,10 +229,10 @@
 <p class="versionbar">These pages describe <b>unreleased <code>main</code></b>, which is ahead of the latest release (<b>v0.18.0</b>) — and the release is what <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">the installer gives you</a>. Commands and flags documented here may not exist in your build; <code>agentstack --version</code> says which one you have.</p>
 <h1 id="undo-anything">Undo anything</h1>
 <p>For anyone who wants to reverse something agentstack did. Prerequisite: none — these work in any project agentstack has touched.</p>
-<pre class="block"><code>agentstack x restore                 # everything undoable, newest first, as a list of ids
-agentstack x restore --last --write  # undo the most recent write
-agentstack x restore a1b2 --write    # undo one write by its id prefix
-agentstack x restore claude-code     # fallback: restore one adapter's config from its backup</code></pre>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack x restore                 <span class="cm"># everything undoable, newest first, as a list of ids</span>
+<span class="pr">$ </span>agentstack x restore --last --write  <span class="cm"># undo the most recent write</span>
+<span class="pr">$ </span>agentstack x restore a1b2 --write    <span class="cm"># undo one write by its id prefix</span>
+<span class="pr">$ </span>agentstack x restore claude-code     <span class="cm"># fallback: restore one adapter's config from its backup</span></code></pre></div>
 <p>Every write agentstack makes — servers, settings, hooks, instructions, even the owned-server manifest refresh — is recorded before it lands, and <code>restore</code> works that record one write at a time. Reverting is itself recorded, so going one step too far is recoverable. (<code>restore &lt;adapter&gt;</code> is a fallback that restores one adapter's config from its single-slot backup.) Reverted files simply show up as pending again; <code>restore</code> lists the recorded writes and the identifier needed to roll each one back (see <a href="../howto/see-what-happened.html">see what your agents did</a>). Five other actions are undone by their own verb, because they are not file writes:</p>
 <div class="tblwrap"><table>
 <thead><tr><th>To undo…</th><th>Run</th><th>What it reverts</th></tr></thead><tbody>
@@ -276,15 +249,15 @@ agentstack x restore claude-code     # fallback: restore one adapter's config fr
 <p><strong>Limits.</strong> <code>restore</code> reverts agentstack's own recorded config writes, not side effects a tool already had — a file a server deleted is not brought back. Nothing here permanently deletes your data; each verb reverses one agentstack change. One edge case: replacing an already-managed skill with the same name is not snapshotted byte-exact, so its restore is not promised exact.</p>
 <h2 id="undo-all-of-it">Undo all of it<a class="hlink" href="#undo-all-of-it" aria-label="Link to this section">#</a></h2>
 <p>The verbs above each reverse one thing. To reverse <strong>everything</strong> — every managed region agentstack rendered into every CLI's config, plus its own state directory — there is one command:</p>
-<pre class="block"><code>agentstack x uninstall          # show what would be removed; changes nothing
-agentstack x uninstall --verbose  # ...with the full diff of each file
-agentstack x uninstall --write  # do it</code></pre>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack x uninstall          <span class="cm"># show what would be removed; changes nothing</span>
+<span class="pr">$ </span>agentstack x uninstall --verbose  <span class="cm"># ...with the full diff of each file</span>
+<span class="pr">$ </span>agentstack x uninstall --write  <span class="cm"># do it</span></code></pre></div>
 <p>Like every other write in agentstack, it previews first: the bare command lists what it would take off and stops.</p>
 <p>It removes what agentstack manages, not what you wrote. <strong>Your <code>agentstack.toml</code> stays exactly where it is</strong>, so <code>agentstack apply --write</code> brings the whole setup back whenever you want it. Entries you or another tool added to those same config files by hand are left alone, and so is anything a different project's manifest manages at global scope.</p>
 <p>Because the removal runs through the same machinery as a normal write, every file it touches is recorded first — so <strong>the uninstall is itself undoable</strong>:</p>
-<pre class="block"><code>agentstack x restore --last --write   # put it all back</code></pre>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack x restore --last --write   <span class="cm"># put it all back</span></code></pre></div>
 <p>That only holds while the ledger exists, and the ledger lives in <code>~/.agentstack</code>, which <code>uninstall</code> removes last. Keep it with:</p>
-<pre class="block"><code>agentstack x uninstall --write --keep-home</code></pre>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack x uninstall --write --keep-home</code></pre></div>
 <p>Two things it does not do: remove the <code>agentstack</code> binary (take that off the way you installed it), and touch a capability's own installed files outside the regions agentstack renders.</p>
 <ul>
 <li><a href="../concepts.html">Concepts</a> — trust, gateway, guard, session, drift</li>

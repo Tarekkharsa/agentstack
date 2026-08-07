@@ -24,31 +24,6 @@
 <meta name="twitter:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
 <link rel="stylesheet" href="theme/organic.css">
 <style>
-[data-theme="dark"]{
---color-bg:#211E1B;--color-surface:#2A2622;--color-text:#F5EAD8;
---color-divider:color-mix(in srgb, #F5EAD8 18%, transparent);
---color-accent:#D98A52;--color-accent-2:#97A876;
---color-neutral-100:#332E29;--color-neutral-200:#3A342E;--color-neutral-300:#46403A;--color-neutral-400:#5C554C;--color-neutral-500:#847767;--color-neutral-600:#A89B87;--color-neutral-700:#C9BCA7;--color-neutral-800:#DACDB8;--color-neutral-900:#EFE6D4;
---color-accent-100:#3A2B1D;--color-accent-200:#4A3625;--color-accent-300:#5C4229;--color-accent-600:#E09B66;--color-accent-700:#E4A878;--color-accent-800:#EDBF97;--color-accent-900:#F4D5B8;
---color-accent-2-100:#2A3122;--color-accent-2-200:#353D2B;--color-accent-2-700:#B5C69A;--color-accent-2-800:#C8D6B0;--color-accent-2-900:#DBE5C9;
---shadow-sm:0 1px 2px rgba(0,0,0,0.4);--shadow-md:0 3px 10px rgba(0,0,0,0.45);--shadow-lg:0 12px 32px rgba(0,0,0,0.55)}
-.nav a.btn-primary{color:var(--color-bg)}
-.nav a.btn-primary:hover{color:var(--color-bg)}
-[data-palette]{--term-bg:#26211C;--term-hd:#1C1815;--term-btn:#38312A;--term-bd:#463D34;--term-muted:#A5988A;--term-text:#E6DCC9;--term-ok:#9DB380;--term-bad:#D97A62;--term-warn:#DDA84E}
-[data-palette="slate"]{--term-bg:#14181C;--term-hd:#0E1114;--term-btn:#23282E;--term-bd:#2E353C;--term-muted:#97A1AD;--term-text:#D7DEE4;--term-ok:#7CC08B;--term-bad:#E5786B;--term-warn:#E0B04A;
---color-bg:#FBFAF7;--color-surface:#FFFFFF;--color-text:#1B1F24;--color-divider:rgba(27,31,36,0.16);
---color-accent:#B4540A;--color-accent-2:#2A6F4E;
---color-neutral-100:#F3F0EA;--color-neutral-200:#E7E2D9;--color-neutral-300:#D8D2C7;--color-neutral-400:#B9B3A8;--color-neutral-500:#7E858D;--color-neutral-600:#5B6570;--color-neutral-700:#3A424B;--color-neutral-800:#2B3138;--color-neutral-900:#1B1F24;
---color-accent-100:#FBF1E7;--color-accent-200:#F5DFC8;--color-accent-300:#EECDA9;--color-accent-600:#9C4A08;--color-accent-700:#8A3F06;--color-accent-800:#6F3305;--color-accent-900:#542704;
---color-accent-2-100:#EAF4EC;--color-accent-2-200:#D3E7D8;--color-accent-2-700:#1F5238;--color-accent-2-800:#183F2B;--color-accent-2-900:#112D1F}
-[data-palette="slate"][data-theme="dark"]{
---color-bg:#14171B;--color-surface:#1A1E23;--color-text:#E9E7E2;--color-divider:rgba(233,231,226,0.16);
---color-accent:#F0975A;--color-accent-2:#7CC08B;
---color-neutral-100:#1E2329;--color-neutral-200:#292E34;--color-neutral-300:#343B43;--color-neutral-400:#454D57;--color-neutral-500:#69727C;--color-neutral-600:#9AA3AC;--color-neutral-700:#C3C9CF;--color-neutral-800:#D7DEE4;--color-neutral-900:#EDF1F4;
---color-accent-100:#2B2018;--color-accent-200:#3A2A1C;--color-accent-300:#4A3520;--color-accent-600:#F2A470;--color-accent-700:#F5B183;--color-accent-800:#F8C7A3;--color-accent-900:#FBDCC5;
---color-accent-2-100:#16281C;--color-accent-2-200:#1E3626;--color-accent-2-700:#A8D4B3;--color-accent-2-800:#C2E2CA;--color-accent-2-900:#DCEFE1;
---shadow-sm:0 1px 2px rgba(0,0,0,0.4);--shadow-md:0 3px 10px rgba(0,0,0,0.45);--shadow-lg:0 12px 32px rgba(0,0,0,0.55)}
-.card{border-radius:var(--radius-md,16px)}
 body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var(--font-body)}
 /* The hero leads with the product running, not with a logo tile: the left
    column carries the promise and the one command that starts it, the right
@@ -57,9 +32,10 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
 .hero-split{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:calc(var(--space-6) * 1.2);align-items:center}
 /* The install line is the most important text on the page, so it wraps to stay
    fully visible rather than scrolling off the right edge of a narrow column. */
-.hero-cmd{background:var(--term-bg);border-radius:var(--radius-md);padding:14px 18px;font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;font-size:0.82rem;line-height:1.8;margin:0 0 var(--space-4)}
-.hero-cmd .row{display:flex;gap:12px}
-.hero-cmd .row span:last-child{overflow-wrap:anywhere}
+/* The hero's install line is a .term without the window chrome: on this page it
+   is the promise, not a screenshot of one. */
+.hero-cmd{padding:14px 18px;font-family:var(--mono);font-size:0.82rem;line-height:1.8;margin:0 0 var(--space-4);color:var(--term-text)}
+.term-lg .term-body{padding:18px 22px;font-size:0.85rem;line-height:2.1}
 .hero-proof{margin:0;border-radius:var(--radius-md);overflow:hidden;border:1px solid var(--color-divider);box-shadow:var(--shadow-lg);background:var(--term-bg)}
 .hero-proof img{display:block;width:100%;height:auto}
 .hero-proof figcaption{font-size:0.8rem;line-height:1.5;color:var(--term-muted);padding:10px 14px;border-top:1px solid var(--term-bd)}
@@ -98,9 +74,9 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
         <span class="tag tag-accent-2">open source · Rust · 13 CLI adapters · MIT / Apache-2.0</span>
         <h1 style="font-family:var(--font-heading);font-weight:400;font-size:3.4rem;line-height:1.08;margin:var(--space-4) 0 var(--space-4)">One agent setup. Every coding CLI.</h1>
         <p style="font-size:1.15rem;line-height:1.65;color:var(--color-neutral-700);margin:0 0 var(--space-5)">AgentStack collects the MCP servers, skills and instructions you already use into one <code style="font-size:0.92em">.agentstack/</code> directory in your project, then renders them back as native configuration for every supported CLI. Named toolsets switch by project or task, and every change stays understandable and recoverable.</p>
-        <div class="hero-cmd">
-          <div class="row"><span style="color:var(--term-warn);user-select:none">$</span><span style="color:var(--term-text);flex:1">curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh</span></div>
-          <div class="row"><span style="color:var(--term-warn);user-select:none">$</span><span style="color:var(--term-text);flex:1">agentstack init</span></div>
+        <div class="term hero-cmd">
+          <div class="term-row"><span class="pr">$</span><span class="cmd">curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh</span></div>
+          <div class="term-row"><span class="pr">$</span><span class="cmd">agentstack init</span></div>
         </div>
         <div style="display:flex;gap:var(--space-3);flex-wrap:wrap">
           <a href="tutorial/" class="btn btn-primary">Unify my setup</a>
@@ -204,18 +180,18 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
         <div style="flex:1"></div>
         <a href="tutorial/" style="font-weight:600;font-size:0.95rem">Prefer guided? Take the tutorial →</a>
       </div>
-      <div style="background:var(--term-bg);border-radius:var(--radius-md);padding:20px 24px;font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;font-size:0.85rem;line-height:2.1;overflow-x:auto">
-        <div style="display:flex;gap:14px;white-space:nowrap"><span style="color:var(--term-warn);user-select:none">$</span><span style="color:var(--term-text);flex:1">curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh</span></div>
-        <div style="display:flex;gap:14px;white-space:nowrap"><span style="color:var(--term-warn);user-select:none">$</span><span style="color:var(--term-text);flex:1">agentstack init</span><span style="color:var(--term-muted)"># guided wizard: your CLI configs → one manifest</span></div>
-        <div style="display:flex;gap:14px;white-space:nowrap"><span style="color:var(--term-warn);user-select:none">$</span><span style="color:var(--term-text);flex:1">agentstack status</span><span style="color:var(--term-muted)"># is it ready — and the one thing that fixes it</span></div>
-      </div>
+      <div class="term term-lg"><div class="term-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="term-title">bash</span></div><div class="term-body">
+        <div class="term-row"><span class="pr">$</span><span class="cmd">curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh</span></div>
+        <div class="term-row"><span class="pr">$</span><span class="cmd">agentstack init</span><span class="cm"># guided wizard: your CLI configs → one manifest</span></div>
+        <div class="term-row"><span class="pr">$</span><span class="cmd">agentstack status</span><span class="cm"># is it ready — and the one thing that fixes it</span></div>
+      </div></div>
       <p style="font-size:0.85rem;color:var(--color-neutral-700);margin:var(--space-2) 0 0"><code>agentstack yes</code>, <code>undo</code>, <code>up</code>, <code>share</code>, and <code>receive</code> are v0.18.0 and later; the install line above serves the current stable release. <code>agentstack --version</code> says which you have.</p>
       <p style="font-size:0.9rem;color:var(--color-neutral-700);margin:var(--space-4) 0 var(--space-2)">Here is what that leaves in your project — plain files you can open, read and commit:</p>
-      <div style="background:var(--term-bg);border-radius:var(--radius-md);padding:16px 24px;font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;font-size:0.82rem;line-height:1.9;overflow-x:auto;color:var(--term-text)"><div style="white-space:pre">your-project/
+      <div class="term"><div class="term-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="term-title">your-project/</span></div><div class="term-body"><div class="term-lines">your-project/
 ├── .agentstack/
-│   ├── agentstack.toml   <span style="color:var(--term-muted)"># everything your tools may run: servers, skills, instructions</span>
-│   └── .env              <span style="color:var(--term-muted)"># token values lifted out of your configs (only when init found any)</span>
-└── .gitignore            <span style="color:var(--term-muted)"># one managed line, so that .env is never committed</span></div></div>
+│   ├── agentstack.toml   <span class="cm"># everything your tools may run: servers, skills, instructions</span>
+│   └── .env              <span class="cm"># token values lifted out of your configs (only when init found any)</span>
+└── .gitignore            <span class="cm"># one managed line, so that .env is never committed</span></div></div></div>
       <p style="font-size:0.9rem;color:var(--color-neutral-700);margin:var(--space-3) 0 0"><code>.agentstack/agentstack.toml</code> records your whole setup — the <a href="concepts.html">manifest</a>. Every CLI-specific file AgentStack writes is rendered from it, and can be regenerated or taken back off at any time. Mostly the system writes it for you — and when you write a skill of your own you don't open it at all: drop the folder under <code>.agentstack/skills/</code>, run <code>agentstack yes</code>, review once, and it is live in every CLI. It holds <code>${GITHUB_TOKEN}</code>-style placeholders, never the token values.</p>
       <p style="font-size:0.9rem;color:var(--color-neutral-700);margin:var(--space-3) 0 0">That is the run replayed at the top of this page. Reproduce it fenced with <a href="https://github.com/Tarekkharsa/agentstack/blob/main/examples/first-value-demo/run-demo.sh"><code>examples/first-value-demo/run-demo.sh</code></a> — it asserts every step, so the recording stays accurate.</p>
     </div>
@@ -228,38 +204,38 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:var(--space-4)">
         <div>
-          <div style="background:var(--term-bg);border-radius:var(--radius-md);padding:14px 18px;font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;font-size:0.78rem;line-height:1.8;overflow-x:auto"><div style="white-space:pre"><span style="color:var(--term-warn)">$</span> <span style="color:var(--term-text)">agentstack yes</span>
-<span style="color:var(--term-text)">→ 1 dropped file ready to go live in this project:</span>
-<span style="color:var(--term-ok)">  +</span> <span style="color:var(--term-text)">skill summarize</span> <span style="color:var(--term-muted)">(./skills/summarize)</span>
-<span style="color:var(--term-muted)">      your own work — untracked in git</span>
-<span style="color:var(--term-ok)">  ✓ pinned 1 skill</span>
-<span style="color:var(--term-text)">This will write:</span>
-<span style="color:var(--term-text)">Claude Code</span>
-<span style="color:var(--term-text)">  → 1 skill to symlink into .claude/skills</span>
-<span style="color:var(--term-text)">Codex CLI</span>
-<span style="color:var(--term-text)">  → 1 skill to symlink into .agents/skills</span>
-<span style="color:var(--term-muted)">  …</span></div></div>
+          <div class="term"><div class="term-body"><div class="term-lines"><span class="pr">$</span> <span>agentstack yes</span>
+<span>→ 1 dropped file ready to go live in this project:</span>
+<span class="ok">  +</span> <span>skill summarize</span> <span class="out">(./skills/summarize)</span>
+<span class="out">      your own work — untracked in git</span>
+<span class="ok">  ✓ pinned 1 skill</span>
+<span>This will write:</span>
+<span>Claude Code</span>
+<span>  → 1 skill to symlink into .claude/skills</span>
+<span>Codex CLI</span>
+<span>  → 1 skill to symlink into .agents/skills</span>
+<span class="out">  …</span></div></div></div>
           <p style="font-size:0.85rem;color:var(--color-neutral-700);margin:var(--space-2) 0 0"><b>Write a skill: drop the folder, say yes.</b> No manifest edit — it is pinned, recorded, and live in every CLI. The one-step review is only for work that is provably yours; anything that arrived with a clone gets the full staged review. <a href="howto/add-a-skill.html">Add a skill →</a></p>
         </div>
         <div>
-          <div style="background:var(--term-bg);border-radius:var(--radius-md);padding:14px 18px;font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;font-size:0.78rem;line-height:1.8;overflow-x:auto"><div style="white-space:pre"><span style="color:var(--term-warn)">$</span> <span style="color:var(--term-text)">agentstack undo</span>
-<span style="color:var(--term-text)">recent changes (newest first)</span>
-<span style="color:var(--term-text)">  1  </span><span style="color:var(--term-muted)">just now  </span><span style="color:var(--term-text)">init</span><span style="color:var(--term-muted)">  1 file · Claude Code, Codex CLI, Gemini CLI, …</span>
-<span style="color:var(--term-text)">  pick a point: </span><span style="color:var(--term-ok)">agentstack undo --to &lt;n&gt; --write</span></div></div>
+          <div class="term"><div class="term-body"><div class="term-lines"><span class="pr">$</span> <span>agentstack undo</span>
+<span>recent changes (newest first)</span>
+<span>  1  </span><span class="out">just now  </span><span>init</span><span class="out">  1 file · Claude Code, Codex CLI, Gemini CLI, …</span>
+<span>  pick a point: </span><span class="ok">agentstack undo --to &lt;n&gt; --write</span></div></div></div>
           <p style="font-size:0.85rem;color:var(--color-neutral-700);margin:var(--space-2) 0 0"><b>Take it back, from a timeline.</b> Every write is recorded before it lands; pick a point and revert to it. The revert is recorded too — going one step too far is recoverable. <a href="howto/undo.html">Undo anything →</a></p>
         </div>
         <div>
-          <div style="background:var(--term-bg);border-radius:var(--radius-md);padding:14px 18px;font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;font-size:0.78rem;line-height:1.8;overflow-x:auto"><div style="white-space:pre"><span style="color:var(--term-bad)">blocked:</span> <span style="color:var(--term-text)">web-search tried to reach api.evil.example</span>
-<span style="color:var(--term-text)">— not in this project's allowed hosts ([policy.egress])</span>
-<span style="color:var(--term-muted)">  nothing was sent · add the host to [policy.egress] if you meant to allow it</span></div></div>
+          <div class="term"><div class="term-body"><div class="term-lines"><span class="bad">blocked:</span> <span>web-search tried to reach api.evil.example</span>
+<span>— not in this project's allowed hosts ([policy.egress])</span>
+<span class="out">  nothing was sent · add the host to [policy.egress] if you meant to allow it</span></div></div></div>
           <p style="font-size:0.85rem;color:var(--color-neutral-700);margin:var(--space-2) 0 0"><b>The seatbelt speaks plainly.</b> A denial says what was stopped, why, that nothing happened, and the one safe next step — backed by a recorded event, on the <a href="enforcement.html">paths where enforcement really runs</a>.</p>
         </div>
         <div>
-          <div style="background:var(--term-bg);border-radius:var(--radius-md);padding:14px 18px;font-family:ui-monospace,'SF Mono',Menlo,Consolas,monospace;font-size:0.78rem;line-height:1.8;overflow-x:auto"><div style="white-space:pre"><span style="color:var(--term-warn)">$</span> <span style="color:var(--term-text)">agentstack share backend</span>
-<span style="color:var(--term-muted)">  # signed as part of sharing — signing is not a flag</span>
-<span style="color:var(--term-warn)">$</span> <span style="color:var(--term-text)">agentstack receive team.astack</span>
-<span style="color:var(--term-muted)">  # staged inert and carded first; a recognized publisher</span>
-<span style="color:var(--term-muted)">  # makes the card shorter — never optional</span></div></div>
+          <div class="term"><div class="term-body"><div class="term-lines"><span class="pr">$</span> <span>agentstack share backend</span>
+<span class="out">  # signed as part of sharing — signing is not a flag</span>
+<span class="pr">$</span> <span>agentstack receive team.astack</span>
+<span class="out">  # staged inert and carded first; a recognized publisher</span>
+<span class="out">  # makes the card shorter — never optional</span></div></div></div>
           <p style="font-size:0.85rem;color:var(--color-neutral-700);margin:var(--space-2) 0 0"><b>Sharing is signing; receiving is reviewing.</b> A bundle carries the manifest, lock, and pinned content. Nothing a teammate receives activates without their own yes. <a href="howto/team-setup.html">Share a setup →</a></p>
         </div>
       </div>

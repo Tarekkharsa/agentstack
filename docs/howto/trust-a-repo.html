@@ -12,36 +12,9 @@
 <script src="../theme/theme.js"></script>
 <link rel="stylesheet" href="../theme/organic.css">
 <style>
-  :root {
-    --paper: #F5EAD8; --surface: #FFFDF6; --ink: #201E1D; --muted: #6E6559;
-    --accent: #C67139; --accent-ink: #FFFFFF;
-    --accent-soft: color-mix(in srgb, var(--accent) 10%, transparent);
-    --accent-line: color-mix(in srgb, var(--accent) 28%, transparent);
-    --line: #E2D5BD; --line-soft: #EADFC9; --code-bg: #ECE0C8;
-    --radius-sm: 9px;
-    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
-    --sans: var(--font-body, Figtree, sans-serif);
-  }
-  [data-theme="dark"] {
-    --paper: #211E1B; --surface: #2A2622; --ink: #F5EAD8; --muted: #A89B87;
-    --accent: #D98A52; --accent-ink: #211406;
-    --line: #3A342E; --line-soft: #332E29; --code-bg: #332E29;
-  }
-  [data-palette="slate"] {
-    --paper: #FBFAF7; --surface: #FFFFFF; --ink: #1B1F24; --muted: #5B6570;
-    --accent: #B4540A; --accent-ink: #FFFFFF;
-    --line: #E7E2D9; --line-soft: #EFEBE3; --code-bg: #F3F0EA;
-  }
-  [data-palette="slate"][data-theme="dark"] {
-    --paper: #14171B; --surface: #1A1E23; --ink: #E9E7E2; --muted: #9AA3AC;
-    --accent: #F0975A; --accent-ink: #1A1206;
-    --line: #292E34; --line-soft: #23282E; --code-bg: #1E2329;
-  }
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.6 var(--sans); }
-  a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
-  a:hover { text-decoration-thickness: 2px; }
   a code { color: var(--ink); }
   code { font-family: var(--mono); font-size: 0.9em; background: var(--code-bg); border-radius: 5px; padding: 0.1em 0.35em; }
   header { position: sticky; top: 0; z-index: 50; background: color-mix(in srgb, var(--surface) 96%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
@@ -80,8 +53,8 @@
   h2:hover .hlink, h3:hover .hlink, h4:hover .hlink { opacity: 0.7; }
   main p, main li { max-width: 46rem; }
   main ul, main ol { padding-left: 1.4rem; }
-  pre.block { background: var(--code-bg); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); padding: 0.85rem 1rem; overflow-x: auto; font-size: 0.82rem; line-height: 1.55; }
-  pre.block code { background: none; padding: 0; font-size: 1em; }
+  /* Code blocks and terminals are the .cb component in theme/organic.css. */
+  main .cb { margin: 1.1rem 0; }
   /* Long inline code (paths, digests, command lines) wraps inside its own
      container instead of widening the page on narrow viewports. */
   main p code, main li code, main td code, main h2 code, main h3 code { overflow-wrap: anywhere; }
@@ -256,18 +229,18 @@
 <p class="versionbar">These pages describe <b>unreleased <code>main</code></b>, which is ahead of the latest release (<b>v0.18.0</b>) — and the release is what <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">the installer gives you</a>. Commands and flags documented here may not exist in your build; <code>agentstack --version</code> says which one you have.</p>
 <h1 id="trust-a-cloned-repo">Trust a cloned repo</h1>
 <p>For anyone who clones repos that ship their own agent capabilities and wants them inert until reviewed. Prerequisite: the CLIs you use, installed on this machine.</p>
-<pre class="block"><code># Once per machine: register the AgentStack gateway in your CLIs
-agentstack x gateway connect --all --write
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="cm"># Once per machine: register the AgentStack gateway in your CLIs</span>
+<span class="pr">$ </span>agentstack x gateway connect --all --write
 
-# Clone a repo and enter it
-git clone &lt;some-repo&gt; &amp;&amp; cd &lt;some-repo&gt;
+<span class="cm"># Clone a repo and enter it</span>
+<span class="pr">$ </span>git clone &lt;some-repo&gt; &amp;&amp; cd &lt;some-repo&gt;
 
-# The repo is inert — an agent here sees control-plane tools only,
-# nothing spawned, nothing contacted, no secrets resolved
-agentstack trust .          # review what it declares, then pin its digest
+<span class="cm"># The repo is inert — an agent here sees control-plane tools only,</span>
+<span class="cm"># nothing spawned, nothing contacted, no secrets resolved</span>
+<span class="pr">$ </span>agentstack trust .          <span class="cm"># review what it declares, then pin its digest</span>
 
-agentstack trust --list     # every trusted project + whether it still matches
-agentstack trust --revoke   # withdraw trust</code></pre>
+<span class="pr">$ </span>agentstack trust --list     <span class="cm"># every trusted project + whether it still matches</span>
+<span class="pr">$ </span>agentstack trust --revoke   <span class="cm"># withdraw trust</span></code></pre></div>
 <p><code>gateway connect --all --write</code> registers agentstack's gateway once in each CLI's global MCP (<a href="../concepts.html">Model Context Protocol</a>) config. After that, every repo you open serves its own MCP servers with no files copied in — but a repo you just cloned is <strong>inert</strong>: none of its servers run or are contacted, and no secrets resolve, until you run <code>agentstack trust .</code>. Trust shows exactly what the manifest runs and contacts, then pins the <a href="../concepts.html">consent digest</a> of the <a href="../concepts.html">manifest</a>, its local overlay, and the <a href="../concepts.html">lockfile</a>. Any edit — a <code>git pull</code>, an <code>agentstack lock --write</code> — drops the repo back to inert until you trust it again. To vet one server or skill in depth first — its provenance, effective policy, and context cost — run <code>agentstack x explain &lt;name&gt;</code>; see <a href="../howto/see-what-happened.html">see what your agents did</a>.</p>
 <h2 id="what-the-review-gates">What the review gates<a class="hlink" href="#what-the-review-gates" aria-label="Link to this section">#</a></h2>
 <p>The gate is not only about the live lane. Until this project is trusted at its current bytes, <strong>five kinds of delivery refuse</strong> — every one of them a way the repo's own words or commands would otherwise reach an agent:</p>
@@ -288,20 +261,20 @@ agentstack trust --revoke   # withdraw trust</code></pre>
 </ul>
 <h2 id="what-a-refusal-looks-like">What a refusal looks like<a class="hlink" href="#what-a-refusal-looks-like" aria-label="Link to this section">#</a></h2>
 <p>It is loud, it names the capability, and it exits nonzero. Nothing is written:</p>
-<pre class="block"><code>✗ refusing to materialize skills: project at /path/to/repo is not trusted —
+<div class="cb"><pre class="block"><code>✗ refusing to materialize skills: project at /path/to/repo is not trusted —
   review and `agentstack trust .` before putting its words into an agent's
   context ('pdf-review')
 ✗ skills not materialized — the project has not been trusted for this content
-error: 3 targets blocked — each ✗ above names the blocker</code></pre>
+error: 3 targets blocked — each ✗ above names the blocker</code></pre></div>
 <p>A repo you cloned and never reviewed says <strong>is not trusted</strong>; a repo whose manifest, overlay, or lockfile moved since you said yes says <strong>changed since it was trusted</strong>. Both are fixed by the same command, <code>agentstack trust .</code>.</p>
 <h2 id="lock-first-then-trust">Lock first, then trust<a class="hlink" href="#lock-first-then-trust" aria-label="Link to this section">#</a></h2>
 <p>The <a href="../concepts.html">lockfile</a> is part of the consent surface, so <code>agentstack lock --write</code> <strong>invalidates a grant you already have</strong> — new pins are new consent. That fixes the order for good:</p>
-<pre class="block"><code>agentstack lock --write     # pin the new bytes (this re-opens consent)
-agentstack trust .          # review what moved, then approve it
-agentstack use --write      # …now it activates</code></pre>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack lock --write     <span class="cm"># pin the new bytes (this re-opens consent)</span>
+<span class="pr">$ </span>agentstack trust .          <span class="cm"># review what moved, then approve it</span>
+<span class="pr">$ </span>agentstack use --write      <span class="cm"># …now it activates</span></code></pre></div>
 <p>The reverse order costs you the review twice. It also means re-locking is not a way past a refusal: when pinned content has drifted, <code>agentstack lock --write</code> accepts the new bytes but does <strong>not</strong> deliver them — accepting content is not an answer to the consent question it reopens. <code>lock --write</code> says so as it runs:</p>
-<pre class="block"><code>⚠ this project is trusted — new pins are new consent, so its trust is now
-  stale; re-review and re-grant with `agentstack trust .`</code></pre>
+<div class="cb"><pre class="block"><code>⚠ this project is trusted — new pins are new consent, so its trust is now
+  stale; re-review and re-grant with `agentstack trust .`</code></pre></div>
 <p><code>agentstack trust</code> honours the global <code>--manifest-dir &lt;dir&gt;</code> flag, so you can review a project without changing into it.</p>
 <h2 id="limits">Limits<a class="hlink" href="#limits" aria-label="Link to this section">#</a></h2>
 <p><strong>What trust covers, and what it doesn't.</strong> Trust pins those three files and gates the five deliveries above; it does <strong>not</strong> vouch for the code the declared servers point at. A server that runs a local script authorizes <em>that command</em>, not later edits to it — so review referenced scripts as part of <code>trust .</code>, the way you'd read a <code>.envrc</code> before <code>direnv allow</code>. The full boundary is the enforcement matrix's <a href="../enforcement.html#what-trusted-does-and-does-not-mean">What "trusted" does and does not mean</a>.</p>
