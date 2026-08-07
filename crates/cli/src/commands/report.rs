@@ -6,8 +6,8 @@
 //! id), and renders a report a security reviewer can read. Read-only; scope is
 //! deliberately a log + viewer, not a dashboard.
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::Result;
-use owo_colors::OwoColorize;
 
 use agentstack_recorder::{read_all, CallRecord, RunEvent, RunLog};
 

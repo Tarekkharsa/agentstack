@@ -8,8 +8,8 @@
 use std::fs;
 use std::path::Path;
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::{Context, Result};
-use owo_colors::OwoColorize;
 use toml_edit::{DocumentMut, Item, Table, Value as TomlValue};
 
 use crate::adapter::descriptor::{SettingField, SettingKind};

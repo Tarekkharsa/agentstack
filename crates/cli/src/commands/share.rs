@@ -35,8 +35,8 @@
 //! a command. Quarantine is a directory of inert bytes: nothing there is on any
 //! search path, in any agent's context, or reachable by any server.
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::{bail, Context, Result};
-use owo_colors::OwoColorize;
 use serde::{Deserialize, Serialize};
 
 use std::path::Path;

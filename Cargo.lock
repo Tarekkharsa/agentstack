@@ -92,7 +92,6 @@ dependencies = [
  "insta",
  "keyring",
  "libc",
- "owo-colors",
  "proptest",
  "regex",
  "reqwest",

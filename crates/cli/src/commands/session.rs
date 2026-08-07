@@ -4,8 +4,8 @@
 
 use std::path::Path;
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::Result;
-use owo_colors::OwoColorize;
 
 use crate::cli::{SessionArgs, SessionCmd};
 use crate::scope::Scope;
@@ -43,6 +43,23 @@ fn render_start_report(
     out.push_str(
         "  End it with `agentstack x session end` — every file above goes back exactly.\n",
     );
+    // …and say why that is the ONLY command that ends it, but only when this
+    // session actually materialized skills. The banner above no longer offers
+    // `x restore` as an alternative; by here the report knows the names, so it
+    // can say what would have gone wrong instead of just withholding a command.
+    //
+    // `crate::history::SKILLS_COME_OFF_WITH` does not fit: it names
+    // `x uninstall --write` and "activate a toolset that omits them", which are
+    // the MACHINE-EXIT ways off. The way off a session is `session end`, which
+    // the line above already names. Only the reason sentence is shared — that
+    // is the half that must never drift between Undo surfaces.
+    if !report.skill_adds.is_empty() {
+        out.push_str(&format!(
+            "    · {}. So `agentstack x restore` is not the way back from a session; \
+             `session end` is.\n",
+            crate::history::SKILLS_ARE_NOT_RECORDED
+        ));
+    }
     out
 }
 
@@ -165,8 +182,20 @@ pub fn run(args: &SessionArgs, dir: Option<&Path>) -> Result<()> {
             // temporary activation — so the banner is the honest form of the
             // rule here. The report below still repeats it, because by then it
             // can name the exact files.
+            //
+            // `agentstack x restore --last --write` used to be offered here as
+            // an equal alternative, and it is not one. `session::start` records
+            // ONLY the server-config snapshots in the history ledger; the
+            // skills it materializes are tracked in the session store and
+            // removed by `session end` through its own mechanism (G31: the
+            // ledger holds a file's bytes, and a delivered skill is a linked
+            // directory). So that restore replays the file edits and leaves the
+            // skills on disk — and a session that materialized skills and
+            // nothing else records no ledger entry at all, so it fails outright
+            // with "nothing to undo". `session end` is the whole revert, which
+            // is why it is now the only command this banner names.
             println!(
-                "  {} temporary: `agentstack x session end` (or `agentstack x restore --last --write`) puts every file back.",
+                "  {} temporary: `agentstack x session end` puts every file back — and takes off any skills this activates.",
                 "↩".dimmed()
             );
             let report = crate::session::start(dir, profile, scope)?;
@@ -254,6 +283,26 @@ mod tests {
         assert!(out.contains("Codex CLI · servers → .codex/config.toml"));
         assert!(out.contains("skills → .claude/skills: helper"));
         assert!(out.contains("agentstack x session end"));
+
+        // This session materialized skills, so the report says why `session
+        // end` is the ONLY command that reverts it — the shared sentence, not a
+        // paraphrase, so this surface cannot drift from the other Undo doors.
+        assert!(out.contains(crate::history::SKILLS_ARE_NOT_RECORDED));
+        assert!(out.contains("is not the way back from a session"));
+
+        // NEGATIVE CONTROL, on the pure function: same report, same closing
+        // line, no materialized skills — so there is nothing the promise
+        // overstates and the bound is not printed. A caveat on every `session
+        // start` is read by no one. (The behaviour behind both branches is
+        // pinned by tests/session_promises_only_the_undo_it_has.rs, which runs
+        // the restore that used to be offered and looks at the disk.)
+        let no_skills = crate::session::StartReport {
+            skill_adds: Vec::new(),
+            ..report
+        };
+        let out = render_start_report(&no_skills, Path::new("/repo"));
+        assert!(out.contains("agentstack x session end"));
+        assert!(!out.contains(crate::history::SKILLS_ARE_NOT_RECORDED));
     }
 
     /// Stage 2.2: `session end` reports exactly what it restored, and an

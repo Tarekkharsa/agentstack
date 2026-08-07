@@ -186,10 +186,20 @@ Four postures, and the binary labels each honestly:
 
 | | What it is |
 |---|---|
-| `--unprotected` | `HOST / ADVISORY`. No trust check, no lock verify, no policy admission. The escape hatch. |
+| `--unprotected` | `HOST / ADVISORY`. No trust check, no lock verify, no policy admission. The escape hatch — **interactive only**: it takes neither `--plan` nor `--prompt` (see below). |
 | *(default)* | `HOST / PROTECTED`. Trust, strict lock verify, policy admission, frozen grant — all before launch. Not isolation: the harness runs as you, on the host. |
 | `--sandbox` | Container, project mounted, HTTPS at the policy proxy. The bridge still permits direct connections that ignore the proxy. Needs `--features sandbox` + Docker. |
 | `--lockdown` | Implies `--sandbox`. Internal Docker network, no host route, no internet; the only peer is the egress-proxy sidecar. |
+
+`--plan` and `--prompt` do not accept every posture, and the gaps are intended.
+`--plan` previews the pre-launch gate, so `--unprotected` — which switches that
+gate off — has nothing to preview; the protected plan launches nothing either
+and walks exactly the checks the escape hatch skips. `--prompt` is headless
+delivery, and headless delivery lives only in the protected contract
+(grant-committed argv, bounded output evidence), so `--unprotected`,
+`--sandbox`, and `--lockdown` all refuse it. Net effect: an unattended run is
+always a governed one, and dropping protection always has a person at the
+terminal.
 
 ### Undo
 

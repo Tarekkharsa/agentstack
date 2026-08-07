@@ -5,9 +5,9 @@
 use agentstack_core::digest::Sha256Hex;
 use std::path::{Path, PathBuf};
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::{Context, Result};
 use indexmap::IndexMap;
-use owo_colors::OwoColorize;
 
 use crate::cli::UseArgs;
 use crate::library::Library;

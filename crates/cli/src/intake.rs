@@ -680,7 +680,7 @@ pub fn notice(found: &Found) -> Option<String> {
 /// surface — `use` and `lock` mention dropped content in passing so the user
 /// learns about it at the moment they are already touching the setup.
 pub fn print_notice(dir: &Path, base: &Path, manifest: &Manifest) {
-    use owo_colors::OwoColorize;
+    use agentstack_core::paint::OwoColorize;
     let found = scan(dir, base, manifest);
     if let Some(text) = notice(&found) {
         println!("  {} {}", "·".dimmed(), text.dimmed());

@@ -44,8 +44,8 @@
 //! least equipped to notice. Whatever `doctor` would honestly tell them to do
 //! next is what `up` says, because it *is* what `doctor` says.
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::Result;
-use owo_colors::OwoColorize;
 
 use std::path::Path;
 

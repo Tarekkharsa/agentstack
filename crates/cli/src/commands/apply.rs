@@ -3,8 +3,8 @@
 
 use std::path::Path;
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::{Context, Result};
-use owo_colors::OwoColorize;
 
 use crate::cli::ApplyArgs;
 use crate::manifest::{validate_with_context, ValidateCtx};

@@ -4,8 +4,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::{Context, Result};
-use owo_colors::OwoColorize;
 use toml_edit::DocumentMut;
 
 use crate::cli::RemoveArgs;

@@ -6,8 +6,8 @@
 use std::fs;
 use std::path::Path;
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::{Context, Result};
-use owo_colors::OwoColorize;
 
 pub fn init(name: Option<&str>) -> Result<()> {
     let cwd = std::env::current_dir().context("reading current dir")?;

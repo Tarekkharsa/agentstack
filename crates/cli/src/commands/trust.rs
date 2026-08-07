@@ -11,8 +11,8 @@ use std::collections::{HashMap, HashSet};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::{Context, Result};
-use owo_colors::OwoColorize;
 
 use crate::cli::TrustArgs;
 use crate::manifest::ServerType;

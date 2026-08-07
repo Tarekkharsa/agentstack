@@ -25,8 +25,8 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::{Context, Result};
-use owo_colors::OwoColorize;
 use serde_json::{json, Value};
 
 use crate::cli::{GuardArgs, GuardCmd};

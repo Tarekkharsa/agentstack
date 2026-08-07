@@ -4,8 +4,8 @@
 
 use std::path::Path;
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::Result;
-use owo_colors::OwoColorize;
 
 use crate::cli::{KillArgs, RunArgs, RunsArgs};
 
@@ -40,11 +40,20 @@ pub fn run(args: &RunArgs, dir: Option<&Path>) -> Result<()> {
     // `--prompt` exists only as the governed child-run primitive: headless
     // delivery is defined by the locked contract (grant-committed argv,
     // bounded output evidence). Anywhere else it would silently skip every
-    // gate the flag's semantics promise — refuse loudly and name the valid
-    // form instead.
+    // gate the flag's semantics promise — refuse loudly, say WHY, and name the
+    // valid form instead. The refusal is deliberate and stays: an unattended
+    // run is precisely the one nobody is watching, so it is the one that must
+    // keep its gate. Widening this would let a script drop the seatbelt.
     if args.prompt.is_some() && (args.unprotected || args.sandbox || args.lockdown) {
         anyhow::bail!(
             "--prompt needs the protected run — nothing was launched\n\
+             \n  \
+             why: headless delivery is defined only by the protected contract — the argv \
+             is committed into a frozen grant and the output is recorded as bounded \
+             evidence. --unprotected, --sandbox, and --lockdown have no such contract, so \
+             --prompt there would skip every gate the flag itself promises. This is \
+             deliberate, not a missing feature: an unattended run is the one nobody is \
+             watching, so it is the one that keeps its gate.\n\
              \n  \
              governed headless run:  agentstack run {h} --prompt \"<text>\"",
             h = args.harness
@@ -73,14 +82,27 @@ pub fn run(args: &RunArgs, dir: Option<&Path>) -> Result<()> {
     // `--plan` promises "print the plan, run NOTHING" — it is only defined for
     // the protected and sandbox flows above. Bare `run --plan` used to fall
     // through and launch the CLI anyway (audit finding: an unintended launch
-    // during a read-only review); an unprotected run has no plan to print, so
-    // refuse and name the two real forms.
+    // during a read-only review); an unprotected run has no gate decisions to
+    // preview, so refuse, say WHY, and name the two real forms.
+    //
+    // The refusal costs the user nothing they cannot get: the PROTECTED plan
+    // launches nothing either and walks exactly the checks `--unprotected`
+    // would skip, so it is the honest preview of what opting out gives up.
+    // That pointer is the last line of the message.
     if args.plan {
         anyhow::bail!(
             "--plan needs a gated run mode — nothing was launched\n\
              \n  \
+             why: --plan previews the pre-launch GATE — content trust, strict lock \
+             verification, policy admission, and the grant a run would freeze. \
+             --unprotected turns that gate off, so an unprotected run has no gate \
+             decisions to preview.\n\
+             \n  \
              protected host plan:  agentstack run --plan {h}\n  \
-             sandbox plan:         agentstack run --sandbox --plan {h}",
+             sandbox plan:         agentstack run --sandbox --plan {h}\n\
+             \n  \
+             To see what --unprotected gives up, drop it: the protected plan above \
+             launches nothing either, and it walks the very checks --unprotected skips.",
             h = args.harness
         );
     }
@@ -249,5 +271,81 @@ mod tests {
         let msg = format!("{:#}", run(&a, None).unwrap_err());
         assert!(msg.contains("--plan needs a gated run mode"), "{msg}");
         assert!(msg.contains("agentstack run --plan codex"), "{msg}");
+    }
+
+    /// P8-G5 witness. Both non-interactive refusals are DELIBERATE — headless
+    /// delivery is contract-bound, and an unprotected run has no gate to
+    /// preview — so neither may be weakened. What they owed the reader was the
+    /// reason: a CI author who only sees "no" cannot tell an intended boundary
+    /// from a missing feature. Each refusal now carries a `why:` clause, and
+    /// the `--plan` one points at the preview that DOES exist.
+    #[test]
+    fn the_opt_out_refusals_say_why_they_refuse() {
+        let mut plan_opt_out = args("codex");
+        plan_opt_out.unprotected = true;
+        plan_opt_out.plan = true;
+        let msg = format!("{:#}", run(&plan_opt_out, None).unwrap_err());
+        assert!(
+            msg.contains("why:"),
+            "the plan refusal states a reason: {msg}"
+        );
+        assert!(
+            msg.contains("no gate decisions to preview"),
+            "and names what is missing: {msg}"
+        );
+        assert!(
+            msg.contains("the protected plan above launches nothing either"),
+            "and points at the preview that does exist: {msg}"
+        );
+
+        for opt_out in ["unprotected", "sandbox", "lockdown"] {
+            let mut a = args("codex");
+            a.prompt = Some("say hi".to_string());
+            match opt_out {
+                "unprotected" => a.unprotected = true,
+                "sandbox" => a.sandbox = true,
+                _ => a.lockdown = true,
+            }
+            let msg = format!("{:#}", run(&a, None).unwrap_err());
+            assert!(msg.contains("why:"), "{opt_out}: states a reason: {msg}");
+            assert!(
+                msg.contains("frozen grant") && msg.contains("bounded"),
+                "{opt_out}: names the contract headless delivery needs: {msg}"
+            );
+            assert!(
+                msg.contains("deliberate, not a missing feature"),
+                "{opt_out}: says the boundary is intended: {msg}"
+            );
+        }
+    }
+
+    /// Negative control for the witness above: the refusals fire ONLY on the
+    /// opt-outs. A protected `--plan` and a protected `--prompt` leave this
+    /// function entirely — in an empty directory they fail later, on a missing
+    /// manifest — so neither refusal, and no `why:` clause of theirs, may
+    /// appear. Without this, an unconditional `bail!` would pass the witness.
+    #[test]
+    fn the_protected_run_reaches_neither_refusal() {
+        let empty = tempfile::tempdir().expect("temp dir");
+        for (label, mut a) in [
+            ("plan", args("codex")),
+            ("prompt", args("codex")),
+            ("bare", args("codex")),
+        ] {
+            match label {
+                "plan" => a.plan = true,
+                "prompt" => a.prompt = Some("say hi".to_string()),
+                _ => {}
+            }
+            let msg = format!("{:#}", run(&a, Some(empty.path())).unwrap_err());
+            assert!(
+                !msg.contains("--plan needs a gated run mode"),
+                "{label}: the protected run is not refused for --plan: {msg}"
+            );
+            assert!(
+                !msg.contains("--prompt needs the protected run"),
+                "{label}: the protected run is not refused for --prompt: {msg}"
+            );
+        }
     }
 }

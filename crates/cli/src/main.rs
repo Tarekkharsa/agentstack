@@ -10,6 +10,14 @@ fn main() {
     // A reader hanging up (`agentstack diff | head`) must end the process
     // silently, not as a println! panic with exit 101.
     agentstack::reset_sigpipe();
+    // The colour decision, taken once, before anything can print: NO_COLOR,
+    // CLICOLOR_FORCE, TERM=dumb, otherwise "is stdout a terminal". Every
+    // `.green()`/`.dimmed()` in the workspace reads the answer at format time
+    // (`agentstack_core::paint`), so this one line is the whole gate — there is
+    // no second place that decides. It is not strictly required (the gate
+    // decides lazily on first use), but taking it here keeps the answer
+    // independent of which screen printed first.
+    agentstack_core::paint::configure();
     // `agentstack --help --all` → the full command inventory. Intercepted
     // before clap parses: its built-in --help prints and exits before a
     // sibling flag is ever seen, so the pair can't be expressed as a normal

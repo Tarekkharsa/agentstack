@@ -7,8 +7,8 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::Result;
-use owo_colors::OwoColorize;
 use serde_json::{json, Value};
 
 use crate::cli::StatsArgs;

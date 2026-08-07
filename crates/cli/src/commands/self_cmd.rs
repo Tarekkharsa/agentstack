@@ -9,9 +9,9 @@
 
 use std::path::{Path, PathBuf};
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::{Context, Result};
 use clap::CommandFactory;
-use owo_colors::OwoColorize;
 
 use crate::cli::{Cli, SelfArgs, SelfCommand, SelfDocsArgs, SelfLinkArgs};
 

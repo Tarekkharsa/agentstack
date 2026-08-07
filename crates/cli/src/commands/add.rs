@@ -5,9 +5,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::{Context, Result};
 use indexmap::IndexMap;
-use owo_colors::OwoColorize;
 use serde_json::Value;
 use toml_edit::{Array, DocumentMut};
 

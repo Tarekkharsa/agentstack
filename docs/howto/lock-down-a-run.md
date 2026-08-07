@@ -53,6 +53,32 @@ Lock, then `agentstack trust .`, then run — see
 [trust a cloned repo](trust-a-repo.md). `--unprotected` is the only way past it,
 and it drops the whole pre-launch gate, not just this check.
 
+**`--unprotected` is interactive only, and deliberately so.** It is the one
+posture that is not available to a script:
+
+```text
+agentstack run claude-code --unprotected --plan          # exit 1
+agentstack run claude-code --unprotected --prompt "…"    # exit 1
+```
+
+Both refusals launch nothing and both are intended, for different reasons:
+
+- `--plan` previews the pre-launch **gate**. `--unprotected` switches that gate
+  off, so there are no gate decisions left to preview. Use the protected plan
+  instead — `agentstack run claude-code --plan` launches nothing either, and it
+  walks the very checks `--unprotected` would skip, which makes it the honest
+  preview of what opting out gives up.
+- `--prompt` is headless delivery, and headless delivery is defined only by the
+  protected contract: the argv is committed into a frozen grant and the output
+  is recorded as bounded evidence. `--unprotected`, `--sandbox`, and
+  `--lockdown` have no such contract. An unattended run is the one nobody is
+  watching, so it is the one that keeps its gate — CI gets
+  `agentstack run <cli> --prompt "…"`, the protected form, and nothing looser.
+
+So an `--unprotected` run always has a person at the terminal reading its
+`HOST / ADVISORY` banner. Dropping protection is not something a script can do
+on your behalf.
+
 Point `AGENTSTACK_SANDBOX_IMAGE` at an image that carries your agent CLI. The
 lockdown egress sidecar is pulled from GHCR automatically, pinned per release
 (override with `AGENTSTACK_EGRESS_IMAGE`).

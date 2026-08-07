@@ -295,6 +295,15 @@
   If you changed pinned inputs, run `agentstack lock --write` first — new pins
   re-gate trust.</code></pre></div>
 <p>Lock, then <code>agentstack trust .</code>, then run — see <a href="../howto/trust-a-repo.html">trust a cloned repo</a>. <code>--unprotected</code> is the only way past it, and it drops the whole pre-launch gate, not just this check.</p>
+<p><strong><code>--unprotected</code> is interactive only, and deliberately so.</strong> It is the one posture that is not available to a script:</p>
+<div class="cb cb-term"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">shell</span></div><pre class="block"><code><span class="pr">$ </span>agentstack run claude-code --unprotected --plan          <span class="cm"># exit 1</span>
+<span class="pr">$ </span>agentstack run claude-code --unprotected --prompt "…"    <span class="cm"># exit 1</span></code></pre></div>
+<p>Both refusals launch nothing and both are intended, for different reasons:</p>
+<ul>
+<li><code>--plan</code> previews the pre-launch <strong>gate</strong>. <code>--unprotected</code> switches that gate off, so there are no gate decisions left to preview. Use the protected plan instead — <code>agentstack run claude-code --plan</code> launches nothing either, and it walks the very checks <code>--unprotected</code> would skip, which makes it the honest preview of what opting out gives up.</li>
+<li><code>--prompt</code> is headless delivery, and headless delivery is defined only by the protected contract: the argv is committed into a frozen grant and the output is recorded as bounded evidence. <code>--unprotected</code>, <code>--sandbox</code>, and <code>--lockdown</code> have no such contract. An unattended run is the one nobody is watching, so it is the one that keeps its gate — CI gets <code>agentstack run &lt;cli&gt; --prompt "…"</code>, the protected form, and nothing looser.</li>
+</ul>
+<p>So an <code>--unprotected</code> run always has a person at the terminal reading its <code>HOST / ADVISORY</code> banner. Dropping protection is not something a script can do on your behalf.</p>
 <p>Point <code>AGENTSTACK_SANDBOX_IMAGE</code> at an image that carries your agent CLI. The lockdown egress sidecar is pulled from GHCR automatically, pinned per release (override with <code>AGENTSTACK_EGRESS_IMAGE</code>).</p>
 <p>After a run, <code>agentstack x report run &lt;id&gt;</code> replays its posture label and every egress and tool-call decision — see <a href="../howto/see-what-happened.html">see what your agents did</a>.</p>
 <p><strong>Limits.</strong> The posture labels name each mode's ceiling honestly: the protected default is pre-launch gating plus a frozen surface, not a kernel fence — the harness still runs as you, on the host — and only <code>--lockdown</code> is topologically confined. What each mode actually enforces per dimension, with every strength caveat, is the <a href="../enforcement.html#the-matrix">enforcement matrix</a>.</p>

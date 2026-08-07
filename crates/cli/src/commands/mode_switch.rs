@@ -250,7 +250,30 @@ pub fn set_mode_preview(args: &PanelSetModeArgs, dir: Option<&Path>) -> Result<V
     if let Some(profile) = &signals.session {
         body.insert("session_active".into(), profile.clone().into());
     }
+    // The undo this plan really has. `set-mode` is retired and its apply half
+    // is gone, so nothing a user runs reaches this field today — but the plan
+    // it describes is the SHARED `unrender` one, whose skills leg is
+    // `capture: false`, and a panel that ever reads this field would repeat the
+    // over-promise every other Undo surface has now been narrowed away from.
+    // One line, and it costs nothing to have it be true when it is read.
+    //
+    // Detected from the plan rather than from the manifest: `capture` is the
+    // ledger's own discriminator (`unrender::Removal::capture`), so this field
+    // cannot drift from what the removals actually record.
+    let skills_outside_the_ledger = plan
+        .as_ref()
+        .is_some_and(|p| p.removals.iter().any(|r| !r.capture));
     body.insert("undo".into(), "agentstack x restore --last".into());
+    body.insert(
+        "undo_covers_files_only".into(),
+        skills_outside_the_ledger.into(),
+    );
+    if skills_outside_the_ledger {
+        body.insert(
+            "undo_note".into(),
+            crate::history::SKILLS_ARE_NOT_RECORDED.into(),
+        );
+    }
 
     Ok(super::panel_edit::build_preview("set-mode", &digest, body))
 }

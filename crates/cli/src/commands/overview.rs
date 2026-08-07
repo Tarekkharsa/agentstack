@@ -4,8 +4,8 @@
 
 use std::path::Path;
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::Result;
-use owo_colors::OwoColorize;
 
 use crate::adapter::Registry;
 use crate::manifest::load::MANIFEST_FILE;

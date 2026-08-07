@@ -14,8 +14,8 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::{Context as AnyhowContext, Result};
-use owo_colors::OwoColorize;
 
 use crate::calllog::{RunEvent, RunLog};
 use crate::cli::RunArgs;
