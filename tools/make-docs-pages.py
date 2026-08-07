@@ -130,6 +130,28 @@ INLINE_CODE = re.compile(r"`([^`]+)`")
 BOLD = re.compile(r"\*\*(.+?)\*\*")
 ITALIC = re.compile(r"(?<![*\w])\*([^*]+)\*(?![*\w])")
 LINK = re.compile(r"\[([^\]]+)\]\(([^)\s]+)\)")
+# A list item that is a bare link and nothing else. A list built ONLY of these
+# is a table of contents — navigation — not running prose, so it must not carry
+# the prose underline. That property is decided here, from the source, and
+# recorded as a class; the stylesheet never has to guess it back out of the
+# rendered markup with a selector that also catches real prose links.
+LINK_ONLY = re.compile(r"\[[^\]]+\]\([^)\s]+\)")
+
+
+def link_only(text):
+    """True when this list item is one bare link and nothing else.
+
+    Code spans are lifted into placeholders first, exactly as inline() does, so
+    a label that contains brackets of its own — ``[Governance (`[policy]`)]`` —
+    still reads as a single link instead of terminating the label early.
+    """
+    count = [0]
+
+    def lift(_m):
+        count[0] += 1
+        return f"\x00{count[0]}\x00"
+
+    return bool(LINK_ONLY.fullmatch(INLINE_CODE.sub(lift, text.strip())))
 
 
 def inline(text, src_rel, out_rel, warnings):
@@ -318,12 +340,19 @@ def convert(md, src_rel, out_rel, warnings):
     out, seen_slugs = [], set()
     title, first_para = None, None
     i, in_ul, in_ol = 0, False, False
+    # Where the open <ul>'s opening tag sits in `out`, and whether every item
+    # seen so far is a bare link. Both are settled only when the list closes,
+    # so the tag is patched in place rather than guessed up front.
+    ul_at, ul_links_only = None, True
 
     def close_lists():
-        nonlocal in_ul, in_ol
+        nonlocal in_ul, in_ol, ul_at, ul_links_only
         if in_ul:
+            if ul_links_only and ul_at is not None:
+                out[ul_at] = '<ul class="navlist">'
             out.append("</ul>")
             in_ul = False
+            ul_at, ul_links_only = None, True
         if in_ol:
             out.append("</ol>")
             in_ol = False
@@ -401,6 +430,7 @@ def convert(md, src_rel, out_rel, warnings):
                 out.append("</ol>")
                 in_ol = False
             if not in_ul:
+                ul_at = len(out)
                 out.append("<ul>")
                 in_ul = True
             item = [m.group(1)]
@@ -427,6 +457,9 @@ def convert(md, src_rel, out_rel, warnings):
                     i += 1
                 else:
                     break
+            ul_links_only = ul_links_only and not tail and all(
+                link_only(" ".join(part)) for part in [item, *sub]
+            )
             li = inline(" ".join(item), src_rel, out_rel, warnings)
             if sub:
                 inner = "".join(
@@ -503,7 +536,11 @@ def convert(md, src_rel, out_rel, warnings):
         text = " ".join(para)
         if first_para is None:
             first_para = re.sub(r"[`*\[\]]|\([^)]*\)", "", text)[:155].strip()
-        out.append(f"<p>{inline(text, src_rel, out_rel, warnings)}</p>")
+        # A paragraph that is one bare link and nothing else — the bold part
+        # headings inside a Contents block are written that way — is navigation
+        # by the same test the lists use, so it carries the same class.
+        cls = ' class="navlist"' if link_only(text.strip().strip("*")) else ""
+        out.append(f"<p{cls}>{inline(text, src_rel, out_rel, warnings)}</p>")
 
     close_lists()
     return "\n".join(out), title or Path(src_rel).stem, first_para or ""
@@ -521,22 +558,27 @@ def convert(md, src_rel, out_rel, warnings):
 CSS = """
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
-  body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.6 var(--sans); }
+  body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.5 var(--sans); }
   a code { color: var(--ink); }
-  code { font-family: var(--mono); font-size: 0.9em; background: var(--code-bg); border-radius: 5px; padding: 0.1em 0.35em; }
+  code { font-family: var(--mono); font-size: 0.86em; background: var(--code-bg); border-radius: 5px; padding: 0.1em 0.35em; }
   header { position: sticky; top: 0; z-index: 50; background: color-mix(in srgb, var(--surface) 96%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
   .bar { max-width: 74rem; margin: 0 auto; padding: 0.7rem 1.35rem; display: flex; align-items: center; gap: 1.1rem; }
-  .wordmark { font-family: var(--font-heading, Caprasimo, serif); font-weight: 400; font-size: 1.15rem; color: var(--ink); display: inline-flex; align-items: center; gap: 0.6rem; }
+  .wordmark { font-family: var(--sans); font-weight: 650; font-size: 1.05rem; letter-spacing: -0.025em; color: var(--ink); display: inline-flex; align-items: center; gap: 0.6rem; }
   .wordmark:hover { text-decoration: none; }
   .wordmark .mark { height: 28px; width: auto; display: block; }
   .wordmark .wm2 { color: var(--ink); }
   nav.top { margin-left: auto; display: flex; align-items: center; gap: 1.05rem; flex-wrap: nowrap; white-space: nowrap; }
-  nav.top a { font-weight: 600; font-size: 0.85rem; color: var(--ink); }
-  nav.top a:hover { color: var(--accent); text-decoration: none; }
-  nav.top .themebtn { font-family: inherit; font-size: 0.8rem; font-weight: 600; padding: 0.4rem 0.85rem; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; }
-  nav.top .themebtn:hover { border-color: var(--accent); }
-  nav.top .ghost { padding: 0.4rem 0.95rem; border: 1px solid var(--accent); border-radius: 999px; color: var(--accent-ink); background: var(--accent); }
-  nav.top .ghost:hover { filter: brightness(1.08); }
+  nav.top a { font-weight: 500; font-size: 0.85rem; letter-spacing: -0.01em; color: var(--muted); }
+  nav.top a:hover { color: var(--ink); text-decoration: none; }
+  /* The theme control is a quiet bordered control; the one call to action is
+     the inverted slab. Neither is the accent — see the button note in
+     theme/organic.css. */
+  nav.top .themebtn { font-family: var(--sans); font-size: 0.8rem; font-weight: 500; letter-spacing: -0.01em; padding: 0.42rem 0.85rem; border-radius: 8px; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease; }
+  nav.top .themebtn:hover { color: var(--ink); border-color: var(--line-strong); background: var(--quiet-hover); }
+  nav.top .ghost { padding: 0.44rem 0.95rem; border: 1px solid transparent; border-radius: 8px; font-weight: 600; color: var(--paper); background: var(--ink); transition: transform 0.18s ease, background 0.18s ease; }
+  nav.top .ghost:hover { transform: translateY(-1px); background: var(--btn-primary-hover); color: var(--paper); }
+  nav.top .ghost:active { transform: translateY(0); }
+  @media (prefers-reduced-motion: reduce) { nav.top .ghost:hover { transform: none; } }
   .docwrap { max-width: 78rem; margin: 0 auto; padding: 0 1.35rem; display: grid; grid-template-columns: 15rem minmax(0, 1fr); gap: 2.75rem; align-items: start; }
   aside.side { position: sticky; top: 4.2rem; max-height: calc(100vh - 5rem); overflow-y: auto; padding: 1.6rem 0 2rem; font-size: 0.85rem; }
   aside.side .grp { margin-bottom: 1.15rem; }
@@ -547,19 +589,45 @@ CSS = """
   aside.side details.grp[open] > summary::after { content: "\\25BE"; }
   aside.side .grp > code { display: block; font-family: var(--mono); font-size: 0.66rem; color: var(--accent); background: none; border: none; padding: 0; margin: -0.25rem 0 0.35rem; }
   aside.side ul { list-style: none; margin: 0; padding: 0; }
-  aside.side li a { display: flex; gap: 0.5rem; align-items: baseline; padding: 0.14rem 0.5rem; border-left: 2px solid transparent; border-radius: 0 5px 5px 0; font-family: var(--mono); font-size: 0.76rem; color: var(--muted); }
-  aside.side li a:hover { color: var(--accent); text-decoration: none; }
-  aside.side li a.on-page { color: var(--ink); font-weight: 600; border-left-color: var(--accent); background: var(--accent-soft); }
+  aside.side li a { display: flex; gap: 0.5rem; align-items: baseline; padding: 0.22rem 0.5rem; border-left: 2px solid transparent; border-radius: 0 5px 5px 0; font-family: var(--sans); font-size: 0.82rem; letter-spacing: -0.01em; color: var(--muted); transition: color 0.16s ease, background 0.16s ease; }
+  aside.side li a:hover { color: var(--ink); text-decoration: none; }
+  aside.side li a.on-page { color: var(--ink); font-weight: 500; border-left-color: var(--accent); background: var(--accent-soft); }
   @media (max-width: 960px) { .docwrap { display: block; } aside.side { display: none; } .bar { flex-wrap: wrap; } nav.top { flex-wrap: wrap; white-space: normal; } }
   main { min-width: 0; padding: 1.6rem 0 4rem; }
-  main h1 { font-family: var(--font-heading, Caprasimo, serif); font-weight: 400; font-size: 2.1rem; line-height: 1.15; letter-spacing: normal; margin: 0 0 0.6rem; }
-  main h2 { font-family: var(--font-heading, Caprasimo, serif); font-weight: 400; font-size: 1.45rem; margin: 2.2rem 0 0.5rem; padding-top: 1.4rem; border-top: 1px solid var(--line-soft); }
-  main h3 { font-family: var(--mono); font-size: 0.98rem; margin: 1.5rem 0 0.4rem; }
-  main h4 { font-family: var(--mono); font-size: 0.9rem; margin: 1.2rem 0 0.3rem; }
-  .hlink { margin-left: 0.45rem; opacity: 0; font-size: 0.85em; }
-  h2:hover .hlink, h3:hover .hlink, h4:hover .hlink { opacity: 0.7; }
-  main p, main li { max-width: 46rem; }
+  /* One sans, weight 500, negative tracking — no display serif, no bold
+     headings. The smaller headings (h3/h4) step up to 600 at body size rather
+     than growing, so a subsection reads as a label and not as another title.
+     Sizes are fluid: the clamp floor is what has to fit a 390px screen. */
+  main h1 { font-family: var(--sans); font-weight: 500; font-size: clamp(2rem, 5.4vw, 2.7rem); line-height: 1.05; letter-spacing: -0.035em; margin: 0 0 0.7rem; }
+  main h2 { font-family: var(--sans); font-weight: 500; font-size: clamp(1.5rem, 3.2vw, 1.9rem); line-height: 1.12; letter-spacing: -0.035em; margin: 2.4rem 0 0.6rem; padding-top: 1.5rem; border-top: 1px solid var(--line-soft); }
+  main h3 { font-family: var(--sans); font-weight: 600; font-size: 1rem; letter-spacing: -0.015em; margin: 1.9rem 0 0.4rem; }
+  main h4 { font-family: var(--sans); font-weight: 600; font-size: 0.94rem; letter-spacing: -0.015em; margin: 1.4rem 0 0.3rem; }
+  .hlink { margin-left: 0.45rem; opacity: 0; font-size: 0.85em; font-weight: 400; color: var(--accent); }
+  h2:hover .hlink, h3:hover .hlink, h4:hover .hlink { opacity: 0.9; }
+  /* Running prose sits one step back from the page foreground; <strong> is
+     promoted to full foreground, which is what makes a scanned paragraph give
+     up its point. Both ends clear 4.5:1 in both themes. */
+  main p, main li, main dd, main blockquote { color: var(--prose); }
+  main strong, main b { color: var(--ink); font-weight: 600; }
+  main p, main li { max-width: 46rem; line-height: 1.78; }
   main ul, main ol { padding-left: 1.4rem; }
+  main li::marker { color: var(--accent); }
+  main li + li { margin-top: 0.35rem; }
+  /* A contents list is navigation: no accent markers, no prose underlines
+     (theme/organic.css owns the underline exception), and set tighter and
+     smaller than prose so a long table of contents scans as an index rather
+     than as another section of the page. */
+  main .navlist { list-style: none; padding-left: 0; margin: 0.5rem 0 1.4rem; }
+  main .navlist li { line-height: 1.5; font-size: 0.94rem; }
+  main .navlist li::marker { content: ""; }
+  main .navlist li + li { margin-top: 0.1rem; }
+  main .navlist a { color: var(--ink); }
+  main .navlist ul { list-style: none; padding-left: 0.95rem; margin: 0.1rem 0 0.45rem; }
+  main .navlist ul li { font-size: 0.88rem; }
+  main .navlist ul a { color: var(--prose); }
+  /* A paragraph that is nothing but a link is a contents heading, not prose. */
+  main p.navlist { margin: 1.6rem 0 0.2rem; font-size: 0.94rem; }
+  main p.navlist strong { letter-spacing: -0.01em; }
   /* Code blocks and terminals are the .cb component in theme/organic.css. */
   main .cb { margin: 1.1rem 0; }
   /* Long inline code (paths, digests, command lines) wraps inside its own

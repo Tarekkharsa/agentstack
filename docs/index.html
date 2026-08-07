@@ -42,6 +42,15 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
 @media (max-width:940px){
   .hero-split{grid-template-columns:1fr;gap:var(--space-6)}
 }
+/* Nav links follow t3code's rule: quiet by default, full foreground on hover.
+   They are styled here rather than inline so the :hover can actually win. */
+.nav-links a{color:var(--color-neutral-600);font-weight:500;font-size:0.9rem;letter-spacing:-0.01em}
+.nav-links a:hover{color:var(--color-text)}
+.nav-links a.btn{font-size:14px}
+.themebtn{font-family:var(--font-sans);font-size:0.8rem;font-weight:500;letter-spacing:-0.01em;padding:0.42rem 0.85rem;border-radius:8px;border:1px solid var(--color-divider);background:transparent;color:var(--color-neutral-600);cursor:pointer}
+.themebtn:hover{color:var(--color-text);border-color:var(--color-divider-strong);background:var(--quiet-hover)}
+.step-num{font-family:var(--font-mono);font-weight:500;font-size:0.95rem}
+.closed-by{font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:0.12em;text-transform:uppercase}
 @media (max-width:720px){
   .grid-gaps,.grid-steps{grid-template-columns:1fr !important}
   .nav{flex-wrap:wrap}
@@ -55,15 +64,15 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
   <nav class="nav" style="display:flex;align-items:center;gap:var(--space-4)">
     <a href="index.html" class="nav-brand" style="display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--color-text)">
       <img src="theme/logo-mark.svg" alt="" style="width:34px;height:34px">
-      <span style="font-family:var(--font-heading);font-size:1.25rem">agent<span style="color:var(--color-accent)">Stack</span></span>
+      <span style="font-family:var(--font-sans);font-weight:650;font-size:1.2rem;letter-spacing:-0.025em">agent<span style="color:var(--color-accent)">Stack</span></span>
     </a>
     <div style="flex:1"></div>
     <div class="nav-links" style="display:flex;align-items:center;gap:var(--space-4)">
-      <a href="docs.html" style="text-decoration:none;font-weight:600;color:var(--color-text)">Documentation</a>
-      <a href="examples.html" style="text-decoration:none;font-weight:600;color:var(--color-text)">Demos</a>
-      <a href="tutorial/" style="text-decoration:none;font-weight:600;color:var(--color-text)">Tutorial</a>
-      <a href="https://github.com/Tarekkharsa/agentstack" style="text-decoration:none;font-weight:600;color:var(--color-text)">GitHub</a>
-      <button data-theme-toggle onclick="toggleTheme()" style="font-size:13px;font-weight:600;padding:7px 14px;border-radius:999px;border:1px solid var(--color-divider);background:var(--color-surface);color:var(--color-text);font-family:inherit">Light mode</button>
+      <a href="docs.html">Documentation</a>
+      <a href="examples.html">Demos</a>
+      <a href="tutorial/">Tutorial</a>
+      <a href="https://github.com/Tarekkharsa/agentstack">GitHub</a>
+      <button class="themebtn" data-theme-toggle onclick="toggleTheme()">Light mode</button>
       <a href="docs.html#start" class="btn btn-primary">Get started</a>
     </div>
   </nav>
@@ -72,7 +81,7 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
     <div class="hero-split">
       <div style="min-width:0">
         <span class="tag tag-accent-2">open source · Rust · 13 CLI adapters · MIT / Apache-2.0</span>
-        <h1 style="font-family:var(--font-heading);font-weight:400;font-size:3.4rem;line-height:1.08;margin:var(--space-4) 0 var(--space-4)">One agent setup. Every coding CLI.</h1>
+        <h1 style="font-family:var(--font-sans);font-weight:500;font-size:clamp(2.4rem,5.8vw,3.5rem);line-height:1.03;letter-spacing:-0.035em;margin:var(--space-4) 0 var(--space-4)">One agent setup. Every coding CLI.</h1>
         <p style="font-size:1.15rem;line-height:1.65;color:var(--color-neutral-700);margin:0 0 var(--space-5)">AgentStack collects the MCP servers, skills and instructions you already use into one <code style="font-size:0.92em">.agentstack/</code> directory in your project, then renders them back as native configuration for every supported CLI. Named toolsets switch by project or task, and every change stays understandable and recoverable.</p>
         <div class="term hero-cmd">
           <div class="term-row"><span class="pr">$</span><span class="cmd">curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh</span></div>
@@ -90,50 +99,50 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
     </div>
 
     <div style="margin-top:calc(var(--space-8) * 1.5)">
-      <h2 style="font-family:var(--font-heading);font-weight:400;font-size:2.1rem;margin:0 0 var(--space-2)">Your tools should share one setup</h2>
+      <h2 style="font-family:var(--font-sans);font-weight:500;font-size:clamp(1.7rem,3.4vw,2.15rem);line-height:1.08;letter-spacing:-0.035em;margin:0 0 var(--space-2)">Your tools should share one setup</h2>
       <p style="color:var(--color-neutral-700);margin:0 0 var(--space-6);max-width:620px">AgentStack manages the complete lifecycle: import, activate, switch, diagnose, recover and share — with safety built underneath.</p>
       <div class="grid-gaps" style="display:grid;grid-template-columns:repeat(2,1fr);gap:var(--space-4)">
         <div class="card elev-sm" style="gap:var(--space-2)">
           <div style="display:flex;align-items:center;gap:var(--space-3)">
             <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-100);display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-700)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><line x1="6" x2="6" y1="3" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg></div>
-            <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700">Every CLI spells setup differently</div>
+            <div class="card-title" style="font-size:1.05rem;font-family:var(--font-sans);font-weight:600">Every CLI spells setup differently</div>
           </div>
           <div class="card-body" style="font-size:0.95rem;line-height:1.6">Import your existing configuration once. It then renders the correct native format for every supported client.</div>
           <div style="display:flex;align-items:center;gap:var(--space-2);margin-top:var(--space-1);padding-top:var(--space-2);border-top:1px solid var(--color-divider)">
-            <span style="font-size:0.72rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-accent-700);font-weight:700">closed by</span>
+            <span class="closed-by" style="text-transform:uppercase;color:var(--color-accent-700)">closed by</span>
             <code style="font-size:0.85rem;background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">agentstack init</code>
           </div>
         </div>
         <div class="card elev-sm" style="gap:var(--space-2)">
           <div style="display:flex;align-items:center;gap:var(--space-3)">
             <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-2-100);display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-2-700)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path></svg></div>
-            <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700">Switching tasks pollutes shared files</div>
+            <div class="card-title" style="font-size:1.05rem;font-family:var(--font-sans);font-weight:600">Switching tasks pollutes shared files</div>
           </div>
           <div class="card-body" style="font-size:0.95rem;line-height:1.6">A toolset selects the servers and skills one task needs. Temporary sessions activate it and restore the previous native configuration afterward.</div>
           <div style="display:flex;align-items:center;gap:var(--space-2);margin-top:var(--space-1);padding-top:var(--space-2);border-top:1px solid var(--color-divider)">
-            <span style="font-size:0.72rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-accent-2-700);font-weight:700">closed by</span>
+            <span class="closed-by" style="text-transform:uppercase;color:var(--color-accent-2-700)">closed by</span>
             <code style="font-size:0.85rem;background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">agentstack session start</code>
           </div>
         </div>
         <div class="card elev-sm" style="gap:var(--space-2)">
           <div style="display:flex;align-items:center;gap:var(--space-3)">
             <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-2-100);display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-2-700)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" x2="20" y1="19" y2="19"></line></svg></div>
-            <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700">Native configuration drifts</div>
+            <div class="card-title" style="font-size:1.05rem;font-family:var(--font-sans);font-weight:600">Native configuration drifts</div>
           </div>
           <div class="card-body" style="font-size:0.95rem;line-height:1.6">Doctor finds the problem, diff shows what would change, adopt keeps an intentional hand edit, and restore undoes a bad write.</div>
           <div style="display:flex;align-items:center;gap:var(--space-2);margin-top:var(--space-1);padding-top:var(--space-2);border-top:1px solid var(--color-divider)">
-            <span style="font-size:0.72rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-accent-2-700);font-weight:700">closed by</span>
+            <span class="closed-by" style="text-transform:uppercase;color:var(--color-accent-2-700)">closed by</span>
             <code style="font-size:0.85rem;background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">agentstack doctor</code>
           </div>
         </div>
         <div class="card elev-sm" style="gap:var(--space-2)">
           <div style="display:flex;align-items:center;gap:var(--space-3)">
             <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-100);display:flex;align-items:center;justify-content:center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-700)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 20h16a2 2 0 0 0 1.73-2z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg></div>
-            <div class="card-title" style="font-size:1.05rem;font-family:var(--font-body);font-weight:700">Portable must not mean automatic</div>
+            <div class="card-title" style="font-size:1.05rem;font-family:var(--font-sans);font-weight:600">Portable must not mean automatic</div>
           </div>
           <div class="card-body" style="font-size:0.95rem;line-height:1.6">Unfamiliar repository configuration stays inert until reviewed. Any pinned change re-gates it, and machine policy always remains the ceiling.</div>
           <div style="display:flex;align-items:center;gap:var(--space-2);margin-top:var(--space-1);padding-top:var(--space-2);border-top:1px solid var(--color-divider)">
-            <span style="font-size:0.72rem;letter-spacing:0.1em;text-transform:uppercase;color:var(--color-accent-700);font-weight:700">closed by</span>
+            <span class="closed-by" style="text-transform:uppercase;color:var(--color-accent-700)">closed by</span>
             <code style="font-size:0.85rem;background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">agentstack trust .</code>
           </div>
         </div>
@@ -141,32 +150,32 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
     </div>
 
     <div style="margin-top:calc(var(--space-8) * 1.5)">
-      <h2 id="climb" style="font-family:var(--font-heading);font-weight:400;font-size:2.1rem;margin:0 0 var(--space-2)">Climb in six steps</h2>
+      <h2 id="climb" style="font-family:var(--font-sans);font-weight:500;font-size:clamp(1.7rem,3.4vw,2.15rem);line-height:1.08;letter-spacing:-0.035em;margin:0 0 var(--space-2)">Climb in six steps</h2>
       <p style="color:var(--color-neutral-700);margin:0 0 var(--space-6);max-width:560px">Each step pays off on its own — nothing later is required to keep the earlier wins.</p>
       <div class="grid-steps" style="display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-4)">
         <div style="display:flex;gap:var(--space-3);align-items:flex-start">
-          <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent);color:#fff;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:1.1rem">1</div>
-          <div><div style="font-weight:700;margin-bottom:2px">Unify</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Import once, render everywhere.</div></div>
+          <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent);color:#fff;display:flex;align-items:center;justify-content:center" class="step-num">1</div>
+          <div><div style="font-weight:600;letter-spacing:-0.01em;margin-bottom:2px">Unify</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Import once, render everywhere.</div></div>
         </div>
         <div style="display:flex;gap:var(--space-3);align-items:flex-start">
-          <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-2);color:#fff;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:1.1rem">2</div>
-          <div><div style="font-weight:700;margin-bottom:2px">Switch</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Toolsets and temporary sessions.</div></div>
+          <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-2);color:#fff;display:flex;align-items:center;justify-content:center" class="step-num">2</div>
+          <div><div style="font-weight:600;letter-spacing:-0.01em;margin-bottom:2px">Switch</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Toolsets and temporary sessions.</div></div>
         </div>
         <div style="display:flex;gap:var(--space-3);align-items:flex-start">
-          <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent);color:#fff;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:1.1rem">3</div>
-          <div><div style="font-weight:700;margin-bottom:2px">Diagnose</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Doctor and diff explain drift.</div></div>
+          <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent);color:#fff;display:flex;align-items:center;justify-content:center" class="step-num">3</div>
+          <div><div style="font-weight:600;letter-spacing:-0.01em;margin-bottom:2px">Diagnose</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Doctor and diff explain drift.</div></div>
         </div>
         <div style="display:flex;gap:var(--space-3);align-items:flex-start">
-          <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-2);color:#fff;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:1.1rem">4</div>
-          <div><div style="font-weight:700;margin-bottom:2px">Recover</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Keep an edit, or undo the write.</div></div>
+          <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-2);color:#fff;display:flex;align-items:center;justify-content:center" class="step-num">4</div>
+          <div><div style="font-weight:600;letter-spacing:-0.01em;margin-bottom:2px">Recover</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Keep an edit, or undo the write.</div></div>
         </div>
         <div style="display:flex;gap:var(--space-3);align-items:flex-start">
-          <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent);color:#fff;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:1.1rem">5</div>
-          <div><div style="font-weight:700;margin-bottom:2px">Share</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Locked, secret-free setups.</div></div>
+          <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent);color:#fff;display:flex;align-items:center;justify-content:center" class="step-num">5</div>
+          <div><div style="font-weight:600;letter-spacing:-0.01em;margin-bottom:2px">Share</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Locked, secret-free setups.</div></div>
         </div>
         <div style="display:flex;gap:var(--space-3);align-items:flex-start">
-          <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-2);color:#fff;display:flex;align-items:center;justify-content:center;font-family:var(--font-heading);font-size:1.1rem">6</div>
-          <div><div style="font-weight:700;margin-bottom:2px">Govern</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Trust, policy, confined runs.</div></div>
+          <div style="width:44px;height:44px;flex:none;border-radius:999px;background:var(--color-accent-2);color:#fff;display:flex;align-items:center;justify-content:center" class="step-num">6</div>
+          <div><div style="font-weight:600;letter-spacing:-0.01em;margin-bottom:2px">Govern</div><div style="font-size:0.92rem;line-height:1.5;color:var(--color-neutral-700)">Trust, policy, confined runs.</div></div>
         </div>
       </div>
     </div>
@@ -244,7 +253,7 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
 
   <div style="border-top:1px solid var(--color-neutral-200);margin-top:var(--space-8)">
     <div style="max-width:1060px;margin:0 auto;padding:var(--space-6);display:flex;gap:var(--space-4);align-items:center;flex-wrap:wrap">
-      <span style="font-family:var(--font-heading)">agent<span style="color:var(--color-accent)">Stack</span></span>
+      <span style="font-family:var(--font-sans);font-weight:650;letter-spacing:-0.025em">agent<span style="color:var(--color-accent)">Stack</span></span>
       <span style="color:var(--color-neutral-700);font-size:0.9rem">Unify · Switch · Diagnose · Recover · Share · Govern — dual-licensed MIT / Apache-2.0</span>
       <div style="flex:1"></div>
       <a href="docs.html" style="font-size:0.92rem">Documentation</a>
