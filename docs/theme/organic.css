@@ -609,5 +609,27 @@ a:not([class]):hover, .nav a:hover { color: var(--color-accent); }
 /* Multi-line authored content that keeps its own whitespace (trees, captured
    output). A <div>, not a <pre>: the CLI-surface test in
    crates/cli/tests/docs_commands.rs treats <pre>/<code> as "a command shown to
-   a reader", and these panes are illustrations of output. */
-.term-lines { white-space: pre; }
+   a reader", and these panes are illustrations of output.
+
+   ONE BLOCK PER CAPTURED LINE (`.tl`). The whole point of these panes is that
+   a reader can read the command, so a line wider than the pane has to wrap —
+   the earlier `white-space: pre` on the container let every transcript run
+   off its own right edge, readable only by scrolling a control that gave no
+   sign it was scrollable. Wrapping needs a per-line box because `text-indent`
+   applies to the first line of a BLOCK, not to each preserved newline inside
+   one; with a block per line, `padding-left` plus a matching negative
+   `text-indent` hangs every continuation 4ch in from where its line started,
+   so a wrap is visible as a wrap and never mistaken for the next line.
+
+   Whitespace WITHIN a line is still preserved (`pre-wrap`) — the tree glyphs
+   and the column alignment of trailing comments are part of the capture. The
+   newlines BETWEEN the blocks are ordinary markup indentation, which is why
+   the container is `white-space: normal`: under `pre` they would each render
+   as an extra blank line. All content must therefore sit inside a `.tl`. */
+.term-lines { white-space: normal; }
+.term-lines > .tl {
+  display: block;
+  white-space: pre-wrap;
+  padding-left: 4ch;
+  text-indent: -4ch;
+}

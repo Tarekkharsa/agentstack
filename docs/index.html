@@ -5,13 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script src="theme/theme.js"></script>
 <title>AgentStack — one agent setup for every coding CLI</title>
-<meta name="description" content="Import your MCP servers, skills and instructions once. AgentStack renders every coding CLI's native configuration, switches toolsets by task, diagnoses drift and restores changes safely.">
+<meta name="description" content="Import your MCP servers, skills and instructions once. AgentStack serves them live to your coding CLIs and writes into native files what no live channel can carry, switches toolsets by task, diagnoses drift and restores changes safely.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <meta property="og:title" content="AgentStack — one agent setup for every coding CLI">
-<meta property="og:description" content="Import once, render everywhere, switch by task, diagnose drift and restore safely.">
+<meta property="og:description" content="Import once, served live everywhere it can be, switch by task, diagnose drift and restore safely.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://tarekkharsa.github.io/agentstack/">
 <meta property="og:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
@@ -20,7 +20,7 @@
 <meta property="og:image:alt" content="AgentStack — one portable setup across AI coding CLIs">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="AgentStack — one agent setup for every coding CLI">
-<meta name="twitter:description" content="Import once, render everywhere, switch by task, diagnose drift and restore safely.">
+<meta name="twitter:description" content="Import once, served live everywhere it can be, switch by task, diagnose drift and restore safely.">
 <meta name="twitter:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
 <link rel="stylesheet" href="theme/organic.css">
 <style>
@@ -122,18 +122,71 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
   align-items:center;
 }
 .hero-copy{min-width:0}
-/* The eyebrow is a mono pill on a wide screen. Below 560px the string is
-   longer than the column, so the chrome comes off and it becomes plain
-   eyebrow text that wraps — rather than a two-line stadium. */
+/* The eyebrow is a mono pill carrying four facts. Uppercase at 0.14em tracking
+   it measures ~590px — wider than the hero copy column at every desktop width
+   below ~1400px — so it has to be able to sit on more than one line.
+   Left to normal wrapping it breaks wherever the text runs out: a fact splits
+   mid-phrase and a "·" strands at the head of the next line. So the facts are
+   marked up as units (`.ep-f`, never broken) and the line breaks are placed
+   rather than discovered: `.ep-br*` are zero-height flex spacers that force a
+   new row, and the "·" that would have landed on the seam is switched off with
+   it. The result is 1, 2 or 3 whole lines, and a separator only ever appears
+   between two facts on the same line.
+   `border-radius:16px` is a stadium on a single line (the radius caps at half
+   the 30px height) and a chip on two — one value, deliberate either way.
+   Below 560px the chrome comes off and it reads as plain eyebrow text. */
 .eyebrow-pill{
-  display:inline-flex;align-items:center;max-width:100%;
+  display:inline-flex;flex-wrap:wrap;align-items:baseline;
+  /* Shrink-to-fit measures the pill against the string UNBROKEN, so a placed
+     break would otherwise leave a box the width of the column with a short
+     first line rattling inside it. `--ep-cap` caps it at its own longest line:
+     N mono characters plus the tracking this eyebrow adds to each, plus the
+     28px padding and 2px border. `ch` measures the face actually in use, so
+     the cap follows a fallback mono rather than assuming JetBrains Mono. */
+  max-width:min(100%, var(--ep-cap, 100%));
+  column-gap:0.6em;row-gap:2px;
   font-family:var(--font-mono);font-size:11px;font-weight:500;
   letter-spacing:0.14em;text-transform:uppercase;line-height:1.5;
   color:var(--color-neutral-600);
-  border:1px solid var(--color-divider);border-radius:999px;
+  border:1px solid var(--color-divider);border-radius:16px;
   padding:6px 14px;
   background:color-mix(in srgb, var(--color-text) 3%, transparent);
 }
+.eyebrow-pill .ep-f{white-space:nowrap}
+.ep-br{flex:0 0 100%;height:0;display:none}
+/* Where the seams go. The copy column is widest in the single-column hero
+   (≤980px) and at the top of the two-column one, so those are the widths that
+   hold one line; the bands between take two, and the narrowest take three.
+   Each threshold is set with headroom over the measured line width, so a
+   fallback mono face cannot push a line past the column. */
+@media (min-width:981px) and (max-width:1399px){
+  /* two lines: "open source · Rust" / "13 adapters… · MIT / Apache-2.0" (50ch) */
+  .eyebrow-pill{--ep-cap:calc(50ch + 7em + 32px)}
+  .ep-br2{display:block}
+  .ep-s2{display:none}
+}
+@media (min-width:981px) and (max-width:1080px){
+  /* three lines: the longest is the adapter link on its own (31ch) */
+  .eyebrow-pill{--ep-cap:calc(31ch + 4.34em + 32px)}
+  .ep-br3{display:block}
+  .ep-s3{display:none}
+}
+@media (max-width:680px){
+  .eyebrow-pill{--ep-cap:calc(50ch + 7em + 32px)}
+  .ep-br2{display:block}
+  .ep-s2{display:none}
+}
+@media (max-width:500px){
+  .eyebrow-pill{--ep-cap:calc(31ch + 4.34em + 32px)}
+  .ep-br3{display:block}
+  .ep-s3{display:none}
+}
+/* The adapter count is a claim with a page behind it — "13" and "5" mean two
+   different things (shipped vs. nightly-verified) and the matrix is where that
+   is spelled out. Inherits the pill's colour so it stays an eyebrow, not a
+   button; only the underline marks it as a destination. */
+.eyebrow-pill a{color:inherit;text-decoration:underline;text-underline-offset:2px;text-decoration-color:var(--color-divider-strong)}
+.eyebrow-pill a:hover{color:var(--color-text)}
 .hero-title{
   font-size:clamp(2.4rem,5.4vw,4.15rem);
   font-weight:500;line-height:1.03;letter-spacing:-0.035em;
@@ -207,9 +260,34 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
 .term-lg .term-body{padding:18px 22px;font-size:0.85rem;line-height:2.1}
 .note{font-size:0.88rem;line-height:1.65;color:var(--color-neutral-600);margin:0;max-width:var(--measure)}
 
-/* — the everyday loop — */
-.grid-loop{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:24px}
+/* — the everyday loop —
+   TWO columns, not four. Unlike the card grids above, these panes hold
+   captured terminal output, and a transcript needs horizontal room the way
+   prose does not: the longest line in the set is 77 characters — 592px at the
+   terminal's type size. Four across even a 1400px shell gives each pane
+   316px, so every one of the four ran off its own edge. Two across gives
+   596px at 1280 and 656px at 1400, which fits every line here but one, and
+   that one wraps with a hanging indent (see .term-lines in organic.css)
+   rather than disappearing. This is why the "spend the extra width on more
+   columns" rule stops at the card grids. */
+.grid-loop{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;align-items:start}
+/* Each cell is self-contained: the terminal ends where its own transcript ends,
+   and the caption sits directly under it. `align-items:start` keeps a cell from
+   being stretched to its row, because a stretched terminal pads the shortfall
+   with black — and empty black inside a terminal frame reads as output that
+   failed to load, not as whitespace. The four transcripts are 15, 3, 5 and 9
+   lines, so equalising rows costs the short panes ~230px of that dead space.
+   The price is ragged bottoms and captions that no longer share a baseline;
+   that is accepted here, since each caption still touches the pane it names. */
 .loop-pane{display:flex;flex-direction:column;gap:var(--space-3);min-width:0}
+/* `pre-wrap` breaks a captured line at its spaces, which is enough for prose
+   output but not for the single long tokens these transcripts carry — a
+   quarantine path, `~/.agentstack/agentstack.toml`, a URL. One of those is
+   wider than the pane on a phone, and with nowhere to break it pushed the
+   terminal into a horizontal scroll. Allowing a break anywhere confines the
+   wrap to the lines that actually need it (a line that fits is untouched), and
+   the hanging indent from `.term-lines > .tl` still shows it as a wrap. */
+.grid-loop .term-lines > .tl{overflow-wrap:anywhere}
 .loop-note{font-size:0.86rem;line-height:1.6;color:var(--color-neutral-600);margin:0}
 .loop-note b{color:var(--color-text);font-weight:600}
 
@@ -230,17 +308,21 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
    560px: the eyebrow pill sheds its chrome. */
 /* Six steps divide evenly by 3 and by 2, so the step grid never orphans. */
 @media (max-width:1180px){
-  .grid-gaps,.grid-loop{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .grid-gaps{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media (max-width:1000px){
   .grid-steps{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media (max-width:980px){
+  /* The loop panes collapse here with the other two-column layouts rather than
+     at 680px: below this a half-shell pane is narrower than the transcripts,
+     and a full-width pane that reads is worth more than two that fold. */
   .hero-split,.start-grid{grid-template-columns:1fr}
+  .grid-loop{grid-template-columns:minmax(0,1fr)}
   .hero-split{gap:40px}
 }
 @media (max-width:680px){
-  .grid-gaps,.grid-loop,.grid-steps{grid-template-columns:minmax(0,1fr)}
+  .grid-gaps,.grid-steps{grid-template-columns:minmax(0,1fr)}
 }
 @media (max-width:820px){
   :root{--shell-pad:20px}
@@ -255,8 +337,25 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
   .section-head,.head-row{margin-bottom:40px}
   .head-row .section-head{flex-basis:100%}
 }
+/* The comment gets its own line, at every width.
+   `.term-row` is a flex row and `.term-row > .cmd` carries `min-width:0`
+   (organic.css) while the trailing `# comment` does not. So flex shrinks the
+   COMMAND — the thing the reader came for — all the way to nothing before it
+   will shrink the comment: at 390px `agentstack init` and `agentstack status`
+   both measured `clientWidth: 0`, and the longest command here squeezed to a
+   six-character column that wrapped one letter per line.
+   The column is ~63 characters at 1280 and the longest row is 43 characters of
+   command plus a 60-character comment, so no shrink policy makes that row fit
+   on one line — the pair has to break. Giving the comment a full-width basis
+   breaks it in the one place that reads correctly: the command stays whole on
+   its own line beside the prompt, and its comment sits under it, indented past
+   the prompt so the pairing is still obvious. */
+.term-lg .term-row{flex-wrap:wrap;row-gap:2px}
+.term-lg .term-row > .cm{flex:1 0 100%;min-width:0;padding-left:calc(1ch + 12px)}
 @media (max-width:560px){
-  .eyebrow-pill{border:0;background:none;padding:0;display:block}
+  /* Chrome off, but still the placed-seam flex row: plain eyebrow text whose
+     facts stay whole and whose separators still sit between two of them. */
+  .eyebrow-pill{border:0;background:none;padding:0;display:flex}
   /* Two rows, not three: at this width the brand plus both controls only fit
      on one line once the controls give back their desktop padding. */
   .nav-brand img{width:26px;height:26px}
@@ -298,9 +397,19 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
     <div class="shell">
       <div class="hero-split">
         <div class="hero-copy">
-          <span class="eyebrow-pill">open source · Rust · 13 CLI adapters · MIT / Apache-2.0</span>
+          <span class="eyebrow-pill"
+            ><span class="ep-f">open source</span
+            ><span class="ep-s" aria-hidden="true">·</span
+            ><span class="ep-f">Rust</span
+            ><span class="ep-s ep-s2" aria-hidden="true">·</span
+            ><span class="ep-br ep-br2" aria-hidden="true"></span
+            ><span class="ep-f"><a href="adapters.html">13 adapters, 5 nightly-verified</a></span
+            ><span class="ep-s ep-s3" aria-hidden="true">·</span
+            ><span class="ep-br ep-br3" aria-hidden="true"></span
+            ><span class="ep-f">MIT / Apache-2.0</span
+          ></span>
           <h1 class="hero-title">One agent setup. Every coding CLI.</h1>
-          <p class="hero-lede">AgentStack collects the MCP servers, skills and instructions you already use into one <code>.agentstack/</code> directory in your project, then renders them back as native configuration for every supported CLI. Named toolsets switch by project or task, and every change stays understandable and recoverable.</p>
+          <p class="hero-lede">AgentStack collects the MCP servers, skills and instructions you already use into one <code>.agentstack/</code> directory, then <strong>serves them live</strong> to your coding CLIs — so the project stays clean. What no live channel can carry, and every tool without MCP, is written into native files instead. Named toolsets switch by project or task, and every change stays understandable and recoverable.</p>
           <div class="term hero-cmd">
             <div class="term-row"><span class="pr">$</span><span class="cmd">curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh</span></div>
             <div class="term-row"><span class="pr">$</span><span class="cmd">agentstack init</span></div>
@@ -312,7 +421,7 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
         </div>
         <figure class="hero-proof">
           <img src="demos/first-value.svg" alt="Recorded proof: two CLIs with different half-setups — import once, render both native formats, doctor clean, restore byte-for-byte" width="715" height="510">
-          <figcaption>Two CLIs, two half-setups → one import → both in sync → clean <code>doctor</code> → byte-for-byte restore. Condensed from a real run.</figcaption>
+          <figcaption>Two half-set-up CLIs → one manifest → served live → files on request → undone. Condensed from a real run of five commands: <code>init</code> is the first of them, not the only one.</figcaption>
         </figure>
       </div>
     </div>
@@ -332,7 +441,7 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
             <div class="gap-mark gap-mark-a"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-700)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" x2="6" y1="3" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg></div>
             <div class="gap-title">Every CLI spells setup differently</div>
           </div>
-          <p class="gap-body">Import your existing configuration once. It then renders the correct native format for every supported client.</p>
+          <p class="gap-body">Import your existing configuration once. AgentStack then routes it per tool: served live over one gateway where the tool speaks MCP, written in the correct native format where it does not.</p>
           <div class="gap-foot">
             <span class="closed-by closed-a">closed by</span>
             <code>agentstack init</code>
@@ -386,7 +495,7 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
       <div class="grid-steps">
         <div class="step">
           <div class="step-num step-a">1</div>
-          <div><div class="step-name">Unify</div><div class="step-body">Import once, render everywhere.</div></div>
+          <div><div class="step-name">Unify</div><div class="step-body">Import once, delivered everywhere.</div></div>
         </div>
         <div class="step">
           <div class="step-num step-b">2</div>
@@ -419,7 +528,7 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
         <div class="section-head">
           <span class="eyebrow">quick start</span>
           <h2>Five minutes to first value</h2>
-          <p>Three commands, then plain files you can open, read and commit.</p>
+          <p>Four commands, then plain files you can open, read and commit. The third is not optional: until the bridge is registered, nothing routed live reaches your tools.</p>
         </div>
         <a class="head-aside" href="tutorial/">Prefer guided? Take the tutorial →</a>
       </div>
@@ -428,13 +537,15 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
           <div class="term term-lg"><div class="term-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="term-title">bash</span></div><div class="term-body">
             <div class="term-row"><span class="pr">$</span><span class="cmd">curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh</span></div>
             <div class="term-row"><span class="pr">$</span><span class="cmd">agentstack init</span><span class="cm"># guided wizard: your CLI configs → one manifest</span></div>
+            <div class="term-row"><span class="pr">$</span><span class="cmd">agentstack x gateway connect --all --write</span><span class="cm"># register the bridge, once, so live delivery reaches your CLIs</span></div>
             <div class="term-row"><span class="pr">$</span><span class="cmd">agentstack status</span><span class="cm"># is it ready — and the one thing that fixes it</span></div>
           </div></div>
-          <div class="term"><div class="term-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="term-title">your-project/</span></div><div class="term-body"><div class="term-lines">your-project/
-├── .agentstack/
-│   ├── agentstack.toml   <span class="cm"># everything your tools may run: servers, skills, instructions</span>
-│   └── .env              <span class="cm"># token values lifted out of your configs (only when init found any)</span>
-└── .gitignore            <span class="cm"># one managed line, so that .env is never committed</span></div></div></div>
+          <div class="term"><div class="term-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="term-title">your-project/</span></div><div class="term-body"><div class="term-lines"><span class="tl">your-project/</span>
+<span class="tl">├── .agentstack/</span>
+<span class="tl">│   ├── agentstack.toml   <span class="cm"># everything your tools may run: servers, skills, instructions</span></span>
+<span class="tl">│   ├── agentstack.lock   <span class="cm"># the pins — exact commits and content digests</span></span>
+<span class="tl">│   └── .env              <span class="cm"># token values lifted out of your configs (only when init found any)</span></span>
+<span class="tl">└── .gitignore            <span class="cm"># two managed lines: a comment, and /.agentstack/.env</span></span></div></div></div>
         </div>
         <div class="start-col">
           <ul class="checklist">
@@ -442,8 +553,8 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
             <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12l5 5L20 6"></path></svg><span>Status says whether it is ready — and the one thing that fixes it.</span></li>
             <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12l5 5L20 6"></path></svg><span>What it leaves behind is plain files you can open, read and commit.</span></li>
           </ul>
-          <p class="note"><code>agentstack yes</code>, <code>undo</code>, <code>up</code>, <code>share</code>, and <code>receive</code> are v0.18.0 and later; the install line above serves the current stable release. <code>agentstack --version</code> says which you have.</p>
-          <p class="note"><code>.agentstack/agentstack.toml</code> records your whole setup — the <a href="concepts.html">manifest</a>. Every CLI-specific file AgentStack writes is rendered from it, and can be regenerated or taken back off at any time. Mostly the system writes it for you — and when you write a skill of your own you don't open it at all: drop the folder under <code>.agentstack/skills/</code>, run <code>agentstack yes</code>, review once, and it is live in every CLI. It holds <code>${GITHUB_TOKEN}</code>-style placeholders, never the token values.</p>
+          <p class="note"><b>The install line above gives you v0.17.1</b> — that is the current stable release, and what <code>/releases/latest</code> resolves to. <code>agentstack yes</code>, <code>undo</code>, <code>up</code>, <code>share</code> and <code>receive</code> — and every transcript further down this page — are <b>v0.18.0-rc.2</b>, a prerelease <code>curl</code> will not hand you unless you name it: <code>AGENTSTACK_VERSION=v0.18.0-rc.2</code>. <code>agentstack --version</code> says which you have.</p>
+          <p class="note"><code>.agentstack/agentstack.toml</code> records your whole setup — the <a href="concepts.html">manifest</a>. Every CLI-specific file AgentStack writes is rendered from it, and can be regenerated or taken back off at any time. Mostly the system writes it for you — and when you write a skill of your own you don't open it at all: drop the folder under <code>.agentstack/skills/</code>, run <code>agentstack yes</code>, review once, and it is live in every CLI. After an import its <code>[servers]</code> block is empty: the server definitions land in your library and the manifest references them by name. The <code>${GITHUB_TOKEN}</code>-style placeholder lives in that library definition — <code>~/.agentstack/lib/servers/github.toml</code> — and neither file ever holds the token value.</p>
           <p class="note">That is the run replayed at the top of this page. Reproduce it fenced with <a href="https://github.com/Tarekkharsa/agentstack/blob/main/examples/first-value-demo/run-demo.sh"><code>examples/first-value-demo/run-demo.sh</code></a> — it asserts every step, so the recording stays accurate.</p>
         </div>
       </div>
@@ -456,43 +567,53 @@ body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var
       <div class="section-head">
         <span class="eyebrow">the everyday loop · one deliberate yes</span>
         <h2>What using it feels like</h2>
-        <p>Four moments, captured from v0.18.0-rc.2 exactly as it prints them — a capture, not a mockup. Everything is automated except the one thing that never is: your yes.</p>
+        <p>Four moments, captured from v0.18.0-rc.2 exactly as it prints them — a capture, not a mockup. Where a transcript is longer than its pane it is cut at a <code>…</code>, and absolute temp paths are shortened to <code>~/your-project</code>; no line is reworded. <b>v0.18.0-rc.2 is a prerelease</b> — the install line above serves v0.17.1, which has none of these commands. Everything is automated except the one thing that never is: your yes.</p>
       </div>
       <div class="grid-loop">
         <div class="loop-pane">
-          <div class="term"><div class="term-body"><div class="term-lines"><span class="pr">$</span> <span>agentstack yes</span>
-<span>→ 1 dropped file ready to go live in this project:</span>
-<span class="ok">  +</span> <span>skill summarize</span> <span class="out">(./skills/summarize)</span>
-<span class="out">      your own work — untracked in git</span>
-<span class="ok">  ✓ pinned 1 skill</span>
-<span>This will write:</span>
-<span>Claude Code</span>
-<span>  → 1 skill to symlink into .claude/skills</span>
-<span>Codex CLI</span>
-<span>  → 1 skill to symlink into .agents/skills</span>
-<span class="out">  …</span></div></div></div>
-          <p class="loop-note"><b>Write a skill: drop the folder, say yes.</b> No manifest edit — it is pinned, recorded, and live in every CLI. The one-step review is only for work that is provably yours; anything that arrived with a clone gets the full staged review. <a href="howto/add-a-skill.html">Add a skill →</a></p>
+          <div class="term"><div class="term-body"><div class="term-lines"><span class="tl"><span class="pr">$</span> <span>agentstack yes</span></span>
+<span class="tl"><span>→ 1 dropped file ready to go live in this project:</span></span>
+<span class="tl"><span class="ok">  +</span> <span>skill summarize</span> <span class="out">(./skills/summarize)</span></span>
+<span class="tl"><span class="out">      Summarize a document into a short brief.</span></span>
+<span class="tl"><span class="out">      your own work — untracked in git</span></span>
+<span class="tl"><span class="ok">  ✓ pinned 1 skill + 2 servers</span></span>
+<span class="tl"><span>This will write:</span></span>
+<span class="tl"><span>Claude Code</span></span>
+<span class="tl"><span class="out">  · MCP servers are served live, not written — nothing for `use` to render here</span></span>
+<span class="tl"><span class="ok">  ✓ skills up to date</span></span>
+<span class="tl"><span>Codex CLI</span></span>
+<span class="tl"><span class="out">  · MCP servers are served live, not written — nothing for `use` to render here</span></span>
+<span class="tl"><span class="ok">  ✓ skills up to date</span></span>
+<span class="tl"><span class="out">…</span></span>
+<span class="tl"><span>Make this live? [y/N]</span></span></div></div></div>
+          <p class="loop-note"><b>Write a skill: drop the folder, say yes.</b> No manifest edit — it is pinned, recorded, and live in every CLI. Nothing is written into the project for it: on an MCP-capable tool the skill is served live. The short review is only for what git says is yours — the project is a git repo and the file is untracked. Outside a repo, or for anything that arrived with a clone, <code>yes</code> refuses the short path and sends you through the full staged review. <a href="howto/add-a-skill.html">Add a skill →</a></p>
         </div>
         <div class="loop-pane">
-          <div class="term"><div class="term-body"><div class="term-lines"><span class="pr">$</span> <span>agentstack undo</span>
-<span>recent changes (newest first)</span>
-<span>  1  </span><span class="out">just now  </span><span>init</span><span class="out">  1 file · Claude Code, Codex CLI, Gemini CLI, …</span>
-<span>  pick a point: </span><span class="ok">agentstack undo --to &lt;n&gt; --write</span></div></div></div>
+          <div class="term"><div class="term-body"><div class="term-lines"><span class="tl"><span class="pr">$</span> <span>agentstack undo</span></span>
+<span class="tl"><span>recent changes (newest first)</span></span>
+<span class="tl"><span>  1  </span><span class="out">just now  </span><span>init</span><span class="out">  7 files · Claude Code, Codex CLI</span></span>
+<span class="tl"><span>  pick a point: </span><span class="ok">agentstack undo --to &lt;n&gt; --write</span></span></div></div></div>
           <p class="loop-note"><b>Take it back, from a timeline.</b> Every write is recorded before it lands; pick a point and revert to it. The revert is recorded too — going one step too far is recoverable. <a href="howto/undo.html">Undo anything →</a></p>
         </div>
         <div class="loop-pane">
-          <div class="term"><div class="term-body"><div class="term-lines"><span class="bad">blocked:</span> <span>web-search tried to reach api.evil.example</span>
-<span>— not in this project's allowed hosts ([policy.egress])</span>
-<span class="out">  nothing was sent · add the host to [policy.egress] if you meant to allow it</span></div></div></div>
-          <p class="loop-note"><b>The seatbelt speaks plainly.</b> A denial says what was stopped, why, that nothing happened, and the one safe next step — backed by a recorded event, on the <a href="enforcement.html">paths where enforcement really runs</a>.</p>
+          <div class="term"><div class="term-body"><div class="term-lines"><span class="tl"><span class="pr">$</span> <span>agentstack guard test "printf 'K=1' &gt; .env"</span></span>
+<span class="tl"><span class="bad">DENY </span> <span>printf 'K=1' &gt; .env</span></span>
+<span class="tl"><span>  blocked: a write to .env was refused — denied by [policy.filesystem] deny rule "!.env" (machine policy — ~/.agentstack/agentstack.toml)</span></span>
+<span class="tl"><span class="out">  nothing was written · edit that [policy.filesystem] rule if this path should be allowed</span></span>
+<span class="tl"><span class="out">…</span></span></div></div></div>
+          <p class="loop-note"><b>The seatbelt speaks plainly.</b> A refusal says what was stopped, why, that nothing happened, and the one safe next step. This one is the machine-policy guard turning down a write to a secret file — cooperative accident protection, wired into every detected CLI as a pre-tool-use hook. Kernel-enforced confinement is a different lane, <code>agentstack run --sandbox</code>; both are mapped on the <a href="enforcement.html">paths where enforcement really runs</a>.</p>
         </div>
         <div class="loop-pane">
-          <div class="term"><div class="term-body"><div class="term-lines"><span class="pr">$</span> <span>agentstack share backend</span>
-<span class="out">  # signed as part of sharing — signing is not a flag</span>
-<span class="pr">$</span> <span>agentstack receive team.astack</span>
-<span class="out">  # staged inert and carded first; a recognized publisher</span>
-<span class="out">  # makes the card shorter — never optional</span></div></div></div>
-          <p class="loop-note"><b>Sharing is signing; receiving is reviewing.</b> A bundle carries the manifest, lock, and pinned content. Nothing a teammate receives activates without their own yes. <a href="howto/team-setup.html">Share a setup →</a></p>
+          <div class="term"><div class="term-body"><div class="term-lines"><span class="tl"><span class="pr">$</span> <span>agentstack share backend</span></span>
+<span class="tl"><span class="out">signing as  </span><span>728a-16ee-41b1-f18a</span> <span class="ok">✓</span></span>
+<span class="tl"><span class="out">bundle      </span><span>backend.astack</span> <span class="out">(manifest + lock + 1 pinned file)</span></span>
+<span class="tl"><span class="pr">$</span> <span>agentstack receive backend.astack</span></span>
+<span class="tl"><span>Review — a shared bundle</span></span>
+<span class="tl"><span class="out">  signed by 6197-28b5-1e88-ffa5 — a publisher you have not recognized before. …</span></span>
+<span class="tl"><span>  Adds 1 skill file</span></span>
+<span class="tl"><span>  The bundle's manifest and lockfile are used to verify these files, not merged — servers, toolsets, and policy do not cross over</span></span>
+<span class="tl"><span class="out">  staged at ~/your-project/.agentstack/quarantine/c362115b… · nothing is active</span></span></div></div></div>
+          <p class="loop-note"><b>Sharing is signing; receiving is reviewing.</b> Only skill and instruction files cross over. The bundle's manifest and lockfile come along to verify those files, not to be merged — the sender's servers, toolsets and policy stay behind. Nothing a teammate receives activates without their own yes. <a href="howto/team-setup.html">Share a setup →</a></p>
         </div>
       </div>
     </div>
