@@ -103,6 +103,7 @@ fn init_args(yes: bool, consented_plan: Option<String>) -> InitArgs {
         include_tool_managed: false,
         yes,
         consented_plan,
+        connect: false,
     }
 }
 

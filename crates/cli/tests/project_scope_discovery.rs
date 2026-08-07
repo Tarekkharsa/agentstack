@@ -38,6 +38,7 @@ fn init_args() -> InitArgs {
         include_tool_managed: false,
         yes: true,
         consented_plan: None,
+        connect: false,
     }
 }
 

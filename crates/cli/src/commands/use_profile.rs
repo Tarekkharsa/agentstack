@@ -661,43 +661,56 @@ pub fn activate(
         );
     }
 
-    // Fail-closed drift gate (--write only): everything resolved above must
-    // still match its agentstack.lock pin before a single byte is
-    // materialized. Unpinned entries pass — recording the first pin below IS
-    // the pinning act, and it re-gates trust via the lock bytes. Drifted or
-    // broken entries block: the human reviews, `agentstack lock` accepts, and
-    // that lock change flips the trust digest for auto mode. The statuses are
-    // classified from the already-resolved sets, so what we verify is exactly
-    // what we materialize and record.
+    // Fail-closed drift gate: everything resolved above must still match its
+    // agentstack.lock pin before a single byte is materialized. Unpinned
+    // entries pass — recording the first pin below IS the pinning act, and it
+    // re-gates trust via the lock bytes. Drifted or broken entries block: the
+    // human reviews, `agentstack lock` accepts, and that lock change flips the
+    // trust digest for auto mode. The statuses are classified from the
+    // already-resolved sets, so what we verify is exactly what we materialize
+    // and record.
+    //
+    // ENFORCED on `--write` only, but ASKED in both modes. A dry run that
+    // skipped the question could not know its own write would refuse, and it
+    // closed by naming that write — the P8-G2 family, one gate deeper than the
+    // per-target trust refusals below. Only the reporting is new; the gate
+    // itself has not moved, and a preview still writes nothing either way.
+    let lock = Lock::load(&ctx.dir)?;
+    let skill_statuses: Vec<_> = resolved_skills
+        .iter()
+        // A keep-pinned skill is drifted BY DEFINITION — that is what the
+        // human was asked about — and it is not being delivered from the
+        // drifted path anyway, so the fail-closed gate must not stop the
+        // activation over it. A blocked skill is not being delivered at
+        // all. Both were already answered at the consent gate; re-blocking
+        // here would make an answered question unanswerable.
+        .filter(|r| !blocked_names.contains(&r.name) && !pinned_copies.contains(&r.name))
+        .map(|r| {
+            let status =
+                crate::resolve::classify_skill(&r.name, &r.checksum, r.rev.as_deref(), &lock);
+            (r.name.clone(), status)
+        })
+        .collect();
+    let server_statuses: Vec<_> = resolved_servers
+        .iter()
+        .map(|r| {
+            let status = crate::resolve::classify_server(&r.name, &r.checksum, &lock);
+            (r.name.clone(), status)
+        })
+        .collect();
+    let activatable =
+        crate::verify::ensure_activatable(&format!("'{label}'"), &skill_statuses, &server_statuses);
+    // The whole-activation refusal a `--write` would raise here, held for the
+    // preview to report and to close on. `None` on a write: the write raises it
+    // instead of describing it.
+    let mut drift_refusal: Option<String> = None;
+    if let Err(e) = activatable {
+        if args.write {
+            return Err(e);
+        }
+        drift_refusal = Some(format!("{e:#}"));
+    }
     if args.write {
-        let lock = Lock::load(&ctx.dir)?;
-        let skill_statuses: Vec<_> = resolved_skills
-            .iter()
-            // A keep-pinned skill is drifted BY DEFINITION — that is what the
-            // human was asked about — and it is not being delivered from the
-            // drifted path anyway, so the fail-closed gate must not stop the
-            // activation over it. A blocked skill is not being delivered at
-            // all. Both were already answered at the consent gate; re-blocking
-            // here would make an answered question unanswerable.
-            .filter(|r| !blocked_names.contains(&r.name) && !pinned_copies.contains(&r.name))
-            .map(|r| {
-                let status =
-                    crate::resolve::classify_skill(&r.name, &r.checksum, r.rev.as_deref(), &lock);
-                (r.name.clone(), status)
-            })
-            .collect();
-        let server_statuses: Vec<_> = resolved_servers
-            .iter()
-            .map(|r| {
-                let status = crate::resolve::classify_server(&r.name, &r.checksum, &lock);
-                (r.name.clone(), status)
-            })
-            .collect();
-        crate::verify::ensure_activatable(
-            &format!("'{label}'"),
-            &skill_statuses,
-            &server_statuses,
-        )?;
         // D3 pre-render gate: an unverifiable local executable (symlink,
         // traversal, non-regular file, broken declared root) must block HERE,
         // before any native config is materialized — record_lock rejects it
@@ -782,6 +795,13 @@ pub fn activate(
             super::count(server_map.len(), "server"),
             super::count(active_skills.len(), "skill")
         );
+        // The drift gate's answer, where a write would have stopped. Printed
+        // here rather than at the gate itself so it lands under the toolset
+        // header the reader is already looking at, and the error's own review
+        // instructions (`agentstack lock --write`) come through intact.
+        if let Some(why) = &drift_refusal {
+            println!("  {} {why}", "✗".red());
+        }
         // Activation delivers what the manifest declares;
         // dropped-but-undeclared content is not part of this toolset until it
         // is adopted.
@@ -845,7 +865,14 @@ pub fn activate(
     // "on 0 target(s)" printed above the list of files it now manages reads as
     // failure.
     let mut covered_targets: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    let mut blocked_targets: Vec<String> = Vec::new();
+    // Targets a write would refuse. Recorded in BOTH modes (P8-G2): the dry
+    // run's closing line has to consult the gates that decide the write, not a
+    // second reading of them, or it sends the user to a command that refuses.
+    //
+    // A set, not a list, for the same reason `apply` uses one: one target can
+    // be refused by its servers AND its skills, and it is still one blocked
+    // target — the summary counted it twice.
+    let mut blocked_targets: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     // Distinct missing secret names across targets — the final blocked error
     // prints their exact `secret set` commands (see the apply counterpart).
     let mut missing_secrets: std::collections::BTreeSet<String> = Default::default();
@@ -1013,8 +1040,12 @@ pub fn activate(
                     would_manage_config =
                         !blocked && (!plan.managed.is_empty() || !foreign.is_empty());
                     if plan.changed() {
+                        // Recorded in both modes; only the "not written" line
+                        // below belongs to the write.
+                        if blocked {
+                            blocked_targets.insert(desc.display.clone());
+                        }
                         if args.write && blocked {
-                            blocked_targets.push(desc.display.clone());
                             if refused {
                                 println!(
                                     "  {} not written — the project has not been trusted for \
@@ -1118,8 +1149,11 @@ pub fn activate(
             // reports honestly and the command still exits nonzero.
             if let Some(why) = &plan.refusal {
                 println!("  {} {why}", "✗".red());
+                // Both modes — see the servers arm above. (`trust_refusal`
+                // returns `None` for an empty active set, so reaching here
+                // structurally implies there was work to refuse.)
+                blocked_targets.insert(desc.display.clone());
                 if args.write {
-                    blocked_targets.push(desc.display.clone());
                     println!(
                         "  {} skills not materialized — the project has not been trusted for \
                          this content",
@@ -1389,36 +1423,95 @@ pub fn activate(
         } else {
             // A blocked target is a failure, not a footnote: report it in the
             // summary and exit nonzero so scripts can't mistake this for done.
-            println!(
-                "\n{} activated '{}' on {} (wrote {wrote}); {} BLOCKED: {}",
-                "⚠".yellow(),
-                label,
-                super::count(covered_targets.len().max(wrote), "target"),
-                super::count(blocked_targets.len(), "target"),
-                blocked_targets.join(", ")
-            );
-            let fix = if missing_secrets.is_empty() {
-                "each ✗ above names the blocker".to_string()
+            let names = blocked_list(&blocked_targets);
+            if total_failure {
+                // P8-G4. Every target refused, and `total_failure` is the
+                // command's own reading of that — the same one that just
+                // skipped the lockfile pin a few lines above, because an
+                // activation that never happened must leave nothing behind.
+                // The summary line has to obey the same reading: "activated
+                // 'backend' on 4 targets (wrote 0)" over a run that wrote
+                // nothing reads as a partial success where there was none.
+                // The four counted targets are the ones with nothing to do.
+                //
+                // G30's lesson, on a screen rather than an exit code:
+                // continuing and succeeding are separable. Every target's
+                // outcome above still printed; only the claim is withdrawn.
+                println!(
+                    "\n{} '{}' NOT activated — nothing was written; {} BLOCKED: {}",
+                    "✗".red(),
+                    label,
+                    super::count(blocked_targets.len(), "target"),
+                    names
+                );
             } else {
-                let cmds: Vec<String> = missing_secrets
-                    .iter()
-                    .map(|n| format!("agentstack secret set {n}"))
-                    .collect();
-                format!("fix: {} (or pass --allow-unresolved)", cmds.join(" · "))
-            };
+                println!(
+                    "\n{} activated '{}' on {} (wrote {wrote}); {} BLOCKED: {}",
+                    "⚠".yellow(),
+                    label,
+                    super::count(covered_targets.len().max(wrote), "target"),
+                    super::count(blocked_targets.len(), "target"),
+                    names
+                );
+            }
             // Not "unresolved secrets blocked …": a target here can equally be
             // blocked by a policy refusal or by the trust gate, and naming one
             // cause for all of them sends the reader after the wrong fix. Each
-            // ✗ above states its own blocker.
+            // ✗ above states its own blocker. Shared with `apply`, whose write
+            // refuses on the same gates and must not word it differently.
             anyhow::bail!(
-                "{} blocked — {fix}",
-                super::count(blocked_targets.len(), "target")
+                "{} blocked — {}",
+                super::count(blocked_targets.len(), "target"),
+                super::apply::blocked_fix(&missing_secrets)
             );
         }
     } else if !args.quiet {
-        println!("\nDry run. Re-run with {} to apply.", "--write".bold());
+        if drift_refusal.is_some() {
+            // The gate above refuses the WHOLE activation, not a target, so it
+            // is stated as such — and it is stated before the per-target
+            // blockers, because a re-lock is the first thing that has to happen
+            // either way.
+            println!(
+                "\nDry run — {} would refuse this activation: a pinned item has drifted from \
+                 agentstack.lock (the {} above names it).",
+                "--write".bold(),
+                "✗".red()
+            );
+            println!(
+                "  {} review and accept the change: agentstack lock --write",
+                "→".cyan()
+            );
+        } else if blocked_targets.is_empty() {
+            println!("\nDry run. Re-run with {} to apply.", "--write".bold());
+        } else {
+            // P8-G2: the gates above have already decided that `--write` would
+            // refuse these targets, so closing with "Re-run with --write to
+            // apply" would be an instruction that fails. The ✗ lines above
+            // stay — going quiet would be worse — and this line says what they
+            // add up to, in the write's own words.
+            println!(
+                "\nDry run — {} would be BLOCKED, so {} would refuse and write nothing: {}",
+                super::count(blocked_targets.len(), "target"),
+                "--write".bold(),
+                blocked_list(&blocked_targets)
+            );
+            println!(
+                "  {} {}",
+                "→".cyan(),
+                super::apply::blocked_fix(&missing_secrets)
+            );
+        }
     }
     Ok(())
+}
+
+/// The blocked targets as one comma-separated line, in the set's own order.
+fn blocked_list(blocked: &std::collections::BTreeSet<String>) -> String {
+    blocked
+        .iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn strategy_word(s: crate::adapter::descriptor::SkillStrategy) -> &'static str {

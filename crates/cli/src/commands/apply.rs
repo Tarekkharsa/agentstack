@@ -616,6 +616,12 @@ fn render(
     // the summary so a `use backend --write` is never undone silently.
     let mut replaced_profiles: std::collections::BTreeSet<String> =
         std::collections::BTreeSet::new();
+    // The dry run's counterpart to `touched_targets`: every target a write
+    // WOULD have written. A preview has to predict its own write (P8-G3), and
+    // the refusal it must predict is counted in targets — so the count has to
+    // exist in both modes, filled by the same arms that do the writing.
+    let mut would_write_targets: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
 
     for id in &target_ids {
         let Some(desc) = ctx.registry.get(id) else {
@@ -880,11 +886,20 @@ fn render(
                     if plan.changed() {
                         changed_count += 1;
                         changed_targets.insert(desc.display.clone());
+                        // Recorded in BOTH modes. The gate above already
+                        // decided whether a write would land here, and the
+                        // preview's closing line has to consult that same
+                        // decision rather than a second reading of it — a
+                        // dry run that promises what `--write` refuses is
+                        // the whole of P8-G3. `blocked_write` below stays
+                        // gated on `will_write`, so only the REPORT widens.
+                        if blocked {
+                            blocked_targets.insert(desc.display.clone());
+                        }
                         if !quiet {
                             print_body_or_summary(args, &plan.diff());
                         }
                         if will_write && blocked {
-                            blocked_targets.insert(desc.display.clone());
                             if refused {
                                 crate::outln!(
                                     "  {} not written — the project has not been trusted for \
@@ -940,6 +955,13 @@ fn render(
                                 );
                             }
                         } else {
+                            // Dry run. `blocked` gates the prospective count
+                            // exactly as it gates the write above: a target
+                            // the gate would refuse has not been "written" in
+                            // any sense the closing line may count.
+                            if !blocked {
+                                would_write_targets.insert(desc.display.clone());
+                            }
                             crate::outln!(
                                 "  {} {} to apply",
                                 "→".cyan(),
@@ -993,6 +1015,10 @@ fn render(
                 if sp.changed() {
                     changed_count += 1;
                     changed_targets.insert(desc.display.clone());
+                    // Both modes — see the servers arm above.
+                    if sblocked {
+                        blocked_targets.insert(desc.display.clone());
+                    }
                     crate::outln!(
                         "  {} settings → {}",
                         "·".dimmed(),
@@ -1002,7 +1028,6 @@ fn render(
                         print_body_or_summary(args, &sp.diff());
                     }
                     if will_write && sblocked {
-                        blocked_targets.insert(desc.display.clone());
                         crate::outln!("  {} settings not written — unresolved secrets", "✗".red());
                     } else if will_write {
                         let capture = crate::history::capture(
@@ -1019,6 +1044,9 @@ fn render(
                             super::count(sp.managed.len(), "setting")
                         );
                     } else {
+                        if !sblocked {
+                            would_write_targets.insert(desc.display.clone());
+                        }
                         crate::outln!(
                             "  {} {} to apply",
                             "→".cyan(),
@@ -1088,12 +1116,15 @@ fn render(
                 if hp.changed() {
                     changed_count += 1;
                     changed_targets.insert(desc.display.clone());
+                    // Both modes — see the servers arm above.
+                    if hblocked {
+                        blocked_targets.insert(desc.display.clone());
+                    }
                     crate::outln!("  {} hooks → {}", "·".dimmed(), hp.path.display());
                     if !quiet {
                         print_body_or_summary(args, &hp.diff());
                     }
                     if will_write && hblocked {
-                        blocked_targets.insert(desc.display.clone());
                         crate::outln!(
                             "  {} hooks not written — {}",
                             "✗".red(),
@@ -1116,6 +1147,9 @@ fn render(
                             super::count(hp.managed.len(), "hook")
                         );
                     } else {
+                        if !hblocked {
+                            would_write_targets.insert(desc.display.clone());
+                        }
                         crate::outln!(
                             "  {} {} to apply",
                             "→".cyan(),
@@ -1209,12 +1243,15 @@ fn render(
                     if ip.changed() {
                         changed_count += 1;
                         changed_targets.insert(desc.display.clone());
+                        // Both modes — see the servers arm above.
+                        if iblocked {
+                            blocked_targets.insert(desc.display.clone());
+                        }
                         crate::outln!("  {} instructions → {}", "·".dimmed(), ip.path.display());
                         if !quiet {
                             print_body_or_summary(args, &ip.diff());
                         }
                         if will_write && iblocked {
-                            blocked_targets.insert(desc.display.clone());
                             crate::outln!(
                                 "  {} instructions not written — {}",
                                 "✗".red(),
@@ -1243,6 +1280,9 @@ fn render(
                             // must not contribute an ignore entry either —
                             // mirroring the write path's blocked arm.
                             would_write_instructions = !iblocked;
+                            if !iblocked {
+                                would_write_targets.insert(desc.display.clone());
+                            }
                             crate::outln!(
                                 "  {} {} to apply",
                                 "→".cyan(),
@@ -1432,6 +1472,18 @@ fn render(
     }
 
     let written_count = touched_targets.len();
+    // What this pass would leave delivered, counted the same way in both modes:
+    // a write counts what it wrote, a preview counts what it would have written.
+    // The refused-delivery gate at the very bottom reads this, and so does the
+    // dry run's closing line — one reading, so a preview cannot promise a write
+    // that the write then refuses (P8-G3).
+    let effective_written = if will_write {
+        written_count
+    } else {
+        would_write_targets.len()
+    };
+    let delivers_nothing =
+        !live_unconnected.is_empty() && !rendered_content && effective_written == 0;
     // A target can be both written and blocked/failed — e.g. its instructions
     // landed while its server config was refused over an unresolved secret, or
     // its settings write threw after its servers landed. Split the overlap out
@@ -1691,6 +1743,12 @@ fn render(
             );
         }
     } else if rerun_hint {
+        // The same rule in three arms: never close a preview with an
+        // instruction the write would refuse. The first arm is the one that
+        // was already here (validation); the two below it read the gates the
+        // write itself reads, so the family of "a dry run promises what the
+        // write refuses" is closed by construction rather than by three
+        // hand-kept spellings.
         if has_errors {
             // Don't point at `--write` when validation already guarantees it
             // would refuse — the next command is fixing the manifest, not
@@ -1700,6 +1758,32 @@ fn render(
                 super::count(changed_count, "target"),
                 removal_note(removed_count),
                 "✗".red()
+            );
+        } else if !blocked_targets.is_empty() {
+            // Every one of these targets has its own ✗ above; the write bails
+            // on exactly this set. Naming the count and the fix is what makes
+            // the preview predict its own write.
+            crate::outln!(
+                "{} would change{} — but {} would refuse on {}: {}",
+                super::count(changed_count, "target"),
+                removal_note(removed_count),
+                "--write".bold(),
+                super::count(blocked_targets.len(), "target"),
+                blocked_fix(&missing_secrets)
+            );
+        } else if delivers_nothing {
+            // Nothing would reach any tool, so `--write` exits 1 with
+            // "nothing was delivered". The counted fact ("0 targets would
+            // change") is honest on its own; "Re-run with --write" was not.
+            // Both ways forward are already printed above — name them again
+            // here, because this is the line a reader acts on.
+            crate::outln!(
+                "{} would change{} — and {} would deliver nothing here, so it refuses: {} · or \
+                 write files anyway: agentstack x delivery render-locally --write",
+                super::count(changed_count, "target"),
+                removal_note(removed_count),
+                "--write".bold(),
+                super::delivery::CONNECT_THE_BRIDGE
             );
         } else {
             crate::outln!(
@@ -1748,21 +1832,11 @@ fn render(
     // (`doctor --ci` runs its own checks and never reads apply's exit code,
     // and `setup` stops on `write_blockers` before its write pass.)
     if blocked_write {
-        // Name the exact fixes when we know them (missing secrets are by far
-        // the common case); anything else keeps its ✗ line above.
-        let fix = if missing_secrets.is_empty() {
-            "each ✗ above names the blocker".to_string()
-        } else {
-            let cmds: Vec<String> = missing_secrets
-                .iter()
-                .map(|n| format!("agentstack secret set {n}"))
-                .collect();
-            format!("fix: {} (or pass --allow-unresolved)", cmds.join(" · "))
-        };
         anyhow::bail!(
-            "{} on {} — {fix}",
+            "{} on {} — {}",
             super::count(blocked_targets.len(), "blocked write"),
-            super::count(blocked_targets.len(), "target")
+            super::count(blocked_targets.len(), "target"),
+            blocked_fix(&missing_secrets)
         );
     }
 
@@ -1781,7 +1855,7 @@ fn render(
     //    happened".
     //  * No new exit code is invented. `apply` already fails with 1 on a
     //    refused write, and this is a refused delivery.
-    if will_write && !live_unconnected.is_empty() && !rendered_content && written_count == 0 {
+    if will_write && delivers_nothing {
         anyhow::bail!(
             "nothing was delivered: every capability here is routed to the live lane and no \
              bridge is registered — {} · or write files anyway: agentstack x delivery \
@@ -1797,6 +1871,26 @@ fn render(
         written_count: if will_write { written_count } else { 0 },
         gitignore_pending,
     })
+}
+
+/// How to unblock a refused write, in one sentence: the exact `secret set`
+/// commands when the blockers are missing secrets (by far the common case),
+/// otherwise a pointer back to the per-blocker ✗ lines — a target can equally
+/// be blocked by a policy or a trust refusal, and naming one cause for all of
+/// them sends the reader after the wrong fix.
+///
+/// Shared by `apply`'s bail, `apply`'s preview, and `use`'s summary. The three
+/// used to spell it out separately; a preview whose wording drifts from the
+/// write it is predicting is the same defect this seam exists to prevent.
+pub(super) fn blocked_fix(missing_secrets: &std::collections::BTreeSet<String>) -> String {
+    if missing_secrets.is_empty() {
+        return "each ✗ above names the blocker".to_string();
+    }
+    let cmds: Vec<String> = missing_secrets
+        .iter()
+        .map(|n| format!("agentstack secret set {n}"))
+        .collect();
+    format!("fix: {} (or pass --allow-unresolved)", cmds.join(" · "))
 }
 
 /// Print validation issues (unless `quiet`); return true if any are structural

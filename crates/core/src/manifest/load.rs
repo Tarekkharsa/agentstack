@@ -218,9 +218,14 @@ pub fn load_from_contents(
         None
     };
 
-    let manifest: Manifest = base
-        .try_into()
-        .context("manifest does not match the expected schema")?;
+    // The source text is handed over only when it alone produced `base`: a
+    // merged value can no longer be attributed to one layer, and a line number
+    // pointing into the wrong file is worse than none.
+    let manifest = deserialize_manifest(
+        &manifest_path,
+        base,
+        local_text.is_none().then_some(manifest_text),
+    )?;
     crate::util::check_schema_version(
         manifest.version,
         SUPPORTED_MANIFEST_VERSION,
@@ -234,6 +239,105 @@ pub fn load_from_contents(
         local_path,
         user_path: None,
     })
+}
+
+/// Deserialize an already-parsed manifest value, reporting a schema failure the
+/// way every other first-contact error here reads: the FILE it is about, where
+/// in it, and the one concrete edit that repairs it (P8-G7).
+///
+/// serde's own text — ``missing field `version` `` — is true and unusable on
+/// its own: the reader of a hand-written manifest learns neither which file
+/// failed nor what a valid header looks like, and this is the first error that
+/// file hits.
+///
+/// `source` is the text that produced `value`, and only when it alone did: a
+/// [`toml::Value`] carries no source spans, so the error can say WHAT is wrong
+/// but never where. Re-running the typed parse over the original text
+/// reproduces the same failure WITH a span, which is where the line comes
+/// from. Pass `None` once an overlay has been merged in — the cause may live in
+/// either layer then, and a wrong line is worse than no line.
+fn deserialize_manifest(path: &Path, value: toml::Value, source: Option<&str>) -> Result<Manifest> {
+    match value.try_into::<Manifest>() {
+        Ok(manifest) => Ok(manifest),
+        Err(error) => {
+            let line = source
+                .and_then(|text| Some((text, toml::from_str::<Manifest>(text).err()?)))
+                .and_then(|(text, spanned)| Some(line_of(text, spanned.span()?.start)));
+            Err(schema_error(path, &error.to_string(), line))
+        }
+    }
+}
+
+/// Format a manifest schema failure. A ROOT error (`anyhow!`, not `.context()`)
+/// for the same reason the missing-manifest bail is one: `main` prints errors
+/// with `{:#}`, which joins a context chain with ": " — a multi-line fix block
+/// glued onto the tail of a summary line reads as noise.
+fn schema_error(path: &Path, detail: &str, line: Option<usize>) -> anyhow::Error {
+    // The toml crate reports the failing key as a trailing ``\nin `key` ``, and
+    // ends the whole message with a newline. Fold it back onto one line and
+    // keep the key: it is what selects the fix.
+    let detail = detail.trim_end();
+    let (message, table) = match detail.split_once("\nin `") {
+        Some((message, rest)) => (message.trim_end(), rest.strip_suffix('`')),
+        None => (detail, None),
+    };
+    let missing = message
+        .strip_prefix("missing field `")
+        .and_then(|rest| rest.strip_suffix('`'));
+    let key = match (missing, table) {
+        (Some(field), Some(table)) => format!("{table}.{field}"),
+        (Some(field), None) => field.to_string(),
+        (None, Some(table)) => table.to_string(),
+        (None, None) => String::new(),
+    };
+    // What the trailer names depends on the failure: for a MISSING field it is
+    // the table that should have carried it; for anything else it is the
+    // offending key itself. Calling the latter a table would invent a
+    // `[version]` section the schema has never had.
+    let located = match (missing, table) {
+        (Some(_), Some(table)) => format!(" in [{table}]"),
+        (None, Some(key)) => format!(" at `{key}`"),
+        (_, None) => String::new(),
+    };
+    anyhow::anyhow!(
+        "{}{}: {message}{located}\n  {}\n  then re-check:   agentstack doctor",
+        path.display(),
+        line.map(|l| format!(" (line {l})")).unwrap_or_default(),
+        schema_fix(&key, missing.is_some()),
+    )
+}
+
+/// The concrete repair for a failing manifest key, keyed on the DOTTED key so
+/// one arm covers every table of a kind (`servers.kibana.type` and
+/// `servers.figma.type` share a fix). The fallback still names the key and what
+/// to do with it rather than leaving the reader to guess.
+fn schema_fix(key: &str, missing: bool) -> String {
+    let leaf = key.rsplit('.').next().unwrap_or(key);
+    match (key, leaf) {
+        ("version", _) if missing => format!(
+            "every manifest starts with its schema version — add this as the first line:\
+             \n    version = {SUPPORTED_MANIFEST_VERSION}"
+        ),
+        ("version", _) => format!(
+            "the schema version is a plain number — set:\
+             \n    version = {SUPPORTED_MANIFEST_VERSION}"
+        ),
+        (k, "type") if k.starts_with("servers.") => "every [servers.X] table declares how the \
+             server runs — add one of:\n    type = \"stdio\"   # a local command\n    \
+             type = \"http\"    # a remote URL"
+            .to_string(),
+        (k, "event" | "command") if k.starts_with("hooks.") => "every [hooks.X] table needs both \
+             keys, for example:\n    event = \"PreToolUse\"\n    command = \"./scripts/check.sh\""
+            .to_string(),
+        _ if key.is_empty() => "correct the manifest's contents to match the schema".to_string(),
+        _ if missing => format!("`{key}` is required — add it to this manifest"),
+        _ => format!("correct the value of `{key}` in this manifest"),
+    }
+}
+
+/// 1-based line of a byte offset in `text`.
+fn line_of(text: &str, offset: usize) -> usize {
+    text.get(..offset).unwrap_or(text).matches('\n').count() + 1
 }
 
 /// One successfully parsed machine-policy source. The digest is computed from
@@ -293,14 +397,16 @@ fn machine_manifest() -> Option<Result<MachineManifestSource>> {
             return Some(Err(anyhow::anyhow!("reading {}: {e}", path.display())));
         }
     };
-    let manifest: Manifest = match toml::from_str(&text) {
+    // The machine manifest is hand-written too, so its schema failures get the
+    // same file/line/fix treatment as a project's — via the same seam, parsing
+    // to a value first so a SYNTAX error (which already carries its own caret)
+    // stays distinct from a SCHEMA error (which needs the fix taught).
+    let manifest = match toml::from_str::<toml::Value>(&text)
+        .with_context(|| format!("parsing {}", path.display()))
+        .and_then(|value| deserialize_manifest(&path, value, Some(&text)))
+    {
         Ok(m) => m,
-        Err(e) => {
-            return Some(Err(anyhow::anyhow!(
-                "{} is unreadable: {e}",
-                path.display()
-            )))
-        }
+        Err(e) => return Some(Err(e)),
     };
     if let Err(e) = crate::util::check_schema_version(
         manifest.version,
@@ -718,6 +824,81 @@ mod tests {
         fs::write(&path, "[servers]\n").unwrap();
         let err = format!("{:#}", load_from_dir(tmp.path()).unwrap_err());
         assert!(err.contains("version"), "{err}");
+    }
+
+    /// P8-G7 — a schema failure must name the FILE, where in it, and the one
+    /// concrete edit that repairs it. Before this, every one of these printed
+    /// only ``manifest does not match the expected schema: missing field `x` ``:
+    /// no path, no line, and nothing a hand-written manifest's author could act
+    /// on.
+    #[test]
+    fn schema_errors_name_the_file_the_line_and_the_fix() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let path = tmp.path().join(MANIFEST_FILE);
+        let err = |text: &str| {
+            fs::write(&path, text).unwrap();
+            format!("{:#}", load_from_dir(tmp.path()).unwrap_err())
+        };
+
+        // The reported gap: no top-level `version`.
+        let msg = err("[servers]\n");
+        assert!(msg.contains(&path.display().to_string()), "names it: {msg}");
+        assert!(msg.contains("missing field `version`"), "{msg}");
+        assert!(msg.contains("version = 1"), "teaches the fix: {msg}");
+        assert!(msg.contains("agentstack doctor"), "{msg}");
+
+        // Its siblings on the same seam: a required key inside a table, and a
+        // key whose VALUE has the wrong type. Both name the table, the line,
+        // and their own fix — not the version one.
+        let msg = err("version = 1\n\n[servers.kibana]\nurl = \"https://x\"\n");
+        assert!(msg.contains(&path.display().to_string()), "{msg}");
+        assert!(msg.contains("missing field `type`"), "{msg}");
+        assert!(msg.contains("[servers.kibana]"), "names the table: {msg}");
+        assert!(msg.contains("(line 3)"), "names the line: {msg}");
+        assert!(msg.contains("type = \"stdio\""), "teaches the fix: {msg}");
+        assert!(!msg.contains("version = 1\n"), "not the version fix: {msg}");
+
+        let msg = err("version = \"one\"\n");
+        assert!(msg.contains(&path.display().to_string()), "{msg}");
+        assert!(msg.contains("expected u32"), "{msg}");
+        assert!(msg.contains("at `version`"), "names the key: {msg}");
+        // A wrong VALUE is located at its key, never dressed up as a table —
+        // the schema has no `[version]` section to send anyone looking for.
+        assert!(!msg.contains("[version]"), "{msg}");
+        assert!(msg.contains("version = 1"), "teaches the fix: {msg}");
+
+        // Negative control 1: a SYNTAX error keeps its own (already spanned)
+        // report and is not dressed up as a missing key.
+        let msg = err("version = 1\n[servers\n");
+        assert!(msg.contains("TOML parse error"), "{msg}");
+        assert!(!msg.contains("is required"), "{msg}");
+
+        // Negative control 2: a valid manifest still loads, and nothing about
+        // WHICH manifests are accepted changed.
+        fs::write(
+            &path,
+            "version = 1\n[servers.kibana]\ntype = \"http\"\nurl = \"https://x\"\n",
+        )
+        .unwrap();
+        assert!(load_from_dir(tmp.path()).is_ok());
+    }
+
+    /// With an overlay merged in, the failure can no longer be attributed to
+    /// one layer — so no line is claimed (a wrong line is worse than none),
+    /// while the file and the fix are still named.
+    #[test]
+    fn a_merged_overlay_suppresses_the_line_but_not_the_fix() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        fs::write(tmp.path().join(MANIFEST_FILE), "[servers]\n").unwrap();
+        fs::write(
+            tmp.path().join(LOCAL_FILE),
+            "[servers.local]\ntype = \"stdio\"\n",
+        )
+        .unwrap();
+        let msg = format!("{:#}", load_from_dir(tmp.path()).unwrap_err());
+        assert!(msg.contains(MANIFEST_FILE), "{msg}");
+        assert!(msg.contains("version = 1"), "{msg}");
+        assert!(!msg.contains("(line "), "no line may be claimed: {msg}");
     }
 
     #[test]

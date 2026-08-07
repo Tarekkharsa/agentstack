@@ -18,11 +18,16 @@ use indexmap::IndexMap;
 use owo_colors::OwoColorize;
 
 use crate::adapter::{extract_servers_with_skips, extract_settings, Registry};
-use crate::cli::{InitArgs, SecretStore};
+use crate::cli::{ConnectArgs, InitArgs, SecretStore};
 use crate::discover::{lift_secrets, merge_servers, Lifted};
 use crate::manifest::load::MANIFEST_FILE;
 use crate::manifest::model::{Delivery, Manifest, Meta, Server, Targets};
 use crate::secret::{env_file, keychain};
+
+/// The command that registers the bridge — what `--connect` does for you, and
+/// what every one of init's "not connected yet" disclosures points at. One
+/// constant so those surfaces cannot drift into naming different commands.
+const GATEWAY_CONNECT: &str = "agentstack x gateway connect --all --write";
 
 /// Store lifted secret values, collecting the references whose store write
 /// failed instead of aborting init or silently dropping them. The manifest
@@ -644,6 +649,12 @@ fn run_gated(args: &InitArgs, manifest_dir: Option<&Path>, interactive: bool) ->
                 // above on purpose) — but the wizard must still honour it.
                 project_servers: args.project_servers,
                 include_tool_managed: args.include_tool_managed,
+                // `--connect` is consent already given, so the wizard states
+                // the registration instead of asking a question the user has
+                // answered. It deliberately does NOT make the run scripted
+                // (see `bare` above): the import still shows its review and
+                // still asks its own confirm.
+                connect: args.connect,
             };
             return super::setup::run(&wizard, manifest_dir);
         }
@@ -1683,6 +1694,18 @@ version = 1
             "✅".dimmed(),
             manifest_path.display()
         );
+        // `--connect` asked for a registration there is nowhere to make: no
+        // supported CLI was detected, so there is no config to put a bridge
+        // in. Say so rather than letting the flag pass silently — a flag that
+        // parses and then does nothing without a word is how a user comes to
+        // believe a machine is wired when it is not.
+        if args.connect {
+            println!(
+                "\n{} --connect had nothing to register: no supported CLI was detected here. \
+                 Install one, then run `{GATEWAY_CONNECT}`.",
+                "·".dimmed()
+            );
+        }
         return Ok(true);
     }
 
@@ -1798,11 +1821,17 @@ version = 1
     // is registered. `unconnected_live_harnesses` is empty in exactly the two
     // honest cases (nothing routes live, or the bridge IS registered), so it
     // doubles as the connection reading here.
+    // `--connect` is the second honest case's twin: this very run registers the
+    // bridge a few lines below, so stating "planned live (not connected)" here
+    // would describe a state that ends before the command does. The claim is
+    // still bound to enforcement — the flag is what makes the registration
+    // happen, and the closing summary re-reads the real per-harness state
+    // afterwards, so a registration that failed is reported as such there.
     print!(
         "{}",
         render_delivery_routing(
             &target_defaults,
-            unconnected_live_harnesses(&target_defaults, None).is_empty()
+            args.connect || unconnected_live_harnesses(&target_defaults, None).is_empty()
         )
     );
 
@@ -1957,6 +1986,17 @@ version = 1
                     )
                 }
             }
+        }
+        if args.connect {
+            // A preview never writes, and that includes the machine-wide half.
+            // Naming the exact files keeps `--dry-run --connect` a real
+            // preview of the consent the flag carries; the diff itself is one
+            // command away (`agentstack x gateway connect --all`, dry-run by
+            // default), which is where a per-file review belongs.
+            println!(
+                "Would also register the agentstack bridge in the CLIs installed here \
+                 (their own global config files); nothing was written."
+            );
         }
         return Ok(true);
     }
@@ -2199,6 +2239,19 @@ version = 1
     }
 
     println!("{}  Wrote {}", "✅".dimmed(), manifest_path.display());
+
+    // `--connect` — the one step that makes the default (live) lane deliver
+    // anything. It runs HERE, before the closing summary, so the summary's
+    // per-harness bridge reading is the state this run actually left behind
+    // instead of a "NOT YET CONNECTED" line contradicted three lines later.
+    //
+    // Consent: the flag is the consent, and there is no other trigger. Nothing
+    // infers it — not `--yes`, not an interactive terminal, not a detected
+    // harness. The wizard route never reaches this branch (it passes
+    // `connect: false` and asks/states it in its own ceremony), so a single
+    // registration happens on either route, never two.
+    let bridge_registered_now = args.connect && register_bridge();
+
     if show_next {
         // The one concise success summary (Stage 1.2): manifest path, source
         // CLIs, what was imported, which secrets still need values, and the
@@ -2239,10 +2292,47 @@ version = 1
                 )),
                 renders_servers(&target_defaults, &manifest),
                 renders_anything(&target_defaults, &manifest, server_count),
+                bridge_registered_now,
             )
         );
     }
     Ok(true)
+}
+
+/// Register the bridge for `init --connect`, on the scripted route.
+///
+/// Straight through [`super::connect::run_connect`] — the shipped
+/// `gateway connect` path, called as a library exactly as the wizard's
+/// `offer_bridge` calls it. There is no second registration writer, so the two
+/// routes cannot disagree about what lands in a harness config, and the write
+/// keeps `gateway connect`'s own undo entry.
+///
+/// Failure is reported, never fatal: an import that succeeded must not be
+/// reported as a failure because no harness here can host a bridge. The manual
+/// command is named so the run still ends with a usable next step — the same
+/// rule the wizard's offer follows.
+///
+/// Returns whether the registration ran clean, which is the only thing the
+/// closing summary may treat as "these configs now carry the bridge". A failure
+/// wrote nothing, so the summary keeps its ordinary untouched-configs note.
+fn register_bridge() -> bool {
+    match super::connect::run_connect(&ConnectArgs {
+        harnesses: Vec::new(),
+        all: true,
+        transparent: false,
+        write: true,
+        command: None,
+    }) {
+        Ok(()) => true,
+        Err(err) => {
+            println!(
+                "{} bridge registration failed ({err:#}) — register it later with:\n    {}",
+                "⚠".yellow(),
+                GATEWAY_CONNECT.bold()
+            );
+            false
+        }
+    }
 }
 
 /// Record trust for the manifest `init` just wrote (review finding H1).
@@ -2407,9 +2497,23 @@ fn render_import_summary(
     // Is there ANY rendered-lane work here? When false, `apply --write` writes
     // nothing and must not be offered as the next step.
     rendered_work: bool,
+    // Did THIS run register the bridge (`--connect`)? Then the source configs
+    // are no longer untouched — each gained exactly one entry — and the note
+    // below must say which, or it contradicts the diff printed above it.
+    bridge_registered_now: bool,
 ) -> String {
     let mut out = String::new();
-    out.push_str("\nImport complete.\n");
+    // The headline is the one line a reader is guaranteed to take away, so it
+    // must not say "complete" about a setup that delivers nothing. When the
+    // live lane has no bridge anywhere, this run imported and stopped — the
+    // wizard's close already says exactly that ("Setup imported, not yet
+    // delivering"), and the scripted close now agrees with it instead of
+    // opening with a success the Delivery block below then retracts.
+    if unconnected_live.is_empty() {
+        out.push_str("\nImport complete.\n");
+    } else {
+        out.push_str("\nImported, and not yet delivering.\n");
+    }
     out.push_str(&format!(
         "  Manifest:  {manifest_path}   (the source of truth your CLIs render from)\n"
     ));
@@ -2471,7 +2575,18 @@ fn render_import_summary(
     // described in two uncoordinated places — which is the exact problem this
     // product exists to remove, so it gets named here rather than discovered
     // later as drift.
-    if server_count > 0 && !servers_rendered {
+    if server_count > 0 && bridge_registered_now {
+        // `--connect` just edited these very files, so "unchanged" would be a
+        // lie told directly under the diff that changed them. "Now carry" is
+        // the reading that stays true whether the entry landed in this run or
+        // was already there (a re-import on a connected machine), which is why
+        // it is not phrased as a count of what was added.
+        out.push_str(
+            "  Note:      those CLI configs now carry one agentstack entry — the bridge.\n\
+             \x20            No server was copied back into them; they are served from\n\
+             \x20            this manifest.\n",
+        );
+    } else if server_count > 0 && !servers_rendered {
         // The double-delivery note is false now: `apply` honours the delivery
         // planner, so these servers are never copied into a native config
         // again. The manifest is the one description of them.
@@ -2506,6 +2621,13 @@ fn render_import_summary(
         ));
         out.push_str("             nothing is served until you register the bridge:\n");
         out.push_str("             agentstack x gateway connect --all --write\n");
+        // The same import in ONE command next time. It belongs beside the
+        // two-step form, not instead of it: a user who is already here needs
+        // the command that fixes this run, and a script author needs the flag
+        // that stops the gap from happening at all.
+        out.push_str(
+            "             (or import and register in one step: agentstack init --connect)\n",
+        );
         out.push_str(
             "             agentstack x delivery   (the routing per tool, and how to write \
              files instead)\n",
@@ -3172,6 +3294,7 @@ mod tests {
             None,
             false,
             true,
+            false,
         );
         assert!(out.contains("Manifest:  /tmp/proj/.agentstack/agentstack.toml"));
         assert!(out.contains("From:      Claude Code · Codex CLI"));
@@ -3199,6 +3322,7 @@ mod tests {
             &[],
             &[],
             None,
+            false,
             false,
             false,
         )
@@ -3241,6 +3365,7 @@ mod tests {
             None,
             false,
             false,
+            false,
         );
         assert!(!all_contributed.contains("Also seen:"));
 
@@ -3256,6 +3381,7 @@ mod tests {
             &[],
             &[],
             None,
+            false,
             false,
             false,
         );
@@ -3278,6 +3404,7 @@ mod tests {
             None,
             false,
             true,
+            false,
         );
         assert!(!empty.contains("the CLI configs above are unchanged"));
         assert!(!empty.contains("create-profile"));
@@ -3295,6 +3422,7 @@ mod tests {
             &[],
             &[],
             None,
+            false,
             false,
             false,
         );
@@ -3321,6 +3449,7 @@ mod tests {
             None,
             false,
             false,
+            false,
         );
         assert!(
             unwired
@@ -3345,9 +3474,78 @@ mod tests {
             None,
             false,
             false,
+            false,
         );
         assert!(wired.contains("Delivery:  Claude Code — skills + MCP servers served live"));
         assert!(!wired.contains("NOT YET CONNECTED"));
+    }
+
+    /// The headline is the one line a reader is guaranteed to keep, so it may
+    /// not say "complete" about an import that delivers nothing — and it may
+    /// not say "unchanged" about configs `--connect` just edited.
+    ///
+    /// The negative control is the second half of each pair: the wording only
+    /// changes in the state that earns it, so a future edit cannot make the
+    /// warning unconditional (which would be its own dishonesty) without
+    /// failing here.
+    #[test]
+    fn the_headline_matches_whether_anything_is_actually_delivered() {
+        let summarize = |unconnected: &[String], bridge_now: bool| {
+            render_import_summary(
+                "/m",
+                &["Claude Code".to_string()],
+                2,
+                0,
+                &[],
+                &[],
+                false,
+                &[],
+                unconnected,
+                None,
+                false,
+                false,
+                bridge_now,
+            )
+        };
+
+        let stranded = summarize(&["Claude Code".to_string()], false);
+        assert!(
+            stranded.contains("Imported, and not yet delivering."),
+            "{stranded}"
+        );
+        assert!(!stranded.contains("Import complete."), "{stranded}");
+        // Both repairs: the command for this machine, and the flag that stops
+        // the gap happening at all.
+        assert!(stranded.contains("agentstack x gateway connect --all --write"));
+        assert!(stranded.contains("agentstack init --connect"), "{stranded}");
+        // Nothing was registered, so the ordinary untouched-configs note holds.
+        assert!(
+            stranded.contains("the CLI configs above are unchanged"),
+            "{stranded}"
+        );
+
+        // Negative control 1: a connected live lane keeps the plain headline
+        // and never mentions the flag that fixes a problem it does not have.
+        let delivering = summarize(&[], false);
+        assert!(delivering.contains("Import complete."), "{delivering}");
+        assert!(!delivering.contains("not yet delivering"), "{delivering}");
+        assert!(!delivering.contains("--connect"), "{delivering}");
+
+        // Negative control 2: `--connect` registered the bridge in this run, so
+        // the source configs are no longer untouched and must not be called so.
+        let connected_now = summarize(&[], true);
+        assert!(
+            connected_now.contains("Import complete."),
+            "{connected_now}"
+        );
+        assert!(
+            !connected_now.contains("the CLI configs above are unchanged"),
+            "{connected_now}"
+        );
+        assert!(
+            connected_now.contains("now carry one agentstack entry"),
+            "{connected_now}"
+        );
     }
 
     /// The scripted close ends on the step that makes the DEFAULT lane live.
@@ -3371,6 +3569,7 @@ mod tests {
             &[],
             &["Claude Code".to_string()],
             None,
+            false,
             false,
             false,
         );
@@ -3399,6 +3598,7 @@ mod tests {
             None,
             false,
             true,
+            false,
         );
         assert!(both.contains("Next:      agentstack x gateway connect --all --write"));
         assert!(both.contains("agentstack apply --write"), "{both}");
@@ -3475,6 +3675,7 @@ mod tests {
             include_tool_managed: false,
             yes: false,
             consented_plan: None,
+            connect: false,
         };
         let err = run_gated(&args, Some(dir.path()), false)
             .expect_err("a flagless non-TTY init must refuse");
@@ -3507,6 +3708,7 @@ mod tests {
             include_tool_managed: false,
             yes: false,
             consented_plan: None,
+            connect: false,
         };
         run_gated(&args, Some(dir.path()), false).expect("plan is read-only and never refuses");
         assert!(!dir.path().join(".agentstack").exists());
@@ -3535,6 +3737,7 @@ mod tests {
             include_tool_managed: false,
             yes: false,
             consented_plan: None,
+            connect: false,
         };
         let with_yes = InitArgs {
             yes: true,

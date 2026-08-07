@@ -26,6 +26,7 @@ fn args() -> SetupArgs {
         scope: Some(Scope::Global),
         project_servers: false,
         include_tool_managed: false,
+        connect: false,
     }
 }
 
@@ -141,6 +142,7 @@ fn init_records_its_manifest_and_restore_last_removes_it() {
             include_tool_managed: false,
             yes: false,
             consented_plan: None,
+            connect: false,
         },
         Some(&proj),
     )
@@ -195,6 +197,7 @@ fn init_rolls_back_when_history_cannot_be_recorded() {
             include_tool_managed: false,
             yes: false,
             consented_plan: None,
+            connect: false,
         },
         Some(&proj),
     )

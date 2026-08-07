@@ -64,7 +64,9 @@ The manifest holds `${GITHUB_TOKEN}`-style placeholders, never token values.
 Scripting it instead of answering prompts? `agentstack init --yes` writes the
 manifest without prompting, `--secrets env|keychain|skip` decides where lifted
 values go, and `agentstack init --plan` writes nothing at all and emits the
-detection as JSON. See [use it in CI](howto/ci.md).
+detection as JSON. Add `--connect` to also register the bridge below in the
+same run — it is a machine-wide write, so nothing but that flag asks for it,
+and `--yes` alone never does. See [use it in CI](howto/ci.md).
 
 ## Register the bridge
 
