@@ -12,6 +12,7 @@
 pub mod digest;
 pub mod lock;
 pub mod manifest;
+pub mod paint;
 pub mod refs;
 pub mod scope;
 pub mod secret;

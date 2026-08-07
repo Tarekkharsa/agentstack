@@ -10,9 +10,12 @@
 //! The removal planning lives in [`super::unrender`] — the ordinary render
 //! path run against an empty manifest, shared with `set-mode`'s un-render leg
 //! so the machine exit and a delivery-mode switch can never disagree about
-//! what "nothing of ours rendered here" means. Every write goes through the
-//! same history capture, so an uninstall is itself undoable with
-//! `agentstack restore` right up until the ledger is removed.
+//! what "nothing of ours rendered here" means. Every FILE edit goes through
+//! the same history capture, so those are undoable with `agentstack restore`
+//! right up until the ledger is removed. The skills leg is the exception —
+//! `capture: false`, because the ledger holds bytes and a delivered skill is a
+//! linked directory (G31; see [`crate::history`]) — so the closing copy says
+//! which half that restore covers: [`print_skills_bound`].
 //!
 //! What it does NOT touch, on purpose: the project's `agentstack.toml` (the
 //! thing you would want to keep or commit), any capability's own installed
@@ -22,8 +25,8 @@
 
 use std::path::Path;
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::Result;
-use owo_colors::OwoColorize;
 
 use crate::cli::UninstallArgs;
 use crate::scope::Scope;
@@ -52,6 +55,11 @@ pub fn run(args: &UninstallArgs, manifest_dir: Option<&Path>) -> Result<()> {
 
     let plan = unrender::plan(&ctx, &state, &scopes, /*own_global_only=*/ false)?;
     let mut removals = plan.removals;
+
+    // Read now, while the records still exist: the write below either clears
+    // them (`clear_managed_state`) or deletes the ledger holding them, and by
+    // the closing line there would be nothing left to name.
+    let pruned_skills = pruned_skills(&ctx, &state, &scopes);
 
     let root = crate::manifest::project_root_of(&ctx.dir);
 
@@ -106,6 +114,7 @@ pub fn run(args: &UninstallArgs, manifest_dir: Option<&Path>) -> Result<()> {
             "  {}",
             "Its own state is still under ~/.agentstack (undo with `agentstack restore`).".dimmed()
         );
+        print_skills_bound(&pruned_skills);
     }
     for line in kept_notes(&ctx.dir) {
         println!("  {}", line.dimmed());
@@ -117,6 +126,67 @@ pub fn run(args: &UninstallArgs, manifest_dir: Option<&Path>) -> Result<()> {
             .dimmed()
     );
     Ok(())
+}
+
+/// The materialized skills this uninstall prunes, by name.
+///
+/// Read from the same `managed_skills` records [`unrender::plan`] builds its
+/// skills leg from, over the scopes this run planned — so the notice below
+/// appears exactly when that leg does, and is empty otherwise. Deduplicated
+/// across targets and scopes: one skill delivered to three CLIs is one thing
+/// the user thinks about.
+fn pruned_skills(ctx: &super::Context, state: &State, scopes: &[Scope]) -> Vec<String> {
+    let mut names = Vec::new();
+    for id in ctx.registry.ids() {
+        for &scope in scopes {
+            names.extend(state.managed_skills(&crate::state::target_key(id, scope, &ctx.dir)));
+        }
+    }
+    names.sort_unstable();
+    names.dedup();
+    names
+}
+
+/// Bound the `restore` line printed above this one.
+///
+/// That ledger replays the FILE edits this uninstall made — every removal is
+/// captured into it first — but the skills leg is `capture: false` (see
+/// [`Removal::capture`], and [`crate::history`] for why: the ledger stores
+/// bytes and a delivered skill is a linked directory). So "undo with
+/// `agentstack restore`" was offering an undo that would bring the configs
+/// back and silently leave the skills off. Say which half is which, and name
+/// the command that does put them back.
+///
+/// [`crate::history::SKILLS_COME_OFF_WITH`] is deliberately not reused here:
+/// it names `x uninstall --write`, which is the command the reader just ran.
+/// The reason sentence is shared, because that is the part that must never
+/// drift between Undo surfaces.
+///
+/// Conditional, like the other Undo surfaces: a project that materialized no
+/// skills prints nothing, so this stays a fact about this project rather than
+/// a disclaimer people learn to skip.
+fn print_skills_bound(names: &[String]) {
+    if names.is_empty() {
+        return;
+    }
+    println!(
+        "  {} {} ({})",
+        "·".dimmed(),
+        crate::history::SKILLS_ARE_NOT_RECORDED.dimmed(),
+        names
+            .iter()
+            .map(|n| crate::text::sanitize_line(n))
+            .collect::<Vec<_>>()
+            .join(", ")
+            .dimmed()
+    );
+    println!(
+        "  {} {}",
+        "·".dimmed(),
+        "so that restore puts the files above back, not these — re-materialize them by \
+         activating a toolset that includes them (`agentstack use --write`)"
+            .dimmed()
+    );
 }
 
 /// N2: name what uninstall deliberately KEPT, and say when one of those files

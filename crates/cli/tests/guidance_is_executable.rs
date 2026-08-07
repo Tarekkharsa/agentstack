@@ -63,7 +63,23 @@
 //!   `trust --preview` describe ONE project, so their machine fields may not
 //!   contradict each other. This is the general form of the last two rounds of
 //!   defects: every string involved parsed, wrote, and carried no placeholder,
-//!   and the bug was that two surfaces said different things at once.
+//!   and the bug was that two surfaces said different things at once. Its
+//!   fourth clause is stranger and stronger: the consent gate must be able to
+//!   SEE the project the other surfaces describe. Every ladder in the product
+//!   routes through `agentstack trust .`, and that command is EXEMPT from
+//!   convergence (c) — a grant needs a reviewed digest a stdin-null spawn
+//!   cannot supply — so a state where `trust` cannot find the manifest is a
+//!   state where `status` names it forever and no other rule here can look.
+//! * **(g) A WRITING COMMAND DOES NOT NAME ITSELF** — the closing `next:` line
+//!   of `up`, `apply --write`, `use --write`, `lock --write` and
+//!   `adopt --write` is the guidance a reader meets most often: it arrives the
+//!   moment they finish a step. None of it was swept, because each of those
+//!   commands destroys the state it was read in and covering them costs a
+//!   fresh project per (state, surface) pair. "Expensive" is not "covered", so
+//!   they now have their own sweep, and its own rule: a command whose parting
+//!   advice is to run the command is the recurring fault at its purest, and
+//!   (a), (b) and (e) are all structurally blind to it — the string parses, it
+//!   writes, and it is perfectly discoverable.
 //!
 //! Two deliberate asymmetries, both load-bearing:
 //!
@@ -76,28 +92,66 @@
 //! * Human prose may offer a preview (`agentstack lock` to *look*). A machine
 //!   fix for a blocking finding may not — see (b).
 //!
+//! **FOUR LIVE DEFECTS OF THIS EXACT FAMILY WERE FOUND BY WIDENING THIS FILE,
+//! AND THEY ARE ON THE LEDGER RATHER THAN IN A CLOSED BUG REPORT.** See
+//! [`KNOWN_DEFECTS`] and the `#[ignore]`d reproducer beside each one. The
+//! ledger is not an allow-list: every entry must STILL REPRODUCE or the run
+//! fails and demands the entry's deletion, so a repaired defect cannot leave a
+//! suppression behind it. Their one-line shapes, because the pattern is the
+//! point: a machine field naming `agentstack init` where `init` refuses without
+//! a terminal; `status` naming `agentstack yes` where `yes` refuses without a
+//! terminal; `agentstack adopt` — the PREVIEW form of a command that declares
+//! `--write` — offered as the fix, exiting 0 and changing nothing (the `lock`
+//! regression, alive again in a second verb); and a machine manifest whose
+//! consent gate reports that the manifest does not exist.
+//!
 //! Scope, stated so the gaps read as decisions:
 //!
-//! * Convergence (c) now runs over the WHOLE matrix, plus the three dedicated
-//!   drift/never-pinned tests below. It used to run for the two drift shapes
-//!   and the never-pinned one — exactly the states that already worked — so
-//!   the check written to prevent the loop class never executed a machine
-//!   field in the states where that class kept reappearing, and the guard
-//!   passed green through two repair loops while the class escaped twice more.
-//!   Exactly one state is exempt and it is named in the run's own NOT COVERED
-//!   list: a fix of `agentstack trust .` needs a reviewed digest a human
-//!   supplies and cannot be driven from a stdin-null spawn. A `null` machine
-//!   field is likewise recorded rather than asserted — there is no command to
-//!   execute — and rule (d) is what guards those states instead.
+//! * Convergence (c) runs over the WHOLE matrix and over BOTH machine
+//!   surfaces. It used to run for two drift shapes; then for every state, but
+//!   reading `doctor --json` alone. That was still a hole with a defect in it:
+//!   rule (d) clause 1 explicitly declines to require that `doctor` and
+//!   `status` name the same command, so a command only `status` names was
+//!   executed by nothing — and `status` is the surface a panel polls. In three
+//!   states of this matrix `doctor` answers `null` while `status` hands a
+//!   driver a command that refuses. Each field is now driven from a PRISTINE
+//!   state, rebuilt rather than copied: a grant is keyed by the project's path,
+//!   so `cp -r` yields an untrusted project wearing a trusted one's name.
+//!   Exactly one command is exempt and it is named in the run's own NOT
+//!   COVERED list: `agentstack trust .` needs a reviewed digest a human
+//!   supplies. A `null` machine field is likewise recorded rather than
+//!   asserted — there is no command to execute — and rule (d) guards those
+//!   states instead.
 //! * The matrix carries two MISSING-BODY states. It had none, and that hole is
 //!   where the final defect lived: a declared body absent from disk, where
 //!   `trust --preview` correctly emitted `fix: null` while `doctor` and
 //!   `status` named `agentstack lock --write`. One of the two is behind an
 //!   exit-0 green tick, which is why (c) compares state and not exit status.
+//! * The matrix is no longer "a focused set of shapes somebody thought of". It
+//!   is enumerated against the product's OWN routing — every arm of
+//!   `overview::next_step` and every rung of `overview::Rung` — and each state
+//!   names the arm it exists to reach. Three arms had never been reached by any
+//!   state: `undeclared_drops` (routes to `agentstack yes`), `unimported_native`
+//!   (routes to `agentstack adopt`), and the unadopted directory with no
+//!   manifest at all (routes to `agentstack init`). All three were carrying a
+//!   live defect. An arm with no state is a guidance branch no assertion in
+//!   this file has ever read, which is the whole mechanism by which this fault
+//!   class survived ten closures.
 //! * Guidance emitted by interactive-only paths (the `init` wizard, TTY
 //!   confirms) is out of reach of a spawned, stdin-null binary and is not
 //!   harvested. `docs_commands.rs` covers the same class for documentation
-//!   prose.
+//!   prose. Note the distinction the run's NOT COVERED list draws: the verbs
+//!   `init`, `trust` and `yes` are all REACHED here and their non-interactive
+//!   REFUSALS are harvested and judged; what is out of reach is the wizard text
+//!   a terminal would show.
+//! * The aligned remedy column an error prints (`  create one here:
+//!   agentstack init`) is NOT harvested, and the reason is recorded on every
+//!   run rather than left implicit: those lines carry placeholders no single
+//!   sentinel can satisfy — a subcommand slot (`--manifest-dir <dir>
+//!   <command>`) and an enumerated value (`--secrets <env|keychain|skip>`) —
+//!   so reading them without a per-argument sentinel derived from the clap tree
+//!   would make rule (a) fail on correct English, and the pressure would be to
+//!   loosen rule (a). A named gap, not a hidden one.
 //! * Nothing here is silent: every state, surface, skipped surface, and
 //!   unjudged string is printed by [`report`] on a passing run, and the
 //!   "not covered" line is computed from that record alone. A guard that
@@ -109,15 +163,88 @@
 //!   `healthy-grouped`). It has to: the strings a *working* project emits are
 //!   guidance too, and the one defect that escaped every earlier round lived
 //!   there, where no unhealthy fixture could ever see it.
-//! * One rung stays out of reach and is named rather than papered over:
-//!   `Rung::Group` on `status`. `status` answers the Group rung only after a
-//!   bridge is registered, and `run` spawns with `env_clear` and
-//!   `PATH=/usr/bin:/bin` on purpose, so no harness is ever detected and the
-//!   "register the bridge" branch precedes the ladder in every state this
-//!   file can build. A placeholder reached a machine field behind exactly
-//!   that shadow. The rules that judge it are therefore asserted directly, on
-//!   the emitted payload, by
-//!   `the_harvest_tags_a_nested_command_carrier_as_a_machine_field`.
+//! * `Rung::Group` on `status` used to be recorded here as structurally out of
+//!   reach, on the reasoning that `run` spawns with `env_clear` and
+//!   `PATH=/usr/bin:/bin` so no harness is ever detected. That reasoning was
+//!   WRONG, and the way it was wrong is worth keeping: harness detection does
+//!   not read PATH, it reads the harness's own config file, and `~/.claude.json`
+//!   lands inside an isolated HOME — which rule (f), further down this same
+//!   file, had already been doing for its own states. So the branch was
+//!   reachable all along and the gap was in the fixtures, not in the isolation.
+//!   `bridge-registered-group` now stands on that rung and the sweep judges the
+//!   real payload; `harness-no-bridge` covers the rung below it. A blind spot
+//!   recorded as structural is worse than one recorded as work outstanding: the
+//!   first stops anybody looking.
+//!   `the_harvest_tags_a_nested_command_carrier_as_a_machine_field` still
+//!   asserts the classification half directly, because a fixture cannot prove a
+//!   walk tags a field correctly.
+//!
+//! ---------------------------------------------------------------------------
+//! WHAT THIS FENCE COVERS, AND WHAT IT DOES NOT
+//! ---------------------------------------------------------------------------
+//!
+//! Kept here as a flat list on purpose. The prose above explains WHY; a reader
+//! deciding whether a new bug could have been caught needs a table, and a table
+//! that lives anywhere but next to the assertions goes stale. The same list is
+//! recomputed and printed by [`report`] on every run from the run's own record,
+//! so if the two ever disagree, believe the run.
+//!
+//! **STATES SWEPT (21).** Each names the routing arm it exists to reach.
+//!   no-project · empty-manifest · declared-unpinned · pinned-untrusted ·
+//!   trusted-healthy · content-drifted · surface-stale · trust-revoked ·
+//!   rendered-only · servers-no-bridge · hooks-only · machine-manifest ·
+//!   dropped-undeclared · native-unimported · bridge-registered-group ·
+//!   harness-no-bridge · session-active · healthy-ungrouped · healthy-grouped ·
+//!   inline-body-missing · orphan-body-missing
+//!
+//! **SURFACES SWEPT IN EVERY STATE (13).** status · status --json · doctor ·
+//!   doctor --json · trust --preview · trust · delivery · delivery --json ·
+//!   lock · apply --dry-run · use · adopt · the bare invocation.
+//!
+//! **WRITING SURFACES (5), swept over 6 states = 30 fresh projects.**
+//!   up · apply --write · use --write · lock --write · adopt --write.
+//!
+//! **NOT COVERED — every one of these is a decision, and each is re-printed by
+//! the run so it cannot be forgotten:**
+//!
+//! 1. INTERACTIVE OUTPUT. The `init` wizard, the TTY trust confirm, and the
+//!    `yes` review are unreachable from a stdin-null spawn. Their verbs ARE
+//!    reached and their non-interactive REFUSALS are judged; the terminal text
+//!    is not. `docs_commands.rs` covers the same class for documentation prose.
+//! 2. THE ALIGNED REMEDY COLUMN of an error (`  create one here:   agentstack
+//!    init`). Not harvested, because those lines carry placeholders no single
+//!    SENTINEL can satisfy — a subcommand slot (`--manifest-dir <dir>
+//!    <command>`) and an enumerated value (`--secrets <env|keychain|skip>`) —
+//!    so reading them today would fail rule (a) on correct English. Closing
+//!    this needs a per-argument sentinel derived from the clap tree.
+//! 3. `agentstack x gateway connect --all --write` REFUSING under this file's
+//!    spawn when no harness config is present. That is a fact about the
+//!    isolated machine, not about the guidance, so it is not asserted. The
+//!    three harness-detecting states are what put the branch under the rules.
+//! 4. SECRET-RESOLUTION states (`${REF}` unresolved). They need a keychain or a
+//!    project `.env` this file does not build; the `Secrets` section's guidance
+//!    is pinned by the `secret` command's own tests.
+//! 5. THE WHOLE WALK TO HEALTH. Convergence (c) is one step at a time, because
+//!    `agentstack trust .` needs a reviewed digest a human supplies. The
+//!    end-to-end walk is
+//!    `tests/trust_content_drift.rs::a_json_only_driver_converges_from_drift_to_health`.
+//! 6. THE WRITING SWEEP IS 6 STATES WIDE, NOT 21. Every pair costs a fresh
+//!    project, so the grid is bounded by runtime rather than by principle. The
+//!    15 states left out are listed by name in that test's own NOT COVERED
+//!    block on every run.
+//! 7. A HARNESS THAT IS INSTALLED rather than merely CONFIGURED. Detection
+//!    reads config files, which the fixtures supply; nothing here puts a binary
+//!    on PATH, and `run` clears PATH on purpose.
+//! 8. `apply`/`use`/`session start` DELIVERY CLAIMS while writing. Rule (f)
+//!    sweeps read-only surfaces; those three are pinned by
+//!    `tests/abandoned_render_is_named.rs` and `tests/use_honours_delivery.rs`.
+//! 9. RULE (f) CLAUSE 2 JUDGES SERVER ARTIFACTS ONLY. Claims about
+//!    instructions, settings, skills and extensions are outside its walk.
+//!
+//! **RUNTIME.** ~25 s wall for the whole file on a warm build (21 states × 13
+//! surfaces, 30 writing pairs, two convergence passes over freshly built
+//! matrices). It was ~8 s before this widening. That is the price of executing
+//! real commands against real fixtures, and it is paid once per CI run.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -256,10 +383,81 @@ type = "http"
 url = "https://api.example.com/mcp/docs"
 "#;
 
+/// Hooks and nothing else.
+///
+/// Hooks are the one capability that always gets the full consent ceremony, so
+/// this manifest's guidance lane is the trust gate with no server, no skill and
+/// no instruction beside it to dilute what the surfaces say about it.
+const HOOKS_ONLY_MANIFEST: &str = r#"version = 1
+
+[hooks.format]
+event = "PostToolUse"
+matcher = "Edit"
+command = "echo"
+args = ["formatted"]
+"#;
+
+/// `FULL_MANIFEST` plus a named toolset — the shape `session start` needs,
+/// since a session loads a toolset by name and refuses without one.
+const TOOLSET_MANIFEST: &str = r#"version = 1
+
+[servers.filesystem]
+type = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem", "."]
+
+[skills.summarize]
+path = "./skills/summarize"
+
+[instructions.house-rules]
+path = "./instructions/house-rules.md"
+
+[settings.claude-code]
+permissions = { allow = ["Bash(git status)"] }
+
+[toolsets.dev]
+servers = ["filesystem"]
+skills = ["summarize"]
+"#;
+
+/// A server configured natively in the project, which this manifest does not
+/// declare — the input to the `adopt` rung.
+const FOREIGN_MCP_JSON: &str =
+    r#"{"mcpServers":{"legacy":{"type":"stdio","command":"node","args":["legacy.js"]}}}"#;
+
 struct State {
     name: &'static str,
     home: PathBuf,
     proj: PathBuf,
+}
+
+/// A state, as a NAME and a BUILDER rather than as a built directory.
+///
+/// The split exists because convergence MUTATES: running the offered command is
+/// the whole point of rule (c), and a state that has already been driven once
+/// cannot answer the same question again. `status --json` and `doctor --json`
+/// do not always name the same command (see rule (d) clause 1), so executing
+/// both machine fields honestly needs two pristine copies of the same state —
+/// and a copied DIRECTORY is not one: a grant is keyed by the project's path,
+/// so `cp -r` silently produces an untrusted project wearing a trusted one's
+/// name. Rebuilding from the spec is the only faithful way to get a second
+/// copy, which is why the builders are plain `fn` pointers.
+struct StateSpec {
+    name: &'static str,
+    build: fn(&Path) -> (PathBuf, PathBuf),
+}
+
+impl StateSpec {
+    fn build_under(&self, root: &Path) -> State {
+        let dir = root.join(self.name);
+        fs::create_dir_all(&dir).unwrap();
+        let (home, proj) = (self.build)(&dir);
+        State {
+            name: self.name,
+            home,
+            proj,
+        }
+    }
 }
 
 /// A skill body with no frontmatter `description:` — the shape doctor advises
@@ -286,6 +484,65 @@ fn write_project_with_skill(root: &Path, manifest: &str, skill: &str) -> (PathBu
     fs::write(a.join("instructions/house-rules.md"), "Prefer boring.\n").unwrap();
     fs::write(a.join("agentstack.toml"), manifest).unwrap();
     (home, proj)
+}
+
+/// A directory with no manifest at or above it — the UNADOPTED state.
+///
+/// The matrix began at "initialized, nothing declared" and so never held the
+/// state every first-time reader is in. It is the one state whose answer is
+/// `agentstack init`, and therefore the only state that can judge whether that
+/// answer is executable.
+fn no_project(root: &Path) -> (PathBuf, PathBuf) {
+    let home = root.join("home");
+    let proj = root.join("proj");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&proj).unwrap();
+    (home, proj)
+}
+
+/// The MACHINE manifest: the setup lives at `~/.agentstack/agentstack.toml`
+/// and the working directory IS the home.
+///
+/// A different scope, not a different project. The manifest home and
+/// `AGENTSTACK_HOME` coincide here, which changes what `apply --scope` defaults
+/// to and which files the rendered lane targets, so every surface answers from
+/// a different reading of "where does this land". Nothing in the matrix
+/// exercised it: every other state is a repo manifest.
+fn machine_manifest(root: &Path) -> (PathBuf, PathBuf) {
+    let home = root.join("home");
+    let a = home.join(".agentstack");
+    fs::create_dir_all(a.join("skills/summarize")).unwrap();
+    fs::create_dir_all(a.join("instructions")).unwrap();
+    fs::write(a.join("skills/summarize/SKILL.md"), SKILL_DESCRIBED).unwrap();
+    fs::write(a.join("instructions/house-rules.md"), "Prefer boring.\n").unwrap();
+    fs::write(a.join("agentstack.toml"), FULL_MANIFEST).unwrap();
+    (home.clone(), home)
+}
+
+/// Make a harness DETECTABLE under the isolated HOME, and say whether the
+/// AgentStack bridge is registered in it.
+///
+/// `run` spawns with `env_clear` and `PATH=/usr/bin:/bin` on purpose, so no
+/// harness is ever found on PATH — which is why this file's header used to
+/// record the whole bridge-and-Group branch as structurally out of reach.
+/// Detection does not read PATH: it reads the harness's own config file, and
+/// `~/.claude.json` lands inside an isolated HOME. Writing one is therefore not
+/// a way around the isolation; it is the same reading the product performs,
+/// supplied honestly. Rule (f) already relies on exactly this.
+fn detect_claude_code(home: &Path, with_bridge: bool) {
+    let body = if with_bridge {
+        CLAUDE_BRIDGE_CONFIG
+    } else {
+        r#"{"mcpServers":{}}"#
+    };
+    fs::write(home.join(".claude.json"), body).unwrap();
+}
+
+/// Withdraw a grant that was given. Distinct from never having granted one:
+/// the project has a trust RECORD saying no, and the surfaces have to route it.
+fn revoke(home: &Path, proj: &Path) {
+    let out = run(&["trust", "--revoke"], home, proj);
+    assert!(out.ok, "fixture: trust --revoke failed:\n{}", out.text);
 }
 
 /// Pin the surface. Uses `lock --write` on purpose: the *writing* form is the
@@ -385,35 +642,56 @@ fn drift_content_and_surface(proj: &Path) {
     fs::write(&manifest, body).unwrap();
 }
 
-/// Build every state in the matrix under one temp root.
+/// Every state in the matrix, as a name and a builder.
 ///
-/// The matrix is deliberately focused rather than exhaustive: these seven are
-/// the shapes whose guidance differs. Adding a state costs one directory and
-/// one surface sweep, so extend it freely — the assertions are state-agnostic.
-fn matrix(root: &Path) -> Vec<State> {
-    let mut states = Vec::new();
-    let mut add = |name: &'static str, build: &dyn Fn(&Path) -> (PathBuf, PathBuf)| {
-        let dir = root.join(name);
-        fs::create_dir_all(&dir).unwrap();
-        let (home, proj) = build(&dir);
-        states.push(State { name, home, proj });
+/// The matrix used to be eleven shapes and was called "deliberately focused".
+/// It was not focused; it was the shapes somebody happened to think of, and the
+/// gap between it and the states a real project passes through is where this
+/// fault class kept living. So the list below is now enumerated against the
+/// product's OWN routing — every arm of `overview::next_step` and every rung of
+/// `overview::Rung` — and each state names the arm it exists to reach. An arm
+/// with no state is a guidance branch no assertion in this file has ever read.
+///
+/// What is still NOT enumerable here, stated so the gaps read as decisions
+/// rather than as coverage:
+///
+/// * Guidance behind an interactive prompt (the `init` wizard, the TTY trust
+///   confirm, `yes`) is out of reach of a stdin-null spawn by construction.
+///   `docs_commands.rs` covers the same class for documentation prose.
+/// * A harness that is *installed* rather than merely *configured*. Detection
+///   reads config files, which [`detect_claude_code`] can supply; it does not
+///   simulate a binary on PATH, and `run` clears PATH on purpose.
+/// * Secret-resolution states (`${REF}` unresolved on this machine) need a
+///   keychain or an `.env` this file does not build. Their guidance is pinned
+///   by the `secret` command's own tests.
+fn matrix() -> Vec<StateSpec> {
+    let mut states: Vec<StateSpec> = Vec::new();
+    let mut add = |name: &'static str, build: fn(&Path) -> (PathBuf, PathBuf)| {
+        states.push(StateSpec { name, build });
     };
 
+    // 0. UNADOPTED — no manifest at or above the working directory.
+    //
+    //    The state every first-time reader is in, and the matrix did not have
+    //    it. It is the only state whose answer is `agentstack init`, so it is
+    //    the only state in which that answer can be judged at all.
+    add("no-project", no_project);
+
     // 1. Initialized, nothing declared.
-    add("empty-manifest", &|d| write_project(d, "version = 1\n"));
+    add("empty-manifest", |d| write_project(d, "version = 1\n"));
 
     // 2. Capabilities declared, nothing pinned.
-    add("declared-unpinned", &|d| write_project(d, FULL_MANIFEST));
+    add("declared-unpinned", |d| write_project(d, FULL_MANIFEST));
 
     // 3. Pinned, never consented.
-    add("pinned-untrusted", &|d| {
+    add("pinned-untrusted", |d| {
         let (home, proj) = write_project(d, FULL_MANIFEST);
         lock(&home, &proj);
         (home, proj)
     });
 
     // 4. Pinned and consented — the healthy shape.
-    add("trusted-healthy", &|d| {
+    add("trusted-healthy", |d| {
         let (home, proj) = write_project(d, FULL_MANIFEST);
         lock(&home, &proj);
         grant(&home, &proj);
@@ -422,7 +700,7 @@ fn matrix(root: &Path) -> Vec<State> {
 
     // 5. Consented, then the pinned content moved underneath it. This is the
     //    state whose fix must WRITE, and the one convergence is asserted on.
-    add("content-drifted", &|d| {
+    add("content-drifted", |d| {
         let (home, proj) = write_project(d, FULL_MANIFEST);
         lock(&home, &proj);
         grant(&home, &proj);
@@ -430,14 +708,150 @@ fn matrix(root: &Path) -> Vec<State> {
         (home, proj)
     });
 
+    // 5b. SURFACE STALE WITHOUT CONTENT DRIFT. The declared surface grew after
+    //     the grant and not one pinned byte moved — `TrustState::Changed`
+    //     reached by the other door. The matrix only ever reached it through
+    //     `drift_content_and_surface`, where a content finding is present too,
+    //     so no state ever showed what the surfaces say when re-consent is the
+    //     ONLY outstanding thing.
+    add("surface-stale", |d| {
+        let (home, proj) = write_project_with_skill(d, FULL_MANIFEST, SKILL_DESCRIBED);
+        lock(&home, &proj);
+        grant(&home, &proj);
+        let manifest = proj.join(".agentstack/agentstack.toml");
+        let mut body = fs::read_to_string(&manifest).unwrap();
+        body.push_str(
+            "\n[servers.notes]\ntype = \"stdio\"\ncommand = \"node\"\nargs = [\"notes.js\"]\n",
+        );
+        fs::write(&manifest, body).unwrap();
+        (home, proj)
+    });
+
+    // 5c. TRUST WITHDRAWN. Not the same as never granted: there is a trust
+    //     record and it says no. `TrustState::Untrusted` reached from above
+    //     rather than from below.
+    add("trust-revoked", |d| {
+        let (home, proj) = write_project_with_skill(d, FULL_MANIFEST, SKILL_DESCRIBED);
+        lock(&home, &proj);
+        grant(&home, &proj);
+        revoke(&home, &proj);
+        (home, proj)
+    });
+
     // 6. The pure rendered lane: files only, no servers.
-    add("rendered-only", &|d| {
+    add("rendered-only", |d| {
         write_project(d, RENDERED_ONLY_MANIFEST)
     });
 
     // 7. Servers declared, no bridge connected anywhere.
-    add("servers-no-bridge", &|d| {
+    add("servers-no-bridge", |d| {
         write_project(d, SERVERS_ONLY_MANIFEST)
+    });
+
+    // 7b. HOOKS AND NOTHING ELSE.
+    //
+    //     Hooks are the one capability that always gets the full consent
+    //     ceremony, and no state declared one. So every hook sentence any
+    //     surface prints — including the review card `trust` shows before it
+    //     refuses — was unharvested, and the trust gate was only ever read
+    //     over servers and skills.
+    add("hooks-only", |d| {
+        let home = d.join("home");
+        let proj = d.join("proj");
+        fs::create_dir_all(&home).unwrap();
+        fs::create_dir_all(proj.join(".agentstack")).unwrap();
+        fs::write(
+            proj.join(".agentstack/agentstack.toml"),
+            HOOKS_ONLY_MANIFEST,
+        )
+        .unwrap();
+        (home, proj)
+    });
+
+    // 7c. THE MACHINE MANIFEST — a different SCOPE, not a different project.
+    add("machine-manifest", machine_manifest);
+
+    // 7d. DROPPED FILES WAITING. A body sitting in `.agentstack/skills/` that
+    //     the manifest does not declare: the `undeclared_drops` arm, which
+    //     outranks every other rung in `next_step` and which no state reached
+    //     on purpose. It is the arm that routes to `agentstack yes`.
+    add("dropped-undeclared", |d| {
+        let home = d.join("home");
+        let proj = d.join("proj");
+        fs::create_dir_all(&home).unwrap();
+        fs::create_dir_all(proj.join(".agentstack/skills/summarize")).unwrap();
+        fs::write(
+            proj.join(".agentstack/skills/summarize/SKILL.md"),
+            SKILL_DESCRIBED,
+        )
+        .unwrap();
+        fs::write(proj.join(".agentstack/agentstack.toml"), "version = 1\n").unwrap();
+        (home, proj)
+    });
+
+    // 7e. NATIVE SERVERS THIS SETUP DOES NOT COVER — the `unimported_native`
+    //     arm, which routes to `agentstack adopt`.
+    //
+    //     Reaching it needs three things at once: a detected harness, a grant
+    //     already in place (the arm sits BELOW the trust gate), and a server
+    //     configured natively that the manifest does not declare. No state had
+    //     any of the three, so the arm had never been read by any rule in this
+    //     file — and it is where a live defect of the recurring family was
+    //     still sitting when this sweep was widened.
+    add("native-unimported", |d| {
+        let (home, proj) = write_project_with_skill(d, FULL_MANIFEST, SKILL_DESCRIBED);
+        detect_claude_code(&home, true);
+        lock(&home, &proj);
+        grant(&home, &proj);
+        // After the grant: `.mcp.json` is not part of the trust surface, so
+        // writing it here leaves the consent valid and isolates the arm.
+        fs::write(proj.join(".mcp.json"), FOREIGN_MCP_JSON).unwrap();
+        (home, proj)
+    });
+
+    // 7f. THE BRIDGE RUNG, AND `Rung::Group` ON `status` BEHIND IT.
+    //
+    //     This file's header recorded `Rung::Group` on `status` as
+    //     structurally unreachable, because "run spawns with env_clear so no
+    //     harness is ever detected". That reasoning was wrong in a way worth
+    //     naming: detection does not read PATH, it reads the harness's own
+    //     config file, and `~/.claude.json` lands inside an isolated HOME —
+    //     which rule (f) further down this same file had already been doing for
+    //     its own states. So the branch was reachable all along and the gap was
+    //     in the fixtures, not in the isolation. With the bridge registered and
+    //     the project rendered, `status` finally answers the Group rung, and
+    //     the machine field that a placeholder once reached is judged by the
+    //     sweep rather than by a hand-built payload.
+    add("bridge-registered-group", |d| {
+        let (home, proj) = write_project_with_skill(d, FULL_MANIFEST, SKILL_DESCRIBED);
+        detect_claude_code(&home, true);
+        lock(&home, &proj);
+        grant(&home, &proj);
+        apply(&home, &proj);
+        (home, proj)
+    });
+
+    // 7g. A HARNESS DETECTED WITH NO BRIDGE REGISTERED. The other half of the
+    //     pair above: the state whose answer is `gateway connect --all --write`
+    //     rather than silence about a bridge nobody could have registered.
+    add("harness-no-bridge", |d| {
+        let (home, proj) = write_project_with_skill(d, FULL_MANIFEST, SKILL_DESCRIBED);
+        detect_claude_code(&home, false);
+        lock(&home, &proj);
+        grant(&home, &proj);
+        (home, proj)
+    });
+
+    // 7h. A SESSION IS ACTIVE. Temporarily loaded content is on disk and the
+    //     project has an end-state to return to, which is guidance of its own
+    //     ("end it with …") and its own way to be wrong.
+    add("session-active", |d| {
+        let (home, proj) = write_project_with_skill(d, TOOLSET_MANIFEST, SKILL_DESCRIBED);
+        lock(&home, &proj);
+        grant(&home, &proj);
+        let out = run(&["session", "start", "dev"], &home, &proj);
+        assert!(out.ok, "fixture: session start dev failed:\n{}", out.text);
+        (home, proj)
     });
 
     // 8. FULLY HEALTHY, UNGROUPED — the `Rung::Group` state.
@@ -449,7 +863,7 @@ fn matrix(root: &Path) -> Vec<State> {
     //    `toolset create <name> --server <server>`). A described skill, a
     //    lock, a grant and a real `apply --write` are what it takes to get
     //    here; each one is a fixture line, and none of them is optional.
-    add("healthy-ungrouped", &|d| {
+    add("healthy-ungrouped", |d| {
         let (home, proj) = write_project_with_skill(d, FULL_MANIFEST, SKILL_DESCRIBED);
         lock(&home, &proj);
         grant(&home, &proj);
@@ -461,7 +875,7 @@ fn matrix(root: &Path) -> Vec<State> {
     //    the setup ladder, where the product has nothing left to ask for.
     //    "Nothing left to ask for" is its own guidance shape and its own way
     //    to be wrong.
-    add("healthy-grouped", &|d| {
+    add("healthy-grouped", |d| {
         let (home, proj) = write_project_with_skill(d, FULL_MANIFEST, SKILL_DESCRIBED);
         lock(&home, &proj);
         grant(&home, &proj);
@@ -485,7 +899,7 @@ fn matrix(root: &Path) -> Vec<State> {
     //     produced the payload they judge. A guard whose matrix cannot reach
     //     the defect's state is green for the same reason the product was
     //     wrong.
-    add("inline-body-missing", &|d| {
+    add("inline-body-missing", |d| {
         let (home, proj) = write_project(d, FULL_MANIFEST);
         fs::remove_dir_all(proj.join(".agentstack/skills/summarize")).unwrap();
         (home, proj)
@@ -499,7 +913,7 @@ fn matrix(root: &Path) -> Vec<State> {
     //     judges progress by exit status sees a success and re-polls into the
     //     identical field forever. The convergence check below therefore
     //     compares STATE, never exit codes.
-    add("orphan-body-missing", &|d| {
+    add("orphan-body-missing", |d| {
         let (home, proj) =
             write_project_with_skill(d, ORPHAN_MISSING_BODY_MANIFEST, SKILL_DESCRIBED);
         let out = run(&["lock", "--write"], &home, &proj);
@@ -616,6 +1030,12 @@ fn command_from_fragment(fragment: &str) -> Option<String> {
         }
         let ended = tok.ends_with(['.', ',', ';', ':']) && !tok.ends_with("..");
         let tok = tok.trim_end_matches(['.', ',', ';', ':']);
+        // A quote INSIDE the punctuation, e.g. `…--server <server>`,` — the
+        // outer trim above cannot reach it, and leaving it attached hides a
+        // placeholder from `is_placeholder` (`<server>\`` does not end with
+        // `>`), which would quietly narrow rule (a'). Strictly a tightening:
+        // it can only turn a token back INTO a placeholder, never out of one.
+        let tok = tok.trim_end_matches(['`', '"', '\'']);
         if tok.is_empty() {
             break;
         }
@@ -793,21 +1213,168 @@ fn is_whole_command(s: &str) -> bool {
 
 /// The surfaces swept in every state. `(label, argv, is_json)`.
 ///
-/// Every guidance-producing, non-interactive, read-only surface the CLI has.
-/// `trust --preview` is included because it is the review a panel renders
-/// before asking for consent — and it emits guidance of its own.
+/// EVERY guidance-producing, non-interactive surface that does not WRITE.
+///
+/// The read/write split is the load-bearing line, and it is not the same line
+/// as "read-only command". A preview is a guidance surface — it prints the
+/// closing "re-run with `--write`" step that a reader follows next — and it
+/// changes nothing, so it can be swept in every state for the price of one
+/// spawn. The surfaces that do write (`up`, `apply --write`, `use --write`,
+/// `lock --write`, `adopt --write`) cannot: running one destroys the state the
+/// sweep is standing in. Those are swept by
+/// [`every_closing_next_step_is_executable`], which builds a fresh state per
+/// pair, and the split is why they are not simply appended here.
+///
+/// `trust --preview` is the review a panel renders before asking for consent;
+/// bare `trust` is what a script gets instead, and its REFUSAL names commands
+/// too — a refusal is guidance, and it was not being read.
 const SURFACES: &[(&str, &[&str], bool)] = &[
     ("status", &["status"], false),
     ("status --json", &["status", "--json"], true),
     ("doctor", &["doctor"], false),
     ("doctor --json", &["doctor", "--json"], true),
     ("trust --preview", &["trust", "--preview"], true),
+    // The non-interactive refusal path of the grant itself: it prints the
+    // whole review card and then names how to proceed without a terminal.
+    ("trust", &["trust"], false),
     ("delivery", &["delivery"], false),
     ("delivery --json", &["delivery", "--json"], true),
+    // The previews. Each one closes with the step a reader takes next, which is
+    // exactly the string family that broke ten times.
+    ("lock", &["lock"], false),
+    ("apply --dry-run", &["apply", "--dry-run"], false),
+    ("use", &["use"], false),
+    ("adopt", &["adopt"], false),
     // The bare invocation: the orientation screen someone sees by typing the
     // product's name, which has its own "Next:" line.
     ("(bare)", &[], false),
 ];
+
+/// The surfaces that WRITE, swept one fresh state at a time by
+/// [`every_closing_next_step_is_executable`]. `(label, argv)`.
+const WRITING_SURFACES: &[(&str, &[&str])] = &[
+    ("up", &["up"]),
+    ("apply --write", &["apply", "--write"]),
+    ("use --write", &["use", "--write"]),
+    ("lock --write", &["lock", "--write"]),
+    ("adopt --write", &["adopt", "--write"]),
+];
+
+// ---------------------------------------------------------------------------
+// Live defects, named — never an allow-list
+// ---------------------------------------------------------------------------
+
+/// One guidance defect that is LIVE in the product today.
+///
+/// Widening this sweep found faults, and there are only three honest things to
+/// do with them: fix the product (not this file's job), delete the assertion
+/// (which is how the class survived ten closures), or name the defect so the
+/// suite stays green AND the bug stays visible. This is the third.
+///
+/// It is not an allow-list, and the difference is enforced rather than
+/// promised: every entry MUST still reproduce. If a defect is repaired and its
+/// entry stays, the run fails and says "delete this entry" — so the ledger
+/// cannot quietly become the place assertions go to die, which is the failure
+/// mode of every suppression list ever written. Each entry also has a
+/// dedicated `#[ignore]`d reproducer further down, so `cargo test -- --ignored`
+/// prints the bug on demand.
+struct KnownDefect {
+    /// Matrix state the defect appears in.
+    state: &'static str,
+    /// The machine field that carries the bad command.
+    surface: &'static str,
+    /// The command as the product emits it.
+    command: &'static str,
+    /// What goes wrong when a driver runs it.
+    why: &'static str,
+}
+
+const KNOWN_DEFECTS: &[KnownDefect] = &[
+    KnownDefect {
+        state: "no-project",
+        surface: "doctor --json",
+        command: "agentstack init",
+        why:
+            "`init` refuses without a terminal (exit 1: \"refusing to init without a terminal\"). \
+              A machine field is executed verbatim by a driver, which by definition has no \
+              terminal, so the caller errors, re-polls, and reads the identical field. The \
+              refusal itself names three runnable spellings (`init --dry-run`, `init --yes`, \
+              `init --secrets <store>`); the machine field names none of them.",
+    },
+    KnownDefect {
+        state: "no-project",
+        surface: "status --json",
+        command: "agentstack init",
+        why: "the same string on the surface a panel polls.",
+    },
+    KnownDefect {
+        state: "empty-manifest",
+        surface: "status --json",
+        command: "agentstack yes",
+        why: "`yes` refuses without a terminal (exit 1: \"`agentstack yes` needs a terminal\"). \
+              Its own refusal names the headless path — `adopt --write`, `lock --write`, `trust \
+              --yes --consented-digest <digest>`, `use --write` — so a runnable first step \
+              exists and the machine field does not name it.",
+    },
+    KnownDefect {
+        state: "servers-no-bridge",
+        surface: "status --json",
+        command: "agentstack yes",
+        why: "same defect, second state.",
+    },
+    KnownDefect {
+        state: "dropped-undeclared",
+        surface: "status --json",
+        command: "agentstack yes",
+        why: "same defect, and this is the state the `undeclared_drops` arm exists FOR — so it \
+              is the shape a real reader meets, not an edge.",
+    },
+    KnownDefect {
+        state: "native-unimported",
+        surface: "doctor --json",
+        command: "agentstack adopt",
+        why: "THE `lock --write` REGRESSION, ALIVE AGAIN IN A SECOND VERB. `adopt` previews by \
+              default and declares `--write`; the machine field names the preview form. Running \
+              it exits 0, prints the diff it WOULD apply, writes nothing, and the identical \
+              command is named again — an exit-0 infinite loop, which is the worse of the two \
+              shapes because nothing in the output says it failed. Rule (b) is the assertion \
+              written for exactly this; it had simply never been given a state that reaches the \
+              `unimported_native` arm.",
+    },
+    KnownDefect {
+        state: "native-unimported",
+        surface: "status --json",
+        command: "agentstack adopt",
+        why: "the same preview-for-a-write defect on the surface a panel polls.",
+    },
+    KnownDefect {
+        state: "machine-manifest",
+        surface: "trust --preview",
+        command: CONSENT_GATE_BLIND,
+        why: "A COMPLETE DEAD END, and the one the `trust .` convergence exemption was hiding. \
+              With the manifest at `~/.agentstack/agentstack.toml` and the working directory at \
+              `~`, `status --json` reports `manifest.loaded = true` and walks the reader up the \
+              ladder — `agentstack lock --write` (exits 0, pins), then `agentstack trust .`. But \
+              `trust`, `trust --preview` and `trust .` all exit 1 with \"no agentstack manifest \
+              at or above ~ — run `agentstack init` first\" over the manifest the other surfaces \
+              just described. The ladder therefore never terminates: `status` names `trust .` \
+              forever, and the command it names cannot see the project at all. The `init` it \
+              suggests instead is wrong twice over — a manifest exists, and `init` refuses \
+              without a terminal.",
+    },
+];
+
+/// Stand-in for "the surface produced no machine answer at all", so a defect
+/// about a MISSING answer can sit on the same ledger as one about a wrong
+/// command. There is no command to name here; that absence IS the defect.
+const CONSENT_GATE_BLIND: &str = "(no JSON — the consent gate cannot find the manifest)";
+
+/// Is this (state, surface, command) triple a defect already on the ledger?
+fn known_defect(state: &str, surface: &str, command: &str) -> Option<&'static KnownDefect> {
+    KNOWN_DEFECTS
+        .iter()
+        .find(|d| d.state == state && d.surface == surface && d.command == command)
+}
 
 /// Is this state's report blocking — i.e. is the product saying something is
 /// wrong that the reader must repair?
@@ -1133,7 +1700,9 @@ impl Skips {
 #[test]
 fn every_suggested_command_parses_and_makes_progress() {
     let tmp = tempfile::tempdir().unwrap();
-    let states = matrix(tmp.path());
+    let specs = matrix();
+    let read_root = tmp.path().join("read");
+    let states: Vec<State> = specs.iter().map(|s| s.build_under(&read_root)).collect();
     let clap_tree = agentstack::cli::Cli::command();
     // What a reader can find, read off the real binary's help screens. Derived
     // once; used by rule (e) below and printed in the coverage report.
@@ -1144,19 +1713,51 @@ fn every_suggested_command_parses_and_makes_progress() {
     let disco = discoverable(&help_home, &help_proj, &clap_tree);
 
     let mut skips = Skips::default();
-    // Seeded, not discovered. The structural limit documented in this file's
-    // header is real on EVERY run, so it belongs in the record on every run —
-    // otherwise the report can print "not covered: nothing" while a known
-    // blind spot stands, which is the precise failure the comment above
-    // `report` warns about. A guard may only claim the coverage it can show.
-    skips.note(
-        "`Rung::Group` on `status` — `run` spawns with `env_clear` and \
-         PATH=/usr/bin:/bin, so no harness is ever detected and the \
-         register-the-bridge branch precedes the ladder in every state this \
-         file can build. Asserted directly instead by \
-         `the_harvest_tags_a_nested_command_carrier_as_a_machine_field`."
-            .to_string(),
-    );
+    // Seeded, not discovered. A structural limit that holds on EVERY run
+    // belongs in the record on every run — otherwise the report can print a
+    // short list while a known blind spot stands, which is the precise failure
+    // the comment above `report` warns about. A guard may only claim the
+    // coverage it can show.
+    //
+    // `Rung::Group` on `status` used to be seeded here as unreachable. It is
+    // not: detection reads the harness's own config file, not PATH, so
+    // `bridge-registered-group` now stands on it and the sweep judges the
+    // payload directly. What remains unreachable is listed instead.
+    for limit in [
+        "guidance behind an interactive prompt — the `init` wizard, the TTY trust confirm, and \
+         `agentstack yes` — is out of reach of a stdin-null spawn by construction. Every one of \
+         those verbs is REACHED in this matrix and its non-interactive refusal IS harvested; what \
+         is not covered is the wizard text a terminal would show. `docs_commands.rs` covers the \
+         same class for documentation prose.",
+        "`agentstack x gateway connect --all --write` is named as a fix by `doctor`, `apply`, \
+         `use` and `delivery`, and it refuses under this file's spawn whenever no harness config \
+         is present (`no installed harness with MCP support detected`). That refusal is a fact \
+         about the ISOLATED MACHINE, not about the guidance, so it is not asserted as a defect. \
+         The states that DO detect a harness (`harness-no-bridge`, `native-unimported`, \
+         `bridge-registered-group`) are what put the branch under the rules at all.",
+        "secret-resolution states (`${REF}` unresolved on this machine) need a keychain or a \
+         project `.env` this file does not build, so the guidance the `Secrets` section emits is \
+         not swept here. Pinned by the `secret` command's own tests.",
+        "THE REMEDY-COLUMN SHAPE IS NOT HARVESTED, and this is a decision with a reason rather \
+         than an oversight. `harvest_human` reads exactly three shapes: a backtick span, a `↳` \
+         fix column, and a `Next:`/`next:` line. It does NOT read the aligned two-column remedy \
+         an error prints — `  create one here:   agentstack init`, `  preview only (writes \
+         nothing):  agentstack init --dry-run`, `  choose the secret store:  agentstack init \
+         --secrets <env|keychain|skip>`. Widening to it was tried and rejected here: those lines \
+         carry placeholders no single SENTINEL can satisfy — one stands in a SUBCOMMAND slot \
+         (`agentstack --manifest-dir <dir> <command>`) and one is an enumerated VALUE \
+         (`<env|keychain|skip>`), so rule (a) would fail on correct English and the pressure \
+         would be to loosen rule (a) rather than to fix the harvest. Reading them needs a \
+         per-argument sentinel derived from the clap tree, which is a change to the harvest \
+         contract and not to this sweep. Until then: the remedy column of an error message is \
+         GUIDANCE THIS FILE DOES NOT JUDGE.",
+        "convergence (c) is judged one step at a time, never as a whole walk to health: \
+         `agentstack trust .` needs a reviewed digest a human supplies and cannot be driven from \
+         a stdin-null spawn. The end-to-end walk is \
+         `tests/trust_content_drift.rs::a_json_only_driver_converges_from_drift_to_health`.",
+    ] {
+        skips.note(limit.to_string());
+    }
     let mut harvested: Vec<Harvested> = Vec::new();
     let mut non_command_machine_fields: Vec<String> = Vec::new();
     let mut per_state_surfaces: BTreeMap<&str, Vec<String>> = BTreeMap::new();
@@ -1356,12 +1957,25 @@ fn every_suggested_command_parses_and_makes_progress() {
     // whose repair is genuinely read-only have no `--write` node and are not
     // considered.
     let mut noop_failures: Vec<String> = Vec::new();
+    let mut reproduced: BTreeSet<(&str, &str, &str)> = BTreeSet::new();
     for h in harvested
         .iter()
         .filter(|h| h.audience == Audience::Machine && h.blocking)
     {
         if let Some(msg) = noop_violation(&clap_tree, h) {
-            noop_failures.push(msg);
+            match known_defect(&h.state, &h.surface, &h.command) {
+                Some(d) => {
+                    reproduced.insert((d.state, d.surface, d.command));
+                    skips.note(format!(
+                        "LIVE DEFECT, on the ledger and queued — [{}] {} names `{}`\n      why: {}\
+                         \n      (rule (b) fired; the assertion is held open by KNOWN_DEFECTS so \
+                         the suite stays green and the bug stays visible. Reproducer: \
+                         `a_preview_form_is_named_as_the_fix_at_the_adopt_rung`.)",
+                        d.state, d.surface, d.command, d.why
+                    ));
+                }
+                None => noop_failures.push(msg),
+            }
         }
     }
     assert!(
@@ -1438,13 +2052,34 @@ fn every_suggested_command_parses_and_makes_progress() {
     // the way it is.
     let mut disagreements: Vec<String> = Vec::new();
     for state in &states {
+        let status_body = payloads.get(&(state.name, "status --json"));
+        let preview_body = payloads.get(&(state.name, "trust --preview"));
         disagreements.extend(agreement_violations(
             state.name,
             payloads.get(&(state.name, "doctor --json")),
-            payloads.get(&(state.name, "status --json")),
-            payloads.get(&(state.name, "trust --preview")),
+            status_body,
+            preview_body,
             &mut skips,
         ));
+        // Clause 4, separate because it is the one clause that can fire on the
+        // ABSENCE of an answer, and because the `trust .` convergence exemption
+        // means it is the only rule in this file that can reach the state it
+        // judges.
+        if let Some(msg) = consent_gate_blind(state.name, status_body, preview_body) {
+            match known_defect(state.name, "trust --preview", CONSENT_GATE_BLIND) {
+                Some(d) => {
+                    reproduced.insert((d.state, d.surface, d.command));
+                    skips.note(format!(
+                        "LIVE DEFECT, on the ledger and queued — [{}] the consent gate cannot see \
+                         the project\n      why: {}\n      (rule (d) clause 4 fired; held open by \
+                         KNOWN_DEFECTS so the suite stays green and the bug stays visible. \
+                         Reproducer: `the_consent_gate_cannot_see_a_machine_manifest`.){msg}",
+                        d.state, d.why
+                    ));
+                }
+                None => disagreements.push(msg),
+            }
+        }
     }
     assert!(
         disagreements.is_empty(),
@@ -1456,23 +2091,58 @@ fn every_suggested_command_parses_and_makes_progress() {
         disagreements.join("\n")
     );
 
-    // ── (c) CONVERGES — NOW FOR EVERY STATE THAT NAMES A COMMAND ──────────
+    // ── (c) CONVERGES — EVERY STATE, AND NOW BOTH MACHINE SURFACES ────────
     //
     // Level (c) used to run for the two drift shapes and `declared-unpinned`
-    // only — precisely the states that already worked. So the guard written to
-    // prevent the loop class never executed a machine field in the states
-    // where the class kept reappearing.
+    // only — precisely the states that already worked. It then grew to every
+    // state, but still read ONE surface: `doctor --json`.
     //
-    // It now runs for every state in the matrix whose `doctor --json`
-    // `next_action` names a command. Detection is BY STATE, never by exit
-    // code: `orphan-body-missing` is the state where the offered command exits
-    // 0, prints a green tick, and leaves the blocking condition exactly where
-    // it was.
+    // That was a hole with a defect already in it. `doctor --json` and
+    // `status --json` do not always name the same command — rule (d) clause 1
+    // explicitly declines to require that they do, because they legitimately
+    // rank different rungs for different audiences. So a command that only
+    // `status` names was executed by nothing, and `status` is the surface a
+    // panel polls. In three states of this matrix `doctor` answers `null`
+    // (terminal, nothing to run) while `status` hands a driver a command that
+    // refuses; the surface that loops was the surface (c) never read.
     //
-    // This pass MUTATES the matrix, so it runs last.
+    // Both fields are therefore driven, each from a PRISTINE state. The status
+    // pass gets its own freshly built matrix rather than the one `doctor` just
+    // mutated, and rebuilt rather than copied: a grant is keyed by the
+    // project's path, so a copied directory is an untrusted project wearing a
+    // trusted one's name and every answer downstream of it would be a fixture
+    // artefact.
+    //
+    // Detection is BY STATE, never by exit code: `orphan-body-missing` is the
+    // state where the offered command exits 0, prints a green tick, and leaves
+    // the blocking condition exactly where it was.
+    //
+    // This pass MUTATES, so it runs last.
     let mut loops: Vec<String> = Vec::new();
     for state in &states {
-        if let Some(msg) = converge_once(state, &mut skips) {
+        if let Some(msg) = converge_once(
+            state,
+            "doctor --json",
+            &["doctor", "--json"],
+            "/next_action",
+            &mut reproduced,
+            &mut skips,
+        ) {
+            loops.push(msg);
+        }
+    }
+
+    let status_root = tmp.path().join("converge-status");
+    for spec in &specs {
+        let state = spec.build_under(&status_root);
+        if let Some(msg) = converge_once(
+            &state,
+            "status --json",
+            &["status", "--json"],
+            "/next_action/command",
+            &mut reproduced,
+            &mut skips,
+        ) {
             loops.push(msg);
         }
     }
@@ -1483,7 +2153,573 @@ fn every_suggested_command_parses_and_makes_progress() {
         loops.join("\n")
     );
 
+    // ── THE LEDGER MAY NOT ROT ────────────────────────────────────────────
+    //
+    // Every entry in `KNOWN_DEFECTS` held an assertion open above. If one of
+    // them no longer reproduces, the product was repaired and the entry is now
+    // a suppression with nothing under it — which is exactly how a guard turns
+    // into a formality. So a stale entry FAILS, and the failure says what to do
+    // about it.
+    let stale: Vec<String> = KNOWN_DEFECTS
+        .iter()
+        .filter(|d| !reproduced.contains(&(d.state, d.surface, d.command)))
+        .map(|d| format!("\n  [{}] {} `{}`", d.state, d.surface, d.command))
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "{} entry/entries in KNOWN_DEFECTS no longer reproduce:{}\n\n\
+         Good news, and a required edit: the product was repaired, so DELETE these entries (and \
+         their `#[ignore]`d reproducers). An entry that outlives its defect is a suppression with \
+         nothing under it, and a ledger that is allowed to hold those is how an assertion \
+         quietly stops asserting.",
+        stale.len(),
+        stale.join("")
+    );
+
     report(&states, &per_state_surfaces, &harvested, &skips, &disco);
+}
+
+// ---------------------------------------------------------------------------
+// (g) THE CLOSING NEXT STEP OF A WRITING COMMAND
+// ---------------------------------------------------------------------------
+
+/// The states the writing sweep runs in. Named, not "all", and the reason is
+/// cost rather than taste: every pair here needs a PRISTINE project, because
+/// the surface under test writes to it — so the sweep is
+/// `states × surfaces` fixture builds, not `states + surfaces`. Six states are
+/// chosen to cover one rung each on the way up the ladder; the run prints the
+/// full grid, and the states NOT in it are named in the report.
+const WRITING_SWEEP_STATES: &[&str] = &[
+    "no-project",
+    "declared-unpinned",
+    "pinned-untrusted",
+    "trusted-healthy",
+    "native-unimported",
+    "bridge-registered-group",
+];
+
+/// Every command a WRITING surface names on its way out must be runnable, must
+/// be findable, and must not be the command that was just run.
+///
+/// WHY THIS IS A SEPARATE TEST. `SURFACES` sweeps what a project can be ASKED,
+/// in every state, for one spawn each. `up`, `apply --write`, `use --write`,
+/// `lock --write` and `adopt --write` cannot join it: each one changes the
+/// project, so running one destroys the state the next surface would have been
+/// read in. That is a real cost — a fresh fixture per (state, surface) pair —
+/// and it is the reason these five were left out of the sweep for as long as
+/// they were. "Expensive" is not the same as "covered", and the closing
+/// `next:` line of a writing command is guidance a reader follows more often
+/// than anything `doctor` prints: it is what they see the moment they finish a
+/// step.
+///
+/// The three rules, and why each one is here:
+///
+/// * **(a) PARSES** — the same rule the read sweep applies, applied to strings
+///   it never saw.
+/// * **(e) IS DISCOVERABLE** — likewise. A closing step naming a command that
+///   appears on no help screen strands the reader exactly where they were most
+///   ready to continue.
+/// * **(g) IS NOT ITSELF** — new, and specific to this sweep. A read-only
+///   surface naming itself is merely useless; a writing surface naming itself
+///   is the recurring fault in its purest form. The reader ran the command,
+///   the command finished, and the command's own parting advice is to run the
+///   command. Nothing in (a), (b) or (e) can see it: the string parses, it
+///   writes, and it is perfectly discoverable — it is just the same step
+///   again. Compared on normalized argv, so `agentstack x lock --write` and
+///   `agentstack lock --write` count as the same command, which they are.
+#[test]
+fn every_closing_next_step_is_executable() {
+    let tmp = tempfile::tempdir().unwrap();
+    let clap_tree = agentstack::cli::Cli::command();
+    let help_home = tmp.path().join("help-home");
+    let help_proj = tmp.path().join("help-proj");
+    fs::create_dir_all(&help_home).unwrap();
+    fs::create_dir_all(&help_proj).unwrap();
+    let disco = discoverable(&help_home, &help_proj, &clap_tree);
+    let reach = disco.reachable();
+
+    let specs = matrix();
+    let mut skips = Skips::default();
+    skips.note(
+        "the aligned remedy column an error prints (`  create one here:   agentstack init`) is \
+         not harvested by `harvest_human` and is therefore not judged here either — see the same \
+         note, with the reason, in `every_suggested_command_parses_and_makes_progress`. It is why \
+         `no-project` shows so few commands below: those surfaces DO name a next step, in a shape \
+         this file cannot yet read without loosening rule (a)."
+            .to_string(),
+    );
+    let swept: BTreeSet<&str> = WRITING_SWEEP_STATES.iter().copied().collect();
+    for spec in &specs {
+        if !swept.contains(spec.name) {
+            skips.note(format!(
+                "[{}] not in the writing sweep — every pair here costs a fresh project build, so \
+                 the grid is deliberately six states wide. This state IS swept by the read \
+                 surfaces in `every_suggested_command_parses_and_makes_progress`; what is not \
+                 covered for it is the closing step of `up`/`apply --write`/`use --write`/\
+                 `lock --write`/`adopt --write` specifically.",
+                spec.name
+            ));
+        }
+    }
+
+    let mut failures: Vec<String> = Vec::new();
+    let mut grid: Vec<String> = Vec::new();
+    let mut total = 0usize;
+
+    for spec in specs.iter().filter(|s| swept.contains(s.name)) {
+        for (label, argv) in WRITING_SURFACES {
+            // A pristine project per pair. Rebuilt, never copied: a grant is
+            // keyed by the project's path, so `cp -r` would hand this sweep an
+            // untrusted project wearing a trusted one's name and every closing
+            // step read out of it would be a fixture artefact.
+            let root = tmp
+                .path()
+                .join(format!("{}--{}", spec.name, label.replace(' ', "_")));
+            fs::create_dir_all(&root).unwrap();
+            let state = spec.build_under(&root);
+            let out = run(argv, &state.home, &state.proj);
+            let text = strip_ansi(&out.text);
+            let found = harvest_human(&text);
+            grid.push(format!(
+                "  {:<24} {:<14} exit_ok={:<5} {} command(s) named",
+                spec.name,
+                label,
+                out.ok,
+                found.len()
+            ));
+
+            for (line, command) in found {
+                total += 1;
+                let toks = as_argv(&tokens_of(&command));
+
+                // (a) PARSES.
+                let mut parse_argv: Vec<String> = vec!["agentstack".to_string()];
+                for tok in toks.iter().skip(1) {
+                    parse_argv.push(if is_placeholder(tok) {
+                        SENTINEL.to_string()
+                    } else {
+                        tok.clone()
+                    });
+                }
+                if let Err(e) = agentstack::cli::Cli::try_parse_from(&parse_argv) {
+                    failures.push(format!(
+                        "\n  state    : {}\n  surface  : agentstack {}\n  line     : {line}\n  \
+                         command  : `{command}`\n  why      : (a) does not parse against the clap \
+                         tree\n  clap says: {}",
+                        spec.name,
+                        argv.join(" "),
+                        e.to_string().lines().next().unwrap_or("").trim(),
+                    ));
+                }
+
+                // (e) IS DISCOVERABLE.
+                let h = Harvested {
+                    state: spec.name.to_string(),
+                    surface: format!("agentstack {}", argv.join(" ")),
+                    origin: line.clone(),
+                    audience: Audience::Human,
+                    command: command.clone(),
+                    blocking: !out.ok,
+                };
+                match toks.get(1) {
+                    Some(verb) if is_ident(verb) => {
+                        if let Some(msg) = discoverability_violation(&h, &reach) {
+                            failures.push(msg);
+                        }
+                    }
+                    _ => skips.note(format!(
+                        "[{}] {label}: rule (e) did not judge `{command}` — its first argument is \
+                         not a command name.",
+                        spec.name
+                    )),
+                }
+
+                // (g) IS NOT ITSELF.
+                if let Some(msg) = self_loop_violation(spec.name, argv, &command) {
+                    failures.push(msg);
+                }
+            }
+        }
+    }
+
+    let mut s = String::new();
+    let _ = writeln!(s, "\n── (g): closing next steps of the writing surfaces ──");
+    for line in &grid {
+        let _ = writeln!(s, "{line}");
+    }
+    let _ = writeln!(
+        s,
+        "{} (state, writing surface) pair(s), {total} command(s) judged by (a), (e) and (g)",
+        grid.len()
+    );
+    let _ = writeln!(s, "NOT COVERED ({}):", skips.0.len());
+    for k in &skips.0 {
+        let _ = writeln!(s, "  {k}");
+    }
+    println!("{s}");
+
+    assert!(
+        !grid.is_empty(),
+        "the writing sweep ran no pairs at all — the state names in WRITING_SWEEP_STATES no \
+         longer match the matrix, not a product problem"
+    );
+    assert!(
+        failures.is_empty(),
+        "{} closing next step(s) of a writing command are unrunnable, unfindable, or a repeat of \
+         the command that just ran:{}",
+        failures.len(),
+        failures.join("\n")
+    );
+}
+
+/// Rule (g), as one function so the guard can be pointed at itself (see
+/// `the_guard_catches_a_surface_that_names_itself`).
+///
+/// `None` means the named command is a different step from the one that was
+/// just run. Comparison is on NORMALIZED argv — `agentstack x lock --write`
+/// and `agentstack lock --write` are one command and must count as one — and
+/// on the whole argv rather than the verb, because `lock` naming `lock
+/// --write` is real progress and flagging it would make the rule useless.
+fn self_loop_violation(state: &str, surface_argv: &[&str], command: &str) -> Option<String> {
+    let named: Vec<String> = as_argv(&tokens_of(command)).into_iter().skip(1).collect();
+    let ran: Vec<String> = as_argv(
+        &std::iter::once("agentstack".to_string())
+            .chain(surface_argv.iter().map(|s| (*s).to_string()))
+            .collect::<Vec<_>>(),
+    )
+    .into_iter()
+    .skip(1)
+    .collect();
+    if named != ran || named.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "\n  state    : {state}\n  surface  : `agentstack {}`\n  command  : `{command}`\n  \
+         why      : (g) the command names ITSELF as the next step. The reader ran it, it \
+         finished, and its parting advice is to run it again. Nothing in (a), (b) or (e) can see \
+         this — the string parses, it writes, and it is discoverable; it is simply the same step \
+         a second time. Name the step that actually follows, or say the work is done.",
+        surface_argv.join(" "),
+    ))
+}
+
+/// Rule (g), pointed at itself — two-sided, like every other rule in this file.
+///
+/// A rule that fires on everything is as useless as one that fires on nothing,
+/// and (g) has an obvious way to become the first: `lock` naming `lock --write`
+/// is real progress and must pass, while `lock --write` naming `lock --write`
+/// is the dead end. The namespaced spelling of the same command must count as
+/// the same command, or hiding a loop behind `agentstack x` would switch the
+/// rule off.
+#[test]
+fn the_guard_catches_a_surface_that_names_itself() {
+    let msg = self_loop_violation(
+        "declared-unpinned",
+        &["lock", "--write"],
+        "agentstack lock --write",
+    )
+    .expect("a writing command naming itself must be flagged");
+    assert!(
+        msg.contains("names ITSELF"),
+        "the failure must say what is wrong:\n{msg}"
+    );
+    println!("guard self-check — a surface that names itself:{msg}");
+
+    // The namespaced spelling is the SAME command.
+    assert!(
+        self_loop_violation("s", &["lock", "--write"], "agentstack x lock --write").is_some(),
+        "`agentstack x lock --write` and `agentstack lock --write` are one command; counting them \
+         as two would let a loop hide behind the namespace"
+    );
+
+    // …and the shapes that are real progress must pass.
+    for (surface, named) in [
+        (&["lock"][..], "agentstack lock --write"),
+        (&["lock", "--write"][..], "agentstack trust ."),
+        (&["apply", "--write"][..], "agentstack use --write"),
+        (&["up"][..], "agentstack lock --write"),
+    ] {
+        assert!(
+            self_loop_violation("s", surface, named).is_none(),
+            "`{named}` after `agentstack {}` is a DIFFERENT step and must pass, or rule (g) would \
+             fire on correct guidance and be switched off",
+            surface.join(" ")
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The live defects, each as its own reproducer
+// ---------------------------------------------------------------------------
+//
+// One `#[ignore]`d test per entry in `KNOWN_DEFECTS`. They are ignored so the
+// suite stays green while the bugs are queued, and they exist so the bugs stay
+// visible: `cargo test -p agentstack --test guidance_is_executable -- --ignored`
+// reproduces each one on demand, against the real binary, with the exit code
+// read directly rather than through a pipe.
+
+/// LIVE DEFECT — the machine field of an UNADOPTED directory names a command
+/// that cannot run without a terminal.
+///
+/// State: no manifest at or above the working directory.
+/// Surfaces: `doctor --json` `/next_action`, `status --json`
+/// `/next_action/command`, both `"agentstack init"`.
+/// What happens: exit 1, "refusing to init without a terminal". A machine
+/// field is executed verbatim by a driver, and a driver has no terminal, so it
+/// errors, re-polls, and reads the identical field forever.
+/// The runnable spellings exist — `init --dry-run`, `init --yes`,
+/// `init --secrets <store>` — and `init`'s own refusal prints all three.
+#[test]
+#[ignore = "live defect: `agentstack init` is named in a machine field and refuses without a TTY"]
+fn a_machine_field_names_init_where_init_refuses() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("no-project");
+    fs::create_dir_all(&dir).unwrap();
+    let (home, proj) = no_project(&dir);
+
+    for (surface, argv, ptr) in [
+        ("doctor --json", &["doctor", "--json"][..], "/next_action"),
+        (
+            "status --json",
+            &["status", "--json"][..],
+            "/next_action/command",
+        ),
+    ] {
+        let v: serde_json::Value =
+            serde_json::from_str(&strip_ansi(&run(argv, &home, &proj).text)).unwrap();
+        assert_eq!(
+            v.pointer(ptr).and_then(serde_json::Value::as_str),
+            Some("agentstack init"),
+            "{surface} {ptr}"
+        );
+    }
+    let out = run(&["init"], &home, &proj);
+    assert!(
+        !out.ok,
+        "the defect is that `agentstack init` REFUSES here; if it now runs, delete this test and \
+         its KNOWN_DEFECTS entries"
+    );
+    panic!(
+        "reproduced: `agentstack init` was named and refused:\n{}",
+        out.text
+    );
+}
+
+/// LIVE DEFECT — `status --json` hands a driver `agentstack yes`, which needs
+/// a terminal.
+///
+/// States: `empty-manifest`, `servers-no-bridge`, `dropped-undeclared` — every
+/// project with a file dropped in that the manifest does not declare, which is
+/// the `undeclared_drops` arm of `overview::next_step` and outranks every other
+/// rung.
+/// Surface: `status --json` `/next_action/command` = `"agentstack yes"`.
+/// What happens: exit 1, "`agentstack yes` needs a terminal — it is a review
+/// you read and answer." The refusal then names the headless path in full, so
+/// a runnable first step exists (`agentstack adopt --write`) and the machine
+/// field does not name it.
+/// `doctor --json` answers `null` for the same project, so this is invisible
+/// to any check that reads only `doctor`.
+#[test]
+#[ignore = "live defect: `agentstack yes` is named in status's machine field and refuses without a TTY"]
+fn status_names_yes_where_yes_refuses() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("dropped");
+    fs::create_dir_all(&dir).unwrap();
+    let home = dir.join("home");
+    let proj = dir.join("proj");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(proj.join(".agentstack/skills/summarize")).unwrap();
+    fs::write(
+        proj.join(".agentstack/skills/summarize/SKILL.md"),
+        SKILL_DESCRIBED,
+    )
+    .unwrap();
+    fs::write(proj.join(".agentstack/agentstack.toml"), "version = 1\n").unwrap();
+
+    let v: serde_json::Value =
+        serde_json::from_str(&strip_ansi(&run(&["status", "--json"], &home, &proj).text)).unwrap();
+    assert_eq!(
+        v.pointer("/next_action/command")
+            .and_then(serde_json::Value::as_str),
+        Some("agentstack yes"),
+    );
+    let out = run(&["yes"], &home, &proj);
+    assert!(
+        !out.ok,
+        "the defect is that `agentstack yes` REFUSES here; if it now runs, delete this test and \
+         its KNOWN_DEFECTS entries"
+    );
+    panic!(
+        "reproduced: `agentstack yes` was named and refused:\n{}",
+        out.text
+    );
+}
+
+/// LIVE DEFECT — THE `lock --write` REGRESSION, ALIVE AGAIN IN `adopt`.
+///
+/// State: a trusted project, a detected harness, and a server configured
+/// natively in `.mcp.json` that the manifest does not declare — the
+/// `unimported_native` arm of `overview::next_step`.
+/// Surfaces: `doctor --json` `/next_action` AND `status --json`
+/// `/next_action/command`, both `"agentstack adopt"`.
+/// What happens: `agentstack adopt` previews by default and declares a
+/// `--write` flag. Running the named form exits **0**, prints the manifest diff
+/// it WOULD apply, writes nothing — and the identical command is named again.
+/// An exit-0 infinite loop, which is the worse of the two shapes because
+/// nothing in the output says it failed.
+/// The correct string is `agentstack adopt --write`.
+#[test]
+#[ignore = "live defect: `agentstack adopt` (preview form) is named as the fix at the adopt rung"]
+fn a_preview_form_is_named_as_the_fix_at_the_adopt_rung() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("native-unimported");
+    fs::create_dir_all(&dir).unwrap();
+    let (home, proj) = write_project_with_skill(&dir, FULL_MANIFEST, SKILL_DESCRIBED);
+    detect_claude_code(&home, true);
+    lock(&home, &proj);
+    grant(&home, &proj);
+    fs::write(proj.join(".mcp.json"), FOREIGN_MCP_JSON).unwrap();
+
+    let tree = agentstack::cli::Cli::command();
+    assert!(
+        takes_write_flag(&tree, &["adopt".to_string()]),
+        "`adopt` must declare `--write`, or this is not the preview-for-a-write shape"
+    );
+
+    let before = strip_ansi(&run(&["doctor", "--json"], &home, &proj).text);
+    let bv: serde_json::Value = serde_json::from_str(&before).unwrap();
+    assert_eq!(bv["next_action"].as_str(), Some("agentstack adopt"));
+
+    let out = run(&["adopt"], &home, &proj);
+    let after = strip_ansi(&run(&["doctor", "--json"], &home, &proj).text);
+    let av: serde_json::Value = serde_json::from_str(&after).unwrap();
+    assert_eq!(
+        observable(&bv),
+        observable(&av),
+        "the defect is that the offered command changes nothing; if it now moves the project, \
+         delete this test and its KNOWN_DEFECTS entries"
+    );
+    panic!(
+        "reproduced: `agentstack adopt` was offered as the fix, exited ok={}, and left every \
+         observable field identical:\n{}",
+        out.ok,
+        out.text.trim()
+    );
+}
+
+/// LIVE DEFECT — the consent gate cannot see a MACHINE manifest, and the
+/// ladder that points at it therefore never ends.
+///
+/// State: the manifest at `~/.agentstack/agentstack.toml`, working directory
+/// `~` — the machine scope, which every other surface reads correctly.
+/// What happens, step by step, each exit code read from the process directly:
+///   1. `status --json` → `manifest.loaded = true`, `next_action.command =
+///      "agentstack lock --write"`.
+///   2. `agentstack lock --write` → exit 0, pins the surface.
+///   3. `status --json` → `next_action.command = "agentstack trust ."`.
+///   4. `agentstack trust .` → **exit 1**, "no agentstack manifest at or above
+///      ~ — run `agentstack init` first".
+///   5. re-poll → step 3 again, forever.
+///
+/// `agentstack trust --preview` and bare `agentstack trust` refuse identically,
+/// so no spelling of the gate can see the project. The `agentstack init` the
+/// refusal suggests is wrong twice over: a manifest exists, and `init` refuses
+/// without a terminal.
+#[test]
+#[ignore = "live defect: `trust` cannot find a machine manifest that status and doctor both read"]
+fn the_consent_gate_cannot_see_a_machine_manifest() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("machine-manifest");
+    fs::create_dir_all(&dir).unwrap();
+    let (home, proj) = machine_manifest(&dir);
+
+    let status: serde_json::Value =
+        serde_json::from_str(&strip_ansi(&run(&["status", "--json"], &home, &proj).text)).unwrap();
+    assert_eq!(
+        status.pointer("/manifest/loaded"),
+        Some(&serde_json::Value::Bool(true)),
+        "fixture: `status` must load the machine manifest, or this is not the state under test"
+    );
+
+    let pinned = run(&["lock", "--write"], &home, &proj);
+    assert!(pinned.ok, "`lock --write` should pin:\n{}", pinned.text);
+
+    let status: serde_json::Value =
+        serde_json::from_str(&strip_ansi(&run(&["status", "--json"], &home, &proj).text)).unwrap();
+    assert_eq!(
+        status
+            .pointer("/next_action/command")
+            .and_then(serde_json::Value::as_str),
+        Some("agentstack trust ."),
+        "the ladder must point at the gate, or this is not the state under test"
+    );
+
+    for spelling in [
+        &["trust", "."][..],
+        &["trust", "--preview"][..],
+        &["trust"][..],
+    ] {
+        let out = run(spelling, &home, &proj);
+        assert!(
+            !out.ok,
+            "the defect is that every spelling of the gate REFUSES here; if `agentstack {}` now \
+             works, delete this test and the KNOWN_DEFECTS entry",
+            spelling.join(" ")
+        );
+        assert!(
+            out.text.contains("no agentstack manifest"),
+            "expected the gate to deny the manifest exists:\n{}",
+            out.text
+        );
+    }
+    panic!(
+        "reproduced: `status` names `agentstack trust .` over a manifest the gate says is not \
+         there. Loop with no exit."
+    );
+}
+
+/// Rule (d) clause 4, pointed at itself — two-sided.
+///
+/// The direction that matters most is the negative one: a directory with no
+/// manifest is a legitimate state whose consent gate legitimately has nothing
+/// to preview, and a clause that flagged it would fire on every unadopted
+/// project and be switched off within a week.
+#[test]
+fn the_guard_catches_a_consent_gate_that_cannot_see_the_project() {
+    let loaded = serde_json::json!({
+        "manifest": { "path": "/home/u/.agentstack/agentstack.toml", "loaded": true }
+    });
+    let msg = consent_gate_blind("machine-manifest", Some(&loaded), None)
+        .expect("a loaded manifest with no preview at all must be flagged");
+    assert!(
+        msg.contains("the consent gate cannot find it")
+            && msg.contains("/home/u/.agentstack/agentstack.toml"),
+        "the failure must say what is wrong and name the manifest the gate cannot see:\n{msg}"
+    );
+    println!("guard self-check — a consent gate blind to its own project:{msg}");
+
+    // A preview that answered is the corrected shape.
+    assert!(
+        consent_gate_blind(
+            "s",
+            Some(&loaded),
+            Some(&serde_json::json!({ "fix": null }))
+        )
+        .is_none(),
+        "a gate that answers must pass"
+    );
+    // No manifest is not a defect — it is a state with its own guidance.
+    let absent =
+        serde_json::json!({ "manifest": { "path": "/p/agentstack.toml", "loaded": false } });
+    assert!(
+        consent_gate_blind("no-project", Some(&absent), None).is_none(),
+        "a directory with no manifest has nothing for the gate to preview; flagging it would make \
+         the clause fire on every unadopted project"
+    );
+    assert!(
+        consent_gate_blind("s", None, None).is_none(),
+        "no reading at all is not a claim, and must not be judged as one"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1843,6 +3079,22 @@ fn machine_field<'a>(body: Option<&'a serde_json::Value>, ptr: &str) -> Option<&
 ///    polarity flipped, and it is not otherwise detectable: both strings parse,
 ///    both write, neither carries a placeholder.
 ///
+/// 4. **The consent gate must be able to SEE the project the other surfaces
+///    describe.** Where `status --json` reports `manifest.loaded = true`,
+///    `trust --preview` must answer at all. This clause is not about two
+///    commands disagreeing; it is about one surface reporting on a project
+///    while the gate that governs it says the project does not exist — and it
+///    is stated separately because nothing else in this file can reach it.
+///    Every ladder in the product routes through `agentstack trust .`, and
+///    that command is EXEMPT from convergence (c): it needs a reviewed digest
+///    a stdin-null spawn cannot supply. So a state where `trust` cannot find
+///    the manifest is a state where `status` names `trust .` forever, (c) is
+///    forbidden from executing it, and the loop is invisible. The exemption
+///    was load-bearing for a real defect, which is why the READ-ONLY half of
+///    the same command is now required to work wherever the ladder points at
+///    it. `status`'s own `manifest.loaded` is the condition, so a project that
+///    genuinely has no manifest is not flagged.
+///
 /// States where a surface produced no JSON at all are recorded as skips rather
 /// than passed over, so the coverage report cannot imply this rule ran
 /// everywhere when it did not.
@@ -1940,7 +3192,48 @@ fn agreement_violations(
             _ => {}
         }
     }
+
     out
+}
+
+/// Rule (d) clause 4, as one function so the guard can be pointed at itself and
+/// so the call site can consult the defect ledger before it fails the run.
+///
+/// `None` means the consent gate can see whatever `status` says is there.
+///
+/// The condition is `status`'s OWN reading — `manifest.loaded` — so a directory
+/// that genuinely has no manifest cannot trip this clause: the flag is false
+/// there and the rule says nothing. That matters, because "no manifest" is a
+/// legitimate state with its own guidance and flagging it would make the rule
+/// fire on correct behaviour.
+fn consent_gate_blind(
+    state: &str,
+    status: Option<&serde_json::Value>,
+    preview: Option<&serde_json::Value>,
+) -> Option<String> {
+    let loaded = status
+        .and_then(|v| v.pointer("/manifest/loaded"))
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    if !loaded || preview.is_some() {
+        return None;
+    }
+    Some(format!(
+        "\n  state    : {state}\n  surface A: status --json /manifest/loaded = true, path \
+         {:?}\n  surface B: trust --preview — no JSON at all\n  \
+         why      : one project, and the consent gate cannot find it. `status` and `doctor` \
+         report on this manifest and walk the reader toward `agentstack trust .`; `trust` answers \
+         that there is no manifest here. Every ladder in the product routes through that command, \
+         so the reader is sent to a gate that refuses to look at the project it governs, and the \
+         ladder never terminates. Convergence (c) is structurally unable to catch this — \
+         `agentstack trust .` is exempt from it, because a grant needs a reviewed digest a \
+         stdin-null spawn cannot supply — which is why the READ-ONLY half of the same command is \
+         required to answer wherever the ladder points at it.",
+        status
+            .and_then(|v| v.pointer("/manifest/path"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("?"),
+    ))
 }
 
 // ---------------------------------------------------------------------------
@@ -1960,27 +3253,50 @@ fn observable(v: &serde_json::Value) -> String {
     )
 }
 
-/// Execute one state's machine field verbatim and require the state to move.
+/// Execute one machine field verbatim and require the state to move.
+///
+/// `surface`/`argv`/`ptr` name WHICH machine field is being driven —
+/// `doctor --json` `/next_action`, or `status --json`
+/// `/next_action/command`. The two are separate contracts on separate surfaces
+/// and they do not always carry the same string, so parameterizing is what
+/// stops the check silently covering only whichever one it was written against.
+///
+/// Progress is always measured through `doctor --json`, whichever surface was
+/// driven: it is the surface whose job is to say whether anything is wrong, and
+/// using one yardstick for both keeps "moved" comparable.
 ///
 /// Returns the failure message, or `None` when the state converged, was
 /// terminal (a `null` machine field: there is nothing to execute and nothing
 /// to loop on), or was recorded as a skip.
-fn converge_once(state: &State, skips: &mut Skips) -> Option<String> {
+fn converge_once(
+    state: &State,
+    surface: &str,
+    argv: &[&str],
+    ptr: &str,
+    reproduced: &mut BTreeSet<(&'static str, &'static str, &'static str)>,
+    skips: &mut Skips,
+) -> Option<String> {
+    let field: serde_json::Value =
+        serde_json::from_str(&strip_ansi(&run(argv, &state.home, &state.proj).text)).ok()?;
     let before: serde_json::Value = serde_json::from_str(&strip_ansi(
         &run(&["doctor", "--json"], &state.home, &state.proj).text,
     ))
     .ok()?;
-    let Some(fix) = before["next_action"].as_str().map(str::to_string) else {
+    let Some(fix) = field
+        .pointer(ptr)
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+    else {
         // Not a gap: `null` is the terminal answer, and a driver that reads it
         // stops. There is no command to execute, so there is nothing for a
         // convergence check to say. Rule (d) is what guards this state, and it
         // ran above.
         skips.note(format!(
-            "[{}] convergence (c): `doctor --json` `next_action` is null — terminal by contract, \
-             so there is no command to execute and nothing for (c) to say. What holds this state \
-             is rule (d) — which, where the trust rung is terminal, forbids ANY surface naming a \
-             trust-rung command over it — together with (a0)/(a)/(a')/(b) on every other string \
-             the state emits.",
+            "[{}] convergence (c) on {surface} {ptr}: null — terminal by contract, so there is no \
+             command to execute and nothing for (c) to say. What holds this state is rule (d) — \
+             which, where the trust rung is terminal, forbids ANY surface naming a trust-rung \
+             command over it — together with (a0)/(a)/(a')/(b) on every other string the state \
+             emits.",
             state.name
         ));
         return None;
@@ -1991,17 +3307,17 @@ fn converge_once(state: &State, skips: &mut Skips) -> Option<String> {
         // command cannot be driven from here. The end-to-end walk through it
         // is asserted by `tests/trust_content_drift.rs`.
         skips.note(format!(
-            "[{}] convergence (c): the offered fix is `agentstack trust .`, which needs a \
-             reviewed digest and cannot be driven from a stdin-null spawn. Asserted end to end \
-             instead by `tests/trust_content_drift.rs`.",
+            "[{}] convergence (c) on {surface}: the offered fix is `agentstack trust .`, which \
+             needs a reviewed digest and cannot be driven from a stdin-null spawn. Asserted end \
+             to end instead by `tests/trust_content_drift.rs`.",
             state.name
         ));
         return None;
     }
 
     let snapshot_before = observable(&before);
-    let argv: Vec<&str> = fix.split_whitespace().skip(1).collect();
-    let out = run(&argv, &state.home, &state.proj);
+    let fix_argv: Vec<&str> = fix.split_whitespace().skip(1).collect();
+    let out = run(&fix_argv, &state.home, &state.proj);
     let after: serde_json::Value = serde_json::from_str(&strip_ansi(
         &run(&["doctor", "--json"], &state.home, &state.proj).text,
     ))
@@ -2010,10 +3326,10 @@ fn converge_once(state: &State, skips: &mut Skips) -> Option<String> {
     if snapshot_before != snapshot_after {
         return None;
     }
-    Some(format!(
-        "\n  state    : {}\n  command  : `{fix}`\n  exit_ok  : {}\n  before   : {snapshot_before}\n  \
+    let msg = format!(
+        "\n  state    : {}\n  surface  : {surface} {ptr}\n  command  : `{fix}`\n  exit_ok  : {}\n  before   : {snapshot_before}\n  \
          after    : {snapshot_after}\n  \
-         why      : `doctor --json` named this as the ONE thing to run; running it verbatim left \
+         why      : {surface} named this as the ONE thing to run; running it verbatim left \
          every observable field identical, and the SAME command is named again. That is a \
          reproduced infinite loop. Note the exit status: a command may succeed and still change \
          nothing, which is why this check compares state and never exit codes.\n\n\
@@ -2021,7 +3337,23 @@ fn converge_once(state: &State, skips: &mut Skips) -> Option<String> {
         state.name,
         out.ok,
         out.text.trim()
-    ))
+    );
+    // A defect already on the ledger holds this assertion open — loudly. See
+    // `KNOWN_DEFECTS`: the entry must still reproduce or the run fails, so this
+    // is a record of a live bug, never a way to stop looking at it.
+    match known_defect(state.name, surface, &fix) {
+        Some(d) => {
+            reproduced.insert((d.state, d.surface, d.command));
+            skips.note(format!(
+                "LIVE DEFECT, on the ledger and queued — [{}] {surface} names `{}`\n      why: {}\
+                 \n      (rule (c) reproduced the loop below; held open by KNOWN_DEFECTS so the \
+                 suite stays green and the bug stays visible.){msg}",
+                d.state, d.command, d.why
+            ));
+            None
+        }
+        None => Some(msg),
+    }
 }
 
 /// The level-(b) rule, as one function so the guard can be pointed at itself

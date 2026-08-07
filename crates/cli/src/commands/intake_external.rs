@@ -30,8 +30,8 @@
 //! reading rather than after, and a refusal to follow a redirect to a scheme we
 //! did not ask for. Nothing fetched is interpolated into a command.
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::{bail, Context, Result};
-use owo_colors::OwoColorize;
 
 use std::path::Path;
 

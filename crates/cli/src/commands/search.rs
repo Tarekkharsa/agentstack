@@ -11,8 +11,8 @@
 
 use std::path::Path;
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::Result;
-use owo_colors::OwoColorize;
 
 use crate::cli::SearchArgs;
 use crate::provider::{self, CandidateKind};

@@ -13,8 +13,8 @@
 
 use std::path::Path;
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::{Context, Result};
-use owo_colors::OwoColorize;
 
 use crate::adapter::Registry;
 use crate::cli::RestoreArgs;

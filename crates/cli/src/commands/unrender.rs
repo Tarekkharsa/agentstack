@@ -10,9 +10,17 @@
 //! previously-managed…)` — the same planners `apply` uses, given nothing to
 //! declare. That is deliberate: they already remove exactly our entries and
 //! leave foreign ones alone, they already produce reviewable diffs, and their
-//! writes go through the same history capture, so every un-render is undoable
-//! with `agentstack restore`. Hand-rolled deletion would be a second write
-//! path with none of those properties.
+//! writes go through the same history capture, so every un-rendered FILE is
+//! undoable with `agentstack restore`. Hand-rolled deletion would be a second
+//! write path with none of those properties.
+//!
+//! The materialized-skills leg is the exception, and this header must not
+//! outrun the code beneath it: that removal carries `capture: false` — see
+//! [`Removal::capture`], and [`crate::history`] for why (the ledger holds a
+//! file's BYTES, and a delivered skill is a symlink or a directory tree).
+//! `restore` therefore puts the config edits back and not the skills;
+//! re-activating a toolset that includes them re-materializes them exactly.
+//! Each caller's closing copy says so where the user is reading.
 //!
 //! Planning only. Each caller owns its confirmation step, history recording,
 //! and closing copy — consent stays where the user is.

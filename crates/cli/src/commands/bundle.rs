@@ -7,8 +7,8 @@ use std::io::{Read, Write};
 use std::path::Path;
 
 use age::secrecy::Secret;
+use agentstack_core::paint::OwoColorize;
 use anyhow::{bail, Context, Result};
-use owo_colors::OwoColorize;
 use serde::{Deserialize, Serialize};
 
 use crate::cli::{ExportArgs, ImportArgs};

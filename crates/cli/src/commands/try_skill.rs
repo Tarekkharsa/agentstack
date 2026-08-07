@@ -19,8 +19,8 @@
 
 use std::path::{Path, PathBuf};
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::{bail, Context, Result};
-use owo_colors::OwoColorize;
 
 use crate::cli::TryArgs;
 

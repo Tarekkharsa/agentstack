@@ -38,8 +38,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::{Context as AnyhowContext, Result};
-use owo_colors::OwoColorize;
 
 use agentstack_workflow::{
     extract_meta, Grant, Progress, RuntimeLimits, SpawnRequest, StepOutcome, StepOutput,

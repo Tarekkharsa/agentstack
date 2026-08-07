@@ -5,7 +5,9 @@
 //! upserted into an otherwise-identical file) and never misleading: identical
 //! files always produce an empty diff.
 
-use owo_colors::OwoColorize;
+// The gated trait, not upstream's: a rendered diff is printed to whatever
+// stdout happens to be, including `agentstack diff > review.patch`.
+use crate::paint::OwoColorize;
 
 /// Whether two texts differ at all (ignoring a trailing newline mismatch).
 pub fn differs(before: &str, after: &str) -> bool {

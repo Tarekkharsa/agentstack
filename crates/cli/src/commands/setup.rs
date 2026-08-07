@@ -11,8 +11,8 @@
 use std::fs;
 use std::path::Path;
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::{Context, Result};
-use owo_colors::OwoColorize;
 
 use crate::cli::{ApplyArgs, ConnectArgs, DoctorArgs, InitArgs, InstallArgs, LockArgs, SetupArgs};
 use crate::lock::Lock;
@@ -664,8 +664,58 @@ fn print_switch_pointer(ctx: &super::Context, mode: super::overview::Mode) {
     );
     println!("    {}", "agentstack x uninstall".bold());
     println!(
-        "  {} it previews every removal first and undoes with `agentstack x restore --last`.",
+        "  {} it previews every removal first, and every FILE it removes undoes with \
+         `agentstack x restore --last`.",
         "·".dimmed()
+    );
+    print_skills_are_not_in_that_undo(&ctx.dir);
+}
+
+/// Bound the `x restore` the pointer above names, when this project has skills
+/// materialized on disk for it to be wrong about.
+///
+/// The pointer sends a reader to `x uninstall`, whose skills leg is
+/// `capture: false` ([`super::unrender::Removal::capture`]) — so "undoes with
+/// `agentstack x restore --last`" offered an undo that brings the configs back
+/// and silently leaves the skills off. This is the same defect
+/// [`super::uninstall`] repaired in its own closing copy, said by a different
+/// command, so it carries the same shared sentence.
+///
+/// Reads [`super::undo::skills_outside_the_ledger`] rather than counting
+/// again: the wizard must not invent a second answer to "which skills are
+/// outside the ledger here".
+///
+/// [`crate::history::SKILLS_COME_OFF_WITH`] does not fit and is deliberately
+/// not reused — it names `x uninstall --write`, which is the command this
+/// pointer just told the reader to run. What is missing here is the way BACK,
+/// so that is what the second line names. The reason sentence is shared,
+/// because that is the half that must never drift between Undo surfaces.
+///
+/// Conditional, like every other Undo surface: a project that materialized no
+/// skills prints nothing, so this stays a fact about this project rather than a
+/// caveat every `setup` run teaches people to skip.
+fn print_skills_are_not_in_that_undo(dir: &std::path::Path) {
+    let names = super::undo::skills_outside_the_ledger(dir);
+    if names.is_empty() {
+        return;
+    }
+    println!(
+        "  {} {} ({})",
+        "·".dimmed(),
+        crate::history::SKILLS_ARE_NOT_RECORDED.dimmed(),
+        names
+            .iter()
+            .map(|n| crate::text::sanitize_line(n))
+            .collect::<Vec<_>>()
+            .join(", ")
+            .dimmed()
+    );
+    println!(
+        "  {} {}",
+        "·".dimmed(),
+        "so that restore puts the files back, not these — re-materialize them by \
+         activating a toolset that includes them (`agentstack use --write`)"
+            .dimmed()
     );
 }
 

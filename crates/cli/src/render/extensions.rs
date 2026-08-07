@@ -23,8 +23,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::{Context, Result};
-use owo_colors::OwoColorize;
 use serde::{Deserialize, Serialize};
 
 use crate::adapter::descriptor::AdapterDescriptor;

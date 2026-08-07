@@ -112,6 +112,45 @@ pub struct Cli {
 // (src/main.rs) matches by variant, so grouping/ordering here is free to change
 // without touching behavior. Promote a command to the everyday list by dropping
 // its `hide` attribute (and moving it out of the after_help group).
+
+/// `x uninstall`'s help footer.
+///
+/// Built at runtime rather than written as a literal so the one sentence that
+/// must never drift between Undo surfaces — [`crate::history::SKILLS_ARE_NOT_RECORDED`]
+/// — is the shared constant here too, not a fourth copy of it. G31 narrowed
+/// the promise (the ledger holds a file's BYTES, and a delivered skill is a
+/// linked directory) and every surface that names `restore` has to carry the
+/// same bound; this help text said "`agentstack restore` still works
+/// afterwards" with nothing to mark where that stops.
+///
+/// Unconditional, unlike the notice the command body prints: `--help` has no
+/// project to inspect, so the boundary is stated once, plainly, rather than
+/// guessed at. The command itself still prints the conditional, named form.
+fn uninstall_after_help() -> String {
+    format!(
+        "\
+The guaranteed exit. Reverts every managed region AgentStack rendered — servers,
+settings, hooks, and instruction blocks — in each CLI's own config, prunes the
+skills it materialized, then removes AgentStack's own state directory.
+
+  agentstack uninstall                    show what would be removed (default)
+  agentstack uninstall --verbose          ...with the full diff of each file
+  agentstack uninstall --write            do it
+  agentstack uninstall --write --keep-home  keep ~/.agentstack (and the undo ledger)
+
+Your agentstack.toml is never touched — this removes rendered output, not your
+setup, so you can re-`apply` at any time. Foreign entries you or another tool
+added to those files are left alone. Every file edit is captured first, so
+`agentstack restore` still works afterwards unless you also removed ~/.agentstack.
+
+The skills are the exception to that ledger:
+  {skills}.
+So restore brings the config edits back and not those — re-materialize them by
+activating a toolset that includes them (`agentstack use --write`).",
+        skills = crate::history::SKILLS_ARE_NOT_RECORDED,
+    )
+}
+
 #[derive(Subcommand, Debug)]
 pub enum Command {
     // ── Everyday: the core loop most projects ever need (shown in --help) ─
@@ -524,23 +563,7 @@ Examples:
     AddServerToProfile(PanelAddServerArgs),
 
     /// Remove everything AgentStack manages, previewing first.
-    #[command(
-        hide = true,
-        after_help = "\
-The guaranteed exit. Reverts every managed region AgentStack rendered — servers,
-settings, hooks, and instruction blocks — in each CLI's own config, then removes
-AgentStack's own state directory.
-
-  agentstack uninstall                    show what would be removed (default)
-  agentstack uninstall --verbose          ...with the full diff of each file
-  agentstack uninstall --write            do it
-  agentstack uninstall --write --keep-home  keep ~/.agentstack (and the undo ledger)
-
-Your agentstack.toml is never touched — this removes rendered output, not your
-setup, so you can re-`apply` at any time. Foreign entries you or another tool
-added to those files are left alone. Every file edit is captured first, so
-`agentstack restore` still works afterwards unless you also removed ~/.agentstack."
-    )]
+    #[command(hide = true, after_help = uninstall_after_help())]
     Uninstall(UninstallArgs),
 
     /// Remove a server config `apply` no longer writes but once did.

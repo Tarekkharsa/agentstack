@@ -16,8 +16,8 @@
 use agentstack_core::digest::Sha256Hex;
 use std::path::{Path, PathBuf};
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::{bail, Context, Result};
-use owo_colors::OwoColorize;
 
 use crate::cli::{
     LibAddArgs, LibAddExtensionArgs, LibAddHookArgs, LibAddServerArgs, LibArgs, LibKind,

@@ -13,9 +13,9 @@
 
 use std::path::{Path, PathBuf};
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::{Context, Result};
 use indexmap::IndexMap;
-use owo_colors::OwoColorize;
 
 use crate::adapter::{extract_servers_with_skips, extract_settings, Registry};
 use crate::cli::{ConnectArgs, InitArgs, SecretStore};

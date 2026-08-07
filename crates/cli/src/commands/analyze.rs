@@ -22,8 +22,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::Result;
-use owo_colors::OwoColorize;
 use serde_json::{json, Value};
 
 use crate::calllog::{self, CallRecord, LoadRecord};

@@ -618,7 +618,7 @@ fn create_profile_gated(
 /// writes only the manifest, and the undo ledger captures rendered config
 /// files, so pointing at it here would undo somebody else's earlier write.
 fn print_created(name: &str, review_pending: bool) {
-    use owo_colors::OwoColorize;
+    use agentstack_core::paint::OwoColorize;
     println!("\n{} toolset {} created.", "✓".green(), name.bold());
     println!(
         "  {}",
@@ -667,7 +667,7 @@ fn switch_lines(name: &str, review_pending: bool) -> Vec<String> {
 /// human needs before saying yes is "which capabilities, and what happens on
 /// yes", not the envelope's schema fields.
 fn print_create_review(args: &PanelCreateProfileArgs, digest: &str) {
-    use owo_colors::OwoColorize;
+    use agentstack_core::paint::OwoColorize;
     println!("New toolset {}\n", args.name.bold());
     if !args.servers.is_empty() {
         println!("  servers  {}", args.servers.join(", "));
@@ -872,7 +872,7 @@ pub fn set_gitignore_preview(args: &PanelSetGitignoreArgs, dir: Option<&Path>) -
 }
 
 fn print_gitignore_review(preview: &Value) {
-    use owo_colors::OwoColorize;
+    use agentstack_core::paint::OwoColorize;
     let enabled = preview
         .pointer("/enabled")
         .and_then(Value::as_bool)
@@ -1508,7 +1508,7 @@ fn rename_profile_gated(
     dir: Option<&Path>,
     interactive: bool,
 ) -> Result<()> {
-    use owo_colors::OwoColorize;
+    use agentstack_core::paint::OwoColorize;
     let preview = rename_profile_preview(args, dir)?;
     if !args.consent.yes {
         if args.consent.preview {
@@ -1630,7 +1630,7 @@ fn delete_profile_gated(
     dir: Option<&Path>,
     interactive: bool,
 ) -> Result<()> {
-    use owo_colors::OwoColorize;
+    use agentstack_core::paint::OwoColorize;
     let preview = delete_profile_preview(args, dir)?;
     if !args.consent.yes {
         if args.consent.preview {

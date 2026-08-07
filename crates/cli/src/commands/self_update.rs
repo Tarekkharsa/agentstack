@@ -39,8 +39,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::{bail, Context, Result};
-use owo_colors::OwoColorize;
 use sha2::{Digest, Sha256};
 
 use crate::cli::SelfUpdateArgs;

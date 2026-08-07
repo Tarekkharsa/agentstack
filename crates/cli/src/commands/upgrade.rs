@@ -33,8 +33,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::{anyhow, Context as _, Result};
-use owo_colors::OwoColorize;
 
 use crate::cli::UpgradeArgs;
 use crate::commands::{add, install, remove};

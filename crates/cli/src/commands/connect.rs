@@ -6,8 +6,8 @@
 //! manual "paste this JSON into your harness config" step the docs used to
 //! prescribe. Dry-run by default, like every other mutating command.
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::{Context, Result};
-use owo_colors::OwoColorize;
 use serde_json::Value;
 
 use crate::adapter::descriptor::Format;

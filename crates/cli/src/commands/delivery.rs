@@ -10,8 +10,8 @@
 //! formatting, and clearing the override removes the key rather than writing
 //! `false` — the default stays implicit, exactly as `[meta] gitignore` does.
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::{Context as _, Result};
-use owo_colors::OwoColorize;
 
 use std::path::Path;
 

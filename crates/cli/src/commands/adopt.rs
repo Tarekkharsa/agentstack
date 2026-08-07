@@ -13,9 +13,9 @@
 use std::fs;
 use std::path::Path;
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::{Context, Result};
 use indexmap::IndexMap;
-use owo_colors::OwoColorize;
 use serde_json::Value;
 
 use crate::adapter::descriptor::Format;

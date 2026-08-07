@@ -22,8 +22,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::{Context as _, Result};
-use owo_colors::OwoColorize;
 
 use agentstack_runtime::image::{self as backend, ImageSpec};
 

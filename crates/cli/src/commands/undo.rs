@@ -36,8 +36,8 @@
 use std::io::Write;
 use std::path::Path;
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::Result;
-use owo_colors::OwoColorize;
 
 use crate::cli::UndoArgs;
 use crate::history::{self, Entry};

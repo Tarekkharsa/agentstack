@@ -6,8 +6,8 @@
 //! a liveness claim — [`crate::lease_registry::liveness`] — and no surface can
 //! invent a second, friendlier answer.
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::Result;
-use owo_colors::OwoColorize;
 
 use crate::lease_registry::{self, Liveness};
 

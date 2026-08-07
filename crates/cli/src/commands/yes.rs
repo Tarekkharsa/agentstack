@@ -32,8 +32,8 @@ use std::path::Path;
 
 use std::io::IsTerminal;
 
+use agentstack_core::paint::OwoColorize;
 use anyhow::{Context, Result};
-use owo_colors::OwoColorize;
 
 use crate::cli::YesArgs;
 use crate::intake;

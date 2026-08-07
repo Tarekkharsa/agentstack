@@ -64,7 +64,14 @@ dirs = "5"
 anyhow = "1"
 thiserror = "1"
 regex = "1"
-owo-colors = "4"
+# NOTE: `owo-colors` is deliberately ABSENT here. Upstream's `OwoColorize` is
+# unconditional — `.green()` writes escapes into pipes, files and CI logs
+# whatever `NO_COLOR` says (TODO gap P8-G1). Every screen in this crate uses
+# `agentstack_core::paint::OwoColorize` instead: same method names, same call
+# shape, but it asks a NO_COLOR/CLICOLOR_FORCE/TTY gate at format time. With no
+# direct dependency, `use owo_colors::…` here does not compile, so the rule is
+# enforced by the compiler and not only by
+# `crates/cli/tests/color_is_gated.rs`. Do not add it back.
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
