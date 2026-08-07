@@ -22,33 +22,8 @@
 <meta name="twitter:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
 <script src="theme/theme.js"></script>
 <link rel="stylesheet" href="theme/organic.css">
-<style>
-[data-theme="dark"]{
---color-bg:#211E1B;--color-surface:#2A2622;--color-text:#F5EAD8;
---color-divider:color-mix(in srgb, #F5EAD8 18%, transparent);
---color-accent:#D98A52;--color-accent-2:#97A876;
---color-neutral-100:#332E29;--color-neutral-200:#3A342E;--color-neutral-300:#46403A;--color-neutral-400:#5C554C;--color-neutral-500:#847767;--color-neutral-600:#A89B87;--color-neutral-700:#C9BCA7;--color-neutral-800:#DACDB8;--color-neutral-900:#EFE6D4;
---color-accent-100:#3A2B1D;--color-accent-200:#4A3625;--color-accent-300:#5C4229;--color-accent-600:#E09B66;--color-accent-700:#E4A878;--color-accent-800:#EDBF97;--color-accent-900:#F4D5B8;
---color-accent-2-100:#2A3122;--color-accent-2-200:#353D2B;--color-accent-2-700:#B5C69A;--color-accent-2-800:#C8D6B0;--color-accent-2-900:#DBE5C9;
---shadow-sm:0 1px 2px rgba(0,0,0,0.4);--shadow-md:0 3px 10px rgba(0,0,0,0.45);--shadow-lg:0 12px 32px rgba(0,0,0,0.55)}
-.nav a.btn-primary{color:var(--color-bg)}
-.nav a.btn-primary:hover{color:var(--color-bg)}
-[data-palette]{--term-bg:#26211C;--term-hd:#1C1815;--term-btn:#38312A;--term-bd:#463D34;--term-muted:#A5988A;--term-text:#E6DCC9;--term-ok:#9DB380;--term-bad:#D97A62;--term-warn:#DDA84E}
-[data-palette="slate"]{--term-bg:#14181C;--term-hd:#0E1114;--term-btn:#23282E;--term-bd:#2E353C;--term-muted:#97A1AD;--term-text:#D7DEE4;--term-ok:#7CC08B;--term-bad:#E5786B;--term-warn:#E0B04A;
---color-bg:#FBFAF7;--color-surface:#FFFFFF;--color-text:#1B1F24;--color-divider:rgba(27,31,36,0.16);
---color-accent:#B4540A;--color-accent-2:#2A6F4E;
---color-neutral-100:#F3F0EA;--color-neutral-200:#E7E2D9;--color-neutral-300:#D8D2C7;--color-neutral-400:#B9B3A8;--color-neutral-500:#7E858D;--color-neutral-600:#5B6570;--color-neutral-700:#3A424B;--color-neutral-800:#2B3138;--color-neutral-900:#1B1F24;
---color-accent-100:#FBF1E7;--color-accent-200:#F5DFC8;--color-accent-300:#EECDA9;--color-accent-600:#9C4A08;--color-accent-700:#8A3F06;--color-accent-800:#6F3305;--color-accent-900:#542704;
---color-accent-2-100:#EAF4EC;--color-accent-2-200:#D3E7D8;--color-accent-2-700:#1F5238;--color-accent-2-800:#183F2B;--color-accent-2-900:#112D1F}
-[data-palette="slate"][data-theme="dark"]{
---color-bg:#14171B;--color-surface:#1A1E23;--color-text:#E9E7E2;--color-divider:rgba(233,231,226,0.16);
---color-accent:#F0975A;--color-accent-2:#7CC08B;
---color-neutral-100:#1E2329;--color-neutral-200:#292E34;--color-neutral-300:#343B43;--color-neutral-400:#454D57;--color-neutral-500:#69727C;--color-neutral-600:#9AA3AC;--color-neutral-700:#C3C9CF;--color-neutral-800:#D7DEE4;--color-neutral-900:#EDF1F4;
---color-accent-100:#2B2018;--color-accent-200:#3A2A1C;--color-accent-300:#4A3520;--color-accent-600:#F2A470;--color-accent-700:#F5B183;--color-accent-800:#F8C7A3;--color-accent-900:#FBDCC5;
---color-accent-2-100:#16281C;--color-accent-2-200:#1E3626;--color-accent-2-700:#A8D4B3;--color-accent-2-800:#C2E2CA;--color-accent-2-900:#DCEFE1;
---shadow-sm:0 1px 2px rgba(0,0,0,0.4);--shadow-md:0 3px 10px rgba(0,0,0,0.45);--shadow-lg:0 12px 32px rgba(0,0,0,0.55)}
-.card{border-radius:var(--radius-md,16px)}
-</style>
+<!-- Palette, terminal tokens and the .cb/.term components live in
+     theme/organic.css, linked above — this page adds only what is its own. -->
 <style>
 /* Light responsive touch — collapse the two-column layout and wrap the nav. */
 @media (max-width:720px){
@@ -142,7 +117,7 @@
         <div class="card-kicker">portability wedge</div>
         <div class="card-body" style="font-size:0.95rem;line-height:1.6;margin-bottom:var(--space-3)">The committed manifest declares one stdio server, one portable instruction fragment, and holds only <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">${GITHUB_TOKEN}</code> — the demo greps it to prove it's secret-free <em>before</em> rendering anything. Then <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">apply</code> fans it out. Pick a CLI to see its native shape:</div>
         <div id="om-tabs" style="display:flex;gap:var(--space-2);flex-wrap:wrap;margin-bottom:var(--space-3)"></div>
-        <div id="om-term" style="background:var(--term-bg);border-radius:var(--radius-md,12px);padding:14px 18px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.7;overflow-x:auto;margin-bottom:var(--space-2)"></div>
+        <div id="om-term" class="term-flat" style="margin-bottom:var(--space-2)"></div>
         <div id="om-quirk" style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700)"></div>
         <div style="margin-top:var(--space-3)"><code style="font-size:0.82rem;background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">examples/one-manifest-demo/run-demo.sh</code></div>
       </div>
@@ -157,7 +132,7 @@
           <button onclick="stepPrev('fr')" style="font-size:0.82rem;font-weight:700;padding:6px 14px;border-radius:999px;border:1px solid var(--color-divider);background:var(--color-surface);color:var(--color-text);font-family:inherit;cursor:pointer">←</button>
           <button id="fr-next" onclick="stepNext('fr')" style="font-size:0.82rem;font-weight:700;padding:6px 16px;border-radius:999px;border:1px solid var(--color-accent);background:var(--color-accent);color:#FDF6EE;font-family:inherit;cursor:pointer">next →</button>
         </div>
-        <div id="fr-lines" style="background:var(--term-bg);border-radius:var(--radius-md,12px);padding:14px 18px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.8;overflow-x:auto;margin-bottom:var(--space-2)"></div>
+        <div id="fr-lines" class="term-flat" style="margin-bottom:var(--space-2)"></div>
         <div id="fr-note" style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700)"></div>
       </div>
 
@@ -171,7 +146,7 @@
           <button onclick="stepPrev('lib')" style="font-size:0.82rem;font-weight:700;padding:6px 14px;border-radius:999px;border:1px solid var(--color-divider);background:var(--color-surface);color:var(--color-text);font-family:inherit;cursor:pointer">←</button>
           <button id="lib-next" onclick="stepNext('lib')" style="font-size:0.82rem;font-weight:700;padding:6px 16px;border-radius:999px;border:1px solid var(--color-accent);background:var(--color-accent);color:#FDF6EE;font-family:inherit;cursor:pointer">next →</button>
         </div>
-        <div id="lib-lines" style="background:var(--term-bg);border-radius:var(--radius-md,12px);padding:14px 18px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.8;overflow-x:auto;margin-bottom:var(--space-2)"></div>
+        <div id="lib-lines" class="term-flat" style="margin-bottom:var(--space-2)"></div>
         <div id="lib-note" style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700)"></div>
       </div>
 
@@ -194,7 +169,7 @@
           <button onclick="stepPrev('le')" style="font-size:0.82rem;font-weight:700;padding:6px 14px;border-radius:999px;border:1px solid var(--color-divider);background:var(--color-surface);color:var(--color-text);font-family:inherit;cursor:pointer">←</button>
           <button id="le-next" onclick="stepNext('le')" style="font-size:0.82rem;font-weight:700;padding:6px 16px;border-radius:999px;border:1px solid var(--color-accent);background:var(--color-accent);color:#FDF6EE;font-family:inherit;cursor:pointer">next →</button>
         </div>
-        <div id="le-lines" style="background:var(--term-bg);border-radius:var(--radius-md,12px);padding:14px 18px;font-family:ui-monospace,Menlo,monospace;font-size:0.82rem;line-height:1.8;overflow-x:auto;margin-bottom:var(--space-2)"></div>
+        <div id="le-lines" class="term-flat" style="margin-bottom:var(--space-2)"></div>
         <div id="le-note" style="font-size:0.88rem;line-height:1.55;color:var(--color-neutral-700)"></div>
       </div>
 

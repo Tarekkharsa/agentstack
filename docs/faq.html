@@ -12,36 +12,9 @@
 <script src="theme/theme.js"></script>
 <link rel="stylesheet" href="theme/organic.css">
 <style>
-  :root {
-    --paper: #F5EAD8; --surface: #FFFDF6; --ink: #201E1D; --muted: #6E6559;
-    --accent: #C67139; --accent-ink: #FFFFFF;
-    --accent-soft: color-mix(in srgb, var(--accent) 10%, transparent);
-    --accent-line: color-mix(in srgb, var(--accent) 28%, transparent);
-    --line: #E2D5BD; --line-soft: #EADFC9; --code-bg: #ECE0C8;
-    --radius-sm: 9px;
-    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
-    --sans: var(--font-body, Figtree, sans-serif);
-  }
-  [data-theme="dark"] {
-    --paper: #211E1B; --surface: #2A2622; --ink: #F5EAD8; --muted: #A89B87;
-    --accent: #D98A52; --accent-ink: #211406;
-    --line: #3A342E; --line-soft: #332E29; --code-bg: #332E29;
-  }
-  [data-palette="slate"] {
-    --paper: #FBFAF7; --surface: #FFFFFF; --ink: #1B1F24; --muted: #5B6570;
-    --accent: #B4540A; --accent-ink: #FFFFFF;
-    --line: #E7E2D9; --line-soft: #EFEBE3; --code-bg: #F3F0EA;
-  }
-  [data-palette="slate"][data-theme="dark"] {
-    --paper: #14171B; --surface: #1A1E23; --ink: #E9E7E2; --muted: #9AA3AC;
-    --accent: #F0975A; --accent-ink: #1A1206;
-    --line: #292E34; --line-soft: #23282E; --code-bg: #1E2329;
-  }
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.6 var(--sans); }
-  a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
-  a:hover { text-decoration-thickness: 2px; }
   a code { color: var(--ink); }
   code { font-family: var(--mono); font-size: 0.9em; background: var(--code-bg); border-radius: 5px; padding: 0.1em 0.35em; }
   header { position: sticky; top: 0; z-index: 50; background: color-mix(in srgb, var(--surface) 96%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
@@ -80,8 +53,8 @@
   h2:hover .hlink, h3:hover .hlink, h4:hover .hlink { opacity: 0.7; }
   main p, main li { max-width: 46rem; }
   main ul, main ol { padding-left: 1.4rem; }
-  pre.block { background: var(--code-bg); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); padding: 0.85rem 1rem; overflow-x: auto; font-size: 0.82rem; line-height: 1.55; }
-  pre.block code { background: none; padding: 0; font-size: 1em; }
+  /* Code blocks and terminals are the .cb component in theme/organic.css. */
+  main .cb { margin: 1.1rem 0; }
   /* Long inline code (paths, digests, command lines) wraps inside its own
      container instead of widening the page on narrow viewports. */
   main p code, main li code, main td code, main h2 code, main h3 code { overflow-wrap: anywhere; }
@@ -274,8 +247,8 @@
 <p>Thirteen adapters ship today: Antigravity, Claude Code, Claude Desktop, Codex CLI, GitHub Copilot CLI, Cursor, Gemini CLI, Junie, Kiro, OpenCode, Pi, VS Code, and Windsurf. <code>agentstack x adapters list</code> shows which are installed here. They are not equally verified — five get a nightly check against the real CLI and the rest are best-effort. The <a href="adapters.html">adapter support matrix</a> says which is which, and what each one manages.</p>
 <h2 id="what-if-two-of-my-clis-already-define-the-same-server">What if two of my CLIs already define the same server?<a class="hlink" href="#what-if-two-of-my-clis-already-define-the-same-server" aria-label="Link to this section">#</a></h2>
 <p><code>agentstack init</code> imports both into one manifest entry. If the two definitions genuinely differ, it keeps the first one imported and says so out loud:</p>
-<pre class="block"><code>⚠ server 'github' is defined differently by 1 other CLI — kept the first
-  definition imported (the other stays in its CLI's own config)</code></pre>
+<div class="cb"><pre class="block"><code>⚠ server 'github' is defined differently by 1 other CLI — kept the first
+  definition imported (the other stays in its CLI's own config)</code></pre></div>
 <p>Nothing is lost — the other definition stays in its own CLI's config until you apply. Review the merged entry, edit it if the wrong one won, then <code>agentstack apply --write</code> makes both CLIs agree. That is how they stop drifting apart.</p>
 <h2 id="do-i-need-docker">Do I need Docker?<a class="hlink" href="#do-i-need-docker" aria-label="Link to this section">#</a></h2>
 <p>No. Docker is only needed for <code>agentstack run --sandbox</code> and <code>--lockdown</code>, the top of the protection ladder. Importing, unifying, applying, naming toolsets, diagnosing, and undoing all work with no container runtime at all. See <a href="choose.html">which protection do I need?</a>.</p>
@@ -285,8 +258,8 @@
 <p>Trust is bound to the content it approved, so a <code>git pull</code> that changes pinned bytes drops the repo back to inert on purpose. <code>agentstack trust .</code> prints the full declared surface and asks. Details: <a href="howto/trust-a-repo.html">trust a cloned repo</a>.</p>
 <h2 id="i-re-locked-and-it-still-refuses-to-deliver">I re-locked and it still refuses to deliver<a class="hlink" href="#i-re-locked-and-it-still-refuses-to-deliver" aria-label="Link to this section">#</a></h2>
 <p>Because re-locking is not reviewing. The lockfile is part of what you consent to, so <code>agentstack lock --write</code> <em>always</em> makes an existing grant stale — new pins are new consent. It accepts the new bytes; only <code>agentstack trust .</code> reviews them, and only the review re-opens delivery.</p>
-<pre class="block"><code>agentstack lock --write   # accept the new bytes
-agentstack trust .        # review them — this is the step that unblocks</code></pre>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack lock --write   <span class="cm"># accept the new bytes</span>
+<span class="pr">$ </span>agentstack trust .        <span class="cm"># review them — this is the step that unblocks</span></code></pre></div>
 <p>The order is the same on a fresh project: lock first, then trust. <code>trust</code> refuses an unpinned surface, so there is no other way round. Full walkthrough: <a href="troubleshooting.html#lock-first-then-trust">lock first, then trust</a>.</p>
 <h2 id="i-added-a-skill-and-now-everything-else-refuses">I added a skill and now everything else refuses<a class="hlink" href="#i-added-a-skill-and-now-everything-else-refuses" aria-label="Link to this section">#</a></h2>
 <p>That is the design. <code>agentstack add … --write</code> writes the manifest and lockfile and delivers in the same run — it judges trust as it stood when the command started, so it never refuses the thing you just asked for. But it does not re-approve the project on your behalf: a new capability is content you have not read yet. So the project reads <code>trust stale (content changed)</code> and the next command re-gates. Run <code>agentstack trust .</code> and the review is over in one step.</p>

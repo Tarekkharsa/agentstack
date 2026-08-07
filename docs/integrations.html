@@ -12,36 +12,9 @@
 <script src="theme/theme.js"></script>
 <link rel="stylesheet" href="theme/organic.css">
 <style>
-  :root {
-    --paper: #F5EAD8; --surface: #FFFDF6; --ink: #201E1D; --muted: #6E6559;
-    --accent: #C67139; --accent-ink: #FFFFFF;
-    --accent-soft: color-mix(in srgb, var(--accent) 10%, transparent);
-    --accent-line: color-mix(in srgb, var(--accent) 28%, transparent);
-    --line: #E2D5BD; --line-soft: #EADFC9; --code-bg: #ECE0C8;
-    --radius-sm: 9px;
-    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
-    --sans: var(--font-body, Figtree, sans-serif);
-  }
-  [data-theme="dark"] {
-    --paper: #211E1B; --surface: #2A2622; --ink: #F5EAD8; --muted: #A89B87;
-    --accent: #D98A52; --accent-ink: #211406;
-    --line: #3A342E; --line-soft: #332E29; --code-bg: #332E29;
-  }
-  [data-palette="slate"] {
-    --paper: #FBFAF7; --surface: #FFFFFF; --ink: #1B1F24; --muted: #5B6570;
-    --accent: #B4540A; --accent-ink: #FFFFFF;
-    --line: #E7E2D9; --line-soft: #EFEBE3; --code-bg: #F3F0EA;
-  }
-  [data-palette="slate"][data-theme="dark"] {
-    --paper: #14171B; --surface: #1A1E23; --ink: #E9E7E2; --muted: #9AA3AC;
-    --accent: #F0975A; --accent-ink: #1A1206;
-    --line: #292E34; --line-soft: #23282E; --code-bg: #1E2329;
-  }
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.6 var(--sans); }
-  a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
-  a:hover { text-decoration-thickness: 2px; }
   a code { color: var(--ink); }
   code { font-family: var(--mono); font-size: 0.9em; background: var(--code-bg); border-radius: 5px; padding: 0.1em 0.35em; }
   header { position: sticky; top: 0; z-index: 50; background: color-mix(in srgb, var(--surface) 96%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
@@ -80,8 +53,8 @@
   h2:hover .hlink, h3:hover .hlink, h4:hover .hlink { opacity: 0.7; }
   main p, main li { max-width: 46rem; }
   main ul, main ol { padding-left: 1.4rem; }
-  pre.block { background: var(--code-bg); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); padding: 0.85rem 1rem; overflow-x: auto; font-size: 0.82rem; line-height: 1.55; }
-  pre.block code { background: none; padding: 0; font-size: 1em; }
+  /* Code blocks and terminals are the .cb component in theme/organic.css. */
+  main .cb { margin: 1.1rem 0; }
   /* Long inline code (paths, digests, command lines) wraps inside its own
      container instead of widening the page on narrow viewports. */
   main p code, main li code, main td code, main h2 code, main h3 code { overflow-wrap: anywhere; }
@@ -304,21 +277,21 @@
 <p>One name in <code>FEATURES</code> is deliberately absent from this table. <code>json-reads-v1</code> names the <code>--json</code> form of <code>status</code>, <code>search</code>, <code>adapters list</code> and <code>session list</code> — an integrator contract for callers that scrape those screens, which the panel does not use because it reads the richer payloads directly. Every other name appears above; <code>profiles-edit-v1</code> covers the digest-bound add verbs and is listed with the toolset rows.</p>
 <p>The table is checked against <code>FEATURES</code> by <code>crates/cli/src/ui_contract.rs::tests::every_served_contract_is_documented</code>, so a contract added to the binary without a row here fails the build rather than reaching an integrator as a name nobody wrote down.</p>
 <p>Check any build yourself — the envelope is part of the read:</p>
-<pre class="block"><code>agentstack doctor --json | jq '{schema_version, features}'</code></pre>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack doctor --json | jq '{schema_version, features}'</code></pre></div>
 <p>A panel feature whose contract is absent disables that action with upgrade guidance; it never guesses or degrades silently.</p>
 <h3 id="what-works-today">What works today<a class="hlink" href="#what-works-today" aria-label="Link to this section">#</a></h3>
 <p>AgentStack already manages the native configuration read by the coding CLIs t3code launches. Static activation and clean-at-rest sessions therefore apply to those launches without t3code reimplementing configuration logic.</p>
 <p>Run:</p>
-<pre class="block"><code>agentstack doctor</code></pre>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack doctor</code></pre></div>
 <p>When t3code is installed, doctor checks the supervisor integration, including provider guard coverage and home-directory overrides that can move a CLI away from the configuration AgentStack manages.</p>
 <p><strong>Guard coverage is per provider, and it is not universal.</strong> Whichever CLI t3code launches, AgentStack manages its native configuration; whether a host guard can referee that session afterwards depends on the CLI. Claude Code (and VS Code agent mode, which reads the same user-scope hooks), Codex, Gemini, Antigravity, Cursor, Windsurf, Copilot CLI, OpenCode and Pi all have a pre-tool-use hook the guard rides. Three do not, for two different reasons: Claude Desktop and Junie expose <strong>no hook surface</strong> — there is nothing to build — while Kiro is simply <strong>not wired yet</strong>, a gap in AgentStack rather than in Kiro. A panel must not flatten those into one "unsupported" label: one is a limit, the other is a to-do. The per-CLI table, and what the guard blocks once wired, is in <a href="adapters.html#which-adapters-get-the-host-guard">the adapter support matrix</a>; <code>agentstack guard status</code> prints the same list for the machine in front of you.</p>
 <p>For per-session run identity, create a transparent launcher:</p>
-<pre class="block"><code>agentstack x shim make claude</code></pre>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack x shim make claude</code></pre></div>
 <p>Point the matching t3code provider's binary-path setting at the generated shim. Each launched session then appears in <code>agentstack x report runs</code> and receives its own run report.</p>
 <h3 id="project-actions-fresh-worktrees-set-themselves-up">Project actions: fresh worktrees set themselves up<a class="hlink" href="#project-actions-fresh-worktrees-set-themselves-up" aria-label="Link to this section">#</a></h3>
 <p>t3code runs each task in a fresh git worktree — a clean checkout in which AgentStack's rendered configuration (<code>.mcp.json</code>, <code>.claude/skills/</code>, and the other native files) does not exist, because the managed <code>.gitignore</code> block deliberately keeps generated artifacts out of git. Left alone, every t3code task therefore starts without the project's servers and skills, and nothing announces the loss.</p>
 <p>t3code's project actions close that gap with no panel and no new AgentStack surface, so they work in any t3code build. A <code>t3.json</code> checked into the repository root offers named commands; t3code shows them for one-click import, runs them in a real terminal inside the worktree, and can run one of them automatically when a worktree is created:</p>
-<pre class="block"><code>{
+<div class="cb" data-language="json"><div class="cb-bar"><span class="cb-lang">json</span></div><pre class="block"><code class="language-json">{
   "$schema": "https://t3.codes/schema/t3.json",
   "scripts": [
     {
@@ -333,7 +306,7 @@
       "icon": "lint"
     }
   ]
-}</code></pre>
+}</code></pre></div>
 <ul>
 <li><strong>Set up toolset</strong> runs the moment a worktree is created, before the coding agent starts. With the project's manifest and lockfile committed, <code>agentstack use --write</code> activates the single declared toolset and renders every native config in place; a project that declares several toolsets must name one (<code>agentstack use &lt;toolset&gt; --write</code>).</li>
 </ul>

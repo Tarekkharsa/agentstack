@@ -105,7 +105,9 @@ h5 { font-size: 16px; }
 h6 { font-size: 13px; }
 h6 { letter-spacing: 0.08em; text-transform: uppercase; }
 p { margin: 0 0 var(--space-3); }
-a { color: var(--color-text); text-decoration: underline; text-underline-offset: 3px; }
+/* Links carry no decoration by default — see the "links" section at the foot of
+   this file, which adds an underline back inside prose only. */
+a { color: var(--color-text); text-decoration: none; }
 img { display: block; max-width: 100%; }
 figure { margin: 0; }
 .toc-sub, .ck-rail a span:first-child { color: var(--color-neutral-700) !important; }
@@ -269,3 +271,237 @@ textarea.input { min-height: 90px; resize: vertical; }
 .btn, .tag, .seg, .input { border-radius: 999px; }
 .input { padding-inline: 14px; }
 
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Site theming — the two axes, in ONE place
+   ──────────────────────────────────────────────────────────────────────────
+   Every docs page (hand-written and generated) links this file, so the palette
+   lives here and nowhere else. Two independent axes compose:
+
+     data-palette  "organic" (the default, warm) or "slate" (the shipped site)
+     data-theme    "light" or "dark", owned by theme.js
+
+   These blocks were previously copy-pasted verbatim into three page <style>
+   blocks and paraphrased a fourth time inside tools/make-docs-pages.py. They
+   are now declared once. Order matters: `:root` above has the same specificity
+   as `[data-palette]`, so these must stay BELOW it.
+   ══════════════════════════════════════════════════════════════════════ */
+
+[data-theme="dark"] {
+  --color-bg: #211E1B; --color-surface: #2A2622; --color-text: #F5EAD8;
+  --color-divider: color-mix(in srgb, #F5EAD8 18%, transparent);
+  --color-accent: #D98A52; --color-accent-2: #97A876;
+  --color-neutral-100: #332E29; --color-neutral-200: #3A342E; --color-neutral-300: #46403A;
+  --color-neutral-400: #5C554C; --color-neutral-500: #847767; --color-neutral-600: #A89B87;
+  --color-neutral-700: #C9BCA7; --color-neutral-800: #DACDB8; --color-neutral-900: #EFE6D4;
+  --color-accent-100: #3A2B1D; --color-accent-200: #4A3625; --color-accent-300: #5C4229;
+  --color-accent-600: #E09B66; --color-accent-700: #E4A878; --color-accent-800: #EDBF97;
+  --color-accent-900: #F4D5B8;
+  --color-accent-2-100: #2A3122; --color-accent-2-200: #353D2B; --color-accent-2-700: #B5C69A;
+  --color-accent-2-800: #C8D6B0; --color-accent-2-900: #DBE5C9;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
+  --shadow-md: 0 3px 10px rgba(0,0,0,0.45);
+  --shadow-lg: 0 12px 32px rgba(0,0,0,0.55);
+}
+
+/* Terminal chrome. A terminal reads as a terminal in BOTH themes, so these
+   stay dark either way — which also means their contrast is verified once,
+   not twice. Keep every foreground here at 4.5:1 or better on --term-bg. */
+[data-palette] {
+  --term-bg: #26211C; --term-hd: #1C1815; --term-btn: #38312A; --term-bd: #463D34;
+  --term-muted: #A5988A; --term-text: #E6DCC9;
+  --term-ok: #9DB380; --term-bad: #D97A62; --term-warn: #DDA84E;
+}
+
+[data-palette="slate"] {
+  --term-bg: #14181C; --term-hd: #0E1114; --term-btn: #23282E; --term-bd: #2E353C;
+  --term-muted: #97A1AD; --term-text: #D7DEE4;
+  --term-ok: #7CC08B; --term-bad: #E5786B; --term-warn: #E0B04A;
+
+  --color-bg: #FBFAF7; --color-surface: #FFFFFF; --color-text: #1B1F24;
+  --color-divider: rgba(27,31,36,0.16);
+  --color-accent: #B4540A; --color-accent-2: #2A6F4E;
+  --color-neutral-100: #F3F0EA; --color-neutral-200: #E7E2D9; --color-neutral-300: #D8D2C7;
+  --color-neutral-400: #B9B3A8; --color-neutral-500: #7E858D; --color-neutral-600: #5B6570;
+  --color-neutral-700: #3A424B; --color-neutral-800: #2B3138; --color-neutral-900: #1B1F24;
+  --color-accent-100: #FBF1E7; --color-accent-200: #F5DFC8; --color-accent-300: #EECDA9;
+  --color-accent-600: #9C4A08; --color-accent-700: #8A3F06; --color-accent-800: #6F3305;
+  --color-accent-900: #542704;
+  --color-accent-2-100: #EAF4EC; --color-accent-2-200: #D3E7D8; --color-accent-2-700: #1F5238;
+  --color-accent-2-800: #183F2B; --color-accent-2-900: #112D1F;
+}
+
+[data-palette="slate"][data-theme="dark"] {
+  --color-bg: #14171B; --color-surface: #1A1E23; --color-text: #E9E7E2;
+  --color-divider: rgba(233,231,226,0.16);
+  --color-accent: #F0975A; --color-accent-2: #7CC08B;
+  --color-neutral-100: #1E2329; --color-neutral-200: #292E34; --color-neutral-300: #343B43;
+  --color-neutral-400: #454D57; --color-neutral-500: #69727C; --color-neutral-600: #9AA3AC;
+  --color-neutral-700: #C3C9CF; --color-neutral-800: #D7DEE4; --color-neutral-900: #EDF1F4;
+  --color-accent-100: #2B2018; --color-accent-200: #3A2A1C; --color-accent-300: #4A3520;
+  --color-accent-600: #F2A470; --color-accent-700: #F5B183; --color-accent-800: #F8C7A3;
+  --color-accent-900: #FBDCC5;
+  --color-accent-2-100: #16281C; --color-accent-2-200: #1E3626; --color-accent-2-700: #A8D4B3;
+  --color-accent-2-800: #C2E2CA; --color-accent-2-900: #DCEFE1;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
+  --shadow-md: 0 3px 10px rgba(0,0,0,0.45);
+  --shadow-lg: 0 12px 32px rgba(0,0,0,0.55);
+}
+
+/* ── One vocabulary, two spellings ─────────────────────────────────────────
+   The generated docs pages were written against a second, shorter token set
+   (--paper/--ink/--line/…). Rather than keep two palettes in step by hand,
+   the short names are now ALIASES of the --color-* ramp above. A colour
+   therefore changes in exactly one place. Aliases resolve at use time against
+   whichever palette/theme block won on :root, so one declaration covers all
+   four combinations. */
+:root {
+  --paper: var(--color-bg);
+  --surface: var(--color-surface);
+  --ink: var(--color-text);
+  --muted: var(--color-neutral-600);
+  --accent: var(--color-accent);
+  --accent-ink: var(--color-bg);
+  --accent-soft: color-mix(in srgb, var(--color-accent) 10%, transparent);
+  --accent-line: color-mix(in srgb, var(--color-accent) 28%, transparent);
+  --line: var(--color-neutral-200);
+  --line-soft: color-mix(in srgb, var(--color-neutral-200) 55%, var(--color-bg));
+  --code-bg: var(--color-neutral-100);
+  --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --sans: var(--font-body, Figtree, sans-serif);
+}
+/* --accent-ink is text ON the accent; in the light palettes white beats the
+   page background against that mid-tone orange. */
+[data-palette="slate"] { --accent-ink: #FFFFFF; }
+[data-theme="dark"] { --accent-ink: #211406; }
+[data-palette="slate"][data-theme="dark"] { --accent-ink: #1A1206; }
+
+.nav a.btn-primary, .nav a.btn-primary:hover { color: var(--color-bg); }
+.card { border-radius: var(--radius-md, 16px); }
+
+/* ── links ────────────────────────────────────────────────────────────────
+   Underlines are earned, not universal. `a` above is undecorated, so nav
+   items, sidebar entries, footers, cards and buttons are plain and shift
+   colour on hover. Only links inside running prose get an underline, and it
+   is a soft accent-tinted rule under body-coloured text — hover brightens the
+   RULE, never the metrics: changing text-decoration-thickness on hover reflows
+   the line and makes the text shimmer. */
+main :is(p, li, td, dd, dt, blockquote, figcaption) a:not(.btn):not(.hlink),
+[role="main"] :is(p, li, td, dd, dt, blockquote, figcaption) a:not(.btn):not(.hlink) {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in srgb, var(--color-accent) 55%, transparent);
+  text-underline-offset: 4px;
+}
+main :is(p, li, td, dd, dt, blockquote, figcaption) a:not(.btn):not(.hlink):hover,
+[role="main"] :is(p, li, td, dd, dt, blockquote, figcaption) a:not(.btn):not(.hlink):hover {
+  text-decoration-color: var(--color-accent);
+}
+a:not([class]):hover, .nav a:hover { color: var(--color-accent); }
+
+/* ── code blocks and terminals ────────────────────────────────────────────
+   One component, used by the generated pages (emitted by
+   tools/make-docs-pages.py) and by the hand-written pages alike.
+
+     .cb            the card: hairline border, 12px radius, clipped corners
+     .cb-bar        the header strip — language label, and dots on a terminal
+     .cb > pre      the only scroller; theme.js gives it tabindex="0" when it
+                    actually overflows, so a wide block scrolls inside itself
+                    and never widens the document
+     .cb-term       the terminal variant: always-dark chrome
+       .pr          a shell prompt — accent-coloured and unselectable, so
+                    copying a session yields runnable text
+       .out         program output — dimmed, which is what separates what you
+                    typed from what came back
+       .cm          a comment — dimmed the same way
+   ══════════════════════════════════════════════════════════════════════ */
+.cb {
+  margin: 1rem 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--code-bg);
+}
+.cb-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--color-text) 5%, var(--code-bg));
+}
+.cb-lang {
+  font-family: var(--mono); font-size: 11px; line-height: 1.6;
+  letter-spacing: 0.09em; text-transform: uppercase;
+  color: var(--color-neutral-700);
+}
+.cb-dots { display: inline-flex; gap: 6px; flex: none; }
+.cb-dots span {
+  display: block; width: 9px; height: 9px; border-radius: 999px;
+  background: var(--term-btn);
+}
+.cb > pre {
+  margin: 0; border: 0; border-radius: 0; background: none;
+  padding: 0.85rem 1rem;
+  overflow-x: auto;
+  font-family: var(--mono); font-size: 0.82rem; line-height: 1.6;
+  scrollbar-width: thin;
+}
+.cb > pre > code {
+  background: none; border: 0; padding: 0; font-size: 1em; font-family: inherit;
+}
+.cb-term { background: var(--term-bg); border-color: var(--term-bd); }
+.cb-term .cb-bar { background: var(--term-hd); border-bottom-color: var(--term-bd); }
+.cb-term .cb-lang { color: var(--term-muted); }
+.cb-term > pre { color: var(--term-text); }
+.cb-term .pr { color: var(--term-warn); user-select: none; -webkit-user-select: none; }
+.cb-term .out, .cb-term .cm { color: var(--term-muted); }
+.cb-term .ok { color: var(--term-ok); }
+.cb-term .bad { color: var(--term-bad); }
+
+/* A standalone terminal on a hand-written page: same chrome, content authored
+   inline rather than compiled from Markdown. */
+.term {
+  border-radius: var(--radius-md, 16px);
+  overflow: hidden;
+  border: 1px solid var(--term-bd);
+  background: var(--term-bg);
+}
+.term-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 14px;
+  background: var(--term-hd);
+  border-bottom: 1px solid var(--term-bd);
+}
+.term-title {
+  font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em;
+  color: var(--term-muted);
+}
+.term-body {
+  padding: 14px 18px;
+  font-family: var(--mono); font-size: 0.8rem; line-height: 1.9;
+  color: var(--term-text);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+.term-body pre { margin: 0; font: inherit; }
+.term-row { display: flex; gap: 12px; }
+.term-row > .cmd { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+/* A terminal with no window chrome — the body's look on a bare element, for
+   panes that are one command deep or are filled in by page script. */
+.term-flat {
+  border: 1px solid var(--term-bd);
+  border-radius: var(--radius-md, 16px);
+  background: var(--term-bg);
+  color: var(--term-text);
+  padding: 14px 18px;
+  font-family: var(--mono); font-size: 0.82rem; line-height: 1.8;
+  overflow-x: auto; scrollbar-width: thin;
+}
+:is(.term, .term-flat) .pr { color: var(--term-warn); user-select: none; -webkit-user-select: none; }
+:is(.term, .term-flat) :is(.out, .cm) { color: var(--term-muted); }
+:is(.term, .term-flat) .ok { color: var(--term-ok); }
+:is(.term, .term-flat) .bad { color: var(--term-bad); }
+/* Multi-line authored content that keeps its own whitespace (trees, captured
+   output). A <div>, not a <pre>: the CLI-surface test in
+   crates/cli/tests/docs_commands.rs treats <pre>/<code> as "a command shown to
+   a reader", and these panes are illustrations of output. */
+.term-lines { white-space: pre; }

@@ -12,36 +12,9 @@
 <script src="theme/theme.js"></script>
 <link rel="stylesheet" href="theme/organic.css">
 <style>
-  :root {
-    --paper: #F5EAD8; --surface: #FFFDF6; --ink: #201E1D; --muted: #6E6559;
-    --accent: #C67139; --accent-ink: #FFFFFF;
-    --accent-soft: color-mix(in srgb, var(--accent) 10%, transparent);
-    --accent-line: color-mix(in srgb, var(--accent) 28%, transparent);
-    --line: #E2D5BD; --line-soft: #EADFC9; --code-bg: #ECE0C8;
-    --radius-sm: 9px;
-    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
-    --sans: var(--font-body, Figtree, sans-serif);
-  }
-  [data-theme="dark"] {
-    --paper: #211E1B; --surface: #2A2622; --ink: #F5EAD8; --muted: #A89B87;
-    --accent: #D98A52; --accent-ink: #211406;
-    --line: #3A342E; --line-soft: #332E29; --code-bg: #332E29;
-  }
-  [data-palette="slate"] {
-    --paper: #FBFAF7; --surface: #FFFFFF; --ink: #1B1F24; --muted: #5B6570;
-    --accent: #B4540A; --accent-ink: #FFFFFF;
-    --line: #E7E2D9; --line-soft: #EFEBE3; --code-bg: #F3F0EA;
-  }
-  [data-palette="slate"][data-theme="dark"] {
-    --paper: #14171B; --surface: #1A1E23; --ink: #E9E7E2; --muted: #9AA3AC;
-    --accent: #F0975A; --accent-ink: #1A1206;
-    --line: #292E34; --line-soft: #23282E; --code-bg: #1E2329;
-  }
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.6 var(--sans); }
-  a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
-  a:hover { text-decoration-thickness: 2px; }
   a code { color: var(--ink); }
   code { font-family: var(--mono); font-size: 0.9em; background: var(--code-bg); border-radius: 5px; padding: 0.1em 0.35em; }
   header { position: sticky; top: 0; z-index: 50; background: color-mix(in srgb, var(--surface) 96%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
@@ -80,8 +53,8 @@
   h2:hover .hlink, h3:hover .hlink, h4:hover .hlink { opacity: 0.7; }
   main p, main li { max-width: 46rem; }
   main ul, main ol { padding-left: 1.4rem; }
-  pre.block { background: var(--code-bg); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); padding: 0.85rem 1rem; overflow-x: auto; font-size: 0.82rem; line-height: 1.55; }
-  pre.block code { background: none; padding: 0; font-size: 1em; }
+  /* Code blocks and terminals are the .cb component in theme/organic.css. */
+  main .cb { margin: 1.1rem 0; }
   /* Long inline code (paths, digests, command lines) wraps inside its own
      container instead of widening the page on narrow viewports. */
   main p code, main li code, main td code, main h2 code, main h3 code { overflow-wrap: anywhere; }
@@ -258,7 +231,7 @@
 <p>For every reader. This page defines each term AgentStack uses, in two or three plain sentences. Every other page links here on first use instead of re-explaining — so keep it open the first time through.</p>
 <h2 id="start-with-the-files">Start with the files<a class="hlink" href="#start-with-the-files" aria-label="Link to this section">#</a></h2>
 <p>Before any of the terms below, this is what AgentStack actually puts in a project. Two groups: the ones you write and commit, and the ones written for you.</p>
-<pre class="block"><code>your-project/
+<div class="cb"><pre class="block"><code>your-project/
 ├── .agentstack/
 │   ├── agentstack.toml   # what your tools may run — you edit this      ← manifest
 │   ├── agentstack.lock   # the exact bytes that resolved to             ← lockfile
@@ -268,7 +241,7 @@
 │
 ├── .mcp.json             # ─┐
 ├── .claude/skills/       #  │ rendered for each CLI: generated output, not
-└── AGENTS.md             # ─┘ hand-edited — regenerate or remove it any time</code></pre>
+└── AGENTS.md             # ─┘ hand-edited — regenerate or remove it any time</code></pre></div>
 <p>Commit the first group; it is the portable part. The second group is written by <code>agentstack apply</code> in one shape per CLI, and how much of it exists at rest is decided by <a href="#delivery-modes">delivery routing</a> — skills and MCP servers reach an MCP-capable CLI live, so nothing generated lands here for them, while house rules, settings, hooks and extensions are real files. Machine-wide counterparts of the same idea live in <code>~/.agentstack/</code>; everything above is what one repository carries.</p>
 <p>The rest of this page names each piece, in the order the pieces are used.</p>
 <h2 id="how-the-pieces-fit-together">How the pieces fit together<a class="hlink" href="#how-the-pieces-fit-together" aria-label="Link to this section">#</a></h2>
@@ -278,8 +251,8 @@
 <p><strong>Manifest</strong> — one file (<code>.agentstack/agentstack.toml</code>) listing everything your tools may run: MCP servers, skills, instructions, settings, hooks, and extensions. You edit it; AgentStack renders it into each tool's own config. It holds only <code>${REF}</code> secret placeholders, never real values.</p>
 <p><strong>Lockfile</strong> — <code>agentstack.lock</code> pins the manifest's resolved contents (server definitions, skill bytes, instruction bytes, settings values) to SHA-256 digests, so the same inputs reproduce and any change is visible. It is part of what you consent to when you trust a project — and that has one consequence worth learning before you meet it.</p>
 <p><strong>Lock first, then trust.</strong> Because the lockfile is inside the consent surface, <code>agentstack lock --write</code> always invalidates an existing grant: new pins are new consent. So the order never varies — pin the bytes, <em>then</em> approve them.</p>
-<pre class="block"><code>agentstack lock --write   # pin
-agentstack trust .        # review the pinned bytes and approve</code></pre>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack lock --write   <span class="cm"># pin</span>
+<span class="pr">$ </span>agentstack trust .        <span class="cm"># review the pinned bytes and approve</span></code></pre></div>
 <p>Doing it the other way round throws the approval away, and <code>trust</code> refuses an unpinned surface anyway. The same rule explains why re-locking a changed skill does not make it deliverable again: <code>lock --write</code> <em>accepts</em> the new bytes, which is a machine's job; only <code>trust</code> <em>reviews</em> them, which is yours, and only the review re-opens delivery.</p>
 <h2 id="toolset">Toolset<a class="hlink" href="#toolset" aria-label="Link to this section">#</a></h2>
 <p><strong>Toolset</strong> — a named subset of the manifest ("backend", "design") you activate together. A manifest with no toolsets activates its whole inline set as the default, so you only name one when you have more than one. In the manifest file a toolset is a <code>[toolsets.&lt;name&gt;]</code> table. <code>[profiles.&lt;name&gt;]</code> is the older spelling and still works, so no existing manifest breaks; it is read, never written back.</p>

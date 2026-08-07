@@ -12,36 +12,9 @@
 <script src="../theme/theme.js"></script>
 <link rel="stylesheet" href="../theme/organic.css">
 <style>
-  :root {
-    --paper: #F5EAD8; --surface: #FFFDF6; --ink: #201E1D; --muted: #6E6559;
-    --accent: #C67139; --accent-ink: #FFFFFF;
-    --accent-soft: color-mix(in srgb, var(--accent) 10%, transparent);
-    --accent-line: color-mix(in srgb, var(--accent) 28%, transparent);
-    --line: #E2D5BD; --line-soft: #EADFC9; --code-bg: #ECE0C8;
-    --radius-sm: 9px;
-    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
-    --sans: var(--font-body, Figtree, sans-serif);
-  }
-  [data-theme="dark"] {
-    --paper: #211E1B; --surface: #2A2622; --ink: #F5EAD8; --muted: #A89B87;
-    --accent: #D98A52; --accent-ink: #211406;
-    --line: #3A342E; --line-soft: #332E29; --code-bg: #332E29;
-  }
-  [data-palette="slate"] {
-    --paper: #FBFAF7; --surface: #FFFFFF; --ink: #1B1F24; --muted: #5B6570;
-    --accent: #B4540A; --accent-ink: #FFFFFF;
-    --line: #E7E2D9; --line-soft: #EFEBE3; --code-bg: #F3F0EA;
-  }
-  [data-palette="slate"][data-theme="dark"] {
-    --paper: #14171B; --surface: #1A1E23; --ink: #E9E7E2; --muted: #9AA3AC;
-    --accent: #F0975A; --accent-ink: #1A1206;
-    --line: #292E34; --line-soft: #23282E; --code-bg: #1E2329;
-  }
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.6 var(--sans); }
-  a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
-  a:hover { text-decoration-thickness: 2px; }
   a code { color: var(--ink); }
   code { font-family: var(--mono); font-size: 0.9em; background: var(--code-bg); border-radius: 5px; padding: 0.1em 0.35em; }
   header { position: sticky; top: 0; z-index: 50; background: color-mix(in srgb, var(--surface) 96%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
@@ -80,8 +53,8 @@
   h2:hover .hlink, h3:hover .hlink, h4:hover .hlink { opacity: 0.7; }
   main p, main li { max-width: 46rem; }
   main ul, main ol { padding-left: 1.4rem; }
-  pre.block { background: var(--code-bg); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); padding: 0.85rem 1rem; overflow-x: auto; font-size: 0.82rem; line-height: 1.55; }
-  pre.block code { background: none; padding: 0; font-size: 1em; }
+  /* Code blocks and terminals are the .cb component in theme/organic.css. */
+  main .cb { margin: 1.1rem 0; }
   /* Long inline code (paths, digests, command lines) wraps inside its own
      container instead of widening the page on narrow viewports. */
   main p code, main li code, main td code, main h2 code, main h3 code { overflow-wrap: anywhere; }
@@ -266,22 +239,22 @@
 <tr><td>Concrete fixes from the signals already collected</td><td><code>agentstack x optimize</code></td></tr>
 <tr><td>One server or skill, <strong>before</strong> you trust or rely on it</td><td><code>agentstack x explain &lt;name&gt;</code></td></tr>
 </tbody></table></div>
-<pre class="block"><code># What ran, and what one run did
-agentstack x report runs                # table of tracked runs (--json to script)
-agentstack x report run &lt;id&gt;            # one run's flight recorder + posture label
-agentstack x kill &lt;id&gt;                  # stop a tracked run that's gone wrong
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="cm"># What ran, and what one run did</span>
+<span class="pr">$ </span>agentstack x report runs                <span class="cm"># table of tracked runs (--json to script)</span>
+<span class="pr">$ </span>agentstack x report run &lt;id&gt;            <span class="cm"># one run's flight recorder + posture label</span>
+<span class="pr">$ </span>agentstack x kill &lt;id&gt;                  <span class="cm"># stop a tracked run that's gone wrong</span>
 
-# What your capabilities cost and call
-agentstack x report usage               # per-capability context cost + activation counts
-agentstack x report usage --live        # measure each server's tools/list on the wire
-agentstack x report calls --since 7     # brokered tool calls, last 7 days (--json to script)
-agentstack x report wire                # per-turn token weight of the tools block
+<span class="cm"># What your capabilities cost and call</span>
+<span class="pr">$ </span>agentstack x report usage               <span class="cm"># per-capability context cost + activation counts</span>
+<span class="pr">$ </span>agentstack x report usage --live        <span class="cm"># measure each server's tools/list on the wire</span>
+<span class="pr">$ </span>agentstack x report calls --since 7     <span class="cm"># brokered tool calls, last 7 days (--json to script)</span>
+<span class="pr">$ </span>agentstack x report wire                <span class="cm"># per-turn token weight of the tools block</span>
 
-# Turn evidence into next actions
-agentstack x optimize                   # evidence-backed recommendations (--write applies the safe class only)
+<span class="cm"># Turn evidence into next actions</span>
+<span class="pr">$ </span>agentstack x optimize                   <span class="cm"># evidence-backed recommendations (--write applies the safe class only)</span>
 
-# Before you trust or rely on a capability
-agentstack x explain &lt;name&gt;             # provenance, effective policy, and context cost, for one capability</code></pre>
+<span class="cm"># Before you trust or rely on a capability</span>
+<span class="pr">$ </span>agentstack x explain &lt;name&gt;             <span class="cm"># provenance, effective policy, and context cost, for one capability</span></code></pre></div>
 <p><strong>Start here:</strong> <code>agentstack x report runs</code>. If it is empty, nothing has been brokered yet — runs are tracked when launched with <code>agentstack run</code>, and calls are brokered through the <a href="../howto/trust-a-repo.html">gateway</a>.</p>
 <p><strong>A call that was refused is not a call the run made.</strong> <code>report run &lt;id&gt;</code> lists tool calls the <a href="../concepts.html#lease-session-or-protected-run-fence">fence</a> turned away in their own <strong>Fence refusals</strong> section, naming the server, the tool, the toolset it was asked through, and the reason — deliberately kept out of the tool-call count above it, so the number a reviewer reads is what the run actually did.</p>
 <p><strong>Before you trust.</strong> <code>agentstack x explain &lt;name&gt;</code> is the vet-first command: it shows one server or skill's origin and provenance, whether it has drifted from its pin, its <a href="../reference.html#mcp-firewall-policytools">effective policy</a> (the tool, egress, and secret-access rules that will actually apply), and its per-session context cost. It reads and reports only, so it is not itself gated — it works in the untrusted repo you are trying to make a decision about. That is the point: run it before <code>agentstack trust .</code> (see <a href="../howto/trust-a-repo.html">trust a cloned repo</a>) or before adding a capability to a toolset.</p>

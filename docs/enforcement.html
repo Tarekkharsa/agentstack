@@ -12,36 +12,9 @@
 <script src="theme/theme.js"></script>
 <link rel="stylesheet" href="theme/organic.css">
 <style>
-  :root {
-    --paper: #F5EAD8; --surface: #FFFDF6; --ink: #201E1D; --muted: #6E6559;
-    --accent: #C67139; --accent-ink: #FFFFFF;
-    --accent-soft: color-mix(in srgb, var(--accent) 10%, transparent);
-    --accent-line: color-mix(in srgb, var(--accent) 28%, transparent);
-    --line: #E2D5BD; --line-soft: #EADFC9; --code-bg: #ECE0C8;
-    --radius-sm: 9px;
-    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
-    --sans: var(--font-body, Figtree, sans-serif);
-  }
-  [data-theme="dark"] {
-    --paper: #211E1B; --surface: #2A2622; --ink: #F5EAD8; --muted: #A89B87;
-    --accent: #D98A52; --accent-ink: #211406;
-    --line: #3A342E; --line-soft: #332E29; --code-bg: #332E29;
-  }
-  [data-palette="slate"] {
-    --paper: #FBFAF7; --surface: #FFFFFF; --ink: #1B1F24; --muted: #5B6570;
-    --accent: #B4540A; --accent-ink: #FFFFFF;
-    --line: #E7E2D9; --line-soft: #EFEBE3; --code-bg: #F3F0EA;
-  }
-  [data-palette="slate"][data-theme="dark"] {
-    --paper: #14171B; --surface: #1A1E23; --ink: #E9E7E2; --muted: #9AA3AC;
-    --accent: #F0975A; --accent-ink: #1A1206;
-    --line: #292E34; --line-soft: #23282E; --code-bg: #1E2329;
-  }
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.6 var(--sans); }
-  a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
-  a:hover { text-decoration-thickness: 2px; }
   a code { color: var(--ink); }
   code { font-family: var(--mono); font-size: 0.9em; background: var(--code-bg); border-radius: 5px; padding: 0.1em 0.35em; }
   header { position: sticky; top: 0; z-index: 50; background: color-mix(in srgb, var(--surface) 96%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
@@ -80,8 +53,8 @@
   h2:hover .hlink, h3:hover .hlink, h4:hover .hlink { opacity: 0.7; }
   main p, main li { max-width: 46rem; }
   main ul, main ol { padding-left: 1.4rem; }
-  pre.block { background: var(--code-bg); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); padding: 0.85rem 1rem; overflow-x: auto; font-size: 0.82rem; line-height: 1.55; }
-  pre.block code { background: none; padding: 0; font-size: 1em; }
+  /* Code blocks and terminals are the .cb component in theme/organic.css. */
+  main .cb { margin: 1.1rem 0; }
   /* Long inline code (paths, digests, command lines) wraps inside its own
      container instead of widening the page on narrow viewports. */
   main p code, main li code, main td code, main h2 code, main h3 code { overflow-wrap: anywhere; }

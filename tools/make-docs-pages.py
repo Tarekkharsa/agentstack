@@ -157,6 +157,161 @@ def inline(text, src_rel, out_rel, warnings):
     return re.sub(r"\x00(\d+)\x00", lambda m: spans[int(m.group(1))], chunk)
 
 
+# ------------------------------------------------------------- code blocks --
+# A fenced block renders as a card (`.cb` in theme/organic.css): hairline
+# border, clipped corners, a header strip naming the language, and a <pre> that
+# is the only thing allowed to scroll. Shell blocks additionally get terminal
+# chrome and per-line roles.
+#
+# HOW A COMMAND LINE IS TOLD FROM AN OUTPUT LINE
+# ----------------------------------------------
+# No new syntax is invented. The rule below was chosen by reading every fenced
+# block under docs/**.md and matching what is already written there:
+#
+#   bash | sh | shell | zsh   "commands to run". Across all 84 such blocks in
+#                             docs/ there is not one `$` prompt and not one
+#                             line of program output — they are copy-paste
+#                             command lists. So every line is a command, and a
+#                             `$` prompt is DRAWN in front of each line that
+#                             starts one: not a `\`-continuation, not a
+#                             comment, not a blank line. The prompt is
+#                             user-select:none, so copying still yields
+#                             runnable text.
+#
+#   console | terminal |      "a recorded session" — and all three such blocks
+#   session, plus any block   in docs/ do carry `$ ` prompts. A line beginning
+#   whose first non-blank     `$ ` is a command: its own prompt is kept and
+#   line begins with "$ "     coloured, the rest is at full brightness. EVERY
+#                             OTHER LINE IS PROGRAM OUTPUT and is dimmed to
+#                             --term-muted. That luminance split is what makes
+#                             a transcript readable at a glance. The
+#                             "first line starts with $" clause is what catches
+#                             the ten ```text blocks that are really
+#                             transcripts (tutorial.md, troubleshooting.md).
+#
+#   any block whose every     also a command list. 24 of the 102 ```text blocks
+#   non-blank, non-comment    in docs/ are exactly this — reference.md writes
+#   line begins with the      its per-verb recipes that way — and a block in
+#   CLI name                  which EVERY line is literally an invocation of
+#                             this CLI cannot be anything else. It is a
+#                             mechanical test over content that already exists,
+#                             not a syntax authors have to learn.
+#
+#   anything else             toml, json, yaml, js, ts, jsonc, prose samples,
+#                             ASCII trees, captured output — a plain code card.
+#                             No prompts, no dimming, no guessed roles. Where a
+#                             block cannot be classified from what is written,
+#                             it is styled well rather than labelled wrongly.
+#
+# Comments are dimmed inside terminal blocks either way. A `#` opens a comment
+# only when it starts the line or follows whitespace AND is outside any quoted
+# string, so `docs.html#start` and `--header "a#b"` stay code.
+#
+# One markup constraint, deliberately honoured below: a command's text is never
+# split across elements. crates/cli/tests/docs_commands.rs parses every command
+# shown in the docs out of the rendered HTML by finding "agentstack" inside a
+# <pre>/<code> and reading the next two whitespace-delimited tokens. Wrapping a
+# whole line is invisible to it; splitting `agentstack` from its verb would
+# silently stop it checking that command.
+CLI = "agentstack"
+RUN_LANGS = {"bash", "sh", "shell", "zsh"}
+SESSION_LANGS = {"console", "terminal", "session"}
+# Languages worth naming in the header strip. An unlabelled fence and ```text
+# name nothing useful, so those cards get no strip.
+LABELLED_LANGS = RUN_LANGS | SESSION_LANGS | {
+    "toml", "json", "jsonc", "yaml", "yml", "js", "ts", "tsx", "rust", "python",
+    "diff", "ini", "xml", "html", "css", "sql", "make", "dockerfile",
+}
+
+
+def split_comment(line):
+    """Split a shell line into (code, comment). `comment` keeps its leading
+    `#` and is empty when the line has none."""
+    quote = None
+    for idx, ch in enumerate(line):
+        if quote is not None:
+            if ch == quote:
+                quote = None
+        elif ch in "'\"":
+            quote = ch
+        elif ch == "#" and (idx == 0 or line[idx - 1].isspace()):
+            return line[:idx], line[idx:]
+    return line, ""
+
+
+def shell_code(text):
+    """Escaped shell text with any trailing comment dimmed."""
+    code, comment = split_comment(text)
+    if not comment:
+        return esc(text)
+    return esc(code) + f'<span class="cm">{esc(comment)}</span>'
+
+
+def all_lines_invoke_cli(lines):
+    """True when every line that is neither blank nor a comment starts with the
+    CLI name at column 0 — the shape of a hand-written command list."""
+    real = [ln for ln in lines if ln.strip() and not ln.lstrip().startswith("#")]
+    return bool(real) and all(ln == CLI or ln.startswith(CLI + " ") for ln in real)
+
+
+def render_block(lang, lines):
+    """One fenced block → the `.cb` card. See the rule block above."""
+    key = lang.lower()
+    first = next((ln for ln in lines if ln.strip()), "")
+    session = key in SESSION_LANGS or first.lstrip().startswith("$ ")
+    run = not session and (key in RUN_LANGS or all_lines_invoke_cli(lines))
+
+    rendered = []
+    if session:
+        for raw in lines:
+            stripped = raw.lstrip(" ")
+            if stripped.startswith("$ "):
+                indent = raw[: len(raw) - len(stripped)]
+                rendered.append(
+                    f'{esc(indent)}<span class="pr">$ </span>'
+                    + shell_code(stripped[2:])
+                )
+            elif raw.strip():
+                rendered.append(f'<span class="out">{esc(raw)}</span>')
+            else:
+                rendered.append(esc(raw))
+    elif run:
+        continued = False
+        for raw in lines:
+            body = raw.lstrip(" ")
+            if not body:
+                rendered.append(esc(raw))
+                continue
+            if body.startswith("#"):
+                rendered.append(f'<span class="cm">{esc(raw)}</span>')
+                continued = False
+                continue
+            # A prompt marks where a command STARTS, so a `\`-continuation of
+            # the previous line keeps the source's own indentation instead.
+            prompt = "" if continued else '<span class="pr">$ </span>'
+            indent = raw[: len(raw) - len(body)]
+            rendered.append(esc(indent) + prompt + shell_code(body))
+            continued = split_comment(body)[0].rstrip().endswith("\\")
+    else:
+        rendered = [esc(raw) for raw in lines]
+
+    label = key if key in LABELLED_LANGS else ""
+    bar = ""
+    if session or run:
+        dots = '<span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span>'
+        bar = f'<div class="cb-bar">{dots}<span class="cb-lang">{esc(label or "shell")}</span></div>'
+    elif label:
+        bar = f'<div class="cb-bar"><span class="cb-lang">{esc(label)}</span></div>'
+
+    cls = "cb cb-term" if (session or run) else "cb"
+    attr = f' data-language="{esc(label)}"' if label else ""
+    code_cls = f' class="language-{esc(label)}"' if label else ""
+    return (
+        f'<div class="{cls}"{attr}>{bar}'
+        f'<pre class="block"><code{code_cls}>' + "\n".join(rendered) + "</code></pre></div>"
+    )
+
+
 def convert(md, src_rel, out_rel, warnings):
     """The page-body converter: returns (article_html, title, first_paragraph)."""
     lines = md.split("\n")
@@ -194,14 +349,13 @@ def convert(md, src_rel, out_rel, warnings):
                 block.append(lines[i])
                 i += 1
             i += 1
-            code = esc("\n".join(block))
             if lang == "mermaid":
                 gh_page = f"{GH}/blob/main/docs/{src_rel}"
                 out.append(
                     f'<p class="gennote">The diagram below is Mermaid source — '
                     f'<a href="{gh_page}">view it rendered on GitHub</a>.</p>'
                 )
-            out.append(f'<pre class="block"><code>{code}</code></pre>')
+            out.append(render_block(lang, block))
             continue
 
         m = re.match(r"^(#{1,4}) +(.*)$", line)
@@ -357,41 +511,17 @@ def convert(md, src_rel, out_rel, warnings):
 
 # ----------------------------------------------------------------- template --
 # The shell matches the design-system pages (index/docs/examples):
-# theme/organic.css supplies fonts and component tokens, theme/theme.js owns
-# the light/dark toggle (data-theme on <html>, dark default), and the token
-# blocks below pin the slate palette in both themes. Keep these overrides in
-# step with docs.html when the site design changes.
+# theme/organic.css supplies fonts, the whole two-axis palette
+# (data-palette × data-theme), the link treatment, and the .cb code/terminal
+# component; theme/theme.js owns the light/dark toggle (data-theme on <html>,
+# dark default). What is left below is layout and typography for the docs
+# shell only — NO colour definitions. The short token names it uses
+# (--paper/--ink/--line/--code-bg/--mono/…) are aliases of the --color-* ramp,
+# declared once in organic.css, so a colour changes in exactly one place.
 CSS = """
-  :root {
-    --paper: #F5EAD8; --surface: #FFFDF6; --ink: #201E1D; --muted: #6E6559;
-    --accent: #C67139; --accent-ink: #FFFFFF;
-    --accent-soft: color-mix(in srgb, var(--accent) 10%, transparent);
-    --accent-line: color-mix(in srgb, var(--accent) 28%, transparent);
-    --line: #E2D5BD; --line-soft: #EADFC9; --code-bg: #ECE0C8;
-    --radius-sm: 9px;
-    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
-    --sans: var(--font-body, Figtree, sans-serif);
-  }
-  [data-theme="dark"] {
-    --paper: #211E1B; --surface: #2A2622; --ink: #F5EAD8; --muted: #A89B87;
-    --accent: #D98A52; --accent-ink: #211406;
-    --line: #3A342E; --line-soft: #332E29; --code-bg: #332E29;
-  }
-  [data-palette="slate"] {
-    --paper: #FBFAF7; --surface: #FFFFFF; --ink: #1B1F24; --muted: #5B6570;
-    --accent: #B4540A; --accent-ink: #FFFFFF;
-    --line: #E7E2D9; --line-soft: #EFEBE3; --code-bg: #F3F0EA;
-  }
-  [data-palette="slate"][data-theme="dark"] {
-    --paper: #14171B; --surface: #1A1E23; --ink: #E9E7E2; --muted: #9AA3AC;
-    --accent: #F0975A; --accent-ink: #1A1206;
-    --line: #292E34; --line-soft: #23282E; --code-bg: #1E2329;
-  }
   * { box-sizing: border-box; }
   html { scroll-behavior: smooth; }
   body { margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.6 var(--sans); }
-  a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--accent); text-underline-offset: 3px; }
-  a:hover { text-decoration-thickness: 2px; }
   a code { color: var(--ink); }
   code { font-family: var(--mono); font-size: 0.9em; background: var(--code-bg); border-radius: 5px; padding: 0.1em 0.35em; }
   header { position: sticky; top: 0; z-index: 50; background: color-mix(in srgb, var(--surface) 96%, transparent); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
@@ -430,8 +560,8 @@ CSS = """
   h2:hover .hlink, h3:hover .hlink, h4:hover .hlink { opacity: 0.7; }
   main p, main li { max-width: 46rem; }
   main ul, main ol { padding-left: 1.4rem; }
-  pre.block { background: var(--code-bg); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); padding: 0.85rem 1rem; overflow-x: auto; font-size: 0.82rem; line-height: 1.55; }
-  pre.block code { background: none; padding: 0; font-size: 1em; }
+  /* Code blocks and terminals are the .cb component in theme/organic.css. */
+  main .cb { margin: 1.1rem 0; }
   /* Long inline code (paths, digests, command lines) wraps inside its own
      container instead of widening the page on narrow viewports. */
   main p code, main li code, main td code, main h2 code, main h3 code { overflow-wrap: anywhere; }
