@@ -309,7 +309,7 @@
 │   ├── agentstack.toml   # the manifest: servers, skills, instructions, toolsets
 │   └── .env              # token values lifted out of your configs (only if init found any)
 └── .gitignore            # a managed block, so .env is never committed</code></pre></div>
-<p>The manifest holds <code>${REF}</code> placeholders and never a secret value. The real values go to the OS keychain or that gitignored <code>.env</code>. Scripting this, or running it in CI? <code>agentstack init --yes --secrets skip</code> writes the manifest and asks nothing.</p>
+<p>The manifest holds <code>${REF}</code> placeholders and never a secret value. The real values go to the OS keychain or that gitignored <code>.env</code>. Scripting this, or running it in CI? <code>agentstack init --yes --secrets skip</code> writes the manifest and asks nothing. Add <code>--connect</code> and the same run also registers the bridge your CLIs need, so the setup delivers the moment <code>init</code> returns; without that flag <code>init</code> writes nothing outside this project.</p>
 <h2 id="step-2--add-a-capability">Step 2 — Add a capability<a class="hlink" href="#step-2--add-a-capability" aria-label="Link to this section">#</a></h2>
 <p>Search once across your library, the bundled catalog, and the official MCP registry:</p>
 <div class="cb cb-term"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">shell</span></div><pre class="block"><code><span class="pr">$ </span>agentstack search postgres
