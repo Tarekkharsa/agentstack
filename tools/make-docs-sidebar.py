@@ -42,11 +42,11 @@ TREE = [
         ("Which protection do I need?", "choose.html", "choose"),
         ("Examples", "examples.html", "examples"),
     ], "open"),
-    ("When it breaks", "$ agentstack status · doctor", [
+    ("When it breaks", "agentstack status · doctor", [
         ("Troubleshooting", "troubleshooting.html", "troubleshooting"),
         ("FAQ", "faq.html", "faq"),
     ], "open"),
-    ("Everyday", "$ agentstack add · apply · doctor", [
+    ("Everyday", "agentstack add · apply · doctor", [
         ("The manifest", "concepts.html#the-manifest-and-the-lockfile", "manifest"),
         ("Add a server", "howto/add-a-server.html", "howto-server"),
         ("Add a skill", "howto/add-a-skill.html", "howto-skill"),
@@ -65,18 +65,18 @@ TREE = [
         ("t3code", "integrations.html", "integrations"),
         ("Automation contract", "automation.html", "automation"),
     ], "open"),
-    ("Configure deeper", "$ agentstack use · session", [
+    ("Configure deeper", "agentstack use · session", [
         ("How it works", "architecture.html", "how-it-works"),
         ("Workflows", "workflows.html", "workflows"),
         ("Library sources", "reference.html#the-library-linked-source-folders", "library"),
         ("Delivery modes", "concepts.html#delivery-modes", "modes"),
     ], "deeper"),
-    ("Protect", "$ agentstack trust · guard", [
+    ("Protect", "agentstack trust · guard", [
         ("What trust does & doesn't", "enforcement.html#what-trusted-does-and-does-not-mean", "trustlimits"),
         ("Guard demo", f"{GH}/tree/main/examples/guard-demo", "guard"),
         ("Policy presets", f"{GH}/tree/main/examples/policies", "presets"),
     ], "deeper"),
-    ("Run confined", "$ agentstack run --lockdown", [
+    ("Run confined", "agentstack run --lockdown", [
         ("Lock down a run", "howto/lock-down-a-run.html", "howto-lockdown"),
         ("Enforcement matrix", "enforcement.html", "matrix"),
     ], "deeper"),
@@ -84,7 +84,7 @@ TREE = [
         ("Team setup", "howto/team-setup.html", "howto-team"),
         ("Use in CI", "howto/ci.html", "howto-ci"),
     ], "deeper"),
-    ("Observe deeper", "$ agentstack report", [
+    ("Observe deeper", "agentstack report", [
         ("Reports & call audit", "examples.html#e20", "reports"),
         ("Wire-cost analysis", "reference.html#wire-proxy-proxy", "wirecost"),
     ], "deeper"),
@@ -139,7 +139,7 @@ def render(page_file, current):
             base = href.split('#')[0]
             if base == page_file:
                 h = '#' + href.split('#')[1] if '#' in href else href
-            on = ' class="on-page"' if key == current else ''
+            on = ' class="on-page" aria-current="page"' if key == current else ''
             out.append(f'      <li><a{on} href="{h}">{esc(label)}</a>')
             if key == current and key in EXPANSIONS:
                 out.append('        <ul class="sub">')

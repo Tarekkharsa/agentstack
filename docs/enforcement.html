@@ -36,18 +36,34 @@
   nav.top .ghost:active { transform: translateY(0); }
   @media (prefers-reduced-motion: reduce) { nav.top .ghost:hover { transform: none; } }
   .docwrap { max-width: 78rem; margin: 0 auto; padding: 0 1.35rem; display: grid; grid-template-columns: 15rem minmax(0, 1fr); gap: 2.75rem; align-items: start; }
-  aside.side { position: sticky; top: 4.2rem; max-height: calc(100vh - 5rem); overflow-y: auto; padding: 1.6rem 0 2rem; font-size: 0.85rem; }
-  aside.side .grp { margin-bottom: 1.15rem; }
-  aside.side .grp > b { display: block; font-family: var(--mono); font-size: 0.66rem; font-weight: 600; letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.35rem; }
-  aside.side details.grp > summary { display: block; font-family: var(--mono); font-size: 0.66rem; font-weight: 600; letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted); margin-bottom: 0.35rem; cursor: pointer; list-style: none; }
+  aside.side { position: sticky; top: 4.2rem; max-height: calc(100vh - 5.5rem); overflow-y: auto; scrollbar-width: thin; padding: 1.5rem 0.15rem 2rem; font-size: 0.85rem; }
+  aside.side .grp { margin-bottom: 0.6rem; }
+  /* One group treatment for both tiers. An always-open group is a <div> and a
+     deeper group is a <details>, but the label row — face, size, tracking,
+     colour, padding and left edge — is declared once for both, so the rail
+     reads as one system. The chevron is the only thing that distinguishes
+     them, because it is the only thing that behaves differently. */
+  aside.side .grp > b,
+  aside.side details.grp > summary { display: flex; align-items: center; gap: 0.4rem; font-family: var(--mono); font-size: 0.64rem; font-weight: 600; letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted); padding: 0.28rem 0.5rem; margin: 0 0 0.05rem; border-radius: 6px; list-style: none; }
+  aside.side details.grp > summary { cursor: pointer; }
+  aside.side details.grp > summary:hover { color: var(--ink); background: var(--quiet-hover); }
   aside.side details.grp > summary::-webkit-details-marker { display: none; }
-  aside.side details.grp > summary::after { content: "\25B8"; float: right; font-size: 0.85em; opacity: 0.55; font-weight: 400; }
-  aside.side details.grp[open] > summary::after { content: "\25BE"; }
-  aside.side .grp > code { display: block; font-family: var(--mono); font-size: 0.66rem; color: var(--accent); background: none; border: none; padding: 0; margin: -0.25rem 0 0.35rem; }
+  /* One glyph, rotated when open — rather than two different characters, which
+     is what made the collapsed and open groups look unrelated. */
+  aside.side details.grp > summary::after { content: "\25B8"; margin-left: auto; font-size: 0.85em; font-weight: 400; opacity: 0.6; transition: transform 0.16s ease; }
+  aside.side details.grp[open] > summary::after { transform: rotate(90deg); }
+  /* The command hint orients a group ("this is the status/doctor corner") but
+     it is not navigation, so it is quiet mono at body-muted colour. The accent
+     is reserved for state — in this rail, the current page and nothing else. */
+  aside.side .grp > code { display: block; font-family: var(--mono); font-size: 0.62rem; line-height: 1.5; color: var(--muted); background: none; border: none; padding: 0 0.5rem; margin: 0 0 0.2rem; }
   aside.side ul { list-style: none; margin: 0; padding: 0; }
-  aside.side li a { display: flex; gap: 0.5rem; align-items: baseline; padding: 0.22rem 0.5rem; border-left: 2px solid transparent; border-radius: 0 5px 5px 0; font-family: var(--sans); font-size: 0.82rem; letter-spacing: -0.01em; color: var(--muted); transition: color 0.16s ease, background 0.16s ease; }
-  aside.side li a:hover { color: var(--ink); text-decoration: none; }
-  aside.side li a.on-page { color: var(--ink); font-weight: 500; border-left-color: var(--accent); background: var(--accent-soft); }
+  aside.side li a { display: block; padding: 0.24rem 0.5rem; border-radius: 6px; font-family: var(--sans); font-size: 0.8rem; line-height: 1.35; letter-spacing: -0.01em; color: var(--muted); transition: color 0.16s ease, background-color 0.16s ease, box-shadow 0.16s ease; }
+  aside.side li a:hover { color: var(--ink); text-decoration: none; background: var(--quiet-hover); }
+  /* Current page: a 2px accent bar drawn as an INSET shadow — no border, so
+     nothing reflows — over an 8% accent wash. A mark in the margin, not a
+     filled block. It hangs off aria-current so the visible state and the
+     announced state cannot drift apart. */
+  aside.side li a[aria-current="page"] { color: var(--ink); background: color-mix(in srgb, var(--accent) 8%, transparent); box-shadow: inset 2px 0 var(--accent); }
   @media (max-width: 960px) { .docwrap { display: block; } aside.side { display: none; } .bar { flex-wrap: wrap; } nav.top { flex-wrap: wrap; white-space: normal; } }
   main { min-width: 0; padding: 1.6rem 0 4rem; }
   /* One sans, weight 500, negative tracking — no display serif, no bold
@@ -141,7 +157,7 @@
   </div>
   <div class="grp">
     <b>When it breaks</b>
-    <code>$ agentstack status · doctor</code>
+    <code>agentstack status · doctor</code>
     <ul>
       <li><a href="troubleshooting.html">Troubleshooting</a>
       </li>
@@ -151,7 +167,7 @@
   </div>
   <div class="grp">
     <b>Everyday</b>
-    <code>$ agentstack add · apply · doctor</code>
+    <code>agentstack add · apply · doctor</code>
     <ul>
       <li><a href="concepts.html#the-manifest-and-the-lockfile">The manifest</a>
       </li>
@@ -193,7 +209,7 @@
   </div>
   <details class="grp">
     <summary>Configure deeper</summary>
-    <code>$ agentstack use · session</code>
+    <code>agentstack use · session</code>
     <ul>
       <li><a href="architecture.html">How it works</a>
       </li>
@@ -207,7 +223,7 @@
   </details>
   <details class="grp">
     <summary>Protect</summary>
-    <code>$ agentstack trust · guard</code>
+    <code>agentstack trust · guard</code>
     <ul>
       <li><a href="#what-trusted-does-and-does-not-mean">What trust does &amp; doesn't</a>
       </li>
@@ -219,11 +235,11 @@
   </details>
   <details class="grp" open>
     <summary>Run confined</summary>
-    <code>$ agentstack run --lockdown</code>
+    <code>agentstack run --lockdown</code>
     <ul>
       <li><a href="howto/lock-down-a-run.html">Lock down a run</a>
       </li>
-      <li><a class="on-page" href="enforcement.html">Enforcement matrix</a>
+      <li><a class="on-page" aria-current="page" href="enforcement.html">Enforcement matrix</a>
       </li>
     </ul>
   </details>
@@ -238,7 +254,7 @@
   </details>
   <details class="grp">
     <summary>Observe deeper</summary>
-    <code>$ agentstack report</code>
+    <code>agentstack report</code>
     <ul>
       <li><a href="examples.html#e20">Reports &amp; call audit</a>
       </li>
