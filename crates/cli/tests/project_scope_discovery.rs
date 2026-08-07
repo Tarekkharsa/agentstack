@@ -171,12 +171,34 @@ fn doctor_refuses_to_call_an_uncovered_setup_clean() {
         "names the one next action: {text}"
     );
 
-    // One next action. This project has never been reviewed, and consent
-    // outranks warning-level repairs on both `status` and `doctor` — so the
-    // headline is the review, and `agentstack adopt` is named by the finding
-    // itself (asserted above), which is where the user reads it.
+    // One next action, and it is `adopt` — not the review.
+    //
+    // This assertion used to read `agentstack trust .`, on the general rule
+    // that consent outranks warning-level repairs. That rule is right, and it
+    // is still what both ladders do; it is just not the rule that governs THIS
+    // state. The manifest here declares nothing, so the review has nothing to
+    // review and `adopt` is the rung that sits above it — see the comment on
+    // the `unimported_native` arm of `overview::next_step`, and the matching
+    // `declares_anything` guard on `doctor`'s own consent rung.
+    //
+    // Measured in this exact fixture, which is why the old expectation was
+    // wrong rather than merely different:
+    //
+    // - `agentstack trust .` prints "nothing — this project declares no
+    //   capabilities yet" and "(no servers)". The grant buys nothing.
+    // - Granting it anyway leaves doctor's next action at `agentstack adopt`
+    //   regardless, so the review is a detour, not a step.
+    // - `agentstack adopt --write` then rewrites the manifest a grant binds
+    //   itself to, and trust drops to `drifted` — a SECOND review, which is the
+    //   precise cost the rung order exists to avoid.
+    // - Taken in the order named here the ladder converges and never repeats:
+    //   `adopt` → `adopt --write` → `lock --write` → `trust .`.
+    //
+    // What the test's NAME promises is unchanged and asserted above: an
+    // uncovered setup is not 0 warnings, the section is relevant, and it names
+    // both servers and the command that absorbs them.
     assert_eq!(report["trust"], "untrusted", "{report}");
-    assert_eq!(report["next_action"], "agentstack trust .");
+    assert_eq!(report["next_action"], "agentstack adopt", "{report}");
 }
 
 /// The complement, so the check cannot become permanent noise: once the
