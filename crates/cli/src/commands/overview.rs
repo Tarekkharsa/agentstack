@@ -410,6 +410,89 @@ pub(crate) fn machine_command(cmd: &str) -> Option<&str> {
     }
 }
 
+/// The unadopted directory's next step — prose, and a `null` machine field BY
+/// DESIGN. Shared verbatim with `doctor`'s hand-written `needs_setup` payload
+/// so the two surfaces describe one state with one sentence.
+///
+/// # Why there is no command here (G33)
+///
+/// This field used to read `agentstack init`, on both surfaces. A machine field
+/// is executed verbatim by a driver, and a driver has no terminal: flagless
+/// `init` IS the guided wizard and refuses outright ("refusing to init without a
+/// terminal"), so the caller errored, re-polled, and read the identical field
+/// forever.
+///
+/// Every runnable spelling was considered and each is worse than `null`:
+///
+/// - `init --dry-run` writes nothing. It exits 0, prints the plan, and leaves
+///   every observable field identical — the exit-0 poll-and-run loop
+///   [`machine_command`] already refused for `agentstack search`, and the worse
+///   of the two shapes because nothing in the output says it failed.
+/// - `init --secrets <env|keychain|skip>` carries an enumerated placeholder. A
+///   driver cannot resolve it, and the angle-bracket rule in [`machine_command`]
+///   exists precisely so it is never handed one.
+/// - `init --yes` runs. It is also the one thing this product must not offer a
+///   driver unprompted, and `init`'s own refusal says why in its own words: a
+///   flagless init "imports your CLI configs and can lift live token values into
+///   files, so it never runs without a prompt or an explicit flag". Naming it
+///   here would route a panel straight around the wall `init` puts up — and the
+///   panel polls every directory it is pointed at, including ones nobody asked
+///   to adopt.
+///
+/// Whether a directory becomes an AgentStack project, and whether this machine's
+/// existing secrets are lifted while it happens, is a decision only a person
+/// makes. `null` says exactly that, and it is a terminal answer this contract
+/// already defines: `Rung::Group` and `Rung::Verified` both emit it, and
+/// `tests/guidance_is_executable.rs` documents `null` as "the terminal answer,
+/// and a driver that reads it stops". The person still gets the whole sentence
+/// on screen.
+pub(crate) const NO_MANIFEST_NEXT: (&str, &str) = (
+    "run `agentstack init` — guided one-command setup: import, preview, apply",
+    "adopting a directory is a decision only a person makes — the wizard needs a terminal, and the scripted form can lift live token values into files",
+);
+
+/// The rung a waiting drop stands on, and the reason it is the WRITING form of
+/// `adopt` rather than `agentstack yes` (G34).
+///
+/// `yes` is the right thing to tell a person: one verb, one review, one
+/// confirmation, and the dropped file is live. It is also, by its own design, an
+/// **interactive** verb — its module says so — and it refuses without a terminal
+/// ("`agentstack yes` needs a terminal — it is a review you read and answer").
+/// So naming it in a field a panel executes verbatim was a loop with no exit.
+///
+/// The answer is NOT a `--yes` form of the ceremony. `yes` compresses declare →
+/// lock → trust → render behind one human confirmation, and handing a driver any
+/// spelling that satisfies that confirmation would assert consent nobody gave —
+/// the thing §7.2 closed on `trust` and the thing `yes` refuses to reopen.
+///
+/// What a driver may honestly do is the INERT half, and only that.
+/// `adopt --write` declares the dropped file in the manifest; it grants nothing,
+/// pins nothing and delivers nothing, and the trust gate still stands between it
+/// and any harness. It is the first step of the headless path `yes`'s own
+/// refusal prints — "`agentstack adopt --write`, `agentstack lock --write`, then
+/// `agentstack trust --yes --consented-digest <digest>`" — so this rung now
+/// agrees with what the product already says in words. Measured over all three
+/// drop states in the guidance matrix: the drop clears and the ladder moves on
+/// to `lock --write`, then to the review, where a driver is meant to stop.
+///
+/// A `null` here would have been the wrong kind of honest: it means "there is
+/// nothing to run", and there is — something safe, inert and progressing.
+pub(crate) const DROPPED_FILES_FIX: &str = "agentstack adopt --write";
+pub(crate) const DROPPED_FILES_WHY: &str =
+    "dropped files are waiting — declare them, then pin and review; in a terminal one confirmation does all three: `agentstack yes`";
+
+/// The unimported-native rung: the WRITING form, for the same reason every
+/// other rung on this ladder names one (G35).
+///
+/// `adopt` previews by default and declares `--write`, so the bare spelling
+/// exits 0, prints the manifest diff it WOULD apply, changes nothing, and is
+/// named again on the next poll. That is the `agentstack lock` regression
+/// wearing a second verb, and the exit-0 shape is the worse one — nothing in the
+/// output says it failed.
+pub(crate) const ADOPT_RUNG_FIX: &str = "agentstack adopt --write";
+pub(crate) const ADOPT_RUNG_WHY: &str =
+    "servers are configured here that this setup doesn't cover yet — bring them into the manifest";
+
 /// The rung that has to come BEFORE the review on a project that has never
 /// been pinned, and the reason it does.
 pub(crate) const LOCK_RUNG_FIX: &str = "agentstack lock --write";
@@ -639,10 +722,7 @@ pub(crate) fn next_step(
     // `TrustState::Changed` — content the user already approved has drifted,
     // and that re-review keeps the headline; the drop is offered next.
     if undeclared_drops && trust != TrustState::Changed {
-        return (
-            "agentstack yes",
-            "dropped files are waiting — review them and take them live",
-        );
+        return (DROPPED_FILES_FIX, DROPPED_FILES_WHY);
     }
     match trust {
         TrustState::Untrusted if trust_relevant => {
@@ -672,10 +752,7 @@ pub(crate) fn next_step(
             // first would approve a manifest the very next step rewrites, and
             // the user would land in `TrustState::Changed` and review again.
             if unimported_native {
-                (
-                    "agentstack adopt",
-                    "servers are configured here that this setup doesn't cover yet",
-                )
+                (ADOPT_RUNG_FIX, ADOPT_RUNG_WHY)
             } else if trust_blocks_delivery(trust, has_capabilities) {
                 // The gate rung, and it sits here because it gates everything
                 // below: `apply --write` is refused outright, `use --write` is
@@ -1852,7 +1929,10 @@ fn print_native_line(native: &[crate::discover::NativeConfig], no_manifest: bool
         if no_manifest {
             "`agentstack init` imports them"
         } else {
-            "`agentstack adopt` brings them into the manifest"
+            // The WRITING form: bare `adopt` previews, so a reader who runs it
+            // sees a diff and nothing lands. Same correction as the rung —
+            // see `ADOPT_RUNG_FIX`.
+            "`agentstack adopt --write` brings them into the manifest"
         }
         .dimmed()
     );
@@ -1931,10 +2011,10 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
             intake: Vec::new(),
             manifest_path,
             manifest: ManifestState::Missing,
-            next: (
-                "agentstack init".to_string(),
-                "guided one-command setup — import, preview, apply",
-            ),
+            // Prose, and therefore a `null` machine field — see
+            // `NO_MANIFEST_NEXT` for why an unadopted directory has no command
+            // a driver may run.
+            next: (NO_MANIFEST_NEXT.0.to_string(), NO_MANIFEST_NEXT.1),
         });
     }
 
@@ -2170,7 +2250,7 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
     // than the one this rung fixes.
     let next = if delivery_abandoned.iter().any(|a| a.recorded)
         && !next.0.starts_with("agentstack trust")
-        && next.0 != "agentstack yes"
+        && next.0 != DROPPED_FILES_FIX
     {
         (
             crate::commands::apply::AbandonedRender::REMOVE_IT.to_string(),
@@ -2191,7 +2271,7 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
     let next = if delivery_has_live
         && !delivery_bridge_gaps.is_empty()
         && !next.0.starts_with("agentstack trust")
-        && next.0 != "agentstack yes"
+        && next.0 != DROPPED_FILES_FIX
     {
         (
             "agentstack x gateway connect --all --write".to_string(),
@@ -2972,7 +3052,9 @@ mod tests {
                 true
             )
             .0,
-            "agentstack adopt"
+            // The WRITING form. Bare `adopt` previews and changes nothing, so
+            // naming it here was an exit-0 loop — see `ADOPT_RUNG_FIX`.
+            "agentstack adopt --write"
         );
 
         // Once trusted the trust-relevance flag is moot: the render vs. verify
@@ -3070,15 +3152,21 @@ mod tests {
     }
 
     /// F9 witness (FINDINGS.md, rc.1 review): a dropped-but-undeclared file
-    /// must route the one next action to `agentstack yes` — the funnel's
-    /// activation verb — not to `adopt` or `trust .`. Before this, `yes`
-    /// appeared on no detection surface at all: a participant who dropped a
-    /// file was told to `trust .` a project with zero servers, and the funnel
-    /// the study exists to measure was unreachable. The one state that still
-    /// outranks a drop is trust-stale: content the user already approved has
-    /// changed, and that re-review keeps the headline.
+    /// must route the one next action to the drop's own rung — not to
+    /// `trust .`, and not to the render ladder below it. Before this, a
+    /// participant who dropped a file was told to `trust .` a project with zero
+    /// servers. The one state that still outranks a drop is trust-stale:
+    /// content the user already approved has changed, and that re-review keeps
+    /// the headline.
+    ///
+    /// The rung named `agentstack yes` for one round and now names
+    /// `agentstack adopt --write` (G34): `yes` refuses without a terminal, and
+    /// this string is what a panel executes verbatim. The funnel is still what
+    /// a PERSON is pointed at — from the `why` here and from the `Dropped` line
+    /// on the screen — which is why the assertion is on the rung's const rather
+    /// than on a literal.
     #[test]
-    fn a_waiting_drop_routes_to_yes() {
+    fn a_waiting_drop_routes_to_its_own_rung() {
         use crate::trust::TrustState;
         // Every non-stale combination of the other signals: the drop wins —
         // including over unimported native servers and the trust unlock.
@@ -3098,8 +3186,8 @@ mod tests {
                                 true,
                             );
                             assert_eq!(
-                                cmd, "agentstack yes",
-                                "a waiting drop must route to the funnel \
+                                cmd, DROPPED_FILES_FIX,
+                                "a waiting drop must route to its own rung \
                                  (trust={trust:?} rendered={rendered} caps={has_capabilities} \
                                  relevant={trust_relevant} unimported={unimported})"
                             );

@@ -917,8 +917,15 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
                 // the field vanish on the one path where it is least able to
                 // guess. `needs_setup` is a readiness like any other.
                 "readiness": "needs_setup",
-                "next_action": "agentstack init",
-                "next_step": "agentstack init",
+                // NULL BY DESIGN, and the same answer `status` gives for the
+                // same directory (both read `overview::NO_MANIFEST_NEXT`).
+                // This field used to name `agentstack init`, which refuses
+                // without a terminal — and a driver, which is the only caller
+                // of this field, never has one. The full reasoning, including
+                // why `--yes`, `--dry-run` and `--secrets` are each worse than
+                // nothing here, is on the const.
+                "next_action": serde_json::Value::Null,
+                "next_step": super::overview::NO_MANIFEST_NEXT.0,
                 "protection": serde_json::Value::Null,
                 "errors": 0,
                 "warnings": 0,
@@ -1260,8 +1267,13 @@ fn run_checks(
     // "0 error(s), 0 warning(s)" — doctor reporting health over a setup it had
     // silently ignored (pilot Run B). A clean doctor has to MEAN ready.
     //
-    // Warn, not Error: the setup is not broken, it is uncovered, and `adopt`
-    // is a one-command fix that is named right here. Project scope only —
+    // Warn, not Error: the setup is not broken, it is uncovered, and
+    // `adopt --write` is a one-command fix that is named right here. The `↳`
+    // slot carries the WRITING form on purpose: `adopt` previews by default, so
+    // the bare spelling `fix_at` used to lift into `next_action` exited 0,
+    // printed a diff, changed nothing, and was handed back on the next poll —
+    // see `overview::ADOPT_RUNG_FIX`, which is the same correction on the
+    // `status` ladder. Project scope only —
     // machine-wide configs belong to whichever manifest manages them, and
     // warning every project about them would be noise, not a finding.
     report.section("Unmanaged setup");
@@ -1289,7 +1301,7 @@ fn run_checks(
             report.line(
                 Level::Warn,
                 format!(
-                    "{:<14} {} in {} not in this manifest: {} ↳ agentstack adopt",
+                    "{:<14} {} in {} not in this manifest: {} ↳ agentstack adopt --write",
                     n.display,
                     super::count(n.unimported.len(), "server"),
                     tidy_path(&n.path),

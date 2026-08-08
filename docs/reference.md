@@ -1807,14 +1807,30 @@ export AGENTSTACK_NO_UPDATE_CHECK=1
 The Docker sandbox is a compile-time option. Published release binaries are
 built with it; a plain `cargo build --release` is not, and the two otherwise
 carry the same version number and the same `--help`. `--version` says which one
-you have:
+you have, and — when it was built from a git checkout — which commit:
 
 ```console
 $ agentstack --version
-agentstack 0.17.1 (sandbox: yes)     # a release binary — run --sandbox works
+agentstack 0.17.1 (sandbox: yes)              # a release binary — run --sandbox works
 $ agentstack --version
-agentstack 0.17.1 (sandbox: no)      # a plain source build — it does not
+agentstack 0.17.1 (sandbox: no)               # a plain source build — it does not
+$ agentstack --version
+agentstack 0.17.1 (sandbox: no, a1b2c3d)      # built from commit a1b2c3d
+$ agentstack --version
+agentstack 0.17.1 (sandbox: no, a1b2c3d-dirty) # …with uncommitted changes on top
 ```
+
+The commit is there because the version number alone does not name a build: it
+is bumped when a release is cut, so every build between two releases prints the
+same one, and `main` can be a hundred commits past the number it still reports.
+Quote the whole line in a bug report — with the commit, it names one build.
+
+`-dirty` means tracked files differed from that commit when the binary was
+compiled. A build with no git available — a release tarball, a vendored tree —
+prints no commit at all, which is the first shape above. To decide the field
+yourself (a reproducible build, or a CI job that would rather pass the commit
+in), set `AGENTSTACK_BUILD_REV` at compile time; set it to the empty string to
+leave the commit out.
 
 `agentstack doctor` repeats the fact in its **Adapters & CLIs** section, and
 `agentstack run <cli> --sandbox` on a build without it refuses by naming the

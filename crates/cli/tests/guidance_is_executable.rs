@@ -93,17 +93,29 @@
 //!   fix for a blocking finding may not — see (b).
 //!
 //! **FOUR LIVE DEFECTS OF THIS EXACT FAMILY WERE FOUND BY WIDENING THIS FILE,
-//! AND THEY ARE ON THE LEDGER RATHER THAN IN A CLOSED BUG REPORT.** See
-//! [`KNOWN_DEFECTS`] and the `#[ignore]`d reproducer beside each one. The
-//! ledger is not an allow-list: every entry must STILL REPRODUCE or the run
-//! fails and demands the entry's deletion, so a repaired defect cannot leave a
-//! suppression behind it. Their one-line shapes, because the pattern is the
-//! point: a machine field naming `agentstack init` where `init` refuses without
-//! a terminal; `status` naming `agentstack yes` where `yes` refuses without a
-//! terminal; `agentstack adopt` — the PREVIEW form of a command that declares
-//! `--write` — offered as the fix, exiting 0 and changing nothing (the `lock`
-//! regression, alive again in a second verb); and a machine manifest whose
-//! consent gate reports that the manifest does not exist.
+//! AND THEY WERE PUT ON THE LEDGER RATHER THAN IN A CLOSED BUG REPORT.** See
+//! [`KNOWN_DEFECTS`] and the reproducer beside each one. The ledger is not an
+//! allow-list: every entry must STILL REPRODUCE or the run fails and demands
+//! the entry's deletion, so a repaired defect cannot leave a suppression behind
+//! it. Their one-line shapes, because the pattern is the point:
+//!
+//! * **G33, repaired** — a machine field naming `agentstack init` where `init`
+//!   refuses without a terminal. It now answers an explicit `null`: no runnable
+//!   spelling of `init` is fit for a driver (`--dry-run` is a no-op preview,
+//!   `--secrets <store>` is a placeholder, and `--yes` imports CLI configs and
+//!   lifts live token values with no prompt), and the human sentence still
+//!   names the verb.
+//! * **G34, repaired** — `status` naming `agentstack yes` where `yes` refuses
+//!   without a terminal. It now names `agentstack adopt --write`: the INERT
+//!   half of that work, which declares the drop and grants nothing, leaving the
+//!   trust gate where it was. The funnel survives in the human `why`.
+//! * **G35, repaired** — `agentstack adopt`, the PREVIEW form of a command that
+//!   declares `--write`, offered as the fix, exiting 0 and changing nothing
+//!   (the `lock` regression, alive again in a second verb). Both surfaces now
+//!   name the writing form.
+//! * **STILL LIVE** — a machine manifest whose consent gate reports that the
+//!   manifest does not exist. That one keeps its ledger entry and its
+//!   `#[ignore]`d reproducer.
 //!
 //! Scope, stated so the gaps read as decisions:
 //!
@@ -1290,63 +1302,12 @@ struct KnownDefect {
 }
 
 const KNOWN_DEFECTS: &[KnownDefect] = &[
-    KnownDefect {
-        state: "no-project",
-        surface: "doctor --json",
-        command: "agentstack init",
-        why:
-            "`init` refuses without a terminal (exit 1: \"refusing to init without a terminal\"). \
-              A machine field is executed verbatim by a driver, which by definition has no \
-              terminal, so the caller errors, re-polls, and reads the identical field. The \
-              refusal itself names three runnable spellings (`init --dry-run`, `init --yes`, \
-              `init --secrets <store>`); the machine field names none of them.",
-    },
-    KnownDefect {
-        state: "no-project",
-        surface: "status --json",
-        command: "agentstack init",
-        why: "the same string on the surface a panel polls.",
-    },
-    KnownDefect {
-        state: "empty-manifest",
-        surface: "status --json",
-        command: "agentstack yes",
-        why: "`yes` refuses without a terminal (exit 1: \"`agentstack yes` needs a terminal\"). \
-              Its own refusal names the headless path — `adopt --write`, `lock --write`, `trust \
-              --yes --consented-digest <digest>`, `use --write` — so a runnable first step \
-              exists and the machine field does not name it.",
-    },
-    KnownDefect {
-        state: "servers-no-bridge",
-        surface: "status --json",
-        command: "agentstack yes",
-        why: "same defect, second state.",
-    },
-    KnownDefect {
-        state: "dropped-undeclared",
-        surface: "status --json",
-        command: "agentstack yes",
-        why: "same defect, and this is the state the `undeclared_drops` arm exists FOR — so it \
-              is the shape a real reader meets, not an edge.",
-    },
-    KnownDefect {
-        state: "native-unimported",
-        surface: "doctor --json",
-        command: "agentstack adopt",
-        why: "THE `lock --write` REGRESSION, ALIVE AGAIN IN A SECOND VERB. `adopt` previews by \
-              default and declares `--write`; the machine field names the preview form. Running \
-              it exits 0, prints the diff it WOULD apply, writes nothing, and the identical \
-              command is named again — an exit-0 infinite loop, which is the worse of the two \
-              shapes because nothing in the output says it failed. Rule (b) is the assertion \
-              written for exactly this; it had simply never been given a state that reaches the \
-              `unimported_native` arm.",
-    },
-    KnownDefect {
-        state: "native-unimported",
-        surface: "status --json",
-        command: "agentstack adopt",
-        why: "the same preview-for-a-write defect on the surface a panel polls.",
-    },
+    // G33 (`agentstack init` in a machine field), G34 (`agentstack yes` in
+    // status's machine field) and G35 (the preview form of `adopt` named as the
+    // fix) were ENTRIES HERE and are now repaired in the product, so their
+    // entries are gone — a ledger that keeps a fixed defect is a suppression
+    // with nothing under it. Their reproducers below are no longer ignored:
+    // each one now asserts the repaired behaviour instead of the bug.
     KnownDefect {
         state: "machine-manifest",
         surface: "trust --preview",
@@ -1969,8 +1930,8 @@ fn every_suggested_command_parses_and_makes_progress() {
                     skips.note(format!(
                         "LIVE DEFECT, on the ledger and queued — [{}] {} names `{}`\n      why: {}\
                          \n      (rule (b) fired; the assertion is held open by KNOWN_DEFECTS so \
-                         the suite stays green and the bug stays visible. Reproducer: \
-                         `a_preview_form_is_named_as_the_fix_at_the_adopt_rung`.)",
+                         the suite stays green and the bug stays visible. Every entry has its own \
+                         reproducer at the bottom of this file.)",
                         d.state, d.surface, d.command, d.why
                     ));
                 }
@@ -2458,119 +2419,185 @@ fn the_guard_catches_a_surface_that_names_itself() {
 // reproduces each one on demand, against the real binary, with the exit code
 // read directly rather than through a pipe.
 
-/// LIVE DEFECT — the machine field of an UNADOPTED directory names a command
-/// that cannot run without a terminal.
+/// G33, CLOSED — an UNADOPTED directory answers a driver with an explicit
+/// `null`, and tells the PERSON what to do in prose.
 ///
-/// State: no manifest at or above the working directory.
-/// Surfaces: `doctor --json` `/next_action`, `status --json`
-/// `/next_action/command`, both `"agentstack init"`.
-/// What happens: exit 1, "refusing to init without a terminal". A machine
-/// field is executed verbatim by a driver, and a driver has no terminal, so it
-/// errors, re-polls, and reads the identical field forever.
-/// The runnable spellings exist — `init --dry-run`, `init --yes`,
-/// `init --secrets <store>` — and `init`'s own refusal prints all three.
+/// The defect: both machine fields read `agentstack init`, and `init` refuses
+/// without a terminal ("refusing to init without a terminal"). A machine field
+/// is executed verbatim by a driver, a driver has no terminal, so it errored,
+/// re-polled, and read the identical field forever.
+///
+/// **Why `null` and not a runnable spelling.** Three exist and each is worse
+/// than nothing, which is why this is a repair and not a rewrite of the string:
+///
+/// * `init --dry-run` writes nothing — the exit-0 poll-and-run loop this file
+///   already caught with `agentstack search`.
+/// * `init --secrets <env|keychain|skip>` is a placeholder, forbidden in a
+///   machine field by rule (a') and by `machine_command`'s angle-bracket rule.
+/// * `init --yes` runs, and is exactly what must NOT be offered here. `init`'s
+///   own refusal says why: a flagless init "imports your CLI configs and can
+///   lift live token values into files, so it never runs without a prompt or an
+///   explicit flag". Putting that in a field a panel executes would route a
+///   driver around the wall the product just built, in every directory the
+///   panel is pointed at.
+///
+/// So the honest answer is that no machine can take this step. `null` is how
+/// this contract says that — `converge_once` below calls it "the terminal
+/// answer, and a driver that reads it stops", and `Rung::Group` and
+/// `Rung::Verified` already emit it — and the human sentence still names `init`.
+///
+/// Asserted two-sided on purpose: the machine field is null, the human sentence
+/// is present and names the verb, and `init` still refuses (so this stays a
+/// test about GUIDANCE and not an accidental claim that `init` became headless).
 #[test]
-#[ignore = "live defect: `agentstack init` is named in a machine field and refuses without a TTY"]
-fn a_machine_field_names_init_where_init_refuses() {
+fn an_unadopted_directory_answers_a_driver_with_null_and_a_person_with_prose() {
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path().join("no-project");
     fs::create_dir_all(&dir).unwrap();
     let (home, proj) = no_project(&dir);
 
-    for (surface, argv, ptr) in [
-        ("doctor --json", &["doctor", "--json"][..], "/next_action"),
+    for (surface, argv, cmd_ptr, prose_ptr) in [
+        (
+            "doctor --json",
+            &["doctor", "--json"][..],
+            "/next_action",
+            "/next_step",
+        ),
         (
             "status --json",
             &["status", "--json"][..],
             "/next_action/command",
+            "/next_action/sentence",
         ),
     ] {
         let v: serde_json::Value =
             serde_json::from_str(&strip_ansi(&run(argv, &home, &proj).text)).unwrap();
-        assert_eq!(
-            v.pointer(ptr).and_then(serde_json::Value::as_str),
-            Some("agentstack init"),
-            "{surface} {ptr}"
+
+        // The seam, exactly as `status_honesty.rs` pins it: the key is PRESENT
+        // and its value is an explicit null. Never missing, never `""`.
+        let machine = v
+            .pointer(cmd_ptr)
+            .unwrap_or_else(|| panic!("{surface} {cmd_ptr} must be present, not missing:\n{v:#}"));
+        assert!(
+            machine.is_null(),
+            "{surface} {cmd_ptr} must be an explicit null — a driver has no terminal, and every \
+             runnable spelling of `init` is either a no-op preview, a placeholder, or an import \
+             that lifts live token values without a prompt. Got {machine}"
+        );
+
+        // …and the person is not left with nothing.
+        let prose = v
+            .pointer(prose_ptr)
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_else(|| {
+                panic!("{surface} {prose_ptr} must carry the human sentence:\n{v:#}")
+            });
+        assert!(
+            prose.contains("agentstack init"),
+            "{surface} {prose_ptr} must still tell the reader how to adopt this directory, or the \
+             null is a dead end rather than a terminal answer: {prose:?}"
         );
     }
+
+    // The premise this repair rests on, re-measured rather than assumed: `init`
+    // still refuses without a terminal. If it ever stops refusing, the reasoning
+    // above changes and this test should be revisited, not quietly kept green.
     let out = run(&["init"], &home, &proj);
     assert!(
         !out.ok,
-        "the defect is that `agentstack init` REFUSES here; if it now runs, delete this test and \
-         its KNOWN_DEFECTS entries"
-    );
-    panic!(
-        "reproduced: `agentstack init` was named and refused:\n{}",
+        "`agentstack init` no longer refuses without a terminal — the premise of the null moved:\n{}",
         out.text
     );
 }
 
-/// LIVE DEFECT — `status --json` hands a driver `agentstack yes`, which needs
-/// a terminal.
+/// G34, CLOSED — a waiting drop hands a driver the INERT half of the work, and
+/// keeps the one-confirmation funnel for the person.
 ///
-/// States: `empty-manifest`, `servers-no-bridge`, `dropped-undeclared` — every
-/// project with a file dropped in that the manifest does not declare, which is
-/// the `undeclared_drops` arm of `overview::next_step` and outranks every other
-/// rung.
-/// Surface: `status --json` `/next_action/command` = `"agentstack yes"`.
-/// What happens: exit 1, "`agentstack yes` needs a terminal — it is a review
-/// you read and answer." The refusal then names the headless path in full, so
-/// a runnable first step exists (`agentstack adopt --write`) and the machine
-/// field does not name it.
-/// `doctor --json` answers `null` for the same project, so this is invisible
-/// to any check that reads only `doctor`.
+/// The defect: `status --json` answered `agentstack yes` for every project with
+/// a dropped-but-undeclared file (the `undeclared_drops` arm, which outranks
+/// every other rung). `yes` is an interactive verb by design and refuses
+/// headlessly — "`agentstack yes` needs a terminal — it is a review you read and
+/// answer" — so the surface a panel polls handed it a dead end. `doctor --json`
+/// answered `null` for the same project, which is why only a check that reads
+/// `status` could see it.
+///
+/// **Why a command and not `null` here.** `null` means "there is nothing to
+/// run", and there is: `adopt --write` DECLARES the dropped file and does
+/// nothing else. It grants nothing, pins nothing, delivers nothing, and the
+/// trust gate still stands between it and any harness — so no consent ceremony
+/// is handed to a driver, which is the line that must not be crossed. It is
+/// also the first step of the headless path `yes`'s own refusal prints, so the
+/// machine field now agrees with what the product already says in words.
+///
+/// Asserted over all three drop states in the matrix, and by state rather than
+/// by exit code: the drop must actually clear.
 #[test]
-#[ignore = "live defect: `agentstack yes` is named in status's machine field and refuses without a TTY"]
-fn status_names_yes_where_yes_refuses() {
+fn a_waiting_drop_hands_a_driver_the_inert_declare_and_not_the_ceremony() {
     let tmp = tempfile::tempdir().unwrap();
-    let dir = tmp.path().join("dropped");
-    fs::create_dir_all(&dir).unwrap();
-    let home = dir.join("home");
-    let proj = dir.join("proj");
-    fs::create_dir_all(&home).unwrap();
-    fs::create_dir_all(proj.join(".agentstack/skills/summarize")).unwrap();
-    fs::write(
-        proj.join(".agentstack/skills/summarize/SKILL.md"),
-        SKILL_DESCRIBED,
-    )
-    .unwrap();
-    fs::write(proj.join(".agentstack/agentstack.toml"), "version = 1\n").unwrap();
 
-    let v: serde_json::Value =
-        serde_json::from_str(&strip_ansi(&run(&["status", "--json"], &home, &proj).text)).unwrap();
-    assert_eq!(
-        v.pointer("/next_action/command")
-            .and_then(serde_json::Value::as_str),
-        Some("agentstack yes"),
-    );
-    let out = run(&["yes"], &home, &proj);
-    assert!(
-        !out.ok,
-        "the defect is that `agentstack yes` REFUSES here; if it now runs, delete this test and \
-         its KNOWN_DEFECTS entries"
-    );
-    panic!(
-        "reproduced: `agentstack yes` was named and refused:\n{}",
-        out.text
-    );
+    for name in ["empty-manifest", "servers-no-bridge", "dropped-undeclared"] {
+        let spec = matrix()
+            .into_iter()
+            .find(|s| s.name == name)
+            .unwrap_or_else(|| panic!("the matrix must still carry `{name}`"));
+        let root = tmp.path().join(name);
+        fs::create_dir_all(&root).unwrap();
+        let state = spec.build_under(&root);
+        let (home, proj) = (state.home, state.proj);
+
+        let v: serde_json::Value =
+            serde_json::from_str(&strip_ansi(&run(&["status", "--json"], &home, &proj).text))
+                .unwrap();
+        assert!(
+            !v["intake"].as_array().unwrap().is_empty(),
+            "[{name}] fixture: a drop must be waiting, or this is not the state under test:\n{v:#}"
+        );
+        let cmd = v
+            .pointer("/next_action/command")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_else(|| panic!("[{name}] status names no command at all:\n{v:#}"));
+        assert_eq!(
+            cmd, "agentstack adopt --write",
+            "[{name}] the drop rung must name the inert declare a driver can run, never the \
+             terminal-only funnel"
+        );
+        assert!(
+            v.pointer("/next_action/why")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|w| w.contains("agentstack yes")),
+            "[{name}] the funnel must survive for the PERSON, in the `why` where no driver is \
+             invited to run it:\n{v:#}"
+        );
+
+        // (c) for this rung, measured by state: run it verbatim and the drop is
+        // gone. An exit code would not prove it — that is the whole reason the
+        // convergence sweep compares observable state.
+        let out = run(&["adopt", "--write"], &home, &proj);
+        let after: serde_json::Value =
+            serde_json::from_str(&strip_ansi(&run(&["status", "--json"], &home, &proj).text))
+                .unwrap();
+        assert!(
+            after["intake"].as_array().unwrap().is_empty(),
+            "[{name}] `agentstack adopt --write` left the drop waiting (exit_ok={}), so the rung \
+             names itself forever:\n{}",
+            out.ok,
+            out.text.trim()
+        );
+    }
 }
 
-/// LIVE DEFECT — THE `lock --write` REGRESSION, ALIVE AGAIN IN `adopt`.
+/// G35, CLOSED — the adopt rung names the WRITING form.
 ///
-/// State: a trusted project, a detected harness, and a server configured
-/// natively in `.mcp.json` that the manifest does not declare — the
-/// `unimported_native` arm of `overview::next_step`.
-/// Surfaces: `doctor --json` `/next_action` AND `status --json`
-/// `/next_action/command`, both `"agentstack adopt"`.
-/// What happens: `agentstack adopt` previews by default and declares a
-/// `--write` flag. Running the named form exits **0**, prints the manifest diff
-/// it WOULD apply, writes nothing — and the identical command is named again.
-/// An exit-0 infinite loop, which is the worse of the two shapes because
+/// The defect was the `agentstack lock` regression alive again in a second
+/// verb: `adopt` previews by default and declares `--write`, and both machine
+/// fields named the bare spelling. Running it exited **0**, printed the manifest
+/// diff it WOULD apply, wrote nothing, and the identical command came back on
+/// the next poll — an exit-0 infinite loop, the worse of the two shapes because
 /// nothing in the output says it failed.
-/// The correct string is `agentstack adopt --write`.
+///
+/// Asserted by state, never by exit code, for exactly that reason.
 #[test]
-#[ignore = "live defect: `agentstack adopt` (preview form) is named as the fix at the adopt rung"]
-fn a_preview_form_is_named_as_the_fix_at_the_adopt_rung() {
+fn the_adopt_rung_names_the_writing_form() {
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path().join("native-unimported");
     fs::create_dir_all(&dir).unwrap();
@@ -2588,20 +2615,30 @@ fn a_preview_form_is_named_as_the_fix_at_the_adopt_rung() {
 
     let before = strip_ansi(&run(&["doctor", "--json"], &home, &proj).text);
     let bv: serde_json::Value = serde_json::from_str(&before).unwrap();
-    assert_eq!(bv["next_action"].as_str(), Some("agentstack adopt"));
+    assert_eq!(
+        bv["next_action"].as_str(),
+        Some("agentstack adopt --write"),
+        "doctor's machine field must name the form that writes"
+    );
+    let sv: serde_json::Value =
+        serde_json::from_str(&strip_ansi(&run(&["status", "--json"], &home, &proj).text)).unwrap();
+    assert_eq!(
+        sv.pointer("/next_action/command")
+            .and_then(serde_json::Value::as_str),
+        Some("agentstack adopt --write"),
+        "…and so must the surface a panel polls"
+    );
 
-    let out = run(&["adopt"], &home, &proj);
+    // Run it verbatim and the project must MOVE. Compared on observable state
+    // because the defect's whole signature was an exit code of 0.
+    let out = run(&["adopt", "--write"], &home, &proj);
     let after = strip_ansi(&run(&["doctor", "--json"], &home, &proj).text);
     let av: serde_json::Value = serde_json::from_str(&after).unwrap();
-    assert_eq!(
+    assert_ne!(
         observable(&bv),
         observable(&av),
-        "the defect is that the offered command changes nothing; if it now moves the project, \
-         delete this test and its KNOWN_DEFECTS entries"
-    );
-    panic!(
-        "reproduced: `agentstack adopt` was offered as the fix, exited ok={}, and left every \
-         observable field identical:\n{}",
+        "the offered command left every observable field identical (exit_ok={}), which is the \
+         exit-0 loop this rung was repaired to remove:\n{}",
         out.ok,
         out.text.trim()
     );

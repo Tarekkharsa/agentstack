@@ -53,14 +53,35 @@ use crate::scope::Scope;
 /// and the `run --sandbox` refusal.
 pub const SANDBOX_SUPPORT: bool = cfg!(feature = "sandbox");
 
-/// `--version`'s payload — the crate version plus the compiled-in feature set
-/// (`0.15.0 (sandbox: yes)`). clap prints the binary name in front of it. Two
-/// `cfg`-selected constants rather than one runtime `format!` because clap
-/// wants a `&'static str`.
+/// `--version`'s payload — the crate version, the compiled-in feature set, and
+/// the commit this binary was built from (`0.15.0 (sandbox: yes, a1b2c3d)`).
+/// clap prints the binary name in front of it. Two `cfg`-selected constants
+/// rather than one runtime `format!` because clap wants a `&'static str`.
+///
+/// The version number alone does not name a build: it is bumped by hand at
+/// release time, so a tagged binary and a `main` a hundred commits later print
+/// the same one, and a bug report quoting it could mean either. The revision
+/// comes from `build.rs` — a short commit, plus `-dirty` when tracked files
+/// differ from it. It arrives as `AGENTSTACK_BUILD_REV_FIELD`, either `""` or
+/// `", <rev>"` with the separator already attached, because `concat!` cannot
+/// ask whether a literal is empty; that is also why it goes last (see
+/// `build.rs`). A build with no git — a release tarball, a vendored tree, or
+/// an `AGENTSTACK_BUILD_REV=` that asks for none — gets the empty form, and
+/// the line is exactly what it always was: `0.15.0 (sandbox: yes)`.
 #[cfg(feature = "sandbox")]
-pub const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (sandbox: yes)");
+pub const VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (sandbox: yes",
+    env!("AGENTSTACK_BUILD_REV_FIELD"),
+    ")"
+);
 #[cfg(not(feature = "sandbox"))]
-pub const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), " (sandbox: no)");
+pub const VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    " (sandbox: no",
+    env!("AGENTSTACK_BUILD_REV_FIELD"),
+    ")"
+);
 
 #[derive(Parser, Debug)]
 #[command(
