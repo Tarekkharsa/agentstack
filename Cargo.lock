@@ -68,7 +68,7 @@ dependencies = [
 
 [[package]]
 name = "agentstack"
-version = "0.18.0-rc.2"
+version = "0.18.0-rc.3"
 dependencies = [
  "age",
  "agentstack-adapters",

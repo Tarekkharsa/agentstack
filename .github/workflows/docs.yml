@@ -3,16 +3,52 @@ name: docs
 # Decision, not oversight (TODO.md, 2026-08-02): "the docs site rides with this
 # release, not before it" — `main` documents behaviour no installable version
 # has, and publishing earlier would describe a product nobody can run. So `push`
-# stays, but it reaches `verify` only; `deploy` is gated below to `release`
-# (published) and `workflow_dispatch`.
+# and `pull_request` stay, but they reach `verify` only; `deploy` is gated below
+# to `release` (published) and `workflow_dispatch`.
+#
+# `pull_request` was missing until 2026-08-08, and its absence was the defect:
+# `verify` could only ever fail AFTER a merge, so a red docs job sat on `main`
+# unnoticed while the PR that caused it showed green — the job structurally
+# could not run there. It gates PRs now. `deploy` excludes `pull_request` by
+# name (see its `if:`), so gating a PR never publishes one.
+#
+# `CHANGELOG.md` is in the paths list because it is a real input to the
+# generated pages: `tools/make-docs-pages.py` reads it to build the version bar
+# on every page, so a CHANGELOG-only commit drifts `docs/` and must be caught by
+# the same "generated pages are in sync" step. Measured, not assumed: adding one
+# `## vX.Y.Z` heading to CHANGELOG.md and regenerating rewrites 23 pages.
+#
+# `crates/**` is deliberately absent — a Rust-only change cannot move a
+# generated page, and does not earn a browser suite.
+#
+# KNOWN RESIDUAL, recorded rather than fixed. `make-docs-pages.py` resolves a
+# `../` link by testing whether the repo file EXISTS, so DELETING or RENAMING
+# one of these turns its link into a raw href, changes the page, and exits 1 —
+# with no trigger here: ../README.md, ../STRATEGY.md, ../TODO.md,
+# ../examples/{policies,mcp-profile-lease,projects/locked-run}/,
+# ../crates/{adapters/descriptors,cli/tests/snapshots},
+# ../.github/workflows/conformance.yml. Covering them means listing `crates/**`
+# and `examples/**`, which would run the browser suite on every Rust PR — the
+# cost this filter exists to avoid. Editing those files is safe; only removing
+# or renaming one is not, and a push to `main` still catches it.
 on:
   push:
     branches: [main]
-    paths: ["docs/**", "tools/**", ".github/workflows/docs.yml"]
+    paths:
+      ["docs/**", "tools/**", "CHANGELOG.md", ".github/workflows/docs.yml"]
+  pull_request:
+    # No `branches:` filter on purpose: a PR into any base branch — `main` or a
+    # release branch — gets the same docs gate. Listing this workflow file makes
+    # the trigger self-gating: a PR that edits these checks runs them.
+    paths:
+      ["docs/**", "tools/**", "CHANGELOG.md", ".github/workflows/docs.yml"]
   release:
     types: [published]
   workflow_dispatch:
 
+# The default for every job. `verify` declares no `permissions:` of its own, so
+# it inherits exactly this — read, and nothing else. The Pages credentials are
+# declared on `deploy` alone, so no push- or PR-triggered run can hold them.
 permissions:
   contents: read
 
@@ -49,22 +85,32 @@ jobs:
 
   deploy:
     needs: verify
-    # Publish with a release, or by hand — never from a push. `main` documents
-    # behaviour that no installable release carries yet, so an automatic
-    # push-to-main deploy would put a page live that describes a build nobody
-    # can get (decided 2026-08-02; TODO.md item 11). `verify` above still runs
-    # on every push, so the docs regression checks keep catching drift while
-    # the site waits for the release.
+    # Publish with a release, or by hand — never from a push, and never from a
+    # pull request. `main` documents behaviour that no installable release
+    # carries yet, so an automatic push-to-main deploy would put a page live
+    # that describes a build nobody can get (decided 2026-08-02; TODO.md item
+    # 12, item 11 when this was written). `verify` above still runs on every
+    # push and every PR, so the docs regression checks keep catching drift
+    # while the site waits for the release.
+    #
+    # This allow-list is what keeps that true as triggers are added: it names
+    # the two events that MAY publish, so `push` and `pull_request` are
+    # excluded by not appearing, not by a rule someone has to remember. Do not
+    # rewrite it as a deny-list.
     if: >-
       github.event_name == 'release' || github.event_name == 'workflow_dispatch'
     # Pages credentials live on this job alone: `verify` never needs them, and
-    # a push-triggered run must not hold a write token for the live site.
+    # a push- or PR-triggered run must not hold a write token for the live
+    # site. A fork PR's token is read-only regardless, but the gate here does
+    # not depend on that.
     permissions:
       contents: read
       pages: write
       id-token: write
-    # Job-scoped so a push-triggered `verify` cannot queue behind — or cancel —
-    # a deployment. `cancel-in-progress: false` because interrupting a deploy
+    # Job-scoped, NOT workflow-scoped, so a push- or PR-triggered `verify`
+    # cannot queue behind — or cancel — a deployment; it joins no concurrency
+    # group at all, and this job is skipped on those events, so it never takes
+    # the lock. `cancel-in-progress: false` because interrupting a deploy
     # mid-upload leaves the live site half-published.
     concurrency:
       group: pages

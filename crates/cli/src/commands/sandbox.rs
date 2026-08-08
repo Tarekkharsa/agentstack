@@ -884,6 +884,75 @@ impl Drop for SandboxGateway {
     }
 }
 
+/// The Docker `bridge` gateway (`docker0`, e.g. `172.17.0.1`), looked up only
+/// where it is a *host* interface. On Docker Desktop that address lives inside
+/// the daemon's VM, so it can never be bound here and
+/// [`agentstack_egress::relay_bind_address`] ignores it — no reason to pay for
+/// the daemon round-trip. Same Linux-only gate as `execution.rs`'s relay.
+#[cfg(feature = "sandbox")]
+fn native_bridge_gateway(
+    backend: &agentstack_runtime::docker::DockerSandbox,
+) -> Option<std::net::IpAddr> {
+    if std::env::consts::OS == "linux" {
+        backend.default_bridge_gateway()
+    } else {
+        None
+    }
+}
+
+/// The narrowest host address a run's host-side listeners — the MCP gateway
+/// endpoint and the `--sandbox` egress proxy — can bind to while the container
+/// still reaches them through `host.docker.internal`.
+///
+/// The platform decision is NOT re-derived here: it is
+/// [`agentstack_egress::relay_bind_address`], the function the per-execution
+/// tool-call relay already uses for this identical question, so there is one
+/// answer to "where may a container-reachable host listener live" — the
+/// `docker0` gateway on a native Linux daemon (a private, non-routable host
+/// interface), the host loopback on Docker Desktop, and the `0.0.0.0` wildcard
+/// only where neither is knowable. Both listeners keep their own token gate;
+/// the bind is defence in depth and may only narrow.
+///
+/// What is added here is the assignability probe. `relay_bind_address` can hand
+/// back an address that has no host interface — Docker Desktop *on Linux*
+/// reports an in-VM bridge gateway — and the two callers report a bind failure
+/// differently (`gateway_http::start` collapses any failure into `None`, which
+/// would silently lose the run's only MCP transport). A throwaway bind of port
+/// 0 answers "is this IP assignable on this host" before either listener
+/// starts, and only `AddrNotAvailable` widens back to the wildcard, with the
+/// same honest note as [`agentstack_egress::BlockingExecutionRelay::start_on_or_unspecified`].
+/// Any other error is left for the real listener to report, and the probe's
+/// port is irrelevant — both listeners ask for port 0 themselves.
+#[cfg(feature = "sandbox")]
+fn container_reachable_bind_ip(
+    bridge_gateway: Option<std::net::IpAddr>,
+    listener: &str,
+) -> std::net::IpAddr {
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener};
+
+    let wildcard = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
+    let preferred = agentstack_egress::relay_bind_address(std::env::consts::OS, bridge_gateway);
+    if preferred == wildcard {
+        // Already the widest answer: nothing narrower to probe for.
+        return wildcard;
+    }
+    match TcpListener::bind(SocketAddr::new(preferred, 0)) {
+        Ok(_probe) => preferred,
+        Err(error) if error.kind() == std::io::ErrorKind::AddrNotAvailable => {
+            eprintln!(
+                "  {} {listener} bind to {preferred} unavailable ({error}); \
+                 falling back to 0.0.0.0 (LAN-reachable for this run)",
+                "note:".dimmed()
+            );
+            wildcard
+        }
+        // A real failure (port exhaustion, a sandboxed process denied a socket)
+        // is not a reason to widen: keep the narrow address and let the actual
+        // listener surface its own error.
+        Err(_) => preferred,
+    }
+}
+
 /// Route the sandbox's MCP traffic through the in-process gateway so
 /// `[policy.tools]` is enforced and every tool call lands in this run's
 /// `events.jsonl` — the gateway-unification milestone.
@@ -1019,10 +1088,30 @@ fn wire_sandbox_gateway(
         return Ok(None);
     }
 
+    // Connect to Docker BEFORE binding the endpoint: on a native Linux daemon
+    // the narrowest container-reachable host address is the `docker0` bridge
+    // gateway, and only the daemon knows it (the same reordering `execution.rs`
+    // made for the tool-call relay). Off Linux the decision ignores any reported
+    // gateway, so no connect is made at all. A connect failure here is NOT
+    // fatal — it only means "gateway unknown", and the run's real "cannot reach
+    // Docker" error follows from the executor moments later, unchanged.
+    let bridge_gateway = if std::env::consts::OS == "linux" {
+        agentstack_runtime::docker::DockerSandbox::connect()
+            .ok()
+            .as_ref()
+            .and_then(native_bridge_gateway)
+    } else {
+        None
+    };
+
     // Start the endpoint so the rendered config can carry its real port +
-    // token. Bind broadly (0.0.0.0) so the container reaches it — the token is
-    // the gate, per the endpoint's own contract, like the egress proxy's bind.
-    let endpoint = crate::gateway_http::start(Arc::new(gateway), "0.0.0.0:0")
+    // token. Bind the narrowest address the container can still reach via
+    // host.docker.internal — never the `0.0.0.0` wildcard while a narrower one
+    // exists, which had made this HTTP MCP endpoint LAN-reachable for the whole
+    // run. The per-run `X-Agentstack-Token` remains the authority boundary; the
+    // bind scope is defence in depth on top of it.
+    let bind_ip = container_reachable_bind_ip(bridge_gateway, "gateway endpoint");
+    let endpoint = crate::gateway_http::start(Arc::new(gateway), &format!("{bind_ip}:0"))
         .context("starting the gateway HTTP endpoint")?;
 
     // How the container reaches the host gateway differs by mode:
@@ -1208,12 +1297,12 @@ fn execute_proxy(
     log: std::sync::Arc<Option<agentstack_recorder::RunLog>>,
     proxy_token: String,
 ) -> Result<()> {
-    use std::net::{IpAddr, Ipv4Addr};
     use std::sync::Arc;
 
     // Stand up the egress proxy for this run from the compiled policy, bound on
-    // 0.0.0.0 so the container reaches it via host.docker.internal. Attributed
-    // to the harness as the sandbox's single egress identity.
+    // the narrowest host address the container can still reach via
+    // host.docker.internal. Attributed to the harness as the sandbox's single
+    // egress identity.
     // The sink runs on the proxy's tokio workers (BlockingBridge has exactly
     // one), so the file append happens on a spool thread — a slow disk must
     // not stall every in-flight tunnel. Declared before `bridge` so it drops
@@ -1244,8 +1333,24 @@ fn execute_proxy(
         // still open; D4's literal-IP / non-TLS restrictions are lockdown-only.
         lockdown: false,
     };
+    // Connect to Docker BEFORE binding the proxy (was after the bind): the
+    // narrowest safe bind depends on the daemon's bridge gateway, so the
+    // listener must learn it first. Nothing has been launched at this point, so
+    // the "cannot reach Docker" wording below still holds exactly.
+    let backend = agentstack_runtime::docker::DockerSandbox::connect().map_err(|e| {
+        anyhow::anyhow!(
+            "cannot reach Docker ({e}) — nothing was launched\n\n  \
+             start Docker Desktop (or your Docker daemon), verify with: docker info\n  \
+             then re-run the same command"
+        )
+    })?;
+
+    // Same rule as the gateway endpoint above: `docker0` on a native Linux
+    // daemon, host loopback on Docker Desktop, wildcard only as a last resort.
+    // The proxy's `auth_token` stays the authority boundary either way.
+    let bind_ip = container_reachable_bind_ip(native_bridge_gateway(&backend), "egress proxy");
     let bridge = agentstack_egress::BlockingBridge::start_on_with(
-        IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+        bind_ip,
         std::slice::from_ref(&server.to_string()),
         spec.ruleset.clone(),
         sink,
@@ -1266,13 +1371,6 @@ fn execute_proxy(
         &format!("http://agentstack:{proxy_token}@host.docker.internal:{port}"),
     );
 
-    let backend = agentstack_runtime::docker::DockerSandbox::connect().map_err(|e| {
-        anyhow::anyhow!(
-            "cannot reach Docker ({e}) — nothing was launched\n\n  \
-             start Docker Desktop (or your Docker daemon), verify with: docker info\n  \
-             then re-run the same command"
-        )
-    })?;
     let result = run_container_to_completion(&spec, run_id, &log, &backend);
     drop(bridge); // stop the proxy now the run is done
     result
@@ -1640,6 +1738,46 @@ mod tests {
         let empty: serde_json::Value = serde_json::from_str(&cfg.empty_body).unwrap();
         assert_eq!(empty["mcpServers"], serde_json::json!({}));
         assert!(!cfg.empty_body.contains("tok-abc"));
+    }
+
+    /// Both host-side listeners of a sandbox run (the MCP gateway endpoint and
+    /// the `--sandbox` egress proxy) pick their bind through one function, and
+    /// that function may only NARROW: it never returns the wildcard while a
+    /// narrower address is both reachable from the container and assignable
+    /// here. The platform matrix itself is proven in
+    /// `egress::relay_bind_address`'s own unit test; what this asserts is that
+    /// this crate applies it, and that an unassignable preference degrades to a
+    /// working wildcard instead of failing (or silently losing) the run.
+    #[cfg(feature = "sandbox")]
+    #[test]
+    fn host_listeners_bind_the_narrowest_container_reachable_address() {
+        use std::net::{IpAddr, Ipv4Addr};
+
+        let wildcard = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
+        let loopback = IpAddr::V4(Ipv4Addr::LOCALHOST);
+
+        // No bridge gateway known — the platform decision stands alone. Docker
+        // Desktop forwards host.docker.internal to the host loopback, so there
+        // the bind is the tightest possible; a native Linux daemon with no
+        // discoverable gateway keeps working on the wildcard.
+        let chosen = container_reachable_bind_ip(None, "test");
+        match std::env::consts::OS {
+            "macos" | "windows" => assert_eq!(chosen, loopback),
+            _ => assert_eq!(chosen, wildcard),
+        }
+
+        // A gateway address with no host interface (203.0.113.9 is TEST-NET-3,
+        // RFC 5737 — guaranteed unassigned) is what Docker Desktop on Linux
+        // effectively reports. It must never be bound: off Linux it is ignored
+        // outright, and on Linux the probe widens to the wildcard so the run
+        // still has a gateway rather than losing it to a swallowed bind error.
+        let unassignable: IpAddr = "203.0.113.9".parse().unwrap();
+        let chosen = container_reachable_bind_ip(Some(unassignable), "test");
+        assert_ne!(chosen, unassignable, "an unassignable bind is never chosen");
+        match std::env::consts::OS {
+            "macos" | "windows" => assert_eq!(chosen, loopback),
+            _ => assert_eq!(chosen, wildcard),
+        }
     }
 
     /// A NESTED global config path (`~/.codex/config.toml`) must keep its

@@ -209,6 +209,23 @@ struct Report {
     /// `fix: null` on the same project. See
     /// [`super::overview::unpinned_next_action`].
     surface_unpinned: Vec<crate::commands::trust::ContentDrift>,
+    /// Does the trust gate govern this manifest AT ALL?
+    ///
+    /// `true` for every project, and for a report with no project context —
+    /// the behaviour every report had before this field existed. `false` for
+    /// exactly one thing: the MACHINE manifest at
+    /// `$AGENTSTACK_HOME/agentstack.toml`, which is undiscoverable as a project
+    /// and therefore exempt from every render gate. See
+    /// [`super::overview::next_step`], which reads the same fact through
+    /// the same [`crate::util::paths::is_machine_home`] spelling, so the two
+    /// surfaces cannot disagree about whether a gate stands here.
+    ///
+    /// Ranking only, exactly like [`content_drift`](Self::content_drift):
+    /// nothing about how trust is granted changes, and the trust WORD this
+    /// report prints is untouched — `untrusted` stays `untrusted`, because
+    /// there is no grant, which is honest. What stops is naming a gate that
+    /// does not stand and a command that cannot run (G36).
+    trust_gated: bool,
 }
 
 /// The machine's bridge coverage, from the ONE definition `gateway connect`
@@ -266,6 +283,7 @@ impl Report {
             lock_pins: None,
             content_drift: false,
             surface_unpinned: Vec::new(),
+            trust_gated: true,
         }
     }
 
@@ -567,13 +585,23 @@ impl Report {
         // project that declares something. So this arm now asks the question
         // `status` already asks, and the Empty rung below answers both surfaces
         // with one sentence.
-        if self.trust == Some("untrusted") && self.declares_anything != Some(false) {
+        // …and not over the MACHINE layer, which no gate governs and no
+        // spelling of `trust` can reach (G36). Both consent rungs carry the
+        // guard, not just this one: the word this report prints for that layer
+        // is `untrusted` and stays so — there is no grant — but "untrusted"
+        // there is a fact with no consequence and no command, and naming one
+        // sent every reader round the loop `status` was already looping in.
+        // Same reading, same spelling, as `status` (`overview::next_step`).
+        if self.trust_gated
+            && self.trust == Some("untrusted")
+            && self.declares_anything != Some(false)
+        {
             return (
                 "agentstack trust .".to_string(),
                 "review this project — nothing it declares is active until you do",
             );
         }
-        if self.trust == Some("drifted") {
+        if self.trust_gated && self.trust == Some("drifted") {
             return (
                 "agentstack trust .".to_string(),
                 "the content changed since you last said yes — review what moved",
@@ -1503,6 +1531,8 @@ fn run_checks(
     }
     let base = crate::manifest::project_root_of(&ctx.dir);
     let trust_state = crate::trust::check(&base);
+    // Does a gate stand over this manifest at all? See `Report::trust_gated`.
+    report.trust_gated = !crate::util::paths::is_machine_home(&ctx.dir);
     // The second half of the trust reading, from the one shared detector (no
     // fetch, the same mode every other surface reads in): bytes this project
     // pinned that have since moved. Read BEFORE the word below, because it is

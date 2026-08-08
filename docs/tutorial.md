@@ -9,8 +9,13 @@ your CLIs already have, add a capability, review it, activate it, and take it
 all back. Each step is one command, and together they are the everyday
 product.
 
-Every command here was run against `agentstack 0.18.0-rc.2`. The transcripts
-are real output, abridged, with paths shortened to `~/your-project`.
+The transcripts are real output, abridged, with paths shortened to
+`~/your-project` — captured against `agentstack 0.18.0-rc.2`, one candidate
+behind the current `0.18.0-rc.3`. Some lines have moved since, so a command
+may print a little more than you see here: `add from … --write`, for one, now
+also pins the addition and points at the review. They are dated rather than
+relabelled, because a provenance claim nobody has earned is worse than a
+sample whose age you can see.
 
 Read it through, or run it in a scratch repository as you go.
 [Get started](start.md) is the same journey with less explanation;

@@ -696,10 +696,32 @@ pub(crate) fn stands_on_delivered_rung(zero_files: bool, rendered: bool) -> bool
     zero_files || rendered
 }
 
-// Eight plain `bool`/enum signals, deliberately: the function is pure over
-// exactly the observations the ladder branches on, which is what lets the
-// whole routing be unit-tested without touching disk. Bundling them into a
-// struct would only move the same eight fields one level out.
+/// The ladder itself. Its rungs and their order are documented above
+/// [`EMPTY_PROJECT_NEXT`], the rung it ends on.
+///
+/// `trust_gated` says whether the trust gate governs this manifest AT ALL.
+///
+/// True for every project. False for exactly one thing: the MACHINE manifest
+/// at `$AGENTSTACK_HOME/agentstack.toml`, the user's own personal layer. It is
+/// deliberately undiscoverable as a project
+/// ([`crate::manifest::discover_project_base`]), so `agentstack trust` can
+/// never reach it — and every render gate exempts it for that reason
+/// (`render::apply`, `render::hooks`, `render::instructions`, `render::skills`,
+/// `render::extensions`, all through
+/// [`crate::util::paths::is_machine_home`]). Its content is delivered whatever
+/// the trust store says, because there is no consent to be had.
+///
+/// Without this flag the two trust rungs below fired there anyway, and the
+/// result was G36: `status` and `doctor` both read the machine manifest, both
+/// named `agentstack trust .`, and all three spellings of that command refused
+/// — a ladder with no last rung. This does not relax a gate; it stops naming
+/// one where none stands. On a real project nothing moves: `trust_gated` is
+/// `true` and every arm reads exactly as it did.
+///
+/// Nine plain `bool`/enum signals, deliberately: the function is pure over
+/// exactly the observations the ladder branches on, which is what lets the
+/// whole routing be unit-tested without touching disk. Bundling them into a
+/// struct would only move the same nine fields one level out.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn next_step(
     trust: crate::trust::TrustState,
@@ -710,8 +732,10 @@ pub(crate) fn next_step(
     unimported_native: bool,
     undeclared_drops: bool,
     declares_a_server: bool,
+    trust_gated: bool,
 ) -> (&'static str, &'static str) {
     use crate::trust::TrustState;
+    let trust_relevant = trust_relevant && trust_gated;
     // A dropped-but-undeclared file outranks everything except a pending
     // re-review: the drop is the newest thing the user did, and `agentstack
     // yes` is the one verb built for it. Until this branch existed, `yes` was
@@ -735,7 +759,7 @@ pub(crate) fn next_step(
         // that state is a re-review the Status line is already reporting, and
         // routing it to `doctor` made the cue cost two commands — status naming
         // doctor, doctor naming the review (pilot Run A).
-        TrustState::Changed => (
+        TrustState::Changed if trust_gated => (
             "agentstack trust .",
             "the content changed since you reviewed it — review and re-trust",
         ),
@@ -753,7 +777,7 @@ pub(crate) fn next_step(
             // the user would land in `TrustState::Changed` and review again.
             if unimported_native {
                 (ADOPT_RUNG_FIX, ADOPT_RUNG_WHY)
-            } else if trust_blocks_delivery(trust, has_capabilities) {
+            } else if trust_gated && trust_blocks_delivery(trust, has_capabilities) {
                 // The gate rung, and it sits here because it gates everything
                 // below: `apply --write` is refused outright, `use --write` is
                 // refused, and grouping or verifying content no harness will
@@ -2099,7 +2123,14 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
     let target_ids: Vec<String> = ctx.registry.ids().map(str::to_string).collect();
     let gateway = gateway_connected(&ctx, &target_ids);
     let mode = detect_mode(&ctx, &target_ids);
-    let trust_relevant = trust_relevant(gateway, mode);
+    // Does the trust gate govern this manifest at all? The one manifest it does
+    // not govern is the machine layer — see `next_step`, and the same
+    // `is_machine_home` spelling every render gate exempts it by. Both readings
+    // below are ANSWERS ABOUT THE GATE, so where no gate stands both are false:
+    // reporting `trust_blocks_delivery: true` over a layer whose `apply --write`
+    // writes every target (measured) is the surface contradicting the product.
+    let trust_gated = !crate::util::paths::is_machine_home(&ctx.dir);
+    let trust_relevant = trust_gated && trust_relevant(gateway, mode);
 
     let has_capabilities = declares_capabilities(m);
     // ...and this is the CAPABILITY reading: is the gate actually standing
@@ -2107,7 +2138,7 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
     // mode on purpose. `trust_relevant` flips from false to true when a
     // lockfile appears — even one a fully refused `apply --write` left behind —
     // while nothing about what trust governs has moved; this one does not.
-    let trust_blocks_delivery = trust_blocks_delivery(trust, has_capabilities);
+    let trust_blocks_delivery = trust_gated && trust_blocks_delivery(trust, has_capabilities);
     // "Is anything on disk for these targets?" — the signal that actually
     // distinguishes "imported but not applied" from "set up and resting".
     // `locked` does not: a static project stays unlocked until `use`/`lock` runs.
@@ -2150,6 +2181,7 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
         unimported,
         undeclared_drops,
         !m.declared_server_names().is_empty(),
+        trust_gated,
     );
     // The Apply rung names a render; `apply` never renders skills. See
     // `correct_apply_rung` — `doctor` applies the same correction to the same
@@ -2903,6 +2935,7 @@ mod tests {
                 false,
                 false,
                 false,
+                true,
                 true
             )
             .0,
@@ -2917,6 +2950,7 @@ mod tests {
                 false,
                 false,
                 false,
+                true,
                 true
             )
             .0,
@@ -2931,6 +2965,7 @@ mod tests {
                 false,
                 false,
                 false,
+                true,
                 true
             )
             .0,
@@ -2952,6 +2987,7 @@ mod tests {
                 false,
                 false,
                 false,
+                true,
                 true
             )
             .0,
@@ -2972,6 +3008,7 @@ mod tests {
                 false,
                 false,
                 false,
+                true,
                 true
             )
             .0,
@@ -2991,6 +3028,7 @@ mod tests {
                 false,
                 false,
                 false,
+                true,
                 true
             )
             .0,
@@ -3005,6 +3043,7 @@ mod tests {
                 false,
                 false,
                 false,
+                true,
                 true
             )
             .0,
@@ -3026,6 +3065,7 @@ mod tests {
             true,
             false,
             false,
+            true,
             true,
         );
         assert_eq!(
@@ -3049,6 +3089,7 @@ mod tests {
                 false,
                 true,
                 false,
+                true,
                 true
             )
             .0,
@@ -3069,6 +3110,7 @@ mod tests {
                     false,
                     false,
                     false,
+                    true,
                     true
                 )
                 .0,
@@ -3083,6 +3125,7 @@ mod tests {
                     false,
                     false,
                     false,
+                    true,
                     true
                 )
                 .0,
@@ -3097,6 +3140,7 @@ mod tests {
                     false,
                     false,
                     false,
+                    true,
                     true
                 )
                 .0,
@@ -3184,6 +3228,7 @@ mod tests {
                                 unimported,
                                 true,
                                 true,
+                                true,
                             );
                             assert_eq!(
                                 cmd, DROPPED_FILES_FIX,
@@ -3205,6 +3250,7 @@ mod tests {
                 false,
                 false,
                 false,
+                true,
                 true,
                 true
             )
@@ -3240,6 +3286,7 @@ mod tests {
                                 false,
                                 drops,
                                 true,
+                                true,
                             );
                             assert!(
                                 !cmd.contains("init"),
@@ -3267,6 +3314,7 @@ mod tests {
                 false,
                 false,
                 false,
+                true,
                 true
             )
             .0,
@@ -3281,6 +3329,7 @@ mod tests {
                 false,
                 false,
                 false,
+                true,
                 true
             )
             .0,
@@ -3482,6 +3531,100 @@ mod tests {
                 );
             }
         }
+
+        // ── ...and the row the table has no axis for, because it is not a
+        // trust state at all: the MACHINE layer, where no gate stands. Both
+        // readings are computed as `trust_gated && …` at the one call site in
+        // `collect`, so the property to hold is that the conjunction collapses
+        // every row above to false — a project's rows are untouched, and the
+        // one manifest no `trust` command can reach claims no gate.
+        for mode in MODES {
+            for gateway in [true, false] {
+                for trust in STATES {
+                    let gated = false;
+                    assert!(
+                        !(gated && trust_relevant(gateway, mode)),
+                        "no gate stands over the machine layer, so the posture hint must not \
+                         claim one ({mode:?}, gw={gateway})"
+                    );
+                    assert!(
+                        !(gated && trust_blocks_delivery(trust, true)),
+                        "…and nothing there is blocked: its `apply --write` writes every target \
+                         while the store says untrusted ({trust:?})"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The ladder's ninth signal, driven from both sides.
+    ///
+    /// `trust_gated: false` is the machine layer and nothing else, so the only
+    /// thing it may change is whether the ladder NAMES the gate. Every rung
+    /// below the gate must answer exactly as it does for a project in the same
+    /// shape — otherwise the flag has become a second ladder, which is how two
+    /// surfaces start disagreeing again.
+    #[test]
+    fn the_ungated_layer_is_never_sent_to_a_gate_it_cannot_reach() {
+        use crate::trust::TrustState;
+        for trust in [TrustState::Untrusted, TrustState::Changed] {
+            for relevant in [true, false] {
+                for rendered in [true, false] {
+                    let gated = next_step(
+                        trust, rendered, true, relevant, true, false, false, true, true,
+                    );
+                    assert_eq!(
+                        gated.0, "agentstack trust .",
+                        "a PROJECT in this shape still meets the gate ({trust:?}, \
+                         relevant={relevant}, rendered={rendered})"
+                    );
+                    let ungated = next_step(
+                        trust, rendered, true, relevant, true, false, false, true, false,
+                    );
+                    assert_ne!(
+                        ungated.0, "agentstack trust .",
+                        "the machine layer has no gate to be sent to ({trust:?}, \
+                         relevant={relevant}, rendered={rendered})"
+                    );
+                    // …and it lands on the SAME rung a trusted project lands
+                    // on, because that is what "no gate here" means.
+                    let trusted = next_step(
+                        TrustState::Trusted,
+                        rendered,
+                        true,
+                        relevant,
+                        true,
+                        false,
+                        false,
+                        true,
+                        true,
+                    );
+                    assert_eq!(
+                        ungated, trusted,
+                        "an ungated layer must fall through to the ordinary setup ladder, not to \
+                         a ladder of its own ({trust:?}, relevant={relevant}, rendered={rendered})"
+                    );
+                }
+            }
+        }
+        // The flag reaches ONLY the trust rungs: a waiting drop still outranks
+        // everything, gated or not.
+        assert_eq!(
+            next_step(
+                TrustState::Untrusted,
+                false,
+                true,
+                true,
+                true,
+                false,
+                true,
+                true,
+                false
+            )
+            .0,
+            DROPPED_FILES_FIX,
+            "the drop rung is not a trust rung and must not move with the flag"
+        );
     }
 
     /// `context-cost-v1` rule 3, at the serializer: no data is not zero.

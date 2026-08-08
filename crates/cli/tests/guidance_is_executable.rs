@@ -113,9 +113,17 @@
 //!   declares `--write`, offered as the fix, exiting 0 and changing nothing
 //!   (the `lock` regression, alive again in a second verb). Both surfaces now
 //!   name the writing form.
-//! * **STILL LIVE** — a machine manifest whose consent gate reports that the
-//!   manifest does not exist. That one keeps its ledger entry and its
-//!   `#[ignore]`d reproducer.
+//! * **G36, established then repaired** — the last entry, and the one whose
+//!   name held two claims. `trust` really cannot reach a MACHINE manifest, and
+//!   that is correct: the machine layer is the user's own personal manifest,
+//!   undiscoverable as a project on purpose, and every render gate exempts it —
+//!   `apply --write` delivers it while the trust store says `untrusted`. The
+//!   defect was the LADDER pointing at that gate anyway: `status` and `doctor`
+//!   both named `agentstack trust .`, every spelling refused, and the refusal
+//!   claimed no manifest existed. Both surfaces now stop naming a gate that
+//!   does not stand, and the refusal says what is true. Nothing became
+//!   trustable. The ledger is now EMPTY, and rule (d) clause 4 carries the one
+//!   paired exemption.
 //!
 //! Scope, stated so the gaps read as decisions:
 //!
@@ -1302,27 +1310,30 @@ struct KnownDefect {
 }
 
 const KNOWN_DEFECTS: &[KnownDefect] = &[
+    // EMPTY, and that is the point of the design: an entry lives here only
+    // while the defect under it still reproduces.
+    //
     // G33 (`agentstack init` in a machine field), G34 (`agentstack yes` in
     // status's machine field) and G35 (the preview form of `adopt` named as the
     // fix) were ENTRIES HERE and are now repaired in the product, so their
     // entries are gone — a ledger that keeps a fixed defect is a suppression
     // with nothing under it. Their reproducers below are no longer ignored:
     // each one now asserts the repaired behaviour instead of the bug.
-    KnownDefect {
-        state: "machine-manifest",
-        surface: "trust --preview",
-        command: CONSENT_GATE_BLIND,
-        why: "A COMPLETE DEAD END, and the one the `trust .` convergence exemption was hiding. \
-              With the manifest at `~/.agentstack/agentstack.toml` and the working directory at \
-              `~`, `status --json` reports `manifest.loaded = true` and walks the reader up the \
-              ladder — `agentstack lock --write` (exits 0, pins), then `agentstack trust .`. But \
-              `trust`, `trust --preview` and `trust .` all exit 1 with \"no agentstack manifest \
-              at or above ~ — run `agentstack init` first\" over the manifest the other surfaces \
-              just described. The ladder therefore never terminates: `status` names `trust .` \
-              forever, and the command it names cannot see the project at all. The `init` it \
-              suggests instead is wrong twice over — a manifest exists, and `init` refuses \
-              without a terminal.",
-    },
+    //
+    // G36 was the last entry and it left differently, which is worth recording
+    // because the shape recurs. Measured, it was TWO facts wearing one name.
+    // `trust` genuinely cannot reach the machine manifest — not a bug: the
+    // machine layer is the user's own personal manifest, undiscoverable as a
+    // project on purpose, and every render gate exempts it (its `apply --write`
+    // writes every target while the trust store says `untrusted`). The defect
+    // was the LADDER: `status` and `doctor` named `agentstack trust .` over a
+    // layer no gate governs, and all three spellings of that command refused.
+    // Fixed in the product by not naming a gate that does not stand (the trust
+    // rungs now read `overview::next_step` / `Report::trust_gated`), and
+    // `trust`'s refusal now says what is true instead of "no agentstack
+    // manifest … run `agentstack init` first". Nothing became trustable. Rule
+    // (d) clause 4 carries the paired exemption; the reproducer below now
+    // asserts the whole repaired state and is no longer ignored.
 ];
 
 /// Stand-in for "the surface produced no machine answer at all", so a defect
@@ -2026,7 +2037,7 @@ fn every_suggested_command_parses_and_makes_progress() {
         // ABSENCE of an answer, and because the `trust .` convergence exemption
         // means it is the only rule in this file that can reach the state it
         // judges.
-        if let Some(msg) = consent_gate_blind(state.name, status_body, preview_body) {
+        if let Some(msg) = consent_gate_blind(state.name, &state.home, status_body, preview_body) {
             match known_defect(state.name, "trust --preview", CONSENT_GATE_BLIND) {
                 Some(d) => {
                     reproduced.insert((d.state, d.surface, d.command));
@@ -2644,27 +2655,37 @@ fn the_adopt_rung_names_the_writing_form() {
     );
 }
 
-/// LIVE DEFECT — the consent gate cannot see a MACHINE manifest, and the
-/// ladder that points at it therefore never ends.
+/// G36, ESTABLISHED AND CLOSED — the machine layer has no consent surface, and
+/// no surface may pretend it has one.
 ///
-/// State: the manifest at `~/.agentstack/agentstack.toml`, working directory
-/// `~` — the machine scope, which every other surface reads correctly.
-/// What happens, step by step, each exit code read from the process directly:
-///   1. `status --json` → `manifest.loaded = true`, `next_action.command =
-///      "agentstack lock --write"`.
-///   2. `agentstack lock --write` → exit 0, pins the surface.
-///   3. `status --json` → `next_action.command = "agentstack trust ."`.
-///   4. `agentstack trust .` → **exit 1**, "no agentstack manifest at or above
-///      ~ — run `agentstack init` first".
-///   5. re-poll → step 3 again, forever.
+/// This test was written as a reproducer for "the consent gate cannot see a
+/// machine manifest". Measured, that name held two different claims, and only
+/// one of them was a bug.
 ///
-/// `agentstack trust --preview` and bare `agentstack trust` refuse identically,
-/// so no spelling of the gate can see the project. The `agentstack init` the
-/// refusal suggests is wrong twice over: a manifest exists, and `init` refuses
-/// without a terminal.
+/// **Not a bug: `trust` cannot reach it.** The manifest at
+/// `$AGENTSTACK_HOME/agentstack.toml` is the user's own personal layer, not a
+/// project. `manifest::discover_project_base` refuses to discover it twice over
+/// (it is the machine home, and the directory above it is `$HOME`), so `$HOME`
+/// can never enter the trust store by any path — and every render gate exempts
+/// it for exactly that reason (`render::apply`, `hooks`, `instructions`,
+/// `skills`, `extensions`, through `paths::is_machine_home`), because a layer
+/// no `trust` command can reach must not be gated on trust. The proof that the
+/// exemption is real and not theory is below: `apply --write` DELIVERS here
+/// while the trust store still says `untrusted`.
+///
+/// **The bug: the ladder pointed at that gate anyway.** `status --json` and
+/// `doctor --json` both named `agentstack trust .`, and all three spellings of
+/// it exited 1 with "no agentstack manifest at or above ~ — run `agentstack
+/// init` first" — false twice over (a manifest is there; `init` refuses when
+/// one exists). Poll, run, poll: a ladder with no last rung.
+///
+/// So the fix could only NARROW. Nothing became trustable — every spelling
+/// still refuses, and this test asserts that first, before anything else, so a
+/// future change that makes the machine layer grantable fails here. What
+/// changed is that the surfaces stopped naming a gate that does not stand, and
+/// the refusal says what is true.
 #[test]
-#[ignore = "live defect: `trust` cannot find a machine manifest that status and doctor both read"]
-fn the_consent_gate_cannot_see_a_machine_manifest() {
+fn the_machine_layer_has_no_consent_surface() {
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path().join("machine-manifest");
     fs::create_dir_all(&dir).unwrap();
@@ -2681,56 +2702,124 @@ fn the_consent_gate_cannot_see_a_machine_manifest() {
     let pinned = run(&["lock", "--write"], &home, &proj);
     assert!(pinned.ok, "`lock --write` should pin:\n{}", pinned.text);
 
-    let status: serde_json::Value =
-        serde_json::from_str(&strip_ansi(&run(&["status", "--json"], &home, &proj).text)).unwrap();
-    assert_eq!(
-        status
-            .pointer("/next_action/command")
-            .and_then(serde_json::Value::as_str),
-        Some("agentstack trust ."),
-        "the ladder must point at the gate, or this is not the state under test"
-    );
-
+    // ── NOTHING BECAME TRUSTABLE ──────────────────────────────────────────
+    //
+    // First, and over the pinned surface, which is the state the old ladder
+    // reached before it started looping. Every spelling of the gate still
+    // refuses. If one of these ever succeeds, the machine layer has become
+    // grantable — a widening, and a maintainer's decision, not a fix.
     for spelling in [
         &["trust", "."][..],
         &["trust", "--preview"][..],
         &["trust"][..],
+        &["trust", "--revoke"][..],
     ] {
         let out = run(spelling, &home, &proj);
         assert!(
             !out.ok,
-            "the defect is that every spelling of the gate REFUSES here; if `agentstack {}` now \
-             works, delete this test and the KNOWN_DEFECTS entry",
-            spelling.join(" ")
+            "`agentstack {}` succeeded over the machine layer. Consent there is not reachable and \
+             must not become reachable: `discover_project_base` refuses this manifest by design \
+             and every render gate exempts it. Widening the gate is a maintainer decision.\n{}",
+            spelling.join(" "),
+            out.text
+        );
+        // ...and the refusal has to be TRUE. The old text claimed there was no
+        // manifest and sent the reader to `agentstack init`, which refuses when
+        // one exists — a dead end dressed as guidance.
+        assert!(
+            !out.text.contains("no agentstack manifest"),
+            "the refusal still denies a manifest that `status` just loaded:\n{}",
+            out.text
         );
         assert!(
-            out.text.contains("no agentstack manifest"),
-            "expected the gate to deny the manifest exists:\n{}",
+            out.text.contains("machine layer"),
+            "the refusal must say what is actually true here — that this is the machine layer and \
+             there is no consent to give:\n{}",
+            out.text
+        );
+        assert!(
+            !out.text.contains("agentstack init"),
+            "`init` refuses when a manifest exists, so naming it here is the second dead end:\n{}",
             out.text
         );
     }
-    panic!(
-        "reproduced: `status` names `agentstack trust .` over a manifest the gate says is not \
-         there. Loop with no exit."
+
+    // ── AND NO SURFACE NAMES THE GATE ─────────────────────────────────────
+    //
+    // The loop itself. Both machine fields, because `status` is the surface a
+    // panel polls and `doctor` is the one a driver checks, and the old defect
+    // was on both.
+    for (label, argv, ptr) in [
+        (
+            "status --json",
+            &["status", "--json"][..],
+            "/next_action/command",
+        ),
+        ("doctor --json", &["doctor", "--json"][..], "/next_action"),
+    ] {
+        let v: serde_json::Value =
+            serde_json::from_str(&strip_ansi(&run(argv, &home, &proj).text)).unwrap();
+        let cmd = v.pointer(ptr).and_then(serde_json::Value::as_str);
+        assert!(
+            !cmd.is_some_and(|c| c.starts_with("agentstack trust")),
+            "{label} {ptr} = {cmd:?} — the machine layer is not gated on trust, so naming the gate \
+             here sends a driver to a command that can only refuse. That is the loop G36 was."
+        );
+    }
+
+    // ── THE EXEMPTION IS REAL, NOT A CLAIM ────────────────────────────────
+    //
+    // The whole argument above rests on "the render gates exempt this layer".
+    // Measured rather than asserted from the source: `apply --write` delivers
+    // while the trust store still says `untrusted`. If this ever starts
+    // refusing, the machine layer IS gated after all and the ladder should go
+    // back to naming a gate — but then `trust` has to be able to answer it, and
+    // that is the maintainer decision above, not a silent flip.
+    let applied = run(&["apply", "--write"], &home, &proj);
+    assert!(
+        applied.ok,
+        "`apply --write` must deliver the machine layer's own content while it is untrusted — \
+         that exemption is why there is no consent to give here:\n{}",
+        applied.text
     );
+    let status: serde_json::Value =
+        serde_json::from_str(&strip_ansi(&run(&["status", "--json"], &home, &proj).text)).unwrap();
+    assert_eq!(
+        status.pointer("/project/trust"),
+        Some(&serde_json::Value::String("untrusted".into())),
+        "the trust WORD stays honest: there is no grant here, and none was invented"
+    );
+    for flag in ["trust_relevant", "trust_blocks_delivery"] {
+        assert_eq!(
+            status.pointer(&format!("/project/{flag}")),
+            Some(&serde_json::Value::Bool(false)),
+            "`{flag}` is an answer about the GATE, and no gate stands over the machine layer — \
+             `apply --write` just wrote every target while it was untrusted"
+        );
+    }
 }
 
-/// Rule (d) clause 4, pointed at itself — two-sided.
+/// Rule (d) clause 4, pointed at itself — now four-sided.
 ///
 /// The direction that matters most is the negative one: a directory with no
 /// manifest is a legitimate state whose consent gate legitimately has nothing
 /// to preview, and a clause that flagged it would fire on every unadopted
 /// project and be switched off within a week.
+///
+/// The fourth side is the machine-layer exemption, driven from both sides so it
+/// stays exactly one manifest wide: the machine manifest is excused, and a
+/// PROJECT manifest under the same home is not.
 #[test]
 fn the_guard_catches_a_consent_gate_that_cannot_see_the_project() {
+    let home = Path::new("/home/u");
     let loaded = serde_json::json!({
-        "manifest": { "path": "/home/u/.agentstack/agentstack.toml", "loaded": true }
+        "manifest": { "path": "/home/u/repo/.agentstack/agentstack.toml", "loaded": true }
     });
-    let msg = consent_gate_blind("machine-manifest", Some(&loaded), None)
+    let msg = consent_gate_blind("declared-unpinned", home, Some(&loaded), None)
         .expect("a loaded manifest with no preview at all must be flagged");
     assert!(
         msg.contains("the consent gate cannot find it")
-            && msg.contains("/home/u/.agentstack/agentstack.toml"),
+            && msg.contains("/home/u/repo/.agentstack/agentstack.toml"),
         "the failure must say what is wrong and name the manifest the gate cannot see:\n{msg}"
     );
     println!("guard self-check — a consent gate blind to its own project:{msg}");
@@ -2739,6 +2828,7 @@ fn the_guard_catches_a_consent_gate_that_cannot_see_the_project() {
     assert!(
         consent_gate_blind(
             "s",
+            home,
             Some(&loaded),
             Some(&serde_json::json!({ "fix": null }))
         )
@@ -2749,13 +2839,34 @@ fn the_guard_catches_a_consent_gate_that_cannot_see_the_project() {
     let absent =
         serde_json::json!({ "manifest": { "path": "/p/agentstack.toml", "loaded": false } });
     assert!(
-        consent_gate_blind("no-project", Some(&absent), None).is_none(),
+        consent_gate_blind("no-project", home, Some(&absent), None).is_none(),
         "a directory with no manifest has nothing for the gate to preview; flagging it would make \
          the clause fire on every unadopted project"
     );
     assert!(
-        consent_gate_blind("s", None, None).is_none(),
+        consent_gate_blind("s", home, None, None).is_none(),
         "no reading at all is not a claim, and must not be judged as one"
+    );
+    // The machine layer: excused, because no gate governs it. See the
+    // function's own doc comment, and `the_machine_layer_has_no_consent_surface`
+    // for the paired assertion that the ladder does not point at the gate there.
+    let machine = serde_json::json!({
+        "manifest": { "path": "/home/u/.agentstack/agentstack.toml", "loaded": true }
+    });
+    assert!(
+        consent_gate_blind("machine-manifest", home, Some(&machine), None).is_none(),
+        "the machine manifest is not a project and no render gate governs it; a preview it never \
+         offers is the correct answer, not a blind gate"
+    );
+    // …and exactly that manifest. A project that merely lives near the home is
+    // governed like any other, so the exemption must not reach it.
+    let nearby = serde_json::json!({
+        "manifest": { "path": "/home/u/.agentstack/skills/agentstack.toml", "loaded": true }
+    });
+    assert!(
+        consent_gate_blind("nearby", home, Some(&nearby), None).is_some(),
+        "the exemption is ONE manifest wide; widening it by prefix would excuse the gate for \
+         anything under the home"
     );
 }
 
@@ -3243,8 +3354,29 @@ fn agreement_violations(
 /// there and the rule says nothing. That matters, because "no manifest" is a
 /// legitimate state with its own guidance and flagging it would make the rule
 /// fire on correct behaviour.
+///
+/// ONE EXEMPTION, and it is a fact about the product rather than a softening of
+/// the rule: the MACHINE manifest at `$AGENTSTACK_HOME/agentstack.toml`. This
+/// clause reads "the gate cannot see a project it GOVERNS", and no gate governs
+/// the machine layer. It is the user's own personal manifest, deliberately
+/// undiscoverable as a project (`manifest::discover_project_base`), and every
+/// render gate exempts it by name (`render::apply`, `hooks`, `instructions`,
+/// `skills`, `extensions`, all through `paths::is_machine_home`) precisely
+/// because a layer no `trust` command can reach must not be gated on trust. Its
+/// content is delivered whatever the trust store says.
+///
+/// So `trust --preview` emitting nothing there is the correct answer to a
+/// question that does not apply, not a blind gate — which is what G36 turned
+/// out to be once it was measured. What was a real defect, and is fixed, is the
+/// LADDER that pointed at the gate anyway: `status` and `doctor` named
+/// `agentstack trust .` over this layer and all three spellings refused. This
+/// exemption is therefore paired, not standalone —
+/// [`the_machine_layer_has_no_consent_surface`] pins that neither surface names
+/// the gate here, so if the ladder ever points back at it the suite fails
+/// again, on the state itself rather than on this rule.
 fn consent_gate_blind(
     state: &str,
+    home: &Path,
     status: Option<&serde_json::Value>,
     preview: Option<&serde_json::Value>,
 ) -> Option<String> {
@@ -3253,6 +3385,27 @@ fn consent_gate_blind(
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false);
     if !loaded || preview.is_some() {
+        return None;
+    }
+    // `run` spawns with `AGENTSTACK_HOME = <home>/.agentstack`, so this is the
+    // exact path the product calls the machine home — compared, not guessed
+    // from the state's name. Canonicalized as well as compared raw: a macOS
+    // tempdir is handed out as `/var/…` and reported back as `/private/var/…`,
+    // and the raw spellings would never match. Same belt-and-braces shape as
+    // `paths::is_machine_home`, which is the rule this mirrors.
+    let machine_manifest = home.join(".agentstack").join("agentstack.toml");
+    if status
+        .and_then(|v| v.pointer("/manifest/path"))
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|p| {
+            let p = Path::new(p);
+            p == machine_manifest
+                || matches!(
+                    (p.canonicalize(), machine_manifest.canonicalize()),
+                    (Ok(a), Ok(b)) if a == b
+                )
+        })
+    {
         return None;
     }
     Some(format!(

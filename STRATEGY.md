@@ -4,7 +4,7 @@
 > decision, superseding v2 (adopted 2026-07-31; see git history). Produced by
 > the strategy-v3 wayfinder effort; this document stands alone.
 >
-> **Current as of:** AgentStack 0.18.0-rc.2
+> **Current as of:** AgentStack 0.18.0-rc.3
 >
 > **Relationship to the other documents:** [`TODO.md`](TODO.md) is the only
 > ordered work queue, re-seeded from "The plan" below. [`CLAUDE.md`](CLAUDE.md)

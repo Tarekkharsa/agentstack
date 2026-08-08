@@ -603,6 +603,15 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   the file-light lanes — which is why it reads `false` for a static
 ///   project whose every write the gate refuses. Decide on the new field, not
 ///   on that one.
+///
+///   Both fields answer about the GATE, so both are `false` where no gate
+///   stands — which is exactly one manifest: the machine layer at
+///   `$AGENTSTACK_HOME/agentstack.toml`. It is undiscoverable as a project, so
+///   `agentstack trust` can never reach it, and every render gate exempts it
+///   for that reason: its `apply --write` writes every target while
+///   `project.trust` still reads `untrusted`. A panel must therefore not read
+///   `trust: "untrusted"` as "something is blocked" — that is what
+///   `trust_blocks_delivery` is for, and there it is honest.
 /// - `library-sources-v1`: `status --json`'s `project` gains a
 ///   `shadowed_names` array (`project.shadowed_names`, beside the other
 ///   per-project readings, so one project card is read from one place) —
