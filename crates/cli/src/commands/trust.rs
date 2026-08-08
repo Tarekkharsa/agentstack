@@ -1514,6 +1514,9 @@ pub fn preview_value(base: &Path) -> Result<serde_json::Value> {
 /// takes it: that helper serves commands that read or write a manifest the
 /// user already owns, while a grant here MINTS consent, so its target must
 /// earn discovery rather than be asserted.
+///
+/// The MACHINE layer keeps its refusal and gets an honest one. See
+/// [`machine_layer_refusal`].
 fn resolve_base(path: Option<&Path>, manifest_dir: Option<&Path>) -> Result<PathBuf> {
     let start = match path.or(manifest_dir) {
         Some(p) => p
@@ -1521,12 +1524,77 @@ fn resolve_base(path: Option<&Path>, manifest_dir: Option<&Path>) -> Result<Path
             .with_context(|| format!("no such directory: {}", p.display()))?,
         None => std::env::current_dir()?,
     };
-    crate::manifest::discover_project_base(&start).with_context(|| {
-        format!(
-            "no agentstack manifest at or above {} — run `agentstack init` first",
-            start.display()
-        )
-    })
+    // The walk FIRST, and unchanged: whatever resolved before resolves now, so
+    // the set of trustable targets is byte-identical. Only the refusal that
+    // walk already produced is re-worded, and only where it was untrue.
+    if let Some(base) = crate::manifest::discover_project_base(&start) {
+        return Ok(base);
+    }
+    if let Some(refusal) = machine_layer_refusal(&start) {
+        anyhow::bail!(refusal);
+    }
+    anyhow::bail!(
+        "no agentstack manifest at or above {} — run `agentstack init` first",
+        start.display()
+    )
+}
+
+/// Is `start` the machine layer, and if so, why does no spelling of this
+/// command apply to it?
+///
+/// `$AGENTSTACK_HOME/agentstack.toml` is the user's own personal layer, not a
+/// project. [`crate::manifest::discover_project_base`] refuses to discover it
+/// (twice over: it is the machine home, and the dir above it is `$HOME`), so
+/// `$HOME` can never enter the trust store by any path — which is exactly why
+/// every render gate EXEMPTS it: `render::apply::trust_refusal`,
+/// `render::hooks`, `render::instructions`, `render::skills` and
+/// `render::extensions` all skip [`crate::util::paths::is_machine_home`],
+/// because a layer no `trust` command can reach must not be gated on trust.
+///
+/// So the refusal is correct and stays: nothing here becomes trustable. What
+/// was wrong was the SENTENCE. `discover_project_base` returning `None` was
+/// reported as "no agentstack manifest at or above ~ — run `agentstack init`
+/// first", which is false twice: a manifest is there (`status` and `doctor`
+/// both read it), and `init` refuses when one exists. A reader following that
+/// text has nowhere to go. This says the true thing instead — there is no
+/// consent to give here because nothing here is gated on consent — and names
+/// no command that would refuse.
+///
+/// Narrow twice over, deliberately.
+///
+/// It is consulted only AFTER [`crate::manifest::discover_project_base`] has
+/// already declined, so it can never take a target away from the walk — a
+/// directory that resolved to a project yesterday resolves to the same project
+/// today, whatever `$AGENTSTACK_HOME` is set to. And it answers only for the
+/// machine home itself and for the project root that home belongs to (`~`, for
+/// the default `~/.agentstack` spelling); an ordinary directory under `$HOME`
+/// with no manifest above it still gets the ordinary "no manifest here"
+/// refusal, because that is what is true of it.
+fn machine_layer_refusal(start: &Path) -> Option<String> {
+    let machine_home = crate::util::paths::agentstack_home();
+    let manifest = machine_home.join("agentstack.toml");
+    if !manifest.exists() {
+        return None;
+    }
+    let is_layer = crate::util::paths::is_machine_home(start) || {
+        let root = crate::manifest::project_root_of(&machine_home);
+        start == root
+            || matches!(
+                (start.canonicalize(), root.canonicalize()),
+                (Ok(a), Ok(b)) if a == b
+            )
+    };
+    if !is_layer {
+        return None;
+    }
+    Some(format!(
+        "{} is the machine layer — your own personal manifest, not a project.\n\
+         It is never gated on trust (every render gate exempts it), so there is no consent to \
+         give or withhold here and no grant to record.\n\
+         `agentstack status` and `agentstack doctor` report on it; `agentstack trust` applies to \
+         a project manifest.",
+        manifest.display()
+    ))
 }
 
 /// Parse the manifest layers out of a [`trust::ConsentSnapshot`]'s captured

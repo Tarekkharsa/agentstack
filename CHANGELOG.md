@@ -4,7 +4,17 @@ User-facing changes per release. The [GitHub Releases
 page](https://github.com/Tarekkharsa/agentstack/releases) carries the built
 binaries, checksums, and provenance attestations for each entry.
 
-## Unreleased
+## v0.18.0-rc.3 — 2026-08-08
+
+**The candidate the activation study runs on.** rc.2 was tagged one week and
+127 commits ago, and the product moved underneath it: delivery became routed
+rather than written by default, the consent gate grew to cover every kind that
+reaches an agent, the library became linked source folders, and a long series
+of next-step lines stopped naming a command that then refuses. rc.2 is
+therefore not a build anyone should be measured on. Like rc.1 and rc.2 this is
+a pre-release: `install.sh` and `brew install` keep serving v0.17.1 until
+v0.18.0 is final, and a participant pins this build with
+`AGENTSTACK_VERSION=v0.18.0-rc.3`.
 
 **Behaviour change you will notice: delivery now needs your yes.**
 `agentstack apply --write` and `agentstack use --write` refuse a project that
@@ -136,6 +146,136 @@ forgives a missing secret, never a missing consent.
   flag the output is byte-identical to before, so existing consumers are
   untouched. A load is not a call: it never enters the ok/error/denied tallies,
   and a refused load is not recorded at all — the call itself fails first.
+
+**The other behaviour change: delivery is routed, and the live lane is the
+default.** A capability's lane is now decided from its kind and the harness,
+not picked by you: on a CLI that speaks MCP, skills and servers are served
+live over the bridge, while instructions, settings, hooks and extensions are
+rendered to files; on a CLI that speaks no MCP, everything renders. The
+practical effect is that a project stops collecting `.mcp.json`, `.codex/`
+and the rest — `apply`, `use`, `session` and `diff` all read one shared plan
+now, where four of five writers used to ignore it. `apply` is still the
+command that writes files when you ask for them, and `[delivery]
+render_locally` (per project or per harness) is the one override.
+
+- **`init --connect` finishes the first run.** The scripted first run used to
+  end in a setup that delivers nothing: `init --yes` had no way to register
+  the bridge, and closed with an unqualified "Import complete" over a project
+  whose live lane reached no tool. `--connect` is that consent, and it is the
+  only trigger — not `--yes`, not a terminal, not a detected harness, because
+  folding a `~/.claude.json` write into the import confirm would be a silent
+  write. It calls the shipped connect path, so the same atomic write and the
+  same undo entry apply. Without it, init now closes "Imported, and not yet
+  delivering" and names both repairs. `agentstack status` shows both lanes,
+  and says plainly when nothing routed live can reach your tools.
+
+- **A next step names a command that works, and a preview predicts its own
+  write.** A dozen dead ends in this family close: `use` and `apply` exited 0
+  saying "re-run with `--write`" where `--write` then exited 1; `add`'s
+  preview promised a materialization the write refused; `lock --write`,
+  `toolset create` and `add skill --write` each printed a next step naming a
+  command that immediately refused; `status` reported no next action at all on
+  a project whose `apply --write` was fully blocked; the ladder sent you to
+  `agentstack trust .` on a project with no lockfile, where the grant is void
+  the moment the pins are written; `up` reported success over a render that
+  failed, and now adopts `apply`'s exit. Previews consult the gates that would
+  refuse them, and footers read the trust state as it stands *after* the
+  command's own write. The machine-readable next-step fields a panel or CI
+  driver reads got the same sweep, with one rule: a field never names a
+  command that needs a terminal — it is null where no safe automatic step
+  exists, and names the inert `adopt --write` where one does.
+
+- **Colour obeys your terminal.** There was no `NO_COLOR` handling anywhere,
+  so escape codes reached files, pipes and CI logs. One gate now decides once
+  at startup — `CLICOLOR_FORCE`, then `NO_COLOR`, then `TERM=dumb`, then
+  whether stdout is a terminal. Forced output is byte-identical to what
+  shipped before.
+
+- **`--version` names the build, not only the release number.** A tagged
+  binary and a `main` a hundred commits ahead of it printed the same line,
+  so a bug report quoting a version could mean either. The commit is appended
+  (with a marker for a dirty tree): `agentstack 0.18.0-rc.3 (sandbox: no,
+  <rev>)`. The old shape is an exact prefix — nothing is inserted — and a
+  build without git history (a release tarball, a vendored tree) simply prints
+  the old line.
+
+- **A server another application owns is left out of the import.** Desktop
+  apps register servers like `node_repl` and computer-use into every CLI's
+  global config, so every project's first run reported them as defined more
+  than once; importing them would pin bytes a vendor rewrites on its own
+  schedule and give an owned entry a second owner. A server whose executable
+  sits inside another application's bundle is now excluded, never silently:
+  the review names each one, its application, the path evidence and the
+  override. `--include-tool-managed` opts one back in and says so. The
+  classifier reads path text only — it executes and resolves nothing, and
+  treats every uncertain case as your own server.
+
+- **The library is linked source folders, in order.** `agentstack x lib link`
+  / `unlink` / `sources` / `reorder` manage an ordered list (a plain non-git
+  folder is first-class); the first source holding a name wins, and
+  `<source>:<name>` pins one explicitly. Collisions are computed at merge time
+  and surfaced by `lib list`, `doctor` and `status`, naming the winner, the
+  shadowed source and the qualified pin. Precedence can never affect what is
+  served: the list is read only when selecting, and every serving path reads
+  pinned bytes by locked digest.
+
+- **Pinned bytes serve; the library only offers.** A skill body is served from
+  the content store by digest, never from the mutable library — an absent
+  snapshot self-heals from already-verified bytes, a tampered one refuses.
+  A library-sourced skill whose library copy moved ahead is now an *update
+  available* (naming `agentstack lock`) rather than drift. The rendered lane
+  stopped leaking too: `use --write` and `add` used to materialize library
+  skills as symlinks into the live library, so a `lib sync` put unreviewed
+  bytes into agent context through an unchanged link. Both now materialize
+  from the pinned snapshot and refuse if it cannot be verified.
+
+- **A bare `agentstack run` is protected by default** — trust, strict lock,
+  policy admission, frozen grant. `--unprotected` is the explicit opt-out,
+  named for what it gives up; `--locked`, `--sandbox` and `--lockdown` are
+  byte-identical to before.
+
+- **Leases are visible, and an unleased project's gateway is empty.** With no
+  lease, the gateway used to serve the implicit union of every manifest server
+  plus every toolset's. A project declaring any toolset now gets an empty
+  gateway until a lease names one. `agentstack x lease status [--json]` is the
+  authoritative read (`lease-status-v1`); liveness is derived at read time and
+  a record whose process is gone, or whose PID was reused, reads stale rather
+  than live.
+
+- **A toolset composes into a self-contained image** (`agentstack x image`).
+  Plan, stage and build a toolset and its pinned members into one layer:
+  descriptor, entrypoint guard, required secrets, manifest and lock, server
+  definitions with `${REF}` intact, and pinned skill bodies. Secrets never
+  bake — only ref names reach the image. A bare `agentstack x image` writes no
+  file and does not contact Docker.
+
+- **One yes over grouped detail.** The review card's body is grouped per
+  capability with change markers and per-group tallies, under exactly one
+  closing question (`trust-card-groups-v1`; `trust-card-diff-v1` is unchanged
+  and still served).
+
+- **Vocabulary, so the file you read matches the ideas you were taught.**
+  `[toolsets.X]` is what the manifest now writes; `[profiles.X]` still parses
+  and is never written back, so no existing manifest breaks and an edit
+  extends the table your file already has. The artifact `agentstack x image`
+  builds is only ever called an image. The Mode axis retires: the `Mode` line
+  leaves `status`, which leaves Delivery alone — Mode said what a project *is*
+  where Delivery says what actually *happened*, and it taught a choice that no
+  longer exists. `set-mode` refuses with a sentence naming what replaced it.
+
+- **Two smaller safety fixes.** The trust store's lock is released on a panic
+  as well as a normal return — a panicking mutation used to leave every later
+  one blocking for five seconds and then failing closed until the staleness
+  window passed. And in the egress proxy's TLS handshake parse, one stray
+  trailing byte read as "no extensions present" (which the proxy allows); a
+  truncated length now reads unverifiable, as the enforcement claim always
+  said it did.
+
+- **The documentation site was rebuilt against the binary**, and the tutorial
+  is generated from Markdown rather than hand-written HTML: 40 KB of inline
+  JavaScript simulating a second UI is gone, along with the pages that taught
+  the retired three-mode picker. Every page carries a version bar saying which
+  build it describes.
 
 ## v0.18.0-rc.2 — 2026-08-01
 

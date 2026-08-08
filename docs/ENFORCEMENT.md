@@ -309,11 +309,30 @@ toolset containing it.
   where `[policy.tools]` is enforced exactly as in gateway mode (denied at
   discovery *and* at call), and each call is recorded in the run's own
   `events.jsonl`. The container reaches the gateway directly through
-  `host.docker.internal`. **Ceiling:** the ordinary bridge remains open; an
-  agent that opens its own connection to an upstream host the egress policy
-  allows bypasses the gateway. (`Gateway::from_frozen`,
+  `host.docker.internal`. Both host-side listeners a `--sandbox` run stands up —
+  that HTTP MCP endpoint and the run's egress proxy — bind the narrowest host
+  interface the container can still reach that way, by the same rule and the
+  same function the executor's relay uses (`relay_bind_address`): the private,
+  non-routable docker0 bridge gateway on a native Linux daemon, or the host
+  loopback on Docker Desktop — never a LAN-facing interface. `--lockdown` shares
+  the endpoint bind, since its sidecar relay dials the same host address. The
+  `0.0.0.0` wildcard survives only where no narrow address is knowable or
+  bindable, which is three cases and not one: a Linux host whose docker0 gateway
+  could not be determined at all — no daemon, no such network, no IPv4 gateway,
+  or an address that would not parse — where no narrow bind is attempted; a
+  Linux host that cannot bind the gateway it chose (Docker-Desktop-on-Linux,
+  whose gateway lives in the VM), where an assignability probe widens back to
+  the wildcard so the run keeps a working gateway instead of silently losing one
+  to a swallowed bind error; and any platform that is not linux/macOS/Windows,
+  which stays functional on the wildcard rather than guess. Those are documented
+  residual exposure, not exotic. The bind is defence in depth in every case: the
+  endpoint's per-run `X-Agentstack-Token` and the proxy's own per-run credential
+  remain the authority, exactly as before. **Ceiling:** the ordinary bridge
+  remains open; an agent that opens its own connection to an upstream host the
+  egress policy allows bypasses the gateway. (`Gateway::from_frozen`,
   `crates/cli/src/gateway_http.rs`, `crates/cli/src/commands/sandbox.rs`
-  `wire_sandbox_gateway`)
+  `wire_sandbox_gateway` / `container_reachable_bind_ip`,
+  `crates/egress/src/execution_relay.rs` `relay_bind_address`)
 - **lockdown — enforced.** The container reaches the host gateway only through
   the egress sidecar's fixed-destination relay. The same frozen, pin-verified
   server set is handed to `Gateway::from_frozen` for dispatch and compiled into

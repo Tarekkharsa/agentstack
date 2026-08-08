@@ -273,7 +273,7 @@
   </details>
 </aside>
   <main id="main-content" tabindex="-1">
-<p class="versionbar">These pages describe <b>unreleased <code>main</code></b>, which is ahead of the latest release (<b>v0.18.0</b>) — and the release is what <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">the installer gives you</a>. Commands and flags documented here may not exist in your build; <code>agentstack --version</code> says which one you have.</p>
+<p class="versionbar">These pages describe <b>v0.18.0-rc.3</b>, a pre-release. <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">The installer</a> serves the current release, <b>v0.17.1</b> — <code>/releases/latest</code> never points at a pre-release — so this is not the build you get unless you ask for it by name: <code>AGENTSTACK_VERSION=v0.18.0-rc.3</code>. <code>agentstack --version</code> says which build you have.</p>
 <h1 id="share-one-setup-with-your-team">Share one setup with your team</h1>
 <p>For a team that wants every member's agent CLIs configured the same way. Prerequisite: a working <a href="../concepts.html">manifest</a> in <code>.agentstack/</code> (run <code>agentstack init</code>, then <code>agentstack apply --write</code>, once).</p>
 <p>You hand a setup over by <strong>committing it</strong>: the repo itself carries the manifest and lock, and each clone reviews before anything activates.</p>

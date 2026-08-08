@@ -679,13 +679,26 @@ def version_banner():
     without tag history — changing every generated page.
 
     CHANGELOG.md carries both facts already, and the release process updates
-    it: the newest `## vX.Y.Z` heading is the latest release, and a non-empty
-    `## Unreleased` section above it means `main` is ahead of that release.
+    it: the newest `## vX.Y.Z` heading is the newest tagged build, and a
+    non-empty `## Unreleased` section above it means `main` is ahead of it.
+
+    TWO TAGS, NOT ONE. "the newest tag" and "what the installer gives you" are
+    different builds whenever the newest tag is a pre-release: install.sh
+    fetches `/releases/latest/download`, and GitHub's `latest` never points at
+    a prerelease. So the newest heading WITHOUT a prerelease suffix is read out
+    separately — that is the release a reader actually gets — and the bar names
+    both. Reading only the first heading (and, before the fix, truncating it at
+    the first `-`) told every reader of an RC's docs that `v0.18.0-rc.3` was
+    `v0.18.0`, "the current release", when the installer was serving v0.17.1.
     """
     text = (ROOT / "CHANGELOG.md").read_text()
 
-    released = re.search(r"^## +(v[0-9][^\s—-]*)", text, re.M)
-    if not released:
+    # `-rc.3` is PART of the version, not trailing noise: stopping at the first
+    # `-` turns a candidate into the release it is only a candidate for. Match
+    # the whole semver and stop there, so the ` — <date>` tail is left behind
+    # without the prerelease going with it.
+    tags = re.findall(r"^## +(v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)", text, re.M)
+    if not tags:
         # No release recorded yet. "Ahead of the latest release" is not a
         # meaningful thing to say, so say the part that is still true.
         return (
@@ -693,25 +706,54 @@ def version_banner():
             "<code>main</code> and may describe unreleased behavior. "
             "<code>agentstack --version</code> says which build you have.</p>"
         )
-    tag = released.group(1)
+    newest = tags[0]
+    stable = next((t for t in tags if "-" not in t), None)
 
     unreleased = re.search(
         r"^## +Unreleased\s*(.*?)(?=^## +v)", text, re.M | re.S
     )
     has_unreleased = bool(unreleased and unreleased.group(1).strip())
 
-    if not has_unreleased:
-        return (
-            f'<p class="versionbar">These pages describe <b>{esc(tag)}</b>, '
-            "the current release.</p>"
+    href = f"{GH}/releases/latest"
+    installer = f'<a href="{href}">the installer</a>'
+    Installer = f'<a href="{href}">The installer</a>'
+    if has_unreleased:
+        # Naming the newest tag only says something when it is NOT the release
+        # the next sentence already names.
+        ahead = (
+            "the current release"
+            if newest == stable
+            else f"the newest tagged build (<b>{esc(newest)}</b>)"
         )
+        lead = (
+            "These pages describe <b>unreleased <code>main</code></b>, which "
+            f"is ahead of {ahead}."
+        )
+    elif newest == stable:
+        lead = f"These pages describe <b>{esc(newest)}</b>, the current release."
+    else:
+        lead = f"These pages describe <b>{esc(newest)}</b>, a pre-release."
+
+    if stable is None:
+        gets = f"There is no published release yet, so {installer} has none to give you."
+    elif has_unreleased:
+        gets = (
+            f"{Installer} serves <b>{esc(stable)}</b>, so commands and flags "
+            "documented here may not exist in your build."
+        )
+    elif newest == stable:
+        gets = f"That is the build {installer} gives you."
+    else:
+        gets = (
+            f"{Installer} serves the current release, "
+            f"<b>{esc(stable)}</b> — <code>/releases/latest</code> never points "
+            "at a pre-release — so this is not the build you get unless you ask "
+            f"for it by name: <code>AGENTSTACK_VERSION={esc(newest)}</code>."
+        )
+
     return (
-        '<p class="versionbar">These pages describe <b>unreleased '
-        f"<code>main</code></b>, which is ahead of the latest release "
-        f"(<b>{esc(tag)}</b>) — and the release is what "
-        f'<a href="{GH}/releases/latest">the installer gives you</a>. '
-        "Commands and flags documented here may not exist in your build; "
-        "<code>agentstack --version</code> says which one you have.</p>"
+        f'<p class="versionbar">{lead} {gets} '
+        "<code>agentstack --version</code> says which build you have.</p>"
     )
 
 

