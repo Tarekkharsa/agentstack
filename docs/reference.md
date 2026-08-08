@@ -86,6 +86,7 @@ implementation internals — live in
 - [Staying current (`agentstack x self update`)](#staying-current-agentstack-self-update)
   - [The version note in `doctor`](#the-version-note-in-doctor)
 - [Which build am I running? (`--version`)](#which-build-am-i-running---version)
+- [Colour output (`NO_COLOR`, `CLICOLOR_FORCE`)](#colour-output-no_color-clicolor_force)
 - [Shell completions (`agentstack x completions`)](#shell-completions-agentstack-completions)
 - [Integrations](#integrations)
 
@@ -1848,6 +1849,28 @@ error: this build has no sandbox support — nothing was launched
 
 `agentstack run --sandbox --plan` still works on either build: a dry run
 describes, it never launches.
+
+## Colour output (`NO_COLOR`, `CLICOLOR_FORCE`)
+
+Colour is decided once, at startup, from the environment and the stream. In
+precedence order:
+
+1. `CLICOLOR_FORCE` — any value except empty and `0` turns colour **on**, even
+   through a pipe or into a file.
+2. `NO_COLOR` — any non-empty value turns it **off** ([no-color.org](https://no-color.org)).
+   `NO_COLOR=` (empty) is not a request and is ignored.
+3. `TERM=dumb` — off.
+4. Otherwise: on when stdout is a terminal, off when it is not.
+
+```bash
+agentstack doctor > report.txt     # a pipe or a file gets no escapes, unasked
+NO_COLOR=1 agentstack doctor       # ...and no escapes at a terminal either
+CLICOLOR_FORCE=1 agentstack doctor | less -R   # keep the colour through a pager
+```
+
+The decision is taken from stdout and applies to stderr too, so one run never
+prints half a coloured screen. `--json` output has never carried colour and does
+not gain any from `CLICOLOR_FORCE`: machine output stays machine output.
 
 <a id="shell-completions-agentstack-completions"></a>
 ## Shell completions (`agentstack x completions`)
