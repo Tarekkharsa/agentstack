@@ -168,7 +168,7 @@ fn doctor_refuses_to_call_an_uncovered_setup_clean() {
     assert!(text.contains("filesystem"), "names the server: {text}");
     assert!(text.contains("sqlite"), "names the server: {text}");
     assert!(
-        text.contains("agentstack adopt"),
+        text.contains("agentstack adopt --write"),
         "names the one next action: {text}"
     );
 
@@ -187,7 +187,7 @@ fn doctor_refuses_to_call_an_uncovered_setup_clean() {
     //
     // - `agentstack trust .` prints "nothing — this project declares no
     //   capabilities yet" and "(no servers)". The grant buys nothing.
-    // - Granting it anyway leaves doctor's next action at `agentstack adopt`
+    // - Granting it anyway leaves doctor's next action on the adopt rung
     //   regardless, so the review is a detour, not a step.
     // - `agentstack adopt --write` then rewrites the manifest a grant binds
     //   itself to, and trust drops to `drifted` — a SECOND review, which is the
@@ -199,7 +199,30 @@ fn doctor_refuses_to_call_an_uncovered_setup_clean() {
     // uncovered setup is not 0 warnings, the section is relevant, and it names
     // both servers and the command that absorbs them.
     assert_eq!(report["trust"], "untrusted", "{report}");
-    assert_eq!(report["next_action"], "agentstack adopt", "{report}");
+    // …and the WRITING form of that rung (G35). This assertion read
+    // `agentstack adopt` until the rung was corrected, which encoded the very
+    // defect the correction removed: `adopt` PREVIEWS by default. Measured in
+    // this exact fixture, with the built binary:
+    //
+    // - `agentstack adopt` exits 0, prints the manifest diff it WOULD apply,
+    //   and ends with "Dry run. Re-run with --write". Every file in the fixture
+    //   — manifest and HOME included — is byte-identical afterwards.
+    // - `doctor` therefore reports the identical 4 warnings and hands back the
+    //   identical rung on the next poll. Nothing in the output says it failed,
+    //   which is what makes the exit-0 shape the worse one: a driver that runs
+    //   the field verbatim loops forever. This is the same fault the fence
+    //   first caught on `agentstack search`.
+    // - `agentstack adopt --write` declares both servers in the manifest
+    //   ("✓ adopted 2 servers"), the Unmanaged setup section goes irrelevant,
+    //   warnings drop 4 → 2, and the rung advances to `agentstack lock
+    //   --write`. That is progress, so that is what a machine field may name.
+    //
+    // The rung is one shared constant, `overview::ADOPT_RUNG_FIX`, so `status`
+    // and `doctor` cannot disagree about it.
+    assert_eq!(
+        report["next_action"], "agentstack adopt --write",
+        "{report}"
+    );
 }
 
 /// The complement, so the check cannot become permanent noise: once the
