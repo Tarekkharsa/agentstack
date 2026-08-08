@@ -41,15 +41,39 @@ use agentstack::commands::doctor;
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 /// The one exit state `collect` cannot reach: an uninitialized directory. It
-/// is answered before any check runs, and it too ends with exactly one
-/// command — so the property holds across the whole surface, not just the
-/// part this file can drive.
+/// is answered before any check runs, and it too ends with exactly one step —
+/// so the property holds across the whole surface, not just the part this file
+/// can drive.
+///
+/// The step is PROSE and the machine field is an explicit `null` (G33). It read
+/// `agentstack init` on both, and `init` refuses without a terminal — which is
+/// the one thing a driver, the only reader of `next_action`, always lacks. The
+/// reasoning, including why every runnable spelling of `init` is worse than
+/// nothing here, is on `overview::NO_MANIFEST_NEXT`, which `status` reads too so
+/// the two surfaces describe one directory with one sentence.
 #[test]
 fn the_uninitialized_state_is_answered_before_checks_run() {
     let src = include_str!("../src/commands/doctor.rs");
     assert!(
-        src.contains(r#""state": "needs_setup""#) && src.contains(r#""agentstack init""#),
-        "the no-manifest JSON state must still name init as its one action"
+        src.contains(r#""state": "needs_setup""#),
+        "the no-manifest JSON state must still be answered before the checks run"
+    );
+    assert!(
+        src.contains(r#""next_action": serde_json::Value::Null"#)
+            && src.contains(r#""next_step": super::overview::NO_MANIFEST_NEXT.0"#),
+        "the no-manifest JSON must answer a driver with an explicit null and a person with the \
+         shared sentence — never with a command that refuses without a terminal"
+    );
+    let overview = include_str!("../src/commands/overview.rs");
+    let body = overview
+        .split("pub(crate) const NO_MANIFEST_NEXT: (&str, &str) = (")
+        .nth(1)
+        .expect("the shared sentence must exist");
+    let sentence = body.split(");").next().unwrap_or_default();
+    assert!(
+        sentence.contains("agentstack init"),
+        "…and that sentence must still tell the reader how to adopt the directory, or the null is \
+         a dead end rather than a terminal answer"
     );
 }
 

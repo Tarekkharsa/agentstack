@@ -843,11 +843,17 @@ target = "pi"                      # exactly one adapter id</code></pre></div>
 <p>Opt out of every release-channel request — this command and the note — with:</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>export AGENTSTACK_NO_UPDATE_CHECK=1</code></pre></div>
 <h2 id="which-build-am-i-running---version">Which build am I running? (<code>--version</code>)<a class="hlink" href="#which-build-am-i-running---version" aria-label="Link to this section">#</a></h2>
-<p>The Docker sandbox is a compile-time option. Published release binaries are built with it; a plain <code>cargo build --release</code> is not, and the two otherwise carry the same version number and the same <code>--help</code>. <code>--version</code> says which one you have:</p>
+<p>The Docker sandbox is a compile-time option. Published release binaries are built with it; a plain <code>cargo build --release</code> is not, and the two otherwise carry the same version number and the same <code>--help</code>. <code>--version</code> says which one you have, and — when it was built from a git checkout — which commit:</p>
 <div class="cb cb-term" data-language="console"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">console</span></div><pre class="block"><code class="language-console"><span class="pr">$ </span>agentstack --version
-<span class="out">agentstack 0.17.1 (sandbox: yes)     # a release binary — run --sandbox works</span>
+<span class="out">agentstack 0.17.1 (sandbox: yes)              # a release binary — run --sandbox works</span>
 <span class="pr">$ </span>agentstack --version
-<span class="out">agentstack 0.17.1 (sandbox: no)      # a plain source build — it does not</span></code></pre></div>
+<span class="out">agentstack 0.17.1 (sandbox: no)               # a plain source build — it does not</span>
+<span class="pr">$ </span>agentstack --version
+<span class="out">agentstack 0.17.1 (sandbox: no, a1b2c3d)      # built from commit a1b2c3d</span>
+<span class="pr">$ </span>agentstack --version
+<span class="out">agentstack 0.17.1 (sandbox: no, a1b2c3d-dirty) # …with uncommitted changes on top</span></code></pre></div>
+<p>The commit is there because the version number alone does not name a build: it is bumped when a release is cut, so every build between two releases prints the same one, and <code>main</code> can be a hundred commits past the number it still reports. Quote the whole line in a bug report — with the commit, it names one build.</p>
+<p><code>-dirty</code> means tracked files differed from that commit when the binary was compiled. A build with no git available — a release tarball, a vendored tree — prints no commit at all, which is the first shape above. To decide the field yourself (a reproducible build, or a CI job that would rather pass the commit in), set <code>AGENTSTACK_BUILD_REV</code> at compile time; set it to the empty string to leave the commit out.</p>
 <p><code>agentstack doctor</code> repeats the fact in its <strong>Adapters &amp; CLIs</strong> section, and <code>agentstack run &lt;cli&gt; --sandbox</code> on a build without it refuses by naming the real cause rather than blaming Docker:</p>
 <div class="cb cb-term" data-language="console"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">console</span></div><pre class="block"><code class="language-console"><span class="pr">$ </span>agentstack run claude-code --sandbox
 <span class="out">error: this build has no sandbox support — nothing was launched</span>

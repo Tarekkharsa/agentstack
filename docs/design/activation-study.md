@@ -38,6 +38,112 @@
 > scored. The five thresholds, the §6 metrics sheet, the §7 results template,
 > and the §7 pass condition are byte-identical — a demand answer informs the
 > bar, it does not move the pass/fail line.
+>
+> **Re-pin pass, 2026-08-08 — DO NOT RUN THIS KIT UNTIL §0 IS CLEARED.** The
+> kit was re-checked against the real binary and several instructions no longer
+> match the product. The corrections are inline and dated; what only the
+> maintainer can decide is in **§0**. The five thresholds, the §6 metrics
+> sheet, the §7 results template and the §7 pass condition are untouched.
+
+## 0. Re-pin status (2026-08-08) — read before booking anyone
+
+**Method, so the claims below can be checked.** A debug build of `main` at
+`ecf5c4d` (`cargo build -p agentstack`), driven in a throwaway directory with a
+fake `HOME` holding two CLI configs — `~/.claude.json` with two MCP servers and
+one plaintext token, `~/.codex/config.toml` with a third. Every exit code was
+read from `$?` directly, never through a pipe. Sessions were non-interactive, so
+the promptless spellings (`init --yes --secrets …`) stood in for the guided run;
+where that matters it is said so. Nothing in `crates/` was changed.
+
+### §0.1 Two blocking decisions — the maintainer's, not an observer's
+
+**B-A. The pinned RC is 125 commits stale, and the study would measure a
+product that no longer exists.** `v0.18.0-rc.2` is tagged at `4afe274`
+(2026-08-01). `main` is 125 commits ahead of it. Landing in that gap, all of it
+on the participant's path: the consent gate extended to all five delivered kinds
+(servers, skills, instructions, hooks, extensions), routed delivery, `init
+--connect`, `NO_COLOR`, the whole G22–G36 family of "the next step names a
+command that then refuses", and the docs-site rebuild. §3 pins the study to
+rc.2. **Re-pinning cannot be done from here: no newer tag exists.** Cut the RC
+the study is to run against, then update §3's install line and the version floor
+in §3 and Appendix B3 to it.
+
+**B-B. `agentstack --version` cannot tell the two builds apart, so every
+version check in this kit is inert.** `crates/cli/Cargo.toml` reads
+`version = "0.18.0-rc.2"` at the tag *and* at `main` — the crate version was
+never bumped after the tag was cut. Measured: the binary built from `main` at
+`ecf5c4d` prints `agentstack 0.18.0-rc.2`. So §3's "confirm `agentstack
+--version` ≥ 0.18.0-rc.2" and Appendix B3's identical check pass on both
+binaries and distinguish nothing. Whatever RC B-A produces must carry a version
+string no earlier build shares, or the pre-flight check is theatre.
+
+Until both are cleared, the honest state of this kit is **not runnable** — not
+because the protocol is wrong, but because there is no build to pin it to.
+
+### §0.2 What the re-pin corrected in place
+
+Each is measured, and each is marked at the line it corrects.
+
+1. **`apply` has left the journey.** §4's parenthetical described the path as
+   `install → init → apply → doctor → toolset switch → restore`. With delivery
+   routed, `init --connect` reaches `0 errors, 0 warnings` with no `apply` at
+   all, and `use --write` writes no server config. Corrected at §4.
+2. **The bridge step exists and the kit never mentioned it.** Without
+   `--connect`, `init` ends `NOT YET CONNECTED` and `doctor` reports `2
+   errors`; the way forward is `agentstack x gateway connect --all --write`,
+   which lives behind the `x` namespace. The §6/§7 gate metric ends at a clean
+   `doctor`, so this step now sits *inside* the measured window. Recorded as an
+   observation point in §5; **no threshold was moved.**
+3. **§8's latency baseline predates all of this** and its conclusion ("the
+   5-minute budget is entirely reading and typing time") is no longer
+   supported. Labelled at §8.
+4. **§8.1's Run A "fixed in v0.17.1" claim does not hold in the routed shape.**
+   Measured on `main`: after a clean `doctor`, `doctor` advances to `toolset
+   create` while `status` still prints `Next: agentstack doctor`. The two
+   surfaces disagree in exactly the state the fix claimed to close. Labelled at
+   §8.1; this is a product finding, not a kit repair.
+5. **§4's closing task cannot be completed as worded.** Measured: after
+   `toolset create`, `agentstack undo` lists only the `init` entry — the
+   toolset creation is not in the ledger (it names its own reversal,
+   `toolset delete`). A participant told to "undo your last change" is offered
+   only "undo everything". Flagged at §4 and at Appendix A's undo box.
+6. **§5's reason for excluding the panel is written against a state that is
+   gone.** It says the panel "renders `status-v1` and does not yet render the
+   contracts this release added". The panel queue item is closed, and
+   `docs/panel/index.html` was deleted and replaced by a redirect. The
+   exclusion may still be correct; **its stated reason is not.** Flagged at §5,
+   not changed — see §0.3.
+
+### §0.3 Recommended, not done — instrument design
+
+These are judgements about what the study measures. They are recorded for the
+maintainer and **deliberately not applied**, because changing them unilaterally
+would change the instrument.
+
+- **The panel exclusion needs a current reason or a decision to drop it** (§0.2
+  item 6). Keeping the exclusion on a reason that has expired is the kind of
+  thing that gets relitigated mid-study.
+- **Two-week retention is asked, but only of people who were watched
+  installing it.** §9.1 contacts the five participants 14 days on. That
+  measures whether a *studied* install survives, which is not the same as
+  whether an install survives. It is the best available signal and worth
+  keeping; it should be reported as what it is rather than as retention.
+- **"What would change your mind" is not asked anywhere.** D1 asks whether
+  they would keep it and why. A "no, because X" is captured; a "yes, but only
+  if Y" is not, and neither is the disconfirming condition for a yes. One
+  additive question after D1 would close it. Not added: D1's design is
+  deliberately "ask once, then stop", and a second question is the maintainer's
+  call.
+- **Where people STOP is captured well; where they stop *trying* is not.** The
+  stall log records each stall and the 5-minute intervention rule marks
+  unaided/aided. Neither records abandonment — a participant who quietly
+  narrows the task and declares themselves done reads on the sheet as a
+  completion. Appendix A has no box for "declared done with the task
+  incomplete", and the §7 gate counts finishing, not finishing *the task*.
+- **The gate metric window now contains a step nobody predicted** (§0.2 item
+  2). Whether the under-5-minute threshold still means what it meant when it
+  was set is a question for the maintainer; the threshold itself was not
+  touched, per the kit's own rule.
 
 ## 1. Participant criteria
 
@@ -100,6 +206,11 @@ docs — participants must arrive cold; the task script hands them the URL.
   > version floor were updated to match. Protocol and pass condition are
   > byte-identical.
 
+  > **Re-pin, 2026-08-08 — this line is stale and must not be sent as it
+  > stands.** `v0.18.0-rc.2` is 125 commits behind `main`; see §0.1 B-A for
+  > what is missing from it. Replace the version in this block with the RC cut
+  > for the run.
+
 - Confirm the binary they end up with carries the current journey:
   `agentstack --version` ≥ 0.18.0-rc.2. Two other routes hand them an older
   binary: a bare `| sh` installs the latest *stable* release, and
@@ -108,6 +219,13 @@ docs — participants must arrive cold; the task script hands them the URL.
   and never carries an RC. Both are a different and older journey — if their
   version reads 0.17.x, they used one of those instead of the pinned line, and
   the session should restart from the install.
+
+  > **Re-pin, 2026-08-08 — this check currently proves less than it says.** The
+  > crate version was not bumped after the rc.2 tag was cut, so a binary built
+  > from `main` also prints `agentstack 0.18.0-rc.2` (measured). It still
+  > catches a 0.17.x participant, which is what it was written for; it cannot
+  > tell the pinned RC apart from anything built after it. §0.1 B-B is the fix.
+
 - Start a timer at the moment they run the install command; note wall-clock
   timestamps at each milestone below.
 
@@ -131,9 +249,34 @@ Consent and data handling (say this before starting, get a verbal yes):
 > smaller named toolset for one kind of work, switch to it, and finally undo
 > your last change. Think aloud as you go."
 
-That single paragraph contains the whole journey (install → init → apply →
-doctor → toolset switch → restore) without naming a single command — whether
-they *find* the commands is the study.
+That single paragraph contains the whole journey without naming a single
+command — whether they *find* the commands is the study.
+
+> **Re-pin, 2026-08-08 — the path underneath the script changed; the script
+> itself did not, and was not changed.** It named `install → init → apply →
+> doctor → toolset switch → restore`. Measured on `main`:
+>
+> - **`apply` is no longer on the path.** Delivery is routed: MCP servers and
+>   skills are served live to a connected CLI, and only house rules, settings
+>   and hooks are written as files. `init --connect` reached `0 errors, 0
+>   warnings` from `doctor` with no `apply` at all, and `use --write` printed
+>   `MCP servers are served live, not written — nothing for `use` to render
+>   here`.
+> - **A bridge registration sits in the middle of it.** Without `--connect`,
+>   `init` closes `NOT YET CONNECTED`, `doctor` reports `2 errors`, and the
+>   named way forward is `agentstack x gateway connect --all --write` — one hop
+>   behind the `x` namespace. Observe whether they find it; do not name it.
+> - **"Switch to it" has almost no visible effect.** On a routed project
+>   `use <name> --write` writes nothing and closes `'web' already active on 2
+>   targets — nothing to change.` Record what the participant believes
+>   happened; the milestone is still theirs to reach.
+> - **"Undo your last change" cannot be satisfied as worded.** After `toolset
+>   create`, `agentstack undo` listed one entry — `init`. The toolset creation
+>   is not in the ledger; the command names its own reversal (`toolset delete`)
+>   instead. So the only thing `undo` offers is undoing everything. **Read the
+>   script as written anyway** — what they do with an instruction the product
+>   cannot honour is data — and record the outcome on the sheet as a product
+>   finding, not as a participant failure.
 
 ## 5. Observation protocol
 
@@ -145,6 +288,24 @@ they *find* the commands is the study.
   studying a disagreement between two surfaces rather than the journey. The
   fork's migration is post-study work. If a participant raises the panel
   themselves, use the scripted line in Appendix B3 and return to the task.
+
+  > **Re-pin, 2026-08-08 — the exclusion stands, its stated reason does not.**
+  > The reason above was recorded "so it is not relitigated", so it is flagged
+  > rather than rewritten. The panel queue item is closed, and the page that
+  > documented the panel is gone — `docs/panel/index.html` is now an 894-byte
+  > redirect stub pointing at `integrations.html#the-panel-journey`. So "the
+  > panel renders `status-v1` and does not yet render the contracts this
+  > release added" no longer describes anything a participant or an observer
+  > could meet. **Keep the exclusion and keep the Appendix B3 line** —
+  > a second surface in the room would still muddy the journey — but the
+  > recorded reason needs replacing by the maintainer before the study runs.
+
+- **Watch for the bridge step (silent, added 2026-08-08).** The gate metric
+  window ends at a clean `doctor`, and on a routed project that state is not
+  reachable until the bridge is registered. Record whether they got there in
+  one command, found the second command themselves, or stalled — and their
+  words for what they thought was missing. **This adds no task, no coaching and
+  no threshold**, and the §7 pass condition is unchanged.
 - **No command coaching.** Never name a command, flag, or file. If asked,
   answer "what would you try?" and record the question verbatim.
 - **Intervention = failure.** If they are hard-stuck for 5+ minutes and you
@@ -287,6 +448,16 @@ two CLIs (Claude Code + Codex), three servers, one plaintext token. Command
 latency across the whole journey: init 1.2s · apply 0.1s · doctor 0.5s ·
 toolset create 0.1s · use 0.1s · doctor 0.1s · restore 0.1s — **2.1s total
 tool time**, so the 5-minute budget is entirely reading and typing time.
+
+> **Re-pin, 2026-08-08 — these numbers are HISTORICAL and their conclusion is
+> no longer supported.** They were taken on a build that predates routed
+> delivery, so they time a journey with an `apply` in it and no bridge
+> registration; the run they describe cannot be reproduced on `main`. The
+> closing claim — that the 5-minute budget is entirely reading and typing time
+> — rests on them and is therefore **unverified**, not merely old. Re-measure
+> against whatever RC §0.1 B-A produces, or drop the claim. Nothing here is a
+> threshold, so nothing in §7 moves either way.
+
 Blockers found and fixed ahead of the study: doctor contradicting a fresh
 toolset switch (active-toolset drift awareness), `toolset create` rejecting
 the positional name, jargon in the no-such-toolset error and lock summary,
@@ -328,6 +499,17 @@ named its own undo. Two things to watch in real sessions:
   has nothing telling them the journey continues.
   **Fixed in v0.17.1:** once the wiring is rendered and nothing is grouped yet,
   `status` advances to `agentstack toolset create <name> --server <server>`.
+  **Re-pin, 2026-08-08 — the fix does not hold in the routed shape, and this is
+  the one §8.1 entry an observer may still meet.** Measured on `main`, on a
+  project where `init --connect` had just produced `0 errors, 0 warnings`:
+  `doctor` closes with `group servers for a task with `agentstack toolset
+  create <name> --server <server>``, while `status` still prints `Next:
+  agentstack doctor   verify the wiring`. The rung's condition is that the
+  wiring is *rendered*, and a routed project renders nothing — `status` itself
+  reports `0 project artifacts for the capabilities served live` — so the fix
+  never fires. The two surfaces disagree in exactly the state the fix was
+  written for. **If a participant loops between `status` and `doctor` here,
+  that is this, and it is a known product finding — log it and keep going.**
 - After `toolset create` re-locks, `status` reports `trust stale (content
   changed)` but its **Next** line points at `doctor`, not at re-review; the
   actual instruction (`review + agentstack trust`) appears one hop later, in
@@ -509,12 +691,25 @@ Where their servers live today (tick what you SEE, do not ask them to change it)
    install command run                     __:__     <- t0, start of gate metric
    install success                yes/no   __:__
    first manifest exists (init done)       __:__
-   first successful apply                  __:__
+   bridge registered              yes/no   __:__     (see note B below)
+   first successful apply (if any)         __:__     (see note A below)
    clean status/verify reached             __:__     <- GATE METRIC ends here
    toolset created                yes/no   __:__
    toolset switched               yes/no   __:__
-   undo / restore succeeded       yes/no   __:__
+   undo / restore succeeded       yes/no   __:__     (see note C below)
    session end                             __:__
+
+   Note A (2026-08-08): delivery is ROUTED. Servers and skills are served live
+     to a connected CLI; only house rules, settings and hooks become files. A
+     participant can reach a clean verify with NO apply at all — leave the box
+     blank in that case, it is not a missed step.
+   Note B (2026-08-08): a clean verify is not reachable until the bridge is
+     registered. It happens in one command if they take it, or in a second
+     command one hop behind `agentstack x`. Record which, and their words for
+     what they thought was missing. NEVER name either command.
+   Note C (2026-08-08): the ledger does not carry toolset creation, so "undo
+     your last change" may only be offerable as "undo everything". If they hit
+     that, it is a PRODUCT finding — record it, do not score it against them.
 
    install -> clean verify = ______ min  (this participant's gate number)
    finished WITHOUT intervention?   yes / no
