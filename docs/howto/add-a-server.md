@@ -29,9 +29,29 @@ agentstack lib list
 ```
 
 The preview validates the definition and shows the destination. The secret
-value never enters the library.
+value never enters the library. `lib list` then shows it under `Servers`, and
+closes with a **What is dead in here** section listing every library entry with
+no recorded usage — a new one starts there, as `no data`.
+
+> **If you ran `agentstack init` first, pick a name it did not already import.**
+> `init` puts each imported server in your first linked library source, so
+> `lib add-server github` afterwards can land a *second* `github` in a
+> *different* source. That is not an error and nothing is overwritten — sources
+> resolve in order and the first match wins, so the new one silently shadows the
+> imported one. `agentstack lib sources` prints the order and a `Shadowed names`
+> section naming what is hidden, and `local:github`-style qualified names reach
+> the shadowed copy. See
+> [Link your central library](../start.md#2-link-your-central-library). Adding
+> the same name twice in the *same* source is refused outright: `'github' is
+> already in the central library — pass --replace to overwrite`.
 
 ## 3. Select it in a project
+
+This goes in the project's manifest, `.agentstack/agentstack.toml`. Add the
+`[toolsets.backend]` table, and **replace** the existing `default_toolset` value
+— TOML allows the key only once, and `init` already wrote
+`default_toolset = "default"`. (Keep the old value instead if you would rather
+select this toolset explicitly with `--toolset backend`.)
 
 ```toml
 default_toolset = "backend"
@@ -49,6 +69,22 @@ agentstack trust .
 agentstack secret set GITHUB_TOKEN
 agentstack status
 ```
+
+`trust .` and `secret set` both need a terminal, and say so rather than guessing:
+`refusing to trust: stdin is not a terminal` and `secret set needs a terminal to
+prompt for the value`. The non-interactive forms are:
+
+```bash
+agentstack trust --preview                  # JSON review surface; read `surface_digest` from it
+agentstack trust . --yes --consented sha256:<the surface_digest you just reviewed>
+agentstack secret set GITHUB_TOKEN --value <VALUE>
+```
+
+`trust --preview` emits JSON on its own (there is no `--json` flag) and its
+`surface_digest` value already carries the `sha256:` prefix; the grant refuses
+unless that digest still matches the bytes on disk. Inline `--value` can land in
+shell history — prefer the prompt when you have a terminal — and add
+`--env-file` to write the project `.env` instead of the OS keychain.
 
 The next trusted agent connection opens the default and can discover the
 server's tools through `tools_search`. The server definition is not copied into

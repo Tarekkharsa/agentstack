@@ -19,12 +19,20 @@
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"       # only if the installer printed "Add to PATH"
 agentstack init                            # finds what your CLIs already have, writes it into .agentstack/
 agentstack x gateway connect --all --write # register the bridge once, so live delivery reaches your CLIs
 agentstack status                          # is it ready — and if not, the one thing that fixes it
 # then restart your coding CLI — a harness reads its config at startup:
 agentstack x why <server>                  # names which CLIs are served it live
 ```
+
+The installer puts the binary in `/usr/local/bin` when it can write there and in
+`$HOME/.local/bin` otherwise. It names the directory it chose, and when that
+directory is not already on your `PATH` it prints
+`Add to PATH:  export PATH="<dir>:$PATH"` — copy that printed line (the `export`
+above is the `~/.local/bin` case) into your shell startup file, so a new shell
+still finds the binary.
 
 ![Two CLIs with different half-setups: agentstack imports both into one manifest, connects the gateway so both CLIs are served the servers live while the project stays clean, passes doctor with 0 errors, renders each native format on request, and restores the machine byte-for-byte](docs/demos/first-value.svg)
 
@@ -39,6 +47,12 @@ your-project/
 │   └── .env              # token values lifted out of your configs (only when init found any)
 └── .gitignore            # one managed line, so that .env is never committed
 ```
+
+That `.gitignore` line is written **only inside a Git repository**: outside one
+`init` still writes the plaintext `.env` and reports `Stored 1 token in .env`
+without the `(gitignored)` suffix, so run `git init` before `init` — or add
+`/.agentstack/.env` to whatever ignore list you do use — before that directory
+goes anywhere.
 
 That is normally the whole footprint. On MCP-capable tools a project carries
 only `.agentstack/` — no `.mcp.json`, no `.claude/skills/`, no generated
@@ -84,10 +98,13 @@ stays inert until you review it — no server spawns, no skill enters an agent's
 context, no secret resolves, and no file is written for it either. `apply --write`
 and `use --write` refuse to render an untrusted project's servers, skills,
 instructions, hooks, and extensions, and name `agentstack trust .` as the fix;
-editing the manifest or the lock afterwards drops the project back to
-untrusted until you review it again. Running `init` yourself needs no such
-step — building the setup *is* the consent. And nothing a project declares can
-loosen the limits your own machine sets.
+editing the manifest or the lock afterwards drops the project out of trust —
+`status` then reads `trust stale (content changed)` — until you review it again.
+Running `init` yourself needs no such step: it grants that review for the bytes
+it just wrote, so `status` reads `trusted` straight after it, and building the
+setup *is* the consent. That consent is bound to those exact bytes and nothing
+wider — every later edit still comes back through `agentstack trust .`. And
+nothing a project declares can loosen the limits your own machine sets.
 
 `init` is a guided wizard. Scripting or CI?
 [Use it in CI](https://tarekkharsa.github.io/agentstack/howto/ci.html).
@@ -98,8 +115,11 @@ current binary. Step by step:
 1. **Start** — two real native configs: Claude Code knows a `github` server
    (inline token), Codex knows `tldraw`. Neither knows the other's.
 2. **Import** — `agentstack init --yes --secrets env`: one manifest; the token
-   is copied to a gitignored `.env` and referenced as `${GITHUB_TOKEN}` (your
-   CLI's own config keeps its copy until you apply at global scope).
+   is copied to a gitignored `.env` and referenced by a `${REF}` placeholder
+   (your CLI's own config keeps its copy until you apply at global scope). The
+   placeholder reuses the key name the token had in the CLI config it came
+   from, so it is `${GITHUB_TOKEN}` in this fixture and
+   `${GITHUB_PERSONAL_ACCESS_TOKEN}` if that is what your config calls it.
 3. **Connect** — `agentstack x gateway connect --all --write`: the live lane
    needs one bridge registered per MCP-capable CLI.
 4. **Route** — `agentstack x delivery`: both CLIs are MCP-capable, so the servers

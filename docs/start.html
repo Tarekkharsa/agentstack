@@ -283,14 +283,16 @@
 <p>The simple model is:</p>
 <div class="cb"><pre class="block"><code>your library repo  →  each project's manifest + lock  →  every agent CLI</code></pre></div>
 <h2 id="1-install-and-set-up-this-machine">1. Install and set up this machine<a class="hlink" href="#1-install-and-set-up-this-machine" aria-label="Link to this section">#</a></h2>
-<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh</code></pre></div>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh
+<span class="pr">$ </span>export PATH="$HOME/.local/bin:$PATH"       <span class="cm"># only if the installer printed "Add to PATH"</span></code></pre></div>
+<p>The installer puts the binary in <code>/usr/local/bin</code> when it can write there and in <code>$HOME/.local/bin</code> otherwise. It names the directory it chose, and when that directory is not already on your <code>PATH</code> it prints <code>Add to PATH:  export PATH="&lt;dir&gt;:$PATH"</code> — the <code>export</code> above is the <code>~/.local/bin</code> case. Copy whichever line it prints into your shell startup file, so a new shell still finds the binary.</p>
 <p>That installs v0.18.0, the release these pages describe, and verifies the download against the checksums published with it. It is the latest stable release, so no version pin is needed; <code>AGENTSTACK_VERSION=vX.Y.Z</code> still asks for a specific build. To build from a checkout instead, see <a href="https://github.com/Tarekkharsa/agentstack/blob/main/README.md#install">Install</a>.</p>
 <p>Set up this machine:</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack init --connect</code></pre></div>
 <p>A real run on a machine with Claude Code and Codex already configured — shown here in its non-interactive form — prints this. Lines marked <code>…</code> are trimmed:</p>
 <div class="cb cb-term" data-language="console"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">console</span></div><pre class="block"><code class="language-console"><span class="pr">$ </span>agentstack init --connect --yes --secrets env
 <span class="out">🔍  Found 2 coding tools · importing 2 MCP servers (github · tldraw)</span>
-<span class="out">🔐  1 plaintext token in your live CLI configs → ${GITHUB_TOKEN} here; each value was COPIED, the original</span>
+<span class="out">🔐  1 plaintext token in your live CLI configs → ${GITHUB_PERSONAL_ACCESS_TOKEN} here; each value was COPIED, the original</span>
 <span class="out">    is still in its CLI's own config, unchanged</span>
 <span class="out">  ✓ pinned 2 servers</span>
 <span class="out">🔑  Stored 1 token in .env (gitignored)</span>
@@ -313,6 +315,11 @@
 <span class="out">  Next:      agentstack doctor   (check the result)</span>
 <span class="out">  Then:      undo: agentstack x restore --last --write</span>
 <span class="out">…   trimmed: the per-CLI --verbose pointers and the zero-files caveat</span></code></pre></div>
+<p>Two details that vary with your machine rather than with the command:</p>
+<ul>
+<li><strong>The placeholder name is not fixed.</strong> Each lifted token keeps the key name it had in the CLI config it came from, so you get <code>${GITHUB_PERSONAL_ACCESS_TOKEN}</code> above only because that is what the source config called it; a config using <code>GITHUB_TOKEN</code> yields <code>${GITHUB_TOKEN}</code>.</li>
+<li><strong><code>(gitignored)</code> is a claim only inside a Git repository.</strong> <code>init</code> writes the managed <code>/.agentstack/.env</code> line into <code>.gitignore</code> only when the project is one. Outside a Git repository the same run prints <code>Stored 1 token in .env</code> with no <code>(gitignored)</code> suffix and writes no <code>.gitignore</code>, leaving a plaintext token unprotected — run <code>git init</code> first, or add <code>/.agentstack/.env</code> to whatever ignore list you use, before that directory goes anywhere.</li>
+</ul>
 <p>Then check the result:</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack status</code></pre></div>
 <p>On the project above, that prints:</p>
@@ -328,8 +335,8 @@
 <span class="out">  Context   2 declared servers not measured — context cost unknown, not zero   see `agentstack x report usage`</span>
 
 <span class="out">  Next:  agentstack doctor  ·  verify the wiring — every warning names its fix</span>
-<span class="out">  All commands: agentstack --help   ·   per-CLI detail: agentstack status --verbose</span>
-<span class="out">  Deep check (drift, quirks, supply chain): agentstack doctor</span></code></pre></div>
+<span class="out">  All commands: agentstack --help   ·   per-CLI detail: agentstack status --verbose</span></code></pre></div>
+<p>The last lines change with the state. When something still needs doing, the <code>Next:</code> line names that instead — and <code>status</code> adds a <code>Deep check (drift, quirks, supply chain): agentstack doctor</code> pointer, which the ready output above does not print. Either way <code>agentstack doctor</code> is the deeper check whenever you want it.</p>
 <p><code>init</code> detects your CLIs, offers to import the MCP server entries and supported settings it can represent, and registers the zero-files gateway. It previews changes before writing them. <code>status</code> tells you whether the setup is ready and gives one next command when it is not.</p>
 <p>It does not take over everything already installed:</p>
 <div class="tblwrap"><table>
@@ -352,7 +359,7 @@
 <p>If you already have <code>~/.agentstack/lib</code>, AgentStack keeps it as another source and you read the combined library. When two sources hold the same name, the first one wins.</p>
 <p>See <a href="library.html#several-libraries-work-together">Several libraries work together</a> for the folder layout, collisions, and qualified names such as <code>local:rust-testing</code>.</p>
 <h3 id="put-reusable-capabilities-in-it">Put reusable capabilities in it<a class="hlink" href="#put-reusable-capabilities-in-it" aria-label="Link to this section">#</a></h3>
-<p>Scaffold a new skill, or copy one you already have into the library:</p>
+<p>Scaffold a new skill in the directory you are standing in, then copy it — or one you already have — into the library:</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack lib new api-review
 <span class="pr">$ </span>agentstack lib add ./api-review
 <span class="pr">$ </span>agentstack lib add ./api-review --write</code></pre></div>
@@ -360,7 +367,8 @@
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack lib add-server github --file ./github-server.toml
 <span class="pr">$ </span>agentstack lib add-server github --file ./github-server.toml --write
 <span class="pr">$ </span>agentstack lib list</code></pre></div>
-<p><code>lib new</code> scaffolds the folder; <code>lib add</code> copies an existing folder in. Every command previews first and writes only with <code>--write</code>. Commit and push the library as you would any Git repo.</p>
+<p><code>lib new</code> writes <code>./&lt;name&gt;/SKILL.md</code> into the <strong>current working directory</strong>, not into the library — it prints <code>✓ scaffolded ./api-review/SKILL.md</code> and stops there; <code>lib add</code> is the separate step that copies that folder in. Every command previews first and writes only with <code>--write</code>. Commit and push the library as you would any Git repo.</p>
+<p><code>lib list</code> prints what the combined library holds, and closes with a <strong>What is dead in here</strong> section: every skill, server, extension, and hook with no recorded usage, plus the reversible <code>agentstack lib remove &lt;name&gt; --write</code> that retires one. It says <code>no data</code> rather than "unused" on purpose — counts come from recorded history only, and the call log rotates.</p>
 <h2 id="3-keep-each-project-small">3. Keep each project small<a class="hlink" href="#3-keep-each-project-small" aria-label="Link to this section">#</a></h2>
 <p>A normal project needs two committed files:</p>
 <div class="cb"><pre class="block"><code>your-project/
@@ -386,6 +394,10 @@ targets = ["*"]</code></pre></div>
 <span class="pr">$ </span>agentstack trust .
 <span class="pr">$ </span>agentstack status</code></pre></div>
 <p><code>lock --write</code> accepts the exact pinned bytes and <code>trust .</code> is the human review for this machine. Run the loop after you add or remove a selected capability, accept an updated library item, or change the default toolset — not for unrelated edits.</p>
+<p><code>trust .</code> needs a terminal: with stdin not a TTY it prints the review surface and then refuses with <code>refusing to trust: stdin is not a terminal</code>. In CI, or in an agent shell with no TTY, take the two-step form instead — <code>trust --preview</code> already emits JSON (there is no <code>--json</code> flag), and the field to read out of it is <code>surface_digest</code>, whose value already carries its <code>sha256:</code> prefix:</p>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack trust --preview                  <span class="cm"># JSON review surface; read `surface_digest` from it</span>
+<span class="pr">$ </span>agentstack trust . --yes --consented sha256:&lt;the surface_digest you just reviewed&gt;</code></pre></div>
+<p><code>--yes</code> requires <code>--consented</code>, and the grant refuses unless the digest still matches the bytes on disk — so it is a consent bound to exactly what was reviewed, not a way to skip the review.</p>
 <div class="cb cb-term" data-language="console"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">console</span></div><pre class="block"><code class="language-console"><span class="pr">$ </span>agentstack lock --write
 <span class="out">✓ pinned 2 servers from 1 toolset in ~/my-project/.agentstack/agentstack.lock</span>
 <span class="out">  no configs rendered, no skills materialized — that stays `agentstack use --write`.</span>
@@ -427,7 +439,7 @@ targets = ["*"]</code></pre></div>
 <tr><td><code>agentstack lib sources</code></td><td>See every linked library and name collision</td></tr>
 <tr><td><code>agentstack x delivery</code></td><td>See where each capability goes, per CLI</td></tr>
 <tr><td><code>agentstack lock</code></td><td>Preview content changes before accepting them</td></tr>
-<tr><td><code>agentstack trust .</code></td><td>Review changed project content on this machine</td></tr>
+<tr><td><code>agentstack trust .</code></td><td>Review changed project content on this machine — needs a terminal; without one use <code>trust --preview</code> then <code>trust . --yes --consented &lt;surface_digest&gt;</code></td></tr>
 <tr><td><code>agentstack up</code></td><td>Preview a machine/library refresh</td></tr>
 <tr><td><code>agentstack undo</code></td><td>Review and reverse AgentStack-managed writes</td></tr>
 </tbody></table></div>

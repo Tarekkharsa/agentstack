@@ -17,7 +17,15 @@ your library repo  →  each project's manifest + lock  →  every agent CLI
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh
+export PATH="$HOME/.local/bin:$PATH"       # only if the installer printed "Add to PATH"
 ```
+
+The installer puts the binary in `/usr/local/bin` when it can write there and in
+`$HOME/.local/bin` otherwise. It names the directory it chose, and when that
+directory is not already on your `PATH` it prints
+`Add to PATH:  export PATH="<dir>:$PATH"` — the `export` above is the
+`~/.local/bin` case. Copy whichever line it prints into your shell startup file,
+so a new shell still finds the binary.
 
 That installs v0.18.0, the release these pages describe, and verifies the
 download against the checksums published with it. It is the latest stable
@@ -37,7 +45,7 @@ here in its non-interactive form — prints this. Lines marked `…` are trimmed
 ```console
 $ agentstack init --connect --yes --secrets env
 🔍  Found 2 coding tools · importing 2 MCP servers (github · tldraw)
-🔐  1 plaintext token in your live CLI configs → ${GITHUB_TOKEN} here; each value was COPIED, the original
+🔐  1 plaintext token in your live CLI configs → ${GITHUB_PERSONAL_ACCESS_TOKEN} here; each value was COPIED, the original
     is still in its CLI's own config, unchanged
   ✓ pinned 2 servers
 🔑  Stored 1 token in .env (gitignored)
@@ -62,6 +70,19 @@ Import complete.
 …   trimmed: the per-CLI --verbose pointers and the zero-files caveat
 ```
 
+Two details that vary with your machine rather than with the command:
+
+- **The placeholder name is not fixed.** Each lifted token keeps the key name it
+  had in the CLI config it came from, so you get `${GITHUB_PERSONAL_ACCESS_TOKEN}`
+  above only because that is what the source config called it; a config using
+  `GITHUB_TOKEN` yields `${GITHUB_TOKEN}`.
+- **`(gitignored)` is a claim only inside a Git repository.** `init` writes the
+  managed `/.agentstack/.env` line into `.gitignore` only when the project is one.
+  Outside a Git repository the same run prints `Stored 1 token in .env` with no
+  `(gitignored)` suffix and writes no `.gitignore`, leaving a plaintext token
+  unprotected — run `git init` first, or add `/.agentstack/.env` to whatever
+  ignore list you use, before that directory goes anywhere.
+
 Then check the result:
 
 ```bash
@@ -84,8 +105,13 @@ agentstack 0.18.0 — one portable manifest, every agent CLI
 
   Next:  agentstack doctor  ·  verify the wiring — every warning names its fix
   All commands: agentstack --help   ·   per-CLI detail: agentstack status --verbose
-  Deep check (drift, quirks, supply chain): agentstack doctor
 ```
+
+The last lines change with the state. When something still needs doing, the
+`Next:` line names that instead — and `status` adds a
+`Deep check (drift, quirks, supply chain): agentstack doctor` pointer, which the
+ready output above does not print. Either way `agentstack doctor` is the deeper
+check whenever you want it.
 
 `init` detects your CLIs, offers to import the MCP server entries and supported
 settings it can represent, and registers the zero-files gateway. It previews
@@ -137,7 +163,8 @@ for the folder layout, collisions, and qualified names such as
 
 ### Put reusable capabilities in it
 
-Scaffold a new skill, or copy one you already have into the library:
+Scaffold a new skill in the directory you are standing in, then copy it — or one
+you already have — into the library:
 
 ```bash
 agentstack lib new api-review
@@ -154,9 +181,17 @@ agentstack lib add-server github --file ./github-server.toml --write
 agentstack lib list
 ```
 
-`lib new` scaffolds the folder; `lib add` copies an existing folder in. Every
-command previews first and writes only with `--write`. Commit and push the
-library as you would any Git repo.
+`lib new` writes `./<name>/SKILL.md` into the **current working directory**, not
+into the library — it prints `✓ scaffolded ./api-review/SKILL.md` and stops
+there; `lib add` is the separate step that copies that folder in. Every command
+previews first and writes only with `--write`. Commit and push the library as
+you would any Git repo.
+
+`lib list` prints what the combined library holds, and closes with a
+**What is dead in here** section: every skill, server, extension, and hook with
+no recorded usage, plus the reversible `agentstack lib remove <name> --write`
+that retires one. It says `no data` rather than "unused" on purpose — counts
+come from recorded history only, and the call log rotates.
 
 ## 3. Keep each project small
 
@@ -205,6 +240,21 @@ agentstack status
 for this machine. Run the loop after you add or remove a selected capability,
 accept an updated library item, or change the default toolset — not for
 unrelated edits.
+
+`trust .` needs a terminal: with stdin not a TTY it prints the review surface and
+then refuses with `refusing to trust: stdin is not a terminal`. In CI, or in an
+agent shell with no TTY, take the two-step form instead — `trust --preview`
+already emits JSON (there is no `--json` flag), and the field to read out of it is
+`surface_digest`, whose value already carries its `sha256:` prefix:
+
+```bash
+agentstack trust --preview                  # JSON review surface; read `surface_digest` from it
+agentstack trust . --yes --consented sha256:<the surface_digest you just reviewed>
+```
+
+`--yes` requires `--consented`, and the grant refuses unless the digest still
+matches the bytes on disk — so it is a consent bound to exactly what was
+reviewed, not a way to skip the review.
 
 ```console
 $ agentstack lock --write
@@ -280,7 +330,7 @@ or from another supervisor. T3 Code is not required.
 | `agentstack lib sources` | See every linked library and name collision |
 | `agentstack x delivery` | See where each capability goes, per CLI |
 | `agentstack lock` | Preview content changes before accepting them |
-| `agentstack trust .` | Review changed project content on this machine |
+| `agentstack trust .` | Review changed project content on this machine — needs a terminal; without one use `trust --preview` then `trust . --yes --consented <surface_digest>` |
 | `agentstack up` | Preview a machine/library refresh |
 | `agentstack undo` | Review and reverse AgentStack-managed writes |
 
