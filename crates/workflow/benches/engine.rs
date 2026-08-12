@@ -41,14 +41,22 @@ fn main() {
     println!("| phase | min | median | p90 | max |");
     println!("| --- | ---: | ---: | ---: | ---: |");
     reference.new_run.row("reference: `new` (trivial script)");
-    reference.per_step.row("reference: per-step (trivial script)");
+    reference
+        .per_step
+        .row("reference: per-step (trivial script)");
     reference.total.row("reference: total (trivial script)");
     fanout.new_run.row("(a) `WorkflowRun::new`");
-    fanout.step_first.row("step 1 — eval to suspension, drain 100 requests");
-    fanout.step_second.row("step 2 — feed 100 results, settle root");
+    fanout
+        .step_first
+        .row("step 1 — eval to suspension, drain 100 requests");
+    fanout
+        .step_second
+        .row("step 2 — feed 100 results, settle root");
     fanout.per_step.row("(b) mean per-step");
     fanout.total.row("(c) total engine wall");
-    fanout.per_request.row("derived: step 2 / 100 (per answered request)");
+    fanout
+        .per_request
+        .row("derived: step 2 / 100 (per answered request)");
 }
 
 /// The width-N workload. `meta` must be a literal (the parse-only extractor

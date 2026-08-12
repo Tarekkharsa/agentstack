@@ -831,6 +831,60 @@ impl WorkflowRun {
     }
 }
 
+/// Bench-only visibility seam for the JSON boundary (`benches/boundary.rs`).
+///
+/// Gated behind the `bench-internals` feature, which **nothing** enables except
+/// an explicit `cargo bench --features bench-internals`: with the feature off —
+/// every shipped build, every CI job, every dependent crate — this type does
+/// not exist and the public surface is byte-for-byte what it was.
+///
+/// It exists because the alternative does not work. `value_to_js` /
+/// `js_to_value` are `pub(crate)`, and the only public paths that reach them
+/// (`WorkflowRun::new` for args, `step` for results and the settled root) each
+/// carry a multi-millisecond `Context`-plus-prelude cost; differencing that to
+/// recover a ~1 µs 1 KB conversion measures noise, not the boundary. The seam
+/// keeps `Context` and `JsValue` *inside* the crate — no Boa type appears in
+/// any signature — so the bench needs no `boa_engine` dependency of its own and
+/// the "Boa lives only here" boundary is untouched.
+///
+/// No production logic is changed, added to, or routed through this.
+#[cfg(feature = "bench-internals")]
+pub struct BoundaryBench {
+    context: Context,
+    /// The JS side of the last [`to_js`](Self::to_js), kept alive so
+    /// [`from_js`](Self::from_js) can be timed on its own.
+    held: Option<JsValue>,
+}
+
+#[cfg(feature = "bench-internals")]
+impl BoundaryBench {
+    /// A bare interpreter context with the production limits — no natives, no
+    /// prelude, no script. Only the boundary is under test.
+    pub fn new(limits: RuntimeLimits) -> Result<Self, WorkflowError> {
+        Ok(Self {
+            context: build_context(limits, Rc::new(Cell::new(false)))?,
+            held: None,
+        })
+    }
+
+    /// serde_json -> JS, exactly as a step result crosses. The converted value
+    /// is retained for [`from_js`](Self::from_js).
+    pub fn to_js(&mut self, value: &serde_json::Value) -> Result<(), WorkflowError> {
+        self.held = Some(value_to_js(value, &mut self.context)?);
+        Ok(())
+    }
+
+    /// JS -> serde_json on the value the last [`to_js`](Self::to_js) produced,
+    /// exactly as a settled root crosses back.
+    pub fn from_js(&mut self) -> Result<serde_json::Value, WorkflowError> {
+        let held = self
+            .held
+            .clone()
+            .ok_or_else(|| WorkflowError::internal("BoundaryBench::from_js before to_js"))?;
+        js_to_value(&held, &mut self.context, 0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
