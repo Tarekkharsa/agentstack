@@ -277,9 +277,10 @@ mod tests {
     /// sheds every further connection with a fast 503. So flooding the endpoint
     /// with more than `MAX_INFLIGHT` such connections MUST produce at least one
     /// 503 — a guarantee that holds however the runner schedules the accept
-    /// loop. (The earlier saturate-exactly-then-probe version raced on that
-    /// scheduling and flaked twice on loaded CI; this is bounded by a connection
-    /// count, not wall-clock time.)
+    /// loop, because it is a claim about the whole flood and not about any one
+    /// connection. The test therefore polls until the server answers rather
+    /// than sampling each socket once and asserting on what has arrived so far;
+    /// two earlier shapes flaked on loaded CI by doing the latter.
     #[test]
     fn request_over_the_inflight_cap_is_shed_with_503() {
         let port = spawn_test_endpoint();
@@ -292,10 +293,9 @@ mod tests {
         for _ in 0..(MAX_INFLIGHT * 3) {
             let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
             // A shed 503 is written by the accept loop immediately; a pinned
-            // slot's handler blocks forever in the body read. A short read
-            // timeout tells the two apart.
-            s.set_read_timeout(Some(std::time::Duration::from_millis(300)))
-                .unwrap();
+            // slot's handler blocks forever in the body read. The sockets are
+            // switched to non-blocking once the flood is complete, which tells
+            // the two apart without ever waiting on a slot-holder.
             // Content-Length > 1024 so tiny_http yields the request to the serve
             // loop (and a handler thread) before the body arrives, pinning the
             // slot; the body never comes, so the handler parks.
@@ -306,42 +306,45 @@ mod tests {
             held.push(s);
         }
 
-        // Now read, and read only where an answer can already be waiting.
+        // Wait for the server, never race it. Exactly `MAX_INFLIGHT` of these
+        // connections can win a slot and park forever in the body read; every
+        // other one — 128 of the 192 — MUST come back 503. So the guarantee is
+        // about the SET, not about any particular socket, and the only thing
+        // the test has to do is not give up before the accept loop gets there.
         //
-        // The accept loop takes connections in order, so the first
-        // `MAX_INFLIGHT` of them are the ones that win a slot and park forever
-        // in the body read; every connection after that is shed with a 503 the
-        // accept loop writes immediately. So the first socket worth reading is
-        // index `MAX_INFLIGHT` — skipping the pinned prefix entirely, because
-        // reading it proves nothing and can only time out.
+        // The previous shape scanned each over-cap socket exactly once with a
+        // 300 ms read timeout and asserted on the first pass. That raced the
+        // accept loop: on a loaded runner (this test runs in the Docker sandbox
+        // job) the scan reached the end of the socket list before the loop had
+        // drained the flood, every read timed out on a connection that had not
+        // been answered YET, and the test failed with the shed working
+        // perfectly. It flaked exactly that way on CI.
         //
-        // That skip is the whole cost of this test. The previous shape read
-        // each socket as soon as it was opened, so the first `MAX_INFLIGHT`
-        // reads each waited out the full 300 ms timeout just to learn the slot
-        // was pinned: 64 x 300 ms ~ 19 s, which was this test's entire runtime
-        // and made it the fourth-slowest test in the suite. Scanning forward
-        // from the cap instead answers in one read.
-        //
-        // (Reading from the NEWEST connection backwards looks tempting and is
-        // worse: the newest connections are the LAST the accept loop reaches,
-        // so those reads wait on the accept loop rather than on a slot.)
-        //
-        // The scan continues past the first candidate only to absorb the
-        // scheduling case where the accept loop has not reached that index
-        // yet. The guarantee asserted is unchanged, and it stays bounded by a
-        // CONNECTION COUNT rather than by wall-clock time — the property the
-        // comment above protects.
+        // Polling every socket non-blocking, repeatedly, until one answers 503
+        // removes the race without weakening the claim: a slot-holder simply
+        // never answers, so it can only be skipped, never mistaken for a pass.
+        // The deadline is generous because it is a backstop against a real
+        // regression (nothing sheds at all), not a timing assumption — when the
+        // shed works, this returns in milliseconds.
+        for socket in &held {
+            socket.set_nonblocking(true).unwrap();
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
         let mut saw_503 = false;
-        for socket in held.iter_mut().skip(MAX_INFLIGHT) {
-            let mut buf = [0u8; 64];
-            match socket.read(&mut buf) {
-                Ok(n) if String::from_utf8_lossy(&buf[..n]).starts_with("HTTP/1.1 503") => {
-                    saw_503 = true;
-                    break;
+        'poll: while std::time::Instant::now() < deadline {
+            for socket in held.iter_mut().skip(MAX_INFLIGHT) {
+                let mut buf = [0u8; 64];
+                match socket.read(&mut buf) {
+                    Ok(n) if String::from_utf8_lossy(&buf[..n]).starts_with("HTTP/1.1 503") => {
+                        saw_503 = true;
+                        break 'poll;
+                    }
+                    // Not answered yet (WouldBlock), or a slot-holder that never
+                    // will be — either way, try the next connection.
+                    _ => continue,
                 }
-                // Not answered yet — try the next over-cap connection.
-                _ => continue,
             }
+            std::thread::sleep(std::time::Duration::from_millis(10));
         }
         assert!(
             saw_503,
