@@ -315,10 +315,97 @@ mod tests {
         );
     }
 
-    /// The outer token gate remains authoritative. RMCP creates a session for
-    /// a legacy initialize, while a modern discover request stays stateless.
+    /// A sandboxed harness reaches this endpoint over a container alias and
+    /// sends `Accept: application/json` — it predates the 2025 rule that a POST
+    /// must also accept `text/event-stream`. The hand-written bridge answered
+    /// such a client in plain JSON, and it must keep doing so: inside a sandbox
+    /// there is no other route to the gateway, and a 406 turns every proxied
+    /// call (including the DENIED ones the audit log exists to record) into a
+    /// transport failure that never reaches the gateway at all.
     #[test]
-    fn socket_gates_token_and_selects_session_behavior_by_protocol_era() {
+    fn a_json_only_client_is_answered_in_plain_json() {
+        let handle = start(std::sync::Arc::new(Gateway::empty()), "127.0.0.1:0").unwrap();
+        let url = format!("http://127.0.0.1:{}/mcp", handle.port);
+        let client = reqwest::blocking::Client::builder()
+            .no_proxy()
+            .build()
+            .unwrap();
+        let post = |accept: Option<&str>, body: &Value| {
+            let mut request = client
+                .post(&url)
+                .header("X-Agentstack-Token", &handle.token)
+                .header("Content-Type", "application/json");
+            if let Some(accept) = accept {
+                request = request.header("Accept", accept);
+            }
+            request.body(body.to_string()).send().unwrap()
+        };
+        let json_body = |resp: reqwest::blocking::Response| -> Value {
+            let ctype = resp
+                .headers()
+                .get("content-type")
+                .and_then(|value| value.to_str().ok())
+                .unwrap_or_default()
+                .to_string();
+            assert_eq!(resp.status().as_u16(), 200);
+            assert!(
+                ctype.starts_with("application/json"),
+                "a json-only client must never be handed a stream: {ctype}"
+            );
+            resp.json().unwrap()
+        };
+
+        let init = json!({
+            "jsonrpc": "2.0", "id": 0, "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": { "name": "sandboxed-harness", "version": "1" }
+            }
+        });
+        // Every shape an older client sends: json only, `*/*`, and no header.
+        for accept in [Some("application/json"), Some("*/*"), None] {
+            let resp = post(accept, &init);
+            assert_eq!(
+                resp.status().as_u16(),
+                200,
+                "Accept {accept:?} was refused: {}",
+                resp.text().unwrap_or_default()
+            );
+            let body = json_body(resp);
+            assert_eq!(body["result"]["serverInfo"]["name"], "agentstack-gateway");
+        }
+
+        // The call is the point, and this is the exact shape the sandboxed
+        // client sends: a bare `tools/call`, no handshake, no session. There is
+        // no other route to the gateway from inside a container, so a refusal
+        // here loses the call entirely — including the DENIED ones the audit
+        // log exists to record.
+        // `*/*` is what the container's `fetch` sends when the caller sets only
+        // content-type, which is exactly what the sandbox client does.
+        let body = json_body(post(
+            Some("*/*"),
+            &json!({
+                "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "params": { "name": "figma__get_file", "arguments": {} }
+            }),
+        ));
+        assert_eq!(body["result"]["isError"], true, "{body}");
+
+        // And discovery on the same terms.
+        let body = json_body(post(
+            Some("application/json"),
+            &json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }),
+        ));
+        assert_eq!(body["result"]["tools"], json!([]));
+    }
+
+    /// The outer token gate remains authoritative, and every request is served
+    /// on its own — no session to establish, in either protocol era. That was
+    /// the hand-written bridge's contract and it is the only one a sandboxed
+    /// client can hold up its end of.
+    #[test]
+    fn socket_gates_token_and_serves_both_protocol_eras_without_a_session() {
         let handle = start(std::sync::Arc::new(Gateway::empty()), "127.0.0.1:0").unwrap();
         let url = format!("http://127.0.0.1:{}/mcp", handle.port);
         let client = reqwest::blocking::Client::builder()
@@ -338,7 +425,7 @@ mod tests {
         let resp = client.post(&url).json(&init).send().unwrap();
         assert_eq!(resp.status().as_u16(), 401);
 
-        // Authed initialize → 200 + session header; GET (SSE probe) → 405.
+        // Authed initialize → 200, and no session is opened for it.
         let resp = client
             .post(&url)
             .header("X-Agentstack-Token", &handle.token)
@@ -347,7 +434,7 @@ mod tests {
             .send()
             .unwrap();
         assert_eq!(resp.status().as_u16(), 200);
-        assert!(resp.headers().get("mcp-session-id").is_some());
+        assert!(resp.headers().get("mcp-session-id").is_none());
 
         let discover = json!({
             "jsonrpc": "2.0", "id": 1, "method": "server/discover",
