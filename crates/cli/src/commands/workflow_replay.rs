@@ -99,9 +99,21 @@ impl ReplayJournal {
             .join("runs")
             .join(run_id)
             .join("events.jsonl");
-        let size = std::fs::metadata(&path)
-            .map(|m| m.len())
-            .with_context(|| format!("no recorded events for run '{run_id}'"))?;
+        // A run id that names no evidence directory at all is the commonest
+        // typo on this flag, and it used to be the worst-served: the raw
+        // `No such file or directory (os error 2)` arrived with no way forward,
+        // while every NEIGHBOURING refusal on the same flag (a child `r-…` id,
+        // a completed run, a diverged name) named one. It gets the same
+        // treatment as its neighbours — and points at `workflow runs`, which is
+        // the surface that marks which ids are resumable, rather than at an
+        // admission banner that has already scrolled away.
+        let size = std::fs::metadata(&path).map(|m| m.len()).map_err(|_| {
+            anyhow::anyhow!(
+                "no recorded events for run '{run_id}' — nothing to resume. List the runs \
+                     that can be resumed with `agentstack workflow runs` (the resumable ones \
+                     are the rows marked RESUMABLE true)"
+            )
+        })?;
         anyhow::ensure!(
             size <= MAX_JOURNAL_BYTES,
             "refusing resume: the journal for run '{run_id}' is {size} bytes (bound \
