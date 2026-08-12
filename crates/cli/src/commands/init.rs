@@ -226,6 +226,29 @@ struct LibraryCollision {
     existing: String,
     /// What this import would write in its place.
     incoming: String,
+    /// The field names that actually differ, sorted. Needed because the two
+    /// lines above are an IDENTITY summary: two definitions can differ in
+    /// `env`, `targets`, `cwd` or `headers` and print the same sentence twice.
+    differing: Vec<String>,
+}
+
+/// The fields in which two definitions of one server actually differ.
+///
+/// The detector compares whole serialized definitions, so it fires on any
+/// difference at all — including one the identity line does not show. Without
+/// this the review could print the same sentence twice and ask the reader to
+/// choose between two things that read identically.
+fn differing_fields(existing: &Server, incoming: &Server) -> Vec<String> {
+    let table = |s: &Server| match toml::Value::try_from(s) {
+        Ok(toml::Value::Table(t)) => t,
+        _ => toml::map::Map::new(),
+    };
+    let (a, b) = (table(existing), table(incoming));
+    let mut keys: Vec<String> = a.keys().chain(b.keys()).cloned().collect();
+    keys.sort();
+    keys.dedup();
+    keys.retain(|k| a.get(k) != b.get(k));
+    keys
 }
 
 /// Split imported native server names by whether the library can store them.
@@ -359,6 +382,7 @@ fn library_collisions(
             name: name.clone(),
             existing: server_identity_line(&existing),
             incoming: server_identity_line(incoming),
+            differing: differing_fields(&existing, incoming),
         });
     }
     out
@@ -396,12 +420,30 @@ fn render_library_collisions(source_name: &str, collisions: &[LibraryCollision])
         }
     );
     for c in collisions {
-        out.push_str(&format!(
-            "      {}\n        in the library:  {}\n        this import:     {}\n",
-            crate::text::sanitize_line(&c.name),
-            crate::text::truncate_chars(&crate::text::sanitize_line(&c.existing), 64),
-            crate::text::truncate_chars(&crate::text::sanitize_line(&c.incoming), 64),
-        ));
+        let name = crate::text::sanitize_line(&c.name);
+        let existing = crate::text::truncate_chars(&crate::text::sanitize_line(&c.existing), 64);
+        let incoming = crate::text::truncate_chars(&crate::text::sanitize_line(&c.incoming), 64);
+        // Printing two identical lines is worse than printing none: it asks
+        // for a decision and withholds what the decision is about. When the
+        // difference is invisible at identity level, name the fields instead.
+        if existing == incoming {
+            let fields = if c.differing.is_empty() {
+                "a field this summary does not show".to_string()
+            } else {
+                c.differing.join(", ")
+            };
+            out.push_str(&format!(
+                "      {}\n        both:            {}\n        differs in:      {}\n",
+                name,
+                existing,
+                crate::text::truncate_chars(&crate::text::sanitize_line(&fields), 64),
+            ));
+        } else {
+            out.push_str(&format!(
+                "      {}\n        in the library:  {}\n        this import:     {}\n",
+                name, existing, incoming,
+            ));
+        }
     }
     out.push_str(
         "      The library is shared: replacing a definition makes every other project \
@@ -3630,6 +3672,7 @@ mod tests {
                 name: "search".into(),
                 existing: "runs npx -y search-mcp".into(),
                 incoming: "runs npx -y search-FORK".into(),
+                differing: vec!["command".into()],
             }],
         );
         assert!(out.contains("search"), "{out}");
@@ -3647,6 +3690,73 @@ mod tests {
         );
     }
 
+    /// C1: a collision whose difference is INVISIBLE at identity level must not
+    /// print the same sentence twice.
+    ///
+    /// `library_collisions` fires on any difference in the whole serialized
+    /// definition, but the two lines it renders are an identity summary —
+    /// "runs <command>" / "contacts <url>". Two definitions differing only in
+    /// `env`, `targets`, `cwd` or `headers` therefore produced a review that
+    /// asked for a yes/no and printed identical evidence on both sides. It now
+    /// says what actually moved.
+    #[test]
+    fn a_collision_invisible_at_identity_level_names_the_field_that_differs() {
+        let out = render_library_collisions(
+            "local",
+            &[LibraryCollision {
+                name: "github".into(),
+                existing: "runs npx -y @modelcontextprotocol/server-github".into(),
+                incoming: "runs npx -y @modelcontextprotocol/server-github".into(),
+                differing: vec!["env".into(), "targets".into()],
+            }],
+        );
+        assert!(out.contains("github"), "{out}");
+        assert!(out.contains("differs in:      env, targets"), "{out}");
+        // The two-identical-lines shape is exactly what this replaces.
+        assert!(
+            !out.contains("in the library:"),
+            "identical sides must not be printed as two opposing lines: {out}"
+        );
+        assert_eq!(
+            out.matches("runs npx -y @modelcontextprotocol/server-github")
+                .count(),
+            1,
+            "the shared identity is stated once, not twice: {out}"
+        );
+    }
+
+    /// The differing-field list is computed from the definitions themselves, so
+    /// a field the identity line hides is still named.
+    #[test]
+    fn differing_fields_sees_past_the_identity_line() {
+        let mut a = Server {
+            server_type: crate::manifest::ServerType::Stdio,
+            url: None,
+            command: Some("npx".into()),
+            args: vec!["-y".into(), "server-github".into()],
+            cwd: None,
+            integrity_roots: Vec::new(),
+            targets: Vec::new(),
+            owner: None,
+            headers: Default::default(),
+            env: Default::default(),
+            extra: Default::default(),
+        };
+        let mut b = a.clone();
+        assert!(
+            differing_fields(&a, &b).is_empty(),
+            "identical definitions differ in nothing"
+        );
+
+        b.env.insert("GITHUB_TOKEN".into(), "${TOK}".into());
+        assert_eq!(differing_fields(&a, &b), vec!["env".to_string()]);
+
+        a.cwd = Some("/tmp".into());
+        let mut fields = differing_fields(&a, &b);
+        fields.sort();
+        assert_eq!(fields, vec!["cwd".to_string(), "env".to_string()]);
+    }
+
     /// Hostile input on both sides: the library folder may be someone else's,
     /// and the incoming definition came from another CLI's config file.
     #[test]
@@ -3657,6 +3767,7 @@ mod tests {
                 name: "ev\u{1b}[2Kil".into(),
                 existing: "runs a\nb".into(),
                 incoming: "runs c\u{7}d".into(),
+                differing: vec!["command".into()],
             }],
         );
         // Every hostile value is neutralized. (The block's own `⚠` still
