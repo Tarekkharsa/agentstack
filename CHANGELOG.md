@@ -4,6 +4,99 @@ User-facing changes per release. The [GitHub Releases
 page](https://github.com/Tarekkharsa/agentstack/releases) carries the built
 binaries, checksums, and provenance attestations for each entry.
 
+## v0.18.0-rc.5 — 2026-08-12
+
+**The candidate that answers what the walk asked.** rc.4 was what came back
+from walking the build end to end; this one settles the five design questions
+that walk raised, and pays down the performance debt sitting underneath them. A
+library skill gets a name that says where it comes from, `guard` sees what the
+rest of the product sees and asks before it writes, and one word means consent
+everywhere. Nothing in the trust, policy or enforcement core moves. Like rc.1
+through rc.4 this is a pre-release: `install.sh` and `brew install` keep serving
+v0.17.1 until v0.18.0 is final, and a participant pins this build with
+`AGENTSTACK_VERSION=v0.18.0-rc.5`.
+
+- **A library skill has a name that says where it came from.** `agentstack add
+  from lib:central/rust-testing` resolves through the library seam — never the
+  catalog extractor — lands as toolset membership, is pinned in the lockfile and
+  is verified by doctor's existing `library · matches lock` rows. It is a second
+  spelling, never a second identity: `central:rust-testing` selects exactly the
+  same capability, and the lock key, the rendered directory and the gateway name
+  do not care which you wrote. A malformed `lib:` reference names nothing rather
+  than quietly decaying into a lookup in a source literally called `lib`. Two
+  pre-existing bugs fell with the same fix: a qualified reference was looked up
+  in the lockfile under the whole reference, so any `<source>:<name>` skill read
+  as "not locked" over a lockfile that had pinned it correctly all along; and
+  the same reference was judged as a capability name, so doctor told you to
+  rename a skill whose name was fine.
+
+- **`guard` detects with the same eyes as `status` and `doctor`.** Guard used to
+  decide a CLI was present purely from its own hook-config directory, so it
+  skipped CLIs the rest of the product could see. Detection now comes from the
+  shared adapter seam, with guard's directory probe folded in as one more config
+  witness — the detected set only ever widens. Where the two facts disagree the
+  line says which one is missing: **config seen, binary not on PATH**, and the
+  hooks are still written, because a CLI installed outside `$PATH` — a GUI app,
+  a shell alias, a version manager — is still a CLI whose hook must fire.
+
+- **`agentstack x guard install` previews by default and applies with
+  `--write`.** This is the one write in the CLI that edits *other products'*
+  global config files, and it was doing it on a bare command. The bare command
+  now names every file and hook event it would touch and returns; `--write`
+  applies. Both screens print from one plan, so the preview and the write cannot
+  describe different installs.
+
+- **One state, one next step.** A dropped file waiting in the project routed
+  `status` to `agentstack yes` while `doctor` answered that there was nothing to
+  repair — the arbiter reads error and warning lines only, and an offer is
+  neither. Doctor now sees the drop as a ranking-level fact without the line
+  changing level, so both screens name `agentstack yes` over the same state. The
+  per-item lines stay advisory, a project with a drop is still `ready`, and the
+  `doctor-advisories-v1` JSON contract does not move.
+
+- **One spelling for consent: `--consented`.** `trust`, `toolset create` and
+  `init` each had their own name for the same argument — the digest of the exact
+  surface a human reviewed. All three are now `--consented`.
+  `--consented-digest` and `--consented-plan` still work as hidden aliases so
+  existing scripts keep running, **and they are removed in the next release** —
+  change them now.
+
+- **The workflow bridge stops paying per element.** Converting a
+  10,000-element array into the engine cost 1445.9 µs and now costs ~280 µs — a
+  5.1× win, ~145 ns per element down to ~28 ns — because the array is built once
+  with `JsArray::from_iter` instead of pushed element by element, where every
+  push charged a property write *and* a `length` update. Objects are defined
+  rather than set, which is faster and also stops an `Object.prototype` setter
+  from running inside host conversion of an untrusted child result. Element
+  reads skip the `Array.prototype.at` builtin, which re-read `length` on every
+  call. Before-and-after tables are in `crates/workflow/benches/BASELINE.md`.
+
+- **The fleet widens from four to sixteen.** Default workflow concurrency was 4;
+  the repo's own scale bench puts the scheduling win at 16 — 15.36 s down to
+  12.00 s at width 100. `machine_policy.workflows.max_concurrent` still lowers
+  it for a machine that wants less, and `max_agents` and the resident-result
+  ceiling are unaffected.
+
+- **The binary is built like a release.** `[profile.release]` gains
+  `lto = "fat"` and `codegen-units = 1`. `panic = "abort"` is now written down
+  as forbidden rather than left as an idea somebody re-proposes: four production
+  `catch_unwind` sites are what contain a panicking workflow. Four unused direct
+  dependencies leave `runtime`, `mcp` and `egress`; clap drops its default
+  features in `cli` and `core` — colour comes from the paint gate, never from
+  clap — and eight packages leave the lockfile with it; and the CLI collects its
+  argv once instead of twice.
+
+- **The README stopped promising rc.3 verbs to v0.17.1 users.** The
+  `agentstack x` namespace shipped in rc.3, but the README describes whatever
+  the installer serves, and it was telling readers of v0.17.1 to run it. One
+  root cause, four wrong statements, all four fixed. Everything else in an audit
+  of the whole file held: all fifteen verbs, every example flag, all links and
+  images, the adapter counts, the nightly conformance claim. Three genuinely
+  closed documents also move to `docs/archive/`, each with the archive's
+  standard status note — the build log for TODO items 1–8, an unadopted
+  docs-architecture proposal the site never adopted, and the plan for a `check`
+  verb that was never queued and does not exist.
+
 ## v0.18.0-rc.4 — 2026-08-12
 
 **The candidate that was walked, not only built.** rc.3 shipped the zero-files
