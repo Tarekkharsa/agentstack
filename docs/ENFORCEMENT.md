@@ -4,6 +4,14 @@
 
 # AgentStack — Enforcement matrix
 
+*Current as of agentstack 0.18.0-rc.5.*
+
+> Short codes below — `W2`, `W4`, `D3`, `D4`, `G9`, `Phase 1`–`Phase 4` — name
+> internal development milestones, not public releases or CVE-style
+> identifiers. They record *when* a behaviour landed relative to other work in
+> `TODO.md`; nothing in this document depends on knowing them, and every claim
+> beside them stands on its own.
+
 This is the authoritative, code-grounded answer to one question: **for each
 execution mode, what does AgentStack actually enforce, and by what mechanism?**
 When any other document and this one disagree, this one is right — it is checked
@@ -18,6 +26,29 @@ Audience: anyone deciding what a mode actually guarantees.
 - [Policy is authority, not isolation](#policy-is-authority-not-isolation)
 - [The matrix](#the-matrix)
 - [Per-cell notes](#per-cell-notes)
+  - [Tools](#tools)
+  - [Egress](#egress)
+  - [Secrets](#secrets)
+  - [Filesystem — write](#filesystem--write)
+  - [Filesystem — read](#filesystem--read)
+  - [Audit / recording](#audit--recording)
+  - [Servers](#servers)
+  - [Skills](#skills)
+  - [Instructions](#instructions)
+  - [Settings](#settings)
+  - [Hooks](#hooks)
+  - [Native extensions](#native-extensions)
+  - [Workflows](#workflows)
+  - [The protected run's frozen grant (the default `run`)](#the-protected-runs-frozen-grant-the-default-run)
+  - [Images (`agentstack image`)](#images-agentstack-image)
+  - [Trust-store mutation logging](#trust-store-mutation-logging)
+  - [Intake detection (dropped files)](#intake-detection-dropped-files)
+  - [Single-action activation (`agentstack yes`)](#single-action-activation-agentstack-yes)
+  - [Review-card state on disk (snapshots, recognition, decisions)](#review-card-state-on-disk-snapshots-recognition-decisions)
+- [Sharing, intake, and what a signature is worth](#sharing-intake-and-what-a-signature-is-worth)
+  - [Bundle signatures — `share` / `receive`](#bundle-signatures--share--receive)
+  - [Quarantine — where intake waits](#quarantine--where-intake-waits)
+  - [Attribution — `license` and `origin` in the lock](#attribution--license-and-origin-in-the-lock)
 - [Experimental `tools_execute`](#experimental-tools_execute)
 - [See also](#see-also)
 
@@ -127,7 +158,7 @@ Modes are columns; policy dimensions are rows. Legend:
 | **Filesystem — read** | cooperative¶ | cooperative¶ | cooperative¶ | coarse | coarse |
 | **Audit / recording** | unsupported | **enforced** | **enforced**◆ | **enforced**§ | **enforced** |
 | **Native extensions** | unsupported‖ | unsupported‖ | n/a◈ | unsupported‖ | unsupported‖ |
-| **Hooks** | unsupported# | unsupported# | n/a◈ | unsupported# | unsupported# |
+| **Hooks** | unsupported⁂ | unsupported⁂ | n/a◈ | unsupported⁂ | unsupported⁂ |
 
 ◇ **the strongest tools cell, and fenced on top.** A lease is the `gateway`
 column's dispatch path with one addition: the toolset. Every capability call
@@ -212,7 +243,7 @@ provenance and content binding — which bytes, from where, reviewed by whom —
 runtime enforcement, and it is deliberately labelled as such. See the Native
 extensions section.
 
-# **runtime is unsupported in every mode — a hook is a command the harness
+⁂ **runtime is unsupported in every mode — a hook is a command the harness
 itself runs at full user permission.** A `[hooks.*]` entry compiles into each
 hook-capable harness's native hooks config; when the harness fires the event,
 it executes the hook's command in its own process context — no policy ceiling,
@@ -439,48 +470,64 @@ toolset containing it.
   -f`, disk writes, …), any access to `[policy.filesystem] deny` globs
   (machine ∪ project — a repo can only add), and writes outside
   the workspace + `[guard] allow_roots` + temp. That last confinement has an
-  exact reach, worth naming. **Shell** writes reach it on every wired CLI — a
+  exact reach, worth naming.
+
+  - **Shell writes** reach it on every wired CLI — a
   redirect, `rm`/`mv`/`cp`/`tee`, `sed -i` — because they arrive as commands
-  and route through the same write-target check. **File-tool** writes reach it
+  and route through the same write-target check.
+
+  - **File-tool writes** reach it
   on two signals. The tool NAME is the floor (`WRITERS`: `Write`, `Edit`,
   `MultiEdit`, `NotebookEdit`, `write_file`, `replace`, `edit_file`,
   `fs_write`, `create_file`, `str_replace_editor`, `replace_string_in_file`,
   `multi_replace_string_in_file`, `apply_patch`) — every name on it is a
   write, as before, and a name on it that arrives with NO readable target is
   refused rather than allowed: a write the guard cannot locate is a write it
-  cannot confine. Codex's `apply_patch` names its targets nowhere but inside
+  cannot confine.
+
+  - **Codex's `apply_patch`** names its targets nowhere but inside
   its patch text, so the guard reads the documented envelope
   (`*** Begin Patch` … `*** Add File:` / `*** Update File:` /
   `*** Delete File:` / `*** Move to:` … `*** End Patch`, per the Codex
   parser's own constants) and puts EVERY path it finds through the identical
   write check a `Write` gets. One refused path refuses the whole patch.
-  Beyond the list the PAYLOAD decides, so a tool this build
+
+  - **Beyond the list the PAYLOAD decides**, so a tool this build
   has never heard of is still confined when its call plainly intends a write:
   an edit structure (`old_string`/`new_string`, a patch, a list of edits), an
   explicit write mode or an `append`/`overwrite`/`create` flag, a body of
   content for the file it names, or an editor verb (`create`, `str_replace`,
   `insert`) in `command`. Key spellings are matched normalized, so the snake,
-  camel and Pascal dialects all land. The residual is real and named: a write
+  camel and Pascal dialects all land.
+
+  - **The residual is real and named:** a write
   whose call carries none of those signals — a path and nothing else, or
   content passed by handle — still degrades to the read path and gets the
   deny-glob check only. A path under a field name the guard does not read is
   now judged only when the tool's NAME is on `WRITERS` (there it fails closed
-  and is refused); under an unknown name it is still not judged at all. The
-  envelope reader is deliberately narrow: it fires only when the whole
+  and is refused); under an unknown name it is still not judged at all.
+
+  - **The envelope reader is deliberately narrow:** it fires only when the whole
   argument is the envelope (first line `*** Begin Patch`, last line
   `*** End Patch`), so a patch smuggled around a shell command stays on the
   command path and keeps its destructive-command analysis — and `apply_patch`
   invoked through the SHELL (heredoc, or argv `["apply_patch", "<patch>"]`) is
   still analysed as a command, not as a patch. That degradation stays the safe
-  default, chosen so an unfamiliar tool cannot wedge a harness. Cursor is confined for shell writes and for
+  default, chosen so an unfamiliar tool cannot wedge a harness.
+
+  - **Cursor** is confined for shell writes and for
   nothing else: its surface offers no pre-write file hook, so the installer
   wires only `beforeShellExecution` and `beforeReadFile` and no Cursor file
-  write is ever presented for a decision. `[guard.project_roots]`
+  write is ever presented for a decision.
+
+  - **`[guard.project_roots]`**
   scopes an extra root to one workspace ("sessions under `~/x` may also
   write `~/y`") — the grant lives in the MACHINE manifest, so a project can
   never widen its own write scope, and the guard denies shell writes to that
   manifest's directory precisely so this table can't be edited into
-  allowlisting itself. Every denial is recorded to the audit log
+  allowlisting itself.
+
+  - **Every denial is recorded to the audit log**
   (`host-guard` entries in `calls.jsonl`), and the two kinds stay tellable
   apart by their subject. A **rule** denial names the call it judged —
   `bash: …`, `read: …`, `write: …`, `other` — and carries the anchored
@@ -493,9 +540,12 @@ toolset containing it.
   had been anchored yet. The prefixes are machine-authored and payload content
   can only land after them, so no tool call can forge a system subject.
   Recording never gates the block: an unwritable audit log loses the evidence,
-  never the denial. The ceiling is the
-  legend's: the harness must honor its own hook protocol — this catches
-  accidents, not malice. Three CLIs are reported as NOT protected, and the code
+  never the denial.
+
+  - **The ceiling is the legend's:** the harness must honor its own hook protocol — this catches
+  accidents, not malice.
+
+  - **Three CLIs are reported as NOT protected,** and the code
   keeps the two reasons apart because they are not the same promise.
   `NO_HOOK_SURFACE` is a fact about the CLI — Claude Desktop has no
   PreToolUse-style hook and Junie has only a static action allowlist, so there
@@ -504,8 +554,9 @@ toolset containing it.
   not because none could be. Kiro's descriptor records its MCP config only, so
   this repo knows no hook file to install into and no entry shape uninstall
   could find again; a hook format guessed from outside the descriptors would be
-  one the guard cannot honestly claim. Both cells are *unsupported* today; only
-  the second one can change. Config unreadable →
+  one the guard cannot honestly claim. Both cells are *unsupported* today; only the second one can change.
+
+  - **Config unreadable** →
   the hook fails CLOSED; unrecognized payload shapes fail open (a guard
   that wedges the harness gets uninstalled, not fixed).
   (`crates/cli/src/guard.rs`, `crates/cli/src/commands/guard.rs`)

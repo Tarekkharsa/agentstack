@@ -305,7 +305,11 @@ script has — statically, spawning nothing. Sites are not calls: one site
 inside a loop runs once per item, so real fan-out is data-dependent. The
 enforced bound on total spawns is `max_agents`, refused per call.
 
-## Where it stands
+## Status
+
+Everything above is the guide. This last section is project status — how mature
+the capability is and what its security review found — kept separate so the two
+are not read as one, and kept honest rather than trimmed.
 
 The full technical contract and security rationale live in the
 [workflows capability design doc](archive/design/workflows-capability.md). The
