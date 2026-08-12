@@ -28,7 +28,7 @@ informed of progress.
 
 The current threat model and its known limits are documented, not implied:
 
-- [Security review (2026-07-11)](docs/security-review-2026-07-11.html) — the
+- [Security review (2026-07-11)](https://tarekkharsa.github.io/agentstack/security-review-2026-07-11.html) — the
   most recent full review, including what was found and fixed.
 - [Enforcement matrix](docs/ENFORCEMENT.md) — what each guarantee actually
   enforces per CLI and per mode, including where enforcement is advisory.
