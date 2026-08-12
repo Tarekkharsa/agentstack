@@ -27,6 +27,7 @@ fn args(force: bool) -> InitArgs {
         project_servers: false,
         include_tool_managed: false,
         yes: false,
+        verbose: false,
         consented_plan: None,
         connect: false,
     }

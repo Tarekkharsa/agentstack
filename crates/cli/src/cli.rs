@@ -2102,6 +2102,13 @@ pub struct InitArgs {
     #[arg(long)]
     pub yes: bool,
 
+    /// Also name the entries the import passed over for reasons that need no
+    /// decision — chiefly agentstack's own gateway bridge, found in a harness
+    /// config because this tool put it there. Excluded entries a user might
+    /// want back (another application's servers) are always named without this.
+    #[arg(long)]
+    pub verbose: bool,
+
     /// The `plan_digest` an `init --plan` emitted alongside the plan that was
     /// reviewed. The scripted import (with `--yes`) then refuses if detection
     /// no longer produces that exact plan — a CLI config edited between plan

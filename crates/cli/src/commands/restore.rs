@@ -320,6 +320,13 @@ fn undo_selection(
     });
 
     if write {
+        // Read BEFORE the undo runs, for the same reason the JSON above is:
+        // afterwards the pruned directories are gone and there is nothing left
+        // to name. Reported after, filtered to the ones that really came off.
+        let prunable: Vec<std::path::PathBuf> = selected
+            .iter()
+            .flat_map(|e| history::prunable_dirs(&e.files))
+            .collect();
         // Newest-to-oldest is essential when two phases touched the same path:
         // first restore the state before the newest phase, then the state from
         // before the whole batch began.
@@ -327,6 +334,9 @@ fn undo_selection(
             history::undo(&selected_entry.id)?;
         }
         if !json {
+            for dir in prunable.iter().filter(|dir| !dir.exists()) {
+                println!("  {} removed empty {}", "✓".green(), dir.display());
+            }
             println!(
                 "{} undone — reverted files show up as pending again; re-run `agentstack apply` to re-render.",
                 "✓".green()
@@ -368,6 +378,17 @@ fn preview_entry(entry: &history::Entry, entries: &[history::Entry]) {
             Some(_) => println!("  {} {:<28} revert {}", "↩".cyan(), f.label, f.path),
             None => println!("  {} {:<28} delete {}", "✗".red(), f.label, f.path),
         }
+    }
+    // The directories those deletes would leave behind. Conditional, and said
+    // so in the same words `x uninstall` uses for its own conditional cleanup:
+    // a parent that still holds anything after the files come off is kept.
+    for dir in history::prunable_dirs(&entry.files) {
+        println!(
+            "  {} {:<28} {}",
+            "✗".red(),
+            super::empty_parent_label(),
+            dir.display()
+        );
     }
 }
 

@@ -920,6 +920,12 @@ struct DetectedImport {
     /// the review can state which of the two happened instead of leaving a
     /// reader to infer it from a list.
     tool_managed_included: bool,
+    /// The gateway-bridge entries this import passed over, deduplicated by name
+    /// — our own registration, read back out of the harness configs we wrote it
+    /// into. See [`crate::commands::connect::is_bridge_entry`]. Never a warning
+    /// and never overridable: there is no reading of "import agentstack into
+    /// agentstack" that is what the user meant.
+    bridge_entries: Vec<String>,
 }
 
 /// One server the classifier read as belonging to the application that
@@ -971,6 +977,7 @@ fn detect_import(dir: &Path, include_tool_managed: bool) -> Result<DetectedImpor
     let mut conflict_counts: IndexMap<String, usize> = IndexMap::new();
     let mut skipped: Vec<(String, crate::adapter::SkippedImport)> = Vec::new();
     let mut tool_managed: IndexMap<String, ToolManagedServer> = IndexMap::new();
+    let mut bridge_entries: Vec<String> = Vec::new();
     let mut project_sourced = false;
     // Which scopes this import reads. A project manifest imports what is
     // configured in the project too — before this, `init` asked the machine-scope
@@ -1033,6 +1040,19 @@ fn detect_import(dir: &Path, include_tool_managed: bool) -> Result<DetectedImpor
             // was someone else's plumbing does not become a default target.
             let mut imported = Vec::with_capacity(extracted.len());
             for (name, server) in extracted {
+                // Our own gateway bridge, read back out of a config THIS tool
+                // wrote. Dropped first and unconditionally: it is not the
+                // user's setup, and a manifest that declares it would ask the
+                // gateway to serve the gateway. Like the tool-managed check
+                // below, this runs before `contributed`, so a CLI whose only
+                // MCP entry was our bridge does not become a default target on
+                // the strength of our own plumbing.
+                if crate::commands::connect::is_bridge_entry(&name, &server) {
+                    if !bridge_entries.contains(&name) {
+                        bridge_entries.push(name);
+                    }
+                    continue;
+                }
                 let Some(found) = crate::adapter::tool_managed(&server) else {
                     imported.push((name, server));
                     continue;
@@ -1109,15 +1129,6 @@ fn detect_import(dir: &Path, include_tool_managed: bool) -> Result<DetectedImpor
                 files.push((path, vec!["MCP servers"]));
             }
         }
-        if settings.contains_key(&cli.id) {
-            if let Some((path, _)) = desc.settings_for(scope, dir) {
-                if let Some(existing) = files.iter_mut().find(|(p, _)| *p == path) {
-                    existing.1.push("settings");
-                } else {
-                    files.push((path, vec!["settings"]));
-                }
-            }
-        }
         for (path, writes) in files {
             destinations.push(PlanDestination {
                 id: cli.id.clone(),
@@ -1126,6 +1137,22 @@ fn detect_import(dir: &Path, include_tool_managed: bool) -> Result<DetectedImpor
                 path,
                 writes,
             });
+        }
+        // Settings are declared in the MACHINE manifest (they were read from
+        // each CLI's machine-wide config, and are personal preferences), so the
+        // file a later apply manages for them is that CLI's own GLOBAL settings
+        // file — never a project copy. Listing the project path here was the
+        // review promising the wrong destination for the wrong layer.
+        if settings.contains_key(&cli.id) {
+            if let Some((path, _)) = desc.settings_for(crate::scope::Scope::Global, dir) {
+                destinations.push(PlanDestination {
+                    id: cli.id.clone(),
+                    display: cli.display.clone(),
+                    scope: crate::scope::Scope::Global,
+                    path,
+                    writes: vec!["settings"],
+                });
+            }
         }
     }
 
@@ -1141,6 +1168,7 @@ fn detect_import(dir: &Path, include_tool_managed: bool) -> Result<DetectedImpor
         destinations,
         tool_managed: tool_managed.into_values().collect(),
         tool_managed_included: include_tool_managed,
+        bridge_entries,
     })
 }
 
@@ -1410,6 +1438,113 @@ pub fn seed_house_rules(dir: &Path) -> Result<bool> {
     Ok(true)
 }
 
+/// `~/.agentstack` where that is what it is, the real path otherwise. The
+/// machine layer is a home-relative idea, and an absolute `/Users/...` in a
+/// sentence about "your machine layer" reads as a path to memorize.
+fn display_home(home: &Path) -> String {
+    let default_home = dirs::home_dir().map(|h| h.join(".agentstack"));
+    if default_home.as_deref() == Some(home) {
+        "~/.agentstack/agentstack.toml".to_string()
+    } else {
+        home.join(MANIFEST_FILE).display().to_string()
+    }
+}
+
+/// The imported per-CLI settings this run may declare in the MACHINE manifest:
+/// the ones that layer does not already speak for.
+///
+/// An existing `[settings.<cli>]` there is the user's own answer, possibly
+/// hand-edited and certainly not this project's business to rewrite. The same
+/// rule the library-collision path follows: shared state is never silently
+/// replaced by an import.
+///
+/// A machine manifest that cannot be read at all yields "declare everything",
+/// which is the correct reading of an absent layer and, for an unparseable one,
+/// fails later at the write with the parse error rather than here in a review.
+fn machine_settings_to_declare(
+    imported: &IndexMap<String, serde_json::Value>,
+) -> IndexMap<String, serde_json::Value> {
+    if imported.is_empty() {
+        return IndexMap::new();
+    }
+    let path = crate::util::paths::agentstack_home().join(MANIFEST_FILE);
+    let existing: Vec<String> = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| toml::from_str::<Manifest>(&text).ok())
+        .map(|m| m.settings.keys().cloned().collect())
+        .unwrap_or_default();
+    imported
+        .iter()
+        .filter(|(id, _)| !existing.contains(id))
+        .map(|(id, value)| (id.clone(), value.clone()))
+        .collect()
+}
+
+/// Declare `settings` under `[settings.<cli>]` in the machine manifest,
+/// capturing every file first so the whole thing stays inside `init`'s one
+/// undoable transaction.
+///
+/// `ensure_global_manifest` is the same seeder `init --global` and the wizard's
+/// house-rules step use — there is one way the machine manifest comes into
+/// existence, and this is not a second one. The capture is taken BEFORE that
+/// call, so an undo of an import that created the layer deletes the file it
+/// created rather than leaving a manifest nobody asked for.
+fn write_machine_settings(
+    settings: &IndexMap<String, serde_json::Value>,
+    backups: &mut Vec<crate::history::FileChange>,
+) -> Result<()> {
+    if settings.is_empty() {
+        return Ok(());
+    }
+    let home = crate::util::paths::agentstack_home();
+    let path = home.join(MANIFEST_FILE);
+    backups.push(crate::history::capture(
+        &path,
+        "machine manifest · settings",
+    ));
+    ensure_global_manifest()?;
+    let mut text =
+        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    for (id, value) in settings {
+        text = super::add::build_manifest_with(&text, "settings", id, value, None)
+            .with_context(|| format!("declaring [settings.{id}] in {}", path.display()))?;
+    }
+    crate::util::atomic::write(&path, &text)
+        .with_context(|| format!("writing {}", path.display()))?;
+    Ok(())
+}
+
+/// The commented preamble a manifest gets when the import found no capability
+/// to declare — otherwise nothing.
+///
+/// The empty tables it replaces (`[servers]`, `[skills]`, `[instructions]`)
+/// were not documentation, they were serialization: `toml` emitted a header for
+/// every collection whether or not it held anything, so a first manifest opened
+/// on three headings that say nothing and answer nothing. A reader's actual
+/// question at that moment is "how do I put something in this?", so that is
+/// what the file says, in commands they can run. When there IS content the
+/// preamble is omitted entirely — the declarations are the better answer, and a
+/// permanent banner is read by nobody.
+fn capability_header(manifest: &Manifest) -> String {
+    let declares_something = !manifest.servers.is_empty()
+        || !manifest.skills.is_empty()
+        || !manifest.instructions.is_empty()
+        || !manifest.profiles.is_empty();
+    if declares_something {
+        return String::new();
+    }
+    "\
+# No capabilities declared yet. Add one:
+#
+#   agentstack search <query>            find a server or skill in the catalog
+#   agentstack add from <id> --write     add one to this project
+#   agentstack add skill <source>        add a SKILL.md directory
+#   agentstack lib link <folder>         reuse a folder of capabilities you keep
+#
+"
+    .to_string()
+}
+
 /// The exact `instructions --write` invocation for the machine-level manifest:
 /// plain from `$HOME` when the layer lives at the default `~/.agentstack`,
 /// spelled with `--manifest-dir` when `AGENTSTACK_HOME` relocated it.
@@ -1567,6 +1702,7 @@ fn run_impl(
         destinations,
         tool_managed,
         tool_managed_included,
+        bridge_entries,
     } = det;
     let detected_ids: Vec<String> = detected.iter().map(|c| c.id.clone()).collect();
     let display_names: Vec<String> = detected.iter().map(|c| c.display.clone()).collect();
@@ -1749,6 +1885,27 @@ version = 1
         "{}",
         render_tool_managed(&tool_managed, tool_managed_included)
     );
+    // Ours, not theirs, and not a decision anyone has to make — so it is a
+    // `--verbose` line rather than a warning. Silence would be wrong too: a
+    // reader comparing the import against their own config file should be able
+    // to account for every entry in it.
+    if args.verbose && !bridge_entries.is_empty() {
+        println!(
+            "{} not imported: {} — agentstack's own gateway bridge, registered by \
+             `{GATEWAY_CONNECT}`; it stays in each CLI's config and serves this project from there",
+            "·".dimmed(),
+            bridge_entries
+                .iter()
+                .map(|n| crate::text::sanitize_line(n))
+                .collect::<Vec<_>>()
+                .join(", ")
+                .dimmed()
+        );
+    }
+    // Which of the imported settings this run will actually declare: the ones
+    // the machine layer does not already speak for. Read here, before the
+    // review, so the line below and the write cannot disagree.
+    let machine_settings = machine_settings_to_declare(&settings);
     if !settings.is_empty() {
         let from: Vec<String> = settings
             .keys()
@@ -1763,6 +1920,38 @@ version = 1
             "      {}",
             "Only settings agentstack understands are imported; every other setting stays in its CLI's own file, untouched.".dimmed()
         );
+        // Where they land, and why it is not here. A model choice, a reasoning
+        // effort, a theme — these were read from each CLI's MACHINE-WIDE
+        // config, and putting them in the project manifest turned a personal
+        // preference into a repo file every teammate would render and commit.
+        // The machine manifest is that layer (docs/reference.md §"The machine
+        // layer"), so that is where they go.
+        println!(
+            "      {}",
+            format!(
+                "They are personal, machine-wide preferences, so they go to your machine layer \
+                 ({}) — not into this repo. Declare a project-specific value with \
+                 `agentstack x settings set <cli> <key> <value>`.",
+                display_home(&crate::util::paths::agentstack_home())
+            )
+            .dimmed()
+        );
+        let already: Vec<String> = settings
+            .keys()
+            .filter(|id| !machine_settings.contains_key(*id))
+            .map(|id| det_display(&detected, id))
+            .collect();
+        if !already.is_empty() {
+            println!(
+                "      {}",
+                format!(
+                    "Your machine layer already declares settings for {} — those are kept as \
+                     they are, not overwritten.",
+                    already.join(" · ")
+                )
+                .dimmed()
+            );
+        }
     }
 
     // Inline secrets were lifted during detection. This is the moment that
@@ -1907,16 +2096,44 @@ version = 1
         }
     }
 
+    // A toolset is an answer to "what does THIS task use", so it needs
+    // something to name. An import that brought in no server had one
+    // synthesized around whatever was left — for a while, around agentstack's
+    // own bridge — and a first manifest opened on `[toolsets.default] servers
+    // = ["agentstack"]`, which is the tool describing itself rather than the
+    // project. `default_toolset` follows the same condition, and must: it is a
+    // validation error for it to name a toolset that is not declared.
+    let synthesize_toolset = library_import && !toolset_servers.is_empty();
     let (manifest_servers, profiles) = if library_import {
-        let default_toolset = crate::manifest::Profile {
-            servers: toolset_servers.clone(),
-            ..Default::default()
-        };
         let mut profiles = IndexMap::new();
-        profiles.insert("default".to_string(), default_toolset);
+        if synthesize_toolset {
+            profiles.insert(
+                "default".to_string(),
+                crate::manifest::Profile {
+                    servers: toolset_servers.clone(),
+                    ..Default::default()
+                },
+            );
+        }
         (inline_servers.clone(), profiles)
     } else {
         (servers.clone(), IndexMap::new())
+    };
+
+    // `[targets]` is a NARROWING. Absent, `apply` targets the CLIs it detects
+    // at render time (`render::apply::resolve_targets`), which is exactly what
+    // this list says when the import narrowed nothing — so writing it out adds
+    // no meaning and pins one machine's inventory into a file that travels to
+    // other machines and into a teammate's checkout. Compared as sets: the two
+    // lists are built in different orders and the ORDER is not the claim.
+    let narrows_targets = {
+        let mut pinned = target_defaults.clone();
+        let mut detected = detected_ids.clone();
+        pinned.sort();
+        pinned.dedup();
+        detected.sort();
+        detected.dedup();
+        pinned != detected
     };
 
     // Assemble the manifest.
@@ -1928,17 +2145,26 @@ version = 1
         },
         servers: manifest_servers,
         skills: IndexMap::new(),
-        default_toolset: library_import.then(|| "default".to_string()),
+        default_toolset: synthesize_toolset.then(|| "default".to_string()),
         profiles,
         instructions: IndexMap::new(),
-        settings,
+        // Never here. Imported native settings came from each CLI's
+        // MACHINE-WIDE config and are personal preferences; they are declared
+        // in the machine manifest by `write_machine_settings` below. A project
+        // may still declare its own `[settings.*]` — that is what
+        // `x settings set` is for — but an IMPORT must not manufacture one.
+        settings: IndexMap::new(),
         hooks: IndexMap::new(),
         extensions: IndexMap::new(),
         workflows: IndexMap::new(),
         packs: IndexMap::new(),
         package_overrides: IndexMap::new(),
         targets: Targets {
-            default: target_defaults.clone(),
+            default: if narrows_targets {
+                target_defaults.clone()
+            } else {
+                Vec::new()
+            },
         },
         policy: Default::default(),
         guard: Default::default(),
@@ -1948,11 +2174,23 @@ version = 1
         // is something a person asks for.
         delivery: Default::default(),
     };
-    let toml_text = toml::to_string_pretty(&manifest).context("serializing manifest to TOML")?;
+    let toml_text = format!(
+        "{}{}",
+        capability_header(&manifest),
+        toml::to_string_pretty(&manifest).context("serializing manifest to TOML")?
+    );
 
     if args.dry_run {
         println!("\n{} (preview — nothing written)\n", MANIFEST_FILE.bold());
         println!("{toml_text}");
+        if !machine_settings.is_empty() {
+            println!(
+                "Would declare {} in your machine layer ({}); this project's manifest carries \
+                 no settings of its own.",
+                super::count(machine_settings.len(), "CLI's settings"),
+                display_home(&crate::util::paths::agentstack_home())
+            );
+        }
         if library_import {
             println!(
                 "Would write {} into library source '{}' ({}); the manifest above references \
@@ -2134,6 +2372,10 @@ version = 1
                 )?;
             }
         }
+
+        // The machine layer's half of the import, written through the same
+        // transaction: a failure below rolls this back with everything else.
+        write_machine_settings(&machine_settings, &mut backups)?;
 
         backups.push(crate::history::capture(&manifest_path, "manifest · import"));
         crate::util::atomic::write(&manifest_path, &toml_text)
@@ -3010,6 +3252,7 @@ mod tests {
                 destinations: Vec::new(),
                 tool_managed: Vec::new(),
                 tool_managed_included: false,
+                bridge_entries: Vec::new(),
             }
         };
 
@@ -3675,6 +3918,7 @@ mod tests {
             project_servers: false,
             include_tool_managed: false,
             yes: false,
+            verbose: false,
             consented_plan: None,
             connect: false,
         };
@@ -3708,6 +3952,7 @@ mod tests {
             project_servers: false,
             include_tool_managed: false,
             yes: false,
+            verbose: false,
             consented_plan: None,
             connect: false,
         };
@@ -3737,6 +3982,7 @@ mod tests {
             project_servers: false,
             include_tool_managed: false,
             yes: false,
+            verbose: false,
             consented_plan: None,
             connect: false,
         };

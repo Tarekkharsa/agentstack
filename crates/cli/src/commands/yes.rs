@@ -316,57 +316,34 @@ fn activate(
 /// them. `None` for a file that did not exist, so restoring removes it again
 /// rather than leaving an empty one behind.
 struct Rollback {
-    manifest: (std::path::PathBuf, Option<String>),
-    lock: (std::path::PathBuf, Option<String>),
+    manifest: crate::history::FileChange,
+    lock: crate::history::FileChange,
 }
 
 impl Rollback {
+    /// Taken through [`crate::history::capture`] itself, at the moment before
+    /// the funnel writes. That is the only instant at which the pre-write bytes
+    /// AND the not-yet-existing parent directories can both be read; a snapshot
+    /// assembled later would record the new bytes as though they were the old
+    /// ones, and would see every directory as pre-existing.
     fn capture(manifest: &Path, lock: &Path) -> Self {
         Self {
-            manifest: (
-                manifest.to_path_buf(),
-                std::fs::read_to_string(manifest).ok(),
-            ),
-            lock: (lock.to_path_buf(), std::fs::read_to_string(lock).ok()),
+            manifest: crate::history::capture(manifest, "manifest · yes"),
+            lock: crate::history::capture(lock, "lock · yes"),
         }
     }
 
-    /// The same two captures, as ledger rows.
-    ///
-    /// This struct already holds exactly what [`crate::history::FileChange`]
-    /// holds — a path and its prior contents — because both exist for the same
-    /// reason. Converting rather than re-capturing matters: a second capture
-    /// would read the files again, after the write, and record the new bytes as
-    /// though they were the old ones. The undo the user is offered is therefore
-    /// bound to the same snapshot the failure path would have restored.
+    /// The same two captures, as ledger rows — so the undo the user is offered
+    /// is bound to the identical snapshot the failure path below would restore.
     fn as_changes(&self) -> Vec<crate::history::FileChange> {
-        [
-            (&self.manifest, "manifest · yes"),
-            (&self.lock, "lock · yes"),
-        ]
-        .into_iter()
-        .map(|((path, before), label)| crate::history::FileChange {
-            path: path.to_string_lossy().into_owned(),
-            before: before.clone(),
-            label: label.to_string(),
-        })
-        .collect()
+        vec![self.manifest.clone(), self.lock.clone()]
     }
 
     /// Best-effort by design: this runs while another error is already on its
     /// way up, and a failure to restore must not replace that error with a
     /// worse one. `restore --last --write` remains the user-facing undo.
     fn restore(&self) {
-        for (path, before) in [&self.manifest, &self.lock] {
-            match before {
-                Some(text) => {
-                    let _ = crate::util::atomic::write(path, text);
-                }
-                None => {
-                    let _ = std::fs::remove_file(path);
-                }
-            }
-        }
+        let _ = crate::history::rollback(&self.as_changes());
     }
 }
 

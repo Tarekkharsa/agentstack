@@ -362,7 +362,11 @@ fn print_plan(
     for path in empty_parent_candidates {
         println!(
             "  {}  {}",
-            "Empty skill parent (if empty after cleanup)".bold(),
+            format!(
+                "Empty skill parent {}",
+                crate::commands::IF_EMPTY_AFTER_CLEANUP
+            )
+            .bold(),
             crate::commands::init::display_path(path, root).dimmed()
         );
     }
@@ -411,7 +415,9 @@ fn project_empty_parent_candidates(
 
     let mut candidates: Vec<PathBuf> = candidates
         .into_iter()
-        .filter(|path| removal_ancestors.contains(path) || is_empty_real_dir(path))
+        .filter(|path| {
+            removal_ancestors.contains(path) || crate::util::fsx::is_empty_real_dir(path)
+        })
         .collect();
     // Children first: `.junie/mcp` must be removed before `.junie` can become
     // empty. Path order makes duplicates adjacent within equal depth.
@@ -436,46 +442,20 @@ fn collect_project_ancestors(root: &Path, path: &Path, out: &mut BTreeSet<PathBu
     }
 }
 
-fn is_empty_real_dir(path: &Path) -> bool {
-    let Ok(metadata) = std::fs::symlink_metadata(path) else {
-        return false;
-    };
-    if metadata.file_type().is_symlink() || !metadata.is_dir() {
-        return false;
-    }
-    std::fs::read_dir(path)
-        .map(|mut entries| entries.next().is_none())
-        .unwrap_or(false)
-}
-
-/// Remove only candidate directories that are empty after skill cleanup.
+/// Remove only candidate directories that are empty after skill cleanup, and
+/// say which came off.
 ///
-/// `remove_dir` is the final ownership guard: it cannot remove a directory
-/// containing user files. Symlinks are skipped explicitly so a project-local
-/// path can never redirect cleanup outside the project boundary.
+/// The removal itself is [`crate::util::fsx::prune_empty_dirs`], shared with
+/// the undo path so both conditional cleanups obey the same guards — deepest
+/// first, never a symlink, and `remove_dir` as the final ownership test, which
+/// simply cannot take a directory that holds a user's file.
 fn prune_empty_project_parents(root: &Path, candidates: &[PathBuf]) -> Result<()> {
-    for path in candidates {
-        let metadata = match std::fs::symlink_metadata(path) {
-            Ok(metadata) => metadata,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(error).with_context_path(path),
-        };
-        if metadata.file_type().is_symlink() || !metadata.is_dir() {
-            continue;
-        }
-        match std::fs::remove_dir(path) {
-            Ok(()) => println!(
-                "  {} removed empty {}",
-                "✓".green(),
-                crate::commands::init::display_path(path, root)
-            ),
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::NotFound | std::io::ErrorKind::DirectoryNotEmpty
-                ) => {}
-            Err(error) => return Err(error).with_context_path(path),
-        }
+    for path in crate::util::fsx::prune_empty_dirs(candidates)? {
+        println!(
+            "  {} removed empty {}",
+            "✓".green(),
+            crate::commands::init::display_path(&path, root)
+        );
     }
     Ok(())
 }

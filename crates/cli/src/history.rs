@@ -84,6 +84,27 @@ pub struct FileChange {
     pub before: Option<String>,
     /// Short label, e.g. "Claude Code · servers".
     pub label: String,
+    /// The ancestor directories this write had to create, deepest first, as
+    /// they stood at [`capture`] time.
+    ///
+    /// Undo deletes a file whose `before` is `None`, and used to stop there —
+    /// so undoing an `init` removed `.agentstack/agentstack.toml` and left an
+    /// empty `.agentstack/` behind, which is not the state the project was in
+    /// before. Reversing the write means reversing the directories too, and
+    /// "the write created it" has to be a FACT rather than an inference: an
+    /// empty directory on disk cannot tell you whether we made it or the user
+    /// did. So it is recorded at capture time, when the answer is simply
+    /// whether the path was there yet.
+    ///
+    /// Empty for a write that MODIFIED an existing file — its parents
+    /// necessarily existed — which is what keeps [`rollback`] from pruning
+    /// anything on the undo of a modification.
+    ///
+    /// `#[serde(default)]` because entries written before this field existed
+    /// have no such key; they load as "created nothing", which is the safe
+    /// reading (an old entry undoes exactly as it always did).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub created_dirs: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -166,10 +187,19 @@ pub fn dir() -> PathBuf {
 /// the write that will replace it.
 pub fn capture(path: &Path, label: impl Into<String>) -> FileChange {
     let before = fs::read_to_string(path).ok();
+    // Asked here, and only here: at this instant a missing ancestor is one the
+    // imminent write (every one of ours goes through `atomic::write`, which
+    // `create_dir_all`s) is about to make. A moment later the same question has
+    // no answer. See `FileChange::created_dirs`.
+    let created_dirs = crate::util::fsx::dirs_a_write_will_create(path)
+        .iter()
+        .map(|dir| dir.to_string_lossy().into_owned())
+        .collect();
     FileChange {
         path: path.to_string_lossy().into_owned(),
         before,
         label: label.into(),
+        created_dirs,
     }
 }
 
@@ -362,10 +392,56 @@ pub fn rollback(files: &[FileChange]) -> Result<()> {
                     fs::remove_file(p)
                         .with_context(|| format!("removing {} during rollback", p.display()))?;
                 }
+                // Only on this arm: `before: None` is the ledger saying the
+                // write CREATED this file, and `created_dirs` is only ever
+                // non-empty for such a write anyway. Deleting the file and
+                // keeping the directory we made to hold it is a half-reversal
+                // — the project is left with an empty `.agentstack/` it never
+                // had. Nothing here is unconditional: `prune_empty_dirs`
+                // removes a candidate only while it is still an empty real
+                // directory, so a sibling file (ours, not yet rolled back, or
+                // the user's own) keeps it.
+                prune_created_dirs(f)?;
             }
         }
     }
     Ok(())
+}
+
+/// The created-directory half of one file's rollback.
+///
+/// Deliberately narrow: it prunes ONLY the paths this very write recorded as
+/// not-yet-existing, so a linked library checkout, a `.git` directory, a
+/// pre-existing `.claude/`, and the project root itself are all outside its
+/// reach by construction rather than by a list of exceptions.
+fn prune_created_dirs(file: &FileChange) -> Result<Vec<PathBuf>> {
+    if file.created_dirs.is_empty() {
+        return Ok(Vec::new());
+    }
+    let candidates: Vec<PathBuf> = file.created_dirs.iter().map(PathBuf::from).collect();
+    crate::util::fsx::prune_empty_dirs(&candidates)
+}
+
+/// The directories an undo of `files` may prune, deepest first — what the
+/// preview announces and the write reports on.
+///
+/// Filtered to the ones that exist right now, because a candidate already gone
+/// (a second undo, a hand `rmdir`) is not a cleanup this run can promise.
+pub fn prunable_dirs(files: &[FileChange]) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = files
+        .iter()
+        .filter(|f| f.before.is_none())
+        .flat_map(|f| f.created_dirs.iter().map(PathBuf::from))
+        .filter(|dir| fs::symlink_metadata(dir).is_ok_and(|m| m.is_dir()))
+        .collect();
+    out.sort_by(|a, b| {
+        b.components()
+            .count()
+            .cmp(&a.components().count())
+            .then_with(|| a.cmp(b))
+    });
+    out.dedup();
+    out
 }
 
 fn prune(max: usize) {

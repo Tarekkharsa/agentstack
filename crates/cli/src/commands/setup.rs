@@ -104,6 +104,11 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
                 // never re-checks the TTY gate), so this field is irrelevant
                 // here.
                 yes: false,
+                // The wizard has no `--verbose` of its own, and its transcript
+                // is already the longest surface we print. The passed-over
+                // bridge line stays available on the standalone
+                // `agentstack init --verbose`.
+                verbose: false,
                 consented_plan: None,
                 // Never here: the wizard registers the bridge in its own
                 // ceremony, after the delivery routing is on screen. Setting
