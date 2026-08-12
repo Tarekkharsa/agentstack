@@ -737,6 +737,205 @@ fn cli(proj: &Path, args: &[&str]) -> String {
     cli_exit(proj, args).0
 }
 
+/// **A refusal that knows the library the user just filled — and names the
+/// verb that actually takes it.**
+///
+/// The central library is the product's own answer to "capabilities you keep,
+/// ready for any project". `add skill <name>` did not know it existed: it
+/// handed the source grammar back — owner/repo, a git URL, a git remote, a
+/// spelled local path — and named no command that would work, for a name
+/// sitting in `agentstack lib list` one command earlier.
+///
+/// The remedy is the toolset, not `add from`, and the test asserts that
+/// specifically. A library skill is referenced BY NAME (the library-first model
+/// `init` uses), so naming it in a toolset is what puts it to work; routing it
+/// through `add from` sends it at the catalog's bundled-asset extractor, which
+/// is a second dead end. This test is therefore also the guard on the choice:
+/// a future edit that "simplifies" both homes to one verb fails here.
+///
+/// `parse_source` stays pure and offline, and so does the lookup: the central
+/// library and the embedded catalog only, never the registry.
+#[test]
+fn a_bare_library_name_is_told_the_verb_that_takes_it() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    set_home(&home);
+    let proj = seed_project(tmp.path());
+
+    // Put a skill in the central library the way a person would.
+    let src = tmp.path().join("authored/pdf");
+    fs::create_dir_all(&src).unwrap();
+    fs::write(
+        src.join("SKILL.md"),
+        "---\nname: pdf\ndescription: Fill PDFs\n---\n# pdf\n",
+    )
+    .unwrap();
+    let added = cli(&proj, &["lib", "add", src.to_str().unwrap(), "--write"]);
+    assert!(added.contains("pdf"), "library add did not land:\n{added}");
+
+    // The dead end: the name is right there, and the old refusal listed every
+    // source spelling except the one that reaches it.
+    let (out, code) = cli_exit(&proj, &["add", "skill", "pdf"]);
+    assert_eq!(
+        code,
+        Some(1),
+        "still a refusal, not a silent success:\n{out}"
+    );
+    assert!(
+        out.contains("--skill pdf"),
+        "the refusal names no command that would work:\n{out}"
+    );
+    assert!(
+        out.contains("toolset create"),
+        "the refusal does not name the verb a library skill is reached by:\n{out}"
+    );
+    assert!(
+        !out.contains("agentstack add from pdf"),
+        "sent a library skill at the catalog's bundled-asset extractor:\n{out}"
+    );
+    assert!(
+        out.contains("central library"),
+        "the refusal does not say where the name was found:\n{out}"
+    );
+    // The grammar it could not parse is still reported — the hint widens the
+    // refusal, it does not replace it.
+    assert!(out.contains("unrecognized source 'pdf'"), "{out}");
+
+    // And the command it names converges: the library skill really does land
+    // in the manifest by name, with no `[skills]` body to go missing.
+    let preview = cli(
+        &proj,
+        &["toolset", "create", "work", "--skill", "pdf", "--preview"],
+    );
+    let digest = preview
+        .split("\"consent_digest\": \"")
+        .nth(1)
+        .and_then(|s| s.split('"').next())
+        .unwrap_or_else(|| panic!("no consent digest in:\n{preview}"))
+        .to_string();
+    let (made, code) = cli_exit(
+        &proj,
+        &[
+            "toolset",
+            "create",
+            "work",
+            "--skill",
+            "pdf",
+            "--yes",
+            "--consented",
+            &digest,
+        ],
+    );
+    assert_eq!(code, Some(0), "the offered command refused:\n{made}");
+    let manifest = fs::read_to_string(proj.join("agentstack.toml")).unwrap();
+    assert!(manifest.contains(r#"skills = ["pdf"]"#), "{manifest}");
+}
+
+/// The counterpart, and the reason the hint is a lookup rather than a sentence:
+/// a name that resolves to nothing on this machine gets the original refusal,
+/// unchanged. Offering a remedy for every unparseable input would be a second
+/// dead end wearing the first one's fix.
+#[test]
+fn an_unknown_bare_name_keeps_the_plain_grammar_refusal() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    set_home(&home);
+    let proj = seed_project(tmp.path());
+
+    let (out, code) = cli_exit(&proj, &["add", "skill", "not-a-thing-anywhere"]);
+    assert_eq!(code, Some(1), "{out}");
+    assert!(
+        out.contains("unrecognized source 'not-a-thing-anywhere'"),
+        "{out}"
+    );
+    assert!(
+        !out.contains("agentstack add from"),
+        "invented an `add from` for a name nothing here holds:\n{out}"
+    );
+    assert!(
+        !out.contains("toolset create"),
+        "invented a toolset remedy for a name nothing here holds:\n{out}"
+    );
+}
+
+/// **A failed add leaves no wreckage.**
+///
+/// `add from <a library skill>` routes a library entry at the catalog's
+/// bundled-asset extractor and fails — a real, separate defect, recorded as
+/// such. What this test pins is the blast radius. The manifest used to be
+/// written FIRST and the body extracted second, so the failing run exited 1
+/// having left `[skills.<name>] path = "./<name>"` behind, pointing at a
+/// directory that does not exist. `doctor` then reported an error whose own
+/// next step was "no command can pin a body that is not on disk — restore it,
+/// or drop the declaration": a project broken by a command that failed, with
+/// no command able to repair it.
+///
+/// Body before declaration. A declaration may not outlive the thing it points
+/// at, so whatever else this path does or does not support, a failure here is
+/// a clean refusal and the project still loads.
+#[test]
+fn a_failed_add_leaves_the_manifest_exactly_as_it_was() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    set_home(&home);
+    let proj = seed_project(tmp.path());
+
+    let src = tmp.path().join("authored/pdf");
+    fs::create_dir_all(&src).unwrap();
+    fs::write(
+        src.join("SKILL.md"),
+        "---\nname: pdf\ndescription: Fill PDFs\n---\n# pdf\n",
+    )
+    .unwrap();
+    cli(&proj, &["lib", "add", src.to_str().unwrap(), "--write"]);
+
+    let before = fs::read_to_string(proj.join("agentstack.toml")).unwrap();
+    let (out, code) = cli_exit(&proj, &["add", "from", "pdf", "--write"]);
+    assert_eq!(code, Some(1), "expected this route to fail:\n{out}");
+
+    assert_eq!(
+        fs::read_to_string(proj.join("agentstack.toml")).unwrap(),
+        before,
+        "a failed add rewrote the manifest:\n{out}"
+    );
+    assert!(
+        !proj.join("pdf").exists(),
+        "a failed add left a body behind:\n{out}"
+    );
+    // The project is still healthy — this is the assertion the exit code alone
+    // could never make, and the one the old behaviour failed.
+    let (report, _) = cli_exit(&proj, &["doctor", "--json"]);
+    let report: serde_json::Value = serde_json::from_str(&report).unwrap();
+    assert_eq!(
+        report["errors"], 0,
+        "the failed add broke the project: {report}"
+    );
+}
+
+/// The other half of the split: a CATALOG skill keeps `add from`, which is the
+/// verb that extracts its bundled body. One refusal, two homes, two verbs.
+#[test]
+fn a_bare_catalog_name_is_still_sent_to_add_from() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    set_home(&home);
+    let proj = seed_project(tmp.path());
+
+    // `adversarial-review` is a skill shipped in the embedded catalog, so this
+    // needs no network and no library.
+    let (out, code) = cli_exit(&proj, &["add", "skill", "adversarial-review"]);
+    assert_eq!(code, Some(1), "{out}");
+    assert!(
+        out.contains("agentstack add from adversarial-review"),
+        "a catalog skill lost the verb that extracts it:\n{out}"
+    );
+    assert!(out.contains("built-in catalog"), "{out}");
+}
+
 /// The same run, with the status the shell would see. G24 is a contradiction
 /// between a printed promise and an exit code, so one witness needs both.
 fn cli_exit(proj: &Path, args: &[&str]) -> (String, Option<i32>) {
