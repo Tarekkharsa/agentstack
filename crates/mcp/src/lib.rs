@@ -912,11 +912,58 @@ pub struct StdioUpstreamClient {
     runtime: tokio::runtime::Runtime,
     running: Option<RunningService<RoleClient, UpstreamHandler>>,
     timeout: std::time::Duration,
-    stderr: CapturedStderr,
+    /// Kept for the life of the connection: a live server keeps logging, and
+    /// the pump has to keep reading or the child blocks on its own stderr.
+    stderr: StderrPump,
 }
 
 const STDERR_CAPTURE_BYTES: usize = 4096;
 type CapturedStderr = Arc<std::sync::Mutex<Vec<u8>>>;
+
+/// How long a failing connection waits for the child's stderr to finish
+/// arriving before it composes the error.
+///
+/// This is a ceiling, not a delay: the pump ends at EOF, and for a child that
+/// has exited EOF is already there, so the join returns at once. The bound only
+/// applies to a child that is still alive — one we just killed for a timeout —
+/// where its last words are a nice-to-have and the caller's deadline is not.
+const STDERR_DRAIN_GRACE: std::time::Duration = std::time::Duration::from_millis(250);
+
+/// The child's stderr, and the task that is draining it.
+///
+/// The task handle is kept so a failure path can JOIN the pump instead of
+/// sleeping and hoping. A server's last line before it dies ("FATAL: no API
+/// key") is the single most useful thing a failed probe can report, and it
+/// arrives on a different task from the one composing the error — so reading
+/// the buffer without joining first is a race, and the report loses the reason
+/// exactly when the reason matters most.
+#[derive(Default)]
+struct StderrPump {
+    capture: CapturedStderr,
+    /// `None` when the child had no stderr pipe, and after the pump has been
+    /// joined — taking the handle keeps a second join from polling a finished
+    /// task.
+    task: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl StderrPump {
+    /// Everything the child said, once it has finished saying it.
+    ///
+    /// Waits for the pump to reach EOF — bounded, so a child that is still
+    /// running cannot hold a failure open — and only then reads the buffer.
+    /// Yields an empty string when the child said nothing, which is what keeps
+    /// the silent case free of a dangling reason clause.
+    async fn last_words(&mut self) -> String {
+        if let Some(task) = self.task.take() {
+            // A `JoinHandle` is a future: this returns when the pipe closes,
+            // which for a child that has already exited is immediate. Dropping
+            // it on timeout detaches the pump rather than cancelling it, so a
+            // live child keeps being drained and cannot block on its own log.
+            let _ = tokio::time::timeout(STDERR_DRAIN_GRACE, task).await;
+        }
+        stderr_text(&self.capture)
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StdioUpstreamErrorKind {
@@ -1006,12 +1053,12 @@ fn stderr_text(capture: &CapturedStderr) -> String {
 fn capture_stderr(
     handle: &tokio::runtime::Handle,
     mut stderr: tokio::process::ChildStderr,
-) -> CapturedStderr {
+) -> StderrPump {
     use tokio::io::AsyncReadExt;
 
     let capture = Arc::new(std::sync::Mutex::new(Vec::new()));
     let writer = Arc::clone(&capture);
-    handle.spawn(async move {
+    let task = handle.spawn(async move {
         let mut chunk = [0_u8; 4096];
         while let Ok(count) = stderr.read(&mut chunk).await {
             if count == 0 {
@@ -1024,7 +1071,10 @@ fn capture_stderr(
             }
         }
     });
-    capture
+    StderrPump {
+        capture,
+        task: Some(task),
+    }
 }
 
 impl StdioUpstreamClient {
@@ -1076,7 +1126,7 @@ impl StdioUpstreamClient {
         };
         let deadline = tokio::time::Instant::now() + startup_timeout;
         let (running, stderr) = runtime.block_on(async {
-            let (modern_transport, modern_stderr) = make_transport()?;
+            let (modern_transport, mut modern_stderr) = make_transport()?;
             // ONE spawn, the WHOLE startup budget. `automatic_lifecycle()`
             // probes with `server/discover` and falls back to the dated
             // handshake on the same child when the peer answers Method Not
@@ -1095,14 +1145,18 @@ impl StdioUpstreamClient {
                 // The budget is spent. There is no second attempt to make, and
                 // inventing one would double the caller's ceiling.
                 Err(_) => {
-                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    // The transport was dropped by the timeout, so the
+                    // process-wrapper kill is already in flight; joining the
+                    // pump waits for the pipe it closes, which is the same
+                    // event, and collects the child's last words on the way.
+                    let stderr = modern_stderr.last_words().await;
                     Err(StdioUpstreamError {
                         kind: StdioUpstreamErrorKind::Timeout,
                         detail: format!(
                             "MCP startup timed out after {}s",
                             startup_timeout.as_secs_f64()
                         ),
-                        stderr: stderr_text(&modern_stderr),
+                        stderr,
                     })
                 }
                 // The child answered, but not in a way discovery could use: a
@@ -1117,16 +1171,17 @@ impl StdioUpstreamClient {
                     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
                     let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
                     if remaining.is_zero() {
+                        let stderr = modern_stderr.last_words().await;
                         return Err(StdioUpstreamError {
                             kind: StdioUpstreamErrorKind::Timeout,
                             detail: format!(
                                 "MCP startup timed out after {}s",
                                 startup_timeout.as_secs_f64()
                             ),
-                            stderr: stderr_text(&modern_stderr),
+                            stderr,
                         });
                     }
-                    let (legacy_transport, legacy_stderr) = make_transport()?;
+                    let (legacy_transport, mut legacy_stderr) = make_transport()?;
                     match tokio::time::timeout(
                         remaining,
                         UpstreamHandler.serve_with_lifecycle(
@@ -1138,22 +1193,28 @@ impl StdioUpstreamClient {
                     {
                         Ok(Ok(running)) => Ok((running, legacy_stderr)),
                         Ok(Err(error)) => {
-                            tokio::task::yield_now().await;
+                            // The handshake failed, so the child is either gone
+                            // or about to be dropped. Join the pump BEFORE
+                            // composing: a `yield_now` only gave the pump one
+                            // chance to be scheduled, which usually won the race
+                            // and sometimes lost it — and the run that lost it
+                            // reported a dead server with no reason attached.
+                            let stderr = legacy_stderr.last_words().await;
                             Err(StdioUpstreamError {
                                 kind: handshake_failure_kind(&error),
                                 detail: error.to_string(),
-                                stderr: stderr_text(&legacy_stderr),
+                                stderr,
                             })
                         }
                         Err(_) => {
-                            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                            let stderr = legacy_stderr.last_words().await;
                             Err(StdioUpstreamError {
                                 kind: StdioUpstreamErrorKind::Timeout,
                                 detail: format!(
                                     "MCP startup timed out after {}s",
                                     startup_timeout.as_secs_f64()
                                 ),
-                                stderr: stderr_text(&legacy_stderr),
+                                stderr,
                             })
                         }
                     }
@@ -1197,7 +1258,7 @@ impl StdioUpstreamClient {
     }
 
     pub fn captured_stderr(&self) -> String {
-        stderr_text(&self.stderr)
+        stderr_text(&self.stderr.capture)
     }
 
     pub fn server_identity(&self) -> (Option<String>, Option<String>) {
@@ -1320,6 +1381,54 @@ mod tests {
             client.cancel().await.expect("cancel client");
             server_task.await.expect("server task");
         }
+    }
+
+    /// The child's last words are read by JOINING the pump, not by hoping it
+    /// was scheduled first.
+    ///
+    /// This test never gives the pump a turn before asking for the text, which
+    /// is the losing side of the race made deterministic: the bytes are in the
+    /// pipe and the task that would move them into the buffer has not run yet.
+    /// Reading the buffer here without the join returns nothing, and a probe
+    /// would report a dead server with no reason attached — which is what CI
+    /// caught intermittently. The join makes the answer the same every time.
+    #[tokio::test]
+    async fn a_dying_child_is_joined_before_its_words_are_read() {
+        let spawn = |script: &str| {
+            let mut child = tokio::process::Command::new("sh")
+                .arg("-c")
+                .arg(script)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .expect("sh is available");
+            let stderr = child.stderr.take().expect("piped stderr");
+            capture_stderr(&tokio::runtime::Handle::current(), stderr)
+        };
+
+        // Asked for immediately: no yield, no sleep, no second chance.
+        let mut pump = spawn("printf 'FATAL: no API key\\n' >&2; exit 3");
+        let words = pump.last_words().await;
+        assert!(
+            words.contains("FATAL: no API key"),
+            "the child's reason was lost between its pipe and the error: {words:?}"
+        );
+
+        // A child with nothing to say yields nothing to append, and does not
+        // spend the drain bound discovering that.
+        let started = std::time::Instant::now();
+        let mut silent = spawn("exit 3");
+        assert_eq!(silent.last_words().await, "");
+        assert!(
+            started.elapsed() < STDERR_DRAIN_GRACE,
+            "joining a pump at EOF must return at once: {:?}",
+            started.elapsed()
+        );
+
+        // Asking twice is safe: the handle is taken, so the second call reads
+        // the buffer instead of polling a finished task.
+        assert_eq!(pump.last_words().await, words);
     }
 
     /// A child that dies mid-handshake shows itself on whichever end of the

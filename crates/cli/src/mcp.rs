@@ -258,13 +258,23 @@ mod tests {
     /// A child that starts and then gives up is its own answer: "exited before
     /// the handshake", not a hang and not a dialect problem. The stream closing
     /// with no reply is what proves it.
+    ///
+    /// The second assertion is the one that flaked, and it is the one that
+    /// matters more: the classification tells a user their server died, while
+    /// the child's own last line tells them WHY. That line arrives on the
+    /// stderr pump — a different task from the one composing the error — so the
+    /// error joins the pump instead of reading whatever happens to have landed.
     #[test]
     fn a_child_that_dies_before_the_handshake_is_reported_as_exited() {
         let err = probe_stdio(
             "sh",
             &[
                 "-c".to_string(),
-                "echo 'FATAL: no API key' >&2; exit 3".to_string(),
+                // `printf` to fd 2 is one write that completes before the shell
+                // exits, so the bytes are in the pipe by the time the child
+                // dies: the reason is always there to be found, never merely
+                // likely to be.
+                "printf 'FATAL: no API key\\n' >&2; exit 3".to_string(),
             ],
             &IndexMap::new(),
             std::path::Path::new("."),
@@ -278,6 +288,35 @@ mod tests {
         assert!(
             err.to_string().contains("FATAL: no API key"),
             "the child's own reason must reach the user: {err}"
+        );
+    }
+
+    /// The other half of the same contract: a child that dies without saying
+    /// anything gets the bare sentence — no dangling reason clause — and does
+    /// not spend the drain bound waiting for words that are never coming.
+    #[test]
+    fn a_child_that_dies_silently_gets_no_reason_clause() {
+        let started = Instant::now();
+        let err = probe_stdio(
+            "sh",
+            &["-c".to_string(), "exit 3".to_string()],
+            &IndexMap::new(),
+            std::path::Path::new("."),
+            Duration::from_secs(5),
+        )
+        .expect_err("a server that exits cannot complete a handshake");
+        assert!(
+            matches!(err, StdioProbeError::Exited { .. }),
+            "expected an exit, got: {err}"
+        );
+        assert!(
+            !err.to_string().contains(" — "),
+            "a silent child must not get an empty reason clause: {err}"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "joining a pump already at EOF must return at once, not wait out the bound: {:?}",
+            started.elapsed()
         );
     }
 

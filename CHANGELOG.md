@@ -4,6 +4,93 @@ User-facing changes per release. The [GitHub Releases
 page](https://github.com/Tarekkharsa/agentstack/releases) carries the built
 binaries, checksums, and provenance attestations for each entry.
 
+## v0.18.0-rc.4 — 2026-08-12
+
+**The candidate that was walked, not only built.** rc.3 shipped the zero-files
+default and the rmcp wire; this one is what came back from walking that build
+end to end, as a newcomer would. Nothing in the consent, policy or enforcement
+core moves. What moves is how much screen you read to get through a first run,
+whether the manifest that run writes actually describes your project, and
+whether the commands you reach for next finish what they start. Like rc.1,
+rc.2 and rc.3 this is a pre-release: `install.sh` and `brew install` keep
+serving v0.17.1 until v0.18.0 is final, and a participant pins this build with
+`AGENTSTACK_VERSION=v0.18.0-rc.4`.
+
+- **The screens went on a diet.** The scripted first run (`init --yes`) prints
+  22 lines where it printed 66, and the wizard 95 where it printed 176;
+  `status` now fits in 14 lines. Nothing left the record: every fact that left
+  a default screen is behind a `--verbose` on the command that used to print
+  it — `init`, `setup`, `status`, `uninstall` — and `doctor` folds a section
+  that is entirely healthy into its header plus a one-line verdict, with
+  `doctor --all` as the escape hatch that shows every section, including ones
+  for features this project does not use. A section with anything to say is
+  expanded exactly as before, a single-line section is never folded, and
+  `--ci` still shows everything, so nothing a CI gate reads changed. Two
+  disclosures deliberately stayed on `init`'s default screen: the machine-layer
+  file it wrote — the only file it writes outside your project — and the CLIs
+  whose settings that layer already declares.
+
+- **The first manifest describes your project.** The file `init` wrote was
+  partly about itself: the agentstack bridge imported into its own manifest,
+  `[skills]` and its neighbours present but empty, your personal editor
+  settings recorded in the repository, and a `[targets]` list that only
+  restated what detection finds anyway. All four are gone. The bridge is never
+  self-imported, empty tables are not written, personal settings go to the
+  machine layer where they belong, and `[targets]` is written only when it
+  narrows something.
+
+- **Undo takes back the folders a write created.** Directory creation is now a
+  recorded fact in the history ledger, so `agentstack x restore --last --write`
+  prunes exactly the directories the write made — where before it removed the
+  files and left their empty parents standing. `use --write` also records its
+  own `.gitignore` edit, which is what makes the `restore --last` line it
+  prints true rather than a hint that reverses somebody else's change, and
+  `session end` puts the `.gitignore` back the way `session start` promised it
+  would.
+
+- **The dead ends the walkthrough found.** A failed `add from` no longer breaks
+  the project: the manifest was written first and the body extracted second, so
+  a failing run exited 1 having left a `[skills.<name>]` declaration pointing at
+  a directory that does not exist — a project broken by a command that failed,
+  with `doctor`'s own next step saying no command could repair it. Body before
+  declaration now, so a failure is a clean refusal. `add skill <name>` for a
+  name sitting in your central library names the verb that actually takes it
+  (the toolset) instead of handing back the source grammar. `share receive`
+  into a folder with no manifest succeeds, rather than printing "✓ 1 file into
+  this project" and then exiting 1 on the same screen. `up --write --library
+  <url>` with an unreachable remote names the command that repoints the remote
+  and shows the URL it tried, instead of telling you to re-run the command that
+  just failed. `lib sync --status` stops promising a push that `lib sync`
+  cannot perform, and both surfaces now name the source you asked about. A
+  workflow script that does not parse is reported as a parse failure at the
+  script's own line, not as a meta-block fault, while a genuine meta fault
+  still names the meta block; and `--resume` with an unknown run id names the
+  command that lists resumable runs instead of handing over an errno.
+
+- **The executor acquires the runtime it was pinned to.** Only the egress
+  sidecar was ever pulled. The digest-pinned node runtime was started and never
+  acquired, so the first `tools_execute` on a clean machine died on a registry
+  404 dressed as a Docker error. The run now ensures every image in its plan
+  through the one acquisition path that already existed, and a pull that
+  happens lands in the run record as evidence like anything else the run did.
+
+- **The test suite never reaches a live registry**, and proves the same things
+  in a third of the time. The workspace pins the override and a witness asserts
+  it holds, so a green run is a hermetic run. Nine binaries fold into three,
+  eight redundant tests leave each named with what still covers it, and the
+  sandbox-gated library tests run in CI at last — one of them the
+  `tools_execute` trust witness, until now compiled everywhere and executed
+  nowhere.
+
+- **Documentation: six files nothing references are gone**, found by a
+  path-precise reachability scan over every page, tool, workflow and crate —
+  two superseded logo copies, one strokeless design mark, and three Figma
+  dev-mode exports whose support script was never committed. Redirect stubs,
+  the OG-card generator and the archive stay, unreferenced by design. The
+  site's fonts are also self-hosted now, so reading the documentation contacts
+  no third party; that shipped inside the rc.3 build but was never written down
+  in its entry.
+
 ## v0.18.0-rc.3 — 2026-08-12
 
 **The candidate the activation study runs on.** rc.2 was tagged one week and

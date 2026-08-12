@@ -13,5 +13,24 @@ boa_engine = "0.21"
 serde_json = { version = "1", features = ["preserve_order"] }
 thiserror = "1"
 
+[features]
+# Off everywhere except an explicit `cargo bench --features bench-internals`.
+# Exposes `BoundaryBench` (see the seam in src/lib.rs) so benches/boundary.rs
+# can time the `pub(crate)` JSON converters directly. Adds no dependency and
+# changes no shipped code path.
+bench-internals = []
+
+# Plain `harness = false` binaries with `std::time::Instant`: the workspace
+# rule is that a new dependency needs maintainer approval, so there is no
+# criterion here. See benches/BASELINE.md for the recorded numbers and the
+# exact commands.
+[[bench]]
+name = "engine"
+harness = false
+
+[[bench]]
+name = "boundary"
+harness = false
+
 [lints]
 workspace = true
