@@ -604,7 +604,7 @@ the exact name</code></pre></div>
 <span class="pr">$ </span>agentstack doctor --ci       <span class="cm"># everything, plus a nonzero exit on any error</span>
 <span class="pr">$ </span>agentstack doctor --json     <span class="cm"># machine-readable, for a UI or a bug report</span>
 <span class="pr">$ </span>agentstack x explain &lt;name&gt;    <span class="cm"># what one server, skill, or instruction actually is</span></code></pre></div>
-<p>By default <code>doctor</code> hides sections for features this project does not use and says how many it hid. <code>--all</code> shows them.</p>
+<p>By default <code>doctor</code> hides sections for features this project does not use, and summarises to one line any section where every check passed. It says how many of each it shortened. Findings are never shortened: one warning or error keeps its whole section in full. <code>--all</code> shows every line.</p>
 <ul>
 <li><a href="faq.html">FAQ</a> — the questions that come up in the first week</li>
 <li><a href="concepts.html">Concepts</a> — every term in two or three plain sentences</li>
