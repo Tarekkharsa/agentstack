@@ -334,7 +334,7 @@ fn run_lockdown_routed(shell_cmd: &str, server_url: &str) -> (bool, String, std:
     // §7.2: the non-interactive grant presents the previewed surface digest,
     // computed after `lock` wrote the lockfile it pins.
     let consent = agentstack::trust::digest_for(&proj).unwrap();
-    run_as(&["trust", ".", "--yes", "--consented-digest", &consent]);
+    run_as(&["trust", ".", "--yes", "--consented", &consent]);
 
     let out = Command::new(env!("CARGO_BIN_EXE_agentstack"))
         .args(["run", "--lockdown", "shtest-http", "--", "-c", shell_cmd])
@@ -563,7 +563,7 @@ fn lockdown_refuses_an_adapter_that_cannot_carry_the_gateway_token() {
     // §7.2: the non-interactive grant presents the previewed surface digest,
     // computed after `lock` wrote the lockfile it pins.
     let consent = agentstack::trust::digest_for(&proj).unwrap();
-    run_as(&["trust", ".", "--yes", "--consented-digest", &consent]);
+    run_as(&["trust", ".", "--yes", "--consented", &consent]);
 
     let out = Command::new(env!("CARGO_BIN_EXE_agentstack"))
         .args(["run", "--lockdown", "shtest-nohdr", "--", "-c", "true"])

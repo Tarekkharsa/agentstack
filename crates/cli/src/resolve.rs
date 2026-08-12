@@ -1596,9 +1596,9 @@ pub fn skill_lock_status(
     // away from the lock, not to force it back to the locked revision.
     let pinned_rev = match mode {
         ResolveMode::Fetch => None,
-        ResolveMode::NoFetch | ResolveMode::PathOnly => {
-            lock.get(name).and_then(|entry| entry.rev.as_deref())
-        }
+        ResolveMode::NoFetch | ResolveMode::PathOnly => lock
+            .get(crate::sources::capability_name(name))
+            .and_then(|entry| entry.rev.as_deref()),
     };
     match resolve_skill_with_pin(
         manifest,
@@ -1643,7 +1643,12 @@ pub fn classify_skill(
     current_rev: Option<&str>,
     lock: &Lock,
 ) -> SkillLockStatus {
-    match lock.get(name) {
+    // The lock is keyed by the capability's own name; a source qualifier
+    // (`central:x`, `lib:central/x`) is a SELECTOR, not part of the identity
+    // (`crate::sources::capability_name`). Looking the pin up under the
+    // reference as typed reported every qualified reference as unlocked, over a
+    // lockfile that had pinned it correctly all along.
+    match lock.get(crate::sources::capability_name(name)) {
         None => SkillLockStatus::MissingLockEntry,
         Some(entry) if entry.checksum.hex() != current_checksum => SkillLockStatus::ChecksumDrift {
             locked: entry.checksum.hex().to_string(),

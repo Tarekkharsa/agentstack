@@ -178,7 +178,7 @@ fn grant_honours_manifest_dir_from_a_manifestless_cwd() {
         &[
             "trust",
             "--yes",
-            "--consented-digest",
+            "--consented",
             &digest,
             "--manifest-dir",
             &dir,

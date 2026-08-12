@@ -256,3 +256,156 @@ fn a_denial_survives_an_unwritable_audit_log() {
         "a rule denial must survive an unwritable log too: {out:?}"
     );
 }
+
+// ── `guard install`: who it can see, and what it takes to write ─────────────
+//
+// Two separate defects, one command.
+//
+// **Detection.** `guard status`/`install` probed a hook-config DIRECTORY of
+// their own (`~/.claude`, `~/.pi/agent`) while `status` and `doctor` ask the
+// adapter descriptors (binary on `$PATH`, or the descriptor's config file). So
+// the guard silently skipped CLIs the rest of the product was reporting as
+// present, and the user was never told.
+//
+// **Consent.** `guard install` wrote hooks into other products' global config
+// files with no preview and no `--write` — the only write in the CLI without
+// the pair every other write has.
+
+/// A machine with an isolated HOME, an isolated `$PATH`, and no CLI configs.
+fn guard_machine(tmp: &Path) -> (PathBuf, PathBuf) {
+    let home = tmp.join("home");
+    fs::create_dir_all(home.join(".agentstack")).unwrap();
+    let bin = tmp.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    (home, bin)
+}
+
+/// Put an executable of this name on the isolated `$PATH`.
+fn fake_binary(bin: &Path, name: &str) {
+    let path = bin.join(name);
+    fs::write(&path, "#!/bin/sh\nexit 0\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    }
+}
+
+fn guard_cmd(home: &Path, bin: &Path, args: &[&str]) -> String {
+    let out = Command::new(env!("CARGO_BIN_EXE_agentstack"))
+        .args(args)
+        .env_clear()
+        .env("HOME", home)
+        .env("AGENTSTACK_HOME", home.join(".agentstack"))
+        .env("PATH", bin)
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("running agentstack");
+    format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    )
+}
+
+/// The pair every other write in this CLI has: bare command previews, `--write`
+/// applies. The preview must name the same files the write touches — a preview
+/// that describes a different install is worse than none.
+#[test]
+fn guard_install_previews_and_only_write_writes() {
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let (home, bin) = guard_machine(tmp.path());
+    fake_binary(&bin, "claude");
+
+    let preview = guard_cmd(&home, &bin, &["guard", "install"]);
+    assert!(
+        preview.contains("Preview") && preview.contains("nothing is written"),
+        "the bare command previews:\n{preview}"
+    );
+    assert!(
+        preview.contains(".claude/settings.json") && preview.contains("PreToolUse"),
+        "the preview names the file and the hook events:\n{preview}"
+    );
+    assert!(
+        preview.contains("agentstack guard install --write"),
+        "the preview names the command that applies it:\n{preview}"
+    );
+    assert!(
+        !home.join(".claude/settings.json").exists(),
+        "a preview must not edit another product's config"
+    );
+    assert!(
+        !home.join(".agentstack/agentstack.toml").exists(),
+        "a preview must not seed the machine manifest either"
+    );
+
+    let written = guard_cmd(&home, &bin, &["guard", "install", "--write"]);
+    let settings = fs::read_to_string(home.join(".claude/settings.json"))
+        .expect("--write installs the hook the preview named");
+    assert!(
+        settings.contains("guard check --protocol claude"),
+        "the hook is ours, recognizable by the command it runs: {settings}"
+    );
+    assert!(
+        fs::read_to_string(home.join(".agentstack/agentstack.toml"))
+            .unwrap()
+            .contains("[guard]"),
+        "…and the machine manifest is seeded: {written}"
+    );
+}
+
+/// The guard now asks the same question the rest of the product asks. A CLI
+/// present only as a binary on `$PATH` — no hook-config directory yet — used to
+/// be invisible here while `status` and `doctor` reported it as installed.
+#[test]
+fn guard_detects_a_cli_by_its_binary_like_every_other_surface() {
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let (home, bin) = guard_machine(tmp.path());
+    fake_binary(&bin, "claude");
+    assert!(
+        !home.join(".claude").exists(),
+        "fixture: no hook-config directory — the binary is the only witness"
+    );
+
+    let preview = guard_cmd(&home, &bin, &["guard", "install"]);
+    assert!(
+        !preview.contains("claude-code (+ vscode agent mode) — not detected"),
+        "a CLI on PATH is detected:\n{preview}"
+    );
+    let status = guard_cmd(&home, &bin, &["guard", "status"]);
+    assert!(
+        !status.contains("claude-code (+ vscode agent mode)        \u{b7} not detected"),
+        "…and `status` agrees:\n{status}"
+    );
+}
+
+/// The other half of the same alignment: a config we can see, a binary we
+/// cannot. Detection counts it (a CLI installed outside `$PATH` still runs
+/// hooks), so the screens say what is true instead of implying a binary was
+/// found.
+#[test]
+fn a_config_without_its_binary_says_so_and_is_still_wired() {
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let (home, bin) = guard_machine(tmp.path());
+    // The adapter descriptor's config for claude-code is the FILE `~/.claude.json`
+    // — guard's own probe is the DIRECTORY `~/.claude`, which does not exist
+    // here. Only the shared seam can see this machine.
+    fs::write(home.join(".claude.json"), "{}\n").unwrap();
+
+    let status = guard_cmd(&home, &bin, &["guard", "status"]);
+    assert!(
+        status.contains("config seen, binary not on PATH"),
+        "the honest one-liner, not a silent skip:\n{status}"
+    );
+
+    let preview = guard_cmd(&home, &bin, &["guard", "install"]);
+    assert!(
+        preview.contains("config seen, binary not on PATH, hooks still written"),
+        "the preview says what will happen, not just what was found:\n{preview}"
+    );
+    guard_cmd(&home, &bin, &["guard", "install", "--write"]);
+    assert!(
+        home.join(".claude/settings.json").exists(),
+        "…and the write does exactly that"
+    );
+}

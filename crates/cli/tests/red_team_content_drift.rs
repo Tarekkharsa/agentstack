@@ -79,11 +79,7 @@ fn delivered_project(tmp: &Path) -> (PathBuf, PathBuf, PathBuf) {
         .as_str()
         .unwrap()
         .to_string();
-    let (text, ok) = run(
-        &["trust", "--yes", "--consented-digest", &digest],
-        &home,
-        &proj,
-    );
+    let (text, ok) = run(&["trust", "--yes", "--consented", &digest], &home, &proj);
     assert!(ok, "grant failed:\n{text}");
     let (text, ok) = run(&["use", "--write", "--no-gitignore"], &home, &proj);
     assert!(ok, "first activation failed:\n{text}");
@@ -221,11 +217,7 @@ fn accepting_drift_requires_relocking_and_re_gates_trust() {
         .as_str()
         .unwrap()
         .to_string();
-    let (text, ok) = run(
-        &["trust", "--yes", "--consented-digest", &digest],
-        &home,
-        &proj,
-    );
+    let (text, ok) = run(&["trust", "--yes", "--consented", &digest], &home, &proj);
     assert!(ok, "re-grant failed:\n{text}");
     let (text, ok) = run(&["use", "--write", "--no-gitignore"], &home, &proj);
     assert!(ok, "activation after acceptance failed:\n{text}");

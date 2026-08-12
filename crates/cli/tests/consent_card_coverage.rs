@@ -170,7 +170,7 @@ fn the_preview_json_carries_every_kind_the_card_discloses() {
     let digest = v["surface_digest"].as_str().unwrap().to_string();
     let (card, granted) = run(
         bin,
-        &["trust", "--yes", "--consented-digest", &digest],
+        &["trust", "--yes", "--consented", &digest],
         &home,
         &proj,
     );
@@ -218,7 +218,7 @@ fn every_recorded_surface_item_appears_in_the_review_the_human_read() {
     // surface. Capturing its stdout captures precisely what a human read.
     let (card, granted) = run(
         bin,
-        &["trust", "--yes", "--consented-digest", &digest],
+        &["trust", "--yes", "--consented", &digest],
         &home,
         &proj,
     );

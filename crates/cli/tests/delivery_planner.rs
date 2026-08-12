@@ -204,11 +204,7 @@ fn grant(proj: &Path, home: &Path) {
         .as_str()
         .expect("preview carries a surface digest")
         .to_string();
-    run(
-        &["trust", "--yes", "--consented-digest", &digest],
-        proj,
-        home,
-    );
+    run(&["trust", "--yes", "--consented", &digest], proj, home);
 }
 
 fn run(args: &[&str], cwd: &Path, home: &Path) -> String {

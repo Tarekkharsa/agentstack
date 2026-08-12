@@ -614,11 +614,7 @@ fn sealed_project(
     let json: serde_json::Value =
         serde_json::from_str(&preview).expect("`trust --preview` must be JSON");
     let digest = json["surface_digest"].as_str().unwrap().to_string();
-    let (_, code) = sealed(
-        &["trust", "--yes", "--consented-digest", &digest],
-        &home,
-        &proj,
-    );
+    let (_, code) = sealed(&["trust", "--yes", "--consented", &digest], &home, &proj);
     assert_eq!(code, 0, "fixture: trust must succeed");
     (home, proj)
 }

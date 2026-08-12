@@ -60,6 +60,22 @@ fn add_from(a: &AddFromArgs, manifest_dir: Option<&Path>) -> Result<()> {
         return add_git_pack(a, &ctx, &git_ref);
     }
 
+    // `lib:<source>/<name>` — a skill from a linked library. Claimed HERE,
+    // above `provider::resolve`, because the provider route ends at the
+    // bundled-catalog extractor and a library body is not a bundled asset:
+    // that is the dead end this spelling exists to replace, and letting the
+    // reference fall through to it would recreate it.
+    if a.id.starts_with(crate::sources::LIB_PREFIX) {
+        let (source, name) = crate::sources::split_lib_reference(&a.id).with_context(|| {
+            format!(
+                "'{}' is not a library reference — the form is `lib:<source>/<name>`, \
+                 e.g. `lib:central/rust-testing` (see `agentstack x lib sources`)",
+                crate::text::sanitize_line(&a.id)
+            )
+        })?;
+        return add_from_library_skill(a, &ctx, source, name);
+    }
+
     let candidate = provider::resolve(&a.id).with_context(|| {
         format!(
             "no capability '{}' in the catalog or registry — run `agentstack search {}` to find one",
@@ -167,7 +183,7 @@ fn add_from_server(a: &AddFromArgs, ctx: &super::Context, candidate: &Candidate)
     if a.write {
         // Same family, same gap: `add from <id>` resolving to a server wrote
         // the manifest and left the pin to whatever ran next.
-        pin_server_write(ctx)?;
+        pin_write(ctx)?;
         println!(
             "{} review secrets with `agentstack secret list`, then `agentstack apply`.",
             "↳".cyan()
@@ -278,6 +294,137 @@ fn add_from_skill(
         );
     }
     Ok(())
+}
+
+/// `agentstack add from lib:<source>/<name>` — declare a skill that already
+/// lives in a linked library.
+///
+/// **Why this is not the provider route.** A catalog skill is a body compiled
+/// into this binary that `add from` extracts into the project; a library skill
+/// is bytes already on disk in a folder the user linked. Sending the second at
+/// the first's extractor is the dead end this spelling closes: the extraction
+/// fails because a library body is not a bundled asset. So the reference is
+/// resolved through the linked-libraries seam
+/// ([`crate::library::Library::get`], which is the same lookup the resolver,
+/// the validator and `doctor` use) and nothing is extracted at all.
+///
+/// **What it writes.** A library skill is referenced BY NAME — it has no
+/// `[skills.<name>]` block, and an empty one shadowing it is a hard error
+/// ([`crate::resolve::ResolveError::InlineNoSourceShadowsLibrary`]). So the
+/// declaration is toolset membership, spelled with the explicit reference:
+///
+/// ```toml
+/// [toolsets.dev]
+/// skills = ["lib:central/rust-testing"]
+/// ```
+///
+/// **What pins it.** `--write` runs the project's own lock entry point
+/// ([`pin_write`]) exactly as `add server --write` does, so the library body's
+/// content digest lands in `agentstack.lock` in the same command that declared
+/// it — which is what makes `doctor`'s `library · matches lock` row have
+/// something to check, and what makes the consent that follows durable.
+fn add_from_library_skill(
+    a: &AddFromArgs,
+    ctx: &super::Context,
+    source: &str,
+    name: &str,
+) -> Result<()> {
+    let library = crate::library::Library::load_default()?;
+    if !library.linked.has_source(source) {
+        let linked = library.linked.source_names();
+        anyhow::bail!(
+            "no linked library named '{}' — linked: {}. Link one with \
+             `agentstack x lib link <path> --name {} --write`.",
+            crate::text::sanitize_line(source),
+            if linked.is_empty() {
+                "(none)".to_string()
+            } else {
+                linked.join(", ")
+            },
+            crate::text::sanitize_line(source),
+        );
+    }
+    let reference = format!("{}{source}/{name}", crate::sources::LIB_PREFIX);
+    if library.get(&reference).is_none() {
+        anyhow::bail!(
+            "no skill '{}' in library '{}' — run `agentstack x lib list` to see what is there",
+            crate::text::sanitize_line(name),
+            crate::text::sanitize_line(source),
+        );
+    }
+    let manifest = &ctx.loaded.manifest;
+    if manifest.skills.contains_key(name) {
+        anyhow::bail!(
+            "skill '{name}' is already declared inline in this manifest — an inline block \
+             shadows the library copy. Remove it (`agentstack x remove {name}`) first, or \
+             keep the inline one."
+        );
+    }
+    // The toolset is the declaration site, so it has to be unambiguous.
+    //
+    //  1. `--toolset` wins — the user said where.
+    //  2. else the manifest's own resolved default: an explicit
+    //     `default_toolset`, or the sole toolset there is.
+    //  3. else, with no toolsets at all, `default` — the name `init` itself
+    //     writes when it creates a project's first toolset, so this adds no new
+    //     convention.
+    //  4. else refuse. Several toolsets and no default is a real question only
+    //     the user can answer, and guessing would put their capability
+    //     somewhere they did not choose.
+    const FIRST_TOOLSET: &str = "default";
+    let toolset = match a.profile.as_deref() {
+        Some(t) => t.to_string(),
+        None => match manifest.resolved_default_toolset() {
+            Some(t) => t.to_string(),
+            None if manifest.profiles.is_empty() => FIRST_TOOLSET.to_string(),
+            None => anyhow::bail!(
+                "this project has {} toolsets and no default, so `add from {reference}` cannot \
+                 tell which one should carry it — name it: \
+                 `agentstack add from {reference} --toolset <name>`",
+                manifest.profiles.len(),
+            ),
+        },
+    };
+
+    let original = fs::read_to_string(&ctx.loaded.manifest_path)
+        .with_context(|| format!("reading {}", ctx.loaded.manifest_path.display()))?;
+    let new_text = add_to_profile(&original, &toolset, "skills", &reference)?;
+
+    println!(
+        "{} add library skill '{}' from '{}' to toolset '{}' in {}",
+        "→".cyan(),
+        crate::text::sanitize_line(name).bold(),
+        crate::text::sanitize_line(source),
+        toolset.bold(),
+        ctx.loaded.manifest_path.display()
+    );
+    print!(
+        "{}",
+        diff::render(&original, &new_text)
+            .lines()
+            .map(|l| format!("  {l}\n"))
+            .collect::<String>()
+    );
+
+    if !a.write {
+        println!(
+            "\nDry run. Re-run with {} to update the manifest.",
+            "--write".bold()
+        );
+        return Ok(());
+    }
+    // Nothing is copied into the project: the body stays in the library and the
+    // manifest points at it. So there is no body-before-declaration ordering to
+    // get right here — only the declaration, then the pin.
+    crate::util::atomic::write(&ctx.loaded.manifest_path, &new_text)
+        .with_context(|| format!("writing {}", ctx.loaded.manifest_path.display()))?;
+    println!(
+        "{} added library skill '{}' to toolset '{}'.",
+        "✓".green(),
+        crate::text::sanitize_line(name),
+        toolset
+    );
+    pin_write(ctx)
 }
 
 /// Lay down a bundled skill's body under the manifest dir, before anything
@@ -770,7 +917,7 @@ fn sanitize_ref(name: &str) -> String {
         .to_ascii_uppercase()
 }
 
-/// Pin what a server write just declared, in the same command that declared it.
+/// Pin what a manifest write just declared, in the same command that declared it.
 ///
 /// **G29, and the whole reason this exists.** `add skill --write` has always
 /// recorded its lock entries inline (see [`preview_and_commit`]); `add server
@@ -795,7 +942,7 @@ fn sanitize_ref(name: &str) -> String {
 /// second implementation of that here is how two pinning paths come to disagree.
 /// `quiet` composes it into this command's output as one `✓ pinned …` line, the
 /// same way `agentstack yes` composes it.
-fn pin_server_write(ctx: &super::Context) -> Result<()> {
+fn pin_write(ctx: &super::Context) -> Result<()> {
     super::lock::run(
         &crate::cli::LockArgs {
             quiet: true,
@@ -901,7 +1048,7 @@ fn upsert_server(a: &AddServerArgs, manifest_dir: Option<&Path>, allow_update: b
     // describes, so leaving the old pin behind is the same trap wearing a
     // different verb.
     if a.write {
-        pin_server_write(&ctx)?;
+        pin_write(&ctx)?;
     }
     Ok(())
 }
@@ -917,27 +1064,40 @@ fn upsert_server(a: &AddServerArgs, manifest_dir: Option<&Path>, allow_update: b
 /// source spellings — none of which is the library — naming no command that
 /// would work.
 ///
-/// **The two homes take different verbs, and saying so is the whole point.** A
-/// catalog skill is a bundled body that `add from` extracts into the project. A
-/// library skill is already on disk in the library and is referenced BY NAME —
-/// the library-first model `init` uses for servers — which for a skill means
-/// naming it in a toolset. Offering `add from` for both would send the library
-/// case at the catalog's bundled-asset extractor, which is exactly where that
-/// route breaks (see the deferred finding on `add from <library skill>`); a
-/// refusal that hands over a second dead end is worse than the first.
+/// **The two homes still take different routes — but both now have a working
+/// command line.** A catalog skill is a bundled body that `add from` extracts
+/// into the project. A library skill is already on disk in the library and is
+/// referenced BY NAME, which for a skill means naming it in a toolset. Sending
+/// the library case at the catalog's bundled-asset extractor is where the plain
+/// `add from <name>` route breaks, so this refusal never offers that; it offers
+/// the explicit library spelling, `add from lib:<source>/<name>`, which is
+/// routed through the linked-libraries seam instead
+/// ([`add_from_library_skill`]).
 ///
-/// The lookup is OFFLINE (`resolve_local`), so a mistyped source can never
-/// become a network round-trip on an error path. When the name resolves to
-/// nothing local the original refusal is returned untouched.
+/// The lookup is OFFLINE (`resolve_local`, plus the already-loaded link list),
+/// so a mistyped source can never become a network round-trip on an error path.
+/// When the name resolves to nothing local the original refusal is returned
+/// untouched.
 fn named_source_hint(source: &str, err: anyhow::Error) -> anyhow::Error {
     let Some(c) = crate::provider::resolve_local(source) else {
         return err;
     };
     let name = crate::text::sanitize_line(source);
     let remedy = if c.source == "library" {
+        // Name the source the skill actually lives in, so the offered command
+        // is one the user can paste. Falling back to the placeholder keeps the
+        // hint honest if the link list cannot be read at all.
+        let holder = crate::library::Library::load_default()
+            .ok()
+            .and_then(|lib| {
+                lib.linked
+                    .find(crate::library::Kind::Skill, source)
+                    .map(|(index, _)| index.name.clone())
+            })
+            .unwrap_or_else(|| "<source>".to_string());
         format!(
             "'{name}' is already in your central library — a project references a library skill \
-             by name, so put it in a toolset: `agentstack toolset create <toolset> --skill {name}`"
+             by name: `agentstack add from lib:{holder}/{name} --write`"
         )
     } else {
         // The same command `search` prints against every catalog row, so the

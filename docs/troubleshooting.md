@@ -617,7 +617,7 @@ untrusted is a legitimate choice.
 ```text
 error: refusing to trust: stdin is not a terminal — review the declarations
 above and re-run interactively, or acknowledge non-interactively with --yes
---consented-digest <surface_digest from `agentstack trust --preview`>
+--consented <surface_digest from `agentstack trust --preview`>
 ```
 
 Typing the command at a terminal *is* the consent, so a piped or scripted
@@ -626,11 +626,11 @@ digest back:
 
 ```bash
 agentstack trust --preview                      # prints surface_digest
-agentstack trust --yes --consented-digest sha256:…
+agentstack trust --yes --consented sha256:…
 ```
 
 ```text
-error: refusing to trust: --yes requires --consented-digest — run `agentstack
+error: refusing to trust: --yes requires --consented — run `agentstack
 trust --preview`, review the surface, and pass its `surface_digest` back
 ```
 

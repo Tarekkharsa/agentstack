@@ -107,7 +107,7 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
                 // never re-checks the TTY gate), so this field is irrelevant
                 // here.
                 yes: false,
-                consented_plan: None,
+                consented: None,
                 // Never here: the wizard registers the bridge in its own
                 // ceremony, after the delivery routing is on screen. Setting
                 // it would also make the import confirm's promise ("your CLIs'
@@ -854,7 +854,7 @@ fn offer_machine_protection(ctx: &super::Context, target_ids: &[String]) -> Resu
             println!(
                 "  {} guard skipped — later: {}",
                 "·".dimmed(),
-                "agentstack guard install".bold()
+                "agentstack guard install --write".bold()
             );
         }
         if rules_pending {
@@ -871,13 +871,13 @@ fn offer_machine_protection(ctx: &super::Context, target_ids: &[String]) -> Resu
         // `guard install` prints its own per-CLI write lines, so the summary
         // surfaces those rather than duplicating them here.
         println!();
-        match super::guard::install() {
+        match super::guard::install(true) {
             Ok(()) => true,
             Err(err) => {
                 println!(
                     "  {} guard install failed ({err:#}) — setup itself succeeded; retry with {}.",
                     "⚠".yellow(),
-                    "agentstack guard install".bold()
+                    "agentstack guard install --write".bold()
                 );
                 false
             }

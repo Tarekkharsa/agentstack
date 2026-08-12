@@ -503,11 +503,11 @@ above names the blocker; if it is consent, review with `agentstack trust .`, the
 <p>The same fact when nothing is wired up yet. Stated as <code>ok</code>, because staying untrusted is a legitimate choice.</p>
 <div class="cb"><pre class="block"><code>error: refusing to trust: stdin is not a terminal — review the declarations
 above and re-run interactively, or acknowledge non-interactively with --yes
---consented-digest &lt;surface_digest from `agentstack trust --preview`&gt;</code></pre></div>
+--consented &lt;surface_digest from `agentstack trust --preview`&gt;</code></pre></div>
 <p>Typing the command at a terminal <em>is</em> the consent, so a piped or scripted <code>trust</code> has no human in it. For automation, review the surface and pass its digest back:</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack trust --preview                      <span class="cm"># prints surface_digest</span>
-<span class="pr">$ </span>agentstack trust --yes --consented-digest sha256:…</code></pre></div>
-<div class="cb"><pre class="block"><code>error: refusing to trust: --yes requires --consented-digest — run `agentstack
+<span class="pr">$ </span>agentstack trust --yes --consented sha256:…</code></pre></div>
+<div class="cb"><pre class="block"><code>error: refusing to trust: --yes requires --consented — run `agentstack
 trust --preview`, review the surface, and pass its `surface_digest` back</code></pre></div>
 <p><code>--yes</code> alone would make "the user saw the review" the caller's claim rather than a checked fact.</p>
 <p><strong><code>cannot trust {path}: its loadable surface isn't fully pinned — N items need locking or review</code></strong></p>

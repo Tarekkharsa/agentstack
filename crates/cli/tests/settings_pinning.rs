@@ -83,7 +83,7 @@ impl Fixture {
         assert!(ok, "trust --preview failed: {preview}");
         let surface: serde_json::Value = serde_json::from_str(&preview).unwrap();
         let digest = surface["surface_digest"].as_str().unwrap().to_string();
-        let (ok, out) = self.run(&["trust", ".", "--yes", "--consented-digest", &digest]);
+        let (ok, out) = self.run(&["trust", ".", "--yes", "--consented", &digest]);
         assert!(ok, "trust failed: {out}");
     }
 

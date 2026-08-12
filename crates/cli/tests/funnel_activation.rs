@@ -132,7 +132,7 @@ fn the_compressed_path_records_the_same_events_as_the_explicit_one() {
             list: false,
             revoke: false,
             yes: true,
-            consented_digest: Some(digest),
+            consented: Some(digest),
             ..Default::default()
         },
         // This call names its target with an explicit `path`, which outranks

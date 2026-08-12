@@ -1096,7 +1096,7 @@ pub struct TrustArgs {
     pub revoke: bool,
 
     /// Grant without a terminal: acknowledge the review non-interactively
-    /// (required when stdin is not a TTY). Requires `--consented-digest` —
+    /// (required when stdin is not a TTY). Requires `--consented` —
     /// the `surface_digest` from `trust --preview` — so the grant is bound
     /// to the exact bytes that were reviewed.
     #[arg(long)]
@@ -1105,13 +1105,16 @@ pub struct TrustArgs {
     /// The `surface_digest` a `trust --preview` emitted alongside the surface
     /// that was reviewed. The grant refuses unless it still matches the bytes
     /// on disk — CLI-enforced "a human reviewed this exact surface".
-    #[arg(long, value_name = "DIGEST")]
-    pub consented_digest: Option<String>,
+    ///
+    /// `--consented-digest` is the pre-unification spelling, kept as a hidden
+    /// alias for one release so existing scripts keep working.
+    #[arg(long = "consented", alias = "consented-digest", value_name = "DIGEST")]
+    pub consented: Option<String>,
 
     /// Emit the review surface as JSON and grant NOTHING (read-only). The
     /// machine-readable consent screen for external UIs — the actual grant
     /// stays the gated `agentstack trust` flow. Includes `surface_digest`,
-    /// the value a later `--yes --consented-digest` grant must present.
+    /// the value a later `--yes --consented` grant must present.
     #[arg(long)]
     pub preview: bool,
 }
@@ -1616,9 +1619,17 @@ pub enum GuardCmd {
         #[arg(trailing_var_arg = true, required = true)]
         command: Vec<String>,
     },
-    /// Wire the guard into every detected hook-capable CLI (global scope)
-    /// and seed [guard] + [policy.filesystem] deny in the machine manifest.
-    Install {},
+    /// Preview wiring the guard into every detected hook-capable CLI (global
+    /// scope); `--write` applies it and seeds [guard] + [policy.filesystem]
+    /// deny in the machine manifest.
+    Install {
+        /// Apply the wiring. Without it nothing is written: the bare command
+        /// names every file and hook event it would touch and returns. This
+        /// write edits OTHER products' global config files, so it gets the
+        /// same preview/`--write` pair every other write in the CLI has.
+        #[arg(long)]
+        write: bool,
+    },
     /// Remove every hook `install` wrote and set [guard] enabled = false.
     Uninstall {},
     /// Show guard config and per-CLI installation state.
@@ -1889,7 +1900,8 @@ pub struct AddArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum AddKind {
-    /// Add a capability from a provider (catalog or official MCP Registry).
+    /// Add a capability from a provider (catalog, official MCP Registry, a
+    /// git pack, or `lib:<source>/<name>` from a linked library).
     From(AddFromArgs),
     /// Add an MCP server.
     #[command(after_help = "\
@@ -1919,9 +1931,13 @@ Examples:
 
 #[derive(Args, Debug)]
 pub struct AddFromArgs {
-    /// Catalog name or registry id (e.g. `github`, `io.github.x/server`).
+    /// Catalog name, registry id (e.g. `github`, `io.github.x/server`), a
+    /// `git:<url>[@tag][#subdir]` pack, or a linked-library skill spelled
+    /// `lib:<source>/<name>` (e.g. `lib:central/rust-testing`).
     pub id: String,
-    /// Also add to this toolset's server list.
+    /// Also add to this toolset. Required for a `lib:` reference when the
+    /// project has several toolsets and no default — that reference IS a
+    /// toolset membership, so it has to land somewhere named.
     #[arg(long = "toolset", alias = "profile", value_name = "NAME")]
     pub profile: Option<String>,
     /// For packs: also install the vendor's house-rule instructions (opt-in —
@@ -2117,8 +2133,11 @@ pub struct InitArgs {
     /// reviewed. The scripted import (with `--yes`) then refuses if detection
     /// no longer produces that exact plan — a CLI config edited between plan
     /// and apply forces a fresh review instead of importing unseen content.
-    #[arg(long, value_name = "DIGEST")]
-    pub consented_plan: Option<String>,
+    ///
+    /// `--consented-plan` is the pre-unification spelling, kept as a hidden
+    /// alias for one release so existing scripts keep working.
+    #[arg(long = "consented", alias = "consented-plan", value_name = "DIGEST")]
+    pub consented: Option<String>,
 
     /// Also register the agentstack bridge in the CLIs installed here, in this
     /// same run — the one step the live lane needs, so the setup delivers

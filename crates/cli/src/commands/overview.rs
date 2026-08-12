@@ -470,7 +470,7 @@ pub(crate) const NO_MANIFEST_NEXT: (&str, &str) = (
 /// pins nothing and delivers nothing, and the trust gate still stands between it
 /// and any harness. It is the first step of the headless path `yes`'s own
 /// refusal prints — "`agentstack adopt --write`, `agentstack lock --write`, then
-/// `agentstack trust --yes --consented-digest <digest>`" — so this rung now
+/// `agentstack trust --yes --consented <digest>`" — so this rung now
 /// agrees with what the product already says in words. Measured over all three
 /// drop states in the guidance matrix: the drop clears and the ladder moves on
 /// to `lock --write`, then to the review, where a driver is meant to stop.

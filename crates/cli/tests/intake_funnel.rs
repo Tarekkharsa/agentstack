@@ -581,6 +581,48 @@ fn a_drop_routes_status_and_doctor_to_yes() {
         doctor.contains("\u{21b3} agentstack yes"),
         "doctor's dropped-file advisory routes to the funnel:\n{doctor}"
     );
+    // …and doctor's ONE next action, which is the half that was missing. The
+    // advisory named the funnel while the arbiter — which reads error and warn
+    // lines only — fell through to "nothing to repair", so one state produced
+    // two different next steps depending on which screen you looked at.
+    let doctor_next = doctor
+        .lines()
+        .find(|l| l.trim_start().starts_with("next:"))
+        .unwrap_or_else(|| panic!("doctor prints a next line:\n{doctor}"));
+    assert!(
+        doctor_next.contains("agentstack yes"),
+        "doctor's next action must name the funnel too, not report nothing to \
+         repair over a waiting drop, got:\n{doctor_next}\n\nfull output:\n{doctor}"
+    );
+    assert!(
+        !doctor.contains("nothing to repair"),
+        "a waiting drop is something to do:\n{doctor}"
+    );
+    // The two surfaces now agree on the machine field as well as the sentence:
+    // the inert declare, with the ceremony named in the reason (`yes` refuses
+    // without a terminal, so it may not be the machine command).
+    let json_out = std::process::Command::new(env!("CARGO_BIN_EXE_agentstack"))
+        .args(["doctor", "--json"])
+        .current_dir(&proj)
+        .env_clear()
+        .env("HOME", std::env::var("HOME").unwrap())
+        .env("AGENTSTACK_HOME", std::env::var("AGENTSTACK_HOME").unwrap())
+        .env("PATH", "/usr/bin:/bin")
+        .output()
+        .unwrap();
+    let doctor_json: serde_json::Value =
+        serde_json::from_slice(&json_out.stdout).expect("doctor --json emits JSON on stdout");
+    assert_eq!(
+        doctor_json["next_action"], "agentstack adopt --write",
+        "the machine field stays runnable headless: {doctor_json}"
+    );
+    assert!(
+        doctor_json["next_step"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("agentstack adopt --write"),
+        "next_step carries the same command: {doctor_json}"
+    );
 
     // `lock`: the in-passing notice (the renderer `use` shares).
     let lock = run(&["lock", "--write"]);

@@ -63,11 +63,11 @@ agentstack trust --preview . > surface.json
 
 # 2. Bind the grant to those exact bytes, then render.
 DIGEST=$(jq -r .surface_digest surface.json)
-agentstack trust . --yes --consented-digest "$DIGEST"
+agentstack trust . --yes --consented "$DIGEST"
 agentstack apply --write
 ```
 
-`--yes` is refused without a digest, and `--consented-digest` is refused on any
+`--yes` is refused without a digest, and `--consented` is refused on any
 mismatch — so a checkout that moved between the preview and the grant fails
 closed rather than approving bytes nobody saw. Derive the digest from the
 surface the job just printed over a pinned checkout; taking it from anywhere

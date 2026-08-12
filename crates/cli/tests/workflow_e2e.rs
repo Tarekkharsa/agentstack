@@ -123,7 +123,7 @@ fn acceptance_bundle_admits_and_runs_end_to_end() {
         home.path(),
         &path,
         proj.path(),
-        &["trust", ".", "--yes", "--consented-digest", &consent],
+        &["trust", ".", "--yes", "--consented", &consent],
     );
     assert!(
         trust.status.success(),
@@ -206,7 +206,7 @@ fn watchdog_force_exits_a_stalled_run_at_the_process_level() {
         home.path(),
         &path,
         proj.path(),
-        &["trust", ".", "--yes", "--consented-digest", &consent],
+        &["trust", ".", "--yes", "--consented", &consent],
     );
     assert!(
         trust.status.success(),
@@ -301,7 +301,7 @@ fn watchdog_force_exits_a_non_yielding_interpreter_slice() {
         home.path(),
         &path,
         proj.path(),
-        &["trust", ".", "--yes", "--consented-digest", &consent],
+        &["trust", ".", "--yes", "--consented", &consent],
     );
     assert!(
         trust.status.success(),

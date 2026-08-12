@@ -261,7 +261,7 @@ fn trusted_bundle_routes_denied_tool_and_records_it() {
     run_as(&["lock", "--write"]);
     // §7.2: the non-interactive grant presents the previewed surface digest.
     let consent = agentstack::trust::digest_for(&proj).unwrap();
-    run_as(&["trust", "--yes", "--consented-digest", &consent]);
+    run_as(&["trust", "--yes", "--consented", &consent]);
 
     // The container reads the mounted gateway config and calls a DENIED tool
     // through the endpoint. node's fetch dials host.docker.internal directly.
@@ -355,7 +355,7 @@ fn lockdown_routes_denied_tool_through_the_sidecar_relay() {
     run_as(&["lock", "--write"]);
     // §7.2: the non-interactive grant presents the previewed surface digest.
     let consent = agentstack::trust::digest_for(&proj).unwrap();
-    run_as(&["trust", "--yes", "--consented-digest", &consent]);
+    run_as(&["trust", "--yes", "--consented", &consent]);
 
     let out = Command::new(bin)
         .args(["run", "--lockdown", "gwtest", "--", "-e", CLIENT_SCRIPT])

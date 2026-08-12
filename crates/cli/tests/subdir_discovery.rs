@@ -77,7 +77,7 @@ fn init_from_a_subdir_refuses_to_silently_nest() {
         project_servers: false,
         include_tool_managed: false,
         yes: true,
-        consented_plan: None,
+        consented: None,
         connect: false,
         verbose: false,
     };

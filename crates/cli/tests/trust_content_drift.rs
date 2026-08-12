@@ -64,12 +64,7 @@ fn grant(bin: &str, home: &Path, proj: &Path) -> (String, bool) {
         .as_str()
         .unwrap()
         .to_string();
-    run(
-        bin,
-        &["trust", "--yes", "--consented-digest", &digest],
-        home,
-        proj,
-    )
+    run(bin, &["trust", "--yes", "--consented", &digest], home, proj)
 }
 
 fn fixture(tmp: &Path) -> (std::path::PathBuf, std::path::PathBuf) {

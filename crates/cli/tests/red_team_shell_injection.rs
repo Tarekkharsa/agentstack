@@ -180,11 +180,7 @@ fn no_verb_in_the_lane_executes_or_mangles_a_hostile_manifest_string() {
             .as_str()
             .unwrap()
             .to_string();
-    let (text, ok) = run(
-        &["trust", "--yes", "--consented-digest", &digest],
-        &home,
-        &proj,
-    );
+    let (text, ok) = run(&["trust", "--yes", "--consented", &digest], &home, &proj);
     assert!(ok, "grant failed:\n{text}");
 
     for args in [

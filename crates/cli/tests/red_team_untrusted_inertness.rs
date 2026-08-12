@@ -220,7 +220,7 @@ fn grant(fx: &Fixture) {
         .as_str()
         .unwrap()
         .to_string();
-    let (text, ok) = run(&["trust", "--yes", "--consented-digest", &digest]);
+    let (text, ok) = run(&["trust", "--yes", "--consented", &digest]);
     assert!(ok, "grant failed:\n{text}");
 }
 

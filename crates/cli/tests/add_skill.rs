@@ -783,16 +783,13 @@ fn a_bare_library_name_is_told_the_verb_that_takes_it() {
         "still a refusal, not a silent success:\n{out}"
     );
     assert!(
-        out.contains("--skill pdf"),
+        out.contains("agentstack add from lib:local/pdf"),
         "the refusal names no command that would work:\n{out}"
     );
     assert!(
-        out.contains("toolset create"),
-        "the refusal does not name the verb a library skill is reached by:\n{out}"
-    );
-    assert!(
         !out.contains("agentstack add from pdf"),
-        "sent a library skill at the catalog's bundled-asset extractor:\n{out}"
+        "the BARE name would still go at the catalog's bundled-asset \
+         extractor; only the explicit library reference is offered:\n{out}"
     );
     assert!(
         out.contains("central library"),
@@ -803,33 +800,18 @@ fn a_bare_library_name_is_told_the_verb_that_takes_it() {
     assert!(out.contains("unrecognized source 'pdf'"), "{out}");
 
     // And the command it names converges: the library skill really does land
-    // in the manifest by name, with no `[skills]` body to go missing.
-    let preview = cli(
-        &proj,
-        &["toolset", "create", "work", "--skill", "pdf", "--preview"],
-    );
-    let digest = preview
-        .split("\"consent_digest\": \"")
-        .nth(1)
-        .and_then(|s| s.split('"').next())
-        .unwrap_or_else(|| panic!("no consent digest in:\n{preview}"))
-        .to_string();
-    let (made, code) = cli_exit(
-        &proj,
-        &[
-            "toolset",
-            "create",
-            "work",
-            "--skill",
-            "pdf",
-            "--yes",
-            "--consented",
-            &digest,
-        ],
-    );
+    // in the manifest by reference, with no `[skills]` body to go missing.
+    let (made, code) = cli_exit(&proj, &["add", "from", "lib:local/pdf", "--write"]);
     assert_eq!(code, Some(0), "the offered command refused:\n{made}");
     let manifest = fs::read_to_string(proj.join("agentstack.toml")).unwrap();
-    assert!(manifest.contains(r#"skills = ["pdf"]"#), "{manifest}");
+    assert!(
+        manifest.contains(r#""lib:local/pdf""#),
+        "the reference lands in a toolset, not as an inline body:\n{manifest}"
+    );
+    assert!(
+        !manifest.contains("[skills.pdf]"),
+        "a library skill must never gain an inline block that shadows it:\n{manifest}"
+    );
 }
 
 /// The counterpart, and the reason the hint is a lookup rather than a sentence:

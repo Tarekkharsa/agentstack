@@ -244,6 +244,20 @@ struct Report {
     /// there is no grant, which is honest. What stops is naming a gate that
     /// does not stand and a command that cannot run (G36).
     trust_gated: bool,
+    /// Is a dropped file waiting — content sitting in the project that this
+    /// setup does not declare (`crate::intake::scan`)?
+    ///
+    /// Ranking only, and deliberately a bool beside a line that stays
+    /// [`Level::Advisory`]. The per-item lines are an OFFER, not a defect: a
+    /// project with a drop is still `ready`, the drop is still excluded from
+    /// `warnings` and from `state`, and `doctor-advisories-v1` still holds. But
+    /// `first_fix` only ever reads error and warn lines, so the arbiter could
+    /// not see the offer at all and answered "nothing to repair" while `status`
+    /// — which reads the same scan through
+    /// [`super::overview::next_step`] — answered `agentstack yes`. One state,
+    /// two screens, two different next steps. This field is how the arbiter
+    /// sees the fact without the line changing level.
+    dropped_files: bool,
 }
 
 /// The machine's bridge coverage, from the ONE definition `gateway connect`
@@ -312,6 +326,7 @@ impl Report {
             content_drift: false,
             surface_unpinned: Vec::new(),
             trust_gated: true,
+            dropped_files: false,
         }
     }
 
@@ -664,6 +679,21 @@ impl Report {
         // same reason string as `status`.
         if let Some(rung) = super::overview::unpinned_next_action(&self.surface_unpinned) {
             return rung;
+        }
+        // A dropped file waiting is a fact about what to do next, not a defect.
+        // It used to reach neither `first_fix` (which reads error and warn
+        // lines only) nor any rung, so doctor answered "nothing to repair" over
+        // a project `status` was already routing to `agentstack yes`. Same
+        // constants as `status` (`super::overview::next_step`, which applies the
+        // same `trust != drifted` guard), so the machine field stays the inert
+        // `adopt --write` — `yes` refuses without a terminal — and the ceremony
+        // is named in the sentence a human reads. Below the error, drift and
+        // unpinned rungs: those are repairs, and a repair outranks an offer.
+        if self.dropped_files && self.trust != Some("drifted") {
+            return (
+                super::overview::DROPPED_FILES_FIX.to_string(),
+                super::overview::DROPPED_FILES_WHY,
+            );
         }
         // …and not over a manifest that declares NOTHING. The residual G28
         // named: an empty untrusted project heard `agentstack trust .` here and
@@ -2020,6 +2050,9 @@ fn run_checks(
         &crate::manifest::project_root_of(&ctx.dir),
         manifest,
     );
+    // The lines stay advisory; the arbiter reads the fact from here instead, so
+    // doctor and `status` name the same next step over one state.
+    report.dropped_files = !dropped.items.is_empty();
     for item in &dropped.items {
         report.line(
             Level::Advisory,
@@ -3098,7 +3131,12 @@ fn run_checks(
         let mut by_folded: std::collections::BTreeMap<String, Vec<&String>> =
             std::collections::BTreeMap::new();
         for name in &names {
-            if crate::text::validate_name(name).is_err() {
+            // A reference may carry a source selector (`central:x`,
+            // `lib:central/x`); the CONTRACT is about the capability's own
+            // name, so strip the selector before judging it. Otherwise every
+            // qualified reference reads as an illegal name and is told to
+            // rename a skill whose name was fine.
+            if crate::text::validate_name(crate::sources::capability_name(name)).is_err() {
                 report.line(
                     Level::Warn,
                     format!(
@@ -4904,7 +4942,7 @@ fn check_t3code(report: &mut Report) {
             Level::Warn,
             "guard not enabled — t3code's Full-access mode disables the providers' own \
              approval prompts, so those sessions run with no pre-tool-use gate at all \
-             ↳ agentstack x guard install",
+             ↳ agentstack x guard install --write",
         );
     } else {
         let coverage = crate::commands::guard::coverage();
@@ -4926,7 +4964,7 @@ fn check_t3code(report: &mut Report) {
                     Level::Warn,
                     format!(
                         "{provider}: guard hook missing — t3code Full-access sessions on \
-                         this provider run ungated ↳ agentstack x guard install"
+                         this provider run ungated ↳ agentstack x guard install --write"
                     ),
                 );
             }
@@ -5267,7 +5305,7 @@ mod tests {
         r.section("T3 Code");
         r.line(
             Level::Warn,
-            "the guard is missing\n  ↳ agentstack x guard install",
+            "the guard is missing\n  ↳ agentstack x guard install --write",
         );
         r.section("Trust");
         r.line(Level::Warn, "the content changed since you said yes");
@@ -5278,7 +5316,7 @@ mod tests {
         // section-order tie-break below trust is untouched.
         r.trust = Some("trusted");
         let (cmd, _) = r.next_action();
-        assert_eq!(cmd, "agentstack x guard install", "{cmd}");
+        assert_eq!(cmd, "agentstack x guard install --write", "{cmd}");
 
         // An error still outranks the review: its command blocks the rest.
         r.trust = Some("drifted");
