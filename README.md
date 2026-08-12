@@ -26,6 +26,11 @@ agentstack x gateway connect --all --write # register the bridge once, so live d
 agentstack status                          # is it ready — and if not, the one thing that fixes it
 ```
 
+> **Use the line above as written — keep the `AGENTSTACK_VERSION` pin.** The
+> unpinned installer and `brew install` both give you **v0.17.1**, where the
+> `agentstack x` prefix does not exist yet, so step 2 fails with an
+> "unrecognized subcommand" error.
+
 That installs **v0.18.0-rc.5**, the release this README describes, and every
 command above runs on it. `AGENTSTACK_VERSION` is what asks for it by name:
 drop it and the same line installs v0.17.1 instead, because `releases/latest`
