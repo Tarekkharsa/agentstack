@@ -282,11 +282,29 @@
 <p>Start with the simple timeline:</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack undo</code></pre></div>
 <p>It shows recent AgentStack-managed writes and the exact command for returning to a point. Nothing changes until you add the shown <code>--write</code> form.</p>
+<div class="cb cb-term" data-language="console"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">console</span></div><pre class="block"><code class="language-console"><span class="out">recent changes (newest first)</span>
+<span class="out">  1  1m ago       init                                         7 files · Claude Code, Codex CLI</span>
+
+<span class="out">  pick a point: agentstack undo --to &lt;n&gt; --write</span></code></pre></div>
 <h2 id="undo-one-recorded-write">Undo one recorded write<a class="hlink" href="#undo-one-recorded-write" aria-label="Link to this section">#</a></h2>
 <p>The script-friendly form is:</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack x restore
 <span class="pr">$ </span>agentstack x restore --last --write
 <span class="pr">$ </span>agentstack x restore &lt;id&gt; --write</code></pre></div>
+<p>The bare form lists every recorded point and every adapter backup:</p>
+<div class="cb cb-term" data-language="console"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">console</span></div><pre class="block"><code class="language-console"><span class="pr">$ </span>agentstack x restore
+<span class="out">Recorded changes (newest first):</span>
+
+<span class="out">  18cb1a4c48  1m ago   global   gateway connect            2 files · Claude Code, Codex CLI</span>
+<span class="out">  18cb1a4c46  1m ago   project  init                       7 files · Claude Code, Codex CLI</span>
+
+<span class="out">Undo one with: agentstack x restore &lt;id&gt; --write (or --last for the newest)</span>
+
+<span class="out">Adapter config backups (content before our last write):</span>
+<span class="out">  Claude Code    global ~/.claude.json</span>
+<span class="out">  Codex CLI      global ~/.codex/config.toml</span>
+
+<span class="out">Restore one with: agentstack x restore &lt;adapter&gt; [--scope project] --write</span></code></pre></div>
 <p>Restore covers managed config-file writes such as settings, hooks, instructions, and rendered server configuration. The revert is itself recorded, so going one step too far remains recoverable.</p>
 <h2 id="remove-legacy-rendered-configuration">Remove legacy rendered configuration<a class="hlink" href="#remove-legacy-rendered-configuration" aria-label="Link to this section">#</a></h2>
 <p>When the gateway now serves MCP servers live but older native entries remain:</p>

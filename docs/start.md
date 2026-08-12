@@ -31,10 +31,60 @@ Set up this machine:
 agentstack init --connect
 ```
 
+A real run on a machine with Claude Code and Codex already configured — shown
+here in its non-interactive form — prints this. Lines marked `…` are trimmed:
+
+```console
+$ agentstack init --connect --yes --secrets env
+🔍  Found 2 coding tools · importing 2 MCP servers (github · tldraw)
+🔐  1 plaintext token in your live CLI configs → ${GITHUB_TOKEN} here; each value was COPIED, the original
+    is still in its CLI's own config, unchanged
+  ✓ pinned 2 servers
+🔑  Stored 1 token in .env (gitignored)
+✅  Wrote ~/my-project/.agentstack/agentstack.toml
+
+Claude Code (~/.claude.json)
+…   trimmed: the JSON diff that adds the one bridge entry
+  ✓ gateway registered (agentstack x mcp --auto-project)
+
+Codex CLI (~/.codex/config.toml)
+…   trimmed: the TOML diff that adds the one bridge entry
+  ✓ gateway registered (agentstack x mcp --auto-project)
+
+Updated 2 harness configs.
+
+Import complete.
+  Manifest:  ~/my-project/.agentstack/agentstack.toml
+  Imported:  2 MCP servers → library 'local', referenced by name
+…   trimmed: a Note that no server was copied back into those CLI configs
+  Next:      agentstack doctor   (check the result)
+  Then:      undo: agentstack x restore --last --write
+…   trimmed: the per-CLI --verbose pointers and the zero-files caveat
+```
+
 Then check the result:
 
 ```bash
 agentstack status
+```
+
+On the project above, that prints:
+
+```console
+agentstack 0.18.0-rc.5 — one portable manifest, every agent CLI
+
+  CLIs      2 of 13 supported detected here: Claude Code · Codex CLI
+  Setup  ~/my-project/.agentstack/agentstack.toml — 2 servers → 2 detected CLIs, no CLIs pinned
+  Status    locked · trusted
+  Toolset   default — default; opens on the next trusted agent connection
+  Delivery  skills + MCP servers served live to 2 CLIs
+            0 project artifacts for the capabilities served live (the manifest and lock stay, and so does any managed region in a house-rules file)
+            rendered lane: house rules + settings + hooks for 2 of 2 CLIs
+  Context   2 declared servers not measured — context cost unknown, not zero   see `agentstack x report usage`
+
+  Next:  agentstack doctor  ·  verify the wiring — every warning names its fix
+  All commands: agentstack --help   ·   per-CLI detail: agentstack status --verbose
+  Deep check (drift, quirks, supply chain): agentstack doctor
 ```
 
 `init` detects your CLIs, offers to import the MCP server entries and supported
@@ -85,6 +135,29 @@ See [Several libraries work together](library.md#several-libraries-work-together
 for the folder layout, collisions, and qualified names such as
 `local:rust-testing`.
 
+### Put reusable capabilities in it
+
+Scaffold a new skill, or copy one you already have into the library:
+
+```bash
+agentstack lib new api-review
+agentstack lib add ./api-review
+agentstack lib add ./api-review --write
+```
+
+Add an MCP server definition the same way. It must contain `${REF}`
+placeholders, never secret values:
+
+```bash
+agentstack lib add-server github --file ./github-server.toml
+agentstack lib add-server github --file ./github-server.toml --write
+agentstack lib list
+```
+
+`lib new` scaffolds the folder; `lib add` copies an existing folder in. Every
+command previews first and writes only with `--write`. Commit and push the
+library as you would any Git repo.
+
 ## 3. Keep each project small
 
 A normal project needs two committed files:
@@ -133,7 +206,34 @@ for this machine. Run the loop after you add or remove a selected capability,
 accept an updated library item, or change the default toolset — not for
 unrelated edits.
 
+```console
+$ agentstack lock --write
+✓ pinned 2 servers from 1 toolset in ~/my-project/.agentstack/agentstack.lock
+  no configs rendered, no skills materialized — that stays `agentstack use --write`.
+
+Next: `agentstack doctor` to verify the gateway wiring.
+```
+
 See [Trust a project](howto/trust-a-repo.md) for why the lock comes first.
+
+`agentstack doctor` is the deeper verification. On a healthy project it ends
+like this:
+
+```console
+$ agentstack doctor
+Adapters & CLIs ✓ 2 detected, configs parse
+Zero-files gateway ✓ 3 checks pass
+Secrets ✓ 1 check pass
+Reproducibility
+  – reproducibility: nothing declared to check — no toolset here pulls a skill from the library
+  ✓ github               library server · matches lock
+  ✓ tldraw               library server · matches lock
+· 12 sections for features this project doesn't use hidden, 3 sections with nothing to fix summarised — agentstack doctor --all shows every line.
+
+0 errors, 0 warnings.
+  ready: reviewed and verified — the default opens on the next agent connection
+  next: nothing to repair — this setup is verified   the default toolset opens automatically on the next trusted agent connection
+```
 
 ## 5. What the agent sees
 

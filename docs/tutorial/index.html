@@ -4,8 +4,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Tutorial: one library, two projects, another machine — agentstack</title>
-<meta name="description" content="This tutorial shows the complete everyday workflow. It assumes AgentStack is installed and agentstack init has completed on this machine.">
+<title>Tutorial — agentstack</title>
+<meta name="description" content="The walkthrough now lives in one place: Get started. It runs the whole path end to end — install, link a library, put reusable capabilities in it, keep a p">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
 <link rel="canonical" href="https://tarekkharsa.github.io/agentstack/tutorial/index.html">
@@ -278,75 +278,28 @@
 </aside>
   <main id="main-content" tabindex="-1">
 <p class="versionbar">These pages describe <b>v0.18.0-rc.5</b>, a pre-release. <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">The installer</a> serves the current release, <b>v0.17.1</b> — <code>/releases/latest</code> never points at a pre-release — so this is not the build you get unless you ask for it by name: <code>AGENTSTACK_VERSION=v0.18.0-rc.5</code>. <code>agentstack --version</code> says which build you have.</p>
-<h1 id="tutorial-one-library-two-projects-another-machine">Tutorial: one library, two projects, another machine</h1>
-<p>This tutorial shows the complete everyday workflow. It assumes AgentStack is installed and <code>agentstack init</code> has completed on this machine.</p>
-<h2 id="step-1--link-your-reusable-library">Step 1 — Link your reusable library<a class="hlink" href="#step-1--link-your-reusable-library" aria-label="Link to this section">#</a></h2>
-<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack lib link ~/GitHub/ai-setup --name central --first
-<span class="pr">$ </span>agentstack lib link ~/GitHub/ai-setup --name central --first --write
-<span class="pr">$ </span>agentstack lib sources</code></pre></div>
-<p>The first command previews. The linked folder can be any normal Git checkout. <code>lib sources</code> shows this source together with the built-in local library and reports names that appear in more than one place.</p>
-<h2 id="step-2--put-reusable-capabilities-there">Step 2 — Put reusable capabilities there<a class="hlink" href="#step-2--put-reusable-capabilities-there" aria-label="Link to this section">#</a></h2>
-<p>Create or import a skill:</p>
-<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack lib new api-review
-<span class="pr">$ </span>agentstack lib add ./api-review
-<span class="pr">$ </span>agentstack lib add ./api-review --write</code></pre></div>
-<p>Add an MCP server definition containing <code>${REF}</code> placeholders, never secret values:</p>
-<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack lib add-server github --file ./github-server.toml
-<span class="pr">$ </span>agentstack lib add-server github --file ./github-server.toml --write
-<span class="pr">$ </span>agentstack lib list</code></pre></div>
-<p>Commit and push the library as you would any Git repo.</p>
-<h2 id="step-3--select-names-in-a-project">Step 3 — Select names in a project<a class="hlink" href="#step-3--select-names-in-a-project" aria-label="Link to this section">#</a></h2>
-<p>Create <code>.agentstack/agentstack.toml</code> with one default toolset:</p>
-<div class="cb" data-language="toml"><div class="cb-bar"><span class="cb-lang">toml</span></div><pre class="block"><code class="language-toml">version = 1
-default_toolset = "backend"
-
-[toolsets.backend]
-servers = ["github"]
-skills = ["api-review"]</code></pre></div>
-<p>The project stores names, not copied skill folders or MCP configs. If your project already contains several capabilities, the command form is:</p>
-<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack toolset create backend --server github --skill api-review
-<span class="pr">$ </span>agentstack toolset default backend
-<span class="pr">$ </span>agentstack toolset default backend --write</code></pre></div>
-<p><code>toolset create</code> is interactive at a terminal. The default command has an explicit preview and write form.</p>
-<h2 id="step-4--pin-and-review-it">Step 4 — Pin and review it<a class="hlink" href="#step-4--pin-and-review-it" aria-label="Link to this section">#</a></h2>
-<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack lock          <span class="cm"># preview</span>
-<span class="pr">$ </span>agentstack lock --write
-<span class="pr">$ </span>agentstack trust .
-<span class="pr">$ </span>agentstack status</code></pre></div>
-<p>The lock freezes the exact library content this project selected; <code>trust .</code> is the local human review of it, so every machine reviews for itself. See <a href="../howto/trust-a-repo.html">Trust a project</a> for why the lock comes first.</p>
-<h2 id="step-5--start-your-agent-normally">Step 5 — Start your agent normally<a class="hlink" href="#step-5--start-your-agent-normally" aria-label="Link to this section">#</a></h2>
-<p>Open Codex, Claude Code, OpenCode, or another supported CLI as usual. You do not need to run <code>agentstack use</code> for a live-capable CLI.</p>
-<p>A trusted connection automatically opens the project's default toolset. The agent sees skill names and descriptions first, so “review this API change” can make it load <code>api-review</code> without the user typing that name — the description is the routing hint. See <a href="../concepts.html#dynamic-skill-loading">Dynamic skill loading</a>.</p>
-<p>If no default exists and several toolsets are declared, the gateway stays on control-plane tools until the agent asks which toolset to use. A modern connection picks up a changed default on its next request; only a legacy connection keeps its opening selection and needs a reconnect.</p>
-<h2 id="step-6--use-the-same-library-in-another-project">Step 6 — Use the same library in another project<a class="hlink" href="#step-6--use-the-same-library-in-another-project" aria-label="Link to this section">#</a></h2>
-<p>The second project references the same reusable names but chooses a different small set:</p>
-<div class="cb" data-language="toml"><div class="cb-bar"><span class="cb-lang">toml</span></div><pre class="block"><code class="language-toml">version = 1
-default_toolset = "docs"
-
-[toolsets.docs]
-servers = ["upstash/context7"]
-skills = ["technical-writing"]</code></pre></div>
-<p>Run the same lock and trust loop. The two projects share the library but keep independent locks, defaults, and trust decisions.</p>
-<h2 id="step-7--bootstrap-another-machine">Step 7 — Bootstrap another machine<a class="hlink" href="#step-7--bootstrap-another-machine" aria-label="Link to this section">#</a></h2>
-<p>Clone the project, then preview and apply one bootstrap:</p>
-<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack up --library https://github.com/you/ai-setup.git
-<span class="pr">$ </span>agentstack up --library https://github.com/you/ai-setup.git --write
-<span class="pr">$ </span>agentstack status</code></pre></div>
-<p>AgentStack detects the CLIs present on that machine and connects only what it finds. The project and library content travel; secrets and trust do not.</p>
-<p>Add each missing secret locally:</p>
-<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack secret set GITHUB_TOKEN</code></pre></div>
-<p>Then run the <code>trust .</code> command named by status.</p>
-<h2 id="update-something-later">Update something later<a class="hlink" href="#update-something-later" aria-label="Link to this section">#</a></h2>
-<p>Edit and push the central library. In a project that should accept the new version:</p>
-<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack up            <span class="cm"># preview</span>
-<span class="pr">$ </span>agentstack up --write
-<span class="pr">$ </span>agentstack lock          <span class="cm"># preview</span>
-<span class="pr">$ </span>agentstack lock --write
-<span class="pr">$ </span>agentstack trust .</code></pre></div>
-<p>The important guarantee is that syncing the library does not silently change a locked project. The <code>lock</code> preview is where you see and accept the change.</p>
-<h2 id="take-back-a-managed-write">Take back a managed write<a class="hlink" href="#take-back-a-managed-write" aria-label="Link to this section">#</a></h2>
-<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack undo</code></pre></div>
-<p>Choose a recorded point and add the exact <code>--write</code> command it shows. Removing an AgentStack-managed setup also removes empty managed parent folders; it keeps user-owned files and non-empty folders.</p>
+<h1 id="tutorial">Tutorial</h1>
+<p>The walkthrough now lives in one place: <strong><a href="../start.html">Get started</a></strong>. It runs the whole path end to end — install, link a library, put reusable capabilities in it, keep a project small, lock and trust, and bootstrap another machine — with real captured command output at each step.</p>
+<p>This page is the map. Each step links to the section that teaches it.</p>
+<div class="tblwrap"><table>
+<thead><tr><th>Step</th><th>Where it is taught</th></tr></thead><tbody>
+<tr><td>1. Set up this machine</td><td><a href="../start.html#1-install-and-set-up-this-machine">Install and set up this machine</a></td></tr>
+<tr><td>2. Link your reusable library</td><td><a href="../start.html#2-link-your-central-library">Link your central library</a></td></tr>
+<tr><td>3. Put reusable skills and servers in it</td><td><a href="../start.html#put-reusable-capabilities-in-it">Put reusable capabilities in it</a></td></tr>
+<tr><td>4. Select names in a project</td><td><a href="../start.html#3-keep-each-project-small">Keep each project small</a></td></tr>
+<tr><td>5. Pin and review it</td><td><a href="../start.html#4-lock-review-done">Lock, review, done</a></td></tr>
+<tr><td>6. Start your agent normally</td><td><a href="../start.html#5-what-the-agent-sees">What the agent sees</a></td></tr>
+<tr><td>7. Bootstrap another machine</td><td><a href="../start.html#6-set-up-another-machine">Set up another machine</a></td></tr>
+</tbody></table></div>
+<p>Deeper on one topic:</p>
+<ul>
+<li><a href="../howto/add-a-server.html">Add an MCP server</a> — one reusable definition, secrets by reference.</li>
+<li><a href="../howto/add-a-skill.html">Add a skill</a> — author it once, select it by name.</li>
+<li><a href="../howto/name-a-toolset.html">Name a toolset</a> — the command form of a toolset, and how a default is chosen.</li>
+<li><a href="../howto/trust-a-repo.html">Trust a project</a> — why the lock comes first, and what the review actually shows.</li>
+<li><a href="../howto/undo.html">Undo AgentStack changes</a> — the timeline, and taking a managed write back.</li>
+<li><a href="../howto/team-setup.html">Team setup</a> — the same library across people and CI.</li>
+</ul>
 <p>Next: <a href="../start.html">Get started</a> · <a href="../library.html">Central library</a> · <a href="../faq.html">FAQ</a> · <a href="../reference.html">Full reference</a></p>
   <p class="srcline">Source of truth: <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/tutorial.md">docs/tutorial.md</a> — this page is generated from it.</p>
   </main>

@@ -287,8 +287,49 @@
 <p>That installs v0.18.0-rc.5, the release these pages describe, and verifies the download against the checksums published with it. <code>AGENTSTACK_VERSION</code> is what asks for it by name — without it the same line installs v0.17.1, because <code>releases/latest</code> never points at a pre-release. To build from a checkout instead, see <a href="https://github.com/Tarekkharsa/agentstack/blob/main/README.md#install">Install</a>.</p>
 <p>Set up this machine:</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack init --connect</code></pre></div>
+<p>A real run on a machine with Claude Code and Codex already configured — shown here in its non-interactive form — prints this. Lines marked <code>…</code> are trimmed:</p>
+<div class="cb cb-term" data-language="console"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">console</span></div><pre class="block"><code class="language-console"><span class="pr">$ </span>agentstack init --connect --yes --secrets env
+<span class="out">🔍  Found 2 coding tools · importing 2 MCP servers (github · tldraw)</span>
+<span class="out">🔐  1 plaintext token in your live CLI configs → ${GITHUB_TOKEN} here; each value was COPIED, the original</span>
+<span class="out">    is still in its CLI's own config, unchanged</span>
+<span class="out">  ✓ pinned 2 servers</span>
+<span class="out">🔑  Stored 1 token in .env (gitignored)</span>
+<span class="out">✅  Wrote ~/my-project/.agentstack/agentstack.toml</span>
+
+<span class="out">Claude Code (~/.claude.json)</span>
+<span class="out">…   trimmed: the JSON diff that adds the one bridge entry</span>
+<span class="out">  ✓ gateway registered (agentstack x mcp --auto-project)</span>
+
+<span class="out">Codex CLI (~/.codex/config.toml)</span>
+<span class="out">…   trimmed: the TOML diff that adds the one bridge entry</span>
+<span class="out">  ✓ gateway registered (agentstack x mcp --auto-project)</span>
+
+<span class="out">Updated 2 harness configs.</span>
+
+<span class="out">Import complete.</span>
+<span class="out">  Manifest:  ~/my-project/.agentstack/agentstack.toml</span>
+<span class="out">  Imported:  2 MCP servers → library 'local', referenced by name</span>
+<span class="out">…   trimmed: a Note that no server was copied back into those CLI configs</span>
+<span class="out">  Next:      agentstack doctor   (check the result)</span>
+<span class="out">  Then:      undo: agentstack x restore --last --write</span>
+<span class="out">…   trimmed: the per-CLI --verbose pointers and the zero-files caveat</span></code></pre></div>
 <p>Then check the result:</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack status</code></pre></div>
+<p>On the project above, that prints:</p>
+<div class="cb cb-term" data-language="console"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">console</span></div><pre class="block"><code class="language-console"><span class="out">agentstack 0.18.0-rc.5 — one portable manifest, every agent CLI</span>
+
+<span class="out">  CLIs      2 of 13 supported detected here: Claude Code · Codex CLI</span>
+<span class="out">  Setup  ~/my-project/.agentstack/agentstack.toml — 2 servers → 2 detected CLIs, no CLIs pinned</span>
+<span class="out">  Status    locked · trusted</span>
+<span class="out">  Toolset   default — default; opens on the next trusted agent connection</span>
+<span class="out">  Delivery  skills + MCP servers served live to 2 CLIs</span>
+<span class="out">            0 project artifacts for the capabilities served live (the manifest and lock stay, and so does any managed region in a house-rules file)</span>
+<span class="out">            rendered lane: house rules + settings + hooks for 2 of 2 CLIs</span>
+<span class="out">  Context   2 declared servers not measured — context cost unknown, not zero   see `agentstack x report usage`</span>
+
+<span class="out">  Next:  agentstack doctor  ·  verify the wiring — every warning names its fix</span>
+<span class="out">  All commands: agentstack --help   ·   per-CLI detail: agentstack status --verbose</span>
+<span class="out">  Deep check (drift, quirks, supply chain): agentstack doctor</span></code></pre></div>
 <p><code>init</code> detects your CLIs, offers to import the MCP server entries and supported settings it can represent, and registers the zero-files gateway. It previews changes before writing them. <code>status</code> tells you whether the setup is ready and gives one next command when it is not.</p>
 <p>It does not take over everything already installed:</p>
 <div class="tblwrap"><table>
@@ -310,6 +351,16 @@
 <p>The first command previews. The second links the folder on this machine. <code>--first</code> makes it the default place to read and add reusable capabilities.</p>
 <p>If you already have <code>~/.agentstack/lib</code>, AgentStack keeps it as another source and you read the combined library. When two sources hold the same name, the first one wins.</p>
 <p>See <a href="library.html#several-libraries-work-together">Several libraries work together</a> for the folder layout, collisions, and qualified names such as <code>local:rust-testing</code>.</p>
+<h3 id="put-reusable-capabilities-in-it">Put reusable capabilities in it<a class="hlink" href="#put-reusable-capabilities-in-it" aria-label="Link to this section">#</a></h3>
+<p>Scaffold a new skill, or copy one you already have into the library:</p>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack lib new api-review
+<span class="pr">$ </span>agentstack lib add ./api-review
+<span class="pr">$ </span>agentstack lib add ./api-review --write</code></pre></div>
+<p>Add an MCP server definition the same way. It must contain <code>${REF}</code> placeholders, never secret values:</p>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack lib add-server github --file ./github-server.toml
+<span class="pr">$ </span>agentstack lib add-server github --file ./github-server.toml --write
+<span class="pr">$ </span>agentstack lib list</code></pre></div>
+<p><code>lib new</code> scaffolds the folder; <code>lib add</code> copies an existing folder in. Every command previews first and writes only with <code>--write</code>. Commit and push the library as you would any Git repo.</p>
 <h2 id="3-keep-each-project-small">3. Keep each project small<a class="hlink" href="#3-keep-each-project-small" aria-label="Link to this section">#</a></h2>
 <p>A normal project needs two committed files:</p>
 <div class="cb"><pre class="block"><code>your-project/
@@ -335,7 +386,26 @@ targets = ["*"]</code></pre></div>
 <span class="pr">$ </span>agentstack trust .
 <span class="pr">$ </span>agentstack status</code></pre></div>
 <p><code>lock --write</code> accepts the exact pinned bytes and <code>trust .</code> is the human review for this machine. Run the loop after you add or remove a selected capability, accept an updated library item, or change the default toolset — not for unrelated edits.</p>
+<div class="cb cb-term" data-language="console"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">console</span></div><pre class="block"><code class="language-console"><span class="pr">$ </span>agentstack lock --write
+<span class="out">✓ pinned 2 servers from 1 toolset in ~/my-project/.agentstack/agentstack.lock</span>
+<span class="out">  no configs rendered, no skills materialized — that stays `agentstack use --write`.</span>
+
+<span class="out">Next: `agentstack doctor` to verify the gateway wiring.</span></code></pre></div>
 <p>See <a href="howto/trust-a-repo.html">Trust a project</a> for why the lock comes first.</p>
+<p><code>agentstack doctor</code> is the deeper verification. On a healthy project it ends like this:</p>
+<div class="cb cb-term" data-language="console"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">console</span></div><pre class="block"><code class="language-console"><span class="pr">$ </span>agentstack doctor
+<span class="out">Adapters &amp; CLIs ✓ 2 detected, configs parse</span>
+<span class="out">Zero-files gateway ✓ 3 checks pass</span>
+<span class="out">Secrets ✓ 1 check pass</span>
+<span class="out">Reproducibility</span>
+<span class="out">  – reproducibility: nothing declared to check — no toolset here pulls a skill from the library</span>
+<span class="out">  ✓ github               library server · matches lock</span>
+<span class="out">  ✓ tldraw               library server · matches lock</span>
+<span class="out">· 12 sections for features this project doesn't use hidden, 3 sections with nothing to fix summarised — agentstack doctor --all shows every line.</span>
+
+<span class="out">0 errors, 0 warnings.</span>
+<span class="out">  ready: reviewed and verified — the default opens on the next agent connection</span>
+<span class="out">  next: nothing to repair — this setup is verified   the default toolset opens automatically on the next trusted agent connection</span></code></pre></div>
 <h2 id="5-what-the-agent-sees">5. What the agent sees<a class="hlink" href="#5-what-the-agent-sees" aria-label="Link to this section">#</a></h2>
 <p>Zero-files delivery does not dump every skill and MCP schema into the model's context. The agent starts with skill names and one-line descriptions, calls <code>agentstack_load(name, reason)</code> for one full body when a task matches, and searches the gateway for an MCP tool schema only when it needs that tool.</p>
 <p>Missing <code>.mcp.json</code> and local skill folders are therefore normal. House rules, settings, hooks, extensions, and file-only CLIs still use managed files.</p>

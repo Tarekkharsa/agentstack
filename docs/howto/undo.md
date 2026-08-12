@@ -13,6 +13,13 @@ agentstack undo
 It shows recent AgentStack-managed writes and the exact command for returning
 to a point. Nothing changes until you add the shown `--write` form.
 
+```console
+recent changes (newest first)
+  1  1m ago       init                                         7 files · Claude Code, Codex CLI
+
+  pick a point: agentstack undo --to <n> --write
+```
+
 ## Undo one recorded write
 
 The script-friendly form is:
@@ -21,6 +28,24 @@ The script-friendly form is:
 agentstack x restore
 agentstack x restore --last --write
 agentstack x restore <id> --write
+```
+
+The bare form lists every recorded point and every adapter backup:
+
+```console
+$ agentstack x restore
+Recorded changes (newest first):
+
+  18cb1a4c48  1m ago   global   gateway connect            2 files · Claude Code, Codex CLI
+  18cb1a4c46  1m ago   project  init                       7 files · Claude Code, Codex CLI
+
+Undo one with: agentstack x restore <id> --write (or --last for the newest)
+
+Adapter config backups (content before our last write):
+  Claude Code    global ~/.claude.json
+  Codex CLI      global ~/.codex/config.toml
+
+Restore one with: agentstack x restore <adapter> [--scope project] --write
 ```
 
 Restore covers managed config-file writes such as settings, hooks,

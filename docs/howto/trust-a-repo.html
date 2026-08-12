@@ -283,7 +283,25 @@
 <h2 id="review-it">Review it<a class="hlink" href="#review-it" aria-label="Link to this section">#</a></h2>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack status     <span class="cm"># inspect first</span>
 <span class="pr">$ </span>agentstack trust .</code></pre></div>
-<p>The review shows what the manifest and lock allow: commands, remote endpoints, secret reference names, skill and instruction content, and machine policy that still limits the project.</p>
+<p>The review shows what the manifest and lock allow: commands, remote endpoints, secret reference names, skill and instruction content, and machine policy that still limits the project. A real review of a two-server project reads:</p>
+<div class="cb cb-term" data-language="console"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">console</span></div><pre class="block"><code class="language-console"><span class="pr">$ </span>agentstack trust .
+<span class="out">Reviewing ~/my-project — approving this lets its capabilities activate.</span>
+
+<span class="out">This project will:</span>
+<span class="out">  run 2 commands on your machine — github, tldraw</span>
+<span class="out">  …using exactly the content shown below, pinned to these bytes.</span>
+
+<span class="out">This project declares — review what auto-mode may run/contact:</span>
+<span class="out">  servers (spawned or contacted over MCP):</span>
+<span class="out">  ▶ github: runs `/usr/bin/env npx -y github-mcp`   [library, pinned]</span>
+<span class="out">  ▶ tldraw: runs `/usr/bin/env npx -y tldraw-mcp`   [library, pinned]</span>
+<span class="out">  machine policy ceiling: ~/.agentstack/agentstack.toml — the repo can only narrow it, never loosen it</span>
+
+<span class="out">✓ trusted at sha256:cea79b113d71d7870dde97bd7d25292191789178a41bb445ddc972a61eea3aa2.</span>
+<span class="out">Editing the manifest or lockfile invalidates this — re-run `agentstack trust` after reviewing changes.</span>
+<span class="out">Pinned skill/server content that drifts is blocked at use time until re-locked.</span>
+<span class="out">Withdraw anytime with `agentstack trust --revoke`.</span></code></pre></div>
+<p>Without a terminal the command refuses rather than guessing. Acknowledge it with <code>--yes --consented &lt;surface_digest&gt;</code>, taking the digest from <code>agentstack trust --preview</code>.</p>
 <p>Trust is bound to this checkout path and the current manifest plus lock. A <code>git pull</code>, manifest edit, or re-lock makes it stale.</p>
 <h2 id="lock-first-then-trust">Lock first, then trust<a class="hlink" href="#lock-first-then-trust" aria-label="Link to this section">#</a></h2>
 <p>When selected content changed:</p>

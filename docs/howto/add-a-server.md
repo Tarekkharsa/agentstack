@@ -54,6 +54,25 @@ The next trusted agent connection opens the default and can discover the
 server's tools through `tools_search`. The server definition is not copied into
 project MCP configs in the live lane.
 
+Because nothing is written for a server served live, `x why` is the place that
+answers "where did this come from, and who gets it":
+
+```console
+$ agentstack x why github
+
+  github  (MCP server)
+
+    from      the central library · init:local
+    pinned    sha256:b720188932b4…
+    approved  yes · you said yes 0s ago
+    live      Claude Code · Codex CLI
+    written   Claude Code — in its own config, which AgentStack does not manage
+    scope     runs `/usr/bin/env` · reads GITHUB_TOKEN
+    used      never activated from here yet
+
+    full detail: agentstack explain github
+```
+
 ## Other starting points
 
 | What you have | Command |

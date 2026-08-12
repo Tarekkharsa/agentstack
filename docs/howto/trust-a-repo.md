@@ -17,7 +17,31 @@ agentstack trust .
 
 The review shows what the manifest and lock allow: commands, remote endpoints,
 secret reference names, skill and instruction content, and machine policy that
-still limits the project.
+still limits the project. A real review of a two-server project reads:
+
+```console
+$ agentstack trust .
+Reviewing ~/my-project — approving this lets its capabilities activate.
+
+This project will:
+  run 2 commands on your machine — github, tldraw
+  …using exactly the content shown below, pinned to these bytes.
+
+This project declares — review what auto-mode may run/contact:
+  servers (spawned or contacted over MCP):
+  ▶ github: runs `/usr/bin/env npx -y github-mcp`   [library, pinned]
+  ▶ tldraw: runs `/usr/bin/env npx -y tldraw-mcp`   [library, pinned]
+  machine policy ceiling: ~/.agentstack/agentstack.toml — the repo can only narrow it, never loosen it
+
+✓ trusted at sha256:cea79b113d71d7870dde97bd7d25292191789178a41bb445ddc972a61eea3aa2.
+Editing the manifest or lockfile invalidates this — re-run `agentstack trust` after reviewing changes.
+Pinned skill/server content that drifts is blocked at use time until re-locked.
+Withdraw anytime with `agentstack trust --revoke`.
+```
+
+Without a terminal the command refuses rather than guessing. Acknowledge it
+with `--yes --consented <surface_digest>`, taking the digest from
+`agentstack trust --preview`.
 
 Trust is bound to this checkout path and the current manifest plus lock. A
 `git pull`, manifest edit, or re-lock makes it stale.
