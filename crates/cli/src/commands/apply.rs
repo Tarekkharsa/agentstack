@@ -1536,7 +1536,7 @@ fn render(
     let mut gitignore_pending = false;
     if will_write && scope == Scope::Project && !gitignore_off {
         let gitignore = project_root.join(".gitignore");
-        let capture = crate::history::capture(&gitignore, ".gitignore · managed artifacts");
+        let capture = crate::history::capture(&gitignore, crate::render::gitignore::HISTORY_LABEL);
         match crate::render::gitignore::ensure_block(&project_root, &ignore_entries, true) {
             Ok(true) => {
                 backups.push(capture);

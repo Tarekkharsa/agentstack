@@ -35,6 +35,11 @@ use crate::scope::Scope;
 const BEGIN: &str = "# >>> agentstack — generated project artifacts (machine-local) >>>";
 const END: &str = "# <<< agentstack >>>";
 
+/// The one label every ledger entry for this file carries. Shared so `apply`,
+/// `use` and `session start` name the same thing the same way — a user reading
+/// `undo` or `session end` sees one line, not three spellings of it.
+pub const HISTORY_LABEL: &str = ".gitignore · managed artifacts";
+
 /// Which of a target's generated project-scope artifacts agentstack currently
 /// manages. Each caller computes these **after** its write sections, from
 /// outcomes and persistent records (see the module docs), not from manifest

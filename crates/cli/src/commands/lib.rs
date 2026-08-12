@@ -2699,9 +2699,19 @@ pub(crate) fn sync_for_bootstrap(remote: Option<&str>) -> Result<()> {
     let out = crate::gitx::run_raw(crate::gitx::Profile::Sync, &pull, Some(&lib))
         .context("pulling the shared library")?;
     if !out.success {
+        // Name the way out, not just the wreck. `up --library <url>` records
+        // the URL before it is ever proven reachable, so one typo leaves every
+        // later `agentstack up` failing here — and "resolve the library, then
+        // re-run `agentstack up`" was the command that had just failed, with no
+        // command between them that repoints the remote. Both repairs are named
+        // with the URL actually in use, so the fix is a copy-paste away.
+        let url = git_out(&lib, &["remote", "get-url", "origin"]).unwrap_or_default();
         bail!(
-            "library pull failed: {}\nresolve the library at {}, then re-run `agentstack up`",
+            "library pull failed: {}\nthe remote it tried is {}\n  \
+             · wrong URL? re-run with the right one: agentstack up --library <url> --write\n  \
+             · already correct? fix the library at {} (network, credentials, or a conflicting checkout), then re-run `agentstack up`",
             out.stderr.trim(),
+            if url.is_empty() { "unset" } else { &url },
             lib.display()
         );
     }

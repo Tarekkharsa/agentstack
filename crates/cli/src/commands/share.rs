@@ -375,9 +375,25 @@ pub fn run_receive(args: &ReceiveArgs, manifest_dir: Option<&Path>) -> Result<()
     // next, not a verdict minted here. `next_step` is the human sentence and
     // is always present; `next_action` is the machine field and is null when
     // the honest next step is not runnable verbatim.
-    let report = super::doctor::collect(Some(&dir))?;
-    if let Some(next) = report["next_step"].as_str() {
-        crate::outln!("{} {}", "next:".bold(), next.bold());
+    //
+    // Best-effort BY DESIGN: the files are already adopted by this line, so a
+    // review that cannot run is not a failed receive. `collect` bails on a
+    // directory with no manifest — which printed "✓ 1 file into this project"
+    // and then exited 1 with "no agentstack manifest here", a contradiction on
+    // one screen. A directory with nothing set up yet has an honest next step
+    // of its own, and it is the one that error already named.
+    match super::doctor::collect(Some(&dir)) {
+        Ok(report) => {
+            if let Some(next) = report["next_step"].as_str() {
+                crate::outln!("{} {}", "next:".bold(), next.bold());
+            }
+        }
+        Err(_) => crate::outln!(
+            "{} {}   {}",
+            "next:".bold(),
+            "agentstack init".bold(),
+            "there is no setup here yet for these files to belong to".dimmed()
+        ),
     }
     Ok(())
 }
