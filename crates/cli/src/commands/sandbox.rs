@@ -909,9 +909,14 @@ fn native_bridge_gateway(
 /// tool-call relay already uses for this identical question, so there is one
 /// answer to "where may a container-reachable host listener live" — the
 /// `docker0` gateway on a native Linux daemon (a private, non-routable host
-/// interface), the host loopback on Docker Desktop, and the `0.0.0.0` wildcard
-/// only where neither is knowable. Both listeners keep their own token gate;
-/// the bind is defence in depth and may only narrow.
+/// interface), the host loopback on Docker Desktop, and a refusal where neither
+/// is knowable. Both listeners keep their own token gate; the bind is defence in
+/// depth and may only narrow.
+///
+/// The `0.0.0.0` wildcard is now reachable only through the operator's
+/// `AGENTSTACK_RELAY_BIND` opt-in, which the shared decision function honours;
+/// the run refuses rather than publishing a token-gated listener to the LAN on
+/// its own initiative.
 ///
 /// What is added here is the assignability probe. `relay_bind_address` can hand
 /// back an address that has no host interface — Docker Desktop *on Linux*
@@ -919,37 +924,42 @@ fn native_bridge_gateway(
 /// differently (`gateway_http::start` collapses any failure into `None`, which
 /// would silently lose the run's only MCP transport). A throwaway bind of port
 /// 0 answers "is this IP assignable on this host" before either listener
-/// starts, and only `AddrNotAvailable` widens back to the wildcard, with the
-/// same honest note as [`agentstack_egress::BlockingExecutionRelay::start_on_or_unspecified`].
+/// starts, and `AddrNotAvailable` is the same refusal
+/// [`agentstack_egress::BlockingExecutionRelay::start_on_or_refuse`] raises.
 /// Any other error is left for the real listener to report, and the probe's
 /// port is irrelevant — both listeners ask for port 0 themselves.
 #[cfg(feature = "sandbox")]
 fn container_reachable_bind_ip(
     bridge_gateway: Option<std::net::IpAddr>,
     listener: &str,
-) -> std::net::IpAddr {
+) -> Result<std::net::IpAddr> {
     use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpListener};
 
     let wildcard = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
-    let preferred = agentstack_egress::relay_bind_address(std::env::consts::OS, bridge_gateway);
+    let preferred = agentstack_egress::relay_bind_address(
+        std::env::consts::OS,
+        bridge_gateway,
+        agentstack_egress::relay_bind_opt_in()?,
+        listener,
+    )?;
     if preferred == wildcard {
-        // Already the widest answer: nothing narrower to probe for.
-        return wildcard;
+        // The operator named the wildcard: nothing narrower to probe for, and
+        // nothing to refuse — the exposure is the choice they made.
+        return Ok(wildcard);
     }
     match TcpListener::bind(SocketAddr::new(preferred, 0)) {
-        Ok(_probe) => preferred,
+        Ok(_probe) => Ok(preferred),
         Err(error) if error.kind() == std::io::ErrorKind::AddrNotAvailable => {
-            eprintln!(
-                "  {} {listener} bind to {preferred} unavailable ({error}); \
-                 falling back to 0.0.0.0 (LAN-reachable for this run)",
-                "note:".dimmed()
-            );
-            wildcard
+            Err(agentstack_egress::relay_bind_refusal(
+                listener,
+                &format!("{preferred} is not assignable on this host ({error})"),
+            )
+            .into())
         }
         // A real failure (port exhaustion, a sandboxed process denied a socket)
         // is not a reason to widen: keep the narrow address and let the actual
         // listener surface its own error.
-        Err(_) => preferred,
+        Err(_) => Ok(preferred),
     }
 }
 
@@ -1110,7 +1120,7 @@ fn wire_sandbox_gateway(
     // exists, which had made this HTTP MCP endpoint LAN-reachable for the whole
     // run. The per-run `X-Agentstack-Token` remains the authority boundary; the
     // bind scope is defence in depth on top of it.
-    let bind_ip = container_reachable_bind_ip(bridge_gateway, "gateway endpoint");
+    let bind_ip = container_reachable_bind_ip(bridge_gateway, "gateway endpoint")?;
     let endpoint = crate::gateway_http::start(Arc::new(gateway), &format!("{bind_ip}:0"))
         .context("starting the gateway HTTP endpoint")?;
 
@@ -1348,7 +1358,7 @@ fn execute_proxy(
     // Same rule as the gateway endpoint above: `docker0` on a native Linux
     // daemon, host loopback on Docker Desktop, wildcard only as a last resort.
     // The proxy's `auth_token` stays the authority boundary either way.
-    let bind_ip = container_reachable_bind_ip(native_bridge_gateway(&backend), "egress proxy");
+    let bind_ip = container_reachable_bind_ip(native_bridge_gateway(&backend), "egress proxy")?;
     let bridge = agentstack_egress::BlockingBridge::start_on_with(
         bind_ip,
         std::slice::from_ref(&server.to_string()),
@@ -1742,41 +1752,62 @@ mod tests {
 
     /// Both host-side listeners of a sandbox run (the MCP gateway endpoint and
     /// the `--sandbox` egress proxy) pick their bind through one function, and
-    /// that function may only NARROW: it never returns the wildcard while a
-    /// narrower address is both reachable from the container and assignable
-    /// here. The platform matrix itself is proven in
+    /// that function may only NARROW: it never returns the wildcard on its own
+    /// initiative. The platform matrix itself is proven in
     /// `egress::relay_bind_address`'s own unit test; what this asserts is that
-    /// this crate applies it, and that an unassignable preference degrades to a
-    /// working wildcard instead of failing (or silently losing) the run.
+    /// this crate applies it, and that an unassignable preference REFUSES the
+    /// run — naming the opt-in — instead of quietly publishing a token-gated
+    /// listener to the local network.
+    ///
+    /// The bare-env case (no `AGENTSTACK_RELAY_BIND`) is what CI and developer
+    /// machines run, so it is what this asserts; the opt-in's own semantics are
+    /// proven env-free in `egress::relay_bind_address`.
     #[cfg(feature = "sandbox")]
     #[test]
     fn host_listeners_bind_the_narrowest_container_reachable_address() {
         use std::net::{IpAddr, Ipv4Addr};
 
-        let wildcard = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
         let loopback = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let opted_in = agentstack_egress::relay_bind_opt_in()
+            .expect("test env must not carry a malformed opt-in")
+            .is_some();
+        if opted_in {
+            // An operator-set bind is honoured verbatim; nothing to assert
+            // about the derivation this test exists for.
+            return;
+        }
 
         // No bridge gateway known — the platform decision stands alone. Docker
         // Desktop forwards host.docker.internal to the host loopback, so there
-        // the bind is the tightest possible; a native Linux daemon with no
-        // discoverable gateway keeps working on the wildcard.
+        // the bind is the tightest possible; a Linux host with no discoverable
+        // docker0 gateway (and any other platform) has no narrow answer and
+        // must refuse.
         let chosen = container_reachable_bind_ip(None, "test");
         match std::env::consts::OS {
-            "macos" | "windows" => assert_eq!(chosen, loopback),
-            _ => assert_eq!(chosen, wildcard),
+            "macos" | "windows" => assert_eq!(chosen.unwrap(), loopback),
+            _ => {
+                let message = chosen
+                    .expect_err("an undetermined bind must refuse")
+                    .to_string();
+                assert!(message.contains("AGENTSTACK_RELAY_BIND"), "{message}");
+            }
         }
 
         // A gateway address with no host interface (203.0.113.9 is TEST-NET-3,
         // RFC 5737 — guaranteed unassigned) is what Docker Desktop on Linux
         // effectively reports. It must never be bound: off Linux it is ignored
-        // outright, and on Linux the probe widens to the wildcard so the run
-        // still has a gateway rather than losing it to a swallowed bind error.
+        // outright, and on Linux the probe refuses rather than widening.
         let unassignable: IpAddr = "203.0.113.9".parse().unwrap();
         let chosen = container_reachable_bind_ip(Some(unassignable), "test");
-        assert_ne!(chosen, unassignable, "an unassignable bind is never chosen");
         match std::env::consts::OS {
-            "macos" | "windows" => assert_eq!(chosen, loopback),
-            _ => assert_eq!(chosen, wildcard),
+            "macos" | "windows" => assert_eq!(chosen.unwrap(), loopback),
+            _ => {
+                let message = chosen
+                    .expect_err("an unassignable bind must refuse, never widen")
+                    .to_string();
+                assert!(message.contains("203.0.113.9"), "{message}");
+                assert!(message.contains("AGENTSTACK_RELAY_BIND"), "{message}");
+            }
         }
     }
 

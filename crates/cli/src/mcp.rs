@@ -447,20 +447,52 @@ done"#;
         };
         let (lead, grand) = (read_pid(&leader), read_pid(&grandchild));
         assert!(lead > 0 && grand > 0, "the child never recorded its pids");
-        // The grandchild is reparented on death, so its reaper is init, not
-        // us — poll briefly rather than assuming the collection already
-        // happened. The leader we reap ourselves, so it is gone on return.
+        // Neither pid is collected by us, so poll briefly rather than assume
+        // the collection already happened: the grandchild is reparented on
+        // death and reaped by init, and the leader is reaped — if at all — by
+        // a task the probe's own runtime detaches on its way out.
         let deadline = Instant::now() + Duration::from_secs(3);
-        while Instant::now() < deadline
-            && (crate::sys::pid_alive(lead) || crate::sys::pid_alive(grand))
-        {
+        while Instant::now() < deadline && (still_running(lead) || still_running(grand)) {
             std::thread::sleep(Duration::from_millis(50));
         }
-        assert!(!crate::sys::pid_alive(lead), "the probed command survived");
+        assert!(!still_running(lead), "the probed command survived");
         assert!(
-            !crate::sys::pid_alive(grand),
+            !still_running(grand),
             "the probed command's own child survived — the group kill missed it"
         );
+    }
+
+    /// Whether `pid` names a process that is still RUNNING — which is what
+    /// "survived" has to mean here, and is NOT what `kill(pid, 0)` answers.
+    ///
+    /// The probed leader is a direct child of this test process, so between
+    /// its death and somebody calling `wait` on it, it stays a zombie: an
+    /// entry in the process table with an uncollected exit status, addressable
+    /// by `kill` and therefore "alive" to [`crate::sys::pid_alive`], but
+    /// running nothing and unable to do anything. The probe kills the group
+    /// and then hands the reaping to a task its Tokio runtime detaches as that
+    /// runtime shuts down, so whether the collection lands before `probe_stdio`
+    /// returns is a scheduling race — one macOS wins and Linux does not, which
+    /// is a fact about who called `wait`, not about what survived. Asking the
+    /// OS for the state keeps the witness on the claim under test; the kernel
+    /// clears the leftover entry when this test binary exits.
+    ///
+    /// `ps` reports `Z` for a zombie on every Unix this suite runs on and
+    /// prints nothing for a pid that is gone. A `ps` that cannot be run at all
+    /// reads as running, because a witness that cannot see must not acquit.
+    fn still_running(pid: i32) -> bool {
+        if !crate::sys::pid_alive(pid) {
+            return false;
+        }
+        let Ok(output) = std::process::Command::new("ps")
+            .args(["-o", "state=", "-p", &pid.to_string()])
+            .output()
+        else {
+            return true;
+        };
+        let state = String::from_utf8_lossy(&output.stdout);
+        let state = state.trim();
+        !state.is_empty() && !state.starts_with('Z')
     }
 
     /// Regression: the stderr capture keeps only a prefix, but it has to keep

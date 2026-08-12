@@ -49,6 +49,9 @@ npx playwright@1.54.0 install chromium
 T3CODE_REPO=/path/to/t3code node tools/t3-integration-smoke.mjs
 ```
 
+This check is optional and maintainer-only: it needs a local T3 Code checkout
+that contributors outside the project may not have, so a PR is never held on it.
+
 The runner uses the release AgentStack binary for T3's bridge E2E suite, then
 starts T3 with isolated `HOME`, `AGENTSTACK_HOME`, and T3 data. Its deterministic
 CLI fixture advertises and withholds individual feature contracts so the real

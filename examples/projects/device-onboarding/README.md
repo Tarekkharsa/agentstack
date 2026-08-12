@@ -77,5 +77,5 @@ bash examples/projects/device-onboarding/assert.sh
 The first round of this example surfaced four gaps — subdirectory walk-up for
 manifest discovery, `adopt` on hand-*edited* values, project-scope
 pending-removal warnings, and the `apply` default-scope vs. quickstart
-decision. All four are now fixed and covered above (sections A, B, and D); see
-`../../../docs/archive/dogfooding-findings.md` ("Device-onboarding round") for the original filings.
+decision. All four are now fixed and covered above (sections A, B, and D); the
+original filings are in the dogfooding report, kept in git history.

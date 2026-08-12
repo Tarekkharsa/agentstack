@@ -5,6 +5,10 @@
 //! JSON values, so protocol SDK types do not leak into trust, policy, or
 //! manifest code.
 
+// This crate is the boundary untrusted protocol input arrives on, so it holds
+// the same rule every other library crate in the workspace holds.
+#![forbid(unsafe_code)]
+
 use std::{borrow::Cow, future::Future, sync::Arc};
 
 use rmcp::{

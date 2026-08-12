@@ -47,7 +47,8 @@ fi
 say "Downloading ${asset} (${VERSION}) …"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
-curl -fsSL "$base/$asset" -o "$tmp/$asset" || err "download failed: $base/$asset"
+curl --proto '=https' --tlsv1.2 -fsSL "$base/$asset" -o "$tmp/$asset" \
+  || err "download failed: $base/$asset"
 
 # Verify the tarball against the release's checksums.txt.
 if have sha256sum; then
@@ -57,7 +58,7 @@ elif have shasum; then
 else
   err "sha256sum or shasum is required to verify the download"
 fi
-curl -fsSL "$base/checksums.txt" -o "$tmp/checksums.txt" \
+curl --proto '=https' --tlsv1.2 -fsSL "$base/checksums.txt" -o "$tmp/checksums.txt" \
   || err "checksums.txt not found for this release: $base/checksums.txt
 Releases before v0.6.0 were published without checksums; pass a newer AGENTSTACK_VERSION."
 expected="$(awk -v a="$asset" '$2 == a {print $1}' "$tmp/checksums.txt")"

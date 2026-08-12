@@ -36,3 +36,7 @@ examples/workflow-scale/results.jsonl
 
 # review scratch space (handoff notes, throwaway fixtures) — never committed
 /.scratch/
+
+# internal planning material — kept on disk for the maintainer, not published
+/plan/
+/PLAN.md

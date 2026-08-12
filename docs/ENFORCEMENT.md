@@ -1,5 +1,5 @@
-<!-- INTERNAL SOURCE: this file is the build input for its page on
-     https://tarekkharsa.github.io/agentstack/ — readers go to the site.
+<!-- BUILD INPUT for this page on https://tarekkharsa.github.io/agentstack/ —
+     readers go to the site, contributors edit this file.
      Edit here, then run: python3 tools/make-docs-pages.py -->
 
 # AgentStack — Enforcement matrix
@@ -316,16 +316,19 @@ toolset containing it.
   non-routable docker0 bridge gateway on a native Linux daemon, or the host
   loopback on Docker Desktop — never a LAN-facing interface. `--lockdown` shares
   the endpoint bind, since its sidecar relay dials the same host address. The
-  `0.0.0.0` wildcard survives only where no narrow address is knowable or
-  bindable, which is three cases and not one: a Linux host whose docker0 gateway
-  could not be determined at all — no daemon, no such network, no IPv4 gateway,
-  or an address that would not parse — where no narrow bind is attempted; a
-  Linux host that cannot bind the gateway it chose (Docker-Desktop-on-Linux,
-  whose gateway lives in the VM), where an assignability probe widens back to
-  the wildcard so the run keeps a working gateway instead of silently losing one
-  to a swallowed bind error; and any platform that is not linux/macOS/Windows,
-  which stays functional on the wildcard rather than guess. Those are documented
-  residual exposure, not exotic. The bind is defence in depth in every case: the
+  `0.0.0.0` wildcard is no longer a fallback. Where no narrow address is
+  knowable or bindable — a Linux host whose docker0 gateway could not be
+  determined at all (no daemon, no such network, no IPv4 gateway, or an address
+  that would not parse); a Linux host that cannot bind the gateway it chose
+  (Docker-Desktop-on-Linux, whose gateway lives in the VM), caught by an
+  assignability probe before either listener starts; or any platform that is not
+  linux/macOS/Windows — the run REFUSES to start and says why, naming the one
+  opt-in. `AGENTSTACK_RELAY_BIND=<ip>` binds an explicit address and
+  `AGENTSTACK_RELAY_BIND=0.0.0.0` accepts the LAN-reachable wildcard
+  deliberately; the same variable governs the executor's relay, so the rule
+  cannot differ between them. A wildcard bind is now always an operator's stated
+  choice, never a consequence of an undetectable docker0.
+  The bind is defence in depth in every case: the
   endpoint's per-run `X-Agentstack-Token` and the proxy's own per-run credential
   remain the authority, exactly as before. **Ceiling:** the ordinary bridge
   remains open; an agent that opens its own connection to an upstream host the
@@ -443,7 +446,15 @@ toolset containing it.
   `MultiEdit`, `NotebookEdit`, `write_file`, `replace`, `edit_file`,
   `fs_write`, `create_file`, `str_replace_editor`, `replace_string_in_file`,
   `multi_replace_string_in_file`, `apply_patch`) — every name on it is a
-  write, as before. Beyond the list the PAYLOAD decides, so a tool this build
+  write, as before, and a name on it that arrives with NO readable target is
+  refused rather than allowed: a write the guard cannot locate is a write it
+  cannot confine. Codex's `apply_patch` names its targets nowhere but inside
+  its patch text, so the guard reads the documented envelope
+  (`*** Begin Patch` … `*** Add File:` / `*** Update File:` /
+  `*** Delete File:` / `*** Move to:` … `*** End Patch`, per the Codex
+  parser's own constants) and puts EVERY path it finds through the identical
+  write check a `Write` gets. One refused path refuses the whole patch.
+  Beyond the list the PAYLOAD decides, so a tool this build
   has never heard of is still confined when its call plainly intends a write:
   an edit structure (`old_string`/`new_string`, a patch, a list of edits), an
   explicit write mode or an `append`/`overwrite`/`create` flag, a body of
@@ -452,9 +463,16 @@ toolset containing it.
   camel and Pascal dialects all land. The residual is real and named: a write
   whose call carries none of those signals — a path and nothing else, or
   content passed by handle — still degrades to the read path and gets the
-  deny-glob check only, and a path under a field name the guard does not read
-  is not judged at all. That degradation stays the safe default, chosen so an
-  unfamiliar tool cannot wedge a harness. Cursor is confined for shell writes and for
+  deny-glob check only. A path under a field name the guard does not read is
+  now judged only when the tool's NAME is on `WRITERS` (there it fails closed
+  and is refused); under an unknown name it is still not judged at all. The
+  envelope reader is deliberately narrow: it fires only when the whole
+  argument is the envelope (first line `*** Begin Patch`, last line
+  `*** End Patch`), so a patch smuggled around a shell command stays on the
+  command path and keeps its destructive-command analysis — and `apply_patch`
+  invoked through the SHELL (heredoc, or argv `["apply_patch", "<patch>"]`) is
+  still analysed as a command, not as a patch. That degradation stays the safe
+  default, chosen so an unfamiliar tool cannot wedge a harness. Cursor is confined for shell writes and for
   nothing else: its surface offers no pre-write file hook, so the installer
   wires only `beforeShellExecution` and `beforeReadFile` and no Cursor file
   write is ever presented for a decision. `[guard.project_roots]`
@@ -684,16 +702,33 @@ still fail-closed, and still only evidence that the check ran.
   (`LockedServer`), the manifest bytes are bound into the trust digest, and
   `doctor`'s `check_server_reproducibility` reports pin-vs-manifest drift.
   Editing a server's command line therefore re-gates trust review, with one
-  named exception: a server tagged `owner = <adapter>` is refreshed from the
-  owning app's own on-disk config by `apply --write`, and because that value
-  is machine-derived from a config the owner already executes, a project that
-  was trusted immediately before the refresh has its trust **re-pinned** to
-  the new digest instead of re-gated. A project that was already untrusted or
-  drifted is left alone — pending review stays pending — and the re-pin
-  digest comes from a pre-write snapshot with agentstack's own new bytes
-  spliced in, never from a re-read of disk, so a hostile edit racing the
-  write cannot be blessed by it. (`crates/cli/src/render/owned.rs`
-  `refresh_owned_servers`, `crates/cli/src/commands/apply.rs`.)
+  named and now narrowed exception: a server tagged `owner = <adapter>` is
+  refreshed from the owning app's own on-disk config by `apply --write`, and
+  the re-pin depends on WHAT the refresh moved. An **environment-only**
+  refresh — the motivating case, the Codex app rotating `node_repl` env
+  values — is machine-derived from a config the owner already executes and
+  authorizes no new executable content, so a project that was trusted
+  immediately before the refresh has its trust **re-pinned** to the new
+  digest instead of re-gated. A refresh that moved the **executable surface**
+  does not get the carry: a stdio server's `command`/`args`, a remote
+  server's `url` or the `headers` it presents there, or a change of transport
+  `type` either way (`OwnedStatus::executable_moved`). There the manifest
+  still records the fresh values, the re-pin is **withheld**, the project is
+  left re-gated for the next command, and the run says which servers changed
+  what they run or reach and that `agentstack trust` is owed. The owner's
+  config is outside this project's consent digest — at project scope it is an
+  in-repo file a `git pull` rewrites — so carrying trust across a new command
+  line, or a new origin holding the auth header, would reach every harness
+  with no review. A project that was already untrusted or drifted is left
+  alone — pending review stays pending — and the re-pin digest comes from a
+  pre-write snapshot with agentstack's own new bytes spliced in, never from a
+  re-read of disk, so a hostile edit racing the write cannot be blessed by
+  it. **The residual is disclosed, not hidden:** an env-value-only refresh
+  still auto-repins, and env is executable-equivalent for an
+  interpreter-launched server — `NODE_OPTIONS`, `LD_PRELOAD` and `PATH` all
+  change what the same command line actually runs. (`crates/cli/src/render/owned.rs`
+  `refresh_owned_servers` / `executable_surface_moved`,
+  `crates/cli/src/commands/apply.rs`.)
   An untrusted or drifted project **spawns nothing through agentstack**:
   `session start`, the protected `run`, and the MCP server's auto-project gate
   all refuse, and `Gateway::from_frozen` refuses to build for a sandboxed run
@@ -1278,7 +1313,7 @@ review of identical content gets shorter.
   project, committed, or shared. Recognition in particular never crosses
   machines — that is a consequence of where it lives, not a policy promise.
 - **Not a backup.** The snapshot store is not a recovery mechanism and is not
-  what `agentstack restore` reads; it holds approved bytes for comparison, not
+  what `agentstack x restore` reads; it holds approved bytes for comparison, not
   project history.
 - **Not a widening of consent.** Recognition shortens what the card *says*; it
   never shortens the gate. The per-project yes still happens in full, and a
@@ -1387,7 +1422,7 @@ feature and has no host fallback.
 | Secrets | **enforced** | No resolved secret, gateway environment, or relay credential appears in guest env/result/events. Upstream processes still receive secrets that their declared server configuration authorizes. |
 | Filesystem read | **enforced** | Guest sees only a private read-only `/app` mount containing source, JSON input, bootstrap, generated bindings, and relay token. The policy ruleset is mounted only into the sidecar. The guest does not receive workspace, AgentStack home, Docker socket, or host home mounts. Container/kernel escape is outside this claim. |
 | Filesystem write | **enforced** | Read-only root and `/app`; only a 16 MiB `noexec,nosuid,nodev` `/tmp` tmpfs and one pre-created result-file bind are writable. Both are real kernel caps, by different mechanisms: the tmpfs size caps the mount, but a bind's bytes land in the host inode and no mount option bounds them, so the result file is bounded at the writer instead — a 4 MiB `RLIMIT_FSIZE` (`--ulimit fsize=`, soft == hard) covering every file in the container. A write past it fails with `SIGXFSZ`, and with capabilities dropped and `no-new-privileges` set the guest cannot raise its own hard limit. The 1 MiB `MAX_RESULT_BYTES` remains a separate **host-side read refusal** applied afterwards: an oversized result is rejected as invalid, never truncated. The write cap is deliberately four times the read refusal, so it can never clip a result the host would have accepted. The cap is per file, not aggregate; total host-disk exposure per execution is bounded because the bind is the only writable host path. |
-| Direct egress | **enforced** | Internal Docker network has only the egress sidecar as peer. Its ordinary proxy requires an undisclosed separate token; the fixed raw relay reaches only the host execution relay. The host relay binds the narrowest interface the sidecar can still reach via `host.docker.internal`: the private, non-routable docker0 bridge gateway on a native Linux daemon, or the host loopback on Docker Desktop — never a LAN-facing interface. It stays reachable from Docker containers on the host (not from other LAN hosts); the residual `0.0.0.0` wildcard bind applies whenever that narrow address is unknown or unbindable, which is three cases and not one: a Linux host that cannot bind the gateway it chose (Docker-Desktop-on-Linux, whose gateway lives in the VM); a Linux host whose docker0 gateway could not be determined at all — no daemon, no such network, no IPv4 gateway, or an address that would not parse — where no narrow bind is even attempted; and any platform that is not linux/macOS/Windows, which stays functional on the wildcard rather than guess. The second case is an ordinary failure mode, not an exotic one, and the code carries it as documented residual exposure. Its random token, exact grant, bounded protocol, and execution-scoped lifetime are the control. No payload/content inspection occurs on allowed tool results. |
+| Direct egress | **enforced** | Internal Docker network has only the egress sidecar as peer. Its ordinary proxy requires an undisclosed separate token; the fixed raw relay reaches only the host execution relay. The host relay binds the narrowest interface the sidecar can still reach via `host.docker.internal`: the private, non-routable docker0 bridge gateway on a native Linux daemon, or the host loopback on Docker Desktop — never a LAN-facing interface. It stays reachable from Docker containers on the host (not from other LAN hosts). Where that narrow address is unknown or unbindable — a Linux host whose docker0 gateway could not be determined, a Linux host that cannot bind the gateway it chose (Docker-Desktop-on-Linux, whose gateway lives in the VM), or any platform that is not linux/macOS/Windows — the execution refuses to start instead of widening to `0.0.0.0`, and the refusal names `AGENTSTACK_RELAY_BIND`. That variable is the only route to a wildcard bind, and `AGENTSTACK_RELAY_BIND=0.0.0.0` is the operator accepting a LAN-reachable relay on purpose. Its random token, exact grant, bounded protocol, and execution-scoped lifetime are the control. No payload/content inspection occurs on allowed tool results. |
 | Process isolation | **enforced** | Non-root uid/gid 65532, capabilities dropped, `no-new-privileges`, 128 MiB memory, one CPU, 32 PIDs, 4 MiB max file size. Docker's configured/default seccomp policy, Docker itself, and the host kernel remain trusted computing base; AgentStack does not yet ship a custom executor seccomp policy. |
 | Limits | **enforced** | Machine-owned timeout, output, and call defaults are configurable only below compiled hard ceilings; requests may only narrow them. Aggregate stdout/stderr and separate result/source/input bytes, granted-tool count, and relay call count are bounded. A tool call already dispatched upstream cannot be revoked atomically. |
 | Recording | **enforced** | Run log creation is required. Events store digests and metadata, never source/input/result/secret values; tool calls carry execution IDs and render beneath the execution in `agentstack report run`. Recording is evidence, not tamper-proof remote attestation. |

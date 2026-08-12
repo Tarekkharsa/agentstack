@@ -15,23 +15,29 @@
 [Get started](https://tarekkharsa.github.io/agentstack/start.html) ·
 [Releases](https://github.com/Tarekkharsa/agentstack/releases)
 
-[![CI](https://img.shields.io/github/actions/workflow/status/Tarekkharsa/agentstack/ci.yml?branch=main&style=flat&label=CI)](https://github.com/Tarekkharsa/agentstack/actions/workflows/ci.yml) [![Conformance](https://img.shields.io/github/actions/workflow/status/Tarekkharsa/agentstack/conformance.yml?branch=main&style=flat&label=conformance)](https://github.com/Tarekkharsa/agentstack/actions/workflows/conformance.yml) [![Release](https://img.shields.io/github/v/release/Tarekkharsa/agentstack?style=flat&label=release)](https://github.com/Tarekkharsa/agentstack/releases) [![License](https://img.shields.io/badge/license-MIT_OR_Apache--2.0-blue?style=flat)](https://github.com/Tarekkharsa/agentstack/blob/main/LICENSE-MIT)
+[![CI](https://img.shields.io/github/actions/workflow/status/Tarekkharsa/agentstack/ci.yml?branch=main&style=flat&label=CI)](https://github.com/Tarekkharsa/agentstack/actions/workflows/ci.yml) [![Conformance](https://img.shields.io/github/actions/workflow/status/Tarekkharsa/agentstack/conformance.yml?style=flat&label=conformance)](https://github.com/Tarekkharsa/agentstack/actions/workflows/conformance.yml) [![Release](https://img.shields.io/github/v/release/Tarekkharsa/agentstack?style=flat&label=release)](https://github.com/Tarekkharsa/agentstack/releases) [![License](https://img.shields.io/badge/license-MIT_OR_Apache--2.0-blue?style=flat)](https://github.com/Tarekkharsa/agentstack/blob/main/LICENSE-MIT)
 
 ## Try it in 60 seconds
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh
-agentstack init                          # finds what your CLIs already have, writes it into .agentstack/
+curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | AGENTSTACK_VERSION=v0.18.0-rc.5 sh
+agentstack init                            # finds what your CLIs already have, writes it into .agentstack/
 agentstack x gateway connect --all --write # register the bridge once, so live delivery reaches your CLIs
-agentstack status                        # is it ready — and if not, the one thing that fixes it
+agentstack status                          # is it ready — and if not, the one thing that fixes it
 ```
 
-Every command above is in the release the install line serves — though the
-`agentstack x` prefix is not, so on v0.17.1 the third line is
-`agentstack gateway connect --all --write`. A few newer
-verbs shorten some of this; they are gathered in one place —
-[newer than the stable release](https://tarekkharsa.github.io/agentstack/start.html#newer-than-the-stable-release).
-`agentstack --version` says which release you have.
+> **Use the line above as written — keep the `AGENTSTACK_VERSION` pin.** The
+> unpinned installer and `brew install` both give you **v0.17.1**, where the
+> `agentstack x` prefix does not exist yet, so step 2 fails with an
+> "unrecognized subcommand" error.
+
+That installs **v0.18.0-rc.5**, the release this README describes, and every
+command above runs on it. `AGENTSTACK_VERSION` is what asks for it by name:
+drop it and the same line installs v0.17.1 instead, because `releases/latest`
+never points at a pre-release. On v0.17.1 the `agentstack x` prefix and a few
+newer verbs do not exist yet —
+[newer than the stable release](https://tarekkharsa.github.io/agentstack/start.html#newer-than-the-stable-release)
+says what to type there, and `agentstack --version` says which build you have.
 
 That is the whole first run. Here is what it left in your project — plain files
 you can open, read, and commit:
@@ -155,7 +161,11 @@ machines, or teammates.
 ## Install
 
 The one-line installer above verifies the release tarball against the `checksums.txt` published with
-each release. Or build from a checkout:
+each release. Each release also carries a GitHub build provenance attestation tying the asset to this
+repository and the workflow that built it — check it with
+`gh attestation verify agentstack-<target>.tar.gz --repo Tarekkharsa/agentstack`. That establishes
+*where* the artifact was built and does not replace the checksum comparison; see
+[`RELEASING.md`](RELEASING.md). Or build from a checkout:
 
 ```sh
 cargo build --release                  # add --features sandbox for `run --sandbox`
@@ -165,17 +175,20 @@ cargo build --release                  # add --features sandbox for `run --sandb
 Release binaries ship with sandbox support compiled in; a bare `cargo build` does not — pass
 `--features sandbox` to get `run --sandbox` / `--lockdown`.
 
-Once installed, `agentstack self update` moves you to the latest release; it verifies the
-download against the release's published checksum before replacing anything.
+Once installed, `agentstack self update` moves you to the latest *stable*
+release; it verifies the download against the release's published checksum
+before replacing anything. It never moves you onto a pre-release, and never
+back off one — for v0.18.0-rc.5 use the install line above.
 
 There is also a Homebrew tap, `Tarekkharsa/homebrew-tap`, whose
-`Formula/agentstack.rb` currently pins v0.17.1 — the latest published release:
+`Formula/agentstack.rb` pins v0.17.1 — the latest stable release, one release
+behind the pre-release above:
 
 ```sh
 brew install Tarekkharsa/tap/agentstack
 ```
 
-The formula is published by hand after each release, so it can lag a tag; if
+The formula is published by hand after each stable release, so it can lag a tag; if
 `brew info` shows an older version than the
 [releases page](https://github.com/Tarekkharsa/agentstack/releases), use the
 installer or a checkout. On a Homebrew install, upgrade with
@@ -202,7 +215,7 @@ governance only when you need them:
 | --- | --- | --- |
 | [1 — Unify](https://tarekkharsa.github.io/agentstack/start.html) | `agentstack init` → `gateway connect --all --write` | import once, delivered everywhere |
 | [2 — Switch](https://tarekkharsa.github.io/agentstack/howto/name-a-toolset.html) | toolsets · `session start/end` | toolsets and temporary sessions |
-| [3 — Diagnose](https://tarekkharsa.github.io/agentstack/start.html#verify-it) | `agentstack doctor` · `diff` | doctor and diff explain drift |
+| [3 — Diagnose](https://tarekkharsa.github.io/agentstack/start.html#the-commands-you-will-actually-use) | `agentstack doctor` · `diff` | doctor and diff explain drift |
 | [4 — Recover](https://tarekkharsa.github.io/agentstack/howto/undo.html) | `adopt` · `apply` · `restore` · `uninstall` | keep an edit, or undo the write |
 | [5 — Share](https://tarekkharsa.github.io/agentstack/howto/team-setup.html) | manifest · lock · library | locked, secret-free setups |
 | [6 — Govern](https://tarekkharsa.github.io/agentstack/howto/trust-a-repo.html) | trust · policy · lockdown | trust, policy, confined runs |
@@ -215,15 +228,6 @@ governance only when you need them:
 
 A verb is on that screen when the product itself can tell you to run it — a
 first-run step, a `doctor` fix line, or a machine-readable `next_action`.
-
-Two of them — `yes` and `undo` — plus `agentstack x why` and
-`agentstack x unrender` below, and the `agentstack x` prefix itself, are in
-v0.18.0 and later, which is newer than the
-v0.17.1 the tap and the installer serve; on that binary they are an
-`unrecognized subcommand` error, and every command that does exist there runs
-at its own bare name. `agentstack --version` says which you have, and
-[newer than the stable release](https://tarekkharsa.github.io/agentstack/start.html#newer-than-the-stable-release)
-lists the full set.
 
 `agentstack x why <name>` is the one to reach for when nothing is on disk: under
 the default routing a served capability writes no file, so `why` is where its
@@ -241,6 +245,14 @@ agentstack x guard install --write   # same command as `agentstack guard install
 Nothing was removed. Every command still runs at its own name with its own
 `--help`, and `agentstack --help --all` prints the whole tree.
 
+The `agentstack x` prefix, and the `yes`, `undo`, `x why`, and `x unrender`
+verbs, arrived in v0.18.0. On v0.17.1 — what the tap pins, and what the
+installer gives you without `AGENTSTACK_VERSION` — they are an
+`unrecognized subcommand` error, and every command that does exist there runs
+at its own bare name. `agentstack --version` says which build you have, and
+[newer than the stable release](https://tarekkharsa.github.io/agentstack/start.html#newer-than-the-stable-release)
+is the whole note.
+
 ## Documentation
 
 Everything is explained on the website — that is the one place docs live:
@@ -257,7 +269,7 @@ Everything is explained on the website — that is the one place docs live:
 - **[Reference](https://tarekkharsa.github.io/agentstack/reference.html)** — the complete feature and command inventory
 - **[Adapter support matrix](https://tarekkharsa.github.io/agentstack/adapters.html)** — which of the thirteen CLIs is verified nightly against the real tool, which is best-effort, and what each one manages
 
-**Go deeper** — the [enforcement matrix](https://tarekkharsa.github.io/agentstack/enforcement.html) (what each mode actually enforces, checked against the source), the [architecture](https://tarekkharsa.github.io/agentstack/architecture.html) (how it works inside), and [18 runnable walkthroughs](https://tarekkharsa.github.io/agentstack/examples.html).
+**Go deeper** — the [enforcement matrix](https://tarekkharsa.github.io/agentstack/enforcement.html) (what each mode actually enforces, checked against the source), the [architecture](https://tarekkharsa.github.io/agentstack/architecture.html) (how it works inside), and [16 runnable walkthroughs](https://tarekkharsa.github.io/agentstack/examples.html).
 
 ## Develop
 

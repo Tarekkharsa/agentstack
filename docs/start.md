@@ -16,8 +16,14 @@ your library repo  →  each project's manifest + lock  →  every agent CLI
 ## 1. Install and set up this machine
 
 ```bash
-cargo install --git https://github.com/Tarekkharsa/agentstack --locked agentstack
+curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | AGENTSTACK_VERSION=v0.18.0-rc.5 sh
 ```
+
+That installs v0.18.0-rc.5, the release these pages describe, and verifies the
+download against the checksums published with it. `AGENTSTACK_VERSION` is what
+asks for it by name — without it the same line installs v0.17.1, because
+`releases/latest` never points at a pre-release. To build from a checkout
+instead, see [Install](../README.md#install).
 
 Set up this machine:
 
@@ -177,6 +183,19 @@ or from another supervisor. T3 Code is not required.
 | `agentstack trust .` | Review changed project content on this machine |
 | `agentstack up` | Preview a machine/library refresh |
 | `agentstack undo` | Review and reverse AgentStack-managed writes |
+
+## Newer than the stable release
+
+These pages describe v0.18.0-rc.5. The plain installer one-liner and the
+Homebrew tap still give you v0.17.1, because `releases/latest` never points at
+a pre-release. `agentstack --version` says which build you have.
+
+On v0.17.1 the `agentstack x` prefix and the `yes`, `undo`, `x why`, and
+`x unrender` verbs do not exist — they fail with `unrecognized subcommand` —
+and every command that does exist there runs at its own bare name, for example
+`agentstack gateway connect --all --write` rather than
+`agentstack x gateway connect --all --write`. The install line at the top of
+this page is the upgrade.
 
 ## Why use it — and when not to
 
