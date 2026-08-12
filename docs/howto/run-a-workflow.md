@@ -74,6 +74,8 @@ agentstack workflow report <run-id>
 - `explain` shows roles, ceilings, serial work, and call sites without spawning
   an agent.
 - `run` launches three reviewers in parallel and one independent verifier.
+- `runs` lists the recorded runs newest first — this is where a `<run-id>`
+  comes from, and which rows are still resumable.
 - `report` shows the workflow plus every child run, grant, outcome, and refusal.
 
 If a run is interrupted, resume only the unfinished work:

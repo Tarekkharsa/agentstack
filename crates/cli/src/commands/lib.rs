@@ -2546,9 +2546,14 @@ fn sync(args: &LibSyncArgs) -> Result<()> {
     // removal never travels as a resurrection copy.
     ensure_trash_ignored(&lib)?;
     if args.status {
-        return sync_status(&lib);
+        return sync_status(&lib, &source.name);
     }
-    sync_now(&lib, args.message.as_deref(), args.allow_secrets)
+    sync_now(
+        &lib,
+        &source.name,
+        args.message.as_deref(),
+        args.allow_secrets,
+    )
 }
 
 /// First-time setup. With a remote and an empty/absent library, clone it (fresh
@@ -2694,9 +2699,19 @@ pub(crate) fn sync_for_bootstrap(remote: Option<&str>) -> Result<()> {
     let out = crate::gitx::run_raw(crate::gitx::Profile::Sync, &pull, Some(&lib))
         .context("pulling the shared library")?;
     if !out.success {
+        // Name the way out, not just the wreck. `up --library <url>` records
+        // the URL before it is ever proven reachable, so one typo leaves every
+        // later `agentstack up` failing here — and "resolve the library, then
+        // re-run `agentstack up`" was the command that had just failed, with no
+        // command between them that repoints the remote. Both repairs are named
+        // with the URL actually in use, so the fix is a copy-paste away.
+        let url = git_out(&lib, &["remote", "get-url", "origin"]).unwrap_or_default();
         bail!(
-            "library pull failed: {}\nresolve the library at {}, then re-run `agentstack up`",
+            "library pull failed: {}\nthe remote it tried is {}\n  \
+             · wrong URL? re-run with the right one: agentstack up --library <url> --write\n  \
+             · already correct? fix the library at {} (network, credentials, or a conflicting checkout), then re-run `agentstack up`",
             out.stderr.trim(),
+            if url.is_empty() { "unset" } else { &url },
             lib.display()
         );
     }
@@ -2727,7 +2742,13 @@ fn set_remote(lib: &Path, url: &str) -> Result<()> {
 }
 
 /// Read-only report: working-tree changes + ahead/behind vs. the remote.
-fn sync_status(lib: &Path) -> Result<()> {
+///
+/// `source` is the linked source's name, carried so the next step this prints
+/// targets the source the reader actually asked about. `sync` resolves a bare
+/// invocation to the FIRST linked source, so a status read of the second one
+/// that closed with a bare `agentstack lib sync` was naming a command that
+/// would act on a different folder entirely.
+fn sync_status(lib: &Path, source: &str) -> Result<()> {
     let dirty = git_out(lib, &["status", "--short"])?;
     if dirty.is_empty() {
         println!("{} working tree clean", "✓".green());
@@ -2746,13 +2767,45 @@ fn sync_status(lib: &Path) -> Result<()> {
             println!("  {ahead} ahead, {behind} behind the remote");
         }
     } else {
-        println!("  no remote tracking branch yet (run `agentstack lib sync` to push)");
+        println!(
+            "  {}",
+            no_upstream_line(git_ok(lib, &["remote", "get-url", "origin"]), source)
+        );
     }
     Ok(())
 }
 
+/// What `--status` says when the branch tracks nothing yet. Pure over the one
+/// fact that decides it, so the claim has a witness that needs no repository.
+///
+/// The distinction is the whole point. With no `origin` at all there is nothing
+/// to push to, and the old single line said "run `agentstack lib sync` to push"
+/// regardless — a next step that reaches `sync_now`, prints "no remote
+/// configured", pushes nothing and exits 0. Two surfaces of one command
+/// disagreeing about whether a push is possible.
+fn no_upstream_line(has_remote: bool, source: &str) -> String {
+    if has_remote {
+        // A remote exists, the branch just does not track it yet: `sync` really
+        // does push here, so naming it is honest.
+        format!(
+            "no remote tracking branch yet (run `agentstack lib sync --source {source}` to push)"
+        )
+    } else {
+        // Same words `sync_now` uses when it reaches this state, so the two
+        // surfaces cannot describe one library differently.
+        format!(
+            "no remote configured — run `agentstack lib sync --remote <url> --source {source}` to set one"
+        )
+    }
+}
+
 /// Commit local changes, then pull + push if a remote is configured.
-fn sync_now(lib: &Path, message: Option<&str>, allow_secrets: bool) -> Result<()> {
+///
+/// `source` names the linked source being synced, so the remedies below stay
+/// runnable against THAT source: a bare `agentstack lib sync` resolves to the
+/// first linked source, which is not the one the reader is looking at whenever
+/// they passed `--source`.
+fn sync_now(lib: &Path, source: &str, message: Option<&str>, allow_secrets: bool) -> Result<()> {
     // A half-finished rebase must be resolved first: committing on top of one
     // and re-pulling loops forever, so don't send the user in a circle.
     if lib.join(".git/rebase-merge").exists() || lib.join(".git/rebase-apply").exists() {
@@ -2801,7 +2854,9 @@ fn sync_now(lib: &Path, message: Option<&str>, allow_secrets: bool) -> Result<()
         return Ok(());
     }
     if !git_ok(lib, &["remote", "get-url", "origin"]) {
-        println!("  no remote configured — run `agentstack lib sync --remote <url>` to set one");
+        println!(
+            "  no remote configured — run `agentstack lib sync --remote <url> --source {source}` to set one"
+        );
         return Ok(());
     }
     let branch = git_out(lib, &["rev-parse", "--abbrev-ref", "HEAD"])?;
@@ -3495,9 +3550,19 @@ const STALE_DAYS: u64 = 30;
 /// view exists to avoid.
 fn rot_summary(rows: &[RotRow], now: u64) -> Vec<String> {
     let mut out = Vec::new();
+    // "Measurable" is the set the meter can actually speak for, so it excludes
+    // BOTH kinds of absence: an entry with no meter at all (`Unmeasured` —
+    // hooks/extensions) and an entry whose meter has never recorded anything
+    // (`NoData`). Counting `NoData` here read as a claim about entries the very
+    // next line says nothing is known about: a fresh library of two untouched
+    // entries printed "0 of 2 measurable entries never used." immediately above
+    // "2 entries have no usage history at all — no data, not \"unused\"." Both
+    // lines described the same two entries and disagreed about whether they had
+    // been measured. With the filter honest, a library with no history at all
+    // has an empty `measured` set and the contradicting line is not printed.
     let measured: Vec<&RotRow> = rows
         .iter()
-        .filter(|r| !matches!(r.uses, Uses::Unmeasured))
+        .filter(|r| matches!(r.uses, Uses::Count(_)))
         .collect();
     let never = measured
         .iter()
@@ -3510,7 +3575,9 @@ fn rot_summary(rows: &[RotRow], now: u64) -> Vec<String> {
             plural_entry(measured.len())
         ));
     }
-    let no_data = measured
+    // Counted over every row, not over `measured` — `NoData` is exactly what
+    // `measured` now excludes, so reading it from there would always be zero.
+    let no_data = rows
         .iter()
         .filter(|r| matches!(r.uses, Uses::NoData))
         .count();
@@ -3546,7 +3613,14 @@ fn rot_summary(rows: &[RotRow], now: u64) -> Vec<String> {
             if drifted == 1 { "entry" } else { "entries" }
         ));
     }
-    let unmeasured = rows.len() - measured.len();
+    // Counted from the variant, not as `rows - measured`: `measured` no longer
+    // carries `NoData`, so the subtraction would fold "has a meter, has never
+    // recorded" into "has no meter (hooks/extensions)" — a different claim, and
+    // one the line above already makes correctly.
+    let unmeasured = rows
+        .iter()
+        .filter(|r| matches!(r.uses, Uses::Unmeasured))
+        .count();
     if unmeasured > 0 {
         out.push(format!(
             "{unmeasured} {} (hooks/extensions) have no usage meter — nothing here claims they are dead.",
@@ -3623,9 +3697,11 @@ mod rot_tests {
         ];
         let out = render_rot(&rows, NOW);
         assert!(out.contains("NEVER USED"));
-        // 3 measurable (the hook is excluded), 1 of them never used.
+        // 2 measurable: the hook has no meter, and "unknown" has one that has
+        // never recorded anything. Both are absences of data, and neither is a
+        // number the "never used" line may speak for. 1 of the 2 is never-used.
         assert!(
-            out.contains("1 of 3 measurable entries never used."),
+            out.contains("1 of 2 measurable entries never used."),
             "{out}"
         );
         assert!(out.contains("1 entry has no usage history at all"), "{out}");
@@ -3636,6 +3712,67 @@ mod rot_tests {
         // The action is the reversible one.
         assert!(out.contains("agentstack lib remove <name> --write"));
         assert!(out.contains("agentstack lib trash"));
+    }
+
+    /// **A fresh library must not contradict itself.** Every entry in a library
+    /// nobody has used yet is `NoData`, and that is the FIRST state any new
+    /// user sees from `agentstack lib list`. It used to print two adjacent
+    /// lines about the same two entries that disagreed:
+    ///
+    /// ```text
+    ///   0 of 2 measurable entries never used.
+    ///   2 entries have no usage history at all — no data, not "unused".
+    /// ```
+    ///
+    /// An entry the meter knows nothing about is not a measurable entry. With
+    /// nothing measurable, there is no "N of M" claim to make, so the line is
+    /// absent rather than zeroed — and the honest line survives alone.
+    #[test]
+    fn a_library_with_no_history_makes_no_measurable_claim() {
+        let rows = vec![
+            row(
+                Kind::Skill,
+                "demo-skill",
+                Uses::NoData,
+                None,
+                Pin::NotPinned,
+            ),
+            row(Kind::Server, "demo", Uses::NoData, None, Pin::NotPinned),
+        ];
+        let out = render_rot(&rows, NOW);
+        assert!(
+            !out.contains("measurable"),
+            "claimed a measurable count for entries with no history at all:\n{out}"
+        );
+        assert!(
+            out.contains("2 entries have no usage history at all"),
+            "{out}"
+        );
+        // And the absence is never rendered as a zero anywhere in the block.
+        assert!(!out.contains("0 uses"), "{out}");
+        assert!(!out.contains("NEVER USED"), "{out}");
+    }
+
+    /// The counterpart: an entry with no meter (a hook) is not folded into the
+    /// "no usage history" line, and an entry with a meter that has recorded
+    /// nothing is not folded into the "no usage meter" line. The two absences
+    /// have different remedies and may never be counted as each other.
+    #[test]
+    fn the_two_kinds_of_absence_are_never_counted_as_each_other() {
+        let rows = vec![
+            row(Kind::Skill, "unknown", Uses::NoData, None, Pin::NotPinned),
+            row(Kind::Hook, "guard", Uses::Unmeasured, None, Pin::NotPinned),
+        ];
+        let out = render_rot(&rows, NOW);
+        assert!(out.contains("1 entry has no usage history at all"), "{out}");
+        assert!(
+            out.contains("1 entry (hooks/extensions) have no usage meter"),
+            "{out}"
+        );
+        assert!(
+            !out.contains("2 entries"),
+            "folded the two kinds of absence into one count:\n{out}"
+        );
     }
 
     /// The staleness line is scoped to entries that have a recorded last-use.
@@ -3773,6 +3910,57 @@ mod rot_tests {
         };
         assert_eq!(silent.server_uses("github"), Uses::NoData);
         assert_eq!(silent.server_last_used("github"), None);
+    }
+}
+
+#[cfg(test)]
+mod sync_hint_tests {
+    use super::*;
+
+    /// **`--status` may not promise a push that `sync` cannot perform.**
+    ///
+    /// A library source with a git history but no `origin` is the ordinary
+    /// state right after `lib sync --init` — and the state a first-time user
+    /// reaches by linking their own git folder. `--status` used to close with
+    /// "no remote tracking branch yet (run `agentstack lib sync` to push)".
+    /// Running exactly that reaches `sync_now`, which answers "no remote
+    /// configured", pushes nothing, and exits 0: a green next step that leaves
+    /// the blocking condition untouched. The two surfaces now agree, in the
+    /// same words, and name the flag that actually moves the state on.
+    #[test]
+    fn status_does_not_promise_a_push_without_a_remote() {
+        let line = no_upstream_line(false, "libsrc");
+        assert!(
+            !line.contains("to push"),
+            "promised a push with no remote to push to: {line}"
+        );
+        assert!(line.contains("no remote configured"), "{line}");
+        assert!(line.contains("--remote <url>"), "{line}");
+    }
+
+    /// With a remote present the branch simply does not track it yet, and
+    /// `sync` really does push — so the push wording stays.
+    #[test]
+    fn status_names_the_push_once_a_remote_exists() {
+        let line = no_upstream_line(true, "libsrc");
+        assert!(line.contains("to push"), "{line}");
+        assert!(!line.contains("--remote <url>"), "{line}");
+    }
+
+    /// **Both remedies target the source the reader asked about.** `sync`
+    /// resolves a bare invocation to the FIRST linked source, so a status read
+    /// of any other source that closed with a bare `agentstack lib sync` named
+    /// a command that would act on a different folder — silently, and with a
+    /// tick. Every remedy this path prints carries `--source`.
+    #[test]
+    fn every_remedy_carries_the_source_it_speaks_for() {
+        for has_remote in [true, false] {
+            let line = no_upstream_line(has_remote, "team-capabilities");
+            assert!(
+                line.contains("--source team-capabilities"),
+                "a remedy that would act on a different source (has_remote={has_remote}): {line}"
+            );
+        }
     }
 }
 

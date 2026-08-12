@@ -297,6 +297,40 @@ pub(crate) fn bridge_command(explicit: Option<&str>) -> String {
         .unwrap_or_else(|| "agentstack".to_string())
 }
 
+/// Is this MCP entry OUR OWN bridge, as `gateway connect` above wrote it?
+///
+/// `init` reads every harness's config and imports what it finds. Our bridge
+/// is in there — we put it there — and importing it made a first manifest
+/// declare agentstack as one of its own MCP servers, then build a toolset
+/// around it. That is a loop, not a setup: the project would ask the gateway
+/// to serve the gateway.
+///
+/// Two readings, because either alone is escapable. The reserved name catches
+/// every registration this command makes; the command/argv shape catches a
+/// registration a user renamed, and matches what [`bridge_server`] writes
+/// (`<path to agentstack> mcp …`) regardless of where the binary lives —
+/// `self link`'s symlink, a `target/release` build, or a packaged install.
+///
+/// Deliberately NOT folded into [`crate::adapter::tool_managed`]: that answers
+/// "another application owns this", carries a user-facing override flag, and
+/// prints a block about someone else's plumbing. This is ours, there is no
+/// case for importing it, and it warrants a line under `--verbose` rather
+/// than a warning.
+pub(crate) fn is_bridge_entry(name: &str, server: &Server) -> bool {
+    if name == BRIDGE_ENTRY {
+        return true;
+    }
+    let Some(command) = server.command.as_deref() else {
+        return false;
+    };
+    let stem = std::path::Path::new(command)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or_default();
+    // `file_stem` so `agentstack.exe` reads the same as `agentstack`.
+    stem == "agentstack" && server.args.first().is_some_and(|arg| arg == "mcp")
+}
+
 /// Whether `desc` can host the stdio bridge at all: it must have an MCP config
 /// location and a renderer able to express a stdio server. The one definition
 /// shared by `run_connect`'s eligibility, doctor's `clis` coverage field, and

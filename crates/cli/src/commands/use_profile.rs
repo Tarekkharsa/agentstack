@@ -1321,11 +1321,26 @@ pub fn activate(
         crate::render::extensions::render(manifest, &ctx.registry, scope, &ctx.dir, args.write)?;
     ignore_entries.extend(ext_ignore);
 
+    // Captured BEFORE the block is spliced, exactly as `apply` does: `use`
+    // prints "↩ undo: agentstack x restore --last --write" up front, and a
+    // .gitignore edit that never entered the ledger made that hint name
+    // somebody else's change — in a live-lane project the managed block is
+    // often the ONLY file this activation writes, so without this the entry
+    // was empty and `restore --last` reverted whatever came before.
+    let gitignore_capture = (args.write && scope == Scope::Project && !gitignore_off).then(|| {
+        crate::history::capture(
+            &project_root.join(".gitignore"),
+            crate::render::gitignore::HISTORY_LABEL,
+        )
+    });
     if args.write
         && scope == Scope::Project
         && !gitignore_off
         && crate::render::gitignore::ensure_block(&project_root, &ignore_entries, true)?
     {
+        if let Some(capture) = gitignore_capture {
+            backups.push(capture);
+        }
         println!(
             "\n{} .gitignore: managed block updated — generated artifacts stay out of git ({} to commit them instead)",
             "✓".green(),

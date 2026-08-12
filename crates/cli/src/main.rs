@@ -83,7 +83,7 @@ fn run(argv: Vec<String>) -> Result<()> {
     };
     match command {
         Command::Init(args) => commands::init::run(args, dir),
-        Command::Status(args) => commands::overview::run_status(dir, args.json),
+        Command::Status(args) => commands::overview::run_status(dir, args.json, args.verbose),
         Command::Add(args) => commands::add::run(args, dir),
         Command::Set(args) => commands::add::run_set(args, dir),
         Command::Install(args) => commands::install::run(args, dir),

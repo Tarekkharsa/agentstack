@@ -39,6 +39,7 @@ fn init_args() -> InitArgs {
         yes: true,
         consented_plan: None,
         connect: false,
+        verbose: false,
     }
 }
 

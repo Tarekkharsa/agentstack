@@ -277,6 +277,17 @@ pub fn run(args: &UndoArgs, manifest_dir: Option<&Path>) -> Result<()> {
             for f in &r.entry.files {
                 println!("  {}", f.path.dimmed());
             }
+            // Reversing a write means reversing the directories it made to
+            // hold those files, so the preview has to name them too — with the
+            // same conditional wording `x uninstall` uses, because the guard is
+            // the same one: a parent that still holds anything is kept.
+            for dir in history::prunable_dirs(&r.entry.files) {
+                println!(
+                    "  {} {}",
+                    dir.display().to_string().dimmed(),
+                    super::empty_parent_label().dimmed()
+                );
+            }
         }
         println!();
         println!(
@@ -289,12 +300,26 @@ pub fn run(args: &UndoArgs, manifest_dir: Option<&Path>) -> Result<()> {
         return Ok(());
     }
 
+    // Named before the revert, reported after it: once the directories are
+    // gone there is nothing left to read them from.
+    let prunable: Vec<std::path::PathBuf> = rows
+        .iter()
+        .filter(|r| r.index <= upto)
+        .flat_map(|r| history::prunable_dirs(&r.entry.files))
+        .collect();
     let recorded = history::undo_recorded(&ids)?;
     println!(
         "{} back to before {}",
         "✓".green(),
         crate::text::sanitize_line(&target.operation)
     );
+    for dir in prunable.iter().filter(|dir| !dir.exists()) {
+        println!(
+            "  {} removed empty {}",
+            "✓".green(),
+            dir.display().to_string().dimmed()
+        );
+    }
     // F10: a `yes` row captures only the manifest declaration and the lock pin
     // — deliberately, per its own comment — so undoing it does NOT retract the
     // files `use --write` already delivered into each CLI. "nothing else
@@ -344,6 +369,7 @@ mod tests {
                 path: path.to_string(),
                 before: Some("old".into()),
                 label: "x".into(),
+                created_dirs: Vec::new(),
             }],
             batch: None,
             operation: "apply".into(),

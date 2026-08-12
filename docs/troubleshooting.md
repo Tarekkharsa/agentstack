@@ -869,8 +869,10 @@ agentstack doctor --json     # machine-readable, for a UI or a bug report
 agentstack x explain <name>    # what one server, skill, or instruction actually is
 ```
 
-By default `doctor` hides sections for features this project does not use and
-says how many it hid. `--all` shows them.
+By default `doctor` hides sections for features this project does not use, and
+summarises to one line any section where every check passed. It says how many
+of each it shortened. Findings are never shortened: one warning or error keeps
+its whole section in full. `--all` shows every line.
 
 - [FAQ](faq.md) — the questions that come up in the first week
 - [Concepts](concepts.md) — every term in two or three plain sentences

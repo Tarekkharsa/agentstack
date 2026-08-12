@@ -1817,13 +1817,18 @@ pub struct UpgradeArgs {
     pub write: bool,
 }
 
-/// `status` takes no flags of its own beyond `--json` — `--manifest-dir` is
-/// global, and the deep flags all belong to `doctor`.
+/// `status` takes two flags of its own — `--json` and `--verbose`.
+/// `--manifest-dir` is global, and the deep flags all belong to `doctor`.
 #[derive(Args, Debug)]
 pub struct StatusArgs {
     /// Emit the same reading as JSON (contract `json-reads-v1`).
     #[arg(long)]
     pub json: bool,
+    /// Expand the per-CLI detail the default screen counts: delivery routing
+    /// and house-rule destinations, one line per CLI. Nothing is added that
+    /// the default screen does not already summarise.
+    #[arg(long)]
+    pub verbose: bool,
 }
 
 /// `setup` is the interactive newcomer wizard; it deliberately has no `--write`
@@ -1868,6 +1873,12 @@ pub struct SetupArgs {
     /// statement — never widen what is written.
     #[arg(long)]
     pub connect: bool,
+
+    /// Show the wizard's full evidence rather than the one-line-per-fact
+    /// summary — the same switch `agentstack init --verbose` carries, routed
+    /// through to every step this wizard orchestrates.
+    #[arg(long, short)]
+    pub verbose: bool,
 }
 
 #[derive(Args, Debug)]
@@ -2122,6 +2133,21 @@ pub struct InitArgs {
     /// `agentstack x gateway connect --all --write` afterwards.
     #[arg(long)]
     pub connect: bool,
+
+    /// Show the full evidence instead of the one-line-per-fact summary: every
+    /// CLI's config paths, every imported server, every entry that was skipped
+    /// and why, the files a later `apply` would manage, and the per-tool
+    /// delivery routing. The default states the same facts as counts — nothing
+    /// is hidden that changes what the run does, only how much of it is spelled
+    /// out.
+    ///
+    /// This is also the switch that names the entries the import passed over
+    /// for reasons that need no decision — chiefly agentstack's own gateway
+    /// bridge, found in a harness config because this tool put it there.
+    /// Excluded entries a user might want back (another application's servers)
+    /// are always named without it.
+    #[arg(long, short)]
+    pub verbose: bool,
 }
 
 /// Where `init` (and `secret set`) put lifted token values when the manifest's

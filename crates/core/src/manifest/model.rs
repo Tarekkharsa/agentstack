@@ -17,11 +17,11 @@ pub struct Manifest {
     pub meta: Meta,
 
     /// MCP servers, keyed by the name used everywhere else (profiles, configs).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub servers: IndexMap<String, Server>,
 
     /// Skills (portable `SKILL.md` directories), keyed by name.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub skills: IndexMap<String, Skill>,
 
     /// Toolset selected automatically for a trusted zero-files connection.
@@ -43,12 +43,17 @@ pub struct Manifest {
     /// The Rust field keeps the older name; renaming it touches ~30 files for
     /// no user-visible gain, and `profiles` is still what most of this crate's
     /// internals say. See TODO.md item 9.
-    #[serde(default, rename = "toolsets", alias = "profiles")]
+    #[serde(
+        default,
+        rename = "toolsets",
+        alias = "profiles",
+        skip_serializing_if = "IndexMap::is_empty"
+    )]
     pub profiles: IndexMap<String, Profile>,
 
     /// Portable instruction fragments compiled into each harness's CLAUDE.md /
     /// AGENTS.md.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub instructions: IndexMap<String, Instruction>,
 
     /// Native per-CLI settings (permissions, feature flags). Keyed by adapter
@@ -94,7 +99,12 @@ pub struct Manifest {
     pub package_overrides: IndexMap<String, PackageOverride>,
 
     /// Where `apply` writes by default and which adapters are in play.
-    #[serde(default)]
+    ///
+    /// Absent means "every CLI detected here", resolved at render time — so an
+    /// empty table is not written back out. A `[targets]` block is a
+    /// NARROWING, and one that merely restates the detection would freeze
+    /// today's machine into a file that travels to other machines.
+    #[serde(default, skip_serializing_if = "Targets::is_empty")]
     pub targets: Targets,
 
     /// Optional governance: required/forbidden capabilities + source allowlist.
@@ -1404,6 +1414,13 @@ pub struct Targets {
     /// Adapter ids `apply` writes to when `--target` is not given.
     #[serde(default)]
     pub default: Vec<String>,
+}
+
+impl Targets {
+    /// Nothing pinned — the same state as no `[targets]` block at all.
+    pub fn is_empty(&self) -> bool {
+        self.default.is_empty()
+    }
 }
 
 impl Profile {

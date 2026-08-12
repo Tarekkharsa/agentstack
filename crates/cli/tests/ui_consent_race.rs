@@ -104,6 +104,7 @@ fn init_args(yes: bool, consented_plan: Option<String>) -> InitArgs {
         yes,
         consented_plan,
         connect: false,
+        verbose: false,
     }
 }
 

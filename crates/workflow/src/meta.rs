@@ -49,6 +49,53 @@ fn wrap_for_parse(script: &str) -> String {
     format!("async function __agentstack_workflow__() {{\n{script}\n}}")
 }
 
+/// Lines the wrapper prepends before the script's first byte. Both wrappers
+/// (`wrap_for_parse` here and `wrap_for_eval` in `lib.rs`) open with exactly
+/// one line, so a position Boa reports is always this much further down than
+/// the same character is in the file the author edits.
+const WRAPPER_LINES: u32 = 1;
+
+/// Rebase every `at line N` in a parser message onto the script's own line
+/// numbering.
+///
+/// The wrapper is an implementation detail of how a top-level `await`/`return`
+/// script is made parseable — the author never sees it and cannot open it. A
+/// message that reports the WRAPPED line therefore sends someone who opens
+/// `.agentstack/workflows/<name>.js` to the line *after* the mistake, which is
+/// a hint that costs more than no hint at all. Boa emits every position through
+/// one of two spellings (`, col` from the parser, `, column` from the lexer,
+/// and a lexer error is wrapped by a parser one so both can appear in a single
+/// message), and both are preceded by the same `at line N,` — so rewriting that
+/// one token covers the whole taxonomy without matching on Boa's error enum,
+/// which is not `#[non_exhaustive]` today but is not ours to depend on either.
+///
+/// Total by construction: a message with no match, or a line number that does
+/// not parse, comes back unchanged rather than mangled. Line 1 clamps instead
+/// of underflowing — a parse error reported on the wrapper's own first line
+/// would be a defect in the wrapper, not something to blame on the author's
+/// line 0.
+fn rebase_to_script_lines(message: &str) -> String {
+    const NEEDLE: &str = "at line ";
+    let mut out = String::with_capacity(message.len());
+    let mut rest = message;
+    while let Some(at) = rest.find(NEEDLE) {
+        let (before, after) = rest.split_at(at + NEEDLE.len());
+        out.push_str(before);
+        let digits: String = after.chars().take_while(char::is_ascii_digit).collect();
+        match digits.parse::<u32>() {
+            Ok(line) => {
+                out.push_str(&line.saturating_sub(WRAPPER_LINES).max(1).to_string());
+                rest = &after[digits.len()..];
+            }
+            // Not a number after all ("at line " in prose): copy nothing extra
+            // and keep scanning past the needle we already emitted.
+            Err(_) => rest = after,
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// AL4: a §3 workflow script begins with an `export const meta = {…}` (the
 /// Claude-Code shape). `export` is a module-only statement and is illegal
 /// inside the async-function body both wrappers produce, so the leading
@@ -154,7 +201,9 @@ pub fn extract_meta(script: &str) -> Result<Meta, WorkflowError> {
     // code can run during meta extraction. That is the whole guarantee.
     let ast = parser
         .parse_script(&scope, &mut interner)
-        .map_err(|e| WorkflowError::invalid_script(e.to_string()))?;
+        // Rebased: Boa's positions are into the WRAPPED source, and the author
+        // only ever has the unwrapped file to open.
+        .map_err(|e| WorkflowError::invalid_script(rebase_to_script_lines(&e.to_string())))?;
 
     // Top-level statement is the async function declaration we wrapped with.
     let body = ast
@@ -459,6 +508,59 @@ mod tests {
         ] {
             let err = extract_meta(script).unwrap_err();
             assert_eq!(err.kind, WorkflowErrorKind::MetaViolation, "{script}");
+        }
+    }
+
+    /// A parse error must point at the line the author can open, not at the
+    /// line the wrapper made. Before the rebase, a syntax error on the last of
+    /// three lines was reported at "line 4" of a three-line file — the reader
+    /// opens the script, finds nothing there, and the hint has cost them more
+    /// than silence would have.
+    #[test]
+    fn a_parse_error_names_the_scripts_own_line() {
+        // Three lines; the unbalanced call on line 2 is only detectable once
+        // the parser reaches `return` on line 3.
+        let script = "export const meta = { name: 'broken', roles: ['worker'] }\n\
+                      const x = await agent('hi', { role: 'worker' }\n\
+                      return x\n";
+        let err = extract_meta(script).unwrap_err();
+        assert_eq!(err.kind, WorkflowErrorKind::InvalidScript);
+        let msg = err.to_string();
+        assert!(
+            msg.contains("at line 3,"),
+            "the error must name the script's own line 3, not the wrapped line 4: {msg}"
+        );
+        assert!(
+            !msg.contains("at line 4,"),
+            "no wrapped line number may survive into the message: {msg}"
+        );
+    }
+
+    /// The rebase is a total string rewrite, so it is pinned on the shapes Boa
+    /// actually emits (both position spellings, and a lexer error nested inside
+    /// a parser one) plus the inputs that must pass through untouched.
+    #[test]
+    fn the_line_rebase_is_total() {
+        for (input, want) in [
+            (
+                "expected ')' at line 4, col 1",
+                "expected ')' at line 3, col 1",
+            ),
+            (
+                "unexpected '#' at line 9, column 2 at line 9, col 2",
+                "unexpected '#' at line 8, column 2 at line 8, col 2",
+            ),
+            // Clamp, never underflow: the wrapper's own first line.
+            ("bad at line 1, col 1", "bad at line 1, col 1"),
+            // No position at all (Boa's `AbruptEnd`) — unchanged.
+            ("abrupt end", "abrupt end"),
+            // "at line " in prose with no number behind it — unchanged.
+            (
+                "something went wrong at line breaks",
+                "something went wrong at line breaks",
+            ),
+        ] {
+            assert_eq!(rebase_to_script_lines(input), want, "input: {input}");
         }
     }
 

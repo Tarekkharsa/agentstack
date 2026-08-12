@@ -53,6 +53,7 @@ fn restore_undoes_manifest_env_and_gitignore_from_one_init() {
             yes: true,
             consented_plan: None,
             connect: false,
+            verbose: false,
         },
         Some(&proj),
     )
@@ -256,6 +257,7 @@ fn library_first_args() -> InitArgs {
         yes: true,
         consented_plan: None,
         connect: false,
+        verbose: false,
     }
 }
 

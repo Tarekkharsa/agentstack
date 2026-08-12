@@ -2491,8 +2491,32 @@ pub fn explain_value(manifest_dir: Option<&Path>, name: &str) -> Result<serde_js
     })?;
 
     let script = read_pinned_script(wf)?;
-    let meta = extract_meta(&script)
-        .map_err(|e| anyhow::anyhow!("workflow '{name}' has an unusable meta block: {e}"))?;
+    // Two different faults, kept apart. `extract_meta` refuses both a script
+    // that does not PARSE and a `meta` block that parses but breaks the
+    // pure-literal rule, and folding them into one sentence sent an author with
+    // an ordinary syntax error to inspect a `meta` block that was never wrong —
+    // the error kind already distinguishes them, so the message does too. Both
+    // name the file, because the pinned copy under `.agentstack/workflows/` is
+    // the one that ran, not whatever source it was declared from.
+    let meta = extract_meta(&script).map_err(|e| {
+        // Rendered through the same helper `declare` prints with, so the file
+        // named here reads identically to the one the author was told they
+        // staged — a raw join of anchor and declared path keeps the `./` from
+        // the manifest and shows up mid-path.
+        let path = script_entry_path(&wf.anchor, &wf.declared)
+            .map(|p| crate::commands::init::display_path(&p, &ctx.dir))
+            .unwrap_or_else(|_| format!("{}.js", wf.name));
+        match e.kind {
+            WorkflowErrorKind::InvalidScript => anyhow::anyhow!(
+                "workflow '{name}' does not parse: {e}\n  ↳ fix the syntax in {path}, then \
+                 re-pin with `agentstack lock --write` and re-trust"
+            ),
+            _ => anyhow::anyhow!(
+                "workflow '{name}' has an unusable meta block: {e}\n  ↳ `meta` in {path} must be \
+                 a top-level `const meta = {{…}}` of plain literals, with a `roles` array"
+            ),
+        }
+    })?;
 
     // The ceiling chain, same three-way min the run computes.
     let effective_agents = meta

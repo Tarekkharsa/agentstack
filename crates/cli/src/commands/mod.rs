@@ -160,3 +160,15 @@ pub fn load(manifest_dir: Option<&Path>) -> Result<Context> {
 pub(crate) fn count(n: usize, noun: &str) -> String {
     format!("{n} {noun}{}", if n == 1 { "" } else { "s" })
 }
+
+/// How every preview qualifies a directory removal it can only CONDITIONALLY
+/// perform: the directory comes off if it is still empty once the files above
+/// it are gone, and stays if anything — the user's own file, most of all — is
+/// in it. One string, so `x uninstall` and the two Undo doors cannot describe
+/// the same guard in three different ways.
+pub(crate) const IF_EMPTY_AFTER_CLEANUP: &str = "(if empty after cleanup)";
+
+/// The preview label for a directory an undo created and may prune.
+pub(crate) fn empty_parent_label() -> String {
+    format!("Empty parent {IF_EMPTY_AFTER_CLEANUP}")
+}

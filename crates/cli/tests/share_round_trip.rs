@@ -298,6 +298,52 @@ fn an_accepted_bundle_lands_its_content_and_ends_through_the_seam() {
     );
 }
 
+/// The seam must not turn a completed receive into a failure. A folder with no
+/// manifest is a perfectly ordinary place to land a shared skill, but the
+/// next-action review bails there — which printed "✓ 1 file into this project"
+/// and then exited 1 with "no agentstack manifest in …", one screen carrying
+/// both a success and its contradiction. The adopt already happened by then, so
+/// the honest ending is the next step that state actually has.
+#[test]
+fn receiving_into_a_folder_with_no_manifest_still_succeeds() {
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let (sender, _) = two_machines(tmp.path());
+    let bundle = share(&sender, tmp.path());
+
+    let home = tmp.path().join("bare-home");
+    let bare = tmp.path().join("bare");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&bare).unwrap();
+
+    let out = Command::new(exe())
+        .args(["receive", bundle.to_str().unwrap(), "--yes"])
+        .current_dir(&bare)
+        .env("HOME", &home)
+        .env("AGENTSTACK_HOME", home.join(".agentstack"))
+        .env("NO_COLOR", "1")
+        .output()
+        .expect("the binary must run");
+    let mut text = String::from_utf8_lossy(&out.stdout).to_string();
+    text.push_str(&String::from_utf8_lossy(&out.stderr));
+
+    assert!(
+        out.status.success(),
+        "the files were adopted, so the receive succeeded:\n{text}"
+    );
+    assert!(
+        bare.join("skills/summarize/SKILL.md").exists(),
+        "the content must land:\n{text}"
+    );
+    assert!(
+        text.contains("next:") && text.contains("agentstack init"),
+        "and the ending must name the step this state really has:\n{text}"
+    );
+    assert!(
+        !text.contains("no agentstack manifest"),
+        "a completed receive must not end on a first-contact error:\n{text}"
+    );
+}
+
 /// Invariant 7 at the receiving door: a bundle whose entry path walks upward
 /// must be refused before a single byte is staged.
 #[test]
