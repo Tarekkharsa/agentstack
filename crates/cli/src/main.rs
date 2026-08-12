@@ -18,12 +18,16 @@ fn main() {
     // decides lazily on first use), but taking it here keeps the answer
     // independent of which screen printed first.
     agentstack_core::paint::configure();
+    // argv is collected once and read two ways: `argv_full` keeps argv[0]
+    // (clap and `strip_namespace` both want the whole vector), `argv` is a
+    // borrowed view of everything after it.
+    let mut argv_full: Vec<String> = std::env::args().collect();
+    let argv = argv_full.get(1..).unwrap_or_default();
     // `agentstack --help --all` → the full command inventory. Intercepted
     // before clap parses: its built-in --help prints and exits before a
     // sibling flag is ever seen, so the pair can't be expressed as a normal
     // arg. Only the exact top-level spelling (nothing but these flags)
     // triggers it — `agentstack apply --help --all` still goes to clap.
-    let argv: Vec<String> = std::env::args().skip(1).collect();
     if argv.iter().any(|a| a == "--all")
         && argv.iter().any(|a| a == "--help" || a == "-h")
         && argv
@@ -37,7 +41,6 @@ fn main() {
     // fifteen on the default help screen. Bare `x` (or `x --help`) lists what
     // lives there; `x <cmd> …` is rewritten to `<cmd> …` before clap parses, so
     // the two spellings share one parse tree and one dispatch path below.
-    let mut argv_full: Vec<String> = std::env::args().collect();
     if argv.first().map(String::as_str) == Some(agentstack::cli::NAMESPACE) {
         if argv.len() == 1 || argv[1..].iter().all(|a| a == "--help" || a == "-h") {
             print!("{}", agentstack::cli::namespace_listing());

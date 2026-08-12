@@ -22,7 +22,6 @@ rmcp = { version = "=3.1.2", default-features = false, features = [
   "transport-streamable-http-client-reqwest",
   "transport-streamable-http-server",
 ] }
-serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1", features = ["io-std", "io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
 tower-service = "0.3"

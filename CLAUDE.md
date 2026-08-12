@@ -16,6 +16,7 @@ crates/
   egress/     enforced network proxy
   executor/   policy-agnostic governed execution domain
   workflow/   self-contained Boa workflow engine
+  mcp/        MCP protocol boundary, RMCP confined behind a JSON backend
   cli/        binary, orchestration, JSON/action APIs
 ```
 

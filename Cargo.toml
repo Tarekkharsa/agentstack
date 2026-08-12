@@ -33,4 +33,34 @@ unimplemented = "deny"
 # Profiles only take effect at the workspace root.
 [profile.release]
 strip = true
-lto = "thin"
+# Fat LTO across one codegen unit: this is a short-lived CLI, so link time is
+# paid by CI once and every run is faster for it.
+lto = "fat"
+codegen-units = 1
+# `panic = "abort"` is FORBIDDEN here. Four production sites catch a Boa engine
+# panic to keep the interpreter's failures contained instead of taking the
+# process down (`crates/workflow/src/lib.rs:470,723` and
+# `crates/cli/src/commands/workflow.rs:1116,1828`). Aborting on panic deletes
+# `catch_unwind`, so the containment invariant would silently stop holding.
+
+# Boa is the workflow interpreter: unoptimized it dominates dev and test wall
+# time, and it is a third-party dependency this workspace never steps through
+# in a debugger. Optimizing just these packages leaves our own crates fully
+# debuggable.
+#
+# `boa_parser` is deliberately NOT in this list. At opt-level 3 under an
+# otherwise unoptimized dev/test build, its recursive-descent frames grow past
+# what a test thread's stack holds, and
+# `meta::tests::pathologically_nested_meta_is_refused_at_the_bound` — the guard
+# proving deeply nested `meta` is refused rather than crashing — aborts on
+# stack overflow instead of refusing. That test is the whole point of the
+# bound, so the parser stays unoptimized here. `profile.release` optimizes it
+# as before; the test passes there, because the calling crate is optimized too.
+[profile.dev.package.boa_engine]
+opt-level = 3
+
+[profile.dev.package.boa_gc]
+opt-level = 3
+
+[profile.dev.package.boa_interner]
+opt-level = 3

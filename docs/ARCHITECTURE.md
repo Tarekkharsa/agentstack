@@ -618,7 +618,7 @@ policy   → core
 recorder → core
 adapters → core
 mcp      → (nothing internal)
-runtime  → core, policy, recorder
+runtime  → policy, recorder
 egress   → core, policy, recorder
 executor → (nothing)
 workflow → (nothing)
@@ -633,6 +633,22 @@ after the successful save, which is what makes evidence unskippable by
 construction and makes log order equal store order. The alternative — a
 callback the caller supplies — was rejected: it is skippable by construction,
 and a mutation path that forgets to record would be silently unwitnessed.
+
+`runtime` lost its `core` edge on 2026-08-12: it never named a `core` type. It
+is the container-lifecycle crate — it takes an already-decided policy and an
+already-opened recorder and runs a sandbox, so `core`'s manifest and lockfile
+vocabulary is the composing `cli` crate's business, not its own.
+
+`mcp` is the MCP protocol boundary, and holds no internal edges by design. It
+owns the wire: RMCP supplies models, validation, framing, lifecycle
+negotiation, and Streamable HTTP, and this crate wraps all of it behind a
+`Backend` trait that speaks plain JSON values. That is the whole point of the
+crate existing separately — protocol SDK types stop here and never reach
+`trust`, `policy`, or manifest code, so an RMCP version bump can never become a
+change to what AgentStack consents to or enforces. It is a *compatibility*
+boundary, never an enforcement one: every request it decodes is handed to the
+same trust, policy, gateway-dispatch, and audit paths a local call takes (see
+"MCP protocol compatibility" under Layer 4).
 
 `executor` holds no internal edges: it is a self-contained, policy-agnostic
 domain built on `serde`/`sha2`/`thiserror`, and the `cli` crate is what composes
