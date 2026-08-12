@@ -2841,8 +2841,12 @@ fn print_orientation(o: &Orientation, status: bool, verbose: bool) {
         }
     }
 
+    // The separator is load-bearing without color. `green` and `dimmed` are what
+    // tell the two halves apart on a terminal, and both collapse to nothing when
+    // the color gate is off (NO_COLOR, a pipe, `TERM=dumb`) — leaving the
+    // sentence and its reason run together mid-word. A printed `·` survives that.
     println!(
-        "\n  {}  {}   {}",
+        "\n  {}  {}  ·  {}",
         "Next:".bold(),
         o.next.0.green(),
         o.next.1.dimmed()
