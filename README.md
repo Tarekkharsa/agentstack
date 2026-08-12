@@ -26,7 +26,9 @@ agentstack x gateway connect --all --write # register the bridge once, so live d
 agentstack status                        # is it ready — and if not, the one thing that fixes it
 ```
 
-Every command above is in the release the install line serves. A few newer
+Every command above is in the release the install line serves — though the
+`agentstack x` prefix is not, so on v0.17.1 the third line is
+`agentstack gateway connect --all --write`. A few newer
 verbs shorten some of this; they are gathered in one place —
 [newer than the stable release](https://tarekkharsa.github.io/agentstack/start.html#newer-than-the-stable-release).
 `agentstack --version` says which release you have.
@@ -163,7 +165,7 @@ cargo build --release                  # add --features sandbox for `run --sandb
 Release binaries ship with sandbox support compiled in; a bare `cargo build` does not — pass
 `--features sandbox` to get `run --sandbox` / `--lockdown`.
 
-Once installed, `agentstack x self update` moves you to the latest release; it verifies the
+Once installed, `agentstack self update` moves you to the latest release; it verifies the
 download against the release's published checksum before replacing anything.
 
 There is also a Homebrew tap, `Tarekkharsa/homebrew-tap`, whose
@@ -177,7 +179,7 @@ The formula is published by hand after each release, so it can lag a tag; if
 `brew info` shows an older version than the
 [releases page](https://github.com/Tarekkharsa/agentstack/releases), use the
 installer or a checkout. On a Homebrew install, upgrade with
-`brew upgrade agentstack` rather than `agentstack x self update` — replacing the
+`brew upgrade agentstack` rather than `agentstack self update` — replacing the
 file directly desynchronizes the formula.
 
 **Supported platforms: macOS and Linux.** A Windows binary is published, but it is not
@@ -187,7 +189,7 @@ evidence that would move it.
 
 ### Upgrading
 
-`agentstack x self update` previews; `--write` verifies the sha256 before
+`agentstack self update` previews; `--write` verifies the sha256 before
 installing.
 [Details](https://tarekkharsa.github.io/agentstack/reference.html).
 
@@ -215,9 +217,11 @@ A verb is on that screen when the product itself can tell you to run it — a
 first-run step, a `doctor` fix line, or a machine-readable `next_action`.
 
 Two of them — `yes` and `undo` — plus `agentstack x why` and
-`agentstack x unrender` below are in v0.18.0 and later, which is newer than the
+`agentstack x unrender` below, and the `agentstack x` prefix itself, are in
+v0.18.0 and later, which is newer than the
 v0.17.1 the tap and the installer serve; on that binary they are an
-`unrecognized subcommand` error. `agentstack --version` says which you have, and
+`unrecognized subcommand` error, and every command that does exist there runs
+at its own bare name. `agentstack --version` says which you have, and
 [newer than the stable release](https://tarekkharsa.github.io/agentstack/start.html#newer-than-the-stable-release)
 lists the full set.
 

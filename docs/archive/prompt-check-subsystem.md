@@ -1,5 +1,14 @@
 # Prompt: add a `check` subsystem to agentstack (governed verification)
 
+> **Status:** unadopted brief, archived 2026-08-12. Moved here from
+> `plan/prompt-check-subsystem.md`; nothing in the tree referenced it and
+> [`TODO.md`](../../TODO.md) never queued it. The subsystem it proposes does
+> not exist — there is no `agentstack x check` — so read it as a proposal, not
+> as a description of the binary. Its "known facts" have drifted too: the
+> workspace is eleven crates now, not the ten it names (`crates/mcp` became
+> the protocol boundary on 2026-08-11; see
+> [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md)).
+
 > Status: merged final (2026-08-05). Two-agent review applied. Blocked on the
 > STOP-SHIP hooks gate in plan/work-plan.html — Phase 0 verifies that first.
 

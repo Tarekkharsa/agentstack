@@ -1,4 +1,12 @@
-# BUILD-LOG
+# BUILD-LOG — the strategy-v3 build, item by item
+
+> **Status:** closed build record. Archived 2026-08-12 and moved here from the
+> repository root; nothing in the tree referenced it. It logs `TODO.md`
+> items 1–8 as they were built, so it is a snapshot of the reasoning at that
+> time, not a description of current behaviour.
+> [`TODO.md`](../../TODO.md) remains the only work queue and
+> [`docs/ARCHITECTURE.md`](../ARCHITECTURE.md) plus
+> [`docs/ENFORCEMENT.md`](../ENFORCEMENT.md) state what the code does today.
 
 Running log of the strategy-v3 build (TODO.md items 1–8), one honest paragraph
 per item. Written by the build loop; the bar stays the maintainer's.

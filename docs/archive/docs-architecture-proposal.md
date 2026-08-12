@@ -1,4 +1,16 @@
-# Docs architecture — evidence and proposal
+# Docs architecture — evidence and proposal (not adopted)
+
+> **Status:** unadopted proposal, archived 2026-08-12. Moved here from
+> `plan/docs-architecture.md` and renamed, because nothing in the tree
+> referenced it and its recommendation was never taken: the site still
+> publishes 28 pages, so every "cut this" verdict below describes a change
+> that did not happen. Kept for its measurements and its overlap matrix, which
+> are still an honest reading of the corpus as of 2026-08-06.
+>
+> **It is not the documentation of the docs-site tooling**, in case the title
+> suggests otherwise. That lives in `.github/workflows/docs.yml`, in the
+> generated banner at the top of every `docs/**/*.html` and its `.md` source,
+> and in the `PAGES` assertion in `crates/cli/tests/docs_commands.rs`.
 
 **Status:** proposal for the maintainer. Written 2026-08-05/06 from a read-only
 survey of `docs/`, the shipped binary's help tree, and `tools/`.
