@@ -91,36 +91,93 @@ fn scripted_init_states_clis_configs_servers_and_destinations_before_writing() {
     );
     assert!(ok, "init failed:\n{text}");
 
-    // (1) First screen: the CLIs found, each with the exact config files that
-    // back the detection — displayed ~-compacted since they live under HOME.
-    assert!(
-        text.contains("Found 2 coding tools and their native configs"),
-        "{text}"
-    );
-    assert!(text.contains("Claude Code"), "{text}");
-    assert!(text.contains("~/.claude.json"), "{text}");
-    assert!(text.contains("Codex CLI"), "{text}");
-    assert!(text.contains("~/.codex/config.toml"), "{text}");
-
-    // (2) Servers by name, with what each runs.
-    assert!(text.contains("Importing 2 MCP servers"), "{text}");
+    // (1) First screen, at the DEFAULT verbosity: how many CLIs were read and
+    // exactly what is coming out of them — one line, counts plus the names a
+    // person is consenting to.
+    assert!(text.contains("Found 2 coding tools"), "{text}");
+    assert!(text.contains("importing 2 MCP servers"), "{text}");
     assert!(text.contains("github"), "{text}");
     assert!(text.contains("tldraw"), "{text}");
-    assert!(
-        text.contains("runs /usr/bin/env npx -y github-mcp"),
-        "{text}"
-    );
-    // The lifted secret reference is named (never its value).
+    // The lifted secret reference is named (never its value), and both of the
+    // security sentences survive the compression.
     assert!(text.contains("${GITHUB_TOKEN}"), "{text}");
+    assert!(text.contains("each value was COPIED"), "{text}");
     assert!(
         !text.contains("ghp-fake-0000"),
         "the token value must never print:\n{text}"
     );
 
-    // (3) Destinations in user terms: the manifest plus each CLI's native
-    // file, scope spelled out — before the write happened.
+    // (2) The evidence tables are behind `--verbose`, not deleted — and the
+    // default says so rather than leaving a reader to guess they are gone.
+    assert!(
+        !text.contains("Files agentstack will manage"),
+        "the destination table is verbose-only:\n{text}"
+    );
+    assert!(
+        !text.contains("How each tool gets them"),
+        "the routing table is verbose-only:\n{text}"
+    );
+    assert!(text.contains("--verbose"), "{text}");
+    // Only ONE next step, whatever else is reachable.
+    assert_eq!(text.matches("Next:").count(), 1, "{text}");
+
+    // (3) No bridge is registered in this scripted run, so the close states the
+    // live lane as a PLAN (invariant 8) — never behind a flag, because it is
+    // about a claim the output must not make.
+    assert!(text.contains("NOT YET CONNECTED"), "{text}");
+
+    // The review preceded a real write.
+    assert!(proj.join(".agentstack/agentstack.toml").exists());
+    // ...and the import itself wrote no native config, as the summary promised.
+    assert!(!proj.join(".mcp.json").exists());
+    assert!(!proj.join(".codex/config.toml").exists());
+}
+
+/// The same run with `--verbose` spells every fact out: which config files
+/// backed the detection, what each server runs, where a later `apply` would
+/// write, and the per-tool routing. Nothing here changes what the run DOES —
+/// this is the same import, said at length.
+#[test]
+fn verbose_init_spells_out_configs_servers_destinations_and_routing() {
+    let bin = env!("CARGO_BIN_EXE_agentstack");
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    seed_fixtures(&home);
+
+    let stub_bin = tmp.path().join("bin");
+    fs::create_dir_all(&stub_bin).unwrap();
+    write_stub(&stub_bin, "claude");
+    write_stub(&stub_bin, "codex");
+
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(proj.join(".git")).unwrap();
+
+    let (text, ok) = run(
+        bin,
+        &["init", "--yes", "--secrets", "skip", "--verbose"],
+        &home,
+        &proj,
+        &stub_bin,
+    );
+    assert!(ok, "init --verbose failed:\n{text}");
+
+    // Every CLI with the exact config files that back the detection —
+    // displayed ~-compacted since they live under HOME.
+    assert!(
+        text.contains("Found 2 coding tools and their native configs"),
+        "{text}"
+    );
+    assert!(text.contains("~/.claude.json"), "{text}");
+    assert!(text.contains("~/.codex/config.toml"), "{text}");
+    // Servers by name, with what each runs.
+    assert!(
+        text.contains("runs /usr/bin/env npx -y github-mcp"),
+        "{text}"
+    );
+    // Destinations in user terms: the manifest plus each CLI's native file,
+    // scope spelled out — before the write happened.
     assert!(text.contains("Files agentstack will manage"), "{text}");
-    assert!(text.contains(".agentstack/agentstack.toml"), "{text}");
     assert!(
         text.contains("the manifest — written by this import"),
         "{text}"
@@ -131,19 +188,15 @@ fn scripted_init_states_clis_configs_servers_and_destinations_before_writing() {
     // double-delivery defect stated as a plan.
     assert!(!text.contains("Claude Code \u{b7} MCP servers"), "{text}");
     assert!(!text.contains("Codex CLI \u{b7} MCP servers"), "{text}");
-    // No bridge is registered in this scripted run, so the routing states the
-    // live lane as a PLAN (invariant 8). The claim under test is that the row
-    // names the live lane at all, not that it promises delivery.
+    // The routing row names the live lane as a plan, not as a delivery.
     assert!(
         text.contains("MCP servers planned live (not connected)"),
         "{text}"
     );
-
-    // The review preceded a real write.
-    assert!(proj.join(".agentstack/agentstack.toml").exists());
-    // ...and the import itself wrote no native config, as the block promised.
-    assert!(!proj.join(".mcp.json").exists());
-    assert!(!proj.join(".codex/config.toml").exists());
+    // ONE routing table per run, still: the pre-write block is the only place
+    // it appears on the scripted route.
+    assert_eq!(text.matches("How each tool gets them").count(), 1, "{text}");
+    assert_eq!(text.matches("Next:").count(), 1, "{text}");
 }
 
 #[test]
@@ -252,26 +305,44 @@ fn servers_another_app_owns_are_left_out_of_the_import_and_named() {
     assert!(ok, "init --dry-run failed:\n{text}");
 
     // Only the user's own server is imported.
-    assert!(text.contains("Importing 1 MCP server"), "{text}");
-    assert!(text.contains("runs npx -y github-mcp"), "{text}");
+    assert!(text.contains("importing 1 MCP server"), "{text}");
 
-    // And the two that were left out are NAMED, with who appears to own them,
-    // the path that evidences it, and the flag that overrides the default.
+    // The default states the exclusion as a COUNT — the fact that must not be
+    // missed — with the promise that nothing was deleted, and names the flag
+    // that shows the reasons. Never silent, at either verbosity.
     assert!(
-        text.contains(
+        text.contains("2 entries not imported (owned by the apps that installed them)"),
+        "the exclusion must be stated, not inferred:\n{text}"
+    );
+    assert!(text.contains("nothing was deleted"), "{text}");
+    assert!(text.contains("--verbose"), "{text}");
+
+    // `--verbose` names each one, who appears to own it, the path that
+    // evidences that, and the flag that overrides the default.
+    let (verbose, ok) = run(
+        bin,
+        &["init", "--dry-run", "--secrets", "skip", "--verbose"],
+        &home,
+        &proj,
+        &stub_bin,
+    );
+    assert!(ok, "init --dry-run --verbose failed:\n{verbose}");
+    assert!(
+        verbose.contains(
             "2 servers are managed by the apps that installed them and were left alone: \
              node_repl, computer-use"
         ),
-        "the exclusion must be stated, not inferred:\n{text}"
+        "{verbose}"
     );
-    assert!(text.contains("ChatGPT"), "{text}");
-    assert!(text.contains("Codex Computer Use"), "{text}");
+    assert!(verbose.contains("ChatGPT"), "{verbose}");
+    assert!(verbose.contains("Codex Computer Use"), "{verbose}");
     assert!(
-        text.contains("/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl"),
-        "the evidence behind the reading is shown:\n{text}"
+        verbose.contains("/Applications/ChatGPT.app/Contents/Resources/cua_node/bin/node_repl"),
+        "the evidence behind the reading is shown:\n{verbose}"
     );
-    assert!(text.contains("nothing was deleted"), "{text}");
-    assert!(text.contains("--include-tool-managed"), "{text}");
+    assert!(verbose.contains("nothing was deleted"), "{verbose}");
+    assert!(verbose.contains("--include-tool-managed"), "{verbose}");
+    assert!(verbose.contains("runs npx -y github-mcp"), "{verbose}");
 
     // `--dry-run` wrote nothing, as always.
     assert!(!proj.join(".agentstack/agentstack.toml").exists());

@@ -44,7 +44,10 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
     // before anything happens — and, crucially, what the import step writes and
     // that CLIs stay untouched until a later confirm. The plan lives here in
     // `setup`, not in plain `init` (which is the scriptable primitive).
-    if interactive {
+    // The five-step plan is orientation, not consent — the consent question
+    // states its own promise a few lines later, and stating the same promise
+    // twice is how it stops being read. `--verbose` keeps the long form.
+    if interactive && args.verbose {
         print_plan();
     }
 
@@ -104,17 +107,16 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
                 // never re-checks the TTY gate), so this field is irrelevant
                 // here.
                 yes: false,
-                // The wizard has no `--verbose` of its own, and its transcript
-                // is already the longest surface we print. The passed-over
-                // bridge line stays available on the standalone
-                // `agentstack init --verbose`.
-                verbose: false,
                 consented_plan: None,
                 // Never here: the wizard registers the bridge in its own
                 // ceremony, after the delivery routing is on screen. Setting
                 // it would also make the import confirm's promise ("your CLIs'
                 // own configs stay untouched") false at the moment it is read.
                 connect: false,
+                // Carried from the invocation: the wizard's import IS this
+                // import, so `--verbose` there has to reach the evidence
+                // blocks here — including the passed-over bridge line.
+                verbose: args.verbose,
             },
             manifest_dir,
         )?;
@@ -181,7 +183,7 @@ fn configure(
     let target_ids = resolve_targets(&ctx.loaded.manifest, &ctx.registry, &args.targets, &ctx.dir)?;
 
     // Preflight inspection (adapters, skills, secrets) — read-only.
-    let pf = preflight(&ctx, &target_ids)?;
+    let pf = preflight(&ctx, &target_ids, args.verbose)?;
 
     // Missing secrets — offer to set each one now (interactive only).
     let missing = resolve_missing_secrets(&ctx, pf.missing_secrets)?;
@@ -244,7 +246,7 @@ fn configure(
 
     let proceeded = match choice {
         DeliveryChoice::Automatic => {
-            run_automatic(&ctx, &target_ids, manifest_dir, args.connect)?;
+            run_automatic(&ctx, &target_ids, manifest_dir, args.connect, args.verbose)?;
             true
         }
         // Render locally is recorded first, so the render that follows is the
@@ -257,11 +259,11 @@ fn configure(
             run_static(args, scope, manifest_dir)?
         }
         DeliveryChoice::Legacy(super::overview::Mode::CleanAtRest) => {
-            run_clean_at_rest(&ctx, manifest_dir)?;
+            run_clean_at_rest(&ctx, manifest_dir, args.verbose)?;
             true
         }
         DeliveryChoice::Legacy(super::overview::Mode::ZeroFiles) => {
-            run_zero_files(&ctx, manifest_dir, args.connect)?;
+            run_zero_files(&ctx, manifest_dir, args.connect, args.verbose)?;
             true
         }
     };
@@ -281,7 +283,13 @@ fn configure(
     // house rules together) after the project itself is done — not two
     // sequential upsells inside every project init (audit C6).
     let (guard_wired, seeded_house_rules) = offer_machine_protection(&ctx, &target_ids)?;
-    print_change_summary(&ctx, history_before, seeded_house_rules, guard_wired);
+    print_change_summary(
+        &ctx,
+        history_before,
+        seeded_house_rules,
+        guard_wired,
+        args.verbose,
+    );
     Ok(())
 }
 
@@ -499,7 +507,7 @@ fn run_static(args: &SetupArgs, scope: Scope, manifest_dir: Option<&Path>) -> Re
     // P8: offer the deep content scan at the one moment it's relevant — right
     // after skills landed. Only when there ARE skills, and only interactively.
     let deep = offer_deep_scan(&ctx)?;
-    super::doctor::run(
+    run_doctor_step(
         &DoctorArgs {
             ci: false,
             live: false,
@@ -511,6 +519,7 @@ fn run_static(args: &SetupArgs, scope: Scope, manifest_dir: Option<&Path>) -> Re
             skip_drift: false,
         },
         manifest_dir,
+        args.verbose,
     )?;
     Ok(true)
 }
@@ -518,7 +527,11 @@ fn run_static(args: &SetupArgs, scope: Scope, manifest_dir: Option<&Path>) -> Re
 /// The clean-at-rest fork: pin the lock (no render), teach the session rhythm,
 /// then a drift-suppressed doctor. Nothing lands in any CLI config — the repo
 /// stays pristine for git and capabilities exist only inside a session.
-fn run_clean_at_rest(ctx: &super::Context, manifest_dir: Option<&Path>) -> Result<()> {
+fn run_clean_at_rest(
+    ctx: &super::Context,
+    manifest_dir: Option<&Path>,
+    verbose: bool,
+) -> Result<()> {
     use super::overview::Mode;
 
     println!("\n{}", "Lock".bold());
@@ -571,7 +584,7 @@ fn run_clean_at_rest(ctx: &super::Context, manifest_dir: Option<&Path>) -> Resul
     // skip_drift: nothing is rendered here on purpose, so the "N change(s)
     // pending ↳ apply --write" comparison would be a false alarm pointing back
     // at the render this mode opts out of.
-    super::doctor::run(
+    run_doctor_step(
         &DoctorArgs {
             ci: false,
             live: false,
@@ -583,6 +596,7 @@ fn run_clean_at_rest(ctx: &super::Context, manifest_dir: Option<&Path>) -> Resul
             skip_drift: true,
         },
         manifest_dir,
+        verbose,
     )?;
     Ok(())
 }
@@ -602,20 +616,31 @@ fn run_zero_files(
     // flag that works on one route and is silently ignored on another is worse
     // than no flag.
     preconsented: bool,
+    verbose: bool,
 ) -> Result<()> {
     use super::overview::Mode;
     let _ = manifest_dir; // the ctx already carries the resolved dir
 
     println!("\n{}", "Zero-files".bold());
     // Honesty rule: never a bare "nothing is written". The project keeps its
-    // manifest and lock, and any house-rules region stays in its file.
-    println!(
-        "  {} no generated files are written; your CLIs fetch servers and skills\n\
-         \x20   live from agentstack — each repo stays inert until you review it.\n\
-         \x20   {}",
-        "·".dimmed(),
-        crate::delivery::ZERO_ARTIFACTS
-    );
+    // manifest and lock, and any house-rules region stays in its file — which
+    // is exactly what `ZERO_ARTIFACTS` spells out, so the default states the
+    // rule and `--verbose` states its limits.
+    if verbose {
+        println!(
+            "  {} no generated files are written; your CLIs fetch servers and skills\n\
+             \x20   live from agentstack — each repo stays inert until you review it.\n\
+             \x20   {}",
+            "·".dimmed(),
+            crate::delivery::ZERO_ARTIFACTS
+        );
+    } else {
+        println!(
+            "  {} no generated files; your CLIs fetch servers and skills live from \
+             agentstack   (what stays behind: --verbose)",
+            "·".dimmed()
+        );
+    }
 
     // cmds[0] = "agentstack trust .", cmds[1] = "agentstack set-mode zero-files"
     let (cmds, what) = mode_switch_plan(Mode::ZeroFiles, None);
@@ -1280,6 +1305,7 @@ fn run_automatic(
     // already answered and the wizard states the registration instead of
     // asking it again.
     preconsented: bool,
+    verbose: bool,
 ) -> Result<()> {
     let plan =
         crate::delivery::Plan::build(&ctx.loaded.manifest.delivery, &ctx.registry, target_ids);
@@ -1291,35 +1317,71 @@ fn run_automatic(
             "·".dimmed()
         );
     }
-    let width = plan
-        .harnesses
-        .iter()
-        .map(|h| h.display.len())
-        .max()
-        .unwrap_or(0);
-    for h in &plan.harnesses {
-        // Per-harness bridge reading, never the raw routing sentence: with no
-        // gateway registered nothing reaches this tool, and `status`, `doctor`
-        // and `delivery` all say "planned live (not connected)" here.
-        println!(
-            "  {:width$}   {}",
-            h.display,
-            crate::commands::delivery::harness_sentence(
-                h,
-                super::overview::bridge_registered(&ctx.registry, &h.id)
+    // The routing table, ONCE per run and only under `--verbose`: the import's
+    // pre-write review and the closing summary both used to state the same
+    // per-tool answer, so one `init` printed it three times. Both of those now
+    // stand down, and this is the copy that survives.
+    //
+    // What does NOT move behind the flag is the honesty reading itself: a
+    // harness with no bridge registered says so at every verbosity, because
+    // invariant 8 is about a claim the output must not make.
+    if verbose {
+        let width = plan
+            .harnesses
+            .iter()
+            .map(|h| h.display.len())
+            .max()
+            .unwrap_or(0);
+        for h in &plan.harnesses {
+            // Per-harness bridge reading, never the raw routing sentence: with
+            // no gateway registered nothing reaches this tool, and `status`,
+            // `doctor` and `delivery` all say "planned live (not connected)".
+            println!(
+                "  {:width$}   {}",
+                h.display,
+                crate::commands::delivery::harness_sentence(
+                    h,
+                    super::overview::bridge_registered(&ctx.registry, &h.id)
+                )
+            );
+        }
+        // The two binding honesty rules, each on its own line.
+        if plan.has_dynamic_lane() {
+            println!("  {} {}", "·".dimmed(), crate::delivery::ZERO_ARTIFACTS);
+        }
+        if let Some(line) = crate::delivery::rendered_lane_line(&plan) {
+            println!("  {} {line}", "·".dimmed());
+            println!(
+                "  {} write them with {}",
+                "·".dimmed(),
+                "agentstack apply --write".bold()
+            );
+        }
+    } else if !plan.harnesses.is_empty() {
+        // Invariant 8 in one line: "served live" only where a bridge really is
+        // registered, "planned live (not connected)" — the product's own
+        // wording — everywhere it is not, and the un-registered harnesses named
+        // when it is only some of them.
+        let unconnected = crate::commands::delivery::unconnected_live(&plan, &ctx.registry);
+        let live_count = plan.live_harnesses().len();
+        let live = if !plan.has_dynamic_lane() {
+            String::new()
+        } else if unconnected.is_empty() {
+            " · skills + MCP servers served live".to_string()
+        } else if unconnected.len() == live_count {
+            " · skills + MCP servers planned live (not connected)".to_string()
+        } else {
+            format!(
+                " · skills + MCP servers planned live (not connected in {})",
+                unconnected.join(", ")
             )
-        );
-    }
-    // The two binding honesty rules, each on its own line.
-    if plan.has_dynamic_lane() {
-        println!("  {} {}", "·".dimmed(), crate::delivery::ZERO_ARTIFACTS);
-    }
-    if let Some(line) = crate::delivery::rendered_lane_line(&plan) {
-        println!("  {} {line}", "·".dimmed());
+        };
+        let files = crate::delivery::rendered_lane_line(&plan)
+            .map(|_| " · the rest written to files by `agentstack apply --write`")
+            .unwrap_or_default();
         println!(
-            "  {} write them with {}",
-            "·".dimmed(),
-            "agentstack apply --write".bold()
+            "  {} targeted{live}{files}   (per tool: --verbose)",
+            super::count(plan.harnesses.len(), "CLI")
         );
     }
 
@@ -1328,15 +1390,13 @@ fn run_automatic(
     // terminal — a scripted setup gets the command printed instead.
     if plan.has_dynamic_lane() {
         offer_bridge(preconsented)?;
-        println!(
-            "\n  {} then review this repo once, so its capabilities can be served:",
-            "·".dimmed()
-        );
-        println!("    {}", "agentstack trust .".bold());
+        // The review pointer that used to sit here is now the close's single
+        // `Next:` — and computed from the trust state this run actually left
+        // behind, rather than printed unconditionally beside the bridge offer.
     }
 
     println!("\n{}", "Doctor".bold());
-    super::doctor::run(
+    run_doctor_step(
         &DoctorArgs {
             ci: false,
             live: false,
@@ -1348,7 +1408,19 @@ fn run_automatic(
             skip_drift: false,
         },
         manifest_dir,
+        verbose,
     )
+}
+
+/// `doctor`, as one step of the wizard: the full report under `--verbose`, its
+/// one-line reading otherwise. The line names `agentstack doctor`, so the
+/// sections are one command away and the wizard keeps its single closing step.
+fn run_doctor_step(args: &DoctorArgs, manifest_dir: Option<&Path>, verbose: bool) -> Result<()> {
+    if verbose {
+        return super::doctor::run(args, manifest_dir);
+    }
+    println!("  {}", super::doctor::summary_line(args, manifest_dir)?);
+    Ok(())
 }
 
 /// Offer to register the agentstack bridge in the installed harnesses — the one
@@ -1530,6 +1602,7 @@ fn print_change_summary(
     history_before: &std::collections::HashSet<String>,
     seeded_house_rules: bool,
     guard_wired: bool,
+    verbose: bool,
 ) {
     let files = files_written_since(history_before);
 
@@ -1622,17 +1695,38 @@ fn print_change_summary(
             &still_needed,
         )
     );
-    println!("\n{}", "What changed on this machine".bold());
+    // The one `Next:` this run ends on. A close that named the review, the
+    // bridge, `apply`, `doctor` and undo as five equally-weighted "next"
+    // commands named none of them: the reader has to pick, and picking is the
+    // job this line exists to do. The gate that is actually standing in the way
+    // wins — until a project is trusted nothing it declares is delivered — and
+    // everything else stays reachable on the compact line under it.
+    let next = if super::overview::trust_blocks_delivery(
+        crate::trust::check(&ctx.dir),
+        super::overview::declares_capabilities(&ctx.loaded.manifest),
+    ) {
+        (
+            "agentstack trust .",
+            "review this project once, so it can be served",
+        )
+    } else {
+        ("agentstack doctor", "check the result")
+    };
+    if verbose {
+        println!("\n{}", "What changed on this machine".bold());
+    }
     print!(
         "{}",
-        render_change_summary(
-            &files,
-            &secrets,
-            &seeded,
+        render_change_summary(&ChangeSummary {
+            files: &files,
+            secrets: &secrets,
+            seeded: &seeded,
             cli_config_changed,
-            &keychain_secrets,
+            keychain_secrets: &keychain_secrets,
             guard_wired,
-        )
+            next,
+            verbose,
+        })
     );
 }
 
@@ -1662,11 +1756,10 @@ fn render_setup_facts(
     }
     out.push_str(&format!("  Capabilities:  {caps}\n"));
     // Undo is one of the product's four ideas, and the guided first-timer is
-    // exactly the person who needs to know the way back. The scripted primitive
-    // names it in its own close; the wizard used to leave it to the detailed
-    // block far below, so it gets the same at-a-glance label line here.
-    out.push_str("  Undo:          agentstack x restore --last --write\n");
-    out.push_str("  Check:         agentstack doctor\n");
+    // exactly the person who needs to know the way back — but it is not this
+    // run's next step, so it moved onto the one compact line the close ends on
+    // (`render_change_summary`) rather than standing here as a third command
+    // competing with the single `Next:`.
     if !still_needed.is_empty() {
         out.push_str(&format!(
             "  Still needed:  {} before this setup can run:\n",
@@ -1686,27 +1779,60 @@ fn render_setup_facts(
 /// with nothing to show are omitted, except the always-present undo/inspect
 /// one-liners. The restart-CLIs line prints only when a native CLI config
 /// changed this run (P30).
-fn render_change_summary(
-    files: &[(String, String)],
-    secrets: &[(String, String)],
-    seeded: &[String],
+#[derive(Default)]
+struct ChangeSummary<'a> {
+    files: &'a [(String, String)],
+    secrets: &'a [(String, String)],
+    seeded: &'a [String],
     cli_config_changed: bool,
-    keychain_secrets: &[String],
+    keychain_secrets: &'a [String],
     guard_wired: bool,
-) -> String {
+    /// The single next step this run ends on, as (command, why), chosen by the
+    /// caller from the state the run actually left behind.
+    next: (&'a str, &'a str),
+    /// Spell every file and secret out rather than counting them.
+    verbose: bool,
+}
+
+fn render_change_summary(s: &ChangeSummary<'_>) -> String {
+    let ChangeSummary {
+        files,
+        secrets,
+        seeded,
+        cli_config_changed,
+        keychain_secrets,
+        guard_wired,
+        next,
+        verbose,
+    } = *s;
     let mut out = String::new();
     if files.is_empty() {
         out.push_str("  No files were written.\n");
-    } else {
+    } else if verbose {
         out.push_str(&format!("  Files written ({}):\n", files.len()));
         for (path, label) in files {
             out.push_str(&format!("    {path}  ({label})\n"));
         }
+    } else {
+        // The count is the fact; the paths are the evidence. Both are honest —
+        // this is not a "nothing was written" claim, which is the one thing
+        // this line may never become.
+        out.push_str(&format!(
+            "  Wrote {} on this machine   (each path: --verbose)\n",
+            super::count(files.len(), "file")
+        ));
     }
     if !secrets.is_empty() {
-        out.push_str("  Secrets:\n");
-        for (name, source) in secrets {
-            out.push_str(&format!("    {name}  resolved from {source}\n"));
+        if verbose {
+            out.push_str("  Secrets:\n");
+            for (name, source) in secrets {
+                out.push_str(&format!("    {name}  resolved from {source}\n"));
+            }
+        } else {
+            out.push_str(&format!(
+                "  Secrets: {} resolved\n",
+                super::count(secrets.len(), "reference")
+            ));
         }
     }
     if !seeded.is_empty() {
@@ -1715,33 +1841,37 @@ fn render_change_summary(
             out.push_str(&format!("    {s}\n"));
         }
     }
-    out.push_str(
-        "  Undo recorded file writes from this setup:  agentstack x restore --last --write\n",
-    );
     // The guard manages its own install/uninstall (its hook writes are outside
     // the apply history `restore` reads), so it carries its own undo line. The
     // per-CLI writes were already listed by `guard install` above — surface the
     // fact and the reversal here, don't re-enumerate them.
     if guard_wired {
         out.push_str(
-            "  Guard wired into your CLIs' pre-tool-use hooks (listed above).\n\
-             \x20 Undo the guard:  agentstack guard uninstall\n",
+            "  Guard wired into your CLIs' pre-tool-use hooks (listed above) — \
+             undo: agentstack guard uninstall\n",
         );
     }
+    // Kept at every verbosity: a value the file ledger cannot reach is exactly
+    // what a reader would otherwise assume `restore` took back.
     if !keychain_secrets.is_empty() {
-        out.push_str(
-            "  Keychain values are outside file history; remove them explicitly if needed:\n",
-        );
-        for name in keychain_secrets {
-            out.push_str(&format!("    agentstack secret rm {name}\n"));
-        }
+        out.push_str(&format!(
+            "  Keychain values are outside file history — remove explicitly: {}\n",
+            keychain_secrets
+                .iter()
+                .map(|name| format!("agentstack secret rm {name}"))
+                .collect::<Vec<_>>()
+                .join("  ·  ")
+        ));
     }
-    out.push_str("  Inspect any time:  agentstack doctor  ·  agentstack\n");
     // Harnesses read config at startup, so an open session won't see the writes
     // — but only say so when a CLI config actually changed this run (P30).
     if cli_config_changed {
         out.push_str("\n  Restart your agent CLIs so they pick up the new config.\n");
     }
+    // ONE next step, and one compact line for everything that stays reachable.
+    let (cmd, why) = next;
+    out.push_str(&format!("\n  Next: {cmd}   ({why})\n"));
+    out.push_str("  Also: agentstack   ·   undo this setup: agentstack x restore --last --write\n");
     // P29.1: the closing doorway is the summary's FINAL line — it hands the user
     // to the walkthrough exactly when curiosity peaks, or back to bare
     // `agentstack` for the next step. Every delivery-mode fork ends through this
@@ -1766,11 +1896,15 @@ pub(crate) struct Preflight {
 /// Inspect adapters, skills, and secrets and print the preflight report,
 /// returning a summary so the wizard can decide what to do next. Read-only —
 /// touches no config. (Moved here from the retired `bootstrap` command.)
-pub(crate) fn preflight(ctx: &super::Context, target_ids: &[String]) -> Result<Preflight> {
+pub(crate) fn preflight(
+    ctx: &super::Context,
+    target_ids: &[String],
+    verbose: bool,
+) -> Result<Preflight> {
     let validation_errors = print_validation(ctx);
-    print_adapters(ctx, target_ids);
-    print_skills(ctx)?;
-    let missing_secrets = print_secrets(ctx);
+    print_adapters(ctx, target_ids, verbose);
+    print_skills(ctx, verbose)?;
+    let missing_secrets = print_secrets(ctx, verbose);
     Ok(Preflight {
         validation_errors,
         missing_secrets,
@@ -1808,12 +1942,43 @@ fn print_validation(ctx: &super::Context) -> bool {
     has_errors
 }
 
-fn print_adapters(ctx: &super::Context, target_ids: &[String]) {
-    println!("\n{}", "Adapters".bold());
+/// The per-CLI adapter readings.
+///
+/// A row per CLI is a table, and on a machine with eight of them it buries the
+/// only rows that need an answer. The default therefore prints the exceptions
+/// (a config with no binary, a CLI that is not installed, an unknown id) and
+/// counts the rest; `--verbose` prints every row.
+fn print_adapters(ctx: &super::Context, target_ids: &[String], verbose: bool) {
     if target_ids.is_empty() {
+        println!("\n{}", "Adapters".bold());
         println!("  {} no target adapters selected", "⚠".yellow());
         return;
     }
+    if !verbose {
+        let installed = target_ids
+            .iter()
+            .filter(|id| ctx.registry.get(id).is_some_and(|d| d.is_installed()))
+            .count();
+        let odd: Vec<String> = target_ids
+            .iter()
+            .filter_map(|id| match ctx.registry.get(id) {
+                Some(desc) if desc.is_installed() => None,
+                Some(desc) if desc.config_present() => {
+                    Some(format!("{} (config, no binary)", desc.display))
+                }
+                Some(desc) => Some(format!("{} (not detected)", desc.display)),
+                None => Some(format!("unknown adapter '{id}'")),
+            })
+            .collect();
+        let mut line = format!("  {} {} installed", "✓".green(), installed);
+        if !odd.is_empty() {
+            line.push_str(&format!(" · {} {}", "⚠".yellow(), odd.join(" · ")));
+        }
+        println!("\n{}", "Adapters".bold());
+        println!("{line}");
+        return;
+    }
+    println!("\n{}", "Adapters".bold());
     for id in target_ids {
         match ctx.registry.get(id) {
             Some(desc) if desc.is_installed() => {
@@ -1830,7 +1995,9 @@ fn print_adapters(ctx: &super::Context, target_ids: &[String]) {
     }
 }
 
-fn print_skills(ctx: &super::Context) -> Result<usize> {
+/// The per-skill readings. Same rule as the adapters above: the default names
+/// only the skills with something wrong and counts the healthy ones.
+fn print_skills(ctx: &super::Context, verbose: bool) -> Result<usize> {
     println!("\n{}", "Skills".bold());
     let manifest = &ctx.loaded.manifest;
     if manifest.skills.is_empty() {
@@ -1841,6 +2008,7 @@ fn print_skills(ctx: &super::Context) -> Result<usize> {
     let store = Store::default_store();
     let lock = Lock::load(&ctx.dir)?;
     let mut issues = 0;
+    let mut healthy = 0;
     for (name, skill) in &manifest.skills {
         let locked = lock.get(name);
         let pinned_rev = locked.and_then(|entry| entry.rev.as_deref());
@@ -1859,7 +2027,10 @@ fn print_skills(ctx: &super::Context) -> Result<usize> {
         };
         match dir_digest(&local) {
             Ok(sum) if sum == locked.checksum => {
-                println!("  {} {name:<20} present · locked", "✓".green());
+                healthy += 1;
+                if verbose {
+                    println!("  {} {name:<20} present · locked", "✓".green());
+                }
             }
             Ok(_) => {
                 issues += 1;
@@ -1871,10 +2042,19 @@ fn print_skills(ctx: &super::Context) -> Result<usize> {
             }
         }
     }
+    if !verbose && healthy > 0 {
+        println!(
+            "  {} {} present · locked",
+            "✓".green(),
+            super::count(healthy, "skill")
+        );
+    }
     Ok(issues)
 }
 
-fn print_secrets(ctx: &super::Context) -> Vec<String> {
+/// The per-secret readings. Same rule again: a missing value is an answer the
+/// user has to act on, a resolved one is a count.
+fn print_secrets(ctx: &super::Context, verbose: bool) -> Vec<String> {
     println!("\n{}", "Secrets".bold());
     // Library-resolved, for the reason in `effective_referenced_secrets`: the
     // inline reading printed "no secrets referenced" in the same wizard run
@@ -1892,14 +2072,27 @@ fn print_secrets(ctx: &super::Context) -> Vec<String> {
 
     let sources = SecretSources::detect(&ctx.dir);
     let mut missing = Vec::new();
+    let mut resolved = 0;
     for name in refs {
         match sources.source_of(&name) {
-            Some(source) => println!("  {} {name:<20} resolved from {source}", "✓".green()),
+            Some(source) => {
+                resolved += 1;
+                if verbose {
+                    println!("  {} {name:<20} resolved from {source}", "✓".green());
+                }
+            }
             None => {
                 println!("  {} {name:<20} missing", "✗".red());
                 missing.push(name);
             }
         }
+    }
+    if !verbose && resolved > 0 {
+        println!(
+            "  {} {} resolved",
+            "✓".green(),
+            super::count(resolved, "secret")
+        );
     }
     missing
 }
@@ -1946,7 +2139,7 @@ mod tests {
     use super::{
         choose_delivery, cli_config_touched, clis_updated, fork_plan, is_cli_config_path,
         mode_switch_plan, render_change_summary, render_setup_facts, render_stop_summary,
-        should_offer_guard, DeliveryChoice,
+        should_offer_guard, ChangeSummary, DeliveryChoice,
     };
 
     // TASK 3: the guard offer is gated — shown only when the shell is
@@ -2131,14 +2324,18 @@ mod tests {
         ];
         let secrets = vec![("API_TOKEN".to_string(), "keychain".to_string())];
         let seeded = vec!["agentstack house rules → ~/.agentstack/agentstack.toml".to_string()];
-        let out = render_change_summary(
-            &files,
-            &secrets,
-            &seeded,
-            true,
-            &["API_TOKEN".to_string()],
-            true,
-        );
+        let keychain = ["API_TOKEN".to_string()];
+        let summary = |verbose| ChangeSummary {
+            files: &files,
+            secrets: &secrets,
+            seeded: &seeded,
+            cli_config_changed: true,
+            keychain_secrets: &keychain,
+            guard_wired: true,
+            next: ("agentstack doctor", "check the result"),
+            verbose,
+        };
+        let out = render_change_summary(&summary(true));
 
         assert!(out.contains("Files written (2)"));
         assert!(out.contains("~/.claude.json  (Claude Code · servers)"));
@@ -2152,12 +2349,40 @@ mod tests {
         // guard_wired → the guard carries its own undo line (its writes are
         // outside the apply history `restore` reverses).
         assert!(out.contains("agentstack guard uninstall"));
+
+        // The default is the same facts as counts: the file COUNT is stated
+        // (never "nothing was written"), the paths are named as `--verbose`,
+        // and the keychain caveat — the one thing `restore` cannot take back —
+        // survives the compression untouched.
+        let brief = render_change_summary(&summary(false));
+        assert!(brief.contains("Wrote 2 files on this machine"), "{brief}");
+        assert!(!brief.contains("Files written (2)"), "{brief}");
+        assert!(brief.contains("--verbose"), "{brief}");
+        assert!(brief.contains("agentstack secret rm API_TOKEN"), "{brief}");
+        assert!(brief.contains("Restart your agent CLIs"), "{brief}");
+    }
+
+    /// The close ends on exactly ONE `Next:`, chosen by the caller, with
+    /// everything else on the compact line under it. Five equally-weighted
+    /// "next" commands were five ways of recommending nothing.
+    #[test]
+    fn change_summary_ends_on_one_next_step() {
+        let out = render_change_summary(&ChangeSummary {
+            next: ("agentstack trust .", "review this project once"),
+            ..Default::default()
+        });
+        assert_eq!(out.matches("Next:").count(), 1, "{out}");
+        assert!(out.contains("Next: agentstack trust ."), "{out}");
+        assert!(out.contains("Also: agentstack"), "{out}");
     }
 
     // With nothing written, the summary says so but still offers the one-liners.
     #[test]
     fn change_summary_with_no_writes_still_offers_undo() {
-        let out = render_change_summary(&[], &[], &[], false, &[], false);
+        let out = render_change_summary(&ChangeSummary {
+            next: ("agentstack doctor", "check the result"),
+            ..Default::default()
+        });
         assert!(out.contains("No files were written"));
         assert!(out.contains("agentstack x restore --last --write"));
     }
@@ -2172,14 +2397,21 @@ mod tests {
             ".agentstack/agentstack.toml".to_string(),
             "manifest · import".to_string(),
         )];
-        let out = render_change_summary(&files, &[], &[], false, &[], false);
+        let summary = |cli_config_changed| ChangeSummary {
+            files: &files,
+            cli_config_changed,
+            next: ("agentstack doctor", "check the result"),
+            verbose: true,
+            ..Default::default()
+        };
+        let out = render_change_summary(&summary(false));
         assert!(out.contains("manifest · import"));
         assert!(
             !out.contains("Restart your agent CLIs"),
             "an import-only run must not advise a restart:\n{out}"
         );
         // But it is still present when a CLI config did change.
-        let out_changed = render_change_summary(&files, &[], &[], true, &[], false);
+        let out_changed = render_change_summary(&summary(true));
         assert!(out_changed.contains("Restart your agent CLIs"));
     }
 
@@ -2239,7 +2471,10 @@ mod tests {
     // every delivery-mode fork (all three end through this one formatter).
     #[test]
     fn change_summary_ends_with_the_start_page_doorway() {
-        let out = render_change_summary(&[], &[], &[], false, &[], false);
+        let out = render_change_summary(&ChangeSummary {
+            next: ("agentstack doctor", "check the result"),
+            ..Default::default()
+        });
         // The exact URL + single-space em dash pins that the string
         // line-continuation collapsed to one space, not zero or two.
         assert!(out.contains(

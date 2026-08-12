@@ -77,9 +77,9 @@ fn init_from_a_subdir_refuses_to_silently_nest() {
         project_servers: false,
         include_tool_managed: false,
         yes: true,
-        verbose: false,
         consented_plan: None,
         connect: false,
+        verbose: false,
     };
     let err = with_cwd(&deep, || commands::init::run(&args, None)).unwrap_err();
     let msg = format!("{err:#}");

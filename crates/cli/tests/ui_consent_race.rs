@@ -102,9 +102,9 @@ fn init_args(yes: bool, consented_plan: Option<String>) -> InitArgs {
         project_servers: false,
         include_tool_managed: false,
         yes,
-        verbose: false,
         consented_plan,
         connect: false,
+        verbose: false,
     }
 }
 
