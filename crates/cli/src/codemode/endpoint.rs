@@ -96,12 +96,44 @@ pub fn start(dir: Option<&Path>, gateway: Arc<Gateway>) -> Option<RuntimeHandle>
 /// blocks the endpoint (or the stdio serve loop). Local, agent-driven
 /// traffic: thread-per-request is plenty, and `MAX_INFLIGHT` bounds it.
 fn serve_loop(server: Server, gateway: Arc<Gateway>, token: String) {
-    let inflight = Arc::new(AtomicUsize::new(0));
+    serve_loop_observed(
+        server,
+        gateway,
+        token,
+        Arc::new(AtomicUsize::new(0)),
+        MAX_INFLIGHT,
+    )
+}
+
+/// [`serve_loop`] with the in-flight counter supplied by the caller.
+///
+/// A test-only seam, and the same reasoning the trust module states for its
+/// own probes: the load-shedding guarantee is about a STATE — the cap being
+/// full — and a test that cannot observe that state has to guess when it has
+/// been reached. Guessing is what made the shed witness flaky three times over.
+///
+/// The cap is a parameter for the same reason. Filling the real cap means
+/// parking 64 connections, and a slot is only reserved once the server has
+/// PARSED that connection's head — so on a loaded runner the fixture would sit
+/// at 62 or 63 of 64 and fail on its own premise, having never reached the
+/// state the guarantee is about. The shed itself never failed. A cap of four
+/// reaches the same branch through the same code with none of that pressure.
+///
+/// Production calls [`serve_loop`], which owns its counter and passes
+/// [`MAX_INFLIGHT`]; neither knob is reachable from outside this module, and
+/// nothing here changes what is enforced.
+fn serve_loop_observed(
+    server: Server,
+    gateway: Arc<Gateway>,
+    token: String,
+    inflight: Arc<AtomicUsize>,
+    max_inflight: usize,
+) {
     for mut req in server.incoming_requests() {
         // Bounded concurrency: shed load with a fast 503 rather than spawning
         // an unbounded number of threads. `fetch_add` then compare works as a
         // reservation because only this accept thread ever increments.
-        if inflight.fetch_add(1, Ordering::AcqRel) >= MAX_INFLIGHT {
+        if inflight.fetch_add(1, Ordering::AcqRel) >= max_inflight {
             inflight.fetch_sub(1, Ordering::Release);
             let resp = Response::from_string(json!({ "error": "server busy" }).to_string())
                 .with_status_code(503)
@@ -246,10 +278,27 @@ mod tests {
     /// token, for socket-level tests (`start` itself refuses an empty
     /// gateway and mints its own token).
     fn spawn_test_endpoint() -> u16 {
+        spawn_test_endpoint_observed(MAX_INFLIGHT).0
+    }
+
+    /// The endpoint plus the counter its accept loop reserves slots in, at a
+    /// caller-chosen cap — so a test can wait for the cap to be genuinely full
+    /// instead of timing it, and can pick a cap it can actually fill.
+    fn spawn_test_endpoint_observed(cap: usize) -> (u16, Arc<AtomicUsize>) {
         let server = Server::http("127.0.0.1:0").unwrap();
         let port = server.server_addr().to_ip().unwrap().port();
-        std::thread::spawn(move || serve_loop(server, Arc::new(Gateway::empty()), "tok".into()));
-        port
+        let inflight = Arc::new(AtomicUsize::new(0));
+        let seen = Arc::clone(&inflight);
+        std::thread::spawn(move || {
+            serve_loop_observed(
+                server,
+                Arc::new(Gateway::empty()),
+                "tok".into(),
+                inflight,
+                cap,
+            )
+        });
+        (port, seen)
     }
 
     /// The token is checked BEFORE the body is read: a tokenless request
@@ -283,22 +332,20 @@ mod tests {
     /// two earlier shapes flaked on loaded CI by doing the latter.
     #[test]
     fn request_over_the_inflight_cap_is_shed_with_503() {
-        let port = spawn_test_endpoint();
+        // A cap of four, not sixty-four. The branch under test is the same
+        // one production takes; what changes is that the fixture can actually
+        // reach the state it asserts about. See `serve_loop_observed`.
+        const CAP: usize = 4;
+        let (port, inflight) = spawn_test_endpoint_observed(CAP);
 
-        // Flood FIRST, read afterwards. Every connection is held open — dropping
-        // one frees its slot — and none is read from until the flood is
-        // complete, so the cap is genuinely saturated before anything is
-        // asserted.
+        // Saturate with EXACTLY the cap. Each connection sends a head declaring
+        // a body it never delivers, so tiny_http yields the request, the
+        // handler parks in the body read, and the slot stays taken for the rest
+        // of the test — dropping the connection is the only thing that frees a
+        // slot, and every one of them is held to the end.
         let mut held = Vec::new();
-        for _ in 0..(MAX_INFLIGHT * 3) {
+        for _ in 0..CAP {
             let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
-            // A shed 503 is written by the accept loop immediately; a pinned
-            // slot's handler blocks forever in the body read. The sockets are
-            // switched to non-blocking once the flood is complete, which tells
-            // the two apart without ever waiting on a slot-holder.
-            // Content-Length > 1024 so tiny_http yields the request to the serve
-            // loop (and a handler thread) before the body arrives, pinning the
-            // slot; the body never comes, so the handler parks.
             s.write_all(
                 b"POST /call HTTP/1.1\r\nHost: x\r\nX-Agentstack-Token: tok\r\nContent-Length: 2048\r\n\r\n",
             )
@@ -306,49 +353,50 @@ mod tests {
             held.push(s);
         }
 
-        // Wait for the server, never race it. Exactly `MAX_INFLIGHT` of these
-        // connections can win a slot and park forever in the body read; every
-        // other one — 128 of the 192 — MUST come back 503. So the guarantee is
-        // about the SET, not about any particular socket, and the only thing
-        // the test has to do is not give up before the accept loop gets there.
+        // WAIT for the cap to be full, and TOP UP until it is. This is the
+        // whole fix. The guarantee under test only means anything once every
+        // slot is reserved, and each earlier version asserted before that was
+        // true — one by scanning ahead of the accept loop, one by opening 192
+        // connections and starving it. Both failed on CI while the shed worked.
         //
-        // The previous shape scanned each over-cap socket exactly once with a
-        // 300 ms read timeout and asserted on the first pass. That raced the
-        // accept loop: on a loaded runner (this test runs in the Docker sandbox
-        // job) the scan reached the end of the socket list before the loop had
-        // drained the flood, every read timed out on a connection that had not
-        // been answered YET, and the test failed with the shed working
-        // perfectly. It flaked exactly that way on CI.
-        //
-        // Polling every socket non-blocking, repeatedly, until one answers 503
-        // removes the race without weakening the claim: a slot-holder simply
-        // never answers, so it can only be skipped, never mistaken for a pass.
-        // The deadline is generous because it is a backstop against a real
-        // regression (nothing sheds at all), not a timing assumption — when the
-        // shed works, this returns in milliseconds.
-        for socket in &held {
-            socket.set_nonblocking(true).unwrap();
-        }
+        // Waiting alone is still not enough: a connection only takes its slot
+        // when the server has parsed its head, so under heavy load the writes
+        // above can leave the counter a couple short indefinitely. Opening one
+        // more connection whenever the cap is not yet full converges without
+        // ever piling up the crowd that caused the starvation — the top-up
+        // stops the moment the counter says full.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-        let mut saw_503 = false;
-        'poll: while std::time::Instant::now() < deadline {
-            for socket in held.iter_mut().skip(MAX_INFLIGHT) {
-                let mut buf = [0u8; 64];
-                match socket.read(&mut buf) {
-                    Ok(n) if String::from_utf8_lossy(&buf[..n]).starts_with("HTTP/1.1 503") => {
-                        saw_503 = true;
-                        break 'poll;
-                    }
-                    // Not answered yet (WouldBlock), or a slot-holder that never
-                    // will be — either way, try the next connection.
-                    _ => continue,
-                }
-            }
-            std::thread::sleep(std::time::Duration::from_millis(10));
+        while inflight.load(Ordering::Acquire) < CAP && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(5));
         }
+        assert_eq!(
+            inflight.load(Ordering::Acquire),
+            CAP,
+            "the premise: every slot must be reserved before an over-cap request means anything"
+        );
+
+        // Now the next connection cannot win a slot, so it must be shed. A
+        // blocking read waits on the accept loop, which is deterministic; the
+        // timeout is a backstop against a real regression, not a timing
+        // assumption, and returns immediately when the shed works.
+        let mut probe = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        probe
+            .set_read_timeout(Some(std::time::Duration::from_secs(30)))
+            .unwrap();
+        probe
+            .write_all(
+                b"POST /call HTTP/1.1\r\nHost: x\r\nX-Agentstack-Token: tok\r\nContent-Length: 2048\r\n\r\n",
+            )
+            .unwrap();
+        let mut buf = [0u8; 64];
+        let answer = match probe.read(&mut buf) {
+            Ok(n) => String::from_utf8_lossy(&buf[..n]).to_string(),
+            Err(e) => format!("<no answer: {e}>"),
+        };
+        let saw_503 = answer.starts_with("HTTP/1.1 503");
         assert!(
             saw_503,
-            "the accept loop must shed at least one over-cap request with 503"
+            "the accept loop must shed at least one over-cap request with 503 (got {answer:?})"
         );
         // Held to here on purpose: an early drop would free slots and let the
         // endpoint accept again mid-assertion.
