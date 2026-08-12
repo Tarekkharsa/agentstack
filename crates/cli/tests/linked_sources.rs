@@ -82,7 +82,7 @@ fn project_referencing(proj: &Path, reference: &str) {
     fs::write(
         proj.join("agentstack.toml"),
         format!(
-            "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+            "version = 1\n[delivery]\nrender_locally = true\n[targets]\ndefault = [\"claude-code\"]\n\
              [profiles.p]\nskills = [\"{reference}\"]\n"
         ),
     )

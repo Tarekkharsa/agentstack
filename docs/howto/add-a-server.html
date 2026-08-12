@@ -4,8 +4,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Add a server — agentstack</title>
-<meta name="description" content="For anyone adding an MCP  — the plugin standard agent CLIs use for tools) server to their setup. Prerequisite: a project with an .agentstack/agentstack.tom">
+<title>Add an MCP server — agentstack</title>
+<meta name="description" content="For a server you want across projects, store one reusable definition in the central library and select it by name.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
 <link rel="canonical" href="https://tarekkharsa.github.io/agentstack/howto/add-a-server.html">
@@ -143,6 +143,8 @@
     <ul>
       <li><a href="../start.html">Get started</a>
       </li>
+      <li><a href="../library.html">Central library</a>
+      </li>
       <li><a href="../tutorial/">Tutorial</a>
       </li>
       <li><a href="../index.html#install">Install</a>
@@ -176,6 +178,8 @@
       <li><a href="../howto/add-a-skill.html">Add a skill</a>
       </li>
       <li><a href="../howto/name-a-toolset.html">Name a toolset</a>
+      </li>
+      <li><a href="../howto/run-a-workflow.html">Run a workflow</a>
       </li>
       <li><a href="../migrations.html">Migration recipes</a>
       </li>
@@ -215,7 +219,7 @@
       </li>
       <li><a href="../workflows.html">Workflows</a>
       </li>
-      <li><a href="../reference.html#the-library-linked-source-folders">Library sources</a>
+      <li><a href="../reference.html#the-library-linked-source-folders">Library internals</a>
       </li>
       <li><a href="../concepts.html#delivery-modes">Delivery modes</a>
       </li>
@@ -274,48 +278,43 @@
 </aside>
   <main id="main-content" tabindex="-1">
 <p class="versionbar">These pages describe <b>v0.18.0-rc.3</b>, a pre-release. <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">The installer</a> serves the current release, <b>v0.17.1</b> — <code>/releases/latest</code> never points at a pre-release — so this is not the build you get unless you ask for it by name: <code>AGENTSTACK_VERSION=v0.18.0-rc.3</code>. <code>agentstack --version</code> says which build you have.</p>
-<h1 id="add-a-server">Add a server</h1>
-<p>For anyone adding an MCP (<a href="../concepts.html">Model Context Protocol</a> — the plugin standard agent CLIs use for tools) server to their setup. Prerequisite: a project with an <code>.agentstack/agentstack.toml</code> <a href="../concepts.html">manifest</a> (run <code>agentstack init</code> if you don't have one).</p>
-<p>Four verbs add a server. Pick by what you already have:</p>
-<div class="tblwrap"><table>
-<thead><tr><th>You have</th><th>Use</th></tr></thead><tbody>
-<tr><td>The server's config details (URL or command)</td><td><code>agentstack add server</code> — or <code>set server</code> to overwrite one that exists</td></tr>
-<tr><td>Just a name — find it in the catalog or registry</td><td><code>agentstack search</code> → <code>agentstack add from &lt;id&gt;</code></td></tr>
-<tr><td>Already hand-added it to one CLI's config</td><td><code>agentstack adopt --write</code></td></tr>
-<tr><td>Want it reusable across projects by name</td><td><code>agentstack x lib add-server</code> + reference it from a <a href="../concepts.html">toolset</a></td></tr>
-</tbody></table></div>
-<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="cm"># 1. Have the details: add (or set, to overwrite) the server</span>
-<span class="pr">$ </span>agentstack add server github --type http \
-  --url https://api.githubcopilot.com/mcp/ \
-  --header "Authorization=Bearer ${GH_PAT}" --write
+<h1 id="add-an-mcp-server">Add an MCP server</h1>
+<p>For a server you want across projects, store one reusable definition in the central library and select it by name.</p>
+<h2 id="1-write-a-safe-definition">1. Write a safe definition<a class="hlink" href="#1-write-a-safe-definition" aria-label="Link to this section">#</a></h2>
+<p>Use <code>${REF}</code> for secrets:</p>
+<div class="cb" data-language="toml"><div class="cb-bar"><span class="cb-lang">toml</span></div><pre class="block"><code class="language-toml"># github-server.toml
+type = "http"
+url = "https://api.githubcopilot.com/mcp/"
 
-<span class="cm"># 2. Know only a name: find it, then add it</span>
-<span class="pr">$ </span>agentstack search github
-<span class="pr">$ </span>agentstack add from github --write
+[headers]
+Authorization = "Bearer ${GITHUB_TOKEN}"</code></pre></div>
+<h2 id="2-add-it-to-the-library">2. Add it to the library<a class="hlink" href="#2-add-it-to-the-library" aria-label="Link to this section">#</a></h2>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack lib add-server github --file ./github-server.toml
+<span class="pr">$ </span>agentstack lib add-server github --file ./github-server.toml --write
+<span class="pr">$ </span>agentstack lib list</code></pre></div>
+<p>The preview validates the definition and shows the destination. The secret value never enters the library.</p>
+<h2 id="3-select-it-in-a-project">3. Select it in a project<a class="hlink" href="#3-select-it-in-a-project" aria-label="Link to this section">#</a></h2>
+<div class="cb" data-language="toml"><div class="cb-bar"><span class="cb-lang">toml</span></div><pre class="block"><code class="language-toml">default_toolset = "backend"
 
-<span class="cm"># 3. Hand-added it to one CLI already: pull it back into the manifest</span>
-<span class="pr">$ </span>agentstack adopt --write
-
-<span class="cm"># 4. Reusable across projects: store it in a linked library source, then name it in a toolset</span>
-<span class="pr">$ </span>agentstack x lib add-server kibana --file ./kibana.toml --write
-<span class="cm">#   then in the manifest:  [toolsets.backend]  servers = ["kibana"]</span>
-
-<span class="cm"># After any of them: re-lock, review the change, then render into every CLI</span>
+[toolsets.backend]
+servers = ["github"]</code></pre></div>
+<p>Then:</p>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack lock          <span class="cm"># preview</span>
 <span class="pr">$ </span>agentstack lock --write
-<span class="pr">$ </span>agentstack trust .          <span class="cm"># the manifest and lock both moved — approve them</span>
-<span class="pr">$ </span>agentstack apply --write</code></pre></div>
-<p>Verbs 1–4 write only the <a href="../concepts.html">manifest</a> (verb 4 also writes your first <a href="../concepts.html">linked library source</a>) — commit-safe, with secrets kept as <code>${REF}</code> placeholders. Nothing reaches a CLI until <code>apply --write</code> renders it. Hand-edit <code>[servers.&lt;name&gt;]</code> in the manifest directly only when you need fields the flags don't cover — native per-adapter keys under <code>extra.&lt;adapter&gt;</code>, a launch <code>cwd</code>, <code>targets</code> scoping, or <code>owner</code>. Whenever you change a toolset's server list, re-lock with <code>agentstack lock --write</code> so the <a href="../concepts.html">lockfile</a> pins the new set, review it with <code>agentstack trust .</code>, then <code>apply --write</code> to render.</p>
-<p><strong>Why the <code>trust .</code> step is there.</strong> Adding a server changes the manifest, and re-locking changes the lockfile — both are part of the <a href="../concepts.html#trust-and-the-consent-digest">consent surface</a>, so the write re-opens the review. Skip it and <code>apply --write</code> refuses out loud rather than writing a server definition your CLI would launch on its own:</p>
-<div class="cb"><pre class="block"><code>✗ refusing to render MCP servers: project at /path/to/repo changed since it
-  was trusted — review and `agentstack trust .` before writing server
-  definitions the harness launches on its own ('github')</code></pre></div>
-<p>Do it in this order — <code>lock --write</code> first, then <code>trust .</code>. Re-locking after you approve would invalidate the approval you just gave. See <a href="../howto/trust-a-repo.html">trust a cloned repo</a>.</p>
-<p><strong>Limits.</strong> Adding a server does not store its secret, trust it, or run it. Store the value with <code>agentstack secret set GH_PAT</code> (it stays out of the manifest). The review gate is not confined to the live lane: a new server stays inert until you re-run <code>agentstack trust .</code> whichever way it is delivered.</p>
-<ul>
-<li><a href="../concepts.html">Concepts</a> — server, toolset, library, secrets</li>
-<li><a href="../reference.html#adopt-and-add">Reference: <code>adopt</code> and <code>add</code></a></li>
-<li><a href="../reference.html#the-library-linked-source-folders">Reference: the library</a></li>
-</ul>
+<span class="pr">$ </span>agentstack trust .
+<span class="pr">$ </span>agentstack secret set GITHUB_TOKEN
+<span class="pr">$ </span>agentstack status</code></pre></div>
+<p>The next trusted agent connection opens the default and can discover the server's tools through <code>tools_search</code>. The server definition is not copied into project MCP configs in the live lane.</p>
+<h2 id="other-starting-points">Other starting points<a class="hlink" href="#other-starting-points" aria-label="Link to this section">#</a></h2>
+<div class="tblwrap"><table>
+<thead><tr><th>What you have</th><th>Command</th></tr></thead><tbody>
+<tr><td>A catalog name</td><td><code>agentstack search &lt;name&gt;</code> then <code>agentstack add from &lt;id&gt;</code></td></tr>
+<tr><td>A native server already configured</td><td><code>agentstack adopt</code> to preview importing it</td></tr>
+<tr><td>A server only this project needs</td><td><code>agentstack add server ...</code></td></tr>
+<tr><td>An existing manifest definition to reuse</td><td><code>agentstack lib add-server &lt;name&gt; --from-manifest</code></td></tr>
+</tbody></table></div>
+<p>After any selected server change, use the same lock-then-trust loop. Run <code>agentstack apply --write</code> only when status reports a rendered compatibility lane that requires native files.</p>
+<p>Next: <a href="../library.html">Central library</a> · <a href="../concepts.html#secrets">Secrets</a> · <a href="../reference.html#adopt-and-add">Server reference</a></p>
   <p class="srcline">Source of truth: <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/add-a-server.md">docs/howto/add-a-server.md</a> — this page is generated from it.</p>
   </main>
 </div>

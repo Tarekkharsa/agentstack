@@ -68,7 +68,7 @@ fn delivered_project(tmp: &Path) -> (PathBuf, PathBuf, PathBuf) {
     fs::write(a.join("skills/summarize/SKILL.md"), REVIEWED).unwrap();
     fs::write(
         a.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\n\
+        "version = 1\n[delivery]\nrender_locally = true\n[targets]\ndefault = [\"claude-code\"]\n\n\
          [skills.summarize]\npath = \"./skills/summarize\"\n",
     )
     .unwrap();

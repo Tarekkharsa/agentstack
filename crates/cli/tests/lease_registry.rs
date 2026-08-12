@@ -43,6 +43,9 @@ fn fixture(tool: &str) -> String {
 while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
   case "$line" in
+    *'"method":"server/discover"'*)
+      printf '{{"jsonrpc":"2.0","id":%s,"error":{{"code":-32601,"message":"method not found"}}}}\n' "$id"
+      ;;
     *'"method":"initialize"'*)
       printf '{{"jsonrpc":"2.0","id":%s,"result":{{"protocolVersion":"2025-06-18","capabilities":{{}},"serverInfo":{{"name":"fix","version":"0"}}}}}}\n' "$id"
       ;;
@@ -165,6 +168,14 @@ impl Connection {
     }
 }
 
+fn legacy_initialize_params() -> Value {
+    json!({
+        "protocolVersion": "2025-11-25",
+        "capabilities": {},
+        "clientInfo": { "name": "agentstack-test", "version": "1" }
+    })
+}
+
 /// `agentstack lease status --json`, decoded.
 fn lease_status(home: &Path) -> Value {
     let out = Command::new(BIN)
@@ -201,7 +212,7 @@ fn an_open_lease_is_visible_to_another_surface_with_honest_liveness() {
         tmp.path(),
         &home,
     );
-    conn.request(1, "initialize", json!({}));
+    conn.request(1, "initialize", legacy_initialize_params());
     let opened = conn.call(2, "agentstack_lease_open", json!({ "profile": "backend" }));
     assert!(opened.contains("\"opened\": \"backend\""), "{opened}");
 
@@ -370,7 +381,7 @@ fn no_lease_means_control_plane_tools_only_even_with_several_toolsets_declared()
     let proj = two_toolset_project(tmp.path());
 
     let mut conn = Connection::open(&["mcp", "--auto-project"], &proj, &home);
-    conn.request(1, "initialize", json!({}));
+    conn.request(1, "initialize", legacy_initialize_params());
 
     // The advertised surface is agentstack's own control plane, and nothing
     // from either toolset.
@@ -401,7 +412,7 @@ fn opening_a_lease_exposes_exactly_that_toolset() {
     let proj = two_toolset_project(tmp.path());
 
     let mut conn = Connection::open(&["mcp", "--auto-project"], &proj, &home);
-    conn.request(1, "initialize", json!({}));
+    conn.request(1, "initialize", legacy_initialize_params());
     let opened = conn.call(2, "agentstack_lease_open", json!({ "profile": "alpha" }));
     assert!(opened.contains("\"opened\": \"alpha\""), "{opened}");
 
@@ -454,7 +465,7 @@ fn a_fenced_call_to_a_declared_server_is_refused_and_recorded() {
     let proj = two_toolset_project(tmp.path());
 
     let mut conn = Connection::open(&["mcp", "--auto-project"], &proj, &home);
-    conn.request(1, "initialize", json!({}));
+    conn.request(1, "initialize", legacy_initialize_params());
 
     // `srva` IS declared, and toolset `alpha` selects it — it is fenced, not
     // absent. That distinction is the whole point of this witness.
@@ -556,7 +567,7 @@ fn a_fenced_call_inside_a_run_reaches_both_the_audit_log_and_the_run_report() {
         &home,
         &[("AGENTSTACK_RUN_ID", run)],
     );
-    conn.request(1, "initialize", json!({}));
+    conn.request(1, "initialize", legacy_initialize_params());
     let frame = conn.request(
         2,
         "tools/call",
@@ -652,7 +663,7 @@ fn a_hostile_tool_name_cannot_forge_a_run_event_or_the_report() {
         &home,
         &[("AGENTSTACK_RUN_ID", run)],
     );
-    conn.request(1, "initialize", json!({}));
+    conn.request(1, "initialize", legacy_initialize_params());
     // A declared server (so the fence records) and a tool name carrying an
     // escape sequence and a newline followed by a whole forged event.
     conn.request(
@@ -712,7 +723,7 @@ fn an_undeclared_tool_name_is_refused_but_records_nothing() {
     let proj = two_toolset_project(tmp.path());
 
     let mut conn = Connection::open(&["mcp", "--auto-project"], &proj, &home);
-    conn.request(1, "initialize", json!({}));
+    conn.request(1, "initialize", legacy_initialize_params());
     let frame = conn.request(
         2,
         "tools/call",

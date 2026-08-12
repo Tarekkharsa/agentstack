@@ -97,6 +97,20 @@ fn seed_project(tmp: &Path) -> PathBuf {
     proj
 }
 
+/// A project that explicitly asks for native skill files. Materialization
+/// mechanics are tested against this lane; the default project above is the
+/// zero-files/live lane.
+fn seed_rendered_project(tmp: &Path) -> PathBuf {
+    let proj = seed_project(tmp);
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [delivery]\nrender_locally = true\n",
+    )
+    .unwrap();
+    proj
+}
+
 /// The human review, in the one line an integration test can afford: record
 /// trust for whatever the project currently digests to.
 ///
@@ -163,13 +177,13 @@ fn preview_mutates_nothing_persistent() {
 }
 
 #[test]
-fn write_lands_manifest_store_and_lock_then_use_materializes() {
+fn rendered_write_lands_manifest_store_lock_and_skill_files() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = assert_fs::TempDir::new().unwrap();
     let home = tmp.path().join("home");
     set_home(&home);
     let url = fixture_repo(tmp.path(), false);
-    let proj = seed_project(tmp.path());
+    let proj = seed_rendered_project(tmp.path());
     // The managed .gitignore block only applies inside a git repo.
     assert!(std::process::Command::new("git")
         .arg("-C")
@@ -262,7 +276,7 @@ fn taken_slot_falls_back_to_pinned_re_resolve() {
     let home = tmp.path().join("home");
     set_home(&home);
     let url = fixture_repo(tmp.path(), false);
-    let proj = seed_project(tmp.path());
+    let proj = seed_rendered_project(tmp.path());
 
     // First write adopts the staged clone (slot empty).
     grant(&proj);
@@ -296,7 +310,7 @@ fn second_add_records_the_union_of_managed_skills() {
     let home = tmp.path().join("home");
     set_home(&home);
     let url = fixture_repo(tmp.path(), false);
-    let proj = seed_project(tmp.path());
+    let proj = seed_rendered_project(tmp.path());
 
     grant(&proj);
     add::run(&add_args(&url, &["pdf"], true), Some(&proj)).unwrap();
@@ -513,7 +527,7 @@ fn materialized_git_skill_survives_a_later_checkout_of_another_revision() {
     set_home(&home);
     let url = fixture_repo(tmp.path(), false);
     let repo = tmp.path().join("skills-repo");
-    let proj = seed_project(tmp.path());
+    let proj = seed_rendered_project(tmp.path());
 
     grant(&proj);
     add::run(&add_args(&url, &["pdf"], true), Some(&proj)).unwrap();
@@ -746,15 +760,15 @@ fn cli_exit(proj: &Path, args: &[&str]) -> (String, Option<i32>) {
     )
 }
 
-/// A static, unambiguous project — nothing rendered, no lockfile, no toolsets —
-/// plus a loose skill directory beside it to add. The lane whose preview used to
-/// print `→ will materialize into N targets` whatever the trust state.
+/// A rendered, unambiguous project — nothing rendered yet, no lockfile, no
+/// toolsets — plus a loose skill directory beside it to add.
 fn seed_static_project(tmp: &Path) -> (PathBuf, PathBuf) {
     let proj = tmp.join("proj");
     fs::create_dir_all(&proj).unwrap();
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n",
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [delivery]\nrender_locally = true\n",
     )
     .unwrap();
     let extra = tmp.join("extra/gamma");

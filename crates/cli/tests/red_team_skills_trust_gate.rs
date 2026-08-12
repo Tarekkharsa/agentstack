@@ -85,7 +85,9 @@ fn json(args: &[&str], home: &Path, proj: &Path) -> serde_json::Value {
 }
 
 fn manifest_with(skills: &str) -> String {
-    format!("version = 1\n[targets]\ndefault = [\"claude-code\"]\n{skills}")
+    format!(
+        "version = 1\n[delivery]\nrender_locally = true\n[targets]\ndefault = [\"claude-code\"]\n{skills}"
+    )
 }
 
 fn skill_block(name: &str) -> String {

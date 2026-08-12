@@ -6,7 +6,7 @@
 //! MCP profile lease protocol smoke test: exercise one real stdio process so
 //! request-to-request state and gateway replacement cannot regress unnoticed.
 
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::process::{Command, Stdio};
 
 use assert_fs::prelude::*;
@@ -34,29 +34,33 @@ fn lease_lives_for_one_stdio_process_and_writes_no_native_artifacts() {
         .unwrap();
 
     let mut stdin = child.stdin.take().unwrap();
+    let mut stdout = BufReader::new(child.stdout.take().unwrap());
+    let mut responses = Vec::new();
     for request in [
-        serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} }),
+        serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "protocolVersion": "2025-11-25", "capabilities": {},
+            "clientInfo": { "name": "agentstack-test", "version": "1" }
+        } }),
         serde_json::json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "agentstack_lease_open", "arguments": { "profile": "backend" } } }),
         serde_json::json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": { "name": "agentstack_lease_status", "arguments": {} } }),
         serde_json::json!({ "jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": { "name": "agentstack_lease_close", "arguments": {} } }),
     ] {
         writeln!(stdin, "{request}").unwrap();
+        stdin.flush().unwrap();
+        let mut line = String::new();
+        stdout.read_line(&mut line).unwrap();
+        responses.push(serde_json::from_str::<Value>(&line).unwrap());
     }
     drop(stdin); // EOF is the implicit final lease cleanup.
 
-    let output = child.wait_with_output().unwrap();
-    assert!(output.status.success());
-    let responses: Vec<Value> = String::from_utf8(output.stdout)
-        .unwrap()
-        .lines()
-        .map(|line| serde_json::from_str(line).unwrap())
-        .collect();
+    let status = child.wait().unwrap();
+    assert!(status.success());
     assert_eq!(responses.len(), 4, "one response per request");
     assert_eq!(responses[0]["id"], 1);
     let opened = responses[1]["result"]["content"][0]["text"]
         .as_str()
         .unwrap();
-    assert!(opened.contains("\"opened\": \"backend\""));
+    assert!(opened.contains("\"opened\": \"backend\""), "{opened}");
     assert!(opened.contains("\"native_files_written\": false"));
     let status = responses[2]["result"]["content"][0]["text"]
         .as_str()
@@ -112,7 +116,10 @@ fn list_loadable_filters_by_query() {
 
     let mut stdin = child.stdin.take().unwrap();
     for request in [
-        serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} }),
+        serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "protocolVersion": "2025-11-25", "capabilities": {},
+            "clientInfo": { "name": "agentstack-test", "version": "1" }
+        } }),
         // Match on the unique description word.
         serde_json::json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "agentstack_list_loadable", "arguments": { "query": "zzuniqueword" } } }),
         // No match → graceful empty answer.
@@ -124,11 +131,12 @@ fn list_loadable_filters_by_query() {
 
     let output = child.wait_with_output().unwrap();
     assert!(output.status.success());
-    let responses: Vec<Value> = String::from_utf8(output.stdout)
+    let mut responses: Vec<Value> = String::from_utf8(output.stdout)
         .unwrap()
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
         .collect();
+    responses.sort_by_key(|response| response["id"].as_i64().unwrap_or_default());
     assert_eq!(responses.len(), 3, "one response per request");
 
     // The matching query returns exactly the skill it describes.

@@ -122,10 +122,10 @@ EXPECTED_KINDS: tuple[str, ...] = (
 
 # Manifest struct fields that are configuration/bookkeeping, not a pinned
 # capability kind with its own governance surface. Verified against
-# model.rs's actual field list (version, meta, servers, skills, profiles,
-# instructions, settings, hooks, extensions, workflows, packs,
-# package_overrides, targets, policy, guard, experimental, delivery) minus
-# EXPECTED_KINDS.
+# model.rs's actual field list (version, meta, default_toolset, servers,
+# skills, profiles, instructions, settings, hooks, extensions, workflows,
+# packs, package_overrides, targets, policy, guard, experimental, delivery)
+# minus EXPECTED_KINDS.
 CONFIG_ALLOWLIST: frozenset[str] = frozenset(
     {
         "version",
@@ -143,6 +143,10 @@ CONFIG_ALLOWLIST: frozenset[str] = frozenset(
         # per-harness). It steers how already-declared capabilities are
         # delivered, not a capability kind of its own.
         "delivery",
+        # Which toolset a new gateway connection opens by default. It selects
+        # among already-declared profiles for the lease path to enforce; the
+        # trust gate delivers nothing for it, so it is not a capability kind.
+        "default_toolset",
     }
 )
 

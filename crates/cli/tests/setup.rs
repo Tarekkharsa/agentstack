@@ -71,7 +71,7 @@ fn materialize_profile_writes_skills_and_pins_the_lock() {
     fs::create_dir_all(proj.join("skills/helper")).unwrap();
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        "version = 1\n[delivery]\nrender_locally = true\n[targets]\ndefault = [\"claude-code\"]\n\
          [skills.helper]\npath = \"./skills/helper\"\n\
          [profiles.p]\nskills = [\"helper\"]\n",
     )

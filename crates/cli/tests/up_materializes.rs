@@ -58,7 +58,7 @@ servers = ["web-search", "notes"]
 fn up(home: &std::path::Path, proj: &std::path::Path) -> (String, bool) {
     let exe = env!("CARGO_BIN_EXE_agentstack");
     let out = Command::new(exe)
-        .args(["up", "--manifest-dir"])
+        .args(["up", "--write", "--manifest-dir"])
         .arg(proj)
         .env("HOME", home)
         .env("AGENTSTACK_HOME", home.join(".agentstack"))
@@ -79,6 +79,157 @@ fn fresh() -> (assert_fs::TempDir, std::path::PathBuf, std::path::PathBuf) {
     fs::create_dir_all(&home).unwrap();
     let proj = checkout(tmp.path());
     (tmp, home, proj)
+}
+
+#[test]
+fn library_flag_clones_the_personal_library_on_a_fresh_machine() {
+    let (_tmp, home, proj) = fresh();
+    let remote = proj.parent().unwrap().join("library-remote");
+    fs::create_dir_all(&remote).unwrap();
+    fs::write(remote.join("library.toml"), "version = 1\n").unwrap();
+    let git = |args: &[&str]| {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(&remote)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git(&["init", "-q"]);
+    git(&["add", "library.toml"]);
+    git(&[
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-qm",
+        "library",
+    ]);
+
+    let exe = env!("CARGO_BIN_EXE_agentstack");
+    let out = Command::new(exe)
+        .args(["up", "--write", "--library"])
+        .arg(format!("file://{}", remote.display()))
+        .args(["--manifest-dir"])
+        .arg(&proj)
+        .env("HOME", &home)
+        .env("AGENTSTACK_HOME", home.join(".agentstack"))
+        .env_remove("SEARCH_API_KEY")
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    assert!(text.contains("cloned library"), "{text}");
+    assert_eq!(
+        fs::read_to_string(home.join(".agentstack/lib/library.toml")).unwrap(),
+        "version = 1\n"
+    );
+}
+
+#[test]
+fn bare_up_pulls_an_already_linked_library_without_pushing() {
+    let (_tmp, home, proj) = fresh();
+    let remote = proj.parent().unwrap().join("library-remote-pull");
+    fs::create_dir_all(&remote).unwrap();
+    fs::write(remote.join("library.toml"), "version = 1\n").unwrap();
+    let git = |args: &[&str]| {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(&remote)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git(&["init", "-q"]);
+    git(&["add", "library.toml"]);
+    git(&[
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-qm",
+        "first",
+    ]);
+
+    let exe = env!("CARGO_BIN_EXE_agentstack");
+    let run = |extra: &[&str]| {
+        Command::new(exe)
+            .arg("up")
+            .arg("--write")
+            .args(extra)
+            .args(["--manifest-dir"])
+            .arg(&proj)
+            .env("HOME", &home)
+            .env("AGENTSTACK_HOME", home.join(".agentstack"))
+            .env_remove("SEARCH_API_KEY")
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap()
+    };
+    let remote_url = format!("file://{}", remote.display());
+    let _ = run(&["--library", &remote_url]);
+
+    fs::create_dir_all(remote.join("skills/shared")).unwrap();
+    fs::write(
+        remote.join("skills/shared/SKILL.md"),
+        "---\nname: shared\ndescription: shared\n---\nbody\n",
+    )
+    .unwrap();
+    git(&["add", "skills/shared/SKILL.md"]);
+    git(&[
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-qm",
+        "second",
+    ]);
+    let remote_head_before = {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(&remote)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+
+    let out = run(&[]);
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(text.contains("pulled shared library"), "{text}");
+    assert!(home.join(".agentstack/lib/skills/shared/SKILL.md").exists());
+    let remote_head_after = {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(&remote)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    };
+    assert_eq!(remote_head_before, remote_head_after, "up must never push");
 }
 
 /// Property 1 — the Moment 9 shape. Not a snapshot of exact bytes (that would
@@ -107,6 +258,63 @@ fn up_reports_what_it_found_what_it_verified_and_what_is_left() {
     let next_at = out.find("next:").unwrap();
     let render_at = out.find("rendered").unwrap();
     assert!(render_at < next_at, "the next step must come last:\n{out}");
+}
+
+#[test]
+fn bare_up_is_a_safe_preview_and_names_write() {
+    let (_tmp, home, proj) = fresh();
+    let exe = env!("CARGO_BIN_EXE_agentstack");
+    let out = Command::new(exe)
+        .args(["up", "--manifest-dir"])
+        .arg(&proj)
+        .env("HOME", &home)
+        .env("AGENTSTACK_HOME", home.join(".agentstack"))
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(text.contains("Nothing written"), "{text}");
+    assert!(text.contains("--write"), "{text}");
+    assert!(!home.join(".agentstack/changes").exists());
+    assert!(!proj.join(".mcp.json").exists());
+}
+
+#[test]
+fn json_mode_is_one_parseable_supervisor_readiness_document() {
+    let (_tmp, home, proj) = fresh();
+    let exe = env!("CARGO_BIN_EXE_agentstack");
+    let out = Command::new(exe)
+        .args(["up", "--json", "--write", "--manifest-dir"])
+        .arg(&proj)
+        .env("HOME", &home)
+        .env("AGENTSTACK_HOME", home.join(".agentstack"))
+        .env_remove("SEARCH_API_KEY")
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(json["command"], "up");
+    assert!(json["success"].is_boolean());
+    assert_eq!(json["applied"], true);
+    assert!(json["state"]["readiness"].is_string());
+    assert!(json["state"]["locked"].is_boolean());
+    assert!(json["state"]["activation"].is_string());
+    assert!(
+        String::from_utf8_lossy(&out.stdout)
+            .trim_start()
+            .starts_with('{'),
+        "stdout must contain JSON only"
+    );
 }
 
 /// The class guard, applied to `up`'s own output: no green line may claim a
@@ -314,5 +522,268 @@ fn up_owns_no_writing_path_of_its_own() {
     assert!(
         src.contains("locked: true"),
         "`up` must verify against the lock, not reconcile it"
+    );
+}
+
+// ------------------------------------------- the bootstrap cannot brick itself
+
+/// A library repo whose committed `.gitignore` predates the trash — the state
+/// of every library initialized before `.trash/` existed.
+fn legacy_library_remote(root: &std::path::Path, name: &str) -> String {
+    let remote = root.join(name);
+    fs::create_dir_all(&remote).unwrap();
+    fs::write(remote.join("library.toml"), "version = 1\n").unwrap();
+    // No `.trash/` line: the whole point of the fixture.
+    fs::write(remote.join(".gitignore"), "*.log\n").unwrap();
+    let git = |args: &[&str]| {
+        let out = Command::new("git")
+            .arg("-C")
+            .arg(&remote)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    git(&["init", "-q"]);
+    git(&["add", "-A"]);
+    git(&[
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-qm",
+        "library",
+    ]);
+    format!("file://{}", remote.display())
+}
+
+fn library_status(home: &std::path::Path) -> String {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(home.join(".agentstack/lib"))
+        .args(["status", "--short"])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
+/// The defect: bootstrap ensured its own `.trash/` line in the library's
+/// tracked `.gitignore` BEFORE the clean-tree gate that refuses to pull over
+/// local changes. On a library that predates the trash, the first `up --write`
+/// made the dirt and every later one aborted on it — permanently, until the
+/// user hand-committed AgentStack's own edit.
+///
+/// The property is the one a user can check: the same command, twice, works
+/// twice, and leaves the library clean enough to keep working a third time.
+#[test]
+fn a_library_that_predates_the_trash_bootstraps_twice() {
+    let (_tmp, home, proj) = fresh();
+    let url = legacy_library_remote(proj.parent().unwrap(), "legacy-library-remote");
+
+    let exe = env!("CARGO_BIN_EXE_agentstack");
+    let run = |extra: &[&str]| {
+        let out = Command::new(exe)
+            .arg("up")
+            .arg("--write")
+            .args(extra)
+            .args(["--manifest-dir"])
+            .arg(&proj)
+            .env("HOME", &home)
+            .env("AGENTSTACK_HOME", home.join(".agentstack"))
+            .env_remove("SEARCH_API_KEY")
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        )
+    };
+
+    let first = run(&["--library", &url]);
+    assert!(first.contains("cloned library"), "fixture:\n{first}");
+
+    for pass in ["second", "third"] {
+        let text = run(&[]);
+        assert!(
+            !text.contains("library has local changes"),
+            "the {pass} `up --write` refused to pull over dirt AgentStack made itself \
+             — the bootstrap bricked the machine it was setting up:\n{text}"
+        );
+        assert!(
+            text.contains("shared library already current"),
+            "the {pass} `up --write` never reached the pull:\n{text}"
+        );
+    }
+
+    assert_eq!(
+        library_status(&home),
+        "",
+        "bootstrap only receives: it must leave the library's working tree as clean \
+         as it found it"
+    );
+}
+
+/// The other half: some other command's uncommitted `.trash/` line must not
+/// block the pull either (`lib sync --status` writes it and returns without
+/// committing), while a real local edit still does. Without the control, the
+/// tolerance above could be "the gate was deleted".
+#[test]
+fn the_managed_ignore_line_is_forgiven_and_the_users_own_edit_is_not() {
+    let (_tmp, home, proj) = fresh();
+    let url = legacy_library_remote(proj.parent().unwrap(), "tolerance-library-remote");
+
+    let exe = env!("CARGO_BIN_EXE_agentstack");
+    let run = || {
+        let out = Command::new(exe)
+            .args(["up", "--write", "--manifest-dir"])
+            .arg(&proj)
+            .env("HOME", &home)
+            .env("AGENTSTACK_HOME", home.join(".agentstack"))
+            .env_remove("SEARCH_API_KEY")
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr)
+        )
+    };
+    let clone = Command::new(exe)
+        .args(["up", "--write", "--library", &url, "--manifest-dir"])
+        .arg(&proj)
+        .env("HOME", &home)
+        .env("AGENTSTACK_HOME", home.join(".agentstack"))
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    assert!(clone.status.code().is_some(), "the binary must run");
+
+    let ignore = home.join(".agentstack/lib/.gitignore");
+    fs::write(&ignore, "*.log\n.trash/\n").unwrap();
+    let tolerated = run();
+    assert!(
+        !tolerated.contains("library has local changes"),
+        "AgentStack's own managed ignore line is not the user's local work:\n{tolerated}"
+    );
+    assert!(
+        tolerated.contains("shared library already current"),
+        "the pull must still have run:\n{tolerated}"
+    );
+
+    // The control: the user's own edit to the same file still stops the pull.
+    fs::write(&ignore, "*.log\n.trash/\nsecrets/\n").unwrap();
+    let refused = run();
+    assert!(
+        refused.contains("library has local changes"),
+        "a real local change must still block the pull — the gate is narrowed, not \
+         removed:\n{refused}"
+    );
+}
+
+// ------------------------------------- a file-only machine still gets set up
+
+/// `up` used to abort the whole bootstrap when the gateway had nowhere to go.
+/// The guard asked "is any CLI installed?", `connect` asks "is any CLI able to
+/// host an MCP server?", and on a machine whose only harness is file-only (Pi
+/// manages skills, settings and instructions and has no MCP config at all) the
+/// two disagree: `connect` bailed, `?` propagated, and the lock verification
+/// and the render never ran. Having nowhere to register the bridge is a fact
+/// about the machine, not a failure of `up`.
+#[test]
+fn a_machine_whose_only_cli_is_file_only_still_renders() {
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    let bin = tmp.path().join("bin");
+    let proj = tmp.path().join("proj");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&bin).unwrap();
+    fs::create_dir_all(proj.join(".agentstack")).unwrap();
+
+    // The only CLI on this machine, and it takes no MCP server.
+    fs::write(bin.join("pi"), "#!/bin/sh\nexit 0\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(bin.join("pi"), fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    fs::write(proj.join(".agentstack/HOUSE.md"), "house rules\n").unwrap();
+    fs::write(
+        proj.join(".agentstack/agentstack.toml"),
+        "version = 1\n\
+         [targets]\n\
+         default = [\"pi\"]\n\
+         [instructions.house]\n\
+         path = \"HOUSE.md\"\n",
+    )
+    .unwrap();
+
+    let exe = env!("CARGO_BIN_EXE_agentstack");
+    let run = |args: &[&str]| {
+        let out = Command::new(exe)
+            .args(args)
+            .current_dir(&proj)
+            .env_clear()
+            .env("HOME", &home)
+            .env("AGENTSTACK_HOME", home.join(".agentstack"))
+            // The fake CLI first: nothing the developer's machine has installed
+            // may decide this outcome.
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+            .env("NO_COLOR", "1")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("the binary must run");
+        (
+            format!(
+                "{}{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            ),
+            out.status.code().expect("the process must exit normally"),
+        )
+    };
+
+    let (locked, code) = run(&["lock", "--write"]);
+    assert_eq!(code, 0, "fixture: lock failed:\n{locked}");
+    let (preview, _) = run(&["trust", "--preview"]);
+    let json: serde_json::Value =
+        serde_json::from_str(&preview).expect("`trust --preview` must be JSON");
+    let digest = json["surface_digest"]
+        .as_str()
+        .expect("the preview must carry a surface digest")
+        .to_string();
+    let (granted, code) = run(&["trust", "--yes", "--consented-digest", &digest]);
+    assert_eq!(code, 0, "fixture: trust failed:\n{granted}");
+
+    let (text, code) = run(&["up", "--write"]);
+    assert_eq!(
+        code, 0,
+        "a machine with no MCP-capable CLI must still be set up — the gateway simply \
+         has nowhere to register:\n{text}"
+    );
+    assert!(
+        text.contains("skipped"),
+        "the skipped gateway step must be stated, not silent:\n{text}"
+    );
+    assert!(
+        proj.join("AGENTS.md").exists(),
+        "the render must have run: Pi's instructions file is what this project \
+         delivers:\n{text}"
+    );
+
+    // The dry run predicts the same skip rather than promising a registration.
+    let (plan, code) = run(&["up"]);
+    assert_eq!(code, 0, "the preview must not fail:\n{plan}");
+    assert!(
+        plan.contains("gateway   skipped"),
+        "the plan must predict the write it will perform:\n{plan}"
     );
 }

@@ -143,6 +143,8 @@
     <ul>
       <li><a href="start.html">Get started</a>
       </li>
+      <li><a href="library.html">Central library</a>
+      </li>
       <li><a href="tutorial/">Tutorial</a>
       </li>
       <li><a href="index.html#install">Install</a>
@@ -176,6 +178,8 @@
       <li><a href="howto/add-a-skill.html">Add a skill</a>
       </li>
       <li><a href="howto/name-a-toolset.html">Name a toolset</a>
+      </li>
+      <li><a href="howto/run-a-workflow.html">Run a workflow</a>
       </li>
       <li><a href="migrations.html">Migration recipes</a>
       </li>
@@ -215,7 +219,7 @@
       </li>
       <li><a href="workflows.html">Workflows</a>
       </li>
-      <li><a href="reference.html#the-library-linked-source-folders">Library sources</a>
+      <li><a href="reference.html#the-library-linked-source-folders">Library internals</a>
       </li>
       <li><a href="concepts.html#delivery-modes">Delivery modes</a>
       </li>
@@ -276,7 +280,7 @@
 <p class="versionbar">These pages describe <b>v0.18.0-rc.3</b>, a pre-release. <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">The installer</a> serves the current release, <b>v0.17.1</b> — <code>/releases/latest</code> never points at a pre-release — so this is not the build you get unless you ask for it by name: <code>AGENTSTACK_VERSION=v0.18.0-rc.3</code>. <code>agentstack --version</code> says which build you have.</p>
 <h1 id="agentstack--architecture">AgentStack — Architecture</h1>
 <p><em>Current as of agentstack 0.18.0-rc.3.</em></p>
-<p>For contributors and architects. If you just want to use AgentStack, start with the <a href="https://github.com/Tarekkharsa/agentstack/blob/main/README.md">README</a> and the <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/start.html">getting-started walkthrough</a>.</p>
+<p>For contributors and architects. If you just want to use AgentStack, start with the <a href="https://github.com/Tarekkharsa/agentstack/blob/main/README.md">README</a> and the <a href="start.html">getting-started walkthrough</a>.</p>
 <p><strong>Contents</strong></p>
 <ul class="navlist">
 <li><a href="#vision">Vision</a></li>
@@ -298,7 +302,7 @@
 <p><strong>A note on vocabulary.</strong> User-facing docs — the README, the getting-started walkthrough, and the how-to guides — call the reviewed config file the <strong>manifest</strong>. This document keeps <strong>bundle</strong> as its strategic frame: it means the manifest, its optional local overlay, and the resolved lockfile taken together as the single unit that gets declared, pinned, trusted, and distributed. Wherever you read "bundle" below, read "the manifest and its lock as one consent unit."</p>
 <p>Core principle: <strong>nothing executes automatically until its content is trusted; governed execution is constrained and recorded.</strong></p>
 <h2 id="where-this-starts">Where this starts<a class="hlink" href="#where-this-starts" aria-label="Link to this section">#</a></h2>
-<p>The current implementation is a ten-crate Rust workspace. It ships the manifest and lock resolver, 13 CLI adapters, a capability library of linked source folders, content-bound trust, machine-first policy, a single-dispatch MCP gateway, Docker sandbox and lockdown runtimes, egress enforcement, per-run recording, an experimental frozen-plan executor, and a self-contained workflow engine. This document describes the current boundaries. <a href="https://github.com/Tarekkharsa/agentstack/blob/main/STRATEGY.md"><code>../STRATEGY.md</code></a> defines the gated direction, and <a href="https://github.com/Tarekkharsa/agentstack/blob/main/TODO.md"><code>../TODO.md</code></a> names the current work.</p>
+<p>The current implementation is an eleven-crate Rust workspace. It ships the manifest and lock resolver, 13 CLI adapters, a capability library of linked source folders, content-bound trust, machine-first policy, a single-dispatch MCP gateway, Docker sandbox and lockdown runtimes, egress enforcement, per-run recording, an experimental frozen-plan executor, and a self-contained workflow engine. This document describes the current boundaries. <a href="https://github.com/Tarekkharsa/agentstack/blob/main/STRATEGY.md"><code>../STRATEGY.md</code></a> defines the gated direction, and <a href="https://github.com/Tarekkharsa/agentstack/blob/main/TODO.md"><code>../TODO.md</code></a> names the current work.</p>
 <h2 id="the-flow">The flow<a class="hlink" href="#the-flow" aria-label="Link to this section">#</a></h2>
 <div class="cb"><pre class="block"><code>manifest + library → resolve + lock → adapters → native CLI config
                             │
@@ -334,7 +338,7 @@
 <tr><td>Any kind, on a harness with no live channel</td><td>rendered</td><td>there is nothing to serve it over</td></tr>
 </tbody></table></div>
 <p>A project is normally in <strong>both</strong> lanes at once; that is the ordinary shape, not a compromise. Rendering is therefore not a legacy path being removed — it stays the only correct answer for what no live channel can carry, and for harnesses that have none.</p>
-<p>The single override is <strong>render locally</strong> (<code>[delivery] render_locally</code>, per project or per harness), which forces the rendered lane where the live channel would have worked — offline operation, deterministic native files, inspection with ordinary filesystem tools, a rule against a persistent background process, or compatibility testing against a harness's own behaviour. It moves capabilities only <em>towards</em> files, declares no capability, and changes neither trust nor authority. There is no "prefer gateway" counterpart and no per-project mode: the Mode axis was retired, <code>set-mode</code> refuses and explains, and <code>set-mode-v1</code> sits under <code>SUPERSEDED</code> in the UI contract. The names <em>static</em>, <em>clean-at-rest</em> and <em>zero-files</em> survive only as readings of a project's current shape (<a href="concepts.html#delivery-modes">concepts.md</a>).</p>
+<p>The single override is <strong>render locally</strong> (<code>[delivery] render_locally</code>, per project or per harness), which forces the rendered lane where the live channel would have worked — offline operation, deterministic native files, inspection with ordinary filesystem tools, a rule against a persistent background process, or compatibility testing against a harness's own behaviour. It moves capabilities only <em>towards</em> files, declares no capability, and changes neither trust nor authority. There is no "prefer gateway" counterpart and no per-project mode: the Mode axis was retired, <code>set-mode</code> refuses and explains, and <code>set-mode-v1</code> sits under <code>SUPERSEDED</code> in the UI contract. The names <em>static</em>, <em>clean-at-rest</em> and <em>zero-files</em> survive only as readings of a project's current shape (<a href="reference.html#delivery--routing-and-where-rendered-files-live">reference.md — delivery</a>).</p>
 <p>Both lanes sit behind the same gates. An untrusted or drifted project delivers through neither: the gateway serves nothing, and <code>apply --write</code> / <code>use --write</code> refuse rather than render.</p>
 <p>The boundaries an operator does still choose:</p>
 <div class="tblwrap"><table>
@@ -443,6 +447,9 @@ web-search = ["*", "!*_delete"]</code></pre></div>
 <p><strong>Scope honesty — exfiltration through allowed channels:</strong> even a perfectly enforced allowlist permits traffic to allowed hosts, including the model API itself — a prompt-injected agent can leak data through any host the policy allows. AgentStack's claim is <em>untrusted declarations are not auto-activated and unapproved egress is blocked on the enforced paths</em> — not that exfiltration is impossible.</p>
 <p>(The shipped <code>agentstack proxy</code> token-observation relay is unrelated to this crate and keeps its name; the enforcement crate is <code>egress</code>.)</p>
 <p>Design references (not dependencies): Sandcastle's provider model, branch strategy, and event hooks are good prior art for orchestration shape.</p>
+<h3 id="mcp-protocol-compatibility">MCP protocol compatibility<a class="hlink" href="#mcp-protocol-compatibility" aria-label="Link to this section">#</a></h3>
+<p>As of 2026-08-11, <code>crates/mcp</code> is the single protocol boundary for AgentStack's local stdio server, sandbox HTTP bridge, and upstream HTTP/stdio clients. It uses RMCP 3.1.2 for models, validation, framing, lifecycle negotiation, and Streamable HTTP rather than maintaining a second hand-written wire stack.</p>
+<p>The 2026-07-28 path is stateless: it uses <code>server/discover</code>, returns the modern tool result and cache fields, creates no HTTP protocol session, never asks the client for roots, and re-derives the trusted default toolset per request. Connection-hidden lease mutations are refused on this path. The dated 2025 path keeps <code>initialize</code>, legacy HTTP sessions, roots, and process-local leases for released clients and older upstream servers. Both eras enter the same trust, policy, gateway-dispatch, and audit code.</p>
 <h2 id="layer-5--flight-recorder-cratesrecorder">Layer 5 — Flight recorder (<code>crates/recorder</code>)<a class="hlink" href="#layer-5--flight-recorder-cratesrecorder" aria-label="Link to this section">#</a></h2>
 <p>Append-only, per-run JSONL records execution start/finish/limits, sandbox lifecycle, egress decisions, brokered tool calls (with argument digests), and secret-reference access (reference names, never values). <code>agentstack report run &lt;id&gt;</code> renders that evidence for humans or JSON consumers and can supplement older runs from the separate global call audit log.</p>
 <p>Trust-store mutations have their own stream: <code>crates/trust</code> appends one identity-only event per store mutation (timestamp, action, project key, digest) to <code>~/.agentstack/audit/trust.jsonl</code>, inside the store lock and only after the store write succeeds — so log order is store order and an event always describes a mutation that happened. It is deliberately unrotated: the consent metrics count over the full history. Per-run token/cost events are still not wired. All of this JSONL is append-only by convention, not cryptographically tamper-evident; a compromised host-mode agent can delete it.</p>
@@ -456,6 +463,7 @@ trust    → core, recorder
 policy   → core
 recorder → core
 adapters → core
+mcp      → (nothing internal)
 runtime  → core, policy, recorder
 egress   → core, policy, recorder
 executor → (nothing)

@@ -278,6 +278,17 @@ pub fn open_leases() -> Vec<(LeaseRecord, Liveness)> {
     out
 }
 
+/// Live leases for one manifest directory, newest first. This is a reporting
+/// helper only; authorization never consults the registry.
+pub fn live_for_project(project: &Path) -> Vec<LeaseRecord> {
+    let project = crate::manifest::resolve_manifest_dir(project);
+    open_leases()
+        .into_iter()
+        .filter(|(record, state)| *state == Liveness::Live && Path::new(&record.project) == project)
+        .map(|(record, _)| record)
+        .collect()
+}
+
 fn read_records() -> Vec<LeaseRecord> {
     let Ok(entries) = std::fs::read_dir(registry_dir()) else {
         return Vec::new();

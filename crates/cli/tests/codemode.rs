@@ -53,7 +53,10 @@ fn start_mock_upstream() -> u16 {
                         .unwrap_or_else(|| json!({}));
                     Some(json!({
                         "jsonrpc": "2.0", "id": id,
-                        "result": { "content": [{ "type": "text", "text": "ok" }], "echoed": args }
+                        "result": {
+                            "content": [{ "type": "text", "text": "ok" }],
+                            "structuredContent": { "echoed": args }
+                        }
                     }))
                 }
                 // notifications (e.g. notifications/initialized): accept, no body.
@@ -111,7 +114,7 @@ fn endpoint_round_trips_through_gateway_to_mock_upstream() {
     );
     assert_eq!(status, 200, "body: {body}");
     let v: Value = serde_json::from_str(&body).unwrap();
-    assert_eq!(v["result"]["echoed"]["msg"], "hi");
+    assert_eq!(v["result"]["structuredContent"]["echoed"]["msg"], "hi");
 }
 
 #[test]

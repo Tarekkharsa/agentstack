@@ -1,6 +1,7 @@
-//! `agentstack use <profile>` — activate a profile: render its servers into each
-//! target's config and materialize its skills into the target's skills dir, for
-//! the chosen scope. Dry-run by default; `--write` performs changes.
+//! `agentstack use <profile>` — activate a profile through the delivery lane
+//! each target supports. Servers and skills are served live by default on an
+//! MCP-capable target; file-only targets and explicit render-locally overrides
+//! use native files. Dry-run by default; `--write` performs changes.
 
 use agentstack_core::digest::Sha256Hex;
 use std::path::{Path, PathBuf};
@@ -123,6 +124,9 @@ pub(crate) fn selected_profile(
             Ok(Some(p.to_string()))
         }
         None => {
+            if let Some(default) = manifest.resolved_default_toolset() {
+                return Ok(Some(default.to_string()));
+            }
             let mut names = manifest.profiles.keys();
             match (names.next(), names.next()) {
                 (None, _) => Ok(None),
@@ -419,6 +423,9 @@ fn print_profile_listing(out: &serde_json::Value) {
 pub(crate) struct SkillsActivation {
     /// (target id, skills dir written into).
     pub written: Vec<(String, PathBuf)>,
+    /// Target ids whose skill is available through the live gateway instead
+    /// of a native skills directory.
+    pub live: Vec<String>,
     /// (target id, skill name) where a user-owned dir was left as is.
     pub conflicts: Vec<(String, String)>,
     /// (target id, reason) — reported, never silently skipped.
@@ -451,12 +458,15 @@ pub(crate) fn materialize_skills_additive(
 ) -> Result<SkillsActivation> {
     let mut out = SkillsActivation {
         written: Vec::new(),
+        live: Vec::new(),
         conflicts: Vec::new(),
         unsupported: Vec::new(),
         failed: Vec::new(),
     };
     let mut state = State::load()?;
     let mut ignore_entries: Vec<String> = Vec::new();
+    let delivery =
+        crate::delivery::Plan::build(&ctx.loaded.manifest.delivery, &ctx.registry, target_ids);
     for id in target_ids {
         let Some(desc) = ctx.registry.get(id) else {
             // resolve_targets validated ids; a manifest-sourced unknown is
@@ -464,6 +474,10 @@ pub(crate) fn materialize_skills_additive(
             out.unsupported.push((id.clone(), "unknown adapter"));
             continue;
         };
+        if delivery.skills_route_live(id) {
+            out.live.push(id.clone());
+            continue;
+        }
         let Some(skills_dir) = desc.skills_dir_for(scope, &ctx.dir) else {
             // BOTH absent cases are reported (binding decision: never a
             // silent skip) — including the copilot-cli shape (`skills`
@@ -788,6 +802,7 @@ pub fn activate(
     // same voice `apply` uses.
     let mut live_withheld: std::collections::BTreeSet<String> = Default::default();
     let mut live_unconnected: std::collections::BTreeSet<String> = Default::default();
+    let mut live_skills_withheld: std::collections::BTreeSet<String> = Default::default();
     if !args.quiet {
         println!(
             "Activating toolset '{}' (scope: {scope}) — {}, {}",
@@ -826,7 +841,15 @@ pub fn activate(
             // — is the honest bound. Widening the ledger instead would mean an
             // undo that deletes a directory whose contents it cannot prove are
             // still ours.
-            if !active_skills.is_empty() {
+            let materializes_any_skills = target_ids.iter().any(|id| {
+                !plan_delivery.skills_route_live(id)
+                    && ctx
+                        .registry
+                        .get(id)
+                        .and_then(|desc| desc.skills_dir_for(scope, &ctx.dir))
+                        .is_some()
+            });
+            if !active_skills.is_empty() && materializes_any_skills {
                 println!(
                     "  {} {}",
                     "·".dimmed(),
@@ -859,6 +882,10 @@ pub fn activate(
     // right under a "✓ N skill(s) → …" line reads as a contradiction when no
     // CLI binaries are on PATH but skills were genuinely written.
     let mut wrote_skill_dirs = 0;
+    // Live delivery can also remove skill directories left by an older
+    // rendered activation. Keep that distinct so the summary never calls a
+    // cleanup a materialization.
+    let mut cleaned_skill_dirs = 0;
     // Targets this activation covers — written or already carrying the right
     // servers. Needed separately from `wrote` for the same reason as in `apply`:
     // activating a toolset whose servers are already on disk changes nothing, and
@@ -1114,9 +1141,57 @@ pub fn activate(
             }
         }
 
-        // --- skills --- (config-only adapters have no skills dir; they still
-        // reach the managed .gitignore block below for their config entry).
-        if let Some(skills_dir) = desc.skills_dir_for(scope, &ctx.dir) {
+        // --- skills ---
+        // Skills obey the same delivery plan as servers. In the live lane we
+        // do not create a native skills directory. If an earlier AgentStack
+        // version rendered managed skills for this target, switching to live
+        // delivery removes only those owned links/copies and clears their
+        // state record; user-owned directories remain untouched.
+        let skills_live = plan_delivery.skills_route_live(id);
+        let skills_dir = desc.skills_dir_for(scope, &ctx.dir);
+        if skills_live {
+            let bridged = super::overview::bridge_registered(&ctx.registry, id);
+            let lane = if bridged {
+                "are served live"
+            } else {
+                "are planned live (not connected)"
+            };
+            println!("  {} skills {lane}, not written", "·".dimmed());
+            live_skills_withheld.insert(desc.display.clone());
+            covered_targets.insert(desc.display.clone());
+
+            let prev_skills = state.managed_skills(&key);
+            if let Some(skills_dir) = skills_dir.as_ref() {
+                if !prev_skills.is_empty() {
+                    let strategy = desc.skills.as_ref().map(|s| s.strategy).unwrap_or_default();
+                    let cleanup = skills::plan(
+                        skills_dir.clone(),
+                        strategy,
+                        Vec::new(),
+                        &prev_skills,
+                        &ctx.dir,
+                        prior,
+                    )?;
+                    for name in &cleanup.to_remove {
+                        println!(
+                            "  {} unlinking previously rendered skill '{name}'",
+                            "−".yellow()
+                        );
+                    }
+                    if args.write {
+                        skills::materialize(&cleanup)?;
+                        state.record_skills(&key, Vec::new());
+                        cleaned_skill_dirs += 1;
+                    }
+                } else if args.write {
+                    // Clear stale state even if the artifact disappeared by
+                    // hand. This keeps .gitignore and future prune plans true.
+                    state.record_skills(&key, Vec::new());
+                }
+            } else if args.write {
+                state.record_skills(&key, Vec::new());
+            }
+        } else if let Some(skills_dir) = skills_dir {
             let strategy = desc.skills.as_ref().map(|s| s.strategy).unwrap_or_default();
             let prev_skills = state.managed_skills(&key);
             // Keep-pinned names are COPIED even where this adapter symlinks:
@@ -1227,8 +1302,9 @@ pub fn activate(
                 config: (!args.write && would_manage_config)
                     || !state.managed_servers(&key).is_empty()
                     || !state.kept_foreign(&key).is_empty(),
-                skills: (!args.write && would_manage_skills)
-                    || !state.managed_skills(&key).is_empty(),
+                skills: !skills_live
+                    && ((!args.write && would_manage_skills)
+                        || !state.managed_skills(&key).is_empty()),
                 instructions: instr_managed,
             };
             ignore_entries.extend(crate::render::gitignore::managed_entries(
@@ -1332,6 +1408,14 @@ pub fn activate(
             );
         }
     }
+    if !live_skills_withheld.is_empty() && !args.quiet {
+        let names: Vec<&str> = live_skills_withheld.iter().map(String::as_str).collect();
+        println!(
+            "\n{} skills for {} are routed to the live lane — `use` does not create skill folders.",
+            "ℹ".cyan(),
+            names.join(", ")
+        );
+    }
 
     if args.write {
         state.save()?;
@@ -1344,7 +1428,7 @@ pub fn activate(
         // untouched (record_lock is the only path that would rewrite it).
         // Partial success — at least one server config or skill dir written —
         // genuinely activated, so it still pins.
-        let nothing_activated = wrote == 0 && wrote_skill_dirs == 0;
+        let nothing_activated = wrote == 0 && wrote_skill_dirs == 0 && cleaned_skill_dirs == 0;
         let total_failure = !blocked_targets.is_empty() && nothing_activated;
         // One undoable history entry for the server configs this activation
         // wrote. Best-effort, like apply: never fail a successful use over it.
@@ -1374,7 +1458,14 @@ pub fn activate(
             )?;
         }
         if blocked_targets.is_empty() {
-            if wrote == 0 && wrote_skill_dirs > 0 {
+            if wrote == 0 && wrote_skill_dirs == 0 && cleaned_skill_dirs > 0 {
+                println!(
+                    "\n{} activated '{}' — removed previously rendered skills from {}; live delivery now owns them.",
+                    "✓".green(),
+                    label,
+                    super::count(cleaned_skill_dirs, "location")
+                );
+            } else if wrote == 0 && wrote_skill_dirs > 0 {
                 println!(
                     "\n{} activated '{}' — wrote skills to {}; no server configs changed.",
                     "✓".green(),

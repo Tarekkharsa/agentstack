@@ -4,7 +4,7 @@ User-facing changes per release. The [GitHub Releases
 page](https://github.com/Tarekkharsa/agentstack/releases) carries the built
 binaries, checksums, and provenance attestations for each entry.
 
-## v0.18.0-rc.3 — 2026-08-08
+## v0.18.0-rc.3 — 2026-08-12
 
 **The candidate the activation study runs on.** rc.2 was tagged one week and
 127 commits ago, and the product moved underneath it: delivery became routed
@@ -15,6 +15,73 @@ therefore not a build anyone should be measured on. Like rc.1 and rc.2 this is
 a pre-release: `install.sh` and `brew install` keep serving v0.17.1 until
 v0.18.0 is final, and a participant pins this build with
 `AGENTSTACK_VERSION=v0.18.0-rc.3`.
+
+**The headline: zero files is what you get by default.** A trusted project's
+default toolset now opens by itself on each new agent connection — you do not
+open a lease, name a toolset, or run a command first. `use --write` no longer
+materializes skill folders into your repository unless the project opts into
+`[delivery] render_locally`, so the ordinary shape of a project using
+AgentStack is a manifest, a lockfile, and nothing else. `status` and `doctor`
+report the four facts separately instead of blurring them into one word:
+whether the project is **locked**, whether it is **trusted**, which toolset is
+its **default**, and whether anything is **live** right now.
+
+- **`agentstack toolset default <name> --write` says which toolset future
+  connections get.** A project that creates its first toolset gets that one as
+  its default without being asked twice.
+
+- **A second machine is one command.** `agentstack up` previews what it would
+  do and `up --write` does it. `agentstack up --library <git-url>` clones your
+  personal library onto a machine that has never seen it; after that a plain
+  `up` pulls the linked library and never pushes it, so a bootstrap can never
+  publish local edits by accident. `up --json` gives a supervisor a
+  machine-readable readiness read of the same run. Two fixes ride with it: a
+  machine whose installed CLIs all take files and no MCP server now bootstraps
+  instead of failing — the gateway step is skipped by name and the render
+  carries on — and the bootstrap no longer edits the library's tracked
+  `.gitignore`, an edit that could leave `up --write` refusing to run on the
+  machine it had just set up.
+
+- **The MCP layer is the official SDK now.** The hand-written protocol code is
+  replaced by `rmcp` behind one internal boundary (`crates/mcp`), which owns
+  models, validation, framing, lifecycle negotiation and Streamable HTTP for
+  the stdio server, the sandbox bridge, and every upstream client. MCP
+  `2026-07-28` stateless is served by default and the dated 2025 path is kept
+  for clients and upstream servers that speak it, chosen by negotiation:
+  `initialize`, HTTP sessions, roots and process-local leases keep working
+  exactly as they did. Both eras enter the same trust, policy, dispatch and
+  audit code. What you will notice: one spawn per upstream, with the whole
+  discovery budget spent on that one; an upstream tool list read through to its
+  last page rather than stopping at the first; a crashed upstream reconnected
+  on the next call instead of staying dead for the session;
+  `tools/list_changed` declared and sent again, so a legacy client that caches
+  the list is told when it moved; HTTP and stdio returning the same error for
+  an unknown tool; and auth failures classified from typed errors rather than
+  from the text of a message.
+
+- **The fence holds across a swap.** A lease or trust transition now waits for
+  the upstream calls already in flight, so no call can finish under authority
+  that was withdrawn while it ran. And when a project's declared default
+  toolset cannot be reopened, the connection falls back to a control-plane-only
+  gateway and records the decision — the old toolset's gateway is never left
+  serving, unleased and wider than anything the project still declares, because
+  of a bookkeeping failure.
+
+- **`doctor --json` keeps the words it documented.** `activation` is again
+  `locked` / `never_activated`, read from the lockfile, so a consumer gating on
+  those values is unaffected; the runtime reading ships beside it as
+  `live_state` (`live` / `not_live`) under its own contract name,
+  `doctor-liveness-v1`. Additive, so `doctor-mode-v1` and its schema version do
+  not move.
+
+- **Project uninstall leaves no empty shells behind.** Removing a project's
+  materialized skills now also removes the AgentStack-managed parent folders
+  that emptying them left over — `.agents`, `.gemini`, `.pi` — including ones a
+  previous version stranded. A folder holding anything of yours is never
+  touched, and every folder removed is checked empty at the moment it goes.
+
+- **A rebuilt landing page and documentation hub**, and three guides that did
+  not exist: the central library, getting started, and running a workflow.
 
 **Behaviour change you will notice: delivery now needs your yes.**
 `agentstack apply --write` and `agentstack use --write` refuse a project that

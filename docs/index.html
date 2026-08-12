@@ -4,649 +4,160 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <script src="theme/theme.js"></script>
-<title>AgentStack — one agent setup for every coding CLI</title>
-<meta name="description" content="Import your MCP servers, skills and instructions once. AgentStack serves them live to your coding CLIs and writes into native files what no live channel can carry, switches toolsets by task, diagnoses drift and restores changes safely.">
+<title>AgentStack — your AI coding setup, on every machine</title>
+<meta name="description" content="Define MCP servers, skills and instructions once. AgentStack serves the right toolset to your coding CLIs on every machine, while secrets and trust stay local.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
-<meta property="og:title" content="AgentStack — one agent setup for every coding CLI">
-<meta property="og:description" content="Import once, served live everywhere it can be, switch by task, diagnose drift and restore safely.">
+<meta property="og:title" content="AgentStack — your AI coding setup, on every machine">
+<meta property="og:description" content="One project contract, one personal capability library, and machine-local secrets. Works directly or through supervisors such as T3 Code.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://tarekkharsa.github.io/agentstack/">
 <meta property="og:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
-<meta property="og:image:width" content="1200">
-<meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="AgentStack — one portable setup across AI coding CLIs">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="AgentStack — one agent setup for every coding CLI">
-<meta name="twitter:description" content="Import once, served live everywhere it can be, switch by task, diagnose drift and restore safely.">
-<meta name="twitter:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
 <link rel="stylesheet" href="theme/organic.css">
 <style>
-/* ══════════════════════════════════════════════════════════════════════════
-   Homepage layout — the structure ported from t3code's marketing home:
-   a full-bleed sticky nav, a hero over a masked grid backdrop, then a run of
-   full-width bands separated by single hairlines. Typography, buttons and the
-   terminal component are inherited from theme/organic.css and are NOT
-   restated here.
-
-   Widths, in one place:
-     --shell      the page shell — content is centred inside it, but the BANDS
-                  (backgrounds, hairlines, the grid backdrop) run edge to edge.
-     --measure    the reading column. Prose never uses the shell width: a
-                  1400px line of body text is unreadable, so paragraphs cap at
-                  roughly 68 characters no matter how wide the screen is.
-   The extra width goes to the multi-column grids — cards, steps, terminals —
-   which is where a wide screen actually buys something.
-   ══════════════════════════════════════════════════════════════════════ */
-:root{
-  --shell: 1400px;
-  --shell-pad: 32px;
-  --measure: 68ch;
-  /* The hero backdrop lines. Very low alpha in both themes: dark ink on the
-     light page, faint white on the dark one. They are masked out before they
-     reach any text, so they never enter a contrast calculation. */
-  --grid-line: rgba(27, 31, 36, 0.055);
-}
-[data-theme="dark"]{ --grid-line: rgba(255, 255, 255, 0.05); }
-
+:root{--shell:1180px;--pad:28px;--grid-line:rgba(27,31,36,.055)}
+[data-theme="dark"]{--grid-line:rgba(255,255,255,.05)}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
 body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var(--font-sans);overflow-x:hidden}
-
-/* — the shell — */
-.shell{width:100%;max-width:var(--shell);margin:0 auto;padding:0 var(--shell-pad)}
-.measure{max-width:var(--measure)}
-
-/* — a band: full-bleed, one hairline above it, generous vertical rhythm — */
-.band{position:relative;padding:96px 0;border-top:1px solid var(--color-divider)}
-
-/* — the tile: 1px alpha border, 12px radius, a barely-there top sheen and no
-     shadow. The edge separates it from the page; the gradient stops the edge
-     reading as a drawn box. — */
-.tile{
-  position:relative;
-  border:1px solid var(--color-divider);
-  border-radius:12px;
-  background-color:var(--color-surface);
-  background-image:linear-gradient(180deg,var(--card-sheen),transparent 60%);
-  overflow:hidden;
-}
-
-/* — sticky nav: translucent and blurred, with NO bottom border until the page
-     has actually scrolled. The border is the only thing that changes, so the
-     bar never jumps. — */
-.site-nav{
-  position:sticky;top:0;z-index:50;
-  backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
-  background:color-mix(in srgb, var(--color-bg) 82%, transparent);
-  border-bottom:1px solid transparent;
-  transition:border-color 0.3s ease;
-}
+a{color:inherit}
+.shell{width:100%;max-width:var(--shell);margin:0 auto;padding:0 var(--pad)}
+.band{padding:88px 0;border-top:1px solid var(--color-divider)}
+.site-nav{position:sticky;top:0;z-index:30;background:color-mix(in srgb,var(--color-bg) 86%,transparent);backdrop-filter:blur(18px);border-bottom:1px solid transparent}
 .site-nav.is-scrolled{border-bottom-color:var(--color-divider)}
-.nav-inner{display:flex;align-items:center;gap:var(--space-4);padding-top:12px;padding-bottom:12px}
-.nav-brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--color-text)}
-.nav-brand img{width:30px;height:30px}
-.nav-wordmark{font-family:var(--font-sans);font-weight:650;font-size:1.1rem;letter-spacing:-0.025em}
-.nav-wordmark span{color:var(--color-accent)}
-.nav-spacer{flex:1}
-.nav-links{display:flex;align-items:center;gap:var(--space-4);flex-wrap:wrap}
-.nav-actions{display:flex;align-items:center;gap:var(--space-3);margin-left:var(--space-4)}
-.nav-link{color:var(--color-neutral-600);font-weight:500;font-size:0.9rem;letter-spacing:-0.01em;text-decoration:none}
-.nav-link:hover{color:var(--color-text)}
-.themebtn{
-  font-family:var(--font-sans);font-size:0.8rem;font-weight:500;letter-spacing:-0.01em;
-  padding:0.42rem 0.85rem;border-radius:8px;border:1px solid var(--color-divider);
-  background:transparent;color:var(--color-neutral-600);cursor:pointer;
-}
-.themebtn:hover{color:var(--color-text);border-color:var(--color-divider-strong);background:var(--quiet-hover)}
-
-/* — hero — */
-.hero{position:relative;overflow:hidden;padding:72px 0 84px;border-top:0}
-/* Two 1px gradient lines on a 48px cell, then masked with a soft ellipse so
-   the grid dissolves before it reaches the edges of the band. Decorative and
-   inert: aria-hidden, pointer-events none, behind everything. */
-.hero-grid{
-  position:absolute;inset:0;pointer-events:none;z-index:0;
-  background-image:
-    linear-gradient(to right, var(--grid-line) 1px, transparent 1px),
-    linear-gradient(to bottom, var(--grid-line) 1px, transparent 1px);
-  background-size:48px 48px;
-  mask-image:radial-gradient(ellipse 80% 60% at 50% 40%, black 40%, transparent 100%);
-  -webkit-mask-image:radial-gradient(ellipse 80% 60% at 50% 40%, black 40%, transparent 100%);
-}
-.hero .shell{position:relative;z-index:1}
-.hero-split{
-  display:grid;
-  grid-template-columns:minmax(0,0.95fr) minmax(0,1.05fr);
-  gap:clamp(32px,4vw,72px);
-  align-items:center;
-}
-.hero-copy{min-width:0}
-/* The eyebrow is a mono pill carrying four facts. Uppercase at 0.14em tracking
-   it measures ~590px — wider than the hero copy column at every desktop width
-   below ~1400px — so it has to be able to sit on more than one line.
-   Left to normal wrapping it breaks wherever the text runs out: a fact splits
-   mid-phrase and a "·" strands at the head of the next line. So the facts are
-   marked up as units (`.ep-f`, never broken) and the line breaks are placed
-   rather than discovered: `.ep-br*` are zero-height flex spacers that force a
-   new row, and the "·" that would have landed on the seam is switched off with
-   it. The result is 1, 2 or 3 whole lines, and a separator only ever appears
-   between two facts on the same line.
-   `border-radius:16px` is a stadium on a single line (the radius caps at half
-   the 30px height) and a chip on two — one value, deliberate either way.
-   Below 560px the chrome comes off and it reads as plain eyebrow text. */
-.eyebrow-pill{
-  display:inline-flex;flex-wrap:wrap;align-items:baseline;
-  /* Shrink-to-fit measures the pill against the string UNBROKEN, so a placed
-     break would otherwise leave a box the width of the column with a short
-     first line rattling inside it. `--ep-cap` caps it at its own longest line:
-     N mono characters plus the tracking this eyebrow adds to each, plus the
-     28px padding and 2px border. `ch` measures the face actually in use, so
-     the cap follows a fallback mono rather than assuming JetBrains Mono. */
-  max-width:min(100%, var(--ep-cap, 100%));
-  column-gap:0.6em;row-gap:2px;
-  font-family:var(--font-mono);font-size:11px;font-weight:500;
-  letter-spacing:0.14em;text-transform:uppercase;line-height:1.5;
-  color:var(--color-neutral-600);
-  border:1px solid var(--color-divider);border-radius:16px;
-  padding:6px 14px;
-  background:color-mix(in srgb, var(--color-text) 3%, transparent);
-}
-.eyebrow-pill .ep-f{white-space:nowrap}
-.ep-br{flex:0 0 100%;height:0;display:none}
-/* Where the seams go. The copy column is widest in the single-column hero
-   (≤980px) and at the top of the two-column one, so those are the widths that
-   hold one line; the bands between take two, and the narrowest take three.
-   Each threshold is set with headroom over the measured line width, so a
-   fallback mono face cannot push a line past the column. */
-@media (min-width:981px) and (max-width:1399px){
-  /* two lines: "open source · Rust" / "13 adapters… · MIT / Apache-2.0" (50ch) */
-  .eyebrow-pill{--ep-cap:calc(50ch + 7em + 32px)}
-  .ep-br2{display:block}
-  .ep-s2{display:none}
-}
-@media (min-width:981px) and (max-width:1080px){
-  /* three lines: the longest is the adapter link on its own (31ch) */
-  .eyebrow-pill{--ep-cap:calc(31ch + 4.34em + 32px)}
-  .ep-br3{display:block}
-  .ep-s3{display:none}
-}
-@media (max-width:680px){
-  .eyebrow-pill{--ep-cap:calc(50ch + 7em + 32px)}
-  .ep-br2{display:block}
-  .ep-s2{display:none}
-}
-@media (max-width:500px){
-  .eyebrow-pill{--ep-cap:calc(31ch + 4.34em + 32px)}
-  .ep-br3{display:block}
-  .ep-s3{display:none}
-}
-/* The adapter count is a claim with a page behind it — "13" and "5" mean two
-   different things (shipped vs. nightly-verified) and the matrix is where that
-   is spelled out. Inherits the pill's colour so it stays an eyebrow, not a
-   button; only the underline marks it as a destination. */
-.eyebrow-pill a{color:inherit;text-decoration:underline;text-underline-offset:2px;text-decoration-color:var(--color-divider-strong)}
-.eyebrow-pill a:hover{color:var(--color-text)}
-.hero-title{
-  font-size:clamp(2.4rem,5.4vw,4.15rem);
-  font-weight:500;line-height:1.03;letter-spacing:-0.035em;
-  margin:var(--space-4) 0 var(--space-4);
-  text-wrap:balance;
-}
-.hero-lede{font-size:1.15rem;line-height:1.6;color:var(--color-neutral-600);margin:0 0 var(--space-5);max-width:60ch}
-/* The install line is the promise, not a screenshot of one: a terminal body
-   with no window chrome. It wraps rather than scrolling off the column. */
-.hero-cmd{padding:14px 18px;font-family:var(--font-mono);font-size:0.82rem;line-height:1.8;margin:0 0 var(--space-4);color:var(--term-text)}
-.hero-actions{display:flex;gap:var(--space-3);flex-wrap:wrap}
-/* The proof is already a terminal window — the SVG draws its own dots and
-   title bar — so it is framed by a hairline only, never a second chrome. */
-.hero-proof{margin:0;border-radius:12px;overflow:hidden;border:1px solid var(--color-divider);background:var(--term-bg)}
-.hero-proof img{display:block;width:100%;height:auto}
-.hero-proof figcaption{font-size:0.8rem;line-height:1.5;color:var(--term-muted);padding:10px 14px;border-top:1px solid var(--term-bd);margin:0}
-
-/* — section heads — */
-.section-head{margin-bottom:56px;max-width:760px}
-.section-head .eyebrow{display:block;margin-bottom:14px}
-.section-head h2{
-  font-size:clamp(1.9rem,3.6vw,2.85rem);
-  font-weight:500;letter-spacing:-0.035em;line-height:1.05;
-  margin:0 0 18px;
-}
-.section-head p{color:var(--color-neutral-600);font-size:1.05rem;line-height:1.6;max-width:62ch;letter-spacing:-0.005em;margin:0}
-.head-row{display:flex;align-items:flex-end;gap:var(--space-6);flex-wrap:wrap;margin-bottom:56px}
-.head-row .section-head{margin-bottom:0;flex:1 1 420px}
-.head-aside{margin-left:auto;font-weight:500;font-size:0.95rem;color:var(--color-neutral-600);text-decoration:none}
-.head-aside:hover{color:var(--color-accent)}
-
-/* — checklist: no bullets, an inline check glyph in the "ok" colour — */
-.checklist{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:12px}
-.checklist li{display:flex;align-items:flex-start;gap:10px;color:var(--color-neutral-600);font-size:0.95rem;line-height:1.55}
-.checklist li svg{color:var(--color-accent-2);flex:none;margin-top:5px}
-
-/* — the problem cards —
-   Explicit column counts rather than auto-fit: both of these grids hold FOUR
-   items, and auto-fit lands on three across a wide range of widths, which
-   leaves a single orphan on a second row. 4 → 2 → 1 always fills its rows. */
-.grid-gaps{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:20px}
-.gap-card{display:flex;flex-direction:column;gap:var(--space-3);padding:22px}
-.gap-head{display:flex;align-items:center;gap:var(--space-3)}
-.gap-mark{width:40px;height:40px;flex:none;border-radius:999px;display:flex;align-items:center;justify-content:center}
-.gap-mark-a{background:var(--color-accent-100)}
-.gap-mark-b{background:var(--color-accent-2-100)}
-.gap-title{font-family:var(--font-sans);font-weight:500;font-size:1.02rem;line-height:1.25;letter-spacing:-0.02em}
-.gap-body{font-size:0.92rem;line-height:1.6;color:var(--color-neutral-600);flex:1;margin:0}
-.gap-foot{display:flex;align-items:center;gap:var(--space-2);flex-wrap:wrap;padding-top:var(--space-3);border-top:1px solid var(--color-divider)}
-.closed-by{font-family:var(--font-mono);font-size:10px;font-weight:500;letter-spacing:0.14em;text-transform:uppercase}
-.closed-a{color:var(--color-accent-700)}
-.closed-b{color:var(--color-accent-2-700)}
-.gap-foot code{font-size:0.8rem;background:var(--color-neutral-100);border-radius:999px;padding:3px 11px}
-
-/* — the six steps — */
-.grid-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:24px}
-.step{display:flex;gap:var(--space-3);align-items:flex-start}
-.step-num{
-  width:42px;height:42px;flex:none;border-radius:999px;color:var(--color-bg);
-  display:flex;align-items:center;justify-content:center;
-  font-family:var(--font-mono);font-weight:500;font-size:0.95rem;
-}
-.step-a{background:var(--color-accent)}
-.step-b{background:var(--color-accent-2)}
-.step-name{font-weight:600;letter-spacing:-0.01em;margin-bottom:3px}
-.step-body{font-size:0.92rem;line-height:1.55;color:var(--color-neutral-600)}
-
-/* — quick start — */
-.start-grid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,0.9fr);gap:clamp(28px,3.5vw,56px);align-items:start}
-.start-col{display:flex;flex-direction:column;gap:var(--space-4);min-width:0}
-.term-lg .term-body{padding:18px 22px;font-size:0.85rem;line-height:2.1}
-.note{font-size:0.88rem;line-height:1.65;color:var(--color-neutral-600);margin:0;max-width:var(--measure)}
-
-/* — the everyday loop —
-   TWO columns, not four. Unlike the card grids above, these panes hold
-   captured terminal output, and a transcript needs horizontal room the way
-   prose does not: the longest line in the set is 77 characters — 592px at the
-   terminal's type size. Four across even a 1400px shell gives each pane
-   316px, so every one of the four ran off its own edge. Two across gives
-   596px at 1280 and 656px at 1400, which fits every line here but one, and
-   that one wraps with a hanging indent (see .term-lines in organic.css)
-   rather than disappearing. This is why the "spend the extra width on more
-   columns" rule stops at the card grids. */
-.grid-loop{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;align-items:start}
-/* Each cell is self-contained: the terminal ends where its own transcript ends,
-   and the caption sits directly under it. `align-items:start` keeps a cell from
-   being stretched to its row, because a stretched terminal pads the shortfall
-   with black — and empty black inside a terminal frame reads as output that
-   failed to load, not as whitespace. The four transcripts are 15, 3, 5 and 9
-   lines, so equalising rows costs the short panes ~230px of that dead space.
-   The price is ragged bottoms and captions that no longer share a baseline;
-   that is accepted here, since each caption still touches the pane it names. */
-.loop-pane{display:flex;flex-direction:column;gap:var(--space-3);min-width:0}
-/* `pre-wrap` breaks a captured line at its spaces, which is enough for prose
-   output but not for the single long tokens these transcripts carry — a
-   quarantine path, `~/.agentstack/agentstack.toml`, a URL. One of those is
-   wider than the pane on a phone, and with nowhere to break it pushed the
-   terminal into a horizontal scroll. Allowing a break anywhere confines the
-   wrap to the lines that actually need it (a line that fits is untouched), and
-   the hanging indent from `.term-lines > .tl` still shows it as a wrap. */
-.grid-loop .term-lines > .tl{overflow-wrap:anywhere}
-.loop-note{font-size:0.86rem;line-height:1.6;color:var(--color-neutral-600);margin:0}
-.loop-note b{color:var(--color-text);font-weight:600}
-
-/* — footer — */
-.site-foot{padding:40px 0}
-.foot-inner{display:flex;gap:var(--space-4);align-items:center;flex-wrap:wrap}
-.foot-wordmark{font-family:var(--font-sans);font-weight:650;letter-spacing:-0.025em}
-.foot-wordmark span{color:var(--color-accent)}
-.foot-line{color:var(--color-neutral-600);font-size:0.88rem}
-.foot-links{display:flex;gap:var(--space-4);flex-wrap:wrap;margin-left:auto}
-.foot-links a{font-size:0.9rem;color:var(--color-neutral-600);text-decoration:none}
-.foot-links a:hover{color:var(--color-text)}
-
-/* — collapse points —
-   980px: both two-column layouts become one column, so the hero copy and the
-          proof each get the full shell instead of two cramped halves.
-   820px: the shell gutters narrow, matching the rest of the site.
-   560px: the eyebrow pill sheds its chrome. */
-/* Six steps divide evenly by 3 and by 2, so the step grid never orphans. */
-@media (max-width:1180px){
-  .grid-gaps{grid-template-columns:repeat(2,minmax(0,1fr))}
-}
-@media (max-width:1000px){
-  .grid-steps{grid-template-columns:repeat(2,minmax(0,1fr))}
-}
-@media (max-width:980px){
-  /* The loop panes collapse here with the other two-column layouts rather than
-     at 680px: below this a half-shell pane is narrower than the transcripts,
-     and a full-width pane that reads is worth more than two that fold. */
-  .hero-split,.start-grid{grid-template-columns:1fr}
-  .grid-loop{grid-template-columns:minmax(0,1fr)}
-  .hero-split{gap:40px}
-}
-@media (max-width:680px){
-  .grid-gaps,.grid-steps{grid-template-columns:minmax(0,1fr)}
-}
-@media (max-width:820px){
-  :root{--shell-pad:20px}
-  /* The bar cannot fit brand + four links + two controls on one phone row, so
-     the links drop to a second row rather than being hidden behind a drawer:
-     every destination stays visible and in tab order. */
-  .nav-inner{flex-wrap:wrap;row-gap:10px;gap:var(--space-3)}
-  .nav-links{order:3;flex-basis:100%;gap:var(--space-4)}
-  .nav-actions{margin-left:0}
-  .band{padding:64px 0}
-  .hero{padding:48px 0 60px}
-  .section-head,.head-row{margin-bottom:40px}
-  .head-row .section-head{flex-basis:100%}
-}
-/* The comment gets its own line, at every width.
-   `.term-row` is a flex row and `.term-row > .cmd` carries `min-width:0`
-   (organic.css) while the trailing `# comment` does not. So flex shrinks the
-   COMMAND — the thing the reader came for — all the way to nothing before it
-   will shrink the comment: at 390px `agentstack init` and `agentstack status`
-   both measured `clientWidth: 0`, and the longest command here squeezed to a
-   six-character column that wrapped one letter per line.
-   The column is ~63 characters at 1280 and the longest row is 43 characters of
-   command plus a 60-character comment, so no shrink policy makes that row fit
-   on one line — the pair has to break. Giving the comment a full-width basis
-   breaks it in the one place that reads correctly: the command stays whole on
-   its own line beside the prompt, and its comment sits under it, indented past
-   the prompt so the pairing is still obvious. */
-.term-lg .term-row{flex-wrap:wrap;row-gap:2px}
-.term-lg .term-row > .cm{flex:1 0 100%;min-width:0;padding-left:calc(1ch + 12px)}
-@media (max-width:560px){
-  /* Chrome off, but still the placed-seam flex row: plain eyebrow text whose
-     facts stay whole and whose separators still sit between two of them. */
-  .eyebrow-pill{border:0;background:none;padding:0;display:flex}
-  /* Two rows, not three: at this width the brand plus both controls only fit
-     on one line once the controls give back their desktop padding. */
-  .nav-brand img{width:26px;height:26px}
-  .nav-wordmark{font-size:1rem}
-  .nav-actions{gap:var(--space-2)}
-  .themebtn{padding:0.34rem 0.6rem;font-size:0.75rem}
-  .nav-actions .btn{padding:8px 13px;font-size:13px}
-}
+.nav-inner{display:flex;align-items:center;gap:22px;min-height:60px}
+.brand{display:flex;align-items:center;gap:10px;text-decoration:none;font-weight:680;font-size:1.08rem;letter-spacing:-.025em}
+.brand img{width:30px;height:30px}.brand span span,.foot-brand span{color:var(--color-accent)}
+.nav-spacer{flex:1}.nav-links,.nav-actions{display:flex;align-items:center;gap:18px}.nav-links a{text-decoration:none;color:var(--color-neutral-600);font-size:.9rem;font-weight:520}.nav-links a:hover{color:var(--color-text)}
+.themebtn{font:inherit;font-size:.8rem;padding:.45rem .8rem;border:1px solid var(--color-divider);border-radius:8px;background:transparent;color:var(--color-neutral-600);cursor:pointer}
+.hero{position:relative;padding:92px 0 84px;overflow:hidden}.hero-grid{position:absolute;inset:0;pointer-events:none;background-image:linear-gradient(to right,var(--grid-line) 1px,transparent 1px),linear-gradient(to bottom,var(--grid-line) 1px,transparent 1px);background-size:48px 48px;mask-image:radial-gradient(ellipse 78% 65% at 50% 38%,black 35%,transparent 100%)}
+.hero .shell{position:relative}.hero-layout{display:grid;grid-template-columns:minmax(0,1.06fr) minmax(370px,.94fr);gap:64px;align-items:center}
+.eyebrow{font-family:var(--font-mono);font-size:.72rem;letter-spacing:.13em;text-transform:uppercase;color:var(--color-neutral-600)}
+h1{font-size:clamp(2.7rem,5.5vw,4.8rem);line-height:.99;letter-spacing:-.045em;font-weight:520;margin:18px 0 22px;text-wrap:balance}
+.lede{font-size:1.16rem;line-height:1.65;color:var(--color-neutral-600);max-width:62ch;margin:0 0 28px}.lede strong{color:var(--color-text);font-weight:620}
+.actions{display:flex;gap:12px;flex-wrap:wrap}.btn-lg{padding:.8rem 1.15rem}
+.proof{border:1px solid var(--color-divider);border-radius:14px;background:var(--color-surface);padding:22px;box-shadow:0 20px 60px color-mix(in srgb,var(--color-text) 7%,transparent)}
+.proof-title{font-size:.78rem;color:var(--color-neutral-600);margin-bottom:20px}.flow{display:grid;gap:10px}.flow-box{border:1px solid var(--color-divider);border-radius:10px;padding:15px 16px;background:color-mix(in srgb,var(--color-surface) 94%,var(--color-accent) 6%)}.flow-box b{display:block;margin-bottom:4px}.flow-box span{font-size:.84rem;color:var(--color-neutral-600);line-height:1.45}.arrow{text-align:center;color:var(--color-accent);font-size:1.1rem}.machine-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.machine-row .flow-box{text-align:center;padding:12px 6px;font-size:.82rem}
+.zero-note{margin:18px 0 0;padding-top:16px;border-top:1px solid var(--color-divider);font-size:.84rem;line-height:1.5;color:var(--color-neutral-600)}
+.section-head{max-width:720px;margin-bottom:42px}.section-head h2{font-size:clamp(2rem,4vw,3rem);font-weight:520;letter-spacing:-.04em;line-height:1.06;margin:13px 0 15px;text-wrap:balance}.section-head p{font-size:1.05rem;line-height:1.65;color:var(--color-neutral-600);margin:0}
+.three{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.card{border:1px solid var(--color-divider);border-radius:12px;background:var(--color-surface);padding:24px}.num{font-family:var(--font-mono);font-size:.72rem;color:var(--color-accent);letter-spacing:.1em}.card h3{font-size:1.08rem;margin:12px 0 8px}.card p{margin:0;color:var(--color-neutral-600);line-height:1.58;font-size:.94rem}.tag{display:inline-block;margin-top:16px;padding:5px 8px;border:1px solid var(--color-divider);border-radius:6px;font-family:var(--font-mono);font-size:.72rem;color:var(--color-neutral-600)}
+.library-rule{display:flex;gap:12px;align-items:flex-start;margin:-18px 0 24px;padding:14px 16px;border:1px solid color-mix(in srgb,var(--color-accent) 30%,var(--color-divider));border-radius:10px;background:color-mix(in srgb,var(--color-surface) 94%,var(--color-accent) 6%);font-size:.9rem;line-height:1.5;color:var(--color-neutral-600)}.library-rule b{color:var(--color-text);white-space:nowrap}.library-steps{display:grid;gap:12px}.library-step{display:grid;grid-template-columns:minmax(260px,.72fr) minmax(0,1.28fr);align-items:stretch;border:1px solid var(--color-divider);border-radius:12px;background:var(--color-surface);overflow:hidden}.library-step-copy{padding:22px}.library-step h3{font-size:1.08rem;margin:9px 0 7px}.library-step p{margin:0;color:var(--color-neutral-600);line-height:1.55;font-size:.9rem}.library-step .terminal{display:flex;flex-direction:column;justify-content:center;border-top:0;border-left:1px solid var(--term-bd)}.library-note{margin:20px 0 0;color:var(--color-neutral-600);font-size:.9rem;line-height:1.55}.library-note code{font-size:.82rem}
+.journeys{display:grid;grid-template-columns:1fr 1fr;gap:18px}.journey{border:1px solid var(--color-divider);border-radius:14px;background:var(--color-surface);overflow:hidden}.journey-copy{padding:25px 25px 18px}.journey h3{font-size:1.25rem;margin:0 0 8px}.journey p{color:var(--color-neutral-600);line-height:1.55;margin:0}.terminal{background:var(--term-bg);color:var(--term-text);border-top:1px solid var(--term-bd);padding:18px 20px;font:500 .82rem/1.75 var(--font-mono);overflow-x:auto}.command{display:block;white-space:nowrap;min-width:max-content}.prompt{color:var(--term-accent);margin-right:9px}.comment{color:var(--term-muted);margin-left:12px}.journey-foot{padding:15px 24px;border-top:1px solid var(--color-divider);font-size:.84rem;color:var(--color-neutral-600)}
+.daily{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.daily .card{padding:20px}.daily h3{margin-top:0}.daily code{font-size:.8rem}
+.compat{display:grid;grid-template-columns:1.15fr .85fr;gap:28px;align-items:start}.compat-list{display:grid;gap:10px}.compat-row{display:flex;gap:12px;align-items:flex-start;padding:15px 17px;border:1px solid var(--color-divider);border-radius:10px;background:var(--color-surface)}.check{color:var(--color-accent);font-weight:700}.compat-row span:last-child{color:var(--color-neutral-600);line-height:1.5}.compat-row b{color:var(--color-text)}
+.safety{padding:26px;border:1px solid var(--color-divider);border-radius:12px;background:var(--color-surface)}.safety h3{margin:0 0 10px}.safety p{margin:0 0 14px;color:var(--color-neutral-600);line-height:1.62}.safety a{color:var(--color-accent);font-weight:600}
+.cta{text-align:center}.cta h2{font-size:clamp(2rem,4vw,3rem);letter-spacing:-.04em;font-weight:520;margin:0 0 12px}.cta p{color:var(--color-neutral-600);margin:0 auto 24px;max-width:54ch;line-height:1.6}
+.site-foot{padding:34px 0}.foot-inner{display:flex;align-items:center;gap:24px;color:var(--color-neutral-600);font-size:.86rem}.foot-brand{font-weight:680;font-size:1rem;color:var(--color-text)}.foot-links{margin-left:auto;display:flex;gap:18px}.foot-links a{text-decoration:none}
+@media(max-width:900px){.hero-layout,.compat{grid-template-columns:1fr}.hero{padding-top:66px}.proof{max-width:620px}.three,.library-step{grid-template-columns:1fr}.library-step .terminal{border-left:0;border-top:1px solid var(--term-bd)}.daily{grid-template-columns:1fr 1fr}.journeys{grid-template-columns:1fr}.nav-links{display:none}}
+@media(max-width:560px){:root{--pad:18px}.band{padding:64px 0}.hero{padding:55px 0 64px}.hero-layout{gap:38px}.machine-row{grid-template-columns:1fr}.daily{grid-template-columns:1fr}.nav-actions .btn{display:none}.terminal{font-size:.77rem}.comment{display:none}.foot-inner{align-items:flex-start;flex-direction:column}.foot-links{margin:0;flex-wrap:wrap}}
 </style>
 </head>
 <body>
 <a class="skip-link" href="#main-content">Skip to content</a>
-
-<nav class="site-nav">
+<nav class="site-nav" aria-label="Main navigation">
   <div class="shell nav-inner">
-    <a href="index.html" class="nav-brand">
-      <img src="theme/logo-mark.svg" alt="">
-      <span class="nav-wordmark">agent<span>Stack</span></span>
-    </a>
+    <a class="brand" href="./"><img src="favicon.svg" alt=""><span>agent<span>Stack</span></span></a>
     <div class="nav-spacer"></div>
-    <div class="nav-links">
-      <a class="nav-link" href="docs.html">Documentation</a>
-      <a class="nav-link" href="examples.html">Demos</a>
-      <a class="nav-link" href="tutorial/">Tutorial</a>
-      <a class="nav-link" href="https://github.com/Tarekkharsa/agentstack">GitHub</a>
-    </div>
-    <div class="nav-actions">
-      <button class="themebtn" data-theme-toggle onclick="toggleTheme()">Light mode</button>
-      <a href="docs.html#start" class="btn btn-primary">Get started</a>
-    </div>
+    <div class="nav-links"><a href="#how">How it works</a><a href="#library">Your library</a><a href="#machines">Machines</a><a href="docs.html">Documentation</a><a href="https://github.com/Tarekkharsa/agentstack">GitHub</a></div>
+    <div class="nav-actions"><button class="themebtn" data-theme-toggle onclick="toggleTheme()">Light mode</button><a class="btn btn-primary" href="#first-machine">Get started</a></div>
   </div>
 </nav>
 
 <main id="main-content" tabindex="-1">
-
-  <!-- ── Hero ────────────────────────────────────────────────────────────── -->
   <section class="hero">
     <div class="hero-grid" aria-hidden="true"></div>
-    <div class="shell">
-      <div class="hero-split">
-        <div class="hero-copy">
-          <span class="eyebrow-pill"
-            ><span class="ep-f">open source</span
-            ><span class="ep-s" aria-hidden="true">·</span
-            ><span class="ep-f">Rust</span
-            ><span class="ep-s ep-s2" aria-hidden="true">·</span
-            ><span class="ep-br ep-br2" aria-hidden="true"></span
-            ><span class="ep-f"><a href="adapters.html">13 adapters, 5 nightly-verified</a></span
-            ><span class="ep-s ep-s3" aria-hidden="true">·</span
-            ><span class="ep-br ep-br3" aria-hidden="true"></span
-            ><span class="ep-f">MIT / Apache-2.0</span
-          ></span>
-          <h1 class="hero-title">One agent setup. Every coding CLI.</h1>
-          <p class="hero-lede">AgentStack collects the MCP servers, skills and instructions you already use into one <code>.agentstack/</code> directory, then <strong>serves them live</strong> to your coding CLIs — so the project stays clean. What no live channel can carry, and every tool without MCP, is written into native files instead. Named toolsets switch by project or task, and every change stays understandable and recoverable.</p>
-          <div class="term hero-cmd">
-            <div class="term-row"><span class="pr">$</span><span class="cmd">curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh</span></div>
-            <div class="term-row"><span class="pr">$</span><span class="cmd">agentstack init</span></div>
-          </div>
-          <div class="hero-actions">
-            <a href="tutorial/" class="btn btn-primary btn-lg">Unify my setup</a>
-            <a href="docs.html" class="btn btn-secondary btn-lg">Read the documentation</a>
-          </div>
+    <div class="shell hero-layout">
+      <div>
+        <span class="eyebrow">Standalone · open source · zero-files by default</span>
+        <h1>Your AI coding setup, on every machine.</h1>
+        <p class="lede">Keep your MCP servers, skills and instructions in your own Git repo. AgentStack gives the right setup to Codex, Claude Code, OpenCode and other coding CLIs—<strong>without copying capability files into every project</strong>.</p>
+        <div class="actions"><a class="btn btn-primary btn-lg" href="#first-machine">Set up my first machine</a><a class="btn btn-secondary btn-lg" href="#another-machine">Add another machine</a></div>
+      </div>
+      <div class="proof" role="img" aria-label="A project manifest and personal library supply local and remote machines, which serve coding CLIs">
+        <div class="proof-title">One setup, delivered where the work runs</div>
+        <div class="flow">
+          <div class="flow-box"><b>Project manifest + lock</b><span>Toolsets, policy, exact reviewed pins</span></div>
+          <div class="flow-box"><b>Personal capability library</b><span>Reusable skills and MCP server definitions, synced with your Git remote</span></div>
+          <div class="arrow">↓</div>
+          <div class="machine-row"><div class="flow-box">Laptop</div><div class="flow-box">Desktop</div><div class="flow-box">Remote</div></div>
+          <div class="arrow">↓</div>
+          <div class="flow-box"><b>Codex · Claude Code · OpenCode · more</b><span>Directly, or launched by a supervisor such as stock T3 Code</span></div>
         </div>
-        <figure class="hero-proof">
-          <img src="demos/first-value.svg" alt="Recorded proof: two CLIs with different half-setups — import once, render both native formats, doctor clean, restore byte-for-byte" width="715" height="510">
-          <figcaption>Two half-set-up CLIs → one manifest → served live → files on request → undone. Condensed from a real run of five commands: <code>init</code> is the first of them, not the only one.</figcaption>
-        </figure>
+        <p class="zero-note"><strong>Zero-files:</strong> MCP-capable tools receive servers and skills live. File-only features are rendered automatically into the format their CLI understands.</p>
       </div>
     </div>
   </section>
 
-  <!-- ── The gaps ────────────────────────────────────────────────────────── -->
+  <section class="band" id="how">
+    <div class="shell">
+      <div class="section-head"><span class="eyebrow">The whole model</span><h2>Three layers. That is all you need to remember.</h2><p>The portable parts travel. The sensitive and machine-specific parts stay on the machine that runs the agent.</p></div>
+      <div class="three">
+        <article class="card"><span class="num">01 · PROJECT</span><h3>What this repository needs</h3><p>Toolsets, project policy, capability references and the lockfile. Commit these with the repository.</p><span class="tag">travels with the repo</span></article>
+        <article class="card"><span class="num">02 · PERSONAL LIBRARY</span><h3>What you reuse everywhere</h3><p>Skills, MCP server definitions and personal instructions. Sync this folder through your own Git remote.</p><span class="tag">travels through your Git</span></article>
+        <article class="card"><span class="num">03 · MACHINE</span><h3>What must stay local</h3><p>Secret values, trust decisions, installed CLIs, policy ceilings and audit history. Every machine supplies its own.</p><span class="tag">never synced by AgentStack</span></article>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" id="library">
+    <div class="shell">
+      <div class="section-head"><span class="eyebrow">Your central library</span><h2>A normal Git repo. Every skill and MCP in one place.</h2><p>Use GitHub, GitLab or any Git remote you already trust. AgentStack maintains the folders, index, checksums and provenance—no hosted account or special server required.</p></div>
+      <div class="library-rule"><b>One simple rule</b><span>Commands with <code>--write</code> apply a change. Remove it to preview first.</span></div>
+      <div class="library-steps">
+        <article class="library-step"><div class="library-step-copy"><span class="num">01 · LINK ONCE</span><h3>Choose your repo</h3><p>Make this Git checkout the first place AgentStack reads from and writes new reusable capabilities to.</p></div><div class="terminal"><span class="command"><span class="prompt">$</span>agentstack lib link ~/GitHub/ai-setup --name central --first --write</span></div></article>
+        <article class="library-step"><div class="library-step-copy"><span class="num">02 · ADD</span><h3>Keep what you reuse</h3><p>Add a skill folder or an MCP server definition. AgentStack updates the library index for you.</p></div><div class="terminal"><span class="command"><span class="prompt">$</span>agentstack lib add ./my-skill --write</span><span class="command"><span class="prompt">$</span>agentstack lib add-server my-tools --file ./my-tools.toml --write</span></div></article>
+        <article class="library-step"><div class="library-step-copy"><span class="num">03 · SYNC</span><h3>Send it to your machines</h3><p>Check the Git state, then let AgentStack commit, pull and push the portable library safely.</p></div><div class="terminal"><span class="command"><span class="prompt">$</span>agentstack lib sync --status</span><span class="command"><span class="prompt">$</span>agentstack lib sync</span></div></article>
+      </div>
+      <p class="library-note"><strong>What travels:</strong> skills, MCP definitions, instructions and extensions. <strong>What never travels:</strong> secret values, trust decisions and audit history. Server files use <code>${REF}</code>; each machine supplies its own value.</p>
+    </div>
+  </section>
+
+  <section class="band" id="machines">
+    <div class="shell">
+      <div class="section-head"><span class="eyebrow">Two short journeys</span><h2>Start once. Recreate it anywhere.</h2><p>AgentStack detects the coding CLIs on each machine and connects them to the same portable project contract.</p></div>
+      <div class="journeys">
+        <article class="journey" id="first-machine"><span id="install"></span><div class="journey-copy"><h3>First machine</h3><p>Review and import existing MCP entries. Native skills and app-owned tools stay where they are unless you explicitly adopt them.</p></div><div class="terminal"><span class="command"><span class="prompt">$</span>cargo install --git https://github.com/Tarekkharsa/agentstack --locked agentstack</span><span class="command"><span class="prompt">$</span>agentstack init</span><span class="command"><span class="prompt">$</span>agentstack status</span></div><div class="journey-foot">The wizard shows every write before it happens. Status ends with one next action.</div></article>
+        <article class="journey" id="another-machine"><div class="journey-copy"><h3>Another machine</h3><p>Point AgentStack at the same library repo. This machine then asks only for its own secrets and trust review.</p></div><div class="terminal"><span class="command"><span class="prompt">$</span>agentstack up --library https://github.com/you/ai-setup.git</span><span class="command"><span class="prompt">$</span>agentstack up --library https://github.com/you/ai-setup.git --write</span><span class="command"><span class="prompt">$</span>agentstack status</span></div><div class="journey-foot">Preview, apply, done. Later refreshes are simply <code>agentstack up</code> and <code>agentstack up --write</code>.</div></article>
+      </div>
+    </div>
+  </section>
+
   <section class="band">
     <div class="shell">
-      <div class="section-head">
-        <span class="eyebrow">the gaps it closes</span>
-        <h2>Your tools should share one setup</h2>
-        <p>AgentStack manages the complete lifecycle: import, activate, switch, diagnose, recover and share — with safety built underneath.</p>
-      </div>
-      <div class="grid-gaps">
-        <div class="tile gap-card">
-          <div class="gap-head">
-            <div class="gap-mark gap-mark-a"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-700)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="6" x2="6" y1="3" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg></div>
-            <div class="gap-title">Every CLI spells setup differently</div>
-          </div>
-          <p class="gap-body">Import your existing configuration once. AgentStack then routes it per tool: served live over one gateway where the tool speaks MCP, written in the correct native format where it does not.</p>
-          <div class="gap-foot">
-            <span class="closed-by closed-a">closed by</span>
-            <code>agentstack init</code>
-          </div>
-        </div>
-        <div class="tile gap-card">
-          <div class="gap-head">
-            <div class="gap-mark gap-mark-b"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-2-700)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path></svg></div>
-            <div class="gap-title">Switching tasks pollutes shared files</div>
-          </div>
-          <p class="gap-body">A toolset selects the servers and skills one task needs. Temporary sessions activate it and restore the previous native configuration afterward.</p>
-          <div class="gap-foot">
-            <span class="closed-by closed-b">closed by</span>
-            <code>agentstack session start</code>
-          </div>
-        </div>
-        <div class="tile gap-card">
-          <div class="gap-head">
-            <div class="gap-mark gap-mark-b"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-2-700)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" x2="20" y1="19" y2="19"></line></svg></div>
-            <div class="gap-title">Native configuration drifts</div>
-          </div>
-          <p class="gap-body">Doctor finds the problem, diff shows what would change, adopt keeps an intentional hand edit, and restore undoes a bad write.</p>
-          <div class="gap-foot">
-            <span class="closed-by closed-b">closed by</span>
-            <code>agentstack doctor</code>
-          </div>
-        </div>
-        <div class="tile gap-card">
-          <div class="gap-head">
-            <div class="gap-mark gap-mark-a"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--color-accent-700)" stroke-width="2.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 20h16a2 2 0 0 0 1.73-2z"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg></div>
-            <div class="gap-title">Portable must not mean automatic</div>
-          </div>
-          <p class="gap-body">Unfamiliar repository configuration stays inert until reviewed. Any pinned change re-gates it, and machine policy always remains the ceiling.</p>
-          <div class="gap-foot">
-            <span class="closed-by closed-a">closed by</span>
-            <code>agentstack trust .</code>
-          </div>
-        </div>
+      <div class="section-head"><span class="eyebrow">Daily use</span><h2>Most days, you only need status.</h2><p>A trusted project with one default toolset opens it automatically when an agent connects.</p></div>
+      <div class="daily">
+        <article class="card"><h3>Automatic</h3><p>The trusted default toolset opens live for each agent connection.</p></article>
+        <article class="card"><h3>Understandable</h3><p><code>agentstack status</code> shows what is locked, trusted, live and what to do next.</p></article>
+        <article class="card"><h3>Portable</h3><p>The repository plus your library recreate the same setup on another machine.</p></article>
+        <article class="card"><h3>Recoverable</h3><p><code>agentstack undo</code> reverses recorded writes; uninstall removes managed empty folders too.</p></article>
       </div>
     </div>
   </section>
 
-  <!-- ── The climb ───────────────────────────────────────────────────────── -->
+  <section class="band" id="workflows">
+    <div class="shell compat">
+      <div>
+        <div class="section-head"><span class="eyebrow">Governed workflows</span><h2>Parallel agents, one reviewed plan.</h2><p>Run several narrow reviewers at once, then let an independent verifier challenge their findings. Every child uses an approved toolset and gets its own recorded grant.</p></div>
+        <div class="actions"><a class="btn btn-primary" href="howto/run-a-workflow.html">Try the practical example</a><a class="btn btn-secondary" href="workflows.html">Read the full model</a></div>
+      </div>
+      <div class="terminal"><span class="command"><span class="prompt">$</span>agentstack workflow explain review-diff</span><span class="command"><span class="prompt">$</span>agentstack workflow run review-diff</span><span class="command"><span class="prompt">$</span>agentstack workflow report w-...</span></div>
+    </div>
+  </section>
+
   <section class="band">
-    <div class="shell">
-      <div class="section-head">
-        <span class="eyebrow">the climb</span>
-        <h2 id="climb">Climb in six steps</h2>
-        <p>Each step pays off on its own — nothing later is required to keep the earlier wins.</p>
-      </div>
-      <div class="grid-steps">
-        <div class="step">
-          <div class="step-num step-a">1</div>
-          <div><div class="step-name">Unify</div><div class="step-body">Import once, delivered everywhere.</div></div>
-        </div>
-        <div class="step">
-          <div class="step-num step-b">2</div>
-          <div><div class="step-name">Switch</div><div class="step-body">Toolsets and temporary sessions.</div></div>
-        </div>
-        <div class="step">
-          <div class="step-num step-a">3</div>
-          <div><div class="step-name">Diagnose</div><div class="step-body">Doctor and diff explain drift.</div></div>
-        </div>
-        <div class="step">
-          <div class="step-num step-b">4</div>
-          <div><div class="step-name">Recover</div><div class="step-body">Keep an edit, or undo the write.</div></div>
-        </div>
-        <div class="step">
-          <div class="step-num step-a">5</div>
-          <div><div class="step-name">Share</div><div class="step-body">Locked, secret-free setups.</div></div>
-        </div>
-        <div class="step">
-          <div class="step-num step-b">6</div>
-          <div><div class="step-name">Govern</div><div class="step-body">Trust, policy, confined runs.</div></div>
-        </div>
-      </div>
+    <div class="shell compat">
+      <div><div class="section-head"><span class="eyebrow">Works where you work</span><h2>Standalone first. Supervisor-friendly too.</h2><p>AgentStack does not require T3 Code, a desktop UI or a hosted service. It stays on the machine where the coding CLI runs.</p></div><div class="compat-list"><div class="compat-row"><span class="check">✓</span><span><b>Direct CLI use:</b> Codex, Claude Code, OpenCode and the other supported adapters.</span></div><div class="compat-row"><span class="check">✓</span><span><b>Stock T3 Code:</b> local, T3 Connect and SSH environments use that environment's AgentStack setup.</span></div><div class="compat-row"><span class="check">✓</span><span><b>Other supervisors:</b> ordinary provider launches work without an AgentStack-specific UI.</span></div><div class="compat-row"><span class="check">✓</span><span><b>File-only tools:</b> capabilities that cannot travel live use the compatible rendered lane.</span></div></div></div>
+      <aside class="safety"><h3>Portable, not automatic trust</h3><p>Manifests and locks can travel. Secret values, trust decisions, machine policy and audits do not. An unfamiliar repository stays inert until you review it on that machine.</p><p>AgentStack resolves <code>${REF}</code> secret names locally and never writes their values into a shared manifest or library.</p><a href="enforcement.html">See exactly where enforcement runs →</a></aside>
     </div>
   </section>
 
-  <!-- ── Quick start ─────────────────────────────────────────────────────── -->
-  <section class="band" id="install">
-    <div class="shell">
-      <div class="head-row">
-        <div class="section-head">
-          <span class="eyebrow">quick start</span>
-          <h2>Five minutes to first value</h2>
-          <p>Four commands, then plain files you can open, read and commit. The third is not optional: until the bridge is registered, nothing routed live reaches your tools.</p>
-        </div>
-        <a class="head-aside" href="tutorial/">Prefer guided? Take the tutorial →</a>
-      </div>
-      <div class="start-grid">
-        <div class="start-col">
-          <div class="term term-lg"><div class="term-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="term-title">bash</span></div><div class="term-body">
-            <div class="term-row"><span class="pr">$</span><span class="cmd">curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh</span></div>
-            <div class="term-row"><span class="pr">$</span><span class="cmd">agentstack init</span><span class="cm"># guided wizard: your CLI configs → one manifest</span></div>
-            <div class="term-row"><span class="pr">$</span><span class="cmd">agentstack x gateway connect --all --write</span><span class="cm"># register the bridge, once, so live delivery reaches your CLIs</span></div>
-            <div class="term-row"><span class="pr">$</span><span class="cmd">agentstack status</span><span class="cm"># is it ready — and the one thing that fixes it</span></div>
-          </div></div>
-          <div class="term"><div class="term-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="term-title">your-project/</span></div><div class="term-body"><div class="term-lines"><span class="tl">your-project/</span>
-<span class="tl">├── .agentstack/</span>
-<span class="tl">│   ├── agentstack.toml   <span class="cm"># everything your tools may run: servers, skills, instructions</span></span>
-<span class="tl">│   ├── agentstack.lock   <span class="cm"># the pins — exact commits and content digests</span></span>
-<span class="tl">│   └── .env              <span class="cm"># token values lifted out of your configs (only when init found any)</span></span>
-<span class="tl">└── .gitignore            <span class="cm"># two managed lines: a comment, and /.agentstack/.env</span></span></div></div></div>
-        </div>
-        <div class="start-col">
-          <ul class="checklist">
-            <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12l5 5L20 6"></path></svg><span>Guided wizard: your CLI configs → one manifest.</span></li>
-            <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12l5 5L20 6"></path></svg><span>Status says whether it is ready — and the one thing that fixes it.</span></li>
-            <li><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12l5 5L20 6"></path></svg><span>What it leaves behind is plain files you can open, read and commit.</span></li>
-          </ul>
-          <p class="note"><b>The install line above gives you v0.17.1</b> — that is the current stable release, and what <code>/releases/latest</code> resolves to. <code>agentstack yes</code>, <code>undo</code>, <code>up</code>, <code>share</code> and <code>receive</code> — and every transcript further down this page — are <b>v0.18.0-rc.2</b>, a prerelease <code>curl</code> will not hand you unless you name it: <code>AGENTSTACK_VERSION=v0.18.0-rc.2</code>. <code>agentstack --version</code> says which you have.</p>
-          <p class="note"><code>.agentstack/agentstack.toml</code> records your whole setup — the <a href="concepts.html">manifest</a>. Every CLI-specific file AgentStack writes is rendered from it, and can be regenerated or taken back off at any time. Mostly the system writes it for you — and when you write a skill of your own you don't open it at all: drop the folder under <code>.agentstack/skills/</code>, run <code>agentstack yes</code>, review once, and it is live in every CLI. After an import its <code>[servers]</code> block is empty: the server definitions land in your library and the manifest references them by name. The <code>${GITHUB_TOKEN}</code>-style placeholder lives in that library definition — <code>~/.agentstack/lib/servers/github.toml</code> — and neither file ever holds the token value.</p>
-          <p class="note">That is the run replayed at the top of this page. Reproduce it fenced with <a href="https://github.com/Tarekkharsa/agentstack/blob/main/examples/first-value-demo/run-demo.sh"><code>examples/first-value-demo/run-demo.sh</code></a> — it asserts every step, so the recording stays accurate.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ── The everyday loop ───────────────────────────────────────────────── -->
-  <section class="band" id="everyday">
-    <div class="shell">
-      <div class="section-head">
-        <span class="eyebrow">the everyday loop · one deliberate yes</span>
-        <h2>What using it feels like</h2>
-        <p>Four moments, captured from v0.18.0-rc.2 exactly as it prints them — a capture, not a mockup. Where a transcript is longer than its pane it is cut at a <code>…</code>, and absolute temp paths are shortened to <code>~/your-project</code>; no line is reworded. <b>v0.18.0-rc.2 is a prerelease</b> — the install line above serves v0.17.1, which has none of these commands. Everything is automated except the one thing that never is: your yes.</p>
-      </div>
-      <div class="grid-loop">
-        <div class="loop-pane">
-          <div class="term"><div class="term-body"><div class="term-lines"><span class="tl"><span class="pr">$</span> <span>agentstack yes</span></span>
-<span class="tl"><span>→ 1 dropped file ready to go live in this project:</span></span>
-<span class="tl"><span class="ok">  +</span> <span>skill summarize</span> <span class="out">(./skills/summarize)</span></span>
-<span class="tl"><span class="out">      Summarize a document into a short brief.</span></span>
-<span class="tl"><span class="out">      your own work — untracked in git</span></span>
-<span class="tl"><span class="ok">  ✓ pinned 1 skill + 2 servers</span></span>
-<span class="tl"><span>This will write:</span></span>
-<span class="tl"><span>Claude Code</span></span>
-<span class="tl"><span class="out">  · MCP servers are served live, not written — nothing for `use` to render here</span></span>
-<span class="tl"><span class="ok">  ✓ skills up to date</span></span>
-<span class="tl"><span>Codex CLI</span></span>
-<span class="tl"><span class="out">  · MCP servers are served live, not written — nothing for `use` to render here</span></span>
-<span class="tl"><span class="ok">  ✓ skills up to date</span></span>
-<span class="tl"><span class="out">…</span></span>
-<span class="tl"><span>Make this live? [y/N]</span></span></div></div></div>
-          <p class="loop-note"><b>Write a skill: drop the folder, say yes.</b> No manifest edit — it is pinned, recorded, and live in every CLI. Nothing is written into the project for it: on an MCP-capable tool the skill is served live. The short review is only for what git says is yours — the project is a git repo and the file is untracked. Outside a repo, or for anything that arrived with a clone, <code>yes</code> refuses the short path and sends you through the full staged review. <a href="howto/add-a-skill.html">Add a skill →</a></p>
-        </div>
-        <div class="loop-pane">
-          <div class="term"><div class="term-body"><div class="term-lines"><span class="tl"><span class="pr">$</span> <span>agentstack undo</span></span>
-<span class="tl"><span>recent changes (newest first)</span></span>
-<span class="tl"><span>  1  </span><span class="out">just now  </span><span>init</span><span class="out">  7 files · Claude Code, Codex CLI</span></span>
-<span class="tl"><span>  pick a point: </span><span class="ok">agentstack undo --to &lt;n&gt; --write</span></span></div></div></div>
-          <p class="loop-note"><b>Take it back, from a timeline.</b> Every write is recorded before it lands; pick a point and revert to it. The revert is recorded too — going one step too far is recoverable. <a href="howto/undo.html">Undo anything →</a></p>
-        </div>
-        <div class="loop-pane">
-          <div class="term"><div class="term-body"><div class="term-lines"><span class="tl"><span class="pr">$</span> <span>agentstack guard test "printf 'K=1' &gt; .env"</span></span>
-<span class="tl"><span class="bad">DENY </span> <span>printf 'K=1' &gt; .env</span></span>
-<span class="tl"><span>  blocked: a write to .env was refused — denied by [policy.filesystem] deny rule "!.env" (machine policy — ~/.agentstack/agentstack.toml)</span></span>
-<span class="tl"><span class="out">  nothing was written · edit that [policy.filesystem] rule if this path should be allowed</span></span>
-<span class="tl"><span class="out">…</span></span></div></div></div>
-          <p class="loop-note"><b>The seatbelt speaks plainly.</b> A refusal says what was stopped, why, that nothing happened, and the one safe next step. This one is the machine-policy guard turning down a write to a secret file — cooperative accident protection, wired into every detected CLI as a pre-tool-use hook. Kernel-enforced confinement is a different lane, <code>agentstack run --sandbox</code>; both are mapped on the <a href="enforcement.html">paths where enforcement really runs</a>.</p>
-        </div>
-        <div class="loop-pane">
-          <div class="term"><div class="term-body"><div class="term-lines"><span class="tl"><span class="pr">$</span> <span>agentstack share backend</span></span>
-<span class="tl"><span class="out">signing as  </span><span>728a-16ee-41b1-f18a</span> <span class="ok">✓</span></span>
-<span class="tl"><span class="out">bundle      </span><span>backend.astack</span> <span class="out">(manifest + lock + 1 pinned file)</span></span>
-<span class="tl"><span class="pr">$</span> <span>agentstack receive backend.astack</span></span>
-<span class="tl"><span>Review — a shared bundle</span></span>
-<span class="tl"><span class="out">  signed by 6197-28b5-1e88-ffa5 — a publisher you have not recognized before. …</span></span>
-<span class="tl"><span>  Adds 1 skill file</span></span>
-<span class="tl"><span>  The bundle's manifest and lockfile are used to verify these files, not merged — servers, toolsets, and policy do not cross over</span></span>
-<span class="tl"><span class="out">  staged at ~/your-project/.agentstack/quarantine/c362115b… · nothing is active</span></span></div></div></div>
-          <p class="loop-note"><b>Sharing is signing; receiving is reviewing.</b> Only skill and instruction files cross over. The bundle's manifest and lockfile come along to verify those files, not to be merged — the sender's servers, toolsets and policy stay behind. Nothing a teammate receives activates without their own yes. <a href="howto/team-setup.html">Share a setup →</a></p>
-        </div>
-      </div>
-    </div>
-  </section>
+  <section class="band cta"><div class="shell"><h2>Make this machine the first one.</h2><p>Install AgentStack, run the guided import, and let status tell you the only remaining action.</p><div class="actions" style="justify-content:center"><a class="btn btn-primary btn-lg" href="#first-machine">Show the commands</a><a class="btn btn-secondary btn-lg" href="docs.html">Open the documentation</a></div></div></section>
 </main>
 
-<footer class="band site-foot">
-  <div class="shell foot-inner">
-    <span class="foot-wordmark">agent<span>Stack</span></span>
-    <span class="foot-line">Unify · Switch · Diagnose · Recover · Share · Govern — dual-licensed MIT / Apache-2.0</span>
-    <div class="foot-links">
-      <a href="docs.html">Documentation</a>
-      <a href="examples.html">Demos</a>
-      <a href="tutorial/">Tutorial</a>
-      <a href="https://github.com/Tarekkharsa/agentstack">GitHub</a>
-    </div>
-  </div>
-</footer>
-
-<script>
-/* The nav carries no bottom border until the page has actually moved, so the
-   bar reads as part of the hero at rest and as a separate surface once content
-   slides under it. Border colour only — nothing that could reflow. */
-(function () {
-  var nav = document.querySelector('.site-nav');
-  if (!nav) return;
-  function onScroll() {
-    if (window.scrollY > 12) nav.classList.add('is-scrolled');
-    else nav.classList.remove('is-scrolled');
-  }
-  window.addEventListener('scroll', onScroll, { passive: true });
-  onScroll();
-})();
-</script>
+<footer class="band site-foot"><div class="shell foot-inner"><span class="foot-brand">agent<span>Stack</span></span><span>One portable setup for every coding CLI and machine.</span><div class="foot-links"><a href="docs.html">Docs</a><a href="adapters.html">Adapters</a><a href="https://github.com/Tarekkharsa/agentstack">GitHub</a></div></div></footer>
+<script>(function(){var n=document.querySelector('.site-nav');if(!n)return;function s(){n.classList.toggle('is-scrolled',window.scrollY>12)}window.addEventListener('scroll',s,{passive:true});s()})();</script>
 </body>
 </html>

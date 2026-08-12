@@ -3,233 +3,132 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Docs — agentstack</title>
-<meta name="description" content="All agentstack documentation, organized by what you want to do: configure, protect, run confined, observe, reference.">
+<title>Documentation — agentStack</title>
+<meta name="description" content="A simple guide to AgentStack: one central library, small project manifests, dynamic skills and MCP tools, and the same setup on every machine.">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="canonical" href="https://tarekkharsa.github.io/agentstack/docs.html">
-<meta property="og:title" content="Docs — agentStack">
-<meta property="og:description" content="All agentstack documentation, organized by what you want to do: configure, protect, run confined, observe.">
+<meta property="og:title" content="Documentation — agentStack">
+<meta property="og:description" content="One central library, small project manifests, and the same agent setup everywhere.">
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://tarekkharsa.github.io/agentstack/docs.html">
 <meta property="og:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
-<meta property="og:image:width" content="1200">
-<meta property="og:image:height" content="630">
-<meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Docs — agentStack">
-<meta name="twitter:description" content="All agentstack documentation, organized by what you want to do: configure, protect, run confined, observe.">
-<meta name="twitter:image" content="https://tarekkharsa.github.io/agentstack/og-card.png">
 <script src="theme/theme.js"></script>
 <link rel="stylesheet" href="theme/organic.css">
-<!-- Palette, terminal tokens and the .cb/.term components live in
-     theme/organic.css, linked above — this page adds only what is its own. -->
 <style>
-/* Nav links follow t3code's rule: quiet by default, full foreground on hover.
-   They are styled here rather than inline so the :hover can actually win. */
-.nav-links a{color:var(--color-neutral-600);font-weight:500;font-size:0.9rem;letter-spacing:-0.01em}
-.nav-links a:hover{color:var(--color-text)}
-.nav-links a.btn{font-size:14px}
-.nav-links .here{font-weight:500;font-size:0.9rem;letter-spacing:-0.01em;color:var(--color-text)}
-.themebtn{font-family:var(--font-sans);font-size:0.8rem;font-weight:500;letter-spacing:-0.01em;padding:0.42rem 0.85rem;border-radius:8px;border:1px solid var(--color-divider);background:transparent;color:var(--color-neutral-600);cursor:pointer}
-.themebtn:hover{color:var(--color-text);border-color:var(--color-divider-strong);background:var(--quiet-hover)}
-.doc-toc a{font-weight:500;font-size:0.88rem;letter-spacing:-0.01em;color:var(--color-neutral-600)}
-.doc-toc a:hover{color:var(--color-text)}
-.eyebrow-label{font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:0.12em;text-transform:uppercase;color:var(--color-neutral-600)}
 body{margin:0;background:var(--color-bg);color:var(--color-text);font-family:var(--font-body)}
-@media (max-width:720px){
-  .doc-wrap{flex-direction:column !important;padding-left:var(--space-4) !important;padding-right:var(--space-4) !important}
-  .doc-toc{position:static !important;width:auto !important;flex-direction:row !important;flex-wrap:wrap !important}
-  .doc-grid{grid-template-columns:1fr !important}
-  .nav{flex-wrap:wrap !important}
-  .nav-links{flex-wrap:wrap !important}
-  .table{display:block;overflow-x:auto}
-}
+.nav-links a{color:var(--color-neutral-600);font-weight:500;font-size:.9rem}.nav-links a:hover{color:var(--color-text)}
+.themebtn{font:500 .8rem var(--font-sans);padding:.42rem .85rem;border-radius:8px;border:1px solid var(--color-divider);background:transparent;color:var(--color-neutral-600);cursor:pointer}
+.themebtn:hover{color:var(--color-text);background:var(--quiet-hover)}
+.wrap{max-width:1040px;margin:0 auto;padding:var(--space-8) var(--space-6) calc(var(--space-8)*1.5)}
+.hero{max-width:760px;margin-bottom:var(--space-8)}
+.hero h1{font:500 clamp(2.35rem,6vw,4.25rem)/.98 var(--font-sans);letter-spacing:-.055em;margin:0 0 var(--space-4)}
+.hero p{font-size:1.08rem;line-height:1.7;color:var(--color-neutral-700);max-width:680px}
+.eyebrow{font:500 11px var(--font-mono);letter-spacing:.12em;text-transform:uppercase;color:var(--color-accent)}
+.flow{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-3);margin:var(--space-5) 0 var(--space-8)}
+.flow .card{min-height:150px}.flow strong{display:block;font:600 1.05rem var(--font-sans);margin:8px 0}.flow p{margin:0;color:var(--color-neutral-700);line-height:1.6;font-size:.94rem}
+.arrow{color:var(--color-accent);font-family:var(--font-mono)}
+.section{margin-top:var(--space-8)}
+.section h2{font:500 clamp(1.6rem,3vw,2rem) var(--font-sans);letter-spacing:-.035em;margin:0 0 var(--space-3)}
+.section-lead{color:var(--color-neutral-700);line-height:1.65;max-width:700px;margin-bottom:var(--space-4)}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:var(--space-3)}
+.link-card{display:block;text-decoration:none;color:inherit}.link-card:hover{border-color:var(--color-divider-strong)}
+.link-card h3{font:600 1rem var(--font-sans);margin:0 0 7px}.link-card p{margin:0;color:var(--color-neutral-700);line-height:1.55;font-size:.93rem}
+.cmds{width:100%;border-collapse:collapse}.cmds th,.cmds td{text-align:left;padding:13px 12px;border-bottom:1px solid var(--color-divider);vertical-align:top}.cmds th{font:500 11px var(--font-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--color-neutral-600)}.cmds td{font-size:.94rem;line-height:1.5}.cmds code{white-space:nowrap}
+.term{margin-top:var(--space-4)}
+.term .terminal{display:flex;flex-direction:column;gap:6px;padding:12px 14px}
+.term .command,.term .output{display:block;line-height:1.45}
+.term .output{color:var(--term-muted)}
+@media(max-width:720px){.nav{flex-wrap:wrap}.nav-links{flex-wrap:wrap}.wrap{padding-left:var(--space-4);padding-right:var(--space-4)}.flow,.grid{grid-template-columns:1fr}.cmds{display:block;overflow-x:auto}.hero h1{font-size:2.55rem}}
 </style>
 </head>
 <body>
 <a class="skip-link" href="#main-content">Skip to content</a>
-<div style="min-height:100vh;background:var(--color-bg);color:var(--color-text);font-family:var(--font-body)">
-  <nav class="nav" style="display:flex;align-items:center;gap:var(--space-4)">
-    <a href="index.html" class="nav-brand" style="display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--color-text)">
-      <img src="theme/logo-mark.svg" alt="" style="width:34px;height:34px">
-      <span style="font-family:var(--font-sans);font-weight:650;font-size:1.2rem;letter-spacing:-0.025em">agent<span style="color:var(--color-accent)">Stack</span></span>
-    </a>
-    <div style="flex:1"></div>
-    <div class="nav-links" style="display:flex;align-items:center;gap:var(--space-4)">
-      <span class="here">Documentation</span>
-      <a href="examples.html">Demos</a>
-      <a href="tutorial/">Tutorial</a>
-      <a href="https://github.com/Tarekkharsa/agentstack">GitHub</a>
-      <button class="themebtn" data-theme-toggle onclick="toggleTheme()">Light mode</button>
-    </div>
-  </nav>
-
-  <div class="doc-wrap" style="max-width:1060px;margin:0 auto;padding:var(--space-8) var(--space-6) calc(var(--space-8) * 1.5);display:flex;gap:var(--space-8)">
-    <div class="doc-toc" style="width:200px;flex:none;position:sticky;top:24px;align-self:flex-start;display:flex;flex-direction:column;gap:var(--space-2)">
-      <div class="eyebrow-label" style="margin-bottom:var(--space-1)">On this page</div>
-      <a href="#start">Getting started</a>
-      <a href="#broken">When it breaks</a>
-      <a href="#concepts">Concepts</a>
-      <a href="#commands">Command reference</a>
-      <a href="#howtos">How-tos</a>
-      <a href="#examples">Examples</a>
-      <a href="#choose">Which protection?</a>
-      <a href="#modes">Delivery modes</a>
-      <a href="#undo">Undo</a>
-      <a href="#agent">Agent-operable</a>
-      <a href="#security">Security model</a>
-    </div>
-
-    <div id="main-content" role="main" tabindex="-1" style="flex:1;min-width:0">
-      <h1 style="font-family:var(--font-sans);font-weight:500;font-size:clamp(2.1rem,5vw,2.7rem);line-height:1.05;letter-spacing:-0.035em;margin:0 0 var(--space-3)">Documentation</h1>
-      <p style="font-size:1.05rem;line-height:1.65;color:var(--color-neutral-700);margin:0 0 var(--space-6);max-width:620px">Everything here in reading form; the <a href="tutorial/">tutorial</a> walks the same ground as six steps you can follow at a terminal. The complete inventory lives on the <a href="reference.html">reference page</a> — including the power commands --help keeps hidden as progressive disclosure.</p>
-
-      <h2 id="start" style="font-family:var(--font-sans);font-weight:500;font-size:clamp(1.5rem,3.2vw,1.85rem);line-height:1.1;letter-spacing:-0.035em;margin:0 0 var(--space-3)">Getting started</h2>
-      <p style="font-size:0.98rem;line-height:1.65;color:var(--color-neutral-700);margin:0 0 var(--space-3);max-width:640px">One static binary — install it and <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">agentstack init</code> does the rest. The installer verifies the release tarball against the <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">checksums.txt</code> published with each release; or build from a checkout with <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">cargo build --release --features sandbox</code> (release binaries ship with sandbox support compiled in; a bare cargo build does not) and put it on PATH with <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">agentstack self link</code>.</p>
-      <div class="card elev-sm" style="margin-bottom:var(--space-6)">
-        <div style="display:flex;flex-direction:column;gap:var(--space-3)">
-          <div style="display:flex;gap:var(--space-3);align-items:baseline"><span class="tag tag-accent">1</span><div><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">agentstack init</code> — scans your machine for the CLIs you use, imports their MCP servers, and writes one reviewed manifest at <code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">.agentstack/agentstack.toml</code>. Inline tokens are lifted to <code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">${REF}</code> placeholders.</div></div>
-          <div style="display:flex;gap:var(--space-3);align-items:baseline"><span class="tag tag-accent">2</span><div><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">agentstack apply --write</code> — renders the manifest back into every CLI's native config. Edit once, applied everywhere.</div></div>
-          <div style="display:flex;gap:var(--space-3);align-items:baseline"><span class="tag tag-accent">3</span><div><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">agentstack status</code> — one screen: what is here, whether it is ready, and the one next step if it is not.</div></div>
-          <div style="display:flex;gap:var(--space-3);align-items:baseline"><span class="tag tag-accent">4</span><div><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">agentstack doctor</code> — the deep check behind that screen: adapters, secrets, drift, skills, supply chain; every warning names its exact fix. Undo any recorded write with <code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">undo</code> (<code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">restore --last --write</code> is the script form, and the only one on releases before v0.18.0).</div></div>
-          <div style="display:flex;gap:var(--space-3);align-items:baseline"><span class="tag tag-accent">5</span><div><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">agentstack yes</code> — a skill you write yourself needs no manifest edit at all: drop the folder under <code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px">.agentstack/skills/</code>, and one review card takes it live in every CLI (v0.18.0+).</div></div>
-        </div>
-      </div>
-
-      <h2 id="broken" style="font-family:var(--font-sans);font-weight:500;font-size:clamp(1.5rem,3.2vw,1.85rem);line-height:1.1;letter-spacing:-0.035em;margin:0 0 var(--space-3)">When something breaks</h2>
-      <p style="font-size:0.98rem;line-height:1.65;color:var(--color-neutral-700);margin:0 0 var(--space-3);max-width:640px">Paste the line your terminal printed into the <a href="troubleshooting.html">troubleshooting page</a> — every message there is quoted from the binary and followed by the exact command that fixes it. For the questions that come before an error, there is a short <a href="faq.html">FAQ</a>.</p>
-      <div class="doc-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3);margin-bottom:var(--space-6)">
-        <div class="card elev-sm"><div class="card-kicker">troubleshooting</div><div class="card-title" style="font-size:1rem;font-family:var(--font-sans);font-weight:600"><a href="troubleshooting.html" style="color:inherit">Search for your error text</a></div><div class="card-body" style="font-size:0.95rem;line-height:1.6">My CLI doesn't see the servers · a secret won't resolve · it says my files drifted · it refuses because the project isn't trusted · I want to undo something · a server won't start.</div></div>
-        <div class="card elev-sm"><div class="card-kicker">faq</div><div class="card-title" style="font-size:1rem;font-family:var(--font-sans);font-weight:600"><a href="faq.html" style="color:inherit">Frequently asked</a></div><div class="card-body" style="font-size:0.95rem;line-height:1.6">Will this overwrite my existing configs? Is my API key in the manifest? Do I have to commit it? Can my teammate use a different CLI? Do I need Docker? What happens if I uninstall?</div></div>
-      </div>
-
-      <h2 id="concepts" style="font-family:var(--font-sans);font-weight:500;font-size:clamp(1.5rem,3.2vw,1.85rem);line-height:1.1;letter-spacing:-0.035em;margin:0 0 var(--space-3)">Concepts</h2>
-      <div class="doc-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3);margin-bottom:var(--space-6)">
-        <div class="card"><div class="card-title" style="font-size:1rem;font-family:var(--font-sans);font-weight:600">manifest</div><div class="card-body" style="font-size:0.95rem;line-height:1.6">One file — .agentstack/agentstack.toml — listing everything your tools may run: MCP servers, skills, instructions, settings, hooks. It only ever holds ${REF} secret placeholders, never real values.</div></div>
-        <div class="card"><div class="card-title" style="font-size:1rem;font-family:var(--font-sans);font-weight:600">lockfile</div><div class="card-body" style="font-size:0.95rem;line-height:1.6">agentstack.lock pins the manifest's resolved contents to SHA-256 digests. Same inputs reproduce; any change is visible. Part of what you consent to when you trust a project.</div></div>
-        <div class="card"><div class="card-title" style="font-size:1rem;font-family:var(--font-sans);font-weight:600">adapter</div><div class="card-body" style="font-size:0.95rem;line-height:1.6">The per-CLI compiler: one YAML descriptor per CLI, embedded in the binary, turning the manifest into native config. Thirteen today: Claude Code, Claude Desktop, Codex, Cursor, Windsurf, Gemini CLI, VS Code, Copilot CLI, OpenCode, Antigravity, Junie, Kiro, Pi — at three levels of verification, listed in the <a href="adapters.html">adapter support matrix</a>.</div></div>
-        <div class="card"><div class="card-title" style="font-size:1rem;font-family:var(--font-sans);font-weight:600">gateway</div><div class="card-body" style="font-size:0.95rem;line-height:1.6">The in-process broker. Calls route through it instead of straight to MCP servers, so policy is checked and every call is logged. Only brokered calls are policy-checked and audited.</div></div>
-        <div class="card"><div class="card-title" style="font-size:1rem;font-family:var(--font-sans);font-weight:600">trust</div><div class="card-body" style="font-size:0.95rem;line-height:1.6">Your approval that a project may auto-load on this machine, pinned to a consent digest. Until you trust, a clone is inert. Change any pinned byte and it drops back to untrusted.</div></div>
-        <div class="card"><div class="card-title" style="font-size:1rem;font-family:var(--font-sans);font-weight:600">policy</div><div class="card-body" style="font-size:0.95rem;line-height:1.6">Rules fencing tools, egress, secrets and filesystem paths. Effective policy = machine ∩ project — a repo can only narrow your rules, never loosen them.</div></div>
-        <div class="card"><div class="card-title" style="font-size:1rem;font-family:var(--font-sans);font-weight:600">toolset</div><div class="card-body" style="font-size:0.95rem;line-height:1.6">A named subset of the manifest ("backend", "design") activated together with use &lt;toolset&gt;. A manifest with no toolsets activates its whole inline set.</div></div>
-        <div class="card"><div class="card-title" style="font-size:1rem;font-family:var(--font-sans);font-weight:600">posture</div><div class="card-body" style="font-size:0.95rem;line-height:1.6">The per-run label on the run banner — HOST/ADVISORY, HOST/PROTECTED, SANDBOX/PROXIED or LOCKDOWN/ENFORCED — what the effective policy is actually enforced by.</div></div>
-      </div>
-
-      <h2 id="commands" style="font-family:var(--font-sans);font-weight:500;font-size:clamp(1.5rem,3.2vw,1.85rem);line-height:1.1;letter-spacing:-0.035em;margin:0 0 var(--space-3)">Command reference</h2>
-      <table class="table" style="width:100%;margin-bottom:var(--space-6)">
-        <thead><tr><th style="text-align:left">Command</th><th style="text-align:left">What it does</th></tr></thead>
-        <tbody>
-          <tr><td style="white-space:nowrap"><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px;font-size:0.88rem">init</code></td><td style="font-size:0.95rem;line-height:1.5">Scan CLIs, write one reviewed manifest; lift inline tokens to ${REF}s.</td></tr>
-          <tr><td style="white-space:nowrap"><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px;font-size:0.88rem">apply --write</code></td><td style="font-size:0.95rem;line-height:1.5">Render the manifest into every CLI's native config.</td></tr>
-          <tr><td style="white-space:nowrap"><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px;font-size:0.88rem">status / doctor</code></td><td style="font-size:0.95rem;line-height:1.5">Health + drift; every warning names its exact fix.</td></tr>
-          <tr><td style="white-space:nowrap"><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px;font-size:0.88rem">diff → adopt | apply</code></td><td style="font-size:0.95rem;line-height:1.5">Review drift, then keep the hand-edit or keep the manifest.</td></tr>
-          <tr><td style="white-space:nowrap"><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px;font-size:0.88rem">guard install</code></td><td style="font-size:0.95rem;line-height:1.5">Block rm -rf, git reset --hard and .env reads before they run.</td></tr>
-          <tr><td style="white-space:nowrap"><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px;font-size:0.88rem">gateway connect --all --write</code></td><td style="font-size:0.95rem;line-height:1.5">Register the gateway once per CLI.</td></tr>
-          <tr><td style="white-space:nowrap"><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px;font-size:0.88rem">trust . / --list / --revoke</code></td><td style="font-size:0.95rem;line-height:1.5">Review a repo and pin its digest; any edit re-gates it.</td></tr>
-          <tr><td style="white-space:nowrap"><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px;font-size:0.88rem">search / add from &lt;id&gt;</code></td><td style="font-size:0.95rem;line-height:1.5">Search library + catalog + MCP Registry; add to all CLIs at once.</td></tr>
-          <tr><td style="white-space:nowrap"><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px;font-size:0.88rem">use &lt;toolset&gt; --write</code></td><td style="font-size:0.95rem;line-height:1.5">Materialize one named subset of the manifest.</td></tr>
-          <tr><td style="white-space:nowrap"><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px;font-size:0.88rem">run --locked | --sandbox | --lockdown</code></td><td style="font-size:0.95rem;line-height:1.5">Climb the posture ladder up to kernel-enforced egress.</td></tr>
-          <tr><td style="white-space:nowrap"><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px;font-size:0.88rem">report runs | calls · optimize · explain</code></td><td style="font-size:0.95rem;line-height:1.5">Flight recorder, audit log, evidence-backed fixes, vet-first.</td></tr>
-          <tr><td style="white-space:nowrap"><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px;font-size:0.88rem">yes</code></td><td style="font-size:0.95rem;line-height:1.5">Review the files you dropped into the project and take them live — one step (v0.18.0+).</td></tr>
-          <tr><td style="white-space:nowrap"><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px;font-size:0.88rem">undo</code></td><td style="font-size:0.95rem;line-height:1.5">Timeline of recorded changes, newest first — pick a point, revert to it (v0.18.0+).</td></tr>
-          <tr><td style="white-space:nowrap"><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px;font-size:0.88rem">share / receive</code></td><td style="font-size:0.95rem;line-height:1.5">Signed setup bundle out; staged, carded review in (v0.18.0+).</td></tr>
-          <tr><td style="white-space:nowrap"><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px;font-size:0.88rem">restore --last --write</code></td><td style="font-size:0.95rem;line-height:1.5">Script-form undo of the newest recorded write.</td></tr>
-        </tbody>
-      </table>
-
-      <h2 id="howtos" style="font-family:var(--font-sans);font-weight:500;font-size:clamp(1.5rem,3.2vw,1.85rem);line-height:1.1;letter-spacing:-0.035em;margin:0 0 var(--space-3)">How-tos</h2>
-      <div class="doc-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3);margin-bottom:var(--space-6)">
-        <div class="card elev-sm"><div class="card-kicker">trust</div><div class="card-title" style="font-size:1rem;font-family:var(--font-sans);font-weight:600">Trust a cloned repo</div><div class="card-body" style="font-size:0.95rem;line-height:1.6">Clone, open — it's inert. Run agentstack trust . to review exactly what it declares (servers, contacts, secrets, skills), then approve. A later git pull that changes pinned bytes drops it back to inert.</div></div>
-        <div class="card elev-sm"><div class="card-kicker">servers</div><div class="card-title" style="font-size:1rem;font-family:var(--font-sans);font-weight:600">Add an MCP server</div><div class="card-body" style="font-size:0.95rem;line-height:1.6">agentstack search &lt;name&gt; looks across your library, the bundled catalog and the official MCP Registry; add from &lt;id&gt; lifts its secrets and renders it to every CLI at once.</div></div>
-        <div class="card elev-sm"><div class="card-kicker">skills</div><div class="card-title" style="font-size:1rem;font-family:var(--font-sans);font-weight:600">Add a skill</div><div class="card-body" style="font-size:0.95rem;line-height:1.6">add skill owner/repo installs from any repo, pinned in the lockfile. Try one first without writing anything: agentstack try &lt;skill&gt;.</div></div>
-        <div class="card elev-sm"><div class="card-kicker">audit</div><div class="card-title" style="font-size:1rem;font-family:var(--font-sans);font-weight:600">See what happened</div><div class="card-body" style="font-size:0.95rem;line-height:1.6">report run &lt;id&gt; replays a run's flight recording; report calls shows the global audit log (argument digests only, never values); optimize turns those signals into evidence-backed fixes.</div></div>
-        <div class="card elev-sm"><div class="card-kicker">team</div><div class="card-title" style="font-size:1rem;font-family:var(--font-sans);font-weight:600">Share one setup with your team</div><div class="card-body" style="font-size:0.95rem;line-height:1.6">Commit .agentstack/ (manifest + lockfile) — intent, never credentials. Each teammate runs secret set for their own values, then apply --write. Or hand it over directly: share makes a signed bundle and receive stages + reviews it (v0.18.0+); the detached-signature primitives (sign / verify --pubkey) remain.</div></div>
-        <div class="card elev-sm"><div class="card-kicker">migrate</div><div class="card-title" style="font-size:1rem;font-family:var(--font-sans);font-weight:600"><a href="migrations.html" style="color:inherit">Bring an existing setup</a></div><div class="card-body" style="font-size:0.95rem;line-height:1.6">Step-by-step recipes for Claude + Codex, Cursor + Gemini, dotfiles, a team without shared secrets, and removing AgentStack completely.</div></div>
-        <div class="card elev-sm"><div class="card-kicker">lockdown</div><div class="card-title" style="font-size:1rem;font-family:var(--font-sans);font-weight:600">Lock down a run</div><div class="card-body" style="font-size:0.95rem;line-height:1.6">Preview with --plan (walks every gate, launches nothing). Then climb: --locked (no Docker, frozen surface) → --sandbox (container + proxied egress, direct route still open) → --sandbox --lockdown (internal-only network, sole peer the egress sidecar).</div></div>
-        <div class="card elev-sm"><div class="card-kicker">undo</div><div class="card-title" style="font-size:1rem;font-family:var(--font-sans);font-weight:600">Undo anything</div><div class="card-body" style="font-size:0.95rem;line-height:1.6">undo shows your recent changes newest-first and reverts to the point you pick (v0.18.0+); restore --last --write is the script form. Non-write actions have their own verb — see the Undo section below.</div></div>
-      </div>
-
-      <h2 id="examples" style="font-family:var(--font-sans);font-weight:500;font-size:clamp(1.5rem,3.2vw,1.85rem);line-height:1.1;letter-spacing:-0.035em;margin:0 0 var(--space-3)">Examples — two different kinds</h2>
-      <div class="doc-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3);margin-bottom:var(--space-6)">
-        <div class="card elev-sm">
-          <div class="card-kicker">how to use the CLI</div>
-          <div class="card-title" style="font-size:1rem;font-family:var(--font-sans);font-weight:600">How-tos — one job per page</div>
-          <div class="card-body" style="font-size:0.92rem;line-height:1.6;margin-bottom:var(--space-2)">Trust a cloned repo, add a server or a skill, name a toolset, lock down a run, undo anything — each one a journey end to end. Every flag and subcommand is in the <a href="reference.html">command reference</a>.</div>
-          <a href="#howtos" class="btn btn-primary">Browse the how-tos →</a>
-        </div>
-        <div class="card elev-sm">
-          <div class="card-kicker">the problems it fixes</div>
-          <div class="card-title" style="font-size:1rem;font-family:var(--font-sans);font-weight:600">Demos — runnable proofs</div>
-          <div class="card-body" style="font-size:0.92rem;line-height:1.6;margin-bottom:var(--space-2)">Exfiltration, destructive commands, drift — each demo shows the threat, then proves the fix holds: isolated temp HOME, PASS/FAIL per claim, interactive walkthroughs.</div>
-          <a href="examples.html" class="btn btn-secondary">Watch the Demos →</a>
-        </div>
-      </div>
-
-      <h2 id="choose" style="font-family:var(--font-sans);font-weight:500;font-size:clamp(1.5rem,3.2vw,1.85rem);line-height:1.1;letter-spacing:-0.035em;margin:0 0 var(--space-3)">Which protection do I need?</h2>
-      <p style="font-size:0.98rem;line-height:1.65;color:var(--color-neutral-700);margin:0 0 var(--space-4);max-width:640px">Two decisions: how much protection, and where rendered files live. Find the row that sounds like you — the rows stack, so most people combine several. Preview any run first with <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">--plan</code>: it walks every gate, launches nothing, needs no Docker.</p>
-      <table class="table" style="width:100%;margin-bottom:var(--space-6)">
-        <thead><tr><th style="text-align:left">You are…</th><th style="text-align:left">Run</th><th style="text-align:left">What it actually does</th></tr></thead>
-        <tbody>
-          <tr><td style="font-size:0.92rem;line-height:1.5">just syncing config across your CLIs</td><td style="white-space:nowrap"><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px;font-size:0.85rem">init → apply --write</code></td><td style="font-size:0.92rem;line-height:1.5">Copies your reviewed config into each CLI. No runtime check — nothing is blocked once an agent is running.</td></tr>
-          <tr><td style="font-size:0.92rem;line-height:1.5">worried about rm -rf or .env accidents</td><td style="white-space:nowrap"><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px;font-size:0.85rem">guard install</code></td><td style="font-size:0.92rem;line-height:1.5">Cooperative: catches an agent's accidents through each CLI's own hook. Not a determined attacker.</td></tr>
-          <tr><td style="font-size:0.92rem;line-height:1.5">cloning repos you didn't write</td><td style="white-space:nowrap"><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px;font-size:0.85rem">gateway connect → trust .</code></td><td style="font-size:0.92rem;line-height:1.5">A repo's servers, skills and secrets stay inert until you trust it. Trust gates loading — it does not sandbox the code.</td></tr>
-          <tr><td style="font-size:0.92rem;line-height:1.5">launching a frozen, verified surface — no Docker</td><td style="white-space:nowrap"><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px;font-size:0.85rem">run &lt;cli&gt; --locked</code></td><td style="font-size:0.92rem;line-height:1.5">Fail-closed trust and pin checks before launch, then a frozen surface. HOST / PROTECTED — the agent still runs as you.</td></tr>
-          <tr><td style="font-size:0.92rem;line-height:1.5">running sensitive work that must not leak</td><td style="white-space:nowrap"><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px;font-size:0.85rem">run --sandbox --lockdown</code></td><td style="font-size:0.92rem;line-height:1.5">Container on an internal-only network whose sole peer is the egress sidecar. LOCKDOWN / ENFORCED · NO DIRECT ROUTE. Needs Docker.</td></tr>
-        </tbody>
-      </table>
-
-      <h2 id="modes" style="font-family:var(--font-sans);font-weight:500;font-size:clamp(1.5rem,3.2vw,1.85rem);line-height:1.1;letter-spacing:-0.035em;margin:0 0 var(--space-3)">Delivery modes — where rendered files live</h2>
-      <p style="font-size:0.98rem;line-height:1.65;color:var(--color-neutral-700);margin:0 0 var(--space-4);max-width:640px">You always commit the <em>intent</em> (agentstack.toml + agentstack.lock). Where the rendered artifacts — .mcp.json, .claude/skills/, the compiled CLAUDE.md / AGENTS.md — live is a per-project choice, presented as an arrow-key pick during interactive init:</p>
-      <div class="doc-grid" style="display:grid;grid-template-columns:repeat(3,1fr);gap:var(--space-3);margin-bottom:var(--space-6)">
-        <div class="card elev-sm"><div class="card-kicker">default</div><div class="card-title" style="font-size:1rem;font-family:var(--font-sans);font-weight:600">static</div><div class="card-body" style="font-size:0.92rem;line-height:1.6">Artifacts on disk, kept out of git by a managed .gitignore block that tracks only files agentstack actually wrote. Pass --no-gitignore to commit them instead.</div></div>
-        <div class="card elev-sm"><div class="card-kicker">quiet trees</div><div class="card-title" style="font-size:1rem;font-family:var(--font-sans);font-weight:600">clean-at-rest</div><div class="card-body" style="font-size:0.92rem;line-height:1.6">agentstack lock --write pins name refs without rendering, so git status stays silent. A toolset arrives via session start / run and reverts on exit.</div></div>
-        <div class="card elev-sm"><div class="card-kicker">nothing rendered</div><div class="card-title" style="font-size:1rem;font-family:var(--font-sans);font-weight:600">zero-files</div><div class="card-body" style="font-size:0.92rem;line-height:1.6">gateway connect registers the gateway once per CLI; every trusted repo serves its own stack live. A lease fences one MCP connection to a toolset with no cleanup contract.</div></div>
-      </div>
-      <p style="font-size:0.95rem;line-height:1.6;color:var(--color-neutral-700);margin:0 0 var(--space-6);max-width:640px"><strong>Which one:</strong> <em>static</em> is the default, and the right answer whenever a CLI must read native skill or instruction files from disk — which is most of them, most of the time. <em>clean-at-rest</em> suits a repo whose git status you want silent between sessions. <em>zero-files</em> is available when the CLI speaks MCP and you juggle many repos, and it trades files on disk for a live gateway rather than removing a step. A lease is a capability fence, not a sandbox — add <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">--sandbox --lockdown</code> when the agent process itself needs isolation.</p>
-
-      <h2 id="agent" style="font-family:var(--font-sans);font-weight:500;font-size:clamp(1.5rem,3.2vw,1.85rem);line-height:1.1;letter-spacing:-0.035em;margin:0 0 var(--space-3)">Agent-operable — agentstack as an MCP server</h2>
-      <p style="font-size:0.98rem;line-height:1.65;color:var(--color-neutral-700);margin:0 0 var(--space-4);max-width:640px">AgentStack itself runs as an MCP server over stdio (<code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">agentstack mcp</code>), so the agent can discover and <em>propose</em> capabilities — proposals write the manifest only, with commit-safe ${REF}s; nothing executes until a human runs apply. Register once per CLI with <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">gateway connect --all --write</code>.</p>
-      <div class="doc-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-3);margin-bottom:var(--space-6)">
-        <div class="card"><div class="card-title" style="font-size:1rem;font-family:var(--font-sans);font-weight:600">Discover & vet</div><div class="card-body" style="font-size:0.92rem;line-height:1.6">agentstack_search finds capabilities across catalog and library; agentstack_explain, _doctor and _diff let the agent inspect state before relying on it.</div></div>
-        <div class="card"><div class="card-title" style="font-size:1rem;font-family:var(--font-sans);font-weight:600">Propose, never apply</div><div class="card-body" style="font-size:0.92rem;line-height:1.6">agentstack_add_from, _add_server, _add_skill and _create_profile write the manifest only — the agent proposes, a human reviews and runs apply.</div></div>
-        <div class="card"><div class="card-title" style="font-size:1rem;font-family:var(--font-sans);font-weight:600">Compact tool surface</div><div class="card-body" style="font-size:0.92rem;line-height:1.6">Upstream tools collapse behind tools_search instead of flooding tools/list, so tool context stays bounded however many servers you add. --transparent instead exposes every policy-filtered tool as server__tool for any standard MCP client.</div></div>
-        <div class="card"><div class="card-title" style="font-size:1rem;font-family:var(--font-sans);font-weight:600">Leases & code mode</div><div class="card-body" style="font-size:0.92rem;line-height:1.6">agentstack_lease_open fences one connection to a toolset (zero-files counterpart of a session). tools_bindings hands the agent a typed, secret-free TypeScript client so one small program can call several upstream tools — real calls brokered over a loopback, token-gated endpoint.</div></div>
-      </div>
-
-      <h2 id="undo" style="font-family:var(--font-sans);font-weight:500;font-size:clamp(1.5rem,3.2vw,1.85rem);line-height:1.1;letter-spacing:-0.035em;margin:0 0 var(--space-3)">Undo anything</h2>
-      <p style="font-size:0.98rem;line-height:1.65;color:var(--color-neutral-700);margin:0 0 var(--space-4);max-width:640px"><code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">undo</code> (v0.18.0+) and <code style="background:var(--color-neutral-100);border-radius:999px;padding:2px 10px">restore</code> are two faces of one record — every write is recorded before it lands; undo is the timeline, restore the script form. Five other actions have their own verb because they are not file writes:</p>
-      <table class="table" style="width:100%;margin-bottom:var(--space-6)">
-        <thead><tr><th style="text-align:left">To undo…</th><th style="text-align:left">Run</th></tr></thead>
-        <tbody>
-          <tr><td style="font-size:0.92rem;line-height:1.5">a recorded write (apply / use / session / settings / hooks)</td><td style="white-space:nowrap"><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px;font-size:0.85rem">restore &lt;id&gt; --write</code></td></tr>
-          <tr><td style="font-size:0.92rem;line-height:1.5">a gateway registration</td><td style="white-space:nowrap"><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px;font-size:0.85rem">gateway disconnect &lt;cli&gt; --write</code></td></tr>
-          <tr><td style="font-size:0.92rem;line-height:1.5">the destructive-command guard</td><td style="white-space:nowrap"><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px;font-size:0.85rem">guard uninstall</code></td></tr>
-          <tr><td style="font-size:0.92rem;line-height:1.5">trust for a repo</td><td style="white-space:nowrap"><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px;font-size:0.85rem">trust --revoke</code></td></tr>
-          <tr><td style="font-size:0.92rem;line-height:1.5">an active session</td><td style="white-space:nowrap"><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px;font-size:0.85rem">session end</code></td></tr>
-          <tr><td style="font-size:0.92rem;line-height:1.5">a server or skill in the manifest</td><td style="white-space:nowrap"><code style="background:var(--color-neutral-100);border-radius:999px;padding:3px 12px;font-size:0.85rem">remove &lt;name&gt; --write</code></td></tr>
-        </tbody>
-      </table>
-      <p style="font-size:0.92rem;line-height:1.6;color:var(--color-neutral-700);margin:0 0 var(--space-6);max-width:640px"><strong>Limit:</strong> restore reverts agentstack's own recorded config writes, not side effects a tool already had — a file a server deleted is not brought back.</p>
-
-      <h2 id="security" style="font-family:var(--font-sans);font-weight:500;font-size:clamp(1.5rem,3.2vw,1.85rem);line-height:1.1;letter-spacing:-0.035em;margin:0 0 var(--space-3)">Security model — the honest version</h2>
-      <div style="display:flex;flex-direction:column;gap:var(--space-3)">
-        <div class="card" style="background:var(--color-accent-100)"><div class="card-title" style="font-size:1rem;font-family:var(--font-sans);font-weight:600">Trust is consent, not a safety claim</div><div class="card-body" style="font-size:0.95rem;line-height:1.6">Trust pins a SHA-256 consent digest of manifest + overlay + lockfile and gates whether declared servers may load. It does not vouch the code is safe and does not confine a running server — vet a capability first with <code>agentstack explain &lt;name&gt;</code>.</div></div>
-        <div class="card" style="background:var(--color-accent-100)"><div class="card-title" style="font-size:1rem;font-family:var(--font-sans);font-weight:600">Guard is cooperative</div><div class="card-body" style="font-size:0.95rem;line-height:1.6">Hooks catch an agent's accidents, not a determined attacker. A CLI that ignores its own hooks bypasses guard entirely — kernel-level confinement is what <code>run --lockdown</code> is for.</div></div>
-        <div class="card" style="background:var(--color-accent-100)"><div class="card-title" style="font-size:1rem;font-family:var(--font-sans);font-weight:600">Even lockdown has bounds</div><div class="card-body" style="font-size:0.95rem;line-height:1.6">Egress rules bound where data can go; they cannot read intent. Traffic to a host you approved — including the model API — is still allowed. Postures from weakest to strongest: HOST/ADVISORY → HOST/PROTECTED → SANDBOX/PROXIED → LOCKDOWN/ENFORCED.</div></div>
-      </div>
-    </div>
+<nav class="nav" style="display:flex;align-items:center;gap:var(--space-4)">
+  <a href="index.html" class="nav-brand" style="display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--color-text)">
+    <img src="theme/logo-mark.svg" alt="" style="width:34px;height:34px">
+    <span style="font:650 1.2rem var(--font-sans);letter-spacing:-.025em">agent<span style="color:var(--color-accent)">Stack</span></span>
+  </a>
+  <div style="flex:1"></div>
+  <div class="nav-links" style="display:flex;align-items:center;gap:var(--space-4)">
+    <a href="start.html">Get started</a><a href="library.html">Central library</a><a href="reference.html">Reference</a><a href="https://github.com/Tarekkharsa/agentstack">GitHub</a>
+    <button class="themebtn" data-theme-toggle onclick="toggleTheme()">Light mode</button>
   </div>
+</nav>
 
-  <div style="border-top:1px solid var(--color-neutral-200)">
-    <div style="max-width:1060px;margin:0 auto;padding:var(--space-6);display:flex;gap:var(--space-4);align-items:center;flex-wrap:wrap">
-      <span style="font-family:var(--font-sans);font-weight:650;letter-spacing:-0.025em">agent<span style="color:var(--color-accent)">Stack</span></span>
-      <div style="flex:1"></div>
-      <a href="enforcement.html" style="font-size:0.92rem">Enforcement matrix</a>
-      <a href="architecture.html" style="font-size:0.92rem">Architecture</a>
-      <a href="index.html" style="font-size:0.92rem">Home</a>
-      <a href="tutorial/" style="font-size:0.92rem">Tutorial</a>
-      <a href="https://github.com/Tarekkharsa/agentstack" style="font-size:0.92rem">GitHub</a>
+<main id="main-content" class="wrap" tabindex="-1">
+  <section class="hero">
+    <span class="eyebrow">Documentation</span>
+    <h1>One setup.<br>Every agent.</h1>
+    <p>Keep reusable capabilities in your own Git library. Let each project select a small toolset. AgentStack pins it, reviews it, and serves it to every supported CLI without copying MCP and skill files everywhere.</p>
+    <div class="term"><div class="terminal"><span class="command"><span class="prompt">$</span>agentstack status</span><span class="output">ready: reviewed, locked, and available to every connected CLI</span></div></div>
+  </section>
+
+  <section>
+    <span class="eyebrow">The whole model</span>
+    <div class="flow">
+      <div class="card"><span class="arrow">01</span><strong>Your central library</strong><p>A normal Git repo with skills, MCP servers, and instructions for all projects and machines.</p></div>
+      <div class="card"><span class="arrow">02</span><strong>Each project</strong><p>A readable manifest selects names. Its lock freezes the exact resolved content.</p></div>
+      <div class="card"><span class="arrow">03</span><strong>Each agent</strong><p>The trusted default opens automatically. Skills and MCP tools load only when needed.</p></div>
     </div>
-  </div>
-</div>
+  </section>
+
+  <section class="section" id="howtos">
+    <h2>Start here</h2>
+    <p class="section-lead">These four pages explain the product from practical setup to the important details. You do not need the large reference to begin.</p>
+    <div class="grid">
+      <a class="card link-card" href="start.html"><h3>Get started →</h3><p>First machine, project files, lock and trust, dynamic loading, and another machine.</p></a>
+      <a class="card link-card" href="library.html"><h3>Central library →</h3><p>Folder structure, several linked libraries, precedence, instructions, and syncing.</p></a>
+      <a class="card link-card" href="tutorial/"><h3>Practical tutorial →</h3><p>Build one library, use it in two projects, then bootstrap another machine.</p></a>
+      <a class="card link-card" href="concepts.html"><h3>Concepts →</h3><p>The three layers, zero-files delivery, dynamic skills, tool discovery, trust, and policy.</p></a>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>Most-used commands</h2>
+    <table class="cmds">
+      <thead><tr><th>Command</th><th>Why you run it</th></tr></thead>
+      <tbody>
+        <tr><td><code>agentstack status</code></td><td>See whether this project is ready and get one next action.</td></tr>
+        <tr><td><code>agentstack lib sources</code></td><td>See all central-library sources, their order, and collisions.</td></tr>
+        <tr><td><code>agentstack lock</code></td><td>Preview the exact library content a project would accept.</td></tr>
+        <tr><td><code>agentstack trust .</code></td><td>Human review after the manifest or lock changes.</td></tr>
+        <tr><td><code>agentstack up</code></td><td>Preview syncing the library and reconciling this machine.</td></tr>
+        <tr><td><code>agentstack doctor</code></td><td>Run the deep check only when status points to a problem.</td></tr>
+        <tr><td><code>agentstack undo</code></td><td>Review and reverse AgentStack-managed writes.</td></tr>
+      </tbody>
+    </table>
+  </section>
+
+  <section class="section">
+    <h2>Common questions</h2>
+    <div class="grid">
+      <a class="card link-card" href="faq.html#what-does-the-lock-mean"><h3>What does the lock mean?</h3><p>It pins the exact library bytes and prevents silent project updates.</p></a>
+      <a class="card link-card" href="faq.html#how-does-the-agent-see-my-skills-if-they-are-not-copied-into-the-repo"><h3>How does the agent see skills?</h3><p>Names and descriptions first; one full body only when the task matches.</p></a>
+      <a class="card link-card" href="faq.html#can-i-link-my-github-library-and-keep-my-old-local-library"><h3>Can I use several libraries?</h3><p>Yes. They form one ordered view, and collisions are explicit.</p></a>
+      <a class="card link-card" href="faq.html#how-do-cli--and-model-specific-instructions-work"><h3>CLI and model instructions?</h3><p>Use reusable variants with deterministic, most-specific selection.</p></a>
+    </div>
+  </section>
+
+  <section class="section">
+    <h2>Task guides</h2>
+    <div class="grid">
+      <a class="card link-card" href="howto/add-a-server.html"><h3>Add an MCP server</h3><p>Store a reusable `${REF}`-safe definition and select it by name.</p></a>
+      <a class="card link-card" href="howto/add-a-skill.html"><h3>Add a skill</h3><p>Create a strong description, validate it, and make it loadable.</p></a>
+      <a class="card link-card" href="howto/name-a-toolset.html"><h3>Name a toolset</h3><p>Bundle the minimum servers and skills for a task and choose the default.</p></a>
+      <a class="card link-card" href="howto/run-a-workflow.html"><h3>Run a multi-agent workflow</h3><p>Fan work out to narrow roles, verify the result, and inspect one evidence tree.</p></a>
+      <a class="card link-card" href="howto/team-setup.html"><h3>Share with a team</h3><p>What travels in Git, what stays local, and how each teammate starts.</p></a>
+      <a class="card link-card" href="troubleshooting.html"><h3>Troubleshooting</h3><p>Search by the exact error text and follow the printed repair command.</p></a>
+      <a class="card link-card" href="reference.html"><h3>Full feature reference</h3><p>All commands, advanced policy, protected runs, workflows, and internals.</p></a>
+    </div>
+  </section>
+
+  <section class="section card">
+    <span class="eyebrow">Is it for you?</span>
+    <h2 style="margin-top:10px">Useful when your setup starts multiplying.</h2>
+    <p class="section-lead" style="margin-bottom:0">Use AgentStack for several CLIs, projects, machines, or teammates—especially when you want reusable private capabilities and reviewed updates. For one CLI with one permanent config and nothing to share, native configuration may be enough.</p>
+  </section>
+</main>
+
+<footer style="max-width:1040px;margin:0 auto;padding:0 var(--space-6) var(--space-8);color:var(--color-neutral-600);font-size:.88rem">agentStack · standalone by design · works directly or under stock T3 Code</footer>
 </body>
 </html>

@@ -4,277 +4,191 @@
 
 # Get started
 
-One agent setup, shared by every coding CLI you use. This page is the whole
-first hour: install it, run it once, connect the bridge, check the result, say
-yes to it, name a toolset, switch between toolsets, and undo anything you did.
+AgentStack gives every agent CLI the same MCP servers, skills, and instructions
+without copying their configuration into every project.
 
-Everything here is a command from the current stable release. Where a newer
-release has a shorter path, it is marked and gathered in one place at the
-bottom — see [newer than the stable release](#newer-than-the-stable-release).
+The simple model is:
 
-## Install
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh
+```text
+your library repo  →  each project's manifest + lock  →  every agent CLI
 ```
 
-The installer verifies the release tarball against the `checksums.txt`
-published with that release. To build from a checkout instead:
+## 1. Install and set up this machine
 
-```sh
-cargo build --release                  # add --features sandbox for `run --sandbox`
-./target/release/agentstack x self link  # symlink it onto your PATH
+```bash
+cargo install --git https://github.com/Tarekkharsa/agentstack --locked agentstack
 ```
 
-Confirm what you got, and which binary a bare `agentstack` runs:
+Set up this machine:
 
-```sh
-agentstack --version
-agentstack x self which
+```bash
+agentstack init --connect
 ```
 
-macOS and Linux are the supported platforms. A Windows binary is published but
-is not exercised by CI — treat it as untested.
+Then check the result:
 
-## What the first run does
-
-```sh
-cd your-project
-agentstack init
+```bash
+agentstack status
 ```
 
-`init` is a guided wizard. It detects the agent CLIs you have, imports the MCP
-servers and skills they are already configured with, lifts any inline token
-into a `${REF}` placeholder, asks where those values should live, then previews
-what it would write and asks before writing anything.
+`init` detects your CLIs, offers to import the MCP server entries and supported
+settings it can represent, and registers the zero-files gateway. It previews
+changes before writing them. `status` tells you whether the setup is ready and
+gives one next command when it is not.
 
-What it leaves in your project is small, and it is all you commit:
+It does not take over everything already installed:
+
+| What already exists | What AgentStack does |
+| --- | --- |
+| MCP entries in a CLI's global or project config | Shows them in the import review and copies accepted definitions into the central library (`~/.agentstack/lib`, or your first linked source) by default. The original entries are not deleted. |
+| Skills already installed for Codex, Claude Code, or another CLI | Leaves them where they are. Adopt a skill explicitly when you want AgentStack to manage and share it. |
+| App-owned tools such as Computer Use or a server installed inside another application's bundle | Leaves them with the owning app and names them as excluded. `--include-tool-managed` is an explicit override. |
+| Unrelated CLI settings, plugins, and built-in capabilities | Leaves them untouched. AgentStack manages only the entries and managed regions it records. |
+
+To preview adopting existing native skills into your central library:
+
+```bash
+agentstack adopt --to-library
+agentstack adopt --to-library --write
+```
+
+Use the central library for your own reusable skills, MCP definitions, and
+instructions. Keep a capability inside one project only when it truly belongs
+to that repository.
+
+## 2. Link your central library
+
+Your library is a normal Git checkout. It can be private, live on any Git host,
+and use a simple folder structure for reusable skills, MCP servers,
+instructions, hooks, and extensions.
+
+```bash
+agentstack lib link ~/GitHub/ai-setup --name central --first
+agentstack lib link ~/GitHub/ai-setup --name central --first --write
+agentstack lib sources
+```
+
+The first command previews. The second links the folder on this machine.
+`--first` makes it the default place to read and add reusable capabilities.
+
+If you already have `~/.agentstack/lib`, AgentStack keeps it as another source
+and you read the combined library. When two sources hold the same name, the
+first one wins.
+
+See [Several libraries work together](library.md#several-libraries-work-together)
+for the folder layout, collisions, and qualified names such as
+`local:rust-testing`.
+
+## 3. Keep each project small
+
+A normal project needs two committed files:
 
 ```text
 your-project/
-├── .agentstack/
-│   ├── agentstack.toml   # the manifest: servers, skills, instructions, toolsets
-│   ├── agentstack.lock   # the pins — exact commits and digests (written by `agentstack lock --write`)
-│   └── .env              # token values lifted out of your configs (only if init found any)
-└── .gitignore            # a managed block, so .env and generated artifacts are never committed
+└── .agentstack/
+    ├── agentstack.toml   # names what this project may use
+    └── agentstack.lock   # pins the exact content it resolved
 ```
 
-The manifest holds `${GITHUB_TOKEN}`-style placeholders, never token values.
-
-Scripting it instead of answering prompts? `agentstack init --yes` writes the
-manifest without prompting, `--secrets env|keychain|skip` decides where lifted
-values go, and `agentstack init --plan` writes nothing at all and emits the
-detection as JSON. Add `--connect` to also register the bridge below in the
-same run — it is a machine-wide write, so nothing but that flag asks for it,
-and `--yes` alone never does. See [use it in CI](howto/ci.md).
-
-## Register the bridge
-
-Skills and MCP servers are **served live** to the CLIs that can take them,
-through one gateway registered once per CLI. Until that registration exists,
-nothing is served live — the plan says where each capability is routed, but no
-tool is receiving anything.
-
-```sh
-agentstack x gateway connect --all           # preview: which CLIs would be registered
-agentstack x gateway connect --all --write   # register it
-```
-
-After this, every trusted project you `cd` into brings its own servers and
-skills to those CLIs with no per-project files.
-
-What is **not** served live is written to files, automatically and always:
-instructions, settings, hooks, and extensions, plus every capability on a CLI
-that has no MCP support. That is the rendered lane, and it is normal for a
-project to be in both lanes at once.
-
-```sh
-agentstack x delivery        # the routing, per tool and per capability kind
-```
-
-The routing report names both lanes separately — the live one, and a
-`rendered lane:` line for what went into files. If the bridge is not
-registered, the live entries read `planned live (not connected)`, and the
-report tells you the one command that connects it.
-
-To write files even where the live channel would have worked:
-
-```sh
-agentstack x delivery render-locally           # preview: what it would record
-agentstack x delivery render-locally --write   # record it, then `agentstack apply --write`
-```
-
-## Verify it
-
-```sh
-agentstack status    # where this project stands, and the one next step
-agentstack doctor    # the deep check: what is wired, what is missing, what changed
-```
-
-`status` is one screen. `doctor` is the thorough pass — it names every problem
-with the command that fixes it, and `doctor --ci` exits nonzero so a pipeline
-can gate on it. When something is routed live and a CLI has no bridge
-registered, `doctor` reports it as an error — `no bridge for <those CLIs> —
-nothing routed live is reaching them` — and names
-`agentstack x gateway connect --all --write`. A project that routes nothing live
-gets no such error.
-
-Expect a note or two on a real machine. Advisories — "these servers launch via
-bare `npx`", for instance — are stated once and do not count against
-readiness.
-
-## Say yes to it
-
-Nothing this project declares reaches a tool until you approve it — not a
-project you cloned, and not the one you just built. Until then no server
-spawns, no server definition is written into a CLI's config, no skill file is
-materialized, no instruction block enters a `CLAUDE.md` or `AGENTS.md`, and no
-secret resolves.
-
-```sh
-agentstack trust .   # read the review, then approve it
-```
-
-`init` already asked, so a project fresh from the wizard reads `trusted` and
-this is a no-op. It is every change after that which needs you: a `git pull`, an
-`agentstack add`, a new toolset, a re-lock.
-
-The yes is bound to the exact bytes you read, so every later edit to the
-manifest or the lockfile reopens it — `status` and `doctor` then say
-`trust stale (content changed)`. Any command that would deliver content
-refuses by name and exits nonzero:
-
-```text
-✗ refusing to materialize skills: project at /your-project changed since it was
-  trusted — review and `agentstack trust .` before putting its words into an
-  agent's context ('code-review')
-✗ skills not materialized — the project has not been trusted for this content
-error: 3 targets blocked — each ✗ above names the blocker
-```
-
-Pruning and removal stay outside the gate, and so do the machine-level manifest
-and its content — the question is only ever about new content this project asks
-a tool to read or run.
-
-See [trust a repo](howto/trust-a-repo.md) for what the review shows.
-
-## Name a toolset
-
-A toolset is a named subset of this project's servers and skills — one for
-backend work, one for incident response — so you switch context without
-editing five config files.
-
-```sh
-agentstack toolset create backend --server github --skill code-review
-agentstack toolset list          # what is declared, and whether each is ready
-```
-
-In the manifest that is one table:
+The manifest can stay this small:
 
 ```toml
-[toolsets.backend]
-servers = ["github"]
-skills  = ["code-review"]
+version = 1
+default_toolset = "rust"
+
+[toolsets.rust]
+servers = ["upstash/context7", "gha-search"]
+skills = ["rust-best-practices", "rust-testing"]
+
+[instructions.team-style]
+targets = ["*"]
 ```
 
-Creating a toolset re-pins `agentstack.lock`, and the lock is part of what you
-approved — so the project needs your yes again before it activates. The command
-says so on its own last line: `Next: agentstack trust . to review and consent.`
+The names resolve from your linked library. The project does not copy those
+files. A trusted new agent connection opens `rust` automatically.
 
-## Switch between toolsets
+The lock records the exact skill bodies, server definitions, and instruction
+bodies selected from the library. Commit it with the manifest so another
+machine resolves the same approved content.
 
-```sh
-agentstack trust .               # the lock moved, so approve it again
-agentstack use backend           # preview what activating it changes
-agentstack use backend --write   # activate it
-agentstack use --list            # every toolset, with a readiness flag
+## 4. Lock, review, done
+
+After changing what a project selects:
+
+```bash
+agentstack lock          # preview
+agentstack lock --write
+agentstack trust .
+agentstack status
 ```
 
-Skip that first line and the last two refuse: `use --write` reports
-`skills not materialized — the project has not been trusted for this content`
-for each target and exits nonzero. `use --list` prints the standing answer in
-its header — `Declared toolsets (project trust: drifted)`.
+`lock --write` accepts the exact pinned bytes and `trust .` is the human review
+for this machine. Run the loop after you add or remove a selected capability,
+accept an updated library item, or change the default toolset — not for
+unrelated edits.
 
-With one toolset declared, `agentstack use` picks it for you; with none
-declared, every inline skill and server activates.
+See [Trust a project](howto/trust-a-repo.md) for why the lock comes first.
 
-When you change what a toolset references, re-pin, re-review, then activate —
-always in that order:
+## 5. What the agent sees
 
-```sh
-agentstack lock --write          # pin the new refs into agentstack.lock
-agentstack trust .               # the lock is part of the consent surface, so re-approve
-agentstack use backend --write   # now it activates
+Zero-files delivery does not dump every skill and MCP schema into the model's
+context. The agent starts with skill names and one-line descriptions, calls
+`agentstack_load(name, reason)` for one full body when a task matches, and
+searches the gateway for an MCP tool schema only when it needs that tool.
+
+Missing `.mcp.json` and local skill folders are therefore normal. House rules,
+settings, hooks, extensions, and file-only CLIs still use managed files.
+
+See [Dynamic skill loading](concepts.md#dynamic-skill-loading) for the whole
+picture.
+
+## 6. Set up another machine
+
+```bash
+agentstack up --library https://github.com/you/ai-setup.git
+agentstack up --library https://github.com/you/ai-setup.git --write
+agentstack status
 ```
 
-Re-locking is not the yes. Content that drifted from its pin is refused until
-you re-lock, and re-locking then says `this project is trusted — new pins are
-new consent, so its trust is now stale`: accepting the content does not answer
-the question that accepting it reopened.
+The first command previews the complete bootstrap. The second clones or links
+the library, detects this machine's CLIs, and installs the required global
+integration. The machine then asks only for its own missing secrets and trust
+reviews.
 
-`agentstack lock` on its own previews: it prints the pins it would add, change,
-or remove and writes nothing into the project. Computing the preview still
-resolves sources, so git-backed sources are fetched. `--write` pins them.
+Later, refresh with:
 
-## Undo anything
-
-Every config write is recorded before it lands, so it can be taken back —
-`init`, `apply`, `gateway connect` and the delivery override all appear here.
-
-```sh
-agentstack x restore                  # everything undoable, newest first
-agentstack x restore --last --write   # undo the most recent write
-agentstack x restore a1b2 --write     # undo one write by its id prefix
+```bash
+agentstack up            # preview
+agentstack up --write
 ```
 
-Skill directories that `use --write` materialized are not in that list. Switch
-toolsets to move them, or take them off with `x uninstall` below.
+AgentStack works the same whether the CLI starts directly, from stock T3 Code,
+or from another supervisor. T3 Code is not required.
 
-To reverse everything agentstack rendered, everywhere:
+## The commands you will actually use
 
-```sh
-agentstack x uninstall          # preview: what would come off
-agentstack x uninstall --write  # do it
-```
-
-Your `agentstack.toml` stays where it is, so the setup rebuilds from it. But
-`x uninstall` also removes `~/.agentstack` — the undo ledger, the trust store
-and the library — so the rebuild starts from an untrusted project and needs the
-yes again:
-
-```sh
-agentstack trust .               # approve it again
-agentstack apply --write         # the rendered lane
-agentstack use backend --write   # the skills
-```
-
-Keep that state, and your approvals with it, by passing `--keep-home`. Full
-detail: [undo anything](howto/undo.md).
-
-## Newer than the stable release
-
-The install line above serves the current stable release. These verbs are in
-v0.18.0 and later, and `agentstack --version` says which you have:
-
-| In v0.18.0 and later | What it shortens |
+| Command | Use it for |
 | --- | --- |
-| `agentstack yes` | drop a skill or instruction file in `.agentstack/`, then declare + pin + trust + render behind one review |
-| `agentstack undo` | the recorded changes as a timeline — pick a point and revert to it (`restore` does it one write at a time) |
-| `agentstack x why <name>` | where a capability came from, its pin, its approval, which CLIs serve it live, and what it reaches — the answer when nothing was written to disk |
-| `agentstack x unrender` | take back a server config the rendered lane left behind, without the whole-machine `x uninstall` |
-| `agentstack x up` | set a new machine up from a setup that already exists (`apply --write` then `doctor` today) |
-| `agentstack x share` / `agentstack x receive` | move a setup between people as a signed bundle (committing the manifest does it today) |
+| `agentstack status` | See what is ready and the one next action |
+| `agentstack doctor` | Run the deeper verification when something is wrong |
+| `agentstack lib sources` | See every linked library and name collision |
+| `agentstack x delivery` | See where each capability goes, per CLI |
+| `agentstack lock` | Preview content changes before accepting them |
+| `agentstack trust .` | Review changed project content on this machine |
+| `agentstack up` | Preview a machine/library refresh |
+| `agentstack undo` | Review and reverse AgentStack-managed writes |
 
-`agentstack x self update --write` moves you to the newest published release
-after verifying its checksum.
+## Why use it — and when not to
 
-## Where to go next
+Use AgentStack when you have more than one agent CLI, project, machine, or
+person and want one reviewed source of truth. It is especially useful when you
+want reusable private skills, consistent MCP servers, per-machine secrets, and
+no generated capability files in repositories.
 
-- [Concepts](concepts.md) — manifest, lockfile, toolset, trust, delivery lanes
-- [Add a server](howto/add-a-server.md) · [Add a skill](howto/add-a-skill.md)
-- [Name a toolset](howto/name-a-toolset.md) — the longer version of the section above
-- [Trust a repo](howto/trust-a-repo.md) — what the review shows, and why
-- [Share one setup with your team](howto/team-setup.md)
-- [Use it in CI](howto/ci.md)
-- [Troubleshooting](troubleshooting.md) — search for the error text you got
-- [Reference](reference.md) — the complete command inventory
+You may not need it for one CLI with one small, permanent configuration and no
+need to share or audit it. AgentStack adds a manifest, locking, and trust review
+on purpose; those controls are valuable only when the setup is worth managing.
+
+Next: [Central library](library.md) · [Concepts](concepts.md) ·
+[Toolsets](howto/name-a-toolset.md) · [Workflows](workflows.md) ·
+[Run a workflow](howto/run-a-workflow.md) · [FAQ](faq.md)

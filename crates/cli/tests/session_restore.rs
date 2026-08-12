@@ -24,7 +24,7 @@ fn setup_project(tmp: &Path) -> PathBuf {
     fs::write(proj.join("skills/local-notes/SKILL.md"), "# local\n").unwrap();
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        "version = 1\n[delivery]\nrender_locally = true\n[targets]\ndefault = [\"claude-code\"]\n\
          [skills.local-notes]\npath = \"./skills/local-notes\"\n\
          [profiles.p]\nskills = [\"local-notes\"]\n",
     )

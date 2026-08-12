@@ -116,6 +116,9 @@ impl Fix {
 /// End to end: fetch → quarantine → card with attribution → yes → live.
 #[test]
 fn an_external_package_flows_through_the_funnel_to_live() {
+    let _env = agentstack::util::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let fix = fixture();
     let pkg = fix.eve_package();
 
@@ -184,6 +187,9 @@ fn an_external_package_flows_through_the_funnel_to_live() {
 /// command's "2 file(s)" summary.
 #[test]
 fn two_imported_packages_keep_their_own_directories() {
+    let _env = agentstack::util::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let fix = fixture();
     let first = fix.eve_package();
     let second = fix.supply.join("translate");
@@ -371,6 +377,9 @@ fn a_traversing_package_is_refused() {
 /// already skipped).
 #[test]
 fn adopt_refuses_a_symlinked_destination() {
+    let _env = agentstack::util::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let fix = fixture();
     std::env::set_var("HOME", &fix.home);
     std::env::set_var("AGENTSTACK_HOME", fix.home.join(".agentstack"));
@@ -405,6 +414,9 @@ fn adopt_refuses_a_symlinked_destination() {
 /// untracked in git, which is precisely what used to read as local work.
 #[test]
 fn received_content_is_not_labeled_local_work() {
+    let _env = agentstack::util::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let fix = fixture();
     std::env::set_var("HOME", &fix.home);
     std::env::set_var("AGENTSTACK_HOME", fix.home.join(".agentstack"));
@@ -462,6 +474,9 @@ fn serve_once(body: &'static str, content_type: &'static str) -> String {
 /// path. The tamper is the transport: identical bytes, delivered over http.
 #[test]
 fn a_url_connection_is_redacted_not_staged_as_a_skill() {
+    let _env = agentstack::util::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
     let fix = fixture();
     std::env::set_var("HOME", &fix.home);
     std::env::set_var("AGENTSTACK_HOME", fix.home.join(".agentstack"));

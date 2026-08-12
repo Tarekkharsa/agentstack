@@ -606,10 +606,17 @@ fn create_profile_gated(
     // subdirectory) to the manifest dir the trust key is derived from; a bare
     // `.` would key the wrong project from anywhere but the root. A failure
     // here cannot mean "no review needed", so it falls closed.
-    let review_pending = crate::commands::load(dir)
+    let loaded = crate::commands::load(dir);
+    let review_pending = loaded
+        .as_ref()
         .map(|ctx| crate::commands::lock::review_pending(&ctx.dir))
         .unwrap_or(true);
-    print_created(&args.name, review_pending);
+    let is_default = loaded
+        .as_ref()
+        .ok()
+        .and_then(|ctx| ctx.loaded.manifest.resolved_default_toolset())
+        == Some(args.name.as_str());
+    print_created(&args.name, review_pending, is_default);
     Ok(())
 }
 
@@ -617,14 +624,14 @@ fn create_profile_gated(
 /// makes it take effect. `restore --last` is deliberately NOT offered — create
 /// writes only the manifest, and the undo ledger captures rendered config
 /// files, so pointing at it here would undo somebody else's earlier write.
-fn print_created(name: &str, review_pending: bool) {
+fn print_created(name: &str, review_pending: bool, is_default: bool) {
     use agentstack_core::paint::OwoColorize;
     println!("\n{} toolset {} created.", "✓".green(), name.bold());
     println!(
         "  {}",
         "Nothing was rendered — your CLIs are unchanged.".dimmed()
     );
-    for line in switch_lines(name, review_pending) {
+    for line in switch_lines(name, review_pending, is_default) {
         println!("  {line}");
     }
     println!(
@@ -652,14 +659,88 @@ fn print_created(name: &str, review_pending: bool) {
 ///
 /// Pure over its inputs so both branches are witnessed without a project on
 /// disk.
-fn switch_lines(name: &str, review_pending: bool) -> Vec<String> {
+fn switch_lines(name: &str, review_pending: bool, is_default: bool) -> Vec<String> {
     if review_pending {
-        return vec![
-            "Review the new pins:  agentstack trust .".to_string(),
-            format!("Then switch to it:  agentstack use {name} --write"),
-        ];
+        let mut lines = vec!["Review the new pins:  agentstack trust .".to_string()];
+        if is_default {
+            lines.push("Then restart the agent — this default opens automatically.".to_string());
+        } else {
+            lines.push(format!(
+                "Then make it the default:  agentstack toolset default {name} --write"
+            ));
+        }
+        return lines;
     }
-    vec![format!("Switch to it:  agentstack use {name} --write")]
+    if is_default {
+        return vec!["It is the default; new agent connections open it automatically.".to_string()];
+    }
+    vec![format!(
+        "Make it the default:  agentstack toolset default {name} --write"
+    )]
+}
+
+/// Select the toolset that future trusted gateway connections open. This is a
+/// project-contract change, not a mutation of an already-running lease.
+pub fn set_default_toolset(
+    args: &crate::cli::ToolsetDefaultArgs,
+    dir: Option<&Path>,
+) -> Result<()> {
+    use agentstack_core::paint::OwoColorize;
+
+    let manifest = load_manifest(dir)?;
+    ensure_profile_exists(&manifest, &args.name)?;
+    if manifest.default_toolset.as_deref() == Some(args.name.as_str()) {
+        println!(
+            "{} '{}' is already the default toolset.",
+            "✓".green(),
+            args.name
+        );
+        return Ok(());
+    }
+    if !args.write {
+        println!(
+            "Default toolset: {} → {}",
+            manifest.default_toolset.as_deref().unwrap_or("none"),
+            args.name
+        );
+        println!(
+            "  Nothing written. Apply with: agentstack toolset default {} --write",
+            args.name
+        );
+        return Ok(());
+    }
+
+    let base = crate::commands::project_base(dir)?;
+    let path =
+        crate::manifest::resolve_manifest_dir(&base).join(crate::manifest::load::MANIFEST_FILE);
+    let text =
+        std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
+    let mut doc = text
+        .parse::<toml_edit::DocumentMut>()
+        .context("parsing manifest")?;
+    doc["default_toolset"] = toml_edit::value(&args.name);
+    let out = doc.to_string();
+    toml::from_str::<Manifest>(&out).context("resulting manifest would be invalid")?;
+    crate::util::atomic::write(&path, &out)
+        .with_context(|| format!("writing {}", path.display()))?;
+
+    crate::commands::lock::run(
+        &crate::cli::LockArgs {
+            profile: Some(args.name.clone()),
+            ..Default::default()
+        },
+        dir,
+    )?;
+    println!(
+        "{} '{}' is now the default toolset.",
+        "✓".green(),
+        args.name
+    );
+    println!(
+        "  New trusted connections will open it automatically; running connections are unchanged."
+    );
+    println!("  Next: agentstack trust .");
+    Ok(())
 }
 
 /// The interactive review: the same facts the JSON preview carries, in prose.
@@ -682,7 +763,7 @@ fn print_create_review(args: &PanelCreateProfileArgs, digest: &str) {
     println!(
         "  {}",
         format!(
-            "switch to it afterwards with `agentstack use {} --write`.",
+            "make it the default afterwards with `agentstack toolset default {} --write`.",
             args.name
         )
         .dimmed()
@@ -1547,7 +1628,15 @@ fn rename_profile_gated(
         crate::manifest::resolve_manifest_dir(&base).join(crate::manifest::load::MANIFEST_FILE);
     let text =
         std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
-    let out = crate::commands::remove::rename_profile_entry(&text, &args.name, &args.to)?;
+    let current: Manifest = toml::from_str(&text).context("parsing manifest")?;
+    let mut out = crate::commands::remove::rename_profile_entry(&text, &args.name, &args.to)?;
+    if current.default_toolset.as_deref() == Some(args.name.as_str()) {
+        let mut doc = out
+            .parse::<toml_edit::DocumentMut>()
+            .context("parsing renamed manifest")?;
+        doc["default_toolset"] = toml_edit::value(&args.to);
+        out = doc.to_string();
+    }
     toml::from_str::<Manifest>(&out).context("resulting manifest would be invalid")?;
     crate::util::atomic::write(&path, &out)
         .with_context(|| format!("writing {}", path.display()))?;
@@ -1579,7 +1668,10 @@ fn rename_profile_gated(
         "  {}",
         "Nothing was rendered — your CLIs are unchanged.".dimmed()
     );
-    println!("  Switch to it:  agentstack use {} --write", args.to);
+    println!(
+        "  To make it the default:  agentstack toolset default {} --write",
+        args.to
+    );
     Ok(())
 }
 
@@ -1668,7 +1760,20 @@ fn delete_profile_gated(
         crate::manifest::resolve_manifest_dir(&base).join(crate::manifest::load::MANIFEST_FILE);
     let text =
         std::fs::read_to_string(&path).with_context(|| format!("reading {}", path.display()))?;
-    let out = crate::commands::remove::remove_profile_entry(&text, &args.name)?;
+    let current: Manifest = toml::from_str(&text).context("parsing manifest")?;
+    let mut out = crate::commands::remove::remove_profile_entry(&text, &args.name)?;
+    if current.default_toolset.as_deref() == Some(args.name.as_str()) {
+        let replacement = current
+            .profiles
+            .keys()
+            .find(|name| name.as_str() != args.name)
+            .context("no replacement default toolset remains")?;
+        let mut doc = out
+            .parse::<toml_edit::DocumentMut>()
+            .context("parsing manifest after deleting its default toolset")?;
+        doc["default_toolset"] = toml_edit::value(replacement);
+        out = doc.to_string();
+    }
     toml::from_str::<Manifest>(&out).context("resulting manifest would be invalid")?;
     crate::util::atomic::write(&path, &out)
         .with_context(|| format!("writing {}", path.display()))?;
@@ -1706,6 +1811,21 @@ pub fn delete_profile_preview(args: &PanelDeleteProfileArgs, dir: Option<&Path>)
 
     let mut body = Map::new();
     body.insert("profile".into(), args.name.clone().into());
+    body.insert(
+        "new_default_toolset".into(),
+        manifest
+            .default_toolset
+            .as_deref()
+            .filter(|default| *default == args.name)
+            .and_then(|_| {
+                manifest
+                    .profiles
+                    .keys()
+                    .find(|name| name.as_str() != args.name)
+            })
+            .cloned()
+            .into(),
+    );
     body.insert(
         "servers".into(),
         json!(members.map(|p| p.servers.clone()).unwrap_or_default()),
@@ -2129,6 +2249,114 @@ mod tests {
         );
     }
 
+    #[test]
+    fn rename_and_delete_keep_the_default_toolset_valid() {
+        let _g = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", tmp.path().join("home"));
+        std::fs::write(
+            tmp.path().join("agentstack.toml"),
+            "version = 1\ndefault_toolset = \"backend\"\n\n\
+             [servers.github]\ntype = \"stdio\"\ncommand = \"npx\"\n\n\
+             [profiles.backend]\nservers = [\"github\"]\n\n\
+             [profiles.spare]\nservers = [\"github\"]\n",
+        )
+        .unwrap();
+
+        let rename = |consented: Option<String>| PanelRenameProfileArgs {
+            name: "backend".into(),
+            to: "api".into(),
+            consent: crate::cli::PanelConsent {
+                preview: consented.is_none(),
+                yes: consented.is_some(),
+                consented,
+                allow_unresolved: false,
+            },
+        };
+        let preview = rename_profile_preview(&rename(None), Some(tmp.path())).unwrap();
+        rename_profile_gated(
+            &rename(Some(preview_digest(&preview).unwrap().to_string())),
+            Some(tmp.path()),
+            false,
+        )
+        .unwrap();
+        let renamed: Manifest =
+            toml::from_str(&std::fs::read_to_string(tmp.path().join("agentstack.toml")).unwrap())
+                .unwrap();
+        assert_eq!(renamed.default_toolset.as_deref(), Some("api"));
+
+        let delete = |consented: Option<String>| PanelDeleteProfileArgs {
+            name: "api".into(),
+            consent: crate::cli::PanelConsent {
+                preview: consented.is_none(),
+                yes: consented.is_some(),
+                consented,
+                allow_unresolved: false,
+            },
+        };
+        let preview = delete_profile_preview(&delete(None), Some(tmp.path())).unwrap();
+        assert_eq!(preview["new_default_toolset"], "spare");
+        delete_profile_gated(
+            &delete(Some(preview_digest(&preview).unwrap().to_string())),
+            Some(tmp.path()),
+            false,
+        )
+        .unwrap();
+        let deleted: Manifest =
+            toml::from_str(&std::fs::read_to_string(tmp.path().join("agentstack.toml")).unwrap())
+                .unwrap();
+        assert_eq!(deleted.default_toolset.as_deref(), Some("spare"));
+        assert!(!deleted.profiles.contains_key("api"));
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    #[test]
+    fn setting_a_default_previews_then_writes_and_relocks() {
+        let _g = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let tmp = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", tmp.path().join("home"));
+        let path = tmp.path().join("agentstack.toml");
+        std::fs::write(
+            &path,
+            "version = 1\ndefault_toolset = \"backend\"\n\n\
+             [servers.github]\ntype = \"stdio\"\ncommand = \"echo\"\n\n\
+             [profiles.backend]\nservers = [\"github\"]\n\n\
+             [profiles.spare]\nservers = [\"github\"]\n",
+        )
+        .unwrap();
+        let before = std::fs::read_to_string(&path).unwrap();
+        set_default_toolset(
+            &crate::cli::ToolsetDefaultArgs {
+                name: "spare".into(),
+                write: false,
+            },
+            Some(tmp.path()),
+        )
+        .unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+
+        set_default_toolset(
+            &crate::cli::ToolsetDefaultArgs {
+                name: "spare".into(),
+                write: true,
+            },
+            Some(tmp.path()),
+        )
+        .unwrap();
+        let manifest: Manifest = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(manifest.default_toolset.as_deref(), Some("spare"));
+        assert!(
+            tmp.path().join("agentstack.lock").exists(),
+            "changing the project contract must refresh its lock"
+        );
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
     /// Both verbs keep the headless two-step contract: a bare non-interactive
     /// call refuses in prose, and an apply needs the digest its preview showed.
     #[test]
@@ -2308,16 +2536,20 @@ mod tests {
     #[test]
     fn switch_lines_keep_todays_wording_when_no_review_is_due() {
         assert_eq!(
-            switch_lines("backend", false),
-            vec!["Switch to it:  agentstack use backend --write".to_string()],
+            switch_lines("backend", false, false),
+            vec!["Make it the default:  agentstack toolset default backend --write".to_string()],
         );
         assert_eq!(
-            switch_lines("backend", true),
+            switch_lines("backend", true, false),
             vec![
                 "Review the new pins:  agentstack trust .".to_string(),
-                "Then switch to it:  agentstack use backend --write".to_string(),
+                "Then make it the default:  agentstack toolset default backend --write".to_string(),
             ],
             "a pending review is named first, because it is what unblocks the switch",
+        );
+        assert_eq!(
+            switch_lines("backend", false, true),
+            vec!["It is the default; new agent connections open it automatically.".to_string()],
         );
     }
 }

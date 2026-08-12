@@ -493,7 +493,10 @@ fn zero_files_project_is_served_live_not_told_to_apply() {
 
     // The typed fields the panel consumes instead of prose.
     assert_eq!(report["mode"], "zero-files", "in: {report}");
+    // No lockfile: never activated. The runtime reading is the separate
+    // `doctor-liveness-v1` field, and nothing is connected here either.
     assert_eq!(report["activation"], "never_activated", "in: {report}");
+    assert_eq!(report["live_state"], "not_live", "in: {report}");
 
     // The drift comparison is suppressed with the honest story, so the one
     // recommended action can never be the render this mode opts out of.

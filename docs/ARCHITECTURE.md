@@ -7,7 +7,7 @@
 *Current as of agentstack 0.18.0-rc.3.*
 
 For contributors and architects. If you just want to use AgentStack, start with
-the [README](../README.md) and the [getting-started walkthrough](start.html).
+the [README](../README.md) and the [getting-started walkthrough](start.md).
 
 **Contents**
 
@@ -45,7 +45,7 @@ governed execution is constrained and recorded.**
 
 ## Where this starts
 
-The current implementation is a ten-crate Rust workspace. It ships the
+The current implementation is an eleven-crate Rust workspace. It ships the
 manifest and lock resolver, 13 CLI adapters, a capability library of linked source folders,
 content-bound trust, machine-first policy, a single-dispatch MCP gateway,
 Docker sandbox and lockdown runtimes, egress enforcement, per-run recording,
@@ -145,7 +145,7 @@ authority. There is no "prefer gateway" counterpart and no per-project mode: the
 Mode axis was retired, `set-mode` refuses and explains, and `set-mode-v1` sits
 under `SUPERSEDED` in the UI contract. The names *static*, *clean-at-rest* and
 *zero-files* survive only as readings of a project's current shape
-([concepts.md](concepts.md#delivery-modes)).
+([reference.md — delivery](reference.md#delivery--routing-and-where-rendered-files-live)).
 
 Both lanes sit behind the same gates. An untrusted or drifted project delivers
 through neither: the gateway serves nothing, and `apply --write` / `use --write`
@@ -566,6 +566,21 @@ crate and keeps its name; the enforcement crate is `egress`.)
 Design references (not dependencies): Sandcastle's provider model, branch
 strategy, and event hooks are good prior art for orchestration shape.
 
+### MCP protocol compatibility
+
+As of 2026-08-11, `crates/mcp` is the single protocol boundary for AgentStack's
+local stdio server, sandbox HTTP bridge, and upstream HTTP/stdio clients. It
+uses RMCP 3.1.2 for models, validation, framing, lifecycle negotiation, and
+Streamable HTTP rather than maintaining a second hand-written wire stack.
+
+The 2026-07-28 path is stateless: it uses `server/discover`, returns the modern
+tool result and cache fields, creates no HTTP protocol session, never asks the
+client for roots, and re-derives the trusted default toolset per request.
+Connection-hidden lease mutations are refused on this path. The dated 2025
+path keeps `initialize`, legacy HTTP sessions, roots, and process-local leases
+for released clients and older upstream servers. Both eras enter the same
+trust, policy, gateway-dispatch, and audit code.
+
 ## Layer 5 — Flight recorder (`crates/recorder`)
 
 Append-only, per-run JSONL records execution start/finish/limits, sandbox
@@ -602,6 +617,7 @@ trust    → core, recorder
 policy   → core
 recorder → core
 adapters → core
+mcp      → (nothing internal)
 runtime  → core, policy, recorder
 egress   → core, policy, recorder
 executor → (nothing)

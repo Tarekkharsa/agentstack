@@ -4,8 +4,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Tutorial — agentstack</title>
-<meta name="description" content="One project, start to finish, in six steps: install AgentStack, import what your CLIs already have, add a capability, review it, activate it, and take it a">
+<title>Tutorial: one library, two projects, another machine — agentstack</title>
+<meta name="description" content="This tutorial shows the complete everyday workflow. It assumes AgentStack is installed and agentstack init has completed on this machine.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
 <link rel="canonical" href="https://tarekkharsa.github.io/agentstack/tutorial/index.html">
@@ -143,6 +143,8 @@
     <ul>
       <li><a href="../start.html">Get started</a>
       </li>
+      <li><a href="../library.html">Central library</a>
+      </li>
       <li><a class="on-page" aria-current="page" href="../tutorial/">Tutorial</a>
       </li>
       <li><a href="../index.html#install">Install</a>
@@ -176,6 +178,8 @@
       <li><a href="../howto/add-a-skill.html">Add a skill</a>
       </li>
       <li><a href="../howto/name-a-toolset.html">Name a toolset</a>
+      </li>
+      <li><a href="../howto/run-a-workflow.html">Run a workflow</a>
       </li>
       <li><a href="../migrations.html">Migration recipes</a>
       </li>
@@ -215,7 +219,7 @@
       </li>
       <li><a href="../workflows.html">Workflows</a>
       </li>
-      <li><a href="../reference.html#the-library-linked-source-folders">Library sources</a>
+      <li><a href="../reference.html#the-library-linked-source-folders">Library internals</a>
       </li>
       <li><a href="../concepts.html#delivery-modes">Delivery modes</a>
       </li>
@@ -274,177 +278,76 @@
 </aside>
   <main id="main-content" tabindex="-1">
 <p class="versionbar">These pages describe <b>v0.18.0-rc.3</b>, a pre-release. <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">The installer</a> serves the current release, <b>v0.17.1</b> — <code>/releases/latest</code> never points at a pre-release — so this is not the build you get unless you ask for it by name: <code>AGENTSTACK_VERSION=v0.18.0-rc.3</code>. <code>agentstack --version</code> says which build you have.</p>
-<h1 id="tutorial">Tutorial</h1>
-<p>One project, start to finish, in six steps: install AgentStack, import what your CLIs already have, add a capability, review it, activate it, and take it all back. Each step is one command, and together they are the everyday product.</p>
-<p>The transcripts are real output, abridged, with paths shortened to <code>~/your-project</code> — captured against <code>agentstack 0.18.0-rc.2</code>, one candidate behind the current <code>0.18.0-rc.3</code>. Some lines have moved since, so a command may print a little more than you see here: <code>add from … --write</code>, for one, now also pins the addition and points at the review. They are dated rather than relabelled, because a provenance claim nobody has earned is worse than a sample whose age you can see.</p>
-<p>Read it through, or run it in a scratch repository as you go. <a href="../start.html">Get started</a> is the same journey with less explanation; <a href="../concepts.html">Concepts</a> defines every word used here; <a href="../reference.html">Every command</a> is the whole surface.</p>
-<h2 id="the-problem-this-solves">The problem this solves<a class="hlink" href="#the-problem-this-solves" aria-label="Link to this section">#</a></h2>
-<p>Your coding CLIs each spell the same setup differently: the same MCP servers, the same skills, the same house rules, copied into incompatible files that drift apart. AgentStack keeps one reviewed manifest — <code>.agentstack/agentstack.toml</code> — and delivers it to every CLI you have.</p>
-<p>Underneath that there is a quieter problem. Adopting agent configuration from a repository is <code>npm install</code> with an agent attached: anything the repository declares would otherwise load into your tools unread. So the same manifest is also what you consent to, byte for byte, before any of it activates. That gate is step 3, and it is the part readers most often get wrong.</p>
-<p>Four ideas cover the product, and this tutorial does all four: <strong>setup</strong> (what you have), <strong>toolset</strong> (what this task needs), <strong>status</strong> (is it ready), and <strong>undo</strong> (how to take it back).</p>
-<h2 id="step-1--install-then-import-what-you-already-have">Step 1 — Install, then import what you already have<a class="hlink" href="#step-1--install-then-import-what-you-already-have" aria-label="Link to this section">#</a></h2>
-<div class="cb cb-term" data-language="sh"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">sh</span></div><pre class="block"><code class="language-sh"><span class="pr">$ </span>curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh
-<span class="pr">$ </span>agentstack --version</code></pre></div>
-<p>Then, in the project you want to set up:</p>
-<div class="cb cb-term" data-language="sh"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">sh</span></div><pre class="block"><code class="language-sh"><span class="pr">$ </span>cd your-project
-<span class="pr">$ </span>agentstack init</code></pre></div>
-<p><code>init</code> is a guided wizard: it scans before it asks. It detects the agent CLIs on this machine, imports the MCP servers and settings they are already configured with, lifts any inline token into a <code>${REF}</code> placeholder, asks where those values should live, and previews everything before it writes.</p>
-<div class="cb cb-term"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">shell</span></div><pre class="block"><code><span class="pr">$ </span>agentstack init
-<span class="out">🔍  Found 5 coding tools and their native configs:</span>
-<span class="out">      Claude Code          binary on PATH — no config files found</span>
-<span class="out">      Codex CLI            binary on PATH — no config files found</span>
-<span class="out">📦  Files agentstack will manage:</span>
-<span class="out">      .agentstack/agentstack.toml   the manifest — written by this import</span>
-<span class="out">🚚  How each tool gets them:</span>
-<span class="out">      Claude Code          skills + MCP servers planned live (not connected) · house rules + settings + hooks written to files</span>
-<span class="out">      Pi                   skills + house rules + settings + extensions written to files — this tool reads files only</span>
-<span class="out">✅  Wrote ~/your-project/.agentstack/agentstack.toml</span>
+<h1 id="tutorial-one-library-two-projects-another-machine">Tutorial: one library, two projects, another machine</h1>
+<p>This tutorial shows the complete everyday workflow. It assumes AgentStack is installed and <code>agentstack init</code> has completed on this machine.</p>
+<h2 id="step-1--link-your-reusable-library">Step 1 — Link your reusable library<a class="hlink" href="#step-1--link-your-reusable-library" aria-label="Link to this section">#</a></h2>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack lib link ~/GitHub/ai-setup --name central --first
+<span class="pr">$ </span>agentstack lib link ~/GitHub/ai-setup --name central --first --write
+<span class="pr">$ </span>agentstack lib sources</code></pre></div>
+<p>The first command previews. The linked folder can be any normal Git checkout. <code>lib sources</code> shows this source together with the built-in local library and reports names that appear in more than one place.</p>
+<h2 id="step-2--put-reusable-capabilities-there">Step 2 — Put reusable capabilities there<a class="hlink" href="#step-2--put-reusable-capabilities-there" aria-label="Link to this section">#</a></h2>
+<p>Create or import a skill:</p>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack lib new api-review
+<span class="pr">$ </span>agentstack lib add ./api-review
+<span class="pr">$ </span>agentstack lib add ./api-review --write</code></pre></div>
+<p>Add an MCP server definition containing <code>${REF}</code> placeholders, never secret values:</p>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack lib add-server github --file ./github-server.toml
+<span class="pr">$ </span>agentstack lib add-server github --file ./github-server.toml --write
+<span class="pr">$ </span>agentstack lib list</code></pre></div>
+<p>Commit and push the library as you would any Git repo.</p>
+<h2 id="step-3--select-names-in-a-project">Step 3 — Select names in a project<a class="hlink" href="#step-3--select-names-in-a-project" aria-label="Link to this section">#</a></h2>
+<p>Create <code>.agentstack/agentstack.toml</code> with one default toolset:</p>
+<div class="cb" data-language="toml"><div class="cb-bar"><span class="cb-lang">toml</span></div><pre class="block"><code class="language-toml">version = 1
+default_toolset = "backend"
 
-<span class="out">Import complete.</span>
-<span class="out">  Undo:      agentstack x restore --last --write</span>
-<span class="out">  Next:      agentstack doctor          (check the result)</span></code></pre></div>
-<p>What it leaves behind is small, and all of it is yours to commit:</p>
-<div class="cb"><pre class="block"><code>your-project/
-├── .agentstack/
-│   ├── agentstack.toml   # the manifest: servers, skills, instructions, toolsets
-│   └── .env              # token values lifted out of your configs (only if init found any)
-└── .gitignore            # a managed block, so .env is never committed</code></pre></div>
-<p>The manifest holds <code>${REF}</code> placeholders and never a secret value. The real values go to the OS keychain or that gitignored <code>.env</code>. Scripting this, or running it in CI? <code>agentstack init --yes --secrets skip</code> writes the manifest and asks nothing. Add <code>--connect</code> and the same run also registers the bridge your CLIs need, so the setup delivers the moment <code>init</code> returns; without that flag <code>init</code> writes nothing outside this project.</p>
-<h2 id="step-2--add-a-capability">Step 2 — Add a capability<a class="hlink" href="#step-2--add-a-capability" aria-label="Link to this section">#</a></h2>
-<p>Search once across your library, the bundled catalog, and the official MCP registry:</p>
-<div class="cb cb-term"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">shell</span></div><pre class="block"><code><span class="pr">$ </span>agentstack search postgres
-<span class="out">4 of 5 results for 'postgres', most relevant first:</span>
+[toolsets.backend]
+servers = ["github"]
+skills = ["api-review"]</code></pre></div>
+<p>The project stores names, not copied skill folders or MCP configs. If your project already contains several capabilities, the command form is:</p>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack toolset create backend --server github --skill api-review
+<span class="pr">$ </span>agentstack toolset default backend
+<span class="pr">$ </span>agentstack toolset default backend --write</code></pre></div>
+<p><code>toolset create</code> is interactive at a terminal. The default command has an explicit preview and write form.</p>
+<h2 id="step-4--pin-and-review-it">Step 4 — Pin and review it<a class="hlink" href="#step-4--pin-and-review-it" aria-label="Link to this section">#</a></h2>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack lock          <span class="cm"># preview</span>
+<span class="pr">$ </span>agentstack lock --write
+<span class="pr">$ </span>agentstack trust .
+<span class="pr">$ </span>agentstack status</code></pre></div>
+<p>The lock freezes the exact library content this project selected; <code>trust .</code> is the local human review of it, so every machine reviews for itself. See <a href="../howto/trust-a-repo.html">Trust a project</a> for why the lock comes first.</p>
+<h2 id="step-5--start-your-agent-normally">Step 5 — Start your agent normally<a class="hlink" href="#step-5--start-your-agent-normally" aria-label="Link to this section">#</a></h2>
+<p>Open Codex, Claude Code, OpenCode, or another supported CLI as usual. You do not need to run <code>agentstack use</code> for a live-capable CLI.</p>
+<p>A trusted connection automatically opens the project's default toolset. The agent sees skill names and descriptions first, so “review this API change” can make it load <code>api-review</code> without the user typing that name — the description is the routing hint. See <a href="../concepts.html#dynamic-skill-loading">Dynamic skill loading</a>.</p>
+<p>If no default exists and several toolsets are declared, the gateway stays on control-plane tools until the agent asks which toolset to use. A modern connection picks up a changed default on its next request; only a legacy connection keeps its opening selection and needs a reconnect.</p>
+<h2 id="step-6--use-the-same-library-in-another-project">Step 6 — Use the same library in another project<a class="hlink" href="#step-6--use-the-same-library-in-another-project" aria-label="Link to this section">#</a></h2>
+<p>The second project references the same reusable names but chooses a different small set:</p>
+<div class="cb" data-language="toml"><div class="cb-bar"><span class="cb-lang">toml</span></div><pre class="block"><code class="language-toml">version = 1
+default_toolset = "docs"
 
-<span class="out">catalog</span>
-<span class="out">  postgres PostgreSQL — query and inspect a database (read-only)</span>
-<span class="out">    trust: ⚠ runs code (npx) · needs secret</span>
-<span class="out">    ↳ agentstack add from postgres</span>
-
-<span class="out">MCP registry</span>
-<span class="out">  postgres-mcp PostgreSQL MCP server - query, schema introspection, explain…</span>
-<span class="out">    io.github.YawLabs/postgres-mcp</span>
-<span class="out">    trust: ✓ verified namespace · ⚠ runs code (npx)</span></code></pre></div>
-<p>Adding shows you the exact manifest change first:</p>
-<div class="cb cb-term"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">shell</span></div><pre class="block"><code><span class="pr">$ </span>agentstack add from postgres --write
-<span class="out">found postgres (catalog) — postgres</span>
-<span class="out">→ add 'postgres' in ~/your-project/.agentstack/agentstack.toml</span>
-<span class="out">  + [servers.postgres]</span>
-<span class="out">  + command = "npx"</span>
-<span class="out">  + args = ["-y", "@modelcontextprotocol/server-postgres"]</span>
-<span class="out">  + [servers.postgres.env]</span>
-<span class="out">  + POSTGRES_URL = "${POSTGRES_URL}"</span>
-<span class="out">✓ added 'postgres'.</span>
-<span class="out">↳ review secrets with `agentstack secret list`, then `agentstack apply`.</span></code></pre></div>
-<p>Skills work the same way: <code>agentstack add skill owner/repo --write</code> installs one from any repository. To write your own, drop a folder holding a <code>SKILL.md</code> under <code>.agentstack/skills/</code> and run <code>agentstack yes</code> — one review card, and it is pinned and live everywhere. <code>yes</code> needs a terminal; the headless equivalent is <code>agentstack adopt --write</code> followed by step 3.</p>
-<p>Nothing you have added is active yet. Adding changed the bytes of your setup, and nothing activates until those bytes are pinned and approved.</p>
-<h2 id="step-3--lock-then-trust-in-that-order">Step 3 — Lock, then trust (in that order)<a class="hlink" href="#step-3--lock-then-trust-in-that-order" aria-label="Link to this section">#</a></h2>
-<p>This is the step to get right, because the order is not interchangeable.</p>
-<p><code>agentstack lock --write</code> resolves every reference and pins it — server definitions, skill bytes, instruction bytes — to SHA-256 digests in <code>agentstack.lock</code>:</p>
-<div class="cb cb-term"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">shell</span></div><pre class="block"><code><span class="pr">$ </span>agentstack lock --write
-<span class="out">✓ pinned 1 skill + 1 server from the implicit default (no toolsets declared) in ~/your-project/.agentstack/agentstack.lock</span>
-<span class="out">  no configs rendered, no skills materialized — that stays `agentstack use --write`.</span>
-
-<span class="out">Next: `agentstack trust .` to review and consent.</span></code></pre></div>
-<p><code>agentstack trust .</code> then shows you what the project runs and asks:</p>
-<div class="cb cb-term"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">shell</span></div><pre class="block"><code><span class="pr">$ </span>agentstack trust .
-<span class="out">Reviewing ~/your-project — approving this lets its capabilities activate.</span>
-
-<span class="out">This project will:</span>
-<span class="out">  run 1 command on your machine — postgres</span>
-<span class="out">  be able to read 1 secret — POSTGRES_URL</span>
-<span class="out">  add 1 file to every agent's context</span>
-<span class="out">  …using exactly the content shown below, pinned to these bytes.</span>
-
-<span class="out">This project declares — review what auto-mode may run/contact:</span>
-<span class="out">  servers (spawned or contacted over MCP):   [+1 added]</span>
-<span class="out">+ ▶ postgres: runs `npx -y @modelcontextprotocol/server-postgres`</span>
-<span class="out">+ secrets referenced: POSTGRES_URL</span>
-<span class="out">  skills loadable over MCP:   [+1 added]</span>
-<span class="out">+ · deploy-checklist   [inline, pinned]</span>
-<span class="out">  machine policy ceiling: ~/.agentstack/agentstack.toml — the repo can only narrow it, never loosen it</span>
-
-<span class="out">✓ trusted at sha256:eb29b1b8…</span>
-<span class="out">Editing the manifest or lockfile invalidates this — re-run `agentstack trust` after reviewing changes.</span></code></pre></div>
-<p><strong>Lock first, then trust.</strong> The grant is bound to a digest of the manifest layers <em>and</em> the lockfile, so a later <code>agentstack lock --write</code> invalidates the grant you just gave — the project drops back to untrusted and you review again. Trusting before locking wastes the review. A <code>git pull</code> that touches either file has exactly the same effect.</p>
-<p>The review is not only about servers. <strong>Five kinds are gated</strong>, because each one either runs code or puts words directly into an agent's context:</p>
-<div class="tblwrap"><table>
-<thead><tr><th>Kind</th><th>Why it is gated</th></tr></thead><tbody>
-<tr><td>servers</td><td>spawned as a process, or contacted over MCP</td></tr>
-<tr><td>skills</td><td>their words enter every agent's context</td></tr>
-<tr><td>house rules</td><td>written into the region a harness reads into context</td></tr>
-<tr><td>hooks</td><td>a hook is a command the harness runs</td></tr>
-<tr><td>native extensions</td><td>extensions run code inside the CLI</td></tr>
-</tbody></table></div>
-<p>Trust says <em>you read this</em>. It is not a claim that the code is safe, and it does not confine a server once it runs — see <a href="../enforcement.html#what-trusted-does-and-does-not-mean">what trusted does and does not mean</a>. To vet one capability in depth before consenting, use <code>agentstack x explain postgres</code>.</p>
-<h2 id="step-4--activate-it">Step 4 — Activate it<a class="hlink" href="#step-4--activate-it" aria-label="Link to this section">#</a></h2>
-<p>Two commands deliver a trusted setup. <code>agentstack apply --write</code> renders what belongs in files; <code>agentstack use --write</code> (or <code>agentstack use backend --write</code> when you have named toolsets) activates a toolset's servers and skills.</p>
-<p>Both refuse on a project you have not reviewed, or have edited since:</p>
-<div class="cb cb-term"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">shell</span></div><pre class="block"><code><span class="pr">$ </span>agentstack use --write
-<span class="out">Activating toolset 'default' (scope: project) — 1 server, 1 skill</span>
-
-<span class="out">Claude Code</span>
-<span class="out">  ✗ refusing to materialize skills: project at ~/your-project changed since it was trusted — review and `agentstack trust .` before putting its words into an agent's context ('deploy-checklist')</span>
-<span class="out">  ✗ skills not materialized — the project has not been trusted for this content</span>
-<span class="out">error: 3 targets blocked — each ✗ above names the blocker</span></code></pre></div>
-<p>That is exit 1, on your own project, because you edited it. The refusal reads <code>changed since it was trusted</code> rather than <code>is not trusted</code>, and it is the same gate. After the review it lands:</p>
-<div class="cb cb-term"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">shell</span></div><pre class="block"><code><span class="pr">$ </span>agentstack use --write
-<span class="out">Activating toolset 'default' (scope: project) — 1 server, 1 skill</span>
-<span class="out">  ↩ undo: `agentstack x restore --last --write`</span>
-
-<span class="out">Claude Code</span>
-<span class="out">  · MCP servers are planned live (not connected), not written — nothing for `use` to render here</span>
-<span class="out">  ✓ 1 skill → ~/your-project/.claude/skills</span>
-<span class="out">✓ activated 'default' — wrote skills to 3 locations; no server configs changed.</span></code></pre></div>
-<h3 id="delivery-is-routed-not-chosen">Delivery is routed, not chosen<a class="hlink" href="#delivery-is-routed-not-chosen" aria-label="Link to this section">#</a></h3>
-<p>Notice what <code>use</code> did not do: it wrote no MCP server config. Where each capability lands is <strong>not a mode you pick</strong>. AgentStack routes every kind to one of two lanes, per kind and per tool, from two facts — what the kind is, and whether that tool speaks MCP.</p>
-<ul>
-<li><strong>The live lane</strong> carries skills and MCP servers, served over the bridge to every tool that can take them, with no project artifacts written for them.</li>
-<li><strong>The rendered lane</strong> carries house rules, settings, hooks and native extensions — those cannot travel live, because no live channel can vary a house rule per model, a settings file is only read as a file, and a hook runs code. A tool that reads files only gets every kind rendered.</li>
-</ul>
-<p>Ask the product rather than guessing:</p>
-<div class="cb cb-term"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">shell</span></div><pre class="block"><code><span class="pr">$ </span>agentstack x delivery
-<span class="out">  Delivery  how capabilities reach each tool</span>
-<span class="out">  Claude Code          skills + MCP servers planned live (not connected) · house rules + settings + hooks written to files</span>
-<span class="out">                       hooks run code — reviewed in full every time</span>
-<span class="out">  Pi                   skills + house rules + settings + extensions written to files — this tool reads files only</span>
-<span class="out">  · register the bridge: agentstack x gateway connect --all --write</span>
-<span class="out">  · write files anyway: agentstack x delivery render-locally --write</span></code></pre></div>
-<p>Routing is the plan, not the delivery: a tool receives the live lane only once its bridge is registered, which is why the line says <em>planned live (not connected)</em> until you run <code>agentstack x gateway connect --all --write</code> — once per machine, not once per project. There is exactly one override, and it goes one way, towards files: <code>agentstack x delivery render-locally --write</code>. It is recorded in the manifest, so every clone answers the same.</p>
-<h2 id="step-5--check-it-then-run">Step 5 — Check it, then run<a class="hlink" href="#step-5--check-it-then-run" aria-label="Link to this section">#</a></h2>
-<p><code>agentstack status</code> is one screen: what is here, whether it is ready, and the single next step. <code>agentstack doctor</code> is the deep check — adapters, secrets, drift, skills, supply chain — and every finding names its own fix:</p>
-<div class="cb cb-term"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">shell</span></div><pre class="block"><code><span class="pr">$ </span>agentstack doctor
-<span class="out">Zero-files gateway</span>
-<span class="out">  ✗ no bridge for Claude Code, Codex CLI — nothing routed live is reaching them ↳ agentstack x gateway connect --all --write</span>
-<span class="out">  ✓ this project is trusted for auto mode</span>
-<span class="out">Secrets</span>
-<span class="out">  ✗ POSTGRES_URL         not found ↳ agentstack secret set POSTGRES_URL</span>
-<span class="out">Drift</span>
-<span class="out">  ✓ all targets in sync</span>
-<span class="out">2 errors, 0 warnings, 1 note.</span>
-<span class="out">  next: agentstack secret set POSTGRES_URL   the finding to start with</span></code></pre></div>
-<p><strong>Drift</strong> is a mismatch between the manifest and what is on disk — usually a hand-edit in a CLI's own config. <code>agentstack diff</code> shows the consequence before anything changes, and then you answer one question: which side holds the truth? If the hand-edit does, <code>agentstack adopt --write</code> pulls it into the manifest (lifting any inline token on the way). If the manifest does, <code>agentstack apply --write</code> re-renders over it. Either way, the setup changed, so step 3 applies again: lock, then trust.</p>
-<p>To launch a CLI as a tracked run:</p>
-<div class="cb cb-term" data-language="sh"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">sh</span></div><pre class="block"><code class="language-sh"><span class="pr">$ </span>agentstack run claude-code</code></pre></div>
-<p>That is the Protected tier by default — pre-launch gates for trust, lock and policy, and a frozen tool surface. <code>--sandbox</code> moves it into a container behind the egress proxy, <code>--lockdown</code> removes the container's direct route out so the audited proxy is its only way to the network, and <code>--unprotected</code> opts out of the gates entirely. Each tier prints its own posture label; the four of them and what each actually enforces are in <a href="../concepts.html#posture-and-the-machine-policy-summary">Concepts</a> and the <a href="../enforcement.html">enforcement matrix</a>.</p>
-<h2 id="step-6--take-it-back-and-set-up-the-next-machine">Step 6 — Take it back, and set up the next machine<a class="hlink" href="#step-6--take-it-back-and-set-up-the-next-machine" aria-label="Link to this section">#</a></h2>
-<p>Rendered writes are recorded as you go, so nothing here is a one-way door. <code>agentstack undo</code> is that record read as a timeline, newest first — with no <code>--write</code> it only shows you the list:</p>
-<div class="cb"><pre class="block"><code>recent changes (newest first)
-  1  2m ago      init         1 file · Claude Code, Codex CLI, OpenCode, Pi
-
-  pick a point: agentstack undo --to &lt;n&gt; --write</code></pre></div>
-<p><code>agentstack undo --to 1 --write</code> reverts to before that change — everything newer comes off with it, because that is what "back to that point" means. The revert is itself recorded, so going one step too far is recoverable. <code>agentstack x restore --last --write</code> is the same record as a one-shot, script-friendly command.</p>
-<p>The limit is worth knowing: restore reverts AgentStack's own recorded writes. A file some server deleted is not brought back, and a manifest edit you regret is undone in your editor or in git, not here.</p>
-<p>On a second machine that has the checkout and nothing else, there is nothing to import — the setup already exists:</p>
-<div class="cb cb-term" data-language="sh"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">sh</span></div><pre class="block"><code class="language-sh"><span class="pr">$ </span>agentstack x up</code></pre></div>
-<p>It finds the CLIs on that machine, verifies the environment against <code>agentstack.lock</code>, renders each CLI's config, and names what is left over, which on a new machine is that machine's secrets. Trust is per person and per machine: nobody else's yes carries over, so you review there too.</p>
-<h2 id="where-to-go-next">Where to go next<a class="hlink" href="#where-to-go-next" aria-label="Link to this section">#</a></h2>
-<ul>
-<li><a href="../start.html">Get started</a> — the same path, command by command, with expected output.</li>
-<li><a href="../concepts.html">Concepts</a> — manifest, lockfile, trust, gateway, policy, posture, defined once.</li>
-<li><a href="../reference.html">Every command</a> — the full surface, including everything under <code>agentstack x</code>.</li>
-<li><a href="../troubleshooting.html">Troubleshooting</a> — when a command refuses and you want the reason.</li>
-<li><a href="../enforcement.html">Enforcement matrix</a> — what each protection really enforces, and where it stops.</li>
-</ul>
+[toolsets.docs]
+servers = ["upstash/context7"]
+skills = ["technical-writing"]</code></pre></div>
+<p>Run the same lock and trust loop. The two projects share the library but keep independent locks, defaults, and trust decisions.</p>
+<h2 id="step-7--bootstrap-another-machine">Step 7 — Bootstrap another machine<a class="hlink" href="#step-7--bootstrap-another-machine" aria-label="Link to this section">#</a></h2>
+<p>Clone the project, then preview and apply one bootstrap:</p>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack up --library https://github.com/you/ai-setup.git
+<span class="pr">$ </span>agentstack up --library https://github.com/you/ai-setup.git --write
+<span class="pr">$ </span>agentstack status</code></pre></div>
+<p>AgentStack detects the CLIs present on that machine and connects only what it finds. The project and library content travel; secrets and trust do not.</p>
+<p>Add each missing secret locally:</p>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack secret set GITHUB_TOKEN</code></pre></div>
+<p>Then run the <code>trust .</code> command named by status.</p>
+<h2 id="update-something-later">Update something later<a class="hlink" href="#update-something-later" aria-label="Link to this section">#</a></h2>
+<p>Edit and push the central library. In a project that should accept the new version:</p>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack up            <span class="cm"># preview</span>
+<span class="pr">$ </span>agentstack up --write
+<span class="pr">$ </span>agentstack lock          <span class="cm"># preview</span>
+<span class="pr">$ </span>agentstack lock --write
+<span class="pr">$ </span>agentstack trust .</code></pre></div>
+<p>The important guarantee is that syncing the library does not silently change a locked project. The <code>lock</code> preview is where you see and accept the change.</p>
+<h2 id="take-back-a-managed-write">Take back a managed write<a class="hlink" href="#take-back-a-managed-write" aria-label="Link to this section">#</a></h2>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack undo</code></pre></div>
+<p>Choose a recorded point and add the exact <code>--write</code> command it shows. Removing an AgentStack-managed setup also removes empty managed parent folders; it keeps user-owned files and non-empty folders.</p>
+<p>Next: <a href="../start.html">Get started</a> · <a href="../library.html">Central library</a> · <a href="../faq.html">FAQ</a> · <a href="../reference.html">Full reference</a></p>
   <p class="srcline">Source of truth: <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/tutorial.md">docs/tutorial.md</a> — this page is generated from it.</p>
   </main>
 </div>

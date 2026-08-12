@@ -667,11 +667,15 @@ fn mcp_exchange(
     drop(stdin);
     let output = child.wait_with_output().unwrap();
     assert!(output.status.success(), "the mcp server exited cleanly");
-    String::from_utf8(output.stdout)
+    let mut responses: Vec<serde_json::Value> = String::from_utf8(output.stdout)
         .unwrap()
         .lines()
         .map(|line| serde_json::from_str(line).unwrap())
-        .collect()
+        .collect();
+    // JSON-RPC responses may complete out of order. Keep this fixture's
+    // callers request-indexed by sorting on the numeric ids they supplied.
+    responses.sort_by_key(|response| response["id"].as_u64().unwrap_or(u64::MAX));
+    responses
 }
 
 /// The JSON payload an `agentstack_*` tool call answers with.
@@ -744,13 +748,18 @@ fn activating_a_package_exposes_the_boundary_without_loading_any_body() {
         &proj,
         &home,
         &[
-            serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} }),
+            serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+                "protocolVersion": "2025-11-25", "capabilities": {},
+                "clientInfo": { "name": "agentstack-test", "version": "1" }
+            } }),
             serde_json::json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "agentstack_lease_open", "arguments": { "profile": "backend" } } }),
             serde_json::json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": { "name": "agentstack_list_loadable", "arguments": {} } }),
         ],
     );
     let catalog = tool_json(&responses[2]);
-    let entries = catalog["loadable"].as_array().unwrap();
+    let entries = catalog["loadable"]
+        .as_array()
+        .unwrap_or_else(|| panic!("missing loadable catalog: {catalog}"));
     let member = entries
         .iter()
         .find(|e| e["name"] == "sql-review")
@@ -792,7 +801,10 @@ fn activating_a_package_exposes_the_boundary_without_loading_any_body() {
         &proj,
         &home,
         &[
-            serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} }),
+            serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+                "protocolVersion": "2025-11-25", "capabilities": {},
+                "clientInfo": { "name": "agentstack-test", "version": "1" }
+            } }),
             serde_json::json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "agentstack_lease_open", "arguments": { "profile": "backend" } } }),
             serde_json::json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": { "name": "agentstack_load", "arguments": { "name": "sql-review", "reason": "reviewing a migration" } } }),
         ],
@@ -864,7 +876,10 @@ fn a_listed_description_comes_from_the_pinned_bytes_not_the_live_library() {
         &proj,
         &home,
         &[
-            serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} }),
+            serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+                "protocolVersion": "2025-11-25", "capabilities": {},
+                "clientInfo": { "name": "agentstack-test", "version": "1" }
+            } }),
             serde_json::json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "agentstack_list_loadable", "arguments": {} } }),
         ],
     );
@@ -1010,6 +1025,9 @@ const SENTINEL_FIXTURE: &str = r#"#!/bin/sh
 while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
   case "$line" in
+    *'"method":"server/discover"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id"
+      ;;
     *'"method":"initialize"'*)
       printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"fix","version":"0"}}}\n' "$id"
       ;;
@@ -1159,6 +1177,9 @@ fn write_pinned_server(script: &Path, sentinel: &Path, tool: &str) {
 while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
   case "$line" in
+    *'"method":"server/discover"'*)
+      printf '{{"jsonrpc":"2.0","id":%s,"error":{{"code":-32601,"message":"method not found"}}}}\n' "$id"
+      ;;
     *'"method":"initialize"'*)
       printf '{{"jsonrpc":"2.0","id":%s,"result":{{"protocolVersion":"2025-06-18","capabilities":{{}},"serverInfo":{{"name":"pkg","version":"0"}}}}}}\n' "$id"
       ;;

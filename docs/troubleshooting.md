@@ -93,7 +93,8 @@ not rendering configs — clean-at-rest keeps them off disk
 In clean-at-rest mode nothing is generated between sessions; capabilities exist
 only inside `agentstack run` or between `agentstack x session start` and
 `agentstack x session end`. A missing `.mcp.json` here is the design. Do not
-create one. See [delivery modes](concepts.md#delivery-modes).
+create one. See
+[delivery in the reference](reference.md#delivery--routing-and-where-rendered-files-live).
 
 **`Codex will IGNORE {dir}/.codex/config.toml — the project is not trusted in ~/.codex/config.toml (projects."{dir}".trust_level) ↳ open Codex in this folder once and accept the trust prompt`**
 

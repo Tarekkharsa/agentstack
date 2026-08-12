@@ -4,229 +4,198 @@
 
 # FAQ
 
-The questions that come up in the first week. If something is *broken* rather
-than unclear, start at [troubleshooting](troubleshooting.md).
+## What belongs in my central library?
 
-## Will this overwrite the CLI configs I already have?
+Reusable skills, MCP server definitions, instructions, hooks, extensions, and
+packages. It is a normal Git repo with a `library.toml` index and folders such
+as `skills/`, `servers/`, and `instructions/`.
 
-No — and nothing is written until you pass `--write`. Every command previews
-first, so a bare `agentstack apply` prints the exact diff and stops.
+Do not put secret values, trust state, audit logs, or machine-specific CLI
+configuration there. See [Central library](library.md).
 
-agentstack edits only the region it manages inside each native config. Servers
-you added by hand, and servers a *different* project's manifest applied at
-global scope, are kept and reported rather than pruned. Removing those takes
-the explicit `agentstack apply --prune-foreign`.
+## What belongs in each project repo?
 
-`agentstack init` starts by **importing** what you already have into the
-manifest, so the first apply is usually a no-op that just makes your existing
-setup portable.
+Usually only `.agentstack/agentstack.toml` and
+`.agentstack/agentstack.lock`. The manifest names the capabilities and default
+toolset. The lock pins the exact library content that was reviewed.
 
-## What happens if I uninstall it?
+Native MCP configs and copied skill folders are generated output or unnecessary
+in the zero-files lane. Do not commit them as a second source of truth.
 
-`agentstack x uninstall` takes off every managed region it rendered, previewing
-first. Your `agentstack.toml` stays exactly where it is, so `agentstack apply
---write` brings the whole setup back later. Entries you or another tool wrote
-into those same files are left alone.
+## What does the lock mean?
 
-Because the removal runs through the same machinery as a normal write, the
-uninstall is itself undoable with `agentstack x restore --last --write`. The
-binary is not removed — take that off the way you installed it. Details:
-[undo anything](howto/undo.md).
+It freezes the exact resolved skill bodies, MCP definitions, instructions, and
+other selected content, so a central library may move forward without silently
+changing a project that already has a lock. Accept an intentional update by
+writing a new lock, then reviewing it again — see
+[Trust a project](howto/trust-a-repo.md).
 
-## Is my API key stored in the manifest?
+## When do I lock again?
 
-No. Manifests hold `${REF}` placeholders only; values are resolved per machine
-from your environment, varlock, the OS keychain, or a gitignored project `.env`.
-A ref that does not resolve **blocks the write** rather than
-rendering an empty string.
+After you change what a toolset or project selects, or when you intentionally
+accept updated library content. Unrelated project edits and new library commits
+need no new lock. See [When to lock again](library.md#when-to-lock-again).
 
-**varlock** is the vault we recommend, because it keeps values out of the
-project entirely — 1Password, a cloud secret manager, or device-local
-encryption behind one resolver. `agentstack init` offers to write the
-`.env.schema` that opts in; that file declares names with empty values and
-nothing else, so it is safe to commit, and `agentstack doctor` reports whether
-varlock is actually serving them.
+## Can I link my GitHub library and keep my old local library?
 
-That is why the manifest is safe to commit, and why a teammate cloning it runs
-`agentstack secret set <NAME>` for their own values instead of receiving yours.
-More: [concepts — secrets](concepts.md#secrets).
+Yes. AgentStack combines all linked sources and the first one holding a kind and
+name wins; existing locked projects keep their pinned content until deliberately
+re-locked. See
+[Several libraries work together](library.md#several-libraries-work-together)
+for collisions and qualified names such as `local:rust-testing`.
 
-## Do I have to commit the manifest?
+## How does the agent see my skills if they are not copied into the repo?
 
-You do not have to, but that is where the value is: `.agentstack/` (manifest +
-lockfile) is intent, never credentials, so committing it is how a team shares
-one setup. The *rendered* files are a different matter — agentstack adds them
-to a managed `.gitignore` block by default, since they are compiled output. If
-your team prefers to commit them, pass `--no-gitignore`.
+The gateway gives the agent a compact index of loadable skill names and one-line
+descriptions, and the agent loads one full body with
+`agentstack_load(name, reason)` when the task matches — so the user never has to
+name the skill. See [Dynamic skill loading](concepts.md#dynamic-skill-loading).
+
+## Does every skill body enter the model's context?
+
+No. Only the compact name-and-description index is present initially. Full
+instructions load on demand and are recorded with the reason.
+
+## How are MCP tools loaded?
+
+The default compact gateway does not advertise every upstream schema at once.
+It exposes the MCP servers selected by the toolset behind `tools_search`. The
+agent searches for a needed tool and receives that tool's schema only when it
+needs to call it.
+
+## Do I need to run `agentstack use` before opening an agent?
+
+Not in the normal zero-files workflow. A trusted new connection automatically
+opens the declared default toolset. `use --write` is for file-only CLIs and
+intentional rendered compatibility lanes.
+
+If several toolsets exist without a default, AgentStack stays on control-plane
+tools until one is selected. Set one with:
+
+```bash
+agentstack toolset default backend
+agentstack toolset default backend --write
+```
+
+## When does a changed default reach an agent that is already running?
+
+A modern MCP connection re-derives the trusted default from the project on its
+next request, so it picks the change up without reconnecting. Only a legacy
+connection keeps the selection it opened with; reconnect that one to receive
+the new default.
+
+## How do CLI- and model-specific instructions work?
+
+An instruction fragment can have base, CLI, model, and CLI-plus-model bodies.
+The most specific matching body wins. AgentStack uses a model explicitly named
+by a toolset or managed setting and never guesses an unknown model.
+
+Put reusable variants in
+`instructions/<name>/instruction.toml` in the central library. See the
+[example](library.md#put-cli--and-model-specific-instructions-in-the-library).
+
+## Will AgentStack overwrite my existing CLI configs?
+
+Installing AgentStack changes nothing by itself. `init` discovers existing MCP
+entries and supported settings, then shows an import review. Accepted MCP
+definitions are copied into the central library (`~/.agentstack/lib`, or your
+first linked source) by default; the original CLI entries are not deleted. Every write has a preview or confirmation, managed
+regions preserve surrounding user content, and recorded writes can be reviewed
+with `agentstack undo`.
+
+When the live gateway can carry skills and MCP servers, AgentStack leaves their
+native project files absent.
+
+## What happens to skills I already installed in Codex or another CLI?
+
+They stay where they are and keep working through that CLI. `init` does not
+automatically import or delete native skills. When you want one to become a
+portable AgentStack skill, preview and adopt it explicitly:
+
+```bash
+agentstack adopt --to-library
+agentstack adopt --to-library --write
+```
+
+The first command shows what would be adopted. The second stores accepted
+skills in the central library so projects can select them by name.
+
+## What about Computer Use and other app-owned tools?
+
+AgentStack leaves them with the application that installed and updates them.
+During `init`, MCP servers whose executable lives inside another app bundle are
+named but excluded by default. This avoids copying one application's private
+plumbing into unrelated CLIs or re-locking every time that app updates.
+
+Use `agentstack init --include-tool-managed` only when you deliberately want to
+override that boundary. Built-in CLI features, plugins, and connector systems
+that are not native MCP config entries are not replaced by AgentStack.
+
+## Where should my custom capabilities go?
+
+Put reusable skills, MCP server definitions, and instructions in the central
+library. A project normally contains only the manifest and lock that select
+those names. Keep a capability inline or under `.agentstack/` only when it is
+specific to that one repository.
+
+## Why are empty folders still present after uninstall?
+
+AgentStack removes empty parent folders it owns after removing its managed
+files. It keeps non-empty folders and any folder containing user-owned content.
+Run `agentstack doctor` if an empty managed folder remains; do not delete
+provider trees blindly.
+
+## Is my API key stored in the manifest or library?
+
+No. Portable files contain `${REF}` placeholders. Each machine stores the
+value with `agentstack secret set REF`, normally in the OS keychain. AgentStack
+never puts resolved values in the lock, agent context, or audit log.
+
+## Why must I trust my own project?
+
+The same rule protects every path, including a repo you just cloned or changed.
+Trust is a review of the current manifest and lock on one machine. A changed
+consent surface becomes inert until reviewed again.
+
+Trust means reviewed, not proven safe. Use policy and protected runs for
+enforcement.
 
 ## Can my teammate use a different CLI than me?
 
-Yes. That is the point. One manifest compiles to each CLI's native format, so
-you can be on Claude Code and your teammate on Codex from the same committed
-file. `[targets].default` lists which CLIs commands act on, and each person can
-narrow that for their own machine.
+Yes. The project declares intent once. Each adapter delivers it in the form its
+CLI supports, and `agentstack up` connects only the CLIs detected on that
+machine.
 
-Thirteen adapters ship today: Antigravity, Claude Code, Claude Desktop, Codex
-CLI, GitHub Copilot CLI, Cursor, Gemini CLI, Junie, Kiro, OpenCode, Pi, VS
-Code, and Windsurf. `agentstack x adapters list` shows which are installed here.
-They are not equally verified — five get a nightly check against the real CLI
-and the rest are best-effort. The
-[adapter support matrix](adapters.md) says which is which, and what each one
-manages.
+## Does AgentStack depend on T3 Code?
 
-## What if two of my CLIs already define the same server?
-
-`agentstack init` imports both into one manifest entry. If the two definitions
-genuinely differ, it keeps the first one imported and says so out loud:
-
-```text
-⚠ server 'github' is defined differently by 1 other CLI — kept the first
-  definition imported (the other stays in its CLI's own config)
-```
-
-Nothing is lost — the other definition stays in its own CLI's config until you
-apply. Review the merged entry, edit it if the wrong one won, then
-`agentstack apply --write` makes both CLIs agree. That is how they stop
-drifting apart.
-
-## Do I need Docker?
-
-No. Docker is only needed for `agentstack run --sandbox` and `--lockdown`, the
-top of the protection ladder. Importing, unifying, applying, naming toolsets,
-diagnosing, and undoing all work with no container runtime at all. See
-[which protection do I need?](choose.md).
-
-## Why does it ask me to trust my own project?
-
-Usually it does not. A consented `agentstack init` records trust as part of
-setup, so the gate mainly appears in two situations: a repository you
-**cloned** (someone else wrote those declarations), and a manifest that
-**changed** since you approved it.
-
-Untrusted means inert — a repo's declarations cannot spawn servers, enter agent
-context, or resolve secrets until a human has read them, and nothing is written
-for them either: no native MCP server config, no skill files, no compiled
-`CLAUDE.md` / `AGENTS.md` region, no hooks, no extensions. Each refuses out loud
-and exits nonzero. Settings, removal and machine-level content stay outside the
-gate, because none of them authorizes new content.
-
-Trust is bound to the content it approved, so a `git pull` that changes pinned
-bytes drops the repo back to inert on purpose. `agentstack trust .` prints the
-full declared surface and asks. Details:
-[trust a cloned repo](howto/trust-a-repo.md).
-
-## I re-locked and it still refuses to deliver
-
-Because re-locking is not reviewing. The lockfile is part of what you consent
-to, so `agentstack lock --write` *always* makes an existing grant stale — new
-pins are new consent. It accepts the new bytes; only `agentstack trust .`
-reviews them, and only the review re-opens delivery.
-
-```bash
-agentstack lock --write   # accept the new bytes
-agentstack trust .        # review them — this is the step that unblocks
-```
-
-The order is the same on a fresh project: lock first, then trust. `trust`
-refuses an unpinned surface, so there is no other way round. Full walkthrough:
-[lock first, then trust](troubleshooting.md#lock-first-then-trust).
-
-## I added a skill and now everything else refuses
-
-That is the design. `agentstack add … --write` writes the manifest and lockfile
-and delivers in the same run — it judges trust as it stood when the command
-started, so it never refuses the thing you just asked for. But it does not
-re-approve the project on your behalf: a new capability is content you have not
-read yet. So the project reads `trust stale (content changed)` and the next
-command re-gates. Run `agentstack trust .` and the review is over in one step.
-
-## I dropped a skill folder into `.agentstack/skills/` — how do I use it without editing any config?
-
-Run `agentstack yes` (v0.18.0 and later; the current stable install serves
-v0.17.1). The dropped files are noticed, pinned, and shown on one review card —
-what gets declared, what each CLI will receive, and the undo that reverses it —
-and one confirmation records them in the manifest and lock and renders them
-everywhere. No manifest edit, no `.mcp.json`, no per-CLI skills directory.
-
-The one caveat is provenance: files you demonstrably wrote here (untracked in
-git, or newer than the last review) get that one-step path, while anything that
-arrived with a clone is somebody else's work and takes the full staged review
-instead. Walkthrough: [add a skill](howto/add-a-skill.md).
-
-## Does agentstack replace my agent CLI?
-
-No. It configures the CLIs you already run — you keep launching `claude`,
-`codex`, or whatever you use. `agentstack run <cli>` is an optional wrapper
-that launches one as a tracked run so you get a flight recording — and it is the
-Protected tier by default: fail-closed trust, lock, and policy checks before
-launch, with `--unprotected` as the explicit way past them. The stronger
-`--sandbox` / `--lockdown` postures build on that. Plain
-`apply` needs none of it.
-
-## What is the difference between `use` and `session start`?
-
-`agentstack use <name> --write` activates a toolset persistently — it renders
-its servers and materializes its skills, and they stay until you change them.
-`agentstack x session start <name>` is the temporary form: the same activation,
-but `agentstack x session end` puts every file back.
-
-Naming a toolset does not activate it. `agentstack toolset create` writes the
-manifest entry and re-locks, and renders nothing at all — activation is always
-a separate, explicit step. More:
-[name a toolset](howto/name-a-toolset.md).
-
-## Does it work on Windows?
-
-Not as a supported platform. A Windows binary is published with each release,
-but CI never runs on Windows and the codebase carries almost no
-Windows-specific handling, so it is untested rather than supported. macOS and
-Linux are the platforms the project stands behind. WSL works, because that is
-Linux.
+No. AgentStack works when a CLI starts directly or under an unchanged T3 Code
+installation or another supervisor. T3 Code can control remote sessions;
+AgentStack independently manages the portable capability configuration on each
+machine.
 
 ## Does it work offline?
 
-Mostly. `doctor`, `diff`, `apply`, `use`, `restore` and toolset resolution are
-static and offline. Three things reach the network when you ask them to:
-`agentstack search` queries the MCP Registry alongside your local library,
-`agentstack x install` fetches git-hosted skills into the store, and
-`agentstack doctor --live` performs a real MCP handshake against HTTP servers.
+Already-pinned local content can work offline. New Git-backed content,
+remote MCP servers, library pulls, and first-time downloads still need a
+network. Use an intentional rendered lane when a CLI must work without the live
+gateway.
 
-Everything fetched is pinned in `agentstack.lock`, so a later run verifies
-bytes rather than re-downloading them.
+## What should I run when something is wrong?
 
-## I ran a command and nothing happened — is it broken?
+Start with:
 
-Almost certainly not. Nothing touches disk without `--write`; a bare command
-prints the plan and exits. This is deliberate: you should be able to run any
-agentstack verb on an unfamiliar machine and learn what it *would* do.
+```bash
+agentstack status
+```
 
-If you expected output and got none, `agentstack status` says where the project
-stands in one screen and names the single next step.
+It gives one next action. Use `agentstack doctor` for the deeper pass. Follow
+the first fix it prints rather than editing generated provider files.
 
-## The servers applied, but my CLI still doesn't see them
+## When should I not use AgentStack?
 
-Restart the CLI. A harness reads its config at startup, and `apply` says so
-when it writes. If a restart does not fix it, the cause is usually scope
-(project-local versus the CLI's user-level config) — see
-[my CLI doesn't see the servers](troubleshooting.md#my-cli-doesnt-see-the-servers).
+If you have one CLI, one permanent configuration, and no need to share,
+version, audit, or reuse it, native configuration may be simpler. AgentStack is
+most useful when projects, CLIs, machines, or teammates multiply.
 
-## Does "trusted" mean the code is safe?
-
-No, and the distinction matters. Trust is **consent to activate what you
-reviewed** — it certifies that a human read the declarations and that the bytes
-have not changed since. It does not audit the server's source, and an allowed
-destination can still exfiltrate.
-
-The same discipline applies elsewhere: host advisory checks are not
-confinement, and recording is not prevention. Exactly what each mode does and
-does not enforce is written down, per cell, in the
-[enforcement matrix](ENFORCEMENT.md).
-
-## Where do I report something wrong with the docs?
-
-The Markdown under `docs/` is the source of truth and the pages here are
-compiled from it, so a fix is a normal pull request against the `.md` file.
-
-- [Troubleshooting](troubleshooting.md) — search for the error text you got
-- [Concepts](concepts.md) — every term in two or three plain sentences
-- [Reference](reference.md) — the complete command inventory
+Next: [Get started](start.md) · [Central library](library.md) ·
+[Troubleshooting](troubleshooting.md)

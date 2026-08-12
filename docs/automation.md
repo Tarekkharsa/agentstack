@@ -10,7 +10,7 @@ contract name to check before you depend on one.
 
 If you are driving the CLI from an agent, a script, or a graphical companion
 such as t3code, this is the page to read. If you want the human-facing flags,
-see [Every command](reference.html).
+see [Every command](reference.md).
 
 ## The envelope
 
@@ -115,7 +115,8 @@ process start time).
 | `agentstack x session list --json` | `json-reads-v1` | `sessions[]` |
 | `agentstack doctor --json` | `status-v1` | `state`, `next_action`, `sections`, `errors`, `warnings`, `trust`, `protection` |
 | `agentstack doctor --json` | `doctor-advisories-v1` | top-level `advisories` count; section lines may carry `level: "advisory"` |
-| `agentstack doctor --json` | `doctor-mode-v1` | top-level `mode` (`static` / `clean-at-rest` / `zero-files`) and `activation` (`locked` / `never_activated`) — the same derived readings `status` prints, so no prose-matching |
+| `agentstack doctor --json` | `doctor-mode-v1` | top-level `mode` (`static` / `clean-at-rest` / `zero-files`) and `activation` (`locked` / `never_activated`) — the same derived readings `status` prints, so no prose-matching. `activation` answers "was this project ever activated", i.e. does a lockfile exist; it is **not** a liveness reading |
+| `agentstack doctor --json` | `doctor-liveness-v1` | top-level `live_state` (`live` / `not_live`), `locked`, `default_toolset`, `live_toolsets[]` — whether the lease registry holds a live record for this project right now. Additive: `activation` keeps its `doctor-mode-v1` values, so gate on this name for the runtime reading |
 | `agentstack doctor --json` | `doctor-cli-coverage-v1` | per-CLI coverage — which detected CLIs the current delivery mode actually configures |
 | `agentstack status --json` / `doctor --json` | `status-honesty-v1` | `state` never reports ready over unverified coverage — gate on this name before trusting `state: "ready"` |
 | `agentstack doctor --probe --json` | `doctor-probe-v1` | top-level `probe` object. **This one spawns**: it starts each stdio server, speaks the MCP `initialize` handshake, and stops it again |
@@ -126,10 +127,10 @@ process start time).
 | `agentstack x diff --json` | `diff-existence-v1` | per-target `existed_before` — splits "never rendered here / file absent" from "the manifest moved ahead of a rendered file" |
 | `agentstack x restore --json` | `restore-last` | `entries` (newest first) and `adapter_backups` |
 | `agentstack undo --json` | `json-reads-v1` | `entries[]` (newest first) — the same recorded writes `restore --json` lists, keyed for timeline display |
-| `agentstack x workflow list --json` | `workflow-observe-v1` | `workflows[]` with per-entry trust and lock state |
-| `agentstack x workflow list --json` | `workflow-serial-roles-v1` | per-entry `serial_roles` |
-| `agentstack x workflow list --json` / `workflow explain --json` | `workflow-role-selection-v1` | per-entry `role_details[]` — each role's `harness`, `model`, `effort`, `serial`, and any declared value that would not reach the child. `explain` carries the envelope too; it is the deeper per-workflow read and **re-gates on trust** |
-| `agentstack x workflow runs --json` | `workflow-observe-v1` | `runs[]` from the machine-global runs directory |
+| `agentstack workflow list --json` | `workflow-observe-v1` | `workflows[]` with per-entry trust and lock state |
+| `agentstack workflow list --json` | `workflow-serial-roles-v1` | per-entry `serial_roles` |
+| `agentstack workflow list --json` / `workflow explain --json` | `workflow-role-selection-v1` | per-entry `role_details[]` — each role's `harness`, `model`, `effort`, `serial`, and any declared value that would not reach the child. `explain` carries the envelope too; it is the deeper per-workflow read and **re-gates on trust** |
+| `agentstack workflow runs --json` | `workflow-observe-v1` | `runs[]` from the machine-global runs directory |
 | `agentstack x lease status --json` | `lease-status-v1` | `leases[]` — the machine-level runtime lease registry, each row's `liveness` derived at read time from the PID and that process's start time. `unknown` never means live. Writes nothing; on macOS it does run `/bin/ps` per recorded PID to read a start time, because there is no `/proc` to read instead |
 | `agentstack x delivery --json` | `delivery-routing-v1` | `default` plus one `harnesses[]` row per targeted CLI with its per-kind `routes[]` (where the bytes go) and that harness's own `bridge_registered`. Decide on those two typed fields; the row's `summary` and `why` are display copy and must never be matched on |
 | `agentstack x image --json` | `image-plan-v1` | the packaging plan: every pinned `members[]` entry, `required_secrets` (names only), `blockers`, `buildable` |
@@ -169,6 +170,9 @@ the digest back to apply.
 | `agentstack remove-capability` | `manifest-remove-v1` | removes a project definition and memberships, then re-locks and re-renders; library untouched |
 | `agentstack x restore --last --write` | `restore-last` | undoes the newest recorded write |
 
+`profile` in these command and contract names is the older spelling of
+**toolset**; they name the same object.
+
 ## Payload shapes
 
 ### `status --json`
@@ -178,7 +182,7 @@ manifest is absent or unreadable, and `manifest.error` says which.
 
 ```json
 {
-  "version": "0.17.1",
+  "version": "0.18.0",
   "clis_detected": ["Claude Code", "Codex CLI", "Gemini CLI"],
   "manifest": {
     "path": "/repo/.agentstack/agentstack.toml",
@@ -427,7 +431,7 @@ change without a `schema_version` bump. Treat them as reports, not APIs:
 - `agentstack x report run --json`, `report runs --json`, `report calls --json`,
   `report wire --json`
 - `agentstack x optimize --json`
-- `agentstack x workflow report --json` (`workflow explain --json` left this list
+- `agentstack workflow report --json` (`workflow explain --json` left this list
   when it gained the envelope and `workflow-role-selection-v1`)
 
 The append-only evidence files are the same kind of thing: JSON Lines with no

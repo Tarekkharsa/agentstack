@@ -15,9 +15,6 @@
 use std::time::{Duration, Instant};
 
 use indexmap::IndexMap;
-use serde_json::{json, Value};
-
-const PROTOCOL_VERSION: &str = "2025-06-18";
 
 #[derive(Debug)]
 pub struct Handshake {
@@ -30,8 +27,6 @@ pub struct Handshake {
 pub enum LiveError {
     /// 401/403 — credentials missing or rejected.
     Auth(u16),
-    /// Other non-success HTTP status.
-    Http(u16),
     /// Could not connect / timed out / TLS error.
     Connect(String),
     /// Connected, but the response wasn't a usable MCP handshake.
@@ -42,7 +37,6 @@ impl std::fmt::Display for LiveError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             LiveError::Auth(code) => write!(f, "{code} unauthorized"),
-            LiveError::Http(code) => write!(f, "HTTP {code}"),
             LiveError::Connect(e) => write!(f, "connection failed: {e}"),
             LiveError::Protocol(e) => write!(f, "protocol error: {e}"),
         }
@@ -55,54 +49,14 @@ pub fn handshake(
     headers: &IndexMap<String, String>,
     timeout: Duration,
 ) -> Result<Handshake, LiveError> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(timeout)
-        .build()
-        .map_err(|e| LiveError::Connect(e.to_string()))?;
-
-    let init = json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": {
-            "protocolVersion": PROTOCOL_VERSION,
-            "capabilities": {},
-            "clientInfo": { "name": "agentstack", "version": env!("CARGO_PKG_VERSION") }
-        }
-    });
-
-    let resp = post(&client, url, headers, None, &init)?;
-    let status = resp.status();
-    if status.as_u16() == 401 || status.as_u16() == 403 {
-        return Err(LiveError::Auth(status.as_u16()));
-    }
-    if !status.is_success() {
-        return Err(LiveError::Http(status.as_u16()));
-    }
-    let session = resp
-        .headers()
-        .get("mcp-session-id")
-        .and_then(|v| v.to_str().ok())
-        .map(str::to_string);
-    let body = resp
-        .text()
-        .map_err(|e| LiveError::Protocol(e.to_string()))?;
-    let result = extract_result(&body)
-        .ok_or_else(|| LiveError::Protocol("no result in initialize response".into()))?;
-
-    let server_name = result
-        .get("serverInfo")
-        .and_then(|s| s.get("name"))
-        .and_then(Value::as_str)
-        .map(str::to_string);
-    let protocol = result
-        .get("protocolVersion")
-        .and_then(Value::as_str)
-        .map(str::to_string);
-
-    // Best-effort: complete the handshake and count tools. Failures here don't
-    // invalidate a successful initialize.
-    let tool_count = count_tools(&client, url, headers, session.as_deref());
+    let headers: Vec<(String, String)> = headers
+        .iter()
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .collect();
+    let client = agentstack_mcp::HttpUpstreamClient::connect(url, &headers, timeout)
+        .map_err(classify_live_error)?;
+    let (server_name, protocol) = client.server_identity();
+    let tool_count = client.list_tools().ok().map(|tools| tools.len());
 
     Ok(Handshake {
         server_name,
@@ -111,69 +65,17 @@ pub fn handshake(
     })
 }
 
-fn count_tools(
-    client: &reqwest::blocking::Client,
-    url: &str,
-    headers: &IndexMap<String, String>,
-    session: Option<&str>,
-) -> Option<usize> {
-    let initialized = json!({"jsonrpc":"2.0","method":"notifications/initialized"});
-    let _ = post(client, url, headers, session, &initialized);
-
-    let list = json!({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}});
-    let resp = post(client, url, headers, session, &list).ok()?;
-    if !resp.status().is_success() {
-        return None;
+/// Turn one failed handshake into the question it answers for the user.
+///
+/// The auth code is read from the protocol adapter's typed refusal, never
+/// scraped out of the message: an error chain carries the URL, so searching it
+/// for "401"/"403" classified `http://127.0.0.1:4013/mcp` as an authentication
+/// failure and sent the user to fix a credential that was fine.
+fn classify_live_error(error: anyhow::Error) -> LiveError {
+    match agentstack_mcp::auth_status(&error) {
+        Some(code) => LiveError::Auth(code),
+        None => LiveError::Connect(format!("{error:#}")),
     }
-    let body = resp.text().ok()?;
-    let result = extract_result(&body)?;
-    result
-        .get("tools")
-        .and_then(Value::as_array)
-        .map(|t| t.len())
-}
-
-fn post(
-    client: &reqwest::blocking::Client,
-    url: &str,
-    headers: &IndexMap<String, String>,
-    session: Option<&str>,
-    body: &Value,
-) -> Result<reqwest::blocking::Response, LiveError> {
-    let mut req = client
-        .post(url)
-        .header("Content-Type", "application/json")
-        .header("Accept", "application/json, text/event-stream");
-    for (k, v) in headers {
-        req = req.header(k, v);
-    }
-    if let Some(s) = session {
-        req = req.header("Mcp-Session-Id", s);
-    }
-    req.json(body)
-        .send()
-        .map_err(|e| LiveError::Connect(e.to_string()))
-}
-
-/// Parse a JSON-RPC `result` from a body that may be plain JSON or an SSE
-/// stream (`data: {...}` lines).
-fn extract_result(body: &str) -> Option<Value> {
-    let trimmed = body.trim_start();
-    if trimmed.starts_with('{') {
-        let v: Value = serde_json::from_str(trimmed).ok()?;
-        return v.get("result").cloned();
-    }
-    // SSE: find the first data line carrying a result.
-    for line in body.lines() {
-        if let Some(data) = line.strip_prefix("data:") {
-            if let Ok(v) = serde_json::from_str::<Value>(data.trim()) {
-                if let Some(r) = v.get("result") {
-                    return Some(r.clone());
-                }
-            }
-        }
-    }
-    None
 }
 
 // ── stdio probe (`doctor --probe`) ──────────────────────────────────────────
@@ -253,121 +155,13 @@ fn tail(stderr: &str) -> String {
     }
 }
 
-/// How much of a probed child's stderr is KEPT, in bytes. Unbounded hostile
-/// output must not grow host memory; this is enough for the one line that
-/// usually explains the failure ("command not found", "missing API key").
-/// Note "kept", not "read" — see the reader in [`probe_stdio`].
-const STDERR_CAP: usize = 4096;
-
-/// How much of that capture is shown. Much smaller than [`STDERR_CAP`]: the
+/// How much of the bounded capture is shown. The display limit is smaller than
+/// the capture limit: the
 /// line that explains a failure ("command not found", "missing API key") is
 /// short and comes first — newlines became spaces, so the front of the string
 /// is the front of the output — while the rest is a stack trace that would
 /// bury the other servers' results.
 const STDERR_DISPLAY_CHARS: usize = 160;
-
-/// How much of a probed child's stdout is read, in bytes. The probe wants two
-/// small replies; only a `tools/list` from a very large server needs more than
-/// a few KiB. Past this the reader stops for real (unlike stderr above, which
-/// keeps draining): the memory bound has to cover an unbounded single line,
-/// and `lines()` cannot be capped per line without reading it first. The
-/// SIGPIPE that closing the pipe hands the child is acceptable here in a way
-/// it is not on stderr — a server that has written two megabytes to its
-/// PROTOCOL channel without answering `initialize` is already failing, and the
-/// probe is about to kill it anyway.
-const STDOUT_CAP: u64 = 2 * 1024 * 1024;
-
-/// Bound on queued stdout frames. The probe consumes at most two replies;
-/// anything beyond this is a server talking to nobody, and a full queue parks
-/// the reader thread rather than buffering without limit.
-const STDOUT_QUEUE_CAP: usize = 64;
-
-/// A probed child process, bounded by construction: whatever happens to the
-/// probe — success, timeout, protocol error, an early `?`, a panic — `Drop`
-/// runs the same shutdown ladder, so nothing this module spawns outlives the
-/// call. (The sibling implementation is `gateway::StdioChild`, which keeps a
-/// child alive across calls and so cannot be shared with a one-shot probe.)
-struct ProbeChild {
-    proc: std::process::Child,
-    /// `Some` until shutdown; closing it is EOF on the child's stdin, the
-    /// polite MCP shutdown signal.
-    stdin: Option<std::process::ChildStdin>,
-    reaped: bool,
-    /// How the child ended, recorded wherever it is collected. Kept because
-    /// "exit status: 3" tells the user far more about a server that gave up
-    /// than "it stopped" does — and the status is gone once the child is
-    /// reaped, so it has to be captured at that moment.
-    status: Option<std::process::ExitStatus>,
-}
-
-impl ProbeChild {
-    /// Poll `try_wait` for up to `dur`; true once the child has exited (and,
-    /// because `try_wait` reaps, has been collected).
-    fn wait_for_exit(&mut self, dur: Duration) -> bool {
-        let deadline = Instant::now() + dur;
-        loop {
-            if let Ok(Some(s)) = self.proc.try_wait() {
-                self.status = Some(s);
-                return true;
-            }
-            if Instant::now() >= deadline {
-                return false;
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-    }
-
-    /// How the child ended, for the report. `ExitStatus`'s own Display is
-    /// already the right phrasing on both platforms ("exit status: 3",
-    /// "signal: 9 (SIGKILL)"); the fallback covers the case where the child
-    /// was never collected, which `terminate` makes unreachable in practice.
-    fn exit_label(&self) -> String {
-        match self.status {
-            Some(s) => s.to_string(),
-            None => "exit status unknown".to_string(),
-        }
-    }
-
-    /// Stop the child and everything it spawned, then reap it. Idempotent, so
-    /// the failure paths can call it explicitly (they need the child dead
-    /// before they read its stderr to EOF) and `Drop` can call it again.
-    ///
-    /// Escalation ladder: stdin EOF → SIGTERM to the process group → SIGKILL
-    /// to the group. The child is its own group leader (see `probe_stdio`), so
-    /// a server that spawned helpers takes them with it.
-    fn terminate(&mut self) {
-        if self.reaped {
-            return;
-        }
-        self.reaped = true;
-        drop(self.stdin.take());
-        if self.wait_for_exit(Duration::from_millis(200)) {
-            return;
-        }
-        #[cfg(unix)]
-        {
-            let pgid = self.proc.id() as i32;
-            let _ = crate::sys::signal_group(pgid, crate::sys::Signal::Term);
-            if self.wait_for_exit(Duration::from_millis(300)) {
-                return;
-            }
-            let _ = crate::sys::signal_group(pgid, crate::sys::Signal::Kill);
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = self.proc.kill();
-        }
-        if let Ok(s) = self.proc.wait() {
-            self.status = Some(s);
-        }
-    }
-}
-
-impl Drop for ProbeChild {
-    fn drop(&mut self) {
-        self.terminate();
-    }
-}
 
 /// Start a stdio MCP server exactly as a harness would, speak `initialize`,
 /// and stop it again.
@@ -388,164 +182,46 @@ pub fn probe_stdio(
     cwd: &std::path::Path,
     timeout: Duration,
 ) -> Result<StdioProbe, StdioProbeError> {
-    use std::io::{BufRead, Read, Write};
-
     let started = Instant::now();
     let deadline = started + timeout;
-
-    let mut cmd = std::process::Command::new(command);
-    cmd.args(args)
-        .envs(env.iter().map(|(k, v)| (k.clone(), v.clone())))
-        .current_dir(cwd)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        // Captured, not inherited: a probe reports what the child said, and a
-        // failing server's stderr is usually the whole diagnosis. Inheriting
-        // would also let hostile bytes reach the terminal unsanitized.
-        .stderr(std::process::Stdio::piped());
-    // Own process group, so `terminate` can tree-kill the child and anything
-    // it spawns.
-    crate::sys::spawn_in_new_process_group(&mut cmd);
-
-    let mut proc = match cmd.spawn() {
-        Ok(p) => p,
-        Err(e) => return Err(StdioProbeError::Spawn(e.to_string())),
-    };
-    let stdin = proc.stdin.take().expect("piped stdin");
-    let stdout = proc.stdout.take().expect("piped stdout");
-    let stderr = proc.stderr.take().expect("piped stderr");
-    let mut child = ProbeChild {
-        proc,
-        stdin: Some(stdin),
-        reaped: false,
-        status: None,
-    };
-
-    // Both pipes get their own reader thread: reading one to completion while
-    // the other fills would deadlock the child on a full pipe buffer.
-    let (errtx, errrx) = std::sync::mpsc::channel::<String>();
-    std::thread::spawn(move || {
-        // Keep the first STDERR_CAP bytes, but keep DRAINING everything after
-        // them. Simply stopping the read would close the pipe and hand a
-        // chatty-but-healthy server a SIGPIPE partway through startup — the
-        // probe would kill the thing it is measuring and then report it as
-        // broken. Servers log to stderr; that must never be fatal here.
-        let mut stderr = stderr;
-        let mut kept: Vec<u8> = Vec::new();
-        let mut chunk = [0u8; 4096];
-        while let Ok(n) = stderr.read(&mut chunk) {
-            if n == 0 {
-                break;
-            }
-            let room = STDERR_CAP.saturating_sub(kept.len());
-            if room > 0 {
-                kept.extend_from_slice(&chunk[..n.min(room)]);
-            }
-        }
-        let _ = errtx.send(String::from_utf8_lossy(&kept).into_owned());
-    });
-    let (outtx, outrx) = std::sync::mpsc::sync_channel::<Value>(STDOUT_QUEUE_CAP);
-    std::thread::spawn(move || {
-        for line in std::io::BufReader::new(stdout.take(STDOUT_CAP)).lines() {
-            let Ok(line) = line else { break };
-            // Non-JSON stdout is noise, not a protocol frame — servers do log
-            // there. Only JSON-RPC frames go through.
-            if let Ok(v) = serde_json::from_str::<Value>(&line) {
-                if outtx.send(v).is_err() {
-                    break;
+    let env: Vec<(String, String)> = env
+        .iter()
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .collect();
+    let client =
+        agentstack_mcp::StdioUpstreamClient::connect(command, args, &env, cwd, timeout, timeout)
+            .map_err(|error| match error.kind {
+                agentstack_mcp::StdioUpstreamErrorKind::Spawn => {
+                    StdioProbeError::Spawn(error.detail)
                 }
-            }
-        }
-    });
-
-    // Collect the child's stderr once it is dead, so the reader thread has
-    // seen EOF and the capture is complete. Bounded either way: the recv
-    // cannot outlast a process we just killed by more than the grace below.
-    let drain_stderr = |child: &mut ProbeChild| -> String {
-        child.terminate();
-        errrx
-            .recv_timeout(Duration::from_millis(500))
-            .unwrap_or_default()
-    };
-
-    let init = json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": {
-            "protocolVersion": PROTOCOL_VERSION,
-            "capabilities": {},
-            "clientInfo": { "name": "agentstack", "version": env!("CARGO_PKG_VERSION") }
-        }
-    });
-    {
-        let pipe = child.stdin.as_mut().expect("stdin open until shutdown");
-        if let Err(e) = writeln!(pipe, "{init}").and_then(|()| pipe.flush()) {
-            // A write that fails this early means the child is already gone —
-            // a bad interpreter, an immediate exit. Report what it said.
-            let stderr = drain_stderr(&mut child);
-            return Err(StdioProbeError::Exited {
-                status: e.to_string(),
-                stderr,
-            });
-        }
-    }
-
-    let result = match await_reply(&outrx, &json!(1), deadline) {
-        Ok(msg) => msg,
-        Err(Wait::Timeout) => {
-            let stderr = drain_stderr(&mut child);
-            return Err(StdioProbeError::Timeout {
-                after: timeout,
-                stderr,
-            });
-        }
-        Err(Wait::Closed) => {
-            // stdout closed: the child exited, or stopped writing frames.
-            // `drain_stderr` terminates it first, which is also what records
-            // the exit status this reports.
-            let stderr = drain_stderr(&mut child);
-            return Err(StdioProbeError::Exited {
-                status: child.exit_label(),
-                stderr,
-            });
-        }
-    };
+                // The stream closed with no reply: for a child process that
+                // means it is gone, which is a different user question ("what
+                // did it reject?") than a hang or a bad dialect.
+                agentstack_mcp::StdioUpstreamErrorKind::Exited => StdioProbeError::Exited {
+                    status: crate::text::one_line(&error.detail, 200),
+                    stderr: error.stderr,
+                },
+                agentstack_mcp::StdioUpstreamErrorKind::Timeout => StdioProbeError::Timeout {
+                    after: timeout,
+                    stderr: error.stderr,
+                },
+                agentstack_mcp::StdioUpstreamErrorKind::Protocol => StdioProbeError::Protocol {
+                    detail: crate::text::one_line(&error.detail, 200),
+                    stderr: error.stderr,
+                },
+            })?;
     let elapsed = started.elapsed();
+    let (server_name, protocol) = client.server_identity();
+    let server_name = server_name.map(|name| crate::text::sanitize_line(&name));
+    let protocol = protocol.map(|version| crate::text::sanitize_line(&version));
 
-    if let Some(err) = result.get("error") {
-        let stderr = drain_stderr(&mut child);
-        return Err(StdioProbeError::Protocol {
-            detail: crate::text::one_line(&err.to_string(), 200),
-            stderr,
-        });
-    }
-    let Some(res) = result.get("result") else {
-        let stderr = drain_stderr(&mut child);
-        return Err(StdioProbeError::Protocol {
-            detail: "no result in initialize response".to_string(),
-            stderr,
-        });
-    };
-
-    let server_name = res
-        .get("serverInfo")
-        .and_then(|s| s.get("name"))
-        .and_then(Value::as_str)
-        // Upstream metadata is remote text on its way to a terminal.
-        .map(crate::text::sanitize_line);
-    let protocol = res
-        .get("protocolVersion")
-        .and_then(Value::as_str)
-        .map(crate::text::sanitize_line);
-
-    // Best-effort, inside the same deadline: completing the handshake and
-    // counting tools proves the server is usable, but a server that came up
-    // and then dawdles here is still a server that came up.
-    let tool_count = stdio_tool_count(&mut child, &outrx, deadline);
-
-    // Success path still stops the child: a probe leaves nothing running.
-    child.terminate();
+    // Best effort, inside the same end-to-end deadline. Dropping the RMCP
+    // client closes the transport and process wrapper, including descendants.
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    let tool_count = (!remaining.is_zero())
+        .then(|| client.list_tools_with_timeout(remaining).ok())
+        .flatten()
+        .map(|tools| tools.len());
 
     Ok(StdioProbe {
         server_name,
@@ -555,79 +231,131 @@ pub fn probe_stdio(
     })
 }
 
-/// Why [`await_reply`] gave up. Distinguished because they mean different
-/// things to the user: a hang and an exit are different bugs.
-enum Wait {
-    Timeout,
-    Closed,
-}
-
-/// Wait for the JSON-RPC response carrying `id`, until `deadline`. Server
-/// notifications and stale replies are skipped, not fatal.
-fn await_reply(
-    rx: &std::sync::mpsc::Receiver<Value>,
-    id: &Value,
-    deadline: Instant,
-) -> Result<Value, Wait> {
-    loop {
-        let remaining = deadline.saturating_duration_since(Instant::now());
-        match rx.recv_timeout(remaining) {
-            Ok(msg) => {
-                if msg.get("id") == Some(id) && msg.get("method").is_none() {
-                    return Ok(msg);
-                }
-            }
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => return Err(Wait::Timeout),
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return Err(Wait::Closed),
-        }
-    }
-}
-
-/// `notifications/initialized` then `tools/list`, returning the tool count.
-/// Every failure here is `None`, never an error: the handshake already
-/// succeeded, and that is what the probe set out to prove.
-fn stdio_tool_count(
-    child: &mut ProbeChild,
-    rx: &std::sync::mpsc::Receiver<Value>,
-    deadline: Instant,
-) -> Option<usize> {
-    use std::io::Write;
-    let pipe = child.stdin.as_mut()?;
-    let ready = json!({"jsonrpc":"2.0","method":"notifications/initialized"});
-    let list = json!({"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}});
-    writeln!(pipe, "{ready}")
-        .and_then(|()| writeln!(pipe, "{list}"))
-        .and_then(|()| pipe.flush())
-        .ok()?;
-    let msg = await_reply(rx, &json!(2), deadline).ok()?;
-    msg.get("result")?
-        .get("tools")
-        .and_then(Value::as_array)
-        .map(Vec::len)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    /// A URL is part of every connection error, and ports are four digits.
+    /// Classifying by substring turned `:4013` into "401 unauthorized" and sent
+    /// the user to fix a credential that was never involved. The auth code now
+    /// comes from the adapter's typed refusal or not at all.
     #[test]
-    fn parses_plain_json_result() {
-        let body = r#"{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"x","serverInfo":{"name":"kibana"}}}"#;
-        let r = extract_result(body).unwrap();
-        assert_eq!(r["serverInfo"]["name"], "kibana");
+    fn a_port_in_the_error_text_is_not_an_auth_failure() {
+        let cases = [
+            "contacting kibana: error sending request for url (http://127.0.0.1:4013/mcp)",
+            "connection refused: http://localhost:4031/mcp",
+            "dns error for https://example.com:14038/mcp",
+        ];
+        for text in cases {
+            let classified = classify_live_error(anyhow::anyhow!("{text}"));
+            assert!(
+                matches!(classified, LiveError::Connect(_)),
+                "{text} was classified as {classified}"
+            );
+        }
     }
 
+    /// A child that starts and then gives up is its own answer: "exited before
+    /// the handshake", not a hang and not a dialect problem. The stream closing
+    /// with no reply is what proves it.
     #[test]
-    fn parses_sse_result() {
-        let body = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"x\"}}\n\n";
-        let r = extract_result(body).unwrap();
-        assert_eq!(r["protocolVersion"], "x");
+    fn a_child_that_dies_before_the_handshake_is_reported_as_exited() {
+        let err = probe_stdio(
+            "sh",
+            &[
+                "-c".to_string(),
+                "echo 'FATAL: no API key' >&2; exit 3".to_string(),
+            ],
+            &IndexMap::new(),
+            std::path::Path::new("."),
+            Duration::from_secs(5),
+        )
+        .expect_err("a server that exits cannot complete a handshake");
+        assert!(
+            matches!(err, StdioProbeError::Exited { .. }),
+            "expected an exit, got: {err}"
+        );
+        assert!(
+            err.to_string().contains("FATAL: no API key"),
+            "the child's own reason must reach the user: {err}"
+        );
     }
 
+    /// The modern probe gets the WHOLE startup budget on ONE child.
+    ///
+    /// It used to be capped at 100ms and wrapped around spawn + handshake, so
+    /// any server that took longer than that to come up failed the probe, was
+    /// killed, and was spawned a second time for the dated handshake — modern
+    /// protocol unreachable in practice and every start-up side effect done
+    /// twice. This server needs 300ms and then refuses `server/discover` the
+    /// way the spec requires; one spawn must be enough.
     #[test]
-    fn no_result_returns_none() {
-        assert!(extract_result("{\"error\":{}}").is_none());
-        assert!(extract_result("garbage").is_none());
+    fn a_slow_legacy_server_is_spawned_once_and_negotiated_on_that_child() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let starts = tmp.path().join("starts");
+        // Test-authored path, not repository content.
+        let script = format!(
+            r#"echo start >> {}
+sleep 0.3
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *server/discover*) printf '{{"jsonrpc":"2.0","id":%s,"error":{{"code":-32601,"message":"unsupported"}}}}\n' "$id" ;;
+    *'"method":"initialize"'*) printf '{{"jsonrpc":"2.0","id":%s,"result":{{"protocolVersion":"2025-11-25","capabilities":{{}},"serverInfo":{{"name":"dated","version":"1"}}}}}}\n' "$id" ;;
+    *tools/list*) printf '{{"jsonrpc":"2.0","id":%s,"result":{{"tools":[]}}}}\n' "$id" ;;
+  esac
+done"#,
+            starts.display()
+        );
+
+        let probe = probe_stdio(
+            "sh",
+            &["-c".to_string(), script],
+            &IndexMap::new(),
+            tmp.path(),
+            Duration::from_secs(10),
+        )
+        .expect("a compliant dated server must be reachable");
+        assert_eq!(probe.server_name.as_deref(), Some("dated"));
+        assert_eq!(probe.protocol.as_deref(), Some("2025-11-25"));
+        let starts = std::fs::read_to_string(&starts).unwrap_or_default();
+        assert_eq!(
+            starts.lines().count(),
+            1,
+            "the server was spawned more than once: {starts:?}"
+        );
+    }
+
+    /// A paginating upstream must be read to the END. `tools/list` returns one
+    /// page plus a `nextCursor`, and the client that stops at page one silently
+    /// hides every tool after it — the surface looks small rather than broken,
+    /// which is the worst way to lose a capability.
+    #[test]
+    fn every_page_of_a_paginating_upstream_is_read() {
+        let tmp = assert_fs::TempDir::new().unwrap();
+        let script = r#"while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *server/discover*) printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"unsupported"}}\n' "$id" ;;
+    *'"method":"initialize"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-11-25","capabilities":{},"serverInfo":{"name":"paged","version":"1"}}}\n' "$id" ;;
+    *cursor*) printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"second","inputSchema":{"type":"object"}}]}}\n' "$id" ;;
+    *tools/list*) printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"first","inputSchema":{"type":"object"}}],"nextCursor":"page-2"}}\n' "$id" ;;
+  esac
+done"#;
+
+        let probe = probe_stdio(
+            "sh",
+            &["-c".to_string(), script.to_string()],
+            &IndexMap::new(),
+            tmp.path(),
+            Duration::from_secs(10),
+        )
+        .expect("a paginating server is a healthy server");
+        assert_eq!(
+            probe.tool_count,
+            Some(2),
+            "the second page was dropped — nextCursor was not followed"
+        );
     }
 
     /// The `--probe` bound, end to end: a server that starts and then says
@@ -708,7 +436,7 @@ mod tests {
         let script = r#"i=0
 while [ $i -lt 3000 ]; do echo 'boot: initializing subsystem ..............' >&2; i=$((i+1)); done
 read x
-echo '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","serverInfo":{"name":"chatty"}}}'"#;
+echo '{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"chatty","version":"1"}}}'"#;
 
         let probe = probe_stdio(
             "sh",

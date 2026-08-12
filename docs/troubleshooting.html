@@ -143,6 +143,8 @@
     <ul>
       <li><a href="start.html">Get started</a>
       </li>
+      <li><a href="library.html">Central library</a>
+      </li>
       <li><a href="tutorial/">Tutorial</a>
       </li>
       <li><a href="index.html#install">Install</a>
@@ -176,6 +178,8 @@
       <li><a href="howto/add-a-skill.html">Add a skill</a>
       </li>
       <li><a href="howto/name-a-toolset.html">Name a toolset</a>
+      </li>
+      <li><a href="howto/run-a-workflow.html">Run a workflow</a>
       </li>
       <li><a href="migrations.html">Migration recipes</a>
       </li>
@@ -215,7 +219,7 @@
       </li>
       <li><a href="workflows.html">Workflows</a>
       </li>
-      <li><a href="reference.html#the-library-linked-source-folders">Library sources</a>
+      <li><a href="reference.html#the-library-linked-source-folders">Library internals</a>
       </li>
       <li><a href="concepts.html#delivery-modes">Delivery modes</a>
       </li>
@@ -303,7 +307,7 @@
 <p>More: <a href="reference.html#scopes">reference — scopes</a>.</p>
 <p><strong>Nothing exists on disk at all, and that is deliberate</strong></p>
 <div class="cb"><pre class="block"><code>not rendering configs — clean-at-rest keeps them off disk</code></pre></div>
-<p>In clean-at-rest mode nothing is generated between sessions; capabilities exist only inside <code>agentstack run</code> or between <code>agentstack x session start</code> and <code>agentstack x session end</code>. A missing <code>.mcp.json</code> here is the design. Do not create one. See <a href="concepts.html#delivery-modes">delivery modes</a>.</p>
+<p>In clean-at-rest mode nothing is generated between sessions; capabilities exist only inside <code>agentstack run</code> or between <code>agentstack x session start</code> and <code>agentstack x session end</code>. A missing <code>.mcp.json</code> here is the design. Do not create one. See <a href="reference.html#delivery--routing-and-where-rendered-files-live">delivery in the reference</a>.</p>
 <p><strong><code>Codex will IGNORE {dir}/.codex/config.toml — the project is not trusted in ~/.codex/config.toml (projects."{dir}".trust_level) ↳ open Codex in this folder once and accept the trust prompt</code></strong></p>
 <p>This is Codex's own project-trust list, not agentstack's. agentstack rendered the file correctly; Codex refuses to read it until you have opened Codex in that folder once and accepted its prompt.</p>
 <p><strong><code>instruction '{fragment}' targets '{target}', which has no instructions file ↳ remove the target or use a supported CLI</code></strong></p>

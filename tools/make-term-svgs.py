@@ -212,8 +212,8 @@ def render(title, rows, out_path):
 
 
 # ------------------------------------------------------------------- specs --
-# Condensed from real runs: demo-firstrun.sh, trust-gate-demo.sh,
-# demo-lockdown.sh, demo-closed-loop.sh. Keep lines <= ~92 chars.
+# Condensed from real runs: demo-firstrun.sh, demo-lockdown.sh,
+# demo-closed-loop.sh. Keep lines <= ~92 chars.
 
 FIRSTRUN = (
     "init → apply → every CLI in sync",
@@ -443,17 +443,15 @@ WIZARD_REPLAY = (
 if __name__ == "__main__":
     docs = Path(__file__).resolve().parent.parent / "docs"
     # Only the SVGs still embedded somewhere are rendered: demos/first-value.svg
-    # (README, landing hero, start, examples), demos/malicious-repo.svg (the
-    # demos page) and trust-gate.svg. The other scene specs above are kept as
-    # source material but not written out — the old landing/docs pages that
-    # embedded them were replaced by the design-system site (docs/theme/).
-    # FIRSTRUN is likewise source-only: its docs/firstrun.svg output ended up
-    # embedded nowhere (docs/examples.html replays the sandbox first run with
-    # its own simulated terminal) and had been hand-patched after generation
-    # (65c6138), so the file was deleted rather than left to drift.
+    # (README, landing hero, start, examples) and demos/malicious-repo.svg (the
+    # demos page). The other scene specs above are kept as source material but
+    # not written out — the old landing/docs pages that embedded them were
+    # replaced by the design-system site (docs/theme/).
+    # FIRSTRUN and TRUST_GATE are likewise source-only: their rendered output
+    # (docs/firstrun.svg, docs/trust-gate.svg) ended up embedded nowhere, so the
+    # files were deleted rather than left to drift.
     for name, (title, rows) in {
         "demos/first-value": FIRST_VALUE,
         "demos/malicious-repo": MALICIOUS_REPO,
-        "trust-gate": TRUST_GATE,
     }.items():
         render(title, rows, docs / f"{name}.svg")

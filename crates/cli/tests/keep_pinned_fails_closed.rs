@@ -67,6 +67,7 @@ fn trusted_project(root: &Path) -> PathBuf {
     fs::write(
         proj.join(".agentstack/agentstack.toml"),
         "version = 1\n\n\
+         [delivery]\nrender_locally = true\n\n\
          [targets]\ndefault = [\"claude-code\"]\n\n\
          [skills.alpha]\npath = \"./skills/alpha\"\n\n\
          [skills.beta]\npath = \"./skills/beta\"\n\n\
@@ -129,7 +130,10 @@ fn mcp_probe(proj: &Path, name: &str) -> McpProbe {
         .unwrap();
     let mut stdin = child.stdin.take().unwrap();
     for request in [
-        serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} }),
+        serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+            "protocolVersion": "2025-11-25", "capabilities": {},
+            "clientInfo": { "name": "agentstack-test", "version": "1" }
+        } }),
         serde_json::json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "agentstack_list_loadable", "arguments": {} } }),
         serde_json::json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": { "name": "agentstack_load", "arguments": { "name": name, "reason": "witness" } } }),
     ] {

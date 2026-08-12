@@ -4,8 +4,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Undo anything — agentstack</title>
-<meta name="description" content="For anyone who wants to reverse something agentstack did. Prerequisite: none — these work in any project agentstack has touched.">
+<title>Undo AgentStack changes — agentstack</title>
+<meta name="description" content="Start with the simple timeline:">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
 <link rel="canonical" href="https://tarekkharsa.github.io/agentstack/howto/undo.html">
@@ -143,6 +143,8 @@
     <ul>
       <li><a href="../start.html">Get started</a>
       </li>
+      <li><a href="../library.html">Central library</a>
+      </li>
       <li><a href="../tutorial/">Tutorial</a>
       </li>
       <li><a href="../index.html#install">Install</a>
@@ -176,6 +178,8 @@
       <li><a href="../howto/add-a-skill.html">Add a skill</a>
       </li>
       <li><a href="../howto/name-a-toolset.html">Name a toolset</a>
+      </li>
+      <li><a href="../howto/run-a-workflow.html">Run a workflow</a>
       </li>
       <li><a href="../migrations.html">Migration recipes</a>
       </li>
@@ -215,7 +219,7 @@
       </li>
       <li><a href="../workflows.html">Workflows</a>
       </li>
-      <li><a href="../reference.html#the-library-linked-source-folders">Library sources</a>
+      <li><a href="../reference.html#the-library-linked-source-folders">Library internals</a>
       </li>
       <li><a href="../concepts.html#delivery-modes">Delivery modes</a>
       </li>
@@ -274,51 +278,36 @@
 </aside>
   <main id="main-content" tabindex="-1">
 <p class="versionbar">These pages describe <b>v0.18.0-rc.3</b>, a pre-release. <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">The installer</a> serves the current release, <b>v0.17.1</b> — <code>/releases/latest</code> never points at a pre-release — so this is not the build you get unless you ask for it by name: <code>AGENTSTACK_VERSION=v0.18.0-rc.3</code>. <code>agentstack --version</code> says which build you have.</p>
-<h1 id="undo-anything">Undo anything</h1>
-<p>For anyone who wants to reverse something agentstack did. Prerequisite: none — these work in any project agentstack has touched.</p>
-<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack x restore                 <span class="cm"># everything undoable, newest first, as a list of ids</span>
-<span class="pr">$ </span>agentstack x restore --last --write  <span class="cm"># undo the most recent write</span>
-<span class="pr">$ </span>agentstack x restore a1b2 --write    <span class="cm"># undo one write by its id prefix</span>
-<span class="pr">$ </span>agentstack x restore claude-code     <span class="cm"># fallback: restore one adapter's config from its backup</span></code></pre></div>
-<p>Every file write agentstack makes — servers, settings, hooks, instructions, even the owned-server manifest refresh — is recorded before it lands, and <code>restore</code> works that record one write at a time. Reverting is itself recorded, so going one step too far is recoverable. (<code>restore &lt;adapter&gt;</code> is a fallback that restores one adapter's config from its single-slot backup.) Reverted files simply show up as pending again; <code>restore</code> lists the recorded writes and the identifier needed to roll each one back (see <a href="../howto/see-what-happened.html">see what your agents did</a>). Five other actions are undone by their own verb, because they are not file writes:</p>
-<div class="tblwrap"><table>
-<thead><tr><th>To undo…</th><th>Run</th><th>What it reverts</th></tr></thead><tbody>
-<tr><td>a recorded write (<code>apply</code> / <code>use</code> / <code>session</code> / settings / hooks / instructions)</td><td><code>agentstack x restore &lt;id&gt; --write</code></td><td>puts the changed native config back and marks it pending</td></tr>
-<tr><td>a <a href="../concepts.html">gateway</a> registration</td><td><code>agentstack x gateway disconnect &lt;cli&gt; --write</code></td><td>removes the gateway entry from that CLI's global config (<code>--all</code> for every CLI)</td></tr>
-<tr><td>the destructive-command <a href="../concepts.html">guard</a></td><td><code>agentstack x guard uninstall</code></td><td>removes every hook it installed and sets <code>[guard] enabled = false</code></td></tr>
-<tr><td><a href="../concepts.html">trust</a> for a repo</td><td><code>agentstack trust --revoke</code></td><td>withdraws consent — the repo goes inert again: no servers written or served, no skills materialized, no house rules compiled, no hooks or extensions rendered</td></tr>
-<tr><td>an active <a href="../concepts.html">session</a></td><td><code>agentstack x session end</code></td><td>puts every file back <strong>and</strong> takes off any skills the session materialized (<code>--all</code> for every session)</td></tr>
-<tr><td>a server config the rendered lane left behind</td><td><code>agentstack x unrender --write</code></td><td>removes only server files AgentStack wrote for harnesses now served live; previews without <code>--write</code>, and is itself undoable</td></tr>
-<tr><td>a server or skill in the manifest</td><td><code>agentstack x remove &lt;name&gt; --write</code></td><td>drops it from the manifest and the lockfile</td></tr>
-<tr><td>a <a href="../howto/add-a-skill.html">skill</a> materialized on disk</td><td><code>agentstack use --write</code> on a toolset that omits it, or <code>agentstack x uninstall --write</code></td><td>takes the delivered skill off — <code>restore</code> cannot, see below</td></tr>
-</tbody></table></div>
-<p><strong>Skills are outside the <code>restore</code> ledger.</strong> A recorded change is a file and its pre-write bytes, and a delivered skill is neither: it is a symlink to a directory, or a copied tree. Nothing is captured for it, and every undo screen says so in the same words — <em>materialized skills are not recorded here — this ledger holds files, and a delivered skill is a linked directory.</em> So <code>restore</code> brings the config edits back and leaves the skills in place. Re-materialize them by activating a toolset that includes them (<code>agentstack use --write</code>); take them off with <code>agentstack x uninstall --write</code>.</p>
-<p>The ledger is narrow on purpose. <code>restore</code> acts on a path with no ownership test, so a ledger that also carried skills would delete a skill directory you put there by hand after delivery.</p>
-<p>One consequence to know: a session that materialized <strong>only</strong> skills records no ledger entry at all, so there is nothing for <code>restore</code> to roll back.</p>
-<div class="cb cb-term" data-language="console"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">console</span></div><pre class="block"><code class="language-console"><span class="pr">$ </span>agentstack x restore --last --write
-<span class="out">error: nothing to undo — no recorded write that isn't already undone</span></code></pre></div>
-<p><code>agentstack x session end</code> is the whole revert for a session — it puts the files back and takes the skills off in one step.</p>
-<p>In v0.18.0 and later, <code>agentstack undo</code> shows the same record as a timeline — pick a point and it reverts to there. See <a href="../start.html#newer-than-the-stable-release">newer than the stable release</a>.</p>
-<p><strong>Undoing is never gated.</strong> Delivering into a project needs <a href="../howto/trust-a-repo.html">a review first</a> — writing a server config, materializing a skill, compiling house rules, rendering a hook or an extension all refuse until you run <code>agentstack trust .</code>. Taking those bytes back off disk does not. Every verb above, plus <code>x unrender</code> and <code>x uninstall</code>, works in a repo that is untrusted or whose review has gone stale, because removal is the inert direction. You never have to consent to something in order to get rid of it.</p>
-<p><strong>Limits.</strong> <code>restore</code> reverts agentstack's own recorded config writes, not side effects a tool already had — a file a server deleted is not brought back. Nothing here permanently deletes your data; each verb reverses one agentstack change. Materialized skills are the one thing <code>restore</code> does not carry, for the reason above; they come back with <code>agentstack use --write</code>.</p>
-<h2 id="undo-all-of-it">Undo all of it<a class="hlink" href="#undo-all-of-it" aria-label="Link to this section">#</a></h2>
-<p>The verbs above each reverse one thing. To reverse <strong>everything</strong> — every managed region agentstack rendered into every CLI's config, plus its own state directory — there is one command:</p>
-<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack x uninstall          <span class="cm"># show what would be removed; changes nothing</span>
-<span class="pr">$ </span>agentstack x uninstall --verbose  <span class="cm"># ...with the full diff of each file</span>
-<span class="pr">$ </span>agentstack x uninstall --write  <span class="cm"># do it</span></code></pre></div>
-<p>Like every other write in agentstack, it previews first: the bare command lists what it would take off and stops.</p>
-<p>It removes what agentstack manages, not what you wrote. <strong>Your <code>agentstack.toml</code> stays exactly where it is</strong>, so <code>agentstack apply --write</code> brings the whole setup back whenever you want it. Entries you or another tool added to those same config files by hand are left alone, and so is anything a different project's manifest manages at global scope.</p>
-<p>Because the removal runs through the same machinery as a normal write, every file it touches is recorded first — so <strong>the config half of the uninstall is itself undoable</strong>:</p>
-<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack x restore --last --write   <span class="cm"># put the config edits back</span>
-<span class="pr">$ </span>agentstack use --write                <span class="cm"># re-materialize the skills it pruned</span></code></pre></div>
-<p>Skills need the second command because they are outside the ledger, as above; the CLI names both when the project has any. That only holds while the ledger exists, and the ledger lives in <code>~/.agentstack</code>, which <code>uninstall</code> removes last. Keep it with:</p>
-<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack x uninstall --write --keep-home</code></pre></div>
-<p>Two things it does not do: remove the <code>agentstack</code> binary (take that off the way you installed it), and touch a capability's own installed files outside the regions agentstack renders.</p>
-<ul>
-<li><a href="../concepts.html">Concepts</a> — trust, gateway, guard, session, drift</li>
-<li><a href="../reference.html#undo-undo-and-restore">Reference: undo — <code>undo</code> and <code>restore</code></a></li>
-<li><a href="../reference.html#drift-adopt-or-apply">Reference: drift — adopt or apply?</a></li>
-</ul>
+<h1 id="undo-agentstack-changes">Undo AgentStack changes</h1>
+<p>Start with the simple timeline:</p>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack undo</code></pre></div>
+<p>It shows recent AgentStack-managed writes and the exact command for returning to a point. Nothing changes until you add the shown <code>--write</code> form.</p>
+<h2 id="undo-one-recorded-write">Undo one recorded write<a class="hlink" href="#undo-one-recorded-write" aria-label="Link to this section">#</a></h2>
+<p>The script-friendly form is:</p>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack x restore
+<span class="pr">$ </span>agentstack x restore --last --write
+<span class="pr">$ </span>agentstack x restore &lt;id&gt; --write</code></pre></div>
+<p>Restore covers managed config-file writes such as settings, hooks, instructions, and rendered server configuration. The revert is itself recorded, so going one step too far remains recoverable.</p>
+<h2 id="remove-legacy-rendered-configuration">Remove legacy rendered configuration<a class="hlink" href="#remove-legacy-rendered-configuration" aria-label="Link to this section">#</a></h2>
+<p>When the gateway now serves MCP servers live but older native entries remain:</p>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack x unrender
+<span class="pr">$ </span>agentstack x unrender --write
+<span class="pr">$ </span>agentstack doctor</code></pre></div>
+<p>It removes only entries AgentStack owns. User entries remain.</p>
+<h2 id="remove-this-projects-rendered-setup">Remove this project's rendered setup<a class="hlink" href="#remove-this-projects-rendered-setup" aria-label="Link to this section">#</a></h2>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack x uninstall --scope project --keep-home
+<span class="pr">$ </span>agentstack x uninstall --scope project --keep-home --write
+<span class="pr">$ </span>agentstack doctor</code></pre></div>
+<p><code>--keep-home</code> preserves the central library, trust store, audit, and undo history. The project manifest and lock remain, so the setup can be rebuilt.</p>
+<p>AgentStack removes empty parent directories left by its managed skill delivery. It preserves non-empty folders and any user-owned files. This cleanup uses directory-empty semantics; it never recursively deletes an unknown provider tree.</p>
+<h2 id="remove-everything-agentstack-manages-on-this-machine">Remove everything AgentStack manages on this machine<a class="hlink" href="#remove-everything-agentstack-manages-on-this-machine" aria-label="Link to this section">#</a></h2>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack x uninstall
+<span class="pr">$ </span>agentstack x uninstall --write</code></pre></div>
+<p>Without <code>--keep-home</code>, this also removes AgentStack's machine state after removing managed provider entries. Preview carefully: the deleted trust store, audit history, and local library state are not recoverable from the undo ledger once that ledger is gone. A Git-backed central library remains recoverable from its remote.</p>
+<h2 id="what-undo-cannot-restore">What undo cannot restore<a class="hlink" href="#what-undo-cannot-restore" aria-label="Link to this section">#</a></h2>
+<p>AgentStack can reverse its own recorded configuration writes. It cannot restore a file an MCP server deleted, an arbitrary manual manifest edit, or another program's change. Use Git or that program's recovery mechanism for those.</p>
+<p>Removal is never blocked by stale trust. You do not need to approve a project to make it inert.</p>
+<p>Next: <a href="../troubleshooting.html">Troubleshooting</a> · <a href="../howto/see-what-happened.html">See what happened</a> · <a href="../reference.html">Reference</a></p>
   <p class="srcline">Source of truth: <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/undo.md">docs/howto/undo.md</a> — this page is generated from it.</p>
   </main>
 </div>

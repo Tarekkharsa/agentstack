@@ -4,8 +4,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Concepts and glossary — agentstack</title>
-<meta name="description" content="For every reader. This page defines each term AgentStack uses, in two or three plain sentences. Every other page links here on first use instead of re-expl">
+<title>Concepts — agentstack</title>
+<meta name="description" content="You only need three layers to understand AgentStack.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="canonical" href="https://tarekkharsa.github.io/agentstack/concepts.html">
@@ -143,6 +143,8 @@
     <ul>
       <li><a href="start.html">Get started</a>
       </li>
+      <li><a href="library.html">Central library</a>
+      </li>
       <li><a href="tutorial/">Tutorial</a>
       </li>
       <li><a href="index.html#install">Install</a>
@@ -176,6 +178,8 @@
       <li><a href="howto/add-a-skill.html">Add a skill</a>
       </li>
       <li><a href="howto/name-a-toolset.html">Name a toolset</a>
+      </li>
+      <li><a href="howto/run-a-workflow.html">Run a workflow</a>
       </li>
       <li><a href="migrations.html">Migration recipes</a>
       </li>
@@ -215,7 +219,7 @@
       </li>
       <li><a href="workflows.html">Workflows</a>
       </li>
-      <li><a href="reference.html#the-library-linked-source-folders">Library sources</a>
+      <li><a href="reference.html#the-library-linked-source-folders">Library internals</a>
       </li>
       <li><a href="#delivery-modes">Delivery modes</a>
       </li>
@@ -274,118 +278,122 @@
 </aside>
   <main id="main-content" tabindex="-1">
 <p class="versionbar">These pages describe <b>v0.18.0-rc.3</b>, a pre-release. <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">The installer</a> serves the current release, <b>v0.17.1</b> — <code>/releases/latest</code> never points at a pre-release — so this is not the build you get unless you ask for it by name: <code>AGENTSTACK_VERSION=v0.18.0-rc.3</code>. <code>agentstack --version</code> says which build you have.</p>
-<h1 id="concepts-and-glossary">Concepts and glossary</h1>
-<p>For every reader. This page defines each term AgentStack uses, in two or three plain sentences. Every other page links here on first use instead of re-explaining — so keep it open the first time through.</p>
-<h2 id="start-with-the-files">Start with the files<a class="hlink" href="#start-with-the-files" aria-label="Link to this section">#</a></h2>
-<p>Before any of the terms below, this is what AgentStack actually puts in a project. Two groups: the ones you write and commit, and the ones written for you.</p>
-<div class="cb"><pre class="block"><code>your-project/
-├── .agentstack/
-│   ├── agentstack.toml   # what your tools may run — you edit this      ← manifest
-│   ├── agentstack.lock   # the exact bytes that resolved to             ← lockfile
-│   ├── skills/           # skill files this project carries (when used)
-│   ├── instructions/     # instruction fragments (when used)
-│   └── .env              # local secret values — gitignored, never committed
-│
-├── .mcp.json             # ─┐
-├── .claude/skills/       #  │ rendered for each CLI: generated output, not
-└── AGENTS.md             # ─┘ hand-edited — regenerate or remove it any time</code></pre></div>
-<p>Commit the first group; it is the portable part. The second group is written by <code>agentstack apply</code> in one shape per CLI, and how much of it exists at rest is decided by <a href="#delivery-modes">delivery routing</a> — skills and MCP servers reach an MCP-capable CLI live, so nothing generated lands here for them, while house rules, settings, hooks and extensions are real files. Machine-wide counterparts of the same idea live in <code>~/.agentstack/</code>; everything above is what one repository carries.</p>
-<p>The rest of this page names each piece, in the order the pieces are used.</p>
-<h2 id="how-the-pieces-fit-together">How the pieces fit together<a class="hlink" href="#how-the-pieces-fit-together" aria-label="Link to this section">#</a></h2>
-<img src="concepts-flow.svg" alt="How the pieces relate: the linked library sources feed the manifest; manifest → lockfile → trust → policy (machine ∩ project) → gateway/runs → audit log; delivery routing decides how it reaches a run">
-<p>Read it left to right: you write a <strong>manifest</strong>, the <strong>lockfile</strong> pins it, you <strong>trust</strong> the result, <strong>policy</strong> narrows what may run, and the <strong>gateway</strong> (or a <strong>run</strong>) carries it to your tools — every call landing in the <strong>audit</strong> log. The <strong>library sources</strong> feed shared capabilities into the manifest; <strong>delivery routing</strong> decides how each capability reaches the agent.</p>
+<h1 id="concepts">Concepts</h1>
+<p>You only need three layers to understand AgentStack.</p>
+<div class="cb"><pre class="block"><code>CENTRAL LIBRARY       PROJECT                    THIS MACHINE
+reusable content  →  manifest + lock        →  CLIs, secrets, trust
+Git repo              committed with project    local state</code></pre></div>
+<h2 id="central-library">Central library<a class="hlink" href="#central-library" aria-label="Link to this section">#</a></h2>
+<p>A normal folder, usually a Git repo, that holds reusable skills, MCP server definitions, instructions, hooks, extensions, and packages. Projects reference items by name; they do not copy the content.</p>
+<p>One machine can link several libraries, read in order like <code>PATH</code>: the first source holding a kind and name wins. See <a href="library.html#several-libraries-work-together">Several libraries work together</a> for collisions, qualified names, and what changing the order affects.</p>
 <h2 id="the-manifest-and-the-lockfile">The manifest and the lockfile<a class="hlink" href="#the-manifest-and-the-lockfile" aria-label="Link to this section">#</a></h2>
-<p><strong>Manifest</strong> — one file (<code>.agentstack/agentstack.toml</code>) listing everything your tools may run: MCP servers, skills, instructions, settings, hooks, and extensions. You edit it; AgentStack renders it into each tool's own config. It holds only <code>${REF}</code> secret placeholders, never real values.</p>
-<p><strong>Lockfile</strong> — <code>agentstack.lock</code> pins the manifest's resolved contents (server definitions, skill bytes, instruction bytes, settings values) to SHA-256 digests, so the same inputs reproduce and any change is visible. It is part of what you consent to when you trust a project — and that has one consequence worth learning before you meet it.</p>
-<p><strong>Lock first, then trust.</strong> Because the lockfile is inside the consent surface, <code>agentstack lock --write</code> always invalidates an existing grant: new pins are new consent. So the order never varies — pin the bytes, <em>then</em> approve them.</p>
-<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack lock --write   <span class="cm"># pin</span>
-<span class="pr">$ </span>agentstack trust .        <span class="cm"># review the pinned bytes and approve</span></code></pre></div>
-<p>Doing it the other way round throws the approval away, and <code>trust</code> refuses an unpinned surface anyway. The same rule explains why re-locking a changed skill does not make it deliverable again: <code>lock --write</code> <em>accepts</em> the new bytes, which is a machine's job; only <code>trust</code> <em>reviews</em> them, which is yours, and only the review re-opens delivery.</p>
-<h2 id="toolset">Toolset<a class="hlink" href="#toolset" aria-label="Link to this section">#</a></h2>
-<p><strong>Toolset</strong> — a named subset of the manifest ("backend", "design") you activate together. A manifest with no toolsets activates its whole inline set as the default, so you only name one when you have more than one. In the manifest file a toolset is a <code>[toolsets.&lt;name&gt;]</code> table. <code>[profiles.&lt;name&gt;]</code> is the older spelling and still works, so no existing manifest breaks; it is read, never written back.</p>
-<p>(The policy <em>presets</em> in <code>examples/policies/</code> are unrelated — starter machine-policy files you copy and edit, not toolsets.)</p>
+<p>A zero-files project normally commits only:</p>
+<div class="cb"><pre class="block"><code>.agentstack/
+├── agentstack.toml
+└── agentstack.lock</code></pre></div>
+<p><strong>Manifest</strong> — <code>agentstack.toml</code> names what the project may use: toolsets, servers, skills, instructions, settings, hooks, extensions, workflows, and policy. It may contain <code>${REF}</code> secret placeholders but never secret values.</p>
+<p>A <strong>workflow</strong> is one of those kinds: a reviewed script that fans a task out to several governed agent runs. Its bytes are pinned in the lock and gated by trust like every other kind, so it stays inert until you review it. See <a href="workflows.html">Governed workflows</a>.</p>
+<p><strong>Lock</strong> — <code>agentstack.lock</code> records the exact resolved content and digest for every selected library item. It makes an updated library an explicit project decision instead of a silent runtime change.</p>
+<p>The lock is part of the consent surface, so a new lock always comes before <code>agentstack trust .</code>. See <a href="howto/trust-a-repo.html">Trust a project</a> for that ceremony.</p>
+<p>Commit both files. Do not commit native MCP configs or copied skill folders in the normal live workflow.</p>
+<h2 id="toolset-and-default-toolset">Toolset and default toolset<a class="hlink" href="#toolset-and-default-toolset" aria-label="Link to this section">#</a></h2>
+<p>A <strong>toolset</strong> is a named group for one task:</p>
+<div class="cb" data-language="toml"><div class="cb-bar"><span class="cb-lang">toml</span></div><pre class="block"><code class="language-toml">default_toolset = "backend"
+
+[toolsets.backend]
+servers = ["github", "postgres"]
+skills = ["api-review", "sql-review"]</code></pre></div>
+<p>The default toolset opens automatically for a trusted gateway. If exactly one toolset exists, AgentStack can use it as the effective default. If several exist without a declared default, the gateway offers only control-plane tools until the launcher supplies a selection or a legacy client opens a lease.</p>
+<p>Modern MCP requests re-derive the reviewed default each time and do not hide authority in a protocol session. Legacy connections keep the selection they opened with for compatibility. A non-default modern selection belongs in the launch context, not in invisible connection state.</p>
 <h2 id="cli-adapter-target">CLI, adapter, target<a class="hlink" href="#cli-adapter-target" aria-label="Link to this section">#</a></h2>
-<p><strong>CLI (≡ harness)</strong> — the agent tool you run: Claude Code, Codex, Cursor, and so on. Some flags and older output call it a <em>harness</em>; same thing, and this page uses <strong>CLI</strong>.</p>
-<p><strong>Adapter</strong> — AgentStack's per-CLI compiler that turns one manifest into that CLI's own config format. <code>agentstack x adapters list</code> shows their ids; there are 13 today, at three different levels of verification — <a href="adapters.html">adapters.md</a> says what each one is tested against and what it manages.</p>
-<p><strong>Target</strong> — an adapter id you name in <code>[targets]</code> (or a <code>--target</code> flag) to say which CLIs a command acts on. More: <a href="reference.html#data-driven-adapters">reference.md — data-driven adapters</a>.</p>
-<h2 id="mcp-gateway-brokered-call">MCP, gateway, brokered call<a class="hlink" href="#mcp-gateway-brokered-call" aria-label="Link to this section">#</a></h2>
-<p><strong>MCP (Model Context Protocol)</strong> — the plugin standard agent CLIs use to expose tools; an "MCP server" is one such plugin. Spelled out here because the rest of the docs assume it.</p>
-<p><strong>Gateway</strong> — AgentStack's in-process broker. Instead of each CLI talking to MCP servers directly, calls route through the gateway, where policy is checked and every call is logged. It is <em>not</em> the <code>agentstack x proxy</code> command — an unrelated, observe-only relay that watches Anthropic-API token usage and enforces nothing.</p>
-<p><strong>Brokered call</strong> — any tool call the gateway routes and records. Only brokered calls are policy-checked and audited; a server rendered straight into a CLI's native config is called directly and is not brokered. More: <a href="reference.html#agent-operable-agentstack-mcp">reference.md — agent-operable <code>mcp</code></a>, <a href="reference.html#compact-proxied-surface--code-mode">reference.md — code mode</a>, <a href="reference.html#wire-proxy-proxy">reference.md — the wire proxy</a>, <a href="reference.html#call-log">reference.md — call log</a>.</p>
-<h2 id="trust-and-the-consent-digest">Trust and the consent digest<a class="hlink" href="#trust-and-the-consent-digest" aria-label="Link to this section">#</a></h2>
-<p><strong>Trust</strong> — your local approval that a project may auto-load on this machine. Until you run <code>agentstack trust .</code>, a cloned repo is inert: no server spawns, no skill enters context, no secret resolves. Trust says the surface was approved for loading — not that the code is safe, or that a trusted project is safe to run unsandboxed.</p>
-<p><strong>The gate is a write gate too.</strong> Inert is not only about run time. On an untrusted or drifted project, five kinds of delivery refuse loudly and exit nonzero: <strong>MCP server config</strong> is not written, <strong>skill files</strong> are not materialized, <strong>instruction fragments</strong> are not compiled into <code>CLAUDE.md</code> / <code>AGENTS.md</code>, and <strong>hooks</strong> and <strong>extensions</strong> are not rendered — those last two run code, so they take the full consent ceremony every time and accept no relaxation. Three things stay outside the gate, because none of them authorizes new content: removal and pruning, machine-layer content and the machine manifest, and <code>[settings.*]</code> values. More: <a href="troubleshooting.html#it-refuses-because-the-project-isnt-trusted">troubleshooting — it refuses because the project isn't trusted</a>.</p>
-<p><strong>Consent digest</strong> — the SHA-256 fingerprint of your manifest, local overlay, and lockfile that trust is pinned to. Change any of those bytes — a <code>git pull</code>, a re-lock, your own edit — and the grant goes <strong>stale</strong> (<code>status</code> calls it <code>trust stale (content changed)</code>) until you review what moved and re-trust. More: <a href="enforcement.html#what-trusted-does-and-does-not-mean">ENFORCEMENT.md — what trusted does and does not mean</a>.</p>
-<p><strong>What a write costs you.</strong> Two rules follow from the digest, and they are the source of most surprises:</p>
-<ul>
-<li>A command that writes the manifest <strong>and delivers in the same run</strong> — <code>agentstack add … --write</code>, the panel's edit verbs — judges trust as it stood when the command <em>started</em>, so it never refuses the delivery you just asked for. It does <strong>not</strong> re-pin: the new capability is real content and still owes a review, so the project is left stale and the next command re-gates.</li>
-<li>A write that records only a <strong>preference</strong> — <code>agentstack x delivery render-locally --write</code>, the <code>.gitignore</code> preference — authorizes nothing, so a grant that was valid immediately before is carried across it. It can never create a grant or resolve a pending review.</li>
-</ul>
-<p><strong>The yes</strong> — the consent moment itself, and the one thing never automated. For files you drop into <code>.agentstack/skills/</code> or <code>.agentstack/instructions/</code>, <code>agentstack yes</code> (v0.18.0+) is the whole ceremony in one step: notice, pin, review, render.</p>
-<p><strong>Review card</strong> — what a yes shows you before it means anything: what the content adds, what it would run, contact, or read, and — on a re-gate — what changed since you last approved it, as a real diff rather than a digest.</p>
-<p><strong>Provenance</strong> — the check that decides which review you get. Content you demonstrably wrote here (untracked in git, or newer than the last review) may take the one-step path; anything that arrived with a clone always takes the full staged review. Selection is by evidence, never by politeness.</p>
-<p><strong>Undo timeline</strong> — <code>agentstack undo</code> (v0.18.0+): every recorded write, newest first; pick a point and revert to it. The revert is itself recorded, so it can be undone too. <code>restore</code> is the same record as a script-friendly, one-write primitive, and works in every release. More: <a href="howto/undo.html">undo anything</a>.</p>
-<h2 id="drift">Drift<a class="hlink" href="#drift" aria-label="Link to this section">#</a></h2>
-<p><strong>Drift</strong> — a mismatch between the manifest and what is actually on disk, either way: a config hand-edited since the last render, or manifest entries that would be removed on the next one. <code>doctor</code> flags it and names the fix — <code>adopt</code> to keep a hand-edit, <code>apply --write</code> when the manifest is right. More: <a href="reference.html#drift-adopt-or-apply">reference.md — drift: adopt or apply?</a>.</p>
-<h2 id="guard">Guard<a class="hlink" href="#guard" aria-label="Link to this section">#</a></h2>
-<p><strong>Guard</strong> — a <em>cooperative</em> check AgentStack wires into a CLI's own pre-tool-use hook to block obvious destructive commands (<code>rm -rf</code> outside the workspace, writes to <code>.env</code> and key files). It catches an agent's accidents, not a determined attacker: any CLI that ignores its own hooks, or a process it never routes through a hook, bypasses it entirely. It is never enforcement.</p>
-<p>Not every CLI is covered, and <code>agentstack x guard status</code> distinguishes the two reasons. <strong><code>no hook surface exists</code></strong> is a fact about the CLI — Claude Desktop has no PreToolUse-style hook, Junie has only a static action allowlist — and no release can fix it. <strong><code>not wired yet</code></strong> is a fact about AgentStack: Kiro could be covered and is not. More: <a href="enforcement.html#filesystem--write">ENFORCEMENT.md — filesystem write</a>.</p>
-<a id="sandbox-lockdown-and-run---locked"></a>
-<h2 id="sandbox-lockdown-and-the-protected-run">Sandbox, lockdown, and the protected run<a class="hlink" href="#sandbox-lockdown-and-the-protected-run" aria-label="Link to this section">#</a></h2>
-<p>Three ways to raise how strongly a run is confined, lightest to strongest:</p>
-<p><strong>A plain <code>run</code> (the Protected tier, and the default)</strong> — no container. AgentStack runs the fail-closed pre-launch gates (trust, lock verification, policy admission) and freezes the run's tool surface, then launches the CLI on your host. Protection before launch, not kernel isolation — the agent still runs as you. <code>--locked</code> is the same run named explicitly; <code>--unprotected</code> opts out to an ungated host run.</p>
-<p><strong><code>run --sandbox</code></strong> — a Docker container with a host-side egress proxy. Proxied HTTPS is checked against policy, but the container keeps a direct network route a proxy-ignoring process could still use.</p>
-<p><strong><code>run --lockdown</code></strong> — the container's only route out is the egress proxy, so there is no direct route at all. Strongest confinement AgentStack ships. More: <a href="enforcement.html#the-matrix">ENFORCEMENT.md — the matrix</a>.</p>
-<h2 id="posture-and-the-machine-policy-summary">Posture and the machine-policy summary<a class="hlink" href="#posture-and-the-machine-policy-summary" aria-label="Link to this section">#</a></h2>
-<p><strong>Posture</strong> — the per-run label for how strongly the effective policy is actually enforced, printed on the run banner. The four labels are <code>HOST / ADVISORY</code>, <code>HOST / PROTECTED</code>, <code>SANDBOX / PROXIED · DIRECT ROUTE OPEN</code>, and <code>LOCKDOWN / ENFORCED · NO DIRECT ROUTE</code> — the sandbox and lockdown labels are emitted with those suffixes, and the suffix is the honest half: plain <code>--sandbox</code> proxies egress but leaves a direct route a proxy-ignoring process can take. <code>HOST / PROTECTED</code> is what a bare <code>agentstack run &lt;cli&gt;</code> prints; <code>HOST / ADVISORY</code> belongs to the <code>--unprotected</code> opt-out. The labels are enumerated in <a href="reference.html#execution-posture">reference.md — execution posture</a>; what each one actually guarantees is <a href="enforcement.html#the-matrix">ENFORCEMENT.md — the matrix</a>, which is keyed by mode rather than by label. "Posture" always means this label.</p>
-<p><strong>Machine-policy summary</strong> — a separate one-word line <code>doctor</code> prints, describing your machine policy's shape rather than a run. A fresh machine reports <code>unconfigured</code> — no ceiling at all, and the state to fix first. Two of the six states, <code>degraded</code> and <code>blocked</code>, mean the file you think is enforcing is not the file being enforced. All six: <a href="reference.html#execution-posture">reference.md — execution posture</a>.</p>
-<h2 id="machine-manifest-and-machine-policy">Machine manifest and machine policy<a class="hlink" href="#machine-manifest-and-machine-policy" aria-label="Link to this section">#</a></h2>
-<p><strong>Machine manifest</strong> — the personal layer at <code>~/.agentstack/agentstack.toml</code>, seeded by <code>agentstack init --global</code>. It holds your standing, cross-project rules: machine policy, personal instruction fragments, and the guard and filesystem-deny defaults. Only its <code>[instructions]</code> merge into a project load (beneath the project's own); servers, skills, and settings never inherit, so personal capabilities never auto-inject into a team repo and its trust digest is untouched.</p>
-<p><strong>Machine policy</strong> — the <code>[policy.*]</code> rules the machine manifest carries: your standing tool, egress, secret, and filesystem limits, checked <strong>before</strong> any project's on every brokered call. The effective policy is the intersection (machine ∩ project), so a repo can only narrow a machine rule, never loosen it; a machine refusal names its layer in the error and the audit log.</p>
-<a id="delivery-modes"></a>
-<h2 id="delivery-routed-not-chosen">Delivery: routed, not chosen<a class="hlink" href="#delivery-routed-not-chosen" aria-label="Link to this section">#</a></h2>
-<p>Since 2026-08-03 delivery is a <strong>routing decision AgentStack makes</strong>, from two facts: what kind a capability is, and which CLI it is going to. You always commit the intent (manifest plus lockfile); where the bytes then go is the routing:</p>
+<p><strong>CLI</strong> or <strong>harness</strong> is the agent program: Codex, Claude Code, OpenCode, and others. <strong>Adapter</strong> is AgentStack's description of that CLI's confirmed config, instruction, hook, and gateway channels. <strong>Target</strong> is the adapter id a command or manifest entry acts on.</p>
+<h2 id="delivery-modes">Delivery modes<a class="hlink" href="#delivery-modes" aria-label="Link to this section">#</a></h2>
+<p>AgentStack registers one global gateway in each MCP-capable CLI. When an agent starts inside a trusted project, the gateway discovers that project and serves its default toolset live.</p>
 <div class="tblwrap"><table>
-<thead><tr><th>Capability kind</th><th>Lane</th></tr></thead><tbody>
-<tr><td>Skills · MCP servers, on a CLI with MCP</td><td><strong>dynamic</strong> — served live, on demand, digest-verified per load</td></tr>
-<tr><td>House rules (<code>CLAUDE.md</code> / <code>AGENTS.md</code> region) · settings</td><td><strong>rendered</strong> — a setting only a file carries; house rules because no live channel a CLI is <em>known</em> to consume can vary them by model</td></tr>
-<tr><td>Hooks · extensions</td><td><strong>rendered</strong>, with the full consent ceremony every time (they run code)</td></tr>
-<tr><td>Any kind, on a CLI without MCP</td><td><strong>rendered</strong> — that CLI has no live channel</td></tr>
+<thead><tr><th>Capability</th><th>Normal delivery</th></tr></thead><tbody>
+<tr><td>Skills</td><td>Name and description first; full body on demand</td></tr>
+<tr><td>MCP servers</td><td>Live behind the compact gateway</td></tr>
+<tr><td>Instructions / house rules</td><td>Managed CLI instruction files</td></tr>
+<tr><td>Settings, hooks, extensions</td><td>Managed files required by the CLI</td></tr>
+<tr><td>File-only CLI</td><td>Rendered compatibility files</td></tr>
 </tbody></table></div>
-<p>A project is normally in both lanes at once. <code>agentstack x delivery</code> shows the routing per CLI; <code>agentstack x delivery --json</code> is the same reading for a UI (<code>delivery-routing-v1</code>).</p>
-<p><strong>The one override — render locally.</strong> <code>[delivery] render_locally = true</code> in the manifest, per project or per harness (<code>[delivery.harness.&lt;id&gt;]</code>), set with <code>agentstack x delivery render-locally [--harness &lt;id&gt;] --write</code>. It writes files even where the live channel would have worked — for offline work, deterministic native files, inspection with ordinary filesystem tools, a rule against a persistent background process, debugging without another runtime dependency, or compatibility testing against a CLI's own behaviour. It only ever moves a capability <em>towards</em> files; nothing moves an instruction or a hook the other way, because no channel would carry it.</p>
-<p>A gateway-served project keeps <strong>0 project artifacts for the capabilities served live</strong> — never "0 files": the manifest, the lockfile, and any managed house-rules region are still there.</p>
-<h3 id="the-older-delivery-modes">The older delivery modes<a class="hlink" href="#the-older-delivery-modes" aria-label="Link to this section">#</a></h3>
-<p>The three per-project modes below predate the routing. They are no longer how delivery is decided, and they are no longer switchable: <code>agentstack set-mode</code> is retired. They survive only as <em>readings</em> of what a project currently looks like, which <code>doctor --json</code> still reports. To stop rendering files, use <code>agentstack x uninstall</code>; to keep files where the live channel would have worked, use <code>agentstack x delivery render-locally</code>.</p>
-<ul>
-<li><strong>static</strong> — rendered files sit on disk, kept out of git by a managed <code>.gitignore</code> block. Works however you launch your tools, since the capabilities are real files the CLI reads directly.</li>
-<li><strong>clean-at-rest</strong> — nothing generated persists between sessions. A toolset is injected when a session or run starts and reverted on exit; <code>agentstack lock --write</code> pins the manifest's name refs <em>without rendering anything</em>, so <code>git status</code> stays silent.</li>
-<li><strong>zero-files</strong> — no <em>generated</em> per-project files. The gateway is registered once per CLI, and every trusted repo serves its own stack live over it; a <a href="#lease-session-or-protected-run-fence">lease</a> can fence one connection to a toolset without rendering native files. The repo still carries its manifest, its lockfile, and any managed house-rules region.</li>
-</ul>
-<p>Not sure which you need? See <a href="choose.html">how capabilities reach your CLIs</a>. More: <a href="reference.html#where-rendered-files-live-three-modes">reference.md — where rendered files live</a>.</p>
-<a id="lease-session-or-locked-run-fence"></a>
-<h2 id="lease-session-or-protected-run-fence">Lease, session, or protected-run fence<a class="hlink" href="#lease-session-or-protected-run-fence" aria-label="Link to this section">#</a></h2>
-<p>Three ways to give a run only <em>part</em> of a manifest for a while. A <strong>session</strong> renders a toolset to disk and reverts it on <code>session end</code>; a <strong>lease</strong> does the same for one live MCP connection without rendering anything; a <strong>protected-run fence</strong> (<code>run &lt;cli&gt; --toolset &lt;name&gt;</code>) narrows one run's frozen surface and ends when the process does. A lease and a session are mutually exclusive, and <code>freeze</code> on either promotes what was actually used into a new toolset — a proposal you review, then <code>agentstack lock --write</code>. Full comparison: <a href="reference.html#mcp-toolset-leases-one-connection-one-capability-fence">reference.md — MCP toolset leases</a>.</p>
+<p>“Zero files” means no generated project MCP configs or copied skill folders for the live lane. The manifest, lock, and any required managed instruction files still exist.</p>
+<p>Use <code>agentstack use &lt;toolset&gt; --write</code> only for a file-only CLI or an intentional rendered compatibility lane. A missing <code>.mcp.json</code> or <code>.claude/skills/</code> is not a problem when status says the capability is served live.</p>
+<p>Two commands are easy to confuse. <code>agentstack use &lt;toolset&gt; --write</code> <strong>materializes one toolset's files now</strong> and records nothing about routing; <code>agentstack x delivery render-locally --write</code> <strong>records a durable preference</strong> that routes kinds to files from then on, for every toolset. One is an action, the other is a setting.</p>
+<h2 id="what-agentstack-owns">What AgentStack owns<a class="hlink" href="#what-agentstack-owns" aria-label="Link to this section">#</a></h2>
+<p>AgentStack manages only content it declared or recorded: the manifest, lock, its gateway registration, its managed instruction regions, and rendered entries or skill folders in its ownership ledger.</p>
+<p>It does not automatically absorb or delete every capability already present on the machine. Existing native skills remain CLI-owned until you explicitly adopt them. Existing MCP entries are copied only through the reviewed <code>init</code> or <code>adopt</code> flow, and their source entries remain in place. App-owned tools such as Computer Use and servers installed inside another application's bundle are excluded from import by default. Unrelated settings, plugins, and built-in CLI features remain native.</p>
+<p>This gives one useful boundary: put capabilities you want to reuse and govern in the central library; leave vendor- or application-owned capabilities with their owner.</p>
+<h2 id="dynamic-skill-loading">Dynamic skill loading<a class="hlink" href="#dynamic-skill-loading" aria-label="Link to this section">#</a></h2>
+<p>The gateway places a compact skill index in the agent's initial context:</p>
+<div class="cb"><pre class="block"><code>api-review — Review API changes for compatibility and error handling
+rust-testing — Plan and write focused Rust tests
+using-agentstack — Operate an AgentStack-managed setup</code></pre></div>
+<p>It is names plus one-line descriptions, capped to keep context small. The agent can refresh or search it with <code>agentstack_list_loadable(query)</code>. When a task matches a description, it calls <code>agentstack_load(name, reason)</code> and receives only that skill's full body.</p>
+<p>The user may ask for a skill by name, but does not have to. A clear frontmatter description tells the agent when the skill is relevant. The embedded <code>using-agentstack</code> manual is always available, even before a project is trusted.</p>
+<h2 id="dynamic-mcp-tool-discovery">Dynamic MCP tool discovery<a class="hlink" href="#dynamic-mcp-tool-discovery" aria-label="Link to this section">#</a></h2>
+<p>The default gateway keeps upstream MCP schemas out of the initial tool list. The agent calls <code>tools_search({ query })</code> to find a tool, then asks for that tool's schema and invokes it by its namespaced name. This keeps the agent's context bounded even when several MCP servers expose hundreds of tools.</p>
+<p>Toolsets decide which MCP servers can be discovered. Machine and project policy still apply to every brokered call.</p>
+<h2 id="instructions-by-cli-and-model">Instructions by CLI and model<a class="hlink" href="#instructions-by-cli-and-model" aria-label="Link to this section">#</a></h2>
+<p>Instructions are reusable fragments such as coding rules or response style. They can have one base body and variants selected by CLI, model, or both:</p>
+<div class="cb" data-language="toml"><div class="cb-bar"><span class="cb-lang">toml</span></div><pre class="block"><code class="language-toml">[instructions.team-style]
+path = "./instructions/base.md"
+
+[[instructions.team-style.variant]]
+cli = "codex"
+path = "./instructions/codex.md"
+
+[[instructions.team-style.variant]]
+model = "opus"
+path = "./instructions/opus.md"</code></pre></div>
+<p>The most specific match wins: CLI + model, CLI, model, then base. AgentStack never guesses an unknown model. The model comes from a named toolset or a model setting AgentStack manages for that CLI.</p>
+<p>In the central library, use <code>instructions/&lt;name&gt;/instruction.toml</code> with the same <code>[[variant]]</code> grammar. A project selects the library fragment with a sourceless <code>[instructions.&lt;name&gt;]</code> table. See <a href="library.html#put-cli--and-model-specific-instructions-in-the-library">the complete example</a>.</p>
+<h2 id="trust-and-the-consent-digest">Trust and the consent digest<a class="hlink" href="#trust-and-the-consent-digest" aria-label="Link to this section">#</a></h2>
+<p>Trust is the local human approval for one project's current manifest and lock. A new clone is inert until reviewed. Editing either file, pulling a changed version, or re-locking makes trust stale.</p>
+<p>Trust means “I reviewed these declared capabilities.” It does not prove that third-party code is safe and it does not copy approval to another machine.</p>
+<p>The <strong>consent digest</strong> is the hash AgentStack records for that reviewed manifest and lock. If either changes, the digest no longer matches and the project becomes inert again.</p>
 <h2 id="secrets">Secrets<a class="hlink" href="#secrets" aria-label="Link to this section">#</a></h2>
-<p><strong>Placeholder (<code>${REF}</code>)</strong> — the only form a secret takes in the manifest: a named reference like <code>${GH_TOKEN}</code>, never the value. A ref is a strict <code>${IDENTIFIER}</code>; shell fallback (<code>${VAR:-default}</code>) and prompt-style placeholders (<code>${input:key}</code>) pass through verbatim and are <strong>not</strong> treated as secrets. Placeholders resolve in memory at run time; if one can't resolve, the write or run fails closed, reporting the unresolved ref rather than blanking or leaking it into live config. Where a resolved value lands depends on delivery mode: a static render writes it into a native config whose format requires it (behind a managed gitignore); gateway-backed and clean-at-rest delivery resolve host-side and keep values out of files at rest. The manifest and lockfile never hold values in any mode.</p>
-<p><strong>Keychain and varlock</strong> — the two backing stores a <code>${REF}</code> resolves from. <strong>varlock</strong> is the <strong>recommended vault</strong>: a resolver fronting 1Password, cloud secret managers, and device-local encryption, so no value lives in the project at all. It is active only when a project opts in — a <code>.env.schema</code> next to the manifest, which <code>agentstack init</code> offers to write and which declares names, never values — and the <code>varlock</code> binary is runnable; otherwise the chain skips it silently, which is why <code>agentstack doctor</code> reports its health. The OS <strong>keychain</strong> (service <code>agentstack</code>) and a gitignored project <code>.env</code> are the local fallbacks. The full chain is process env → varlock → keychain → project <code>.env</code>. More: <a href="reference.html#secret-resolution">reference.md — secret resolution</a>.</p>
-<h2 id="library-catalog-registry-trust-store">Library, catalog, registry, trust store<a class="hlink" href="#library-catalog-registry-trust-store" aria-label="Link to this section">#</a></h2>
-<p>Four things that skim alike but do different jobs:</p>
-<ul>
-<li><strong>Central library</strong> — your own managed home (<code>~/.agentstack/lib/</code>) of skills and server definitions that projects reference by name instead of copying.</li>
-<li><strong>Bundled catalog</strong> — ready-made skills shipped inside the AgentStack binary that <code>search</code> can find and add.</li>
-<li><strong>Official MCP Registry</strong> — the public <code>registry.modelcontextprotocol.io</code> index of MCP servers; <code>search</code> queries it and <code>add from &lt;id&gt;</code> installs one.</li>
-<li><strong>Trust store</strong> — the machine-local record (under <code>~/.agentstack/</code>) of which projects you have trusted, keyed by path and consent digest. It stores no capabilities — only your approvals. More: <a href="reference.html#the-library-linked-source-folders">reference.md — the library</a>, <a href="reference.html#search-across-providers">reference.md — search across providers</a>.</li>
-</ul>
-<p>Skills also come straight from any skills repo — <code>add skill owner/repo</code> (or a git URL, or a local dir) discovers, scans, and pins them; see <a href="howto/add-a-skill.html">add a skill</a>.</p>
+<p>Manifests and library definitions use references such as <code>${GITHUB_TOKEN}</code>. Each machine stores its own value:</p>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack secret set GITHUB_TOKEN</code></pre></div>
+<p>AgentStack resolves values only when needed. It does not write them into the library, project manifest, lock, agent context, or audit log. An unresolved secret blocks the operation and names the missing reference.</p>
+<h2 id="policy-guard-and-protected-runs">Policy, guard, and protected runs<a class="hlink" href="#policy-guard-and-protected-runs" aria-label="Link to this section">#</a></h2>
+<p><strong>Machine policy</strong> is the maximum authority allowed on this machine. A project can narrow it, never widen it. It can restrict tools, filesystem paths, network destinations, and which server may read each secret.</p>
+<p><strong>Guard</strong> is a pre-tool-use check for supported CLIs. It can stop dangerous commands before a harness runs them.</p>
+<p><strong>Protected run</strong> — <code>agentstack run &lt;cli&gt;</code> verifies trust, lock, and policy, then freezes the selected tool surface for the run. It is host-side gating, not OS isolation. <code>--sandbox</code> adds a container; <code>--lockdown</code> forces network access through the audited proxy.</p>
 <h2 id="egress">Egress<a class="hlink" href="#egress" aria-label="Link to this section">#</a></h2>
-<p><strong>Egress</strong> — outbound network traffic from a run, governed by <code>[policy.egress]</code> host rules. Under <code>--sandbox</code> and <code>--lockdown</code> the egress proxy enforces those rules on proxied traffic: unapproved egress is blocked on the enforced paths. That is the honest limit — it never makes exfiltration impossible, because traffic to a host you <em>did</em> approve (including the model API) is still allowed. More: <a href="enforcement.html#egress">ENFORCEMENT.md — egress</a>.</p>
-<h2 id="flight-recorder-and-the-call-audit-log">Flight recorder and the call audit log<a class="hlink" href="#flight-recorder-and-the-call-audit-log" aria-label="Link to this section">#</a></h2>
-<p>Two separate records, easy to confuse:</p>
-<p><strong>Flight recorder</strong> — a per-run, append-only log of one run's lifecycle, limits, egress decisions, brokered tool calls, and secret-reference names. Read it with <code>agentstack x report run &lt;id&gt;</code>.</p>
-<p><strong>Call audit log</strong> — the single global log (<code>~/.agentstack/audit/calls.jsonl</code>) of every brokered tool call across all runs, storing argument <em>digests</em> only, never values. It is best-effort local diagnostics, not tamper-evident forensic evidence. More: <a href="architecture.html#layer-5--flight-recorder-cratesrecorder">ARCHITECTURE.md — flight recorder</a>, <a href="reference.html#call-log">reference.md — call log</a>.</p>
-<hr>
-<p>Have the words you needed? <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/start.html">Get started</a> is the guided path, and <a href="choose.html">which protection do I need?</a> covers the one choice that is still yours — delivery is routed for you.</p>
+<p>Egress is network access from a brokered server or protected run. Machine and project policy can restrict destinations. In lockdown, the audited proxy is the only route out; in an ordinary host run, AgentStack does not claim kernel-level network isolation.</p>
+<h2 id="lease-session-or-protected-run-fence">Lease, session, or protected-run fence<a class="hlink" href="#lease-session-or-protected-run-fence" aria-label="Link to this section">#</a></h2>
+<p>A live <strong>lease</strong> selects one toolset for one MCP connection without writing files. Connection-scoped toolset leases are <strong>legacy-only</strong>: a modern MCP connection re-derives the trusted default on each request, so the binary refuses to fence one for it. Pick a different toolset with <code>agentstack toolset default &lt;name&gt; --write</code>, or per launch with <code>agentstack run &lt;cli&gt; --toolset &lt;name&gt;</code>. A native <strong>session</strong> temporarily renders a toolset for compatibility and restores it at the end. A <strong>protected-run fence</strong> selects and freezes a toolset for one <code>agentstack run</code> process. The normal declared default is enough for ordinary trusted connections.</p>
+<h2 id="drift">Drift<a class="hlink" href="#drift" aria-label="Link to this section">#</a></h2>
+<p>Drift is a difference between AgentStack's source of truth and a generated native file.</p>
+<ul>
+<li>Keep the manifest: <code>agentstack apply</code> previews restoring its rendered output.</li>
+<li>Keep a deliberate native hand-edit: <code>agentstack adopt</code> previews importing it.</li>
+</ul>
+<p>Do not repair drift by editing another generated file. Run <code>agentstack doctor</code> and follow the exact first fix it reports.</p>
+<h2 id="machine-manifest-and-machine-policy">Machine manifest and machine policy<a class="hlink" href="#machine-manifest-and-machine-policy" aria-label="Link to this section">#</a></h2>
+<p>These remain local and are intentionally not shared through a library or project repo:</p>
+<ul>
+<li>linked library paths</li>
+<li>installed and detected CLIs</li>
+<li>secret values</li>
+<li>trust grants</li>
+<li>machine policy</li>
+<li>active connections and leases</li>
+<li>audit history and undo records</li>
+</ul>
+<p><code>agentstack up --library &lt;git-url&gt;</code> reconstructs the portable part on another machine, then tells you which local decisions remain.</p>
+<h2 id="the-practical-loop">The practical loop<a class="hlink" href="#the-practical-loop" aria-label="Link to this section">#</a></h2>
+<div class="cb"><pre class="block"><code>edit library or project
+        ↓
+preview lock → write lock
+        ↓
+human trust review
+        ↓
+new agent connection opens the default
+        ↓
+status for the next action; doctor only when needed</code></pre></div>
+<p>Next: <a href="start.html">Get started</a> · <a href="library.html">Central library</a> · <a href="faq.html">FAQ</a> · <a href="reference.html">Feature reference</a></p>
   <p class="srcline">Source of truth: <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/concepts.md">docs/concepts.md</a> — this page is generated from it.</p>
   </main>
 </div>

@@ -35,6 +35,9 @@ pub struct Issue {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum IssueKind {
+    /// `default_toolset` names no `[toolsets.*]` table, so a trusted gateway
+    /// cannot select it automatically.
+    UnknownDefaultToolset,
     UnknownServerRef,
     /// A server ref names a known entry, but resolving its definition failed
     /// (e.g. a library entry whose `servers/<name>.toml` is missing/malformed).
@@ -123,7 +126,8 @@ impl IssueKind {
     pub fn is_error(&self) -> bool {
         matches!(
             self,
-            IssueKind::UnknownServerRef
+            IssueKind::UnknownDefaultToolset
+                | IssueKind::UnknownServerRef
                 | IssueKind::UnresolvableServerRef
                 | IssueKind::UnknownSkillRef
                 | IssueKind::UnresolvableSkillRef
@@ -220,6 +224,20 @@ fn run<'a>(
     let mut issues = Vec::new();
     let targets: std::collections::BTreeSet<String> =
         targets.into_iter().map(str::to_string).collect();
+
+    if let Some(default) = manifest.default_toolset.as_deref() {
+        if !manifest.profiles.contains_key(default) {
+            issues.push(
+                Issue::new(
+                    IssueKind::UnknownDefaultToolset,
+                    format!("default_toolset '{default}' names no declared toolset"),
+                )
+                .with_fix(format!(
+                    "create toolset '{default}' or change `default_toolset` in agentstack.toml"
+                )),
+            );
+        }
+    }
 
     // [policy.egress] pattern grammar: a malformed pattern fails every
     // decision that consults it closed at run time — reject it here so the
@@ -851,6 +869,24 @@ mod tests {
         assert!(validate(&m)
             .iter()
             .all(|i| i.kind != IssueKind::MalformedEgressPattern));
+    }
+
+    #[test]
+    fn default_toolset_must_name_a_declared_toolset() {
+        let valid =
+            parse("version = 1\ndefault_toolset = \"rust\"\n[profiles.rust]\nservers = []\n");
+        assert!(validate(&valid)
+            .iter()
+            .all(|issue| issue.kind != IssueKind::UnknownDefaultToolset));
+
+        let dangling =
+            parse("version = 1\ndefault_toolset = \"missing\"\n[profiles.rust]\nservers = []\n");
+        let issue = validate(&dangling)
+            .into_iter()
+            .find(|issue| issue.kind == IssueKind::UnknownDefaultToolset)
+            .expect("a dangling default must be rejected");
+        assert!(issue.kind.is_error());
+        assert!(issue.message.contains("missing"));
     }
 
     /// Stage 3.1: every actionable validation error carries a concrete next

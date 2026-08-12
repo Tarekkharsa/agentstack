@@ -29,18 +29,6 @@ __pycache__/
 # workflow scaling bench output — regenerated on every run, not evidence
 examples/workflow-scale/results.jsonl
 
-# >>> agentstack — generated project artifacts (machine-local) >>>
-/.agents/mcp_config.json
-/.codex/config.toml
-/.cursor/mcp.json
-/.gemini/settings.json
-/.junie/mcp/mcp.json
-/.kiro/settings/mcp.json
-/.mcp.json
-/.vscode/mcp.json
-/opencode.json
-# <<< agentstack >>>
-
 # local playwright install for tools/site-smoke.mjs
 /node_modules/
 /package.json

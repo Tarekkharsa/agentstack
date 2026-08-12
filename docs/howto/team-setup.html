@@ -4,8 +4,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Share one setup with your team — agentstack</title>
-<meta name="description" content="For a team that wants every member&#x27;s agent CLIs configured the same way. Prerequisite: a working manifest in .agentstack/ .">
+<title>Share one setup with a team — agentstack</title>
+<meta name="description" content="Share two normal Git repos:">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
 <link rel="canonical" href="https://tarekkharsa.github.io/agentstack/howto/team-setup.html">
@@ -143,6 +143,8 @@
     <ul>
       <li><a href="../start.html">Get started</a>
       </li>
+      <li><a href="../library.html">Central library</a>
+      </li>
       <li><a href="../tutorial/">Tutorial</a>
       </li>
       <li><a href="../index.html#install">Install</a>
@@ -176,6 +178,8 @@
       <li><a href="../howto/add-a-skill.html">Add a skill</a>
       </li>
       <li><a href="../howto/name-a-toolset.html">Name a toolset</a>
+      </li>
+      <li><a href="../howto/run-a-workflow.html">Run a workflow</a>
       </li>
       <li><a href="../migrations.html">Migration recipes</a>
       </li>
@@ -215,7 +219,7 @@
       </li>
       <li><a href="../workflows.html">Workflows</a>
       </li>
-      <li><a href="../reference.html#the-library-linked-source-folders">Library sources</a>
+      <li><a href="../reference.html#the-library-linked-source-folders">Library internals</a>
       </li>
       <li><a href="../concepts.html#delivery-modes">Delivery modes</a>
       </li>
@@ -274,31 +278,41 @@
 </aside>
   <main id="main-content" tabindex="-1">
 <p class="versionbar">These pages describe <b>v0.18.0-rc.3</b>, a pre-release. <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">The installer</a> serves the current release, <b>v0.17.1</b> — <code>/releases/latest</code> never points at a pre-release — so this is not the build you get unless you ask for it by name: <code>AGENTSTACK_VERSION=v0.18.0-rc.3</code>. <code>agentstack --version</code> says which build you have.</p>
-<h1 id="share-one-setup-with-your-team">Share one setup with your team</h1>
-<p>For a team that wants every member's agent CLIs configured the same way. Prerequisite: a working <a href="../concepts.html">manifest</a> in <code>.agentstack/</code> (run <code>agentstack init</code>, then <code>agentstack apply --write</code>, once).</p>
-<p>You hand a setup over by <strong>committing it</strong>: the repo itself carries the manifest and lock, and each clone reviews before anything activates.</p>
-<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="cm"># You, once: commit the manifest and its lockfile</span>
-<span class="pr">$ </span>git add .agentstack/          <span class="cm"># manifest + agentstack.lock</span>
-<span class="pr">$ </span>git commit -m "Add agentstack setup"
-<span class="pr">$ </span>git push
-
-<span class="cm"># Each teammate, after cloning:</span>
-<span class="pr">$ </span>agentstack trust .             <span class="cm"># review what the repo declares, then approve it</span>
-<span class="pr">$ </span>agentstack secret set GH_PAT   <span class="cm"># their own value (keychain by default)</span>
-<span class="pr">$ </span>agentstack apply --write       <span class="cm"># render the shared setup into the CLIs they have</span>
-<span class="pr">$ </span>agentstack doctor              <span class="cm"># confirm the result; every warning names its fix</span></code></pre></div>
-<p><strong><code>trust .</code> comes first, and it is not optional.</strong> A clone starts untrusted, and an untrusted project refuses to deliver: <code>apply --write</code> writes no server definitions and compiles no house rules, and <code>use --write</code> materializes no skill files. Each refusal is loud, exits nonzero, and names <code>agentstack trust .</code> — run it before <code>apply</code>, not after, or the teammate's first command fails for a reason the sequence never mentioned. The lockfile is already committed and already pinned, so there is nothing to re-lock first; see <a href="../howto/trust-a-repo.html">trust a cloned repo</a> for the full boundary.</p>
-<p><strong>Changing the setup later re-opens it for everyone.</strong> Editing the manifest or re-running <code>agentstack lock --write</code> moves the consent surface, so your own project drifts too — re-approve with <code>agentstack trust .</code> before you <code>apply</code>. Once you push, each teammate's <code>git pull</code> drifts their grant the same way, and their next <code>apply --write</code> or <code>use --write</code> refuses until they review what moved. The review is a diff of what changed since they last said yes, not a re-read of the whole surface, so batch a run of edits into one commit rather than trickling them out.</p>
-<p>You commit <strong>intent</strong>, not credentials. The <a href="../concepts.html">manifest</a> is the reviewed source of truth and the <a href="../concepts.html">lockfile</a> pins exact versions and digests, so everyone resolves the same bytes. Secrets appear in the manifest only as <code>${REF}</code> placeholders — each teammate stores their own value locally with <code>agentstack secret set</code>.</p>
-<p>In v0.18.0 and later, <code>agentstack x up</code> collapses the teammate's four commands into one, and <code>agentstack x share &lt;name&gt;</code> / <code>agentstack x receive &lt;path&gt;</code> move a setup as a signed <code>.astack</code> bundle when there is no shared repo to commit to — staged inert and carded first. See <a href="../start.html#newer-than-the-stable-release">newer than the stable release</a>.</p>
-<p><strong>Never committed:</strong> secret values (they live per-machine in the OS keychain or a gitignored <code>.env</code>) and the rendered native artifacts — <code>.mcp.json</code>, <code>.claude/skills/</code>, the compiled <code>CLAUDE.md</code> — which sit behind a managed <code>.gitignore</code> block whenever they are written — see <a href="../concepts.html#delivery-modes">delivery routing</a> for which capabilities are written at all and which are served live.</p>
-<p><strong>Optional provenance.</strong> A maintainer can <code>agentstack x sign</code> the lockfile — it writes a detached ed25519 signature and prints a public key to publish. Teammates run <code>agentstack x verify --pubkey &lt;key&gt;</code> to confirm the lockfile is the one the maintainer signed before they rely on it.</p>
-<p><strong>Limits.</strong> agentstack shares configuration, not trust in referenced code. <code>verify</code> proves who signed the lockfile, not that a server it names is safe to run. <a href="../howto/trust-a-repo.html">Consent does not travel</a>: each teammate runs <code>agentstack trust .</code> themselves, in every delivery mode, and so does each of their machines and each fresh checkout — the grant is keyed to a path on one machine, never to the repo. A CI runner is no different; see <a href="../howto/ci.html">use it in CI</a> for the headless form.</p>
-<ul>
-<li><a href="../concepts.html">Concepts</a> — manifest, lockfile, secrets, delivery modes</li>
-<li><a href="../reference.html#export--import">Reference: <code>export</code> / <code>import</code></a> — move a whole setup between machines</li>
-<li><a href="../reference.html#syncing-across-machines-lib-sync">Reference: syncing across machines (<code>lib sync</code>)</a></li>
-</ul>
+<h1 id="share-one-setup-with-a-team">Share one setup with a team</h1>
+<p>Share two normal Git repos:</p>
+<ol>
+<li>A central library repo containing reusable skills, servers, and instructions.</li>
+<li>Each project repo containing <code>.agentstack/agentstack.toml</code> and <code>.agentstack/agentstack.lock</code>.</li>
+</ol>
+<h2 id="maintainer">Maintainer<a class="hlink" href="#maintainer" aria-label="Link to this section">#</a></h2>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>git -C ~/GitHub/ai-setup push
+<span class="pr">$ </span>git add .agentstack/agentstack.toml .agentstack/agentstack.lock
+<span class="pr">$ </span>git commit -m "Configure AgentStack"
+<span class="pr">$ </span>git push</code></pre></div>
+<p>Commit intent and pinned content, never credentials or generated provider configuration. Server definitions contain <code>${REF}</code> placeholders.</p>
+<h2 id="teammate-or-another-machine">Teammate or another machine<a class="hlink" href="#teammate-or-another-machine" aria-label="Link to this section">#</a></h2>
+<p>After cloning the project:</p>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack up --library https://github.com/your-team/ai-setup.git
+<span class="pr">$ </span>agentstack up --library https://github.com/your-team/ai-setup.git --write
+<span class="pr">$ </span>agentstack status</code></pre></div>
+<p>Status names any secret references this machine still needs and the local trust review. Each person then runs the commands it shows, for example:</p>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack secret set GITHUB_TOKEN
+<span class="pr">$ </span>agentstack trust .
+<span class="pr">$ </span>agentstack status</code></pre></div>
+<p>Trust never travels between people, machines, or checkout paths. That is why a cloned project stays inert until its local review.</p>
+<h2 id="update-the-shared-setup">Update the shared setup<a class="hlink" href="#update-the-shared-setup" aria-label="Link to this section">#</a></h2>
+<p>When library content changes, teammates refresh it with <code>agentstack up</code>. A project continues serving its locked version until its maintainer deliberately re-locks and commits the changed lock:</p>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack up            <span class="cm"># preview</span>
+<span class="pr">$ </span>agentstack up --write
+<span class="pr">$ </span>agentstack lock          <span class="cm"># preview</span>
+<span class="pr">$ </span>agentstack lock --write
+<span class="pr">$ </span>agentstack trust .
+<span class="pr">$ </span>git add .agentstack/agentstack.lock
+<span class="pr">$ </span>git commit -m "Update AgentStack capabilities"
+<span class="pr">$ </span>git push</code></pre></div>
+<p>After pulling that commit, every teammate reviews the changed consent surface with <code>agentstack trust .</code>. Their secret values remain local.</p>
+<p>Team members may use different supported CLIs. AgentStack routes live capabilities to MCP-capable tools and writes only the kinds or compatibility lanes that require files.</p>
+<p>Next: <a href="../library.html">Central library</a> · <a href="../howto/trust-a-repo.html">Trust a clone</a> · <a href="../howto/ci.html">Use it in CI</a></p>
   <p class="srcline">Source of truth: <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/team-setup.md">docs/howto/team-setup.md</a> — this page is generated from it.</p>
   </main>
 </div>

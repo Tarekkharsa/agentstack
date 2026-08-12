@@ -143,6 +143,8 @@
     <ul>
       <li><a href="start.html">Get started</a>
       </li>
+      <li><a href="library.html">Central library</a>
+      </li>
       <li><a href="tutorial/">Tutorial</a>
       </li>
       <li><a href="index.html#install">Install</a>
@@ -176,6 +178,8 @@
       <li><a href="howto/add-a-skill.html">Add a skill</a>
       </li>
       <li><a href="howto/name-a-toolset.html">Name a toolset</a>
+      </li>
+      <li><a href="howto/run-a-workflow.html">Run a workflow</a>
       </li>
       <li><a href="migrations.html">Migration recipes</a>
       </li>
@@ -215,7 +219,7 @@
       </li>
       <li><a class="on-page" aria-current="page" href="workflows.html">Workflows</a>
       </li>
-      <li><a href="reference.html#the-library-linked-source-folders">Library sources</a>
+      <li><a href="reference.html#the-library-linked-source-folders">Library internals</a>
       </li>
       <li><a href="concepts.html#delivery-modes">Delivery modes</a>
       </li>
@@ -276,10 +280,17 @@
 <p class="versionbar">These pages describe <b>v0.18.0-rc.3</b>, a pre-release. <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">The installer</a> serves the current release, <b>v0.17.1</b> — <code>/releases/latest</code> never points at a pre-release — so this is not the build you get unless you ask for it by name: <code>AGENTSTACK_VERSION=v0.18.0-rc.3</code>. <code>agentstack --version</code> says which build you have.</p>
 <h1 id="governed-workflows">Governed workflows</h1>
 <p>A <strong>workflow</strong> is one script that fans a task out to many agent runs and composes their results — the map/reduce shape, but every worker is a governed agent run instead of a bare process. One review chore becomes: run a reader over each file, synthesize the findings, then run an independent verifier to refute the weak ones. Claude Code has an ungoverned version of this today; AgentStack's version pins the orchestration code and gives every step its own reviewed authority.</p>
-<p><strong>The full path ships today.</strong> Declare, pin, and trust a workflow, run it end to end with <code>agentstack x workflow run</code>, render its evidence tree with <code>agentstack x workflow report</code>, and resume an interrupted run with <code>--resume</code> (replay from the recorded journal — byte-identical script and args, or it refuses). Every agent step runs as a governed <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.html">protected run</a>. The interpreter boundary was independently security-reviewed on 2026-07-23, and all six findings that review raised are now closed, each with its own witness. <code>agentstack x workflow</code> is therefore a listed command rather than a hidden one.</p>
-<p>That change is <strong>discoverability, not enforcement</strong>. Not one boundary moved when the command became visible: what the review settled is the <em>posture</em>, and a host-tier step is still cooperative-guard only, exactly as <em>Honest limits</em> below describes.</p>
+<p>For the shortest practical path, start with <a href="howto/run-a-workflow.html">Run a multi-agent workflow</a>. The complete loop is:</p>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack workflow declare ... --preview
+<span class="pr">$ </span>agentstack workflow declare ... --write
+<span class="pr">$ </span>agentstack trust .
+<span class="pr">$ </span>agentstack workflow explain &lt;name&gt;
+<span class="pr">$ </span>agentstack workflow run &lt;name&gt;
+<span class="pr">$ </span>agentstack workflow report &lt;run-id&gt;</code></pre></div>
+<p><strong>The full path ships today.</strong> Declare, pin, and trust a workflow, run it end to end with <code>agentstack workflow run</code>, render its evidence tree with <code>agentstack workflow report</code>, and resume an interrupted run with <code>--resume</code> (replay from the recorded journal — byte-identical script and args, or it refuses). Every agent step runs as a governed <a href="reference.html#execution-posture">protected run</a>. The interpreter boundary was independently security-reviewed on 2026-07-23, and all six findings that review raised are now closed, each with its own witness. <code>agentstack workflow</code> is therefore listed one hop away: it is grouped out of the everyday <code>agentstack --help</code> list and named under <strong>Run</strong> on <code>agentstack x</code>. It runs at both <code>agentstack x workflow</code> and <code>agentstack workflow</code>.</p>
+<p>That change is <strong>discoverability, not enforcement</strong>. Not one boundary moved when the command became listed: what the review settled is the <em>posture</em>, and a host-tier step is still cooperative-guard only, exactly as <em>Honest limits</em> below describes.</p>
 <h2 id="why-a-workflow-needs-governing">Why a workflow needs governing<a class="hlink" href="#why-a-workflow-needs-governing" aria-label="Link to this section">#</a></h2>
-<p>A workflow is <strong>authority, multiplied</strong>: one command spawns N agent runs, each with tool access, filesystem reach, and token spend, with the control flow decided at runtime by script code. That is exactly the thing a security tool should not run on trust. So AgentStack treats the orchestration script the same way it treats any other executable content from a repo — as <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/enforcement.html#what-trusted-does-and-does-not-mean">untrusted input</a> until you review and pin it.</p>
+<p>A workflow is <strong>authority, multiplied</strong>: one command spawns N agent runs, each with tool access, filesystem reach, and token spend, with the control flow decided at runtime by script code. That is exactly the thing a security tool should not run on trust. So AgentStack treats the orchestration script the same way it treats any other executable content from a repo — as <a href="enforcement.html#what-trusted-does-and-does-not-mean">untrusted input</a> until you review and pin it.</p>
 <h2 id="the-security-model">The security model<a class="hlink" href="#the-security-model" aria-label="Link to this section">#</a></h2>
 <ul>
 <li><strong>Pinned, re-gated on change.</strong> Workflow source is pinned in the lockfile by a strict content digest (a symlink anywhere is a hard error). Change one byte and trust re-gates — you review again before it can run.</li>
@@ -299,7 +310,7 @@
 </tbody></table></div>
 <p>Step outputs are model output — untrusted data. One step's result can flow into a later step's <em>prompt</em> by design, so a prompt-injected step can mislead its successors; it cannot widen any grant. The built-in <strong>validation step</strong> (an independent verifier under a narrower role) is the mitigation, and the report labels each step's posture rather than implying uniform containment.</p>
 <h3 id="what-the-interpreter-bounds-and-what-it-does-not">What the interpreter bounds, and what it does not<a class="hlink" href="#what-the-interpreter-bounds-and-what-it-does-not" aria-label="Link to this section">#</a></h3>
-<p>The orchestration script runs under host-set ceilings, and two of them are <strong>partial on purpose</strong>. A partial bound that reads as total is the failure this section exists to prevent, so both residuals are stated here and in the posture block <code>agentstack x workflow report</code> prints verbatim:</p>
+<p>The orchestration script runs under host-set ceilings, and two of them are <strong>partial on purpose</strong>. A partial bound that reads as total is the failure this section exists to prevent, so both residuals are stated here and in the posture block <code>agentstack workflow report</code> prints verbatim:</p>
 <ul>
 <li><strong>There is no JS heap cap.</strong> Every path by which <em>untrusted</em> input reaches the interpreter heap is bounded — the invoker's args and every child result cross a depth-bounded JSON boundary under the resident-result ceiling, progress output is capped per line and per run, and the one allocation a script can name directly (<code>ArrayBuffer</code> / <code>SharedArrayBuffer</code>) has an engine-owned ceiling. But a <strong>trusted, reviewed, pinned</strong> script that allocates <em>on purpose</em> — doubling a string in a loop — is bounded by nothing here. The bound covers hostile ingress, not intent.</li>
 <li><strong>The native call budget covers our natives, not Boa's built-ins.</strong> Calls into the host functions AgentStack installs (<code>agent</code>, <code>phase</code>, <code>log</code>, <code>budget.*</code>) are charged against a run-total ceiling. Work <em>inside a single built-in</em> — a backtracking regex, a large <code>sort</code>, <code>String.prototype.repeat</code> — <strong>ticks no counter at any setting</strong>, because the engine exposes no instruction counter or interrupt hook to build one on.</li>
@@ -316,6 +327,7 @@
 <div class="cb" data-language="js"><div class="cb-bar"><span class="cb-lang">js</span></div><pre class="block"><code class="language-js">export const meta = {
   name: 'nightly-review',
   description: "Review the day's diff, then verify the findings",
+  roles: ['reader', 'writer', 'verifier'],
 }
 
 const FINDINGS = {
@@ -360,7 +372,7 @@ effort = "high"</code></pre></div>
 <li>the harness has <strong>no notion</strong> of the dimension at all, or</li>
 <li>the harness <strong>has the setting</strong> but no confirmed way to select it for a single launch.</li>
 </ul>
-<p>Either way you get a <code>⚠</code> line per child naming the role, the harness, the dimension and the reason, and <strong>the run proceeds</strong> on that harness's own default — an undeliverable model is a capability gap, not a manifest error. A value the adapter's own catalog <em>rejects</em> (an effort outside its enum) is a manifest error, and a run refuses that child before launch. <code>agentstack x workflow explain &lt;name&gt;</code> reports the same facts statically, spawning nothing.</p>
+<p>Either way you get a <code>⚠</code> line per child naming the role, the harness, the dimension and the reason, and <strong>the run proceeds</strong> on that harness's own default — an undeliverable model is a capability gap, not a manifest error. A value the adapter's own catalog <em>rejects</em> (an effort outside its enum) is a manifest error, and a run refuses that child before launch. <code>agentstack workflow explain &lt;name&gt;</code> reports the same facts statically, spawning nothing.</p>
 <h3 id="named-algorithms">Named algorithms<a class="hlink" href="#named-algorithms" aria-label="Link to this section">#</a></h3>
 <p>Five helpers spell out the shapes scripts kept re-deriving by hand. All five are <strong>pure compositions of <code>parallel</code> / <code>pipeline</code> / <code>shard</code> / <code>partition</code></strong>, and not one of them calls <code>agent()</code> — an agent run happens only when <em>your</em> callback calls it, through the same bridge a hand-written script uses. So a helper can never widen a role or manufacture fan-out: the <code>role ∈ meta.roles</code> check and the <code>max_agents</code> ceiling remain the only authority path.</p>
 <div class="tblwrap"><table>
@@ -382,7 +394,7 @@ effort = "high"</code></pre></div>
 <h3 id="keeping-wide-runs-in-memory">Keeping wide runs in memory<a class="hlink" href="#keeping-wide-runs-in-memory" aria-label="Link to this section">#</a></h3>
 <p>A run that fans out over large outputs can ask for <code>agent(prompt, { result: 'handle' })</code>, resolving with <code>{ digest, bytes, preview }</code> instead of the full text. There is also a machine ceiling on total result bytes; a run that exceeds it fails closed and tells you to use handles. Handles cost about 620 bytes each, so they are for stages returning kilobytes — on short results they are simply pointless.</p>
 <h3 id="before-you-run-it">Before you run it<a class="hlink" href="#before-you-run-it" aria-label="Link to this section">#</a></h3>
-<p><code>agentstack x workflow explain &lt;name&gt;</code> reports the effective ceilings, which roles launch serially, and how many <code>agent()</code> call <strong>sites</strong> the pinned script has — statically, spawning nothing. Sites are not calls: one site inside a loop runs once per item, so real fan-out is data-dependent. The enforced bound on total spawns is <code>max_agents</code>, refused per call.</p>
+<p><code>agentstack workflow explain &lt;name&gt;</code> reports the effective ceilings, which roles launch serially, and how many <code>agent()</code> call <strong>sites</strong> the pinned script has — statically, spawning nothing. Sites are not calls: one site inside a loop runs once per item, so real fan-out is data-dependent. The enforced bound on total spawns is <code>max_agents</code>, refused per call.</p>
 <h2 id="where-it-stands">Where it stands<a class="hlink" href="#where-it-stands" aria-label="Link to this section">#</a></h2>
 <p>The full technical contract and security rationale live in the <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/archive/design/workflows-capability.md">workflows capability design doc</a>. The manifest kind, pinning, trust review, the engine, <code>workflow run</code> / <code>workflow report</code>, negotiated ceilings, and journal-replay resume all ship.</p>
 <p><strong>The six review findings are closed</strong>, each with a focused witness named for it: the watchdog's no-I/O exit path, interpreter memory bounds, host-native re-entrancy, a run-total budget for native calls, cross-host resume determinism, and the crate boundary. Two of those witnesses are constructions rather than assertions — the re-entrancy witness is the reproduction itself (a getter that re-enters <code>agent()</code> during its own argument conversion, which spawns a second child without the guard), and the crate-boundary witness fails if any other crate takes the interpreter dependency.</p>

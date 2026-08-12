@@ -150,7 +150,7 @@ fn up_and_apply_agree_that_delivering_nothing_is_a_failure() {
     let (u_home, u_proj) = project(tmp.path(), "for-up", LIVE_ONLY);
 
     let applied = run(&["apply", "--write"], &a_home, &a_proj);
-    let upped = run(&["up"], &u_home, &u_proj);
+    let upped = run(&["up", "--write"], &u_home, &u_proj);
 
     // The premise: this is the refused-delivery state, not some other failure.
     assert!(
@@ -214,7 +214,7 @@ fn a_project_that_delivers_something_still_exits_zero_from_both() {
         applied.text
     );
 
-    let upped = run(&["up"], &u_home, &u_proj);
+    let upped = run(&["up", "--write"], &u_home, &u_proj);
     assert_eq!(
         upped.code, 0,
         "`up` must not have become a command that fails whenever anything routes \
@@ -295,7 +295,7 @@ fn up_does_not_report_success_over_a_lock_it_could_not_verify() {
         installed.text
     );
 
-    let upped = run(&["up"], &u_home, &u_proj);
+    let upped = run(&["up", "--write"], &u_home, &u_proj);
     assert_ne!(
         upped.code, 0,
         "`up` delegates the verification to `install --locked`, which exited {} — \
@@ -351,7 +351,7 @@ fn a_project_whose_lock_verifies_still_exits_zero() {
     );
     let (home, proj) = project(tmp.path(), "intact", &manifest);
 
-    let upped = run(&["up"], &home, &proj);
+    let upped = run(&["up", "--write"], &home, &proj);
     assert_eq!(
         upped.code, 0,
         "the pinned body is untouched, so the verification passes and `up` has \
@@ -394,7 +394,7 @@ fn a_registry_that_will_not_load_is_not_reported_as_no_cli_installed() {
     fs::set_permissions(&adapters, perms).unwrap();
     let unreadable = fs::read_dir(&adapters).is_err();
 
-    let upped = run(&["up"], &home, &proj);
+    let upped = run(&["up", "--write"], &home, &proj);
 
     // Restore before any assertion, so a failure cannot leave the tempdir
     // undeletable.
@@ -438,7 +438,7 @@ fn a_machine_with_no_cli_installed_still_hears_that_and_only_that() {
         "version = 1\n[settings.claude-code]\nmodel = \"opus\"\n",
     );
 
-    let upped = run(&["up"], &home, &proj);
+    let upped = run(&["up", "--write"], &home, &proj);
     assert!(
         upped.text.contains("install a supported CLI"),
         "an empty `PATH` and an empty HOME is the no-CLI machine, and it keeps \
