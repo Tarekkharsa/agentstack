@@ -702,7 +702,9 @@ A project
 that already has rendered files keeps its render path in a scripted run: the
 files are a fact, and un-rendering stays the explicit `agentstack x uninstall`
 act. Bare `agentstack` no longer prints a `Mode` line — the `Delivery` lines
-report what the planner actually did, per CLI.
+report what the planner actually did. By default they are counted (`skills +
+MCP servers served live to 6 CLIs`); `agentstack status --verbose` expands them
+to one line per CLI.
 
 The managed `.gitignore` block is anchored to **outcomes, not declarations**: an
 entry exists only for a file agentstack actually wrote or still manages, so a
@@ -1854,7 +1856,9 @@ yourself (a reproducible build, or a CI job that would rather pass the commit
 in), set `AGENTSTACK_BUILD_REV` at compile time; set it to the empty string to
 leave the commit out.
 
-`agentstack doctor` repeats the fact in its **Adapters & CLIs** section, and
+`agentstack doctor --all` repeats the fact in its **Adapters & CLIs** section
+(the default screen summarises that section to one line when nothing in it
+needs fixing), and
 `agentstack run <cli> --sandbox` on a build without it refuses by naming the
 real cause rather than blaming Docker:
 
@@ -1953,7 +1957,7 @@ you need the exact verb, flag, or subcommand.
 <!-- agentstack:generated commands -->
 - **`init`** — Setup: find the CLIs you have and bring their setups together — flags `--global/--force/--dry-run/--plan/--secrets/--no-keychain/--project-servers/--include-tool-managed/--yes/--consented-plan/--connect/--verbose`
 - **`up`** _(hidden)_ — Set this machine up from a setup that already exists: one command — flags `--library/--json/--write/--targets/--toolset/--no-gitignore`
-- **`status`** — Status: where this project stands, on one screen, and the one next step — flags `--json`
+- **`status`** — Status: where this project stands, on one screen, and the one next step — flags `--json/--verbose`
 - **`add`** — Add a server or skill to this project's setup — subcommands `from/server/skill`
 - **`set`** _(hidden)_ — Create or update a manifest entry in place (idempotent `add`) — subcommands `server`
 - **`search`** — Search the capability catalog (and mark what's already added) — flags `--all/--json`

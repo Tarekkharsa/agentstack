@@ -1138,8 +1138,12 @@ fn doctor_sees_content_drift_on_the_default_path() {
     isolate_home(tmp.path());
     let proj = trusted_project(tmp.path());
 
-    // Before the edit, doctor is clean about alpha.
-    let (before, _) = cli(&proj, &["doctor"]);
+    // Before the edit, doctor is clean about alpha. Read through `--all`: the
+    // default screen summarises a section whose every line passed, so a clean
+    // `alpha` is exactly the line it folds away. That is display only — this
+    // check is establishing that alpha IS checked, and the drift assertions
+    // below still read the default path, which is the claim under test.
+    let (before, _) = cli(&proj, &["doctor", "--all"]);
     assert!(
         before.contains("alpha"),
         "fixture: alpha is checked:\n{before}"

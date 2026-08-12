@@ -1130,8 +1130,14 @@ pub(crate) struct ProjectFacts {
     /// prints nothing (docs/design/linked-library-sources.md).
     shadowed_names: Vec<String>,
     /// The delivery planner's routing, one plain-language line per CLI (W4).
-    /// The planner runs silently; this is where `status` names what it did.
+    /// The planner runs silently; this is where `status --verbose` names what
+    /// it did, and this is what the JSON has always carried.
     delivery: Vec<String>,
+    /// The same routing, grouped and counted for the DEFAULT screen: one line
+    /// per (kinds, bridge state) group instead of one per CLI. Collected beside
+    /// its per-CLI twin rather than derived at print time, because both readings
+    /// need the planner and the registry and `print_orientation` has neither.
+    delivery_collapsed: Vec<String>,
     /// The per-harness house-rules honesty matrix (item 4): which channel
     /// actually carries instructions to each CLI, whether that CLI's live
     /// channel is confirmed or merely declared, and which variant it receives.
@@ -1143,6 +1149,11 @@ pub(crate) struct ProjectFacts {
     /// The `rendered lane:` line, present only when something is actually
     /// written — an empty lane line is its own small lie.
     delivery_rendered_lane: Option<String>,
+    /// The same sentence with the destinations counted rather than listed, for
+    /// the default screen. The honesty rule is that the rendered lane gets its
+    /// own line naming what is written; it has never been that the line must
+    /// enumerate every CLI.
+    delivery_rendered_lane_summary: Option<String>,
     /// Whether anything DECLARED is routed to the live lane, which is the only
     /// condition under which the zero-artifacts sentence is true here.
     delivery_has_live: bool,
@@ -1369,9 +1380,11 @@ fn shadowed_name_lines() -> Vec<String> {
         .collect()
 }
 
-pub fn run_status(manifest_dir: Option<&Path>, json: bool) -> Result<()> {
+pub fn run_status(manifest_dir: Option<&Path>, json: bool, verbose: bool) -> Result<()> {
     // `--json` changes only the rendering: the same collect, with the same
-    // deep readings the named `status` screen already asks for.
+    // deep readings the named `status` screen already asks for. `--verbose` is
+    // the same again — every fact it expands is already collected, and already
+    // in the JSON, which is why neither flag reaches `collect`.
     let orientation = collect(manifest_dir, true)?;
     if json {
         println!(
@@ -1380,7 +1393,7 @@ pub fn run_status(manifest_dir: Option<&Path>, json: bool) -> Result<()> {
         );
         return Ok(());
     }
-    print_orientation(&orientation, true);
+    print_orientation(&orientation, true, verbose);
     Ok(())
 }
 
@@ -1395,7 +1408,9 @@ pub fn status_body(manifest_dir: Option<&Path>) -> Result<serde_json::Value> {
 
 pub fn run(manifest_dir: Option<&Path>) -> Result<()> {
     let orientation = collect(manifest_dir, false)?;
-    print_orientation(&orientation, false);
+    // Bare `agentstack` is the shortest screen in the product; it is never the
+    // verbose one. `agentstack status --verbose` is where the detail lives.
+    print_orientation(&orientation, false, false);
     Ok(())
 }
 
@@ -1842,7 +1857,12 @@ fn print_updates_line(updates: &[crate::commands::updates::PackUpdate]) {
 /// 4. **Quiet when boring.** One contributor gets the total only; the breakdown
 ///    appears when there is genuinely something to compare. The full per-server
 ///    detail lives in `agentstack x report usage`.
-fn print_context_line(c: &ContextCost) {
+///
+/// `verbose` is rule 4 taken one step further: the default screen states the
+/// whole reading as one line — headline, the unmeasured caveat that qualifies
+/// it, and the command that breaks it down — and the share table appears only
+/// when a reader asks for it.
+fn print_context_line(c: &ContextCost, verbose: bool) {
     if c.is_silent() {
         return;
     }
@@ -1850,16 +1870,43 @@ fn print_context_line(c: &ContextCost) {
     if total == 0 {
         // Only unmeasured servers: say that, rather than printing a total of 0
         // for a project whose servers are usually the whole bill.
-        println!(
-            "  {}  {} not measured — context cost unknown, not zero",
-            "Context ".bold(),
-            super::count(c.servers_unmeasured, "declared server")
-        );
+        //
         // Deliberately not "measure it with …": the measuring pass is a live
         // connection behind a flag, and naming the read-only command as though
         // it measured would be a claim the command does not meet. The read-only
-        // command is named, and it is the one that explains the measurement.
-        println!("            {}", "see `agentstack x report usage`".dimmed());
+        // command is named, and it is the one that explains the measurement —
+        // on the same line by default, because a pointer is not a second fact.
+        let headline = format!(
+            "{} not measured — context cost unknown, not zero",
+            super::count(c.servers_unmeasured, "declared server")
+        );
+        let pointer = "see `agentstack x report usage`";
+        if verbose {
+            println!("  {}  {headline}", "Context ".bold());
+            println!("            {}", pointer.dimmed());
+        } else {
+            println!("  {}  {headline}   {}", "Context ".bold(), pointer.dimmed());
+        }
+        return;
+    }
+
+    if !verbose {
+        // One line: headline, the unmeasured caveat that qualifies it, and the
+        // command that breaks it down. The share table is what `--verbose` (and
+        // `x report usage`, which owns this subject) is for.
+        let mut line = format!("~{} per session (estimate)", fmt_tokens_per_session(total));
+        if c.servers_unmeasured > 0 {
+            line.push_str(&format!(
+                " · plus {} never measured",
+                super::count(c.servers_unmeasured, "declared server")
+            ));
+        }
+        println!(
+            "  {}  {}   {}",
+            "Context ".bold(),
+            line,
+            "detail: `agentstack x report usage`".dimmed()
+        );
         return;
     }
 
@@ -2399,6 +2446,10 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
             // routing that has not started. Read PER HARNESS — one connected
             // CLI must never make the other four claim live delivery.
             delivery: crate::commands::delivery::summary_lines_for(&delivery_plan, &ctx.registry),
+            delivery_collapsed: crate::commands::delivery::summary_counts_for(
+                &delivery_plan,
+                &ctx.registry,
+            ),
             instruction_channels: crate::instructions::channels(
                 m,
                 &ctx.registry,
@@ -2411,6 +2462,7 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
                 None,
             ),
             delivery_rendered_lane: crate::delivery::rendered_lane_line(&delivery_plan),
+            delivery_rendered_lane_summary: crate::delivery::rendered_lane_summary(&delivery_plan),
             // Not `has_dynamic_lane()`: the plan reports a live lane for what
             // a harness CAN take, so a project declaring only instructions and
             // settings — served entirely from files — was being told to
@@ -2447,7 +2499,14 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
 
 /// The human screen. `status` distinguishes `agentstack status` (which adds
 /// the secrets line and the deep-check pointer) from bare `agentstack`.
-fn print_orientation(o: &Orientation, status: bool) {
+///
+/// `verbose` (`agentstack status --verbose`) expands the three blocks that
+/// grow with the number of CLIs — delivery routing, house-rule destinations,
+/// and the context breakdown — back to one line each per CLI. The default
+/// screen states each of those as one counted fact instead. Nothing is ever
+/// only in the verbose screen: `--verbose` re-states what the default screen
+/// summarised, and `--json` carries all of it either way.
+fn print_orientation(o: &Orientation, status: bool, verbose: bool) {
     println!(
         "{} {} — one portable manifest, every agent CLI\n",
         "agentstack".bold(),
@@ -2539,7 +2598,17 @@ fn print_orientation(o: &Orientation, status: bool) {
             // Profiles get their own line, named rather than counted (P18):
             // "which profiles do I have" stops being archaeology through the
             // manifest or a triggered disambiguation error.
-            if !f.toolsets.is_empty() {
+            //
+            // Except when there is nothing to choose between. With exactly one
+            // toolset, and that one already the default the `Toolset` line
+            // below names, this line prints the same word a second time and
+            // answers a question ("which do I have") the next line answers
+            // better ("and here is what it is doing"). `--verbose` keeps it, so
+            // the inventory reading never disappears entirely.
+            let toolsets_are_restated = f.toolsets.len() == 1
+                && f.session.is_none()
+                && f.default_toolset.as_deref() == Some(f.toolsets[0].as_str());
+            if !f.toolsets.is_empty() && (verbose || !toolsets_are_restated) {
                 println!(
                     "  {}  {}",
                     "Toolsets".bold(),
@@ -2634,31 +2703,61 @@ fn print_orientation(o: &Orientation, status: bool) {
             // screen asks a person to hold in their head.
 
             // W4: the planner routes silently, so this is where a person finds
-            // out what it decided — per CLI, both lanes, in plain language.
-            // The two binding honesty rules follow it on their own lines: never
-            // a bare "0 files", and a separate `rendered lane:` naming what is
-            // really written.
-            for (i, line) in f.delivery.iter().enumerate() {
+            // out what it decided — both lanes, in plain language. The default
+            // screen states it as counted groups (one line, usually two); the
+            // per-CLI table is `--verbose`. The two binding honesty rules
+            // follow it on their own lines either way: never a bare "0 files",
+            // and a separate `rendered lane:` naming what is really written.
+            let delivery = if verbose {
+                &f.delivery
+            } else {
+                &f.delivery_collapsed
+            };
+            for (i, line) in delivery.iter().enumerate() {
                 let label = if i == 0 { "Delivery" } else { "        " };
                 println!("  {}  {}", label.bold(), line);
             }
+            // Read off the per-CLI list, not the rendering above: the abandoned
+            // renders and the bridge hint are findings about this project, and
+            // whether the reader asked for the wide screen has nothing to do
+            // with whether they are true.
             if !f.delivery.is_empty() {
-                if f.delivery_has_live && !f.delivery_bridge_gaps.is_empty() {
+                // The hint is dropped when the Next line below is already this
+                // exact command. Two spellings of one action, eight lines
+                // apart, read as two things to do.
+                if f.delivery_has_live
+                    && !f.delivery_bridge_gaps.is_empty()
+                    && (verbose
+                        || !crate::commands::delivery::CONNECT_THE_BRIDGE.ends_with(&o.next.0))
+                {
                     println!(
                         "            {}",
                         crate::commands::delivery::CONNECT_THE_BRIDGE
                     );
                 }
-                if f.delivery_has_live {
-                    // Disk-checked: the "0 project artifacts" wording is only
-                    // true when the walk found nothing an earlier render left.
+                // Disk-checked: the "0 project artifacts" wording is only true
+                // when the walk found nothing an earlier render left.
+                //
+                // On the default screen it is held back until a bridge actually
+                // carries the live lane. Its subject is "the capabilities served
+                // live", and while nothing is connected the line above says in
+                // so many words that none are — so the sentence describes a
+                // delivery that is not happening, which is the duplication this
+                // screen's diet is meant to remove, not an honesty the reader
+                // gains. `--verbose` states it unconditionally, as before.
+                if f.delivery_has_live && (verbose || f.delivery_bridge_gaps.is_empty()) {
                     println!(
                         "            {}",
                         crate::commands::apply::live_lane_artifacts_line(&f.delivery_abandoned)
                             .dimmed()
                     );
                 }
-                if let Some(lane) = &f.delivery_rendered_lane {
+                let lane = if verbose {
+                    f.delivery_rendered_lane.as_ref()
+                } else {
+                    f.delivery_rendered_lane_summary.as_ref()
+                };
+                if let Some(lane) = lane {
                     println!("            {}", lane.dimmed());
                 }
                 // Directly under the zero-artifacts sentence, which is true of
@@ -2698,15 +2797,42 @@ fn print_orientation(o: &Orientation, status: bool) {
             // actually has house rules — an orientation screen stays four ideas
             // wide until there is something to say — but then it names EVERY
             // targeted harness, including the ones that cannot receive them.
+            //
+            // On the default screen only the GAP is stated. Where a harness
+            // does receive house rules, the `rendered lane:` line above has
+            // already said so; repeating it per CLI, with the destination path
+            // and the variant, was the same fact a second time at four times
+            // the width. Where a harness does NOT, nothing else on the screen
+            // says it, so those CLIs are named here in full — the honesty rule
+            // is that an adapter which cannot receive house rules may never
+            // quietly disappear from the coverage list.
             if f.instructions > 0 {
-                for (i, row) in f.instruction_channels.iter().enumerate() {
-                    let label = if i == 0 { "House   " } else { "        " };
-                    println!("  {}  {}", label.bold(), row.sentence());
+                if verbose {
+                    for (i, row) in f.instruction_channels.iter().enumerate() {
+                        let label = if i == 0 { "House   " } else { "        " };
+                        println!("  {}  {}", label.bold(), row.sentence());
+                    }
+                } else {
+                    let unreached: Vec<&str> = f
+                        .instruction_channels
+                        .iter()
+                        .filter(|c| c.file.is_none())
+                        .map(|c| c.display.as_str())
+                        .collect();
+                    if !unreached.is_empty() {
+                        println!(
+                            "  {}  house rules do not reach {} of {}: {}",
+                            "House   ".bold(),
+                            unreached.len(),
+                            super::count(f.instruction_channels.len(), "targeted CLI"),
+                            unreached.join(" · ")
+                        );
+                    }
                 }
             }
 
             if status {
-                print_context_line(&f.context);
+                print_context_line(&f.context, verbose);
                 print_updates_line(&f.updates);
                 if let Some(secrets) = &f.secrets {
                     print_secrets_line(secrets);
@@ -2721,7 +2847,18 @@ fn print_orientation(o: &Orientation, status: bool) {
         o.next.0.green(),
         o.next.1.dimmed()
     );
-    println!("  {}", "All commands: agentstack --help".dimmed());
+    // The escape hatch is named on the screen it applies to, on a line that was
+    // already there. A separate "run this for more" line would have cost the
+    // diet one of the lines it just bought back.
+    if verbose {
+        println!("  {}", "All commands: agentstack --help".dimmed());
+    } else {
+        println!(
+            "  {}",
+            "All commands: agentstack --help   ·   per-CLI detail: agentstack status --verbose"
+                .dimmed()
+        );
+    }
     // The deep-check pointer is redundant when `doctor` is already the one next
     // step: printing the same command twice, described two different ways, made
     // it look like two different things and undercut the single-next-step rule.
@@ -3431,7 +3568,9 @@ mod tests {
                 shadowed_names: Vec::new(),
                 instruction_channels: Vec::new(),
                 delivery: Vec::new(),
+                delivery_collapsed: Vec::new(),
                 delivery_rendered_lane: None,
+                delivery_rendered_lane_summary: None,
                 delivery_has_live: false,
                 delivery_bridge_gaps: Vec::new(),
                 delivery_abandoned: Vec::new(),

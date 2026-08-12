@@ -400,6 +400,75 @@ pub fn summary_lines_for(plan: &Plan, registry: &crate::adapter::Registry) -> Ve
         .collect()
 }
 
+/// The collapsed twin of [`summary_lines_for`], for the default `status`
+/// screen: the same routing, grouped and counted instead of listed per CLI.
+///
+/// Harnesses that route the same kinds AND share a bridge state collapse into
+/// one line, so a thirteen-CLI fan-out reads as one or two facts rather than a
+/// table. The per-CLI list is one flag away (`agentstack status --verbose`,
+/// which prints [`summary_lines_for`] instead) — disclosure, not omission.
+///
+/// **No harness is ever named on a line that carries a live claim.** A count
+/// makes the sentence project-wide, which is the only shape that cannot be read
+/// as "this named tool is being served"; naming a file-only CLI beside a
+/// `served live` clause is exactly the invariant-8 misread
+/// [`harness_sentence`] exists to prevent. The names live behind `--verbose`,
+/// where each one carries its own honest verb.
+pub fn summary_counts_for(plan: &Plan, registry: &crate::adapter::Registry) -> Vec<String> {
+    // Keyed by (live kinds, this harness's own bridge state), in first-seen
+    // order so the line order tracks the target order a reader already saw.
+    let mut groups: Vec<((String, bool), usize)> = Vec::new();
+    let mut file_only = 0usize;
+    for h in &plan.harnesses {
+        let live = h.kinds_in(Lane::Dynamic);
+        if live.is_empty() {
+            // A harness with nothing in either lane has nothing to report; it
+            // is not a "files only" tool, it is an empty one.
+            if !h.kinds_in(Lane::Rendered).is_empty() {
+                file_only += 1;
+            }
+            continue;
+        }
+        let key = (
+            live.iter()
+                .map(|k| k.label())
+                .collect::<Vec<_>>()
+                .join(" + "),
+            super::overview::bridge_registered(registry, &h.id),
+        );
+        match groups.iter_mut().find(|(k, _)| *k == key) {
+            Some((_, n)) => *n += 1,
+            None => groups.push((key, 1)),
+        }
+    }
+    let mut lines: Vec<String> = groups
+        .into_iter()
+        .map(|((kinds, bridged), n)| {
+            if bridged {
+                format!("{kinds} served live to {}", super::count(n, "CLI"))
+            } else {
+                // The same correction `harness_sentence` makes, in the
+                // collapsed voice: with no bridge, nothing is reaching anything.
+                format!(
+                    "{kinds} planned live (not connected) for {}",
+                    super::count(n, "CLI")
+                )
+            }
+        })
+        .collect();
+    if file_only > 0 {
+        let clause = format!("files only for {}", super::count(file_only, "CLI"));
+        match lines.first_mut() {
+            Some(first) => {
+                first.push_str(" · ");
+                first.push_str(&clause);
+            }
+            None => lines.push(format!("{clause} — those tools read files only")),
+        }
+    }
+    lines
+}
+
 /// The plan stated as if every bridge were registered. For surfaces describing
 /// a plan that has deliberately not been carried out yet (`init`'s preview),
 /// where the un-registered state is disclosed separately and in full.

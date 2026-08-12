@@ -516,6 +516,47 @@ pub fn rendered_lane_line(plan: &Plan) -> Option<String> {
     (!parts.is_empty()).then(|| format!("rendered lane: {}", parts.join(" · ")))
 }
 
+/// The collapsed twin of [`rendered_lane_line`], for a default screen that has
+/// to fit: the same `rendered lane:` sentence, stated as the union of kinds and
+/// a COUNT of harnesses rather than a per-harness list.
+///
+/// The honesty rule this line exists to satisfy is that a surface reporting the
+/// dynamic lane must name what is really written on its own line — not that it
+/// must name every destination. The destinations are one flag away
+/// (`status --verbose`, which prints [`rendered_lane_line`] instead), so this
+/// is disclosure, not omission.
+///
+/// Returns `None` for the same reason its twin does: nothing renders, and an
+/// empty lane line is its own small lie.
+pub fn rendered_lane_summary(plan: &Plan) -> Option<String> {
+    let mut kinds: Vec<Kind> = Vec::new();
+    let mut reached = 0usize;
+    for h in &plan.harnesses {
+        let here = h.kinds_in(Lane::Rendered);
+        if here.is_empty() {
+            continue;
+        }
+        reached += 1;
+        kinds.extend(here);
+    }
+    // `Kind`'s `Ord` is matrix order, so the union reads in the same sequence
+    // the per-harness line does.
+    kinds.sort_unstable();
+    kinds.dedup();
+    (reached > 0).then(|| {
+        format!(
+            "rendered lane: {} for {} of {}",
+            kinds
+                .iter()
+                .map(|k| k.label())
+                .collect::<Vec<_>>()
+                .join(" + "),
+            reached,
+            crate::commands::count(plan.harnesses.len(), "CLI"),
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

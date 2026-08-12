@@ -278,6 +278,12 @@ struct Section {
     relevant: bool,
     /// (level, message) — level is `ok` / `warn` / `error`.
     lines: Vec<(&'static str, String)>,
+    /// The one line a fully-healthy section stands in for on the default
+    /// terminal report, in this section's own vocabulary
+    /// ("8 detected, configs parse"). `None` falls back to a count of the
+    /// checks that passed. Never reaches the JSON, `--all` or `--ci`: it is a
+    /// rendering of lines that are all still there.
+    summary: Option<String>,
 }
 
 impl Report {
@@ -314,7 +320,18 @@ impl Report {
             title: title.to_string(),
             relevant: true,
             lines: Vec::new(),
+            summary: None,
         });
+    }
+
+    /// Give the current section the sentence it collapses to when every one of
+    /// its lines is healthy. Call it after the section's lines are emitted; it
+    /// is display only, and a section that never sets one still collapses (to a
+    /// count of the checks that passed).
+    fn section_summary(&mut self, text: impl Into<String>) {
+        if let Some(s) = self.sections.last_mut() {
+            s.summary = Some(text.into());
+        }
     }
 
     /// Mark the current section as not relevant to this project. Call once the
@@ -350,6 +367,7 @@ impl Report {
                 title: "Manifest".to_string(),
                 relevant: true,
                 lines: Vec::new(),
+                summary: None,
             });
         }
         self.sections
@@ -360,10 +378,21 @@ impl Report {
     }
 
     /// Render the terminal report. Default: only sections that are relevant to
-    /// this project or carry a warn/error. `show_all` (from `--all` or `--ci`)
-    /// prints everything, matching the complete JSON response.
+    /// this project or carry a warn/error, and a section whose every line is
+    /// healthy collapses to its header plus a one-line summary. `show_all`
+    /// (from `--all` or `--ci`) prints everything, matching the complete JSON
+    /// response.
+    ///
+    /// The findings are the product, so nothing that is a finding is ever
+    /// touched: one warn, error or advisory line keeps its whole section
+    /// expanded exactly as before. What collapses is the healthy remainder — a
+    /// per-item roll call of things that are fine, which is the part a person
+    /// scans past. `unchecked` blocks the collapse too, and deliberately: that
+    /// marker exists so the reader sees a check that did NOT run, and folding
+    /// it under a green tick would claim the coverage it was written to deny.
     fn print(&self, show_all: bool) {
         let mut hidden = 0;
+        let mut collapsed = 0;
         for s in &self.sections {
             // A section that produced no lines has nothing to say — print no
             // bare header for it, even under `--all`. (This happens when every
@@ -384,6 +413,28 @@ impl Report {
                 .any(|(tag, _)| *tag == "warn" || *tag == "error" || *tag == "advisory");
             if !(show_all || s.relevant || flagged) {
                 hidden += 1;
+                continue;
+            }
+            // Fully healthy, and more than one line of it: state the verdict
+            // once. One line is left alone — folding a header and its single
+            // line together saves nothing a reader can feel, and it would move
+            // a sentence a script may be reading off the line below the header
+            // onto the header itself.
+            let only_ok = s
+                .lines
+                .iter()
+                .all(|(tag, _)| *tag == "ok" || *tag == "info");
+            let passed = s.lines.iter().filter(|(tag, _)| *tag == "ok").count();
+            if !show_all && only_ok && passed > 0 && s.lines.len() > 1 {
+                collapsed += 1;
+                println!(
+                    "{} {} {}",
+                    s.title.bold(),
+                    "✓".green(),
+                    s.summary
+                        .clone()
+                        .unwrap_or_else(|| format!("{} pass", super::count(passed, "check")))
+                );
                 continue;
             }
             println!("{}", s.title.bold());
@@ -411,12 +462,27 @@ impl Report {
                 }
             }
         }
-        if hidden > 0 {
-            let verb = if hidden == 1 { "is" } else { "are" };
+        // One footer for both kinds of disclosure, so the escape hatch is named
+        // once and a reader is never left guessing which of the two shortenings
+        // a given screen used.
+        if hidden > 0 || collapsed > 0 {
+            let mut what: Vec<String> = Vec::new();
+            if hidden > 0 {
+                what.push(format!(
+                    "{} for features this project doesn't use hidden",
+                    super::count(hidden, "section")
+                ));
+            }
+            if collapsed > 0 {
+                what.push(format!(
+                    "{} with nothing to fix summarised",
+                    super::count(collapsed, "section")
+                ));
+            }
             println!(
-                "{} {} for features this project doesn't use {verb} hidden — {} shows everything.",
+                "{} {} — {} shows every line.",
                 "·".dimmed(),
-                super::count(hidden, "section"),
+                what.join(", "),
                 "agentstack doctor --all".bold()
             );
         }
@@ -1354,6 +1420,39 @@ fn run_checks(
             }
         }
     }
+    // What the roll call above adds up to, when every line of it is healthy:
+    // the two facts a reader wanted from it — how many CLIs are really here,
+    // and whether their own config files still parse. The per-CLI list is one
+    // `--all` away.
+    //
+    // The two numbers are counted SEPARATELY, and that is the whole point of
+    // this block. `read_config_value` returns `Ok(None)` for an installed CLI
+    // whose config file does not exist yet, which is not a parse and must never
+    // be summarised as one — an absent config is not a parsing success. So
+    // "parses" is claimed only for the adapters that declare a config path AND
+    // have that file on disk; the rest are counted as detected and nothing
+    // more. `config_present` is an existence check the loop above already makes,
+    // so this costs no second read, and it is computed here rather than inside
+    // the match so the arm that words each per-CLI line stays a separate
+    // concern from the arithmetic that summarises them.
+    //
+    // Safe to infer parsing from mere presence *here*: this sentence is only
+    // ever printed when the section is fully healthy, so a file that failed to
+    // parse would have emitted an error line and blocked the collapse outright.
+    let detected = report
+        .sections
+        .last()
+        .map_or(0, |s| s.lines.iter().filter(|(t, _)| *t == "ok").count());
+    let parsed = target_ids
+        .iter()
+        .filter_map(|id| ctx.registry.get(id))
+        .filter(|desc| desc.is_installed() && desc.config_present())
+        .count();
+    report.section_summary(match parsed {
+        0 => format!("{detected} detected"),
+        n if n == detected => format!("{detected} detected, configs parse"),
+        n => format!("{detected} detected, {n} with a config, and it parses"),
+    });
 
     // Which build is this? A release binary compiles the optional `sandbox`
     // feature in; a source `cargo build --release` does not, and nothing else

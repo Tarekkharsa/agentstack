@@ -1817,13 +1817,18 @@ pub struct UpgradeArgs {
     pub write: bool,
 }
 
-/// `status` takes no flags of its own beyond `--json` — `--manifest-dir` is
-/// global, and the deep flags all belong to `doctor`.
+/// `status` takes two flags of its own — `--json` and `--verbose`.
+/// `--manifest-dir` is global, and the deep flags all belong to `doctor`.
 #[derive(Args, Debug)]
 pub struct StatusArgs {
     /// Emit the same reading as JSON (contract `json-reads-v1`).
     #[arg(long)]
     pub json: bool,
+    /// Expand the per-CLI detail the default screen counts: delivery routing
+    /// and house-rule destinations, one line per CLI. Nothing is added that
+    /// the default screen does not already summarise.
+    #[arg(long)]
+    pub verbose: bool,
 }
 
 /// `setup` is the interactive newcomer wizard; it deliberately has no `--write`
