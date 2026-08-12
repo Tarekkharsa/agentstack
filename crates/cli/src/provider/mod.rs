@@ -580,6 +580,25 @@ pub fn resolve(id: &str) -> Option<Candidate> {
         .find(|c| c.id == id || c.name == id)
 }
 
+/// [`resolve`], restricted to the two OFFLINE providers: the user's central
+/// library and the embedded catalog.
+///
+/// This exists for guidance, and guidance may not depend on the network — the
+/// same rule `search` states for its no-query listing. An error path that
+/// wanted to say "you meant the library entry of this name" must not turn a
+/// typo into a registry round-trip that can hang or fail offline, so it asks
+/// only the sources that answer from disk.
+pub fn resolve_local(id: &str) -> Option<Candidate> {
+    let providers: Vec<Box<dyn Provider>> = vec![
+        Box::new(LibraryProvider::default()),
+        Box::new(CatalogProvider),
+    ];
+    providers
+        .into_iter()
+        .flat_map(|p| p.search(id, 30))
+        .find(|c| c.id == id || c.name == id)
+}
+
 /// Uppercase, identifier-safe ref base from a name.
 fn sanitize(name: &str) -> String {
     name.chars()

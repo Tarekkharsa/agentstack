@@ -258,12 +258,18 @@ fn add_from_skill(
     );
 
     if a.write {
+        // Body first, declaration second. The declaration POINTS AT the body,
+        // so writing it first means any failure below leaves the manifest
+        // naming a directory that is not there — a project that no longer
+        // loads clean, from a command that exited nonzero. That is not
+        // hypothetical: `add from <a library skill>` reaches this path, the
+        // extraction fails (a library skill is not a bundled catalog asset),
+        // and the run used to leave `[skills.<name>] path = "./<name>"` behind
+        // with `doctor` reporting an unpinnable body and no command able to
+        // repair it. Extracting first makes that failure a clean refusal.
+        extract_skill_asset(asset.as_deref(), ctx, &candidate.name)?;
         crate::util::atomic::write(&ctx.loaded.manifest_path, &new_text)
             .with_context(|| format!("writing {}", ctx.loaded.manifest_path.display()))?;
-        if let Some(asset) = &asset {
-            crate::catalog::extract_asset_dir(asset, &ctx.dir.join(asset))
-                .with_context(|| format!("extracting bundled skill '{}'", candidate.name))?;
-        }
         println!("{} added skill '{}'.", "✓".green(), candidate.name);
     } else {
         println!(
@@ -272,6 +278,18 @@ fn add_from_skill(
         );
     }
     Ok(())
+}
+
+/// Lay down a bundled skill's body under the manifest dir, before anything
+/// declares it. `None` (a git source) is a no-op.
+///
+/// Split out so both `add from` write paths — the plain skill and the pack —
+/// order the two writes the same way, and so the ordering has one place to
+/// state why. See the call site in [`add_from_skill`].
+fn extract_skill_asset(asset: Option<&str>, ctx: &super::Context, name: &str) -> Result<()> {
+    let Some(asset) = asset else { return Ok(()) };
+    crate::catalog::extract_asset_dir(asset, &ctx.dir.join(asset))
+        .with_context(|| format!("extracting bundled skill '{name}'"))
 }
 
 /// Translate a provider [`SkillRef`] into the manifest [`Skill`] entry to write
@@ -888,6 +906,47 @@ fn upsert_server(a: &AddServerArgs, manifest_dir: Option<&Path>, allow_update: b
     Ok(())
 }
 
+/// Widen `add skill`'s source-grammar refusal when the bare name the user
+/// typed is one this machine can already reach.
+///
+/// `parse_source` is a pure parser and stays one: a bare name never probes the
+/// filesystem, so the same input means the same thing on every machine. That
+/// rule is right, and it left a dead end beside it. Somebody who ran
+/// `agentstack lib add ./skills/pdf --write` and saw `pdf` in `lib list` then
+/// reaches for `agentstack add skill pdf`, and got back an enumeration of five
+/// source spellings — none of which is the library — naming no command that
+/// would work.
+///
+/// **The two homes take different verbs, and saying so is the whole point.** A
+/// catalog skill is a bundled body that `add from` extracts into the project. A
+/// library skill is already on disk in the library and is referenced BY NAME —
+/// the library-first model `init` uses for servers — which for a skill means
+/// naming it in a toolset. Offering `add from` for both would send the library
+/// case at the catalog's bundled-asset extractor, which is exactly where that
+/// route breaks (see the deferred finding on `add from <library skill>`); a
+/// refusal that hands over a second dead end is worse than the first.
+///
+/// The lookup is OFFLINE (`resolve_local`), so a mistyped source can never
+/// become a network round-trip on an error path. When the name resolves to
+/// nothing local the original refusal is returned untouched.
+fn named_source_hint(source: &str, err: anyhow::Error) -> anyhow::Error {
+    let Some(c) = crate::provider::resolve_local(source) else {
+        return err;
+    };
+    let name = crate::text::sanitize_line(source);
+    let remedy = if c.source == "library" {
+        format!(
+            "'{name}' is already in your central library — a project references a library skill \
+             by name, so put it in a toolset: `agentstack toolset create <toolset> --skill {name}`"
+        )
+    } else {
+        // The same command `search` prints against every catalog row, so the
+        // refusal and the listing name one verb.
+        format!("'{name}' is in the built-in catalog — add it by name instead: `agentstack add from {name}`")
+    };
+    anyhow::anyhow!("{err}\n  {remedy}")
+}
+
 /// `agentstack add skill <source>` — the ecosystem-grammar acquisition verb.
 /// Parse →
 /// stage (git) → discover → select → scan → preview; `--write` promotes the
@@ -898,7 +957,7 @@ fn upsert_server(a: &AddServerArgs, manifest_dir: Option<&Path>, allow_update: b
 fn add_skill(a: &AddSkillArgs, manifest_dir: Option<&Path>) -> Result<()> {
     use crate::provider::source::{parse_source, SkillSource};
     let ctx = super::load(manifest_dir)?;
-    let parsed = parse_source(&a.source)?;
+    let parsed = parse_source(&a.source).map_err(|e| named_source_hint(&a.source, e))?;
 
     // `@skill` is the human alias for --skill; disagreement is an error,
     // never a precedence puzzle.
@@ -1867,12 +1926,11 @@ pub fn write_from_provider(dir: &Path, id: &str, profile: Option<&str>) -> Resul
             let body = serde_json::to_value(&entry)?;
             let new_text =
                 build_manifest_with(&original, "skills", &candidate.name, &body, profile)?;
+            // Body before declaration, for the reason spelled out in
+            // `add_from_skill` — this is the same write in the pack lane.
+            extract_skill_asset(asset.as_deref(), &ctx, &candidate.name)?;
             crate::util::atomic::write(&ctx.loaded.manifest_path, &new_text)
                 .with_context(|| format!("writing {}", ctx.loaded.manifest_path.display()))?;
-            if let Some(asset) = &asset {
-                crate::catalog::extract_asset_dir(asset, &ctx.dir.join(asset))
-                    .with_context(|| format!("extracting bundled skill '{}'", candidate.name))?;
-            }
             Ok(AddedMembers {
                 skills: vec![candidate.name.clone()],
                 ..Default::default()

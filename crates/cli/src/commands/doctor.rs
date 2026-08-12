@@ -1243,17 +1243,38 @@ fn run_checks(
                 // "<path> parses" only makes sense when there is a config to
                 // parse; an adapter with none (e.g. Pi) gets an honest label
                 // instead of the garbled "no MCP config parses".
-                let wiring = desc
+                //
+                // And "a config to parse" means a file that is actually there.
+                // `read_config_value` answers `Ok(None)` for a missing or empty
+                // file — it is a read, not an assertion of existence — so
+                // matching `Ok(_)` claimed "~/.claude.json parses" on a machine
+                // where that file has never existed. On a fresh install that is
+                // every detected CLI at once, and it contradicts `init` on the
+                // same run, which reports the same tools as "binary on PATH —
+                // no config files found". Three states, three sentences: a file
+                // that parsed, no file yet, and no config concept at all.
+                let path_label = desc
                     .config
                     .as_ref()
-                    .map(|c| format!("{} parses", tidy_path(&paths::expand_tilde(&c.path))))
-                    .unwrap_or_else(|| "no MCP config to check".to_string());
+                    .map(|c| tidy_path(&paths::expand_tilde(&c.path)));
                 if desc.is_installed() {
                     match desc.read_config_value() {
-                        Ok(_) => report.line(
-                            Level::Ok,
-                            format!("{:<14} installed · {}", desc.display, wiring),
-                        ),
+                        Ok(read) => {
+                            let wiring = match (&path_label, read.is_some()) {
+                                (Some(p), true) => format!("{p} parses"),
+                                // The honest reading of `Ok(None)`: the adapter
+                                // has a config path, and nothing is at it yet.
+                                // Not a fault — a CLI that has never been
+                                // configured is the ordinary first-run state —
+                                // so the level is unchanged.
+                                (Some(p), false) => format!("no config yet at {p}"),
+                                (None, _) => "no MCP config to check".to_string(),
+                            };
+                            report.line(
+                                Level::Ok,
+                                format!("{:<14} installed · {}", desc.display, wiring),
+                            )
+                        }
                         Err(e) => report.line(
                             Level::Error,
                             format!("{}: config invalid · {e}", desc.display),
