@@ -57,14 +57,27 @@ use crate::text::sanitize_line;
 use crate::workflows::NormalizedWorkflow;
 
 /// Default cap on concurrently running children when the machine's
-/// `[policy.workflows] max_concurrent` is absent. Conservative and
-/// single-digit by design: children are full harness CLI processes (each ~1
-/// CPU during startup plus a model call), the canonical map fan-out (§3.1)
-/// and the acceptance fixture are 3-wide, and 4 covers that shape with one
-/// slot of headroom while bounding host load and API-rate pressure.
-/// Engine-owned: never script-negotiated (Stage D negotiates the OTHER
-/// ceilings, not this one).
-const DEFAULT_MAX_CONCURRENT: u32 = 4;
+/// `[policy.workflows] max_concurrent` is absent. Engine-owned: never
+/// script-negotiated (Stage D negotiates the OTHER ceilings, not this one).
+///
+/// Raised 4 → 16 once continuous dispatch made the capacity usable. The
+/// repo's own bench (`examples/workflow-scale/README.md`) is the evidence:
+/// before Phase 1, going 4 → 16 at width 100 *lowered* efficiency (0.885 →
+/// 0.547) because the per-stage barrier, not the worker pool, was binding;
+/// after it, the same cell runs 15.36 s → 12.00 s (−22%) and reaches 0.902
+/// efficiency once the mock's straggler tail is removed. The remaining gap is
+/// the tail itself, not scheduling, so 16 is where the measured win is — not
+/// a guess, and not a number that needs raising again without new evidence.
+///
+/// It stays a cap on CONCURRENCY only: it never widens what a run may spawn
+/// (`max_agents` is the total-spawn ceiling and is enforced inside the
+/// engine), never relaxes the resident-result ceiling (charged on total bytes
+/// fed to the interpreter, not on in-flight children), and a narrower batch
+/// simply leaves workers idle. The cost it does buy is host load — at most 16
+/// harness processes and 16 × the 1 MiB stdout capture cap in flight — which
+/// a machine with a smaller budget bounds through `[policy.workflows]
+/// max_concurrent`.
+const DEFAULT_MAX_CONCURRENT: u32 = 16;
 
 /// Bound on `--args-json` before it is parsed (rule 7: invoker args are
 /// untrusted input). Depth is bounded twice behind this: serde_json's own

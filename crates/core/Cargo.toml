@@ -12,7 +12,7 @@ publish = false
 # TODO(phase-1): drop clap from core — Scope/ServerType derive ValueEnum today.
 # The orphan-rule-safe fix: a cli-local arg enum implementing ValueEnum, with
 # From<CliX> for the core type. core parses hostile input; thinnest deps win.
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", default-features = false, features = ["derive", "std"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 toml = { version = "0.8", features = ["preserve_order"] }

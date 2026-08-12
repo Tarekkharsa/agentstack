@@ -40,7 +40,19 @@ agentstack-mcp = { path = "../mcp" }
 # The egress proxy — pulled in only with the `sandbox` feature (it brings
 # tokio); the default cli build doesn't compile it.
 agentstack-egress = { path = "../egress", optional = true }
-clap = { version = "4", features = ["derive"] }
+# No default features: clap's default set pulls its own colour stack
+# (anstream, anstyle-*, colorchoice, utf8parse, is_terminal_polyfill), and this
+# workspace paints through `agentstack_core::paint` instead — the gate every
+# screen goes through (see `tests/color_is_gated.rs`). Colourless clap help and
+# errors are the design, not a regression.
+clap = { version = "4", default-features = false, features = [
+    "derive",
+    "std",
+    "help",
+    "usage",
+    "error-context",
+    "suggestions",
+] }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 sha2 = "0.10"

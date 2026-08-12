@@ -558,19 +558,21 @@ fn value_to_js_depth(
         }
         V::String(s) => Ok(JsValue::from(JsString::from(s.as_str()))),
         V::Array(items) => {
-            let arr = JsArray::new(context);
+            // Convert first, then build the array in one shot: `JsArray::push`
+            // per element pays a property write plus a `length` update each.
+            let mut elems = Vec::with_capacity(items.len());
             for item in items {
-                let v = value_to_js_depth(item, context, depth + 1)?;
-                arr.push(v, context)
-                    .map_err(|_| WorkflowError::internal("failed to build JS array"))?;
+                elems.push(value_to_js_depth(item, context, depth + 1)?);
             }
-            Ok(arr.into())
+            Ok(JsArray::from_iter(elems, context).into())
         }
         V::Object(map) => {
             let obj = JsObject::with_object_proto(context.intrinsics());
             for (k, v) in map {
                 let jv = value_to_js_depth(v, context, depth + 1)?;
-                obj.set(JsString::from(k.as_str()), jv, false, context)
+                // Define, never set: a `[[Set]]` would run any `Object.prototype`
+                // setter during host conversion of an untrusted child result.
+                obj.create_data_property(JsString::from(k.as_str()), jv, context)
                     .map_err(|_| WorkflowError::internal("failed to build JS object"))?;
             }
             Ok(obj.into())
@@ -610,10 +612,13 @@ pub(crate) fn js_to_value(
                 let len = arr
                     .length(context)
                     .map_err(|_| WorkflowError::internal("array length read failed"))?;
-                let mut out = Vec::new();
+                // Indexed `[[Get]]` per element rather than `JsArray::at`: `at`
+                // is the builtin, which re-reads `length` on every call. Capacity
+                // is capped because `len` comes from untrusted JS.
+                let mut out = Vec::with_capacity(len.min(1024) as usize);
                 for i in 0..len {
                     let elem = arr
-                        .at(i as i64, context)
+                        .get(i, context)
                         .map_err(|_| WorkflowError::internal("array element read failed"))?;
                     out.push(js_to_value(&elem, context, depth + 1)?);
                 }

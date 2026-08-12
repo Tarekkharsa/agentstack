@@ -19,7 +19,6 @@ default = []
 docker = ["dep:bollard", "dep:tokio", "dep:futures-util"]
 
 [dependencies]
-agentstack-core = { path = "../core" }
 agentstack-policy = { path = "../policy" }
 agentstack-recorder = { path = "../recorder" }
 serde = { version = "1", features = ["derive"] }
@@ -34,9 +33,6 @@ thiserror = "1"
 bollard = { version = "0.21", optional = true }
 tokio = { version = "1", optional = true, features = ["rt", "rt-multi-thread", "net", "io-util", "time"] }
 futures-util = { version = "0.3", optional = true, default-features = false }
-
-[dev-dependencies]
-assert_fs = "1"
 
 [lints]
 workspace = true
