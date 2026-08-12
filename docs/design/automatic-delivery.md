@@ -7,14 +7,15 @@
 > resolved by citing it. Where the memo and this document differ, this document
 > is right.
 >
-> **Direction:** [`STRATEGY.md`](../../STRATEGY.md) — "Delivery ambition"
-> (dynamic zero-files as the eventual default, with named preconditions) and
-> open design question #1 (where the yes lives in zero-files mode). This
-> document answers question #1 and fixes the contracts the flip needs; it does
+> **Direction:** [`STRATEGY.md`](../../STRATEGY.md) — "What the product is
+> today", where routed delivery is recorded as shipped. Both questions this
+> document was written against are now closed: dynamic delivery is the default,
+> and where the yes lives in zero-files mode is answered here and shipped as
+> `agentstack yes`. This document fixes the contracts that flip needed; it does
 > not amend the strategy and does not authorize work on its own.
 >
-> **Ordered work:** [`TODO.md`](../../TODO.md) — "Automatic delivery
-> (package-aware, dynamic-first)".
+> **Ordered work:** [`TODO.md`](../../TODO.md) — carried under "Not scheduled,
+> deliberately".
 >
 > **Vocabulary:** Package · Toolset · Lease. Defined in §Package-aware delivery
 > and used consistently below.
