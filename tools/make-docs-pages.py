@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """Render the source-of-truth Markdown docs pages into styled site pages.
 
-The Markdown stays canonical — concepts.md, choose.md, reference.md,
+The Markdown stays canonical — docs.md, concepts.md, choose.md, reference.md,
 ARCHITECTURE.md, ENFORCEMENT.md, and howto/*.md are what you edit,
 review, and read on GitHub. This script compiles each of them (see PAGES
-below) into a docs-site HTML page carrying the same shell (header, sidebar,
-footer, CSS variables) as docs.html, so site visitors never leave the site for
+below) into a docs-site HTML page carrying one shell (header, sidebar,
+footer, CSS variables), so site visitors never leave the site for
 any of them. Links that target some other repo file — one this script does
-not compile into a page — are rewritten to GitHub blob/tree URLs instead.
+not compile into a page — are rewritten to GitHub blob/tree URLs instead;
+a .html file under docs/ is a published page, so it stays site-local.
+
+The documentation hub, docs.html, is one of those generated pages (from
+docs.md) and check_hub_coverage() keeps it honest: the build fails if a
+generated page is missing from the hub, or a how-to is missing from PAGES.
 
 Deliberately supports only the Markdown subset those pages use — ATX headings,
 paragraphs, flat lists, pipe tables, fenced code, bold/italic/inline
@@ -35,7 +40,13 @@ GH = "https://github.com/Tarekkharsa/agentstack"
 SITE = "https://tarekkharsa.github.io/agentstack"
 
 # (markdown source relative to docs/, html output relative to docs/, sidebar key)
+# HUB first: docs.html is the documentation index every other page and the
+# README link to, so it is generated from docs.md like everything else. It used
+# to be the one hand-written page here, and it drifted exactly the way a
+# hand-kept index does — five how-tos and eight pages existed that it never
+# linked. check_hub_coverage() below now fails the build instead.
 PAGES = [
+    ("docs.md", "docs.html", "docs"),
     ("start.md", "start.html", "start"),
     ("library.md", "library.html", "library"),
     ("tutorial.md", "tutorial/index.html", "tutorial"),
@@ -63,6 +74,41 @@ PAGES = [
     ("howto/see-what-happened.md", "howto/see-what-happened.html", "howto-audit"),
 ]
 MD_TO_HTML = {src: out for src, out, _ in PAGES}
+
+# The hub page: the index that must link every page this script generates.
+HUB_MD = "docs.md"
+
+
+def check_hub_coverage():
+    """Fail the build when the hub index and the real docs tree disagree.
+
+    Two directions, because an index rots from both ends:
+
+      a) every page in PAGES is linked from docs.md — so adding a page without
+         indexing it is a build error, not an invisible orphan;
+      b) every docs/howto/*.md is in PAGES — so a how-to that was written but
+         never wired up cannot exist as an unpublished Markdown file.
+
+    Both are pure filesystem/text facts, so this runs before any page is
+    written and says exactly what is missing.
+    """
+    md = (DOCS / HUB_MD).read_text()
+    linked = {m.split("#")[0] for m in re.findall(r"\]\(([^)\s]+)\)", md)}
+    problems = [
+        f"docs/{HUB_MD}: does not link docs/{src} (every generated page belongs on the hub)"
+        for src, _, _ in PAGES
+        if src != HUB_MD and src not in linked
+    ]
+    listed = {src for src, _, _ in PAGES}
+    problems += [
+        f"tools/make-docs-pages.py: docs/howto/{p.name} exists but is not in PAGES"
+        for p in sorted((DOCS / "howto").glob("*.md"))
+        if f"howto/{p.name}" not in listed
+    ]
+    if problems:
+        raise SystemExit(
+            "docs hub is out of date:\n  " + "\n  ".join(problems)
+        )
 
 # ---------------------------------------------------------------- sidebar --
 # Import the sidebar tree/renderer from its dashed filename.
@@ -119,7 +165,13 @@ def rewrite_href(href, src_rel, out_rel, warnings):
     repo_rel = fs.resolve().relative_to(ROOT).as_posix() if fs.exists() else None
     if repo_rel:
         # Site assets (images) stay site-local — GitHub Pages serves docs/.
-        if not target.startswith("..") and fs.suffix in (".svg", ".png", ".gif", ".webp"):
+        # So does a .html page under docs/: the hand-written pages
+        # (index.html, examples.html, the security review) are PUBLISHED
+        # pages, not repo files, and sending a reader to a GitHub blob view of
+        # their source would show them markup instead of the page.
+        if not target.startswith("..") and fs.suffix in (
+            ".svg", ".png", ".gif", ".webp", ".html",
+        ):
             return "../" * depth + target + frag
         kind = "tree" if fs.is_dir() else "blob"
         return f"{GH}/{kind}/main/{repo_rel}{frag}"
@@ -834,6 +886,7 @@ def build_page(src_rel, out_rel, key):
 
 
 if __name__ == "__main__":
+    check_hub_coverage()
     all_warnings = []
     for src, out, key in PAGES:
         all_warnings += build_page(src, out, key)
