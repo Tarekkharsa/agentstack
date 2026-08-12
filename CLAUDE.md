@@ -40,3 +40,11 @@ new dependencies need maintainer approval; Boa stays isolated in `workflow`.
   change can break; full suite belongs to CI.
 - Before handoff: `cargo check --workspace --all-targets` (the only cheap
   check that sees all test targets), `cargo fmt --check`, relevant clippy.
+
+## Hard rules — build cache
+
+- Building in `.claude/worktrees/*`: export
+  `CARGO_TARGET_DIR="$HOME/.cache/agentstack-target"` first, so every worktree
+  shares one incremental cache instead of recompiling the workspace per tree.
+- Debug builds by default; `--release` only when CI parity demands it.
+- Removing a worktree: delete its local `target/` with it.

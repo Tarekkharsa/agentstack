@@ -443,9 +443,10 @@ WIZARD_REPLAY = (
 if __name__ == "__main__":
     docs = Path(__file__).resolve().parent.parent / "docs"
     # Only the SVGs still embedded somewhere are rendered: demos/first-value.svg
-    # (README, landing hero, start, examples) and demos/malicious-repo.svg (the
-    # demos page). The other scene specs above are kept as source material but
-    # not written out — the old landing/docs pages that embedded them were
+    # (README.md and docs/examples.html — index.html and start.html carried it
+    # once and no longer do) and demos/malicious-repo.svg (docs/examples.html,
+    # the demos page). The other scene specs above are kept as source material
+    # but not written out — the old landing/docs pages that embedded them were
     # replaced by the design-system site (docs/theme/).
     # FIRSTRUN and TRUST_GATE are likewise source-only: their rendered output
     # (docs/firstrun.svg, docs/trust-gate.svg) ended up embedded nowhere, so the
