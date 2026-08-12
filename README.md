@@ -35,7 +35,7 @@ you can open, read, and commit:
 your-project/
 ├── .agentstack/
 │   ├── agentstack.toml   # everything your tools may run: servers, skills, instructions
-│   ├── agentstack.lock   # the pins — exact commits and content digests (written by `agentstack lock --write`)
+│   ├── agentstack.lock   # the pins — exact commits and content digests (`init` writes it; `agentstack lock --write` re-pins later changes)
 │   └── .env              # token values lifted out of your configs (only when init found any)
 └── .gitignore            # one managed line, so that .env is never committed
 ```
@@ -53,17 +53,18 @@ It holds `${GITHUB_TOKEN}`-style placeholders, never the token values.
 
 ### How it reaches your tools
 
-Delivery is **routed, not chosen** — AgentStack picks the lane per capability
-and per tool, and `agentstack x delivery` prints the routing:
+Delivery is **routed, not chosen** — you never pick a delivery mode per server.
+AgentStack decides the lane for each capability on each tool, and
+`agentstack x delivery` prints what it decided. There are two lanes:
 
 - **Served live.** Skills and MCP servers go to MCP-capable tools through one
-  gateway, brokered, policy-checked, digest-verified, and recorded. Nothing is
+  gateway — brokered, policy-checked, digest-verified, and recorded. Nothing is
   written into the project for them.
-- **rendered lane:** instructions, settings, hooks, and extensions are written
-  into native files — always, because no live channel a tool is known to
-  consume can carry them correctly — and so is *every* capability on a tool
-  without MCP. Those files are regenerable and can be taken back off at any
-  time.
+- **Written as files.** Instructions, settings, hooks, and extensions are
+  written into each tool's native config — always, because no live channel a
+  tool is known to consume can carry them correctly — and so is *every*
+  capability on a tool without MCP. Those files are regenerable and can be
+  taken back off at any time.
 
 Live delivery needs the bridge registered once per tool:
 

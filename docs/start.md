@@ -295,8 +295,13 @@ On v0.17.1 the `agentstack x` prefix and the `yes`, `undo`, `x why`, and
 `x unrender` verbs do not exist — they fail with `unrecognized subcommand` —
 and every command that does exist there runs at its own bare name, for example
 `agentstack gateway connect --all --write` rather than
-`agentstack x gateway connect --all --write`. The install line at the top of
-this page is the upgrade.
+`agentstack x gateway connect --all --write`.
+
+To upgrade, run `agentstack self update --write` — on v0.17.1 that is the
+spelling, and plain `--help` there does not list `self` (only
+`agentstack --help --all` does). The install line at the top of this page works
+too, and is the one to use if `self update` reports that Homebrew owns the
+binary.
 
 ## Why use it — and when not to
 
