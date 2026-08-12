@@ -338,8 +338,16 @@ asb adopt --write >/dev/null
 asb lock --write >/dev/null
 DIGEST_B="$(asb trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')"
 asb trust . --yes --consented-digest "$DIGEST_B" >/dev/null
-run "agentstack up"
-UP_OUT="$(asb up 2>&1)"
+# `--write` is load-bearing: bare `up` is a dry run that only prints the plan
+# ("Nothing written. Re-run with --write to apply this plan."), and the three
+# assertions below are about what the write actually did on this machine.
+run "agentstack up --write"
+UP_OUT="$(asb up --write 2>&1)" || {
+  printf '%s\n' "$UP_OUT"
+  bad "agentstack up --write exited nonzero (its output is above)"
+  printf '\n\033[1mSummary:\033[0m %d passed, %d failed\n' "$PASS" "$FAIL"
+  exit 1
+}
 printf '%s\n' "$UP_OUT" | sed 's/^/  /'
 
 if grep -q "Claude Code" <<< "$UP_OUT"; then

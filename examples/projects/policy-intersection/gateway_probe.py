@@ -19,6 +19,21 @@ Steps 1 and 3-6 in ONE session on purpose: the same connection that saw nothing
 sees the filtered set the moment a lease names the toolset, so the fence and the
 policy intersection are proven against the same gateway state.
 
+Two properties of the wire are load-bearing here, and both are why this file
+drives the session request-by-request instead of pouring a script into stdin:
+
+  · the server answers requests CONCURRENTLY, so a pipelined script comes back
+    out of order — the "before any lease" calls could be answered after the
+    lease had already opened, and the fence would look broken (or, worse, look
+    fine when it was not),
+  · the negotiated protocol version decides the era. Connection-scoped toolset
+    leases are legacy-only (docs/concepts.md): a modern connection re-derives
+    the trusted default on every request and refuses to fence one. An
+    unrecognized version string — the old "2024-11-05" — is NOT negotiated
+    down; the handshake settles on the server's latest, which is the modern
+    era. This probe's subject is the leased fence, so it asks for a version the
+    server actually knows.
+
 It prints one JSON object on stdout: {name: [is_error, text]} for each call, so
 assert.sh can make exact assertions about the fence, discovery filtering and
 refusals. Newline-delimited JSON-RPC over stdin, one response per line — the
@@ -29,13 +44,60 @@ import subprocess
 import sys
 
 
-def call(rid, name, args):
-    return {
-        "jsonrpc": "2.0",
-        "id": rid,
-        "method": "tools/call",
-        "params": {"name": name, "arguments": args},
-    }
+class Session:
+    """One stdio MCP connection, driven strictly one request at a time."""
+
+    def __init__(self, argv, cwd=None):
+        self.proc = subprocess.Popen(
+            argv,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            cwd=cwd,
+        )
+        self.next_id = 0
+
+    def notify(self, method):
+        self._send({"jsonrpc": "2.0", "method": method})
+
+    def call(self, method, params):
+        self.next_id += 1
+        rid = self.next_id
+        self._send({"jsonrpc": "2.0", "id": rid, "method": method, "params": params})
+        while True:
+            line = self.proc.stdout.readline()
+            if not line:
+                self.proc.wait()
+                raise SystemExit(
+                    f"agentstack mcp closed its stdout before answering {method} "
+                    f"(exit {self.proc.returncode})"
+                )
+            try:
+                response = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(response, dict) and response.get("id") == rid:
+                return response
+
+    def tool(self, name, args):
+        return self.call("tools/call", {"name": name, "arguments": args})
+
+    def _send(self, message):
+        self.proc.stdin.write(json.dumps(message) + "\n")
+        self.proc.stdin.flush()
+
+    def close(self):
+        self.proc.stdin.close()
+        self.proc.wait()
+
+
+def outcome(response):
+    if "error" in response:
+        return [True, "TRANSPORT_ERROR: " + json.dumps(response["error"])]
+    result = response.get("result", {})
+    content = result.get("content") or [{}]
+    return [bool(result.get("isError")), content[0].get("text", "")]
 
 
 def main():
@@ -43,65 +105,30 @@ def main():
         raise SystemExit("usage: gateway_probe.py AGENTSTACK_BIN PROJECT_DIR")
     agentstack, project = sys.argv[1], sys.argv[2]
 
-    messages = [
+    session = Session([agentstack, "mcp", "--auto-project"], cwd=project)
+    session.call(
+        "initialize",
         {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2024-11-05",
-                "capabilities": {},
-                "clientInfo": {"name": "probe", "version": "0"},
-            },
+            "protocolVersion": "2025-11-25",
+            "capabilities": {},
+            "clientInfo": {"name": "probe", "version": "0"},
         },
-        {"jsonrpc": "2.0", "method": "notifications/initialized"},
-        call(2, "tools_search", {"query": "status items delete admin reset everything"}),
-        call(3, "opsbox__get_status", {}),
-        call(4, "agentstack_lease_open", {"profile": "default"}),
-        call(5, "tools_search", {"query": "status items delete admin reset everything"}),
-        call(6, "opsbox__get_status", {}),
-        call(7, "opsbox__delete_everything", {}),
-        call(8, "opsbox__admin_reset", {}),
-    ]
-    payload = "".join(json.dumps(m) + "\n" for m in messages)
-    completed = subprocess.run(
-        [agentstack, "mcp", "--auto-project"],
-        input=payload,
-        text=True,
-        capture_output=True,
-        cwd=project,
     )
+    session.notify("notifications/initialized")
 
-    by_id = {}
-    for line in completed.stdout.splitlines():
-        try:
-            resp = json.loads(line)
-        except Exception:
-            continue
-        if isinstance(resp, dict) and "id" in resp:
-            by_id[resp["id"]] = resp
+    broad = {"query": "status items delete admin reset everything"}
+    results = {
+        "fenced_search": outcome(session.tool("tools_search", broad)),
+        "fenced_call": outcome(session.tool("opsbox__get_status", {})),
+        "lease": outcome(session.tool("agentstack_lease_open", {"profile": "default"})),
+        "search": outcome(session.tool("tools_search", broad)),
+        "get_status": outcome(session.tool("opsbox__get_status", {})),
+        "delete_everything": outcome(session.tool("opsbox__delete_everything", {})),
+        "admin_reset": outcome(session.tool("opsbox__admin_reset", {})),
+    }
+    session.close()
 
-    def outcome(rid):
-        resp = by_id.get(rid, {})
-        if "error" in resp:
-            return [True, "TRANSPORT_ERROR: " + json.dumps(resp["error"])]
-        result = resp.get("result", {})
-        content = result.get("content") or [{}]
-        return [bool(result.get("isError")), content[0].get("text", "")]
-
-    print(
-        json.dumps(
-            {
-                "fenced_search": outcome(2),
-                "fenced_call": outcome(3),
-                "lease": outcome(4),
-                "search": outcome(5),
-                "get_status": outcome(6),
-                "delete_everything": outcome(7),
-                "admin_reset": outcome(8),
-            }
-        )
-    )
+    print(json.dumps(results))
 
 
 if __name__ == "__main__":

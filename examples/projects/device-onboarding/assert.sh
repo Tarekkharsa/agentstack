@@ -408,7 +408,9 @@ render_locally   # this fixture asserts on rendered files
 # the lockfile travels, consent does not. Trust is per-machine, so the person
 # sitting at THIS machine reviews the servers before `up` writes any of them.
 consent
-OUT=$("$AS" up 2>&1) && ok "up exits 0 on a machine that has never seen this project" || bad "up failed: $OUT"
+# `--write` is load-bearing: a bare `up` is a dry run that prints the plan and
+# writes nothing, and every assertion below is about what the write produced.
+OUT=$("$AS" up --write 2>&1) && ok "up exits 0 on a machine that has never seen this project" || bad "up failed: $OUT"
 grep -q "Claude Code" <<<"$OUT" && ok "up names the harnesses this machine actually has" || bad "no harness line: $OUT"
 [ -f .mcp.json ] && ok "up rendered the native config" || bad "up rendered no config at all"
 grep -q "docs.example" .mcp.json 2>/dev/null && ok "the rendered config carries the manifest's server" || bad "rendered config lacks the server"
@@ -424,14 +426,14 @@ printf -- '---\nname: sql-review\ndescription: Review SQL migrations before they
   > .agentstack/skills/sql-review/SKILL.md
 "$AS" lock --write >/dev/null 2>&1
 consent   # same fresh-machine review as E1 — the servers and the pinned skill
-OUT=$("$AS" up 2>&1)
+OUT=$("$AS" up --write 2>&1)
 grep -q 'DEVICE_UP_TOKEN' <<<"$OUT" && ok "up names the ref this machine cannot resolve" || bad "unresolvable ref went unmentioned: $OUT"
 grep -q 'agentstack secret set DEVICE_UP_TOKEN' <<<"$OUT" && ok "...alongside the exact command that stores it" || bad "no per-ref store command: $OUT"
 grep -q 'held back whole' <<<"$OUT" && ok "...and says the config is held back whole (fail closed)" || bad "fail-closed rule unstated: $OUT"
 grep -q 'api.example' .mcp.json 2>/dev/null && bad "A SERVER WAS WRITTEN WITH AN UNRESOLVED CREDENTIAL" || ok "nothing rendered while the credential was missing"
 grep -q 'DEVICE_UP_TOKEN' .agentstack/agentstack.toml && ok "the manifest still holds only the \${REF}" || bad "manifest lost the placeholder"
 # Naming it is only useful if acting on it finishes the job: resolve and re-run.
-OUT=$(env DEVICE_UP_TOKEN=fake-value "$AS" up 2>&1)
+OUT=$(env DEVICE_UP_TOKEN=fake-value "$AS" up --write 2>&1)
 grep -q 'api.example' .mcp.json 2>/dev/null && ok "the same up renders both servers once the ref resolves" || bad "resolved up still wrote nothing"
 grep -q 'fake-value' .mcp.json && ok "the resolved value reached the native config" || bad "resolved value missing from the render"
 grep -q 'fake-value' .agentstack/agentstack.toml && bad "SECRET VALUE IN THE MANIFEST" || ok "the value never entered the manifest"

@@ -112,6 +112,20 @@ SRC_SQL="$AGENTSTACK_HOME/lib/skills/sql-review/SKILL.md"
 # ─────────────────────────────────────────────────────────────────────────────
 say "LANE A (on request) — the rendered lane via 'use <toolset> --write'"
 # ─────────────────────────────────────────────────────────────────────────────
+# The routing asserted above is real, so `use --write` on its own would write
+# nothing here — correctly. Lane A's whole subject is the rendered lane, so it
+# ASKS for files the way the router itself says to, one line above: the single
+# documented override, which records `[delivery] render_locally` in the
+# manifest so the answer is the same on every clone and every run.
+#
+# It runs before `lock`/`trust` on purpose: it edits the manifest, and the
+# grant below binds to the manifest AND lockfile bytes, so overriding after a
+# grant would invalidate the grant.
+run_locally="$("$AS" x delivery render-locally --write 2>&1)" || {
+  printf '%s\n' "$run_locally"
+  bad "delivery render-locally --write exited nonzero (its output is above)"
+  exit 1
+}
 "$AS" lock --write >/dev/null
 # The yes, before EITHER lane delivers anything. A skill body is text an agent
 # is told to follow, so — like a server definition, which is a command the

@@ -100,7 +100,13 @@ RUNS="$AGENTSTACK_HOME/runs"
 # and `set -o pipefail` propagates the 141. awk drains its input.
 newest_run() { ls -t "$RUNS" 2>/dev/null | awk 'NR==1'; }
 
-INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}
+# The version has to be one the server actually knows: an unrecognized string
+# is NOT negotiated down, the handshake settles on the server's latest, and a
+# modern connection refuses `agentstack_lease_open` for a different reason
+# (connection-scoped leases are legacy-only, docs/concepts.md) — which would
+# quietly replace the refusal step 3 exists to prove, namely that a FROZEN RUN
+# GRANT is what closes the mutating control plane.
+INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}
 {"jsonrpc":"2.0","method":"notifications/initialized"}'
 
 call() { printf '{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"%s","arguments":%s}}' "$1" "${2:-\{\}}"; }

@@ -52,6 +52,16 @@ if [[ "${1:-}" == "--self-test" ]]; then
   # up" as redundant.
   grep -q 'as apply --scope global --write' "$0"
   grep -q 'as use default --scope global --write' "$0"
+  # The rendered lane is what this alarm tests. Delivery sends MCP servers
+  # live by default, so without the override `apply --write` writes nothing
+  # and refuses — the smoke would have no file to hand the CLI.
+  grep -q 'render_locally = true' "$0"
+  # Both write paths run behind the trust gate; neither renders untrusted.
+  # Two bare call sites (the skills leg and the MCP leg), one per write.
+  [[ "$(grep -c '^ *trust_fenced_project$' "$0")" == 2 ]]
+  # No capture may swallow its own failure (the 2026-08-11 silent-exit bug):
+  # the apply capture must pair with `|| died`, which prints before exiting.
+  grep -A1 'apply_out="\$(' "$0" | grep -q '|| died'
   echo "classify self-test OK"
   exit 0
 fi
@@ -84,6 +94,36 @@ xdg_unset=(-u XDG_CONFIG_HOME -u XDG_DATA_HOME -u XDG_CACHE_HOME -u XDG_STATE_HO
 
 as() { env "${xdg_unset[@]}" HOME="$home" AGENTSTACK_HOME="$sandbox/ashome" "$bin" "$@"; }
 
+# A capture that dies silently is the worst failure this harness can have.
+# `x="$(cmd)"` under `set -e` exits the script with everything the command
+# said still sealed inside the variable: the 2026-08-11 nightly lost five jobs
+# to exactly that — instant exit 1, zero stdout, nothing to read. Every
+# capture below prints its output before it fails.
+died() {
+  printf '%s\n' "$2"
+  echo "FAIL: $1 exited nonzero (its output is above)"
+  exit 1
+}
+
+# The trust gate covers rendered servers AND materialized skills alike, so an
+# untrusted project renders nothing — by design, and the fenced project here
+# is no exception. This script wrote that manifest a few lines earlier, so
+# consenting to it is honest. Consent without a TTY is deliberately two-step:
+# read the exact surface, then present the digest of the bytes that were read.
+trust_fenced_project() {
+  local preview digest granted
+  preview="$(cd "$proj" && as trust --preview 2>&1)" || died 'trust --preview' "$preview"
+  digest="$(sed -n 's/.*"surface_digest"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' <<<"$preview")"
+  if [[ -z "$digest" ]]; then
+    printf '%s\n' "$preview"
+    echo "FAIL: trust --preview emitted no surface_digest — cannot consent without a TTY"
+    exit 1
+  fi
+  granted="$(cd "$proj" && as trust --yes --consented-digest "$digest" 2>&1)" \
+    || died 'trust --yes' "$granted"
+  echo "trust: OK — fenced project consented ($digest)"
+}
+
 # ── skills mode (config "-"): the CLI has no MCP support by design (pi) —
 # conformance means skills render where the CLI actually loads them.
 if [[ "$config_rel" == "-" ]]; then
@@ -102,6 +142,10 @@ skills = ["conformance-skill"]
 [targets]
 default = ["$adapter"]
 TOML
+  # An inline skill is loadable content, so trust refuses to pin a surface
+  # that isn't itself pinned: lock first, then consent to the locked bytes.
+  lock_out="$(cd "$proj" && as lock --write 2>&1)" || died 'lock --write' "$lock_out"
+  trust_fenced_project
   (cd "$proj" && as use default --scope global --write)
   skill_md="$home/.pi/agent/skills/conformance-skill/SKILL.md"
   if [[ "$adapter" != "pi" ]]; then
@@ -128,6 +172,17 @@ fi
 
 # Minimal secret-free manifest: one stdio + one http server, plus the
 # slash-named startup-validation probe, this adapter only.
+#
+# `[delivery] render_locally` is load-bearing, and it belongs here rather than
+# inside the heredoc (which is unquoted, so backticks in it would run as
+# command substitutions). Adapter-rot detection lives in the RENDERED lane:
+# the alarm is "the file we write no longer parses in the real CLI", and that
+# needs a file. Delivery routes MCP servers to the live lane by default — zero
+# files, nothing on disk — so without this override `apply --write` correctly
+# refuses with "nothing was delivered" and the smoke has nothing to hand the
+# CLI. This is the manifest form of `agentstack x delivery render-locally
+# --write`, whose stated reasons include, verbatim, compatibility testing
+# against a CLI's own behaviour. Drop it and this alarm stops testing anything.
 cat > "$proj/.agentstack/agentstack.toml" <<TOML
 version = 1
 
@@ -145,6 +200,9 @@ type = "stdio"
 command = "echo"
 args = ["slash"]
 
+[delivery]
+render_locally = true
+
 [targets]
 default = ["$adapter"]
 TOML
@@ -153,7 +211,13 @@ TOML
 # the live probe runs the CLI from outside $proj, so project-scope artifacts
 # (the repo-manifest default since the context-derived scope landed) would be
 # invisible to both.
-apply_out="$(cd "$proj" && as apply --scope global --write 2>&1)"
+trust_fenced_project
+
+# The output is captured because the name-validation assertions below read it
+# — but it is never captured silently: a refusal is printed, then the harness
+# fails loudly, instead of `set -e` swallowing the capture whole.
+apply_out="$(cd "$proj" && as apply --scope global --write 2>&1)" \
+  || died 'apply --scope global --write' "$apply_out"
 printf '%s\n' "$apply_out"
 
 config="$home/$config_rel"

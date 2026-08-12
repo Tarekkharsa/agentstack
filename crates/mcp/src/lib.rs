@@ -469,7 +469,17 @@ impl<B: Backend> HttpServer<B> {
         let factory_backend = Arc::clone(&backend);
         let mut config =
             rmcp::transport::streamable_http_server::tower::StreamableHttpServerConfig::default();
-        config.legacy_session_mode = true;
+        // Every POST is answered on its own, with no session to establish
+        // first. This is the contract the hand-written bridge published and the
+        // one its callers were built against: a sandboxed harness POSTs
+        // `tools/call` directly, with no `initialize` and no `Mcp-Session-Id`,
+        // and legacy session mode answers that with "expected initialize
+        // request" — so the call never reaches the gateway and a denial that
+        // should have been recorded is lost as a transport failure. Sessions
+        // bought this endpoint nothing anyway: it serves one project's proxied
+        // surface, keeps no per-client state, and needs no server-initiated
+        // stream.
+        config.legacy_session_mode = false;
         config.json_response = true;
         config.max_request_body_bytes = 4 * 1024 * 1024;
         // The outer listener is deliberately reachable from a sandbox and
@@ -495,22 +505,27 @@ impl<B: Backend> HttpServer<B> {
     pub fn handle(&self, request: http::Request<Vec<u8>>) -> anyhow::Result<HttpResponse> {
         use http_body_util::{BodyExt, Full};
 
-        let (parts, body) = request.into_parts();
+        let (mut parts, body) = request.into_parts();
+        let json_only = widen_legacy_accept(&mut parts);
         let request = http::Request::from_parts(parts, Full::new(bytes::Bytes::from(body)));
         let mut service = self.service.clone();
-        self.runtime.block_on(async move {
+        let mut response = self.runtime.block_on(async move {
             let response = service
                 .call(request)
                 .await
                 .expect("RMCP HTTP service is infallible");
             let (parts, body) = response.into_parts();
             let body = body.collect().await?.to_bytes().to_vec();
-            Ok(HttpResponse {
+            anyhow::Ok(HttpResponse {
                 status: parts.status.as_u16(),
                 headers: parts.headers,
                 body,
             })
-        })
+        })?;
+        if json_only {
+            collapse_stream_to_json(&mut response);
+        }
+        Ok(response)
     }
 
     pub fn handle_parts(&self, request: HttpRequest) -> anyhow::Result<HttpResponse> {
@@ -522,6 +537,116 @@ impl<B: Backend> HttpServer<B> {
         }
         self.handle(builder.body(request.body)?)
     }
+}
+
+/// The `Accept` a strict 2025-spec Streamable HTTP server insists on.
+const DUAL_ACCEPT: &str = "application/json, text/event-stream";
+
+/// Let a JSON-only client keep talking to this endpoint.
+///
+/// The 2025 revision requires a POST to accept BOTH `application/json` and
+/// `text/event-stream`, and RMCP enforces that with a 406. AgentStack's own
+/// clients predate the rule: the sandboxed harness — and plenty of older MCP
+/// clients — send `Accept: application/json`, or `*/*`, or nothing at all, and
+/// the hand-written bridge this replaced answered them in plain JSON. Rejecting
+/// them now would take the gateway away from exactly the callers a sandbox
+/// leaves no alternative for.
+///
+/// So a POST that does not name the event stream is widened to the strict form
+/// before RMCP sees it, and the answer is turned back into plain JSON by
+/// [`collapse_stream_to_json`]. Returns whether that widening happened, which
+/// is the same question as "does this caller need the answer un-streamed".
+///
+/// This is CONTENT negotiation only. The token gate, the body ceiling, and the
+/// concurrency limit all sit outside this function and are untouched by it.
+fn widen_legacy_accept(parts: &mut http::request::Parts) -> bool {
+    if parts.method != http::Method::POST {
+        return false;
+    }
+    let strict = parts
+        .headers
+        .get(http::header::ACCEPT)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.contains("text/event-stream"));
+    if strict {
+        return false;
+    }
+    parts.headers.insert(
+        http::header::ACCEPT,
+        http::HeaderValue::from_static(DUAL_ACCEPT),
+    );
+    true
+}
+
+/// Hand a JSON-only caller the one JSON-RPC message its POST asked for.
+///
+/// RMCP answers a legacy session POST with an event stream even when the
+/// endpoint is configured for JSON responses — the session layer owns that
+/// decision. One POST still carries exactly one JSON-RPC reply, so for a client
+/// that never asked for a stream the framing is pure overhead it cannot parse.
+/// Unwrapping it restores the contract the hand-written bridge published: a
+/// plain `application/json` body, with the session header left in place.
+///
+/// A caller that DID ask for `text/event-stream` never reaches here, so the
+/// spec-compliant path keeps its stream untouched.
+fn collapse_stream_to_json(response: &mut HttpResponse) {
+    let streamed = response
+        .headers
+        .get(http::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(|value| value.starts_with("text/event-stream"));
+    if !streamed {
+        return;
+    }
+    let Some(message) = first_sse_message(&response.body) else {
+        return;
+    };
+    response.body = message;
+    response.headers.insert(
+        http::header::CONTENT_TYPE,
+        http::HeaderValue::from_static("application/json"),
+    );
+    // The body is no longer the one these described. The transport recomputes
+    // the length; a stale value would truncate or hang the reply.
+    response.headers.remove(http::header::CONTENT_LENGTH);
+    response.headers.remove(http::header::TRANSFER_ENCODING);
+}
+
+/// The first JSON-RPC message carried by an SSE body.
+///
+/// Deliberately narrow: it accepts `data:` payloads only, joins a multi-line
+/// field the way the SSE grammar says to, and ignores comments, `event:`,
+/// `id:`, and `retry:` lines — the keep-alive and priming frames RMCP may put
+/// in front of the real answer. `None` when nothing in the body is a JSON-RPC
+/// message, which leaves the original response untouched rather than replacing
+/// it with a guess.
+fn first_sse_message(body: &[u8]) -> Option<Vec<u8>> {
+    let text = std::str::from_utf8(body).ok()?;
+    let mut data = String::new();
+    for line in text.lines() {
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        if let Some(chunk) = line.strip_prefix("data:") {
+            if !data.is_empty() {
+                data.push('\n');
+            }
+            data.push_str(chunk.strip_prefix(' ').unwrap_or(chunk));
+            continue;
+        }
+        if line.is_empty() && !data.is_empty() {
+            if is_jsonrpc(&data) {
+                return Some(data.into_bytes());
+            }
+            data.clear();
+        }
+    }
+    is_jsonrpc(&data).then(|| data.into_bytes())
+}
+
+fn is_jsonrpc(payload: &str) -> bool {
+    serde_json::from_str::<Value>(payload)
+        .ok()
+        .and_then(|value| value.get("jsonrpc").cloned())
+        .is_some()
 }
 
 #[derive(Clone, Default)]
@@ -821,14 +946,40 @@ impl std::error::Error for StdioUpstreamError {}
 
 /// Tell "the child died" apart from "the child answered wrongly".
 ///
-/// RMCP reports a stream that ended before the reply as `ConnectionClosed`,
-/// and for a stdio child that is exactly one thing: the process is gone. The
-/// distinction is the whole reason the caller classifies at all — a server that
-/// exits is a bad argument or a rejected credential, while one that answers
-/// nonsense is not speaking MCP.
+/// The distinction is the whole reason the caller classifies at all: a server
+/// that exits is a bad argument or a rejected credential, while one that
+/// answers nonsense is not speaking MCP, and the two send the user to different
+/// places.
+///
+/// A dead child shows itself on whichever end of the pipe we happen to touch
+/// first, and that differs by platform: reading finds a closed stream
+/// (`ConnectionClosed`), while writing finds `EPIPE`. Linux usually reports the
+/// write, macOS usually the read, so classifying only one of them makes the
+/// answer depend on the operating system. Both are read structurally — the
+/// transport's error type is `std::io::Error`, so its `ErrorKind` is available
+/// without matching on any message text.
 fn handshake_failure_kind(error: &rmcp::service::ClientInitializeError) -> StdioUpstreamErrorKind {
+    use rmcp::service::ClientInitializeError;
+
     match error {
-        rmcp::service::ClientInitializeError::ConnectionClosed(_) => StdioUpstreamErrorKind::Exited,
+        ClientInitializeError::ConnectionClosed(_) => StdioUpstreamErrorKind::Exited,
+        ClientInitializeError::TransportError { error, .. } => {
+            match error
+                .error
+                .downcast_ref::<std::io::Error>()
+                .map(|io| io.kind())
+            {
+                Some(
+                    std::io::ErrorKind::BrokenPipe
+                    | std::io::ErrorKind::ConnectionReset
+                    | std::io::ErrorKind::ConnectionAborted
+                    | std::io::ErrorKind::NotConnected
+                    | std::io::ErrorKind::UnexpectedEof
+                    | std::io::ErrorKind::WriteZero,
+                ) => StdioUpstreamErrorKind::Exited,
+                _ => StdioUpstreamErrorKind::Protocol,
+            }
+        }
         _ => StdioUpstreamErrorKind::Protocol,
     }
 }
@@ -838,12 +989,29 @@ fn stderr_text(capture: &CapturedStderr) -> String {
     String::from_utf8_lossy(&bytes).into_owned()
 }
 
-fn capture_stderr(mut stderr: tokio::process::ChildStderr) -> CapturedStderr {
+/// Start draining the child's stderr immediately, and keep draining it for the
+/// whole life of the connection.
+///
+/// This runs CONCURRENTLY with the handshake on purpose, and the requirement is
+/// not cosmetic. A stderr pipe holds about 64KB; a server that logs its boot
+/// blocks on the write once that fills, and a blocked server never reads its
+/// stdin, so the handshake it was about to answer breaks instead. Reading only
+/// after the handshake would deadlock exactly the chatty-but-healthy servers
+/// this capture exists to report on.
+///
+/// The pump is spawned on the connection's OWN runtime handle rather than the
+/// ambient context, so it starts whether or not the caller happens to be inside
+/// a runtime, and the bytes are capped while the READING continues past the cap
+/// — stopping the read would close the pipe and hand the child a SIGPIPE.
+fn capture_stderr(
+    handle: &tokio::runtime::Handle,
+    mut stderr: tokio::process::ChildStderr,
+) -> CapturedStderr {
     use tokio::io::AsyncReadExt;
 
     let capture = Arc::new(std::sync::Mutex::new(Vec::new()));
     let writer = Arc::clone(&capture);
-    tokio::spawn(async move {
+    handle.spawn(async move {
         let mut chunk = [0_u8; 4096];
         while let Ok(count) = stderr.read(&mut chunk).await {
             if count == 0 {
@@ -876,6 +1044,10 @@ impl StdioUpstreamClient {
                 detail: error.to_string(),
                 stderr: String::new(),
             })?;
+        // The pump that drains the child's stderr is bound to THIS runtime, so
+        // it is running before the first handshake byte is written and cannot
+        // depend on whichever context the caller happens to be in.
+        let pump = runtime.handle().clone();
         let make_transport = || -> Result<_, StdioUpstreamError> {
             use process_wrap::tokio::{CommandWrap, KillOnDrop};
             let mut wrapped = CommandWrap::with_new(command, |process| {
@@ -897,7 +1069,9 @@ impl StdioUpstreamClient {
                     detail: format!("spawning '{}' in {}: {error}", command, cwd.display()),
                     stderr: String::new(),
                 })?;
-            let capture = stderr.map(capture_stderr).unwrap_or_default();
+            let capture = stderr
+                .map(|stderr| capture_stderr(&pump, stderr))
+                .unwrap_or_default();
             Ok((transport, capture))
         };
         let deadline = tokio::time::Instant::now() + startup_timeout;
@@ -1146,6 +1320,108 @@ mod tests {
             client.cancel().await.expect("cancel client");
             server_task.await.expect("server task");
         }
+    }
+
+    /// A child that dies mid-handshake shows itself on whichever end of the
+    /// pipe we touch first, and that differs by platform: macOS usually reports
+    /// the closed READ, Linux the failed WRITE (`EPIPE`). Both mean the same
+    /// thing to the user — the server exited — so both must classify the same
+    /// way, or `doctor --probe` would give a different diagnosis per operating
+    /// system for one identical fault.
+    #[test]
+    fn a_dead_child_is_exited_whichever_end_of_the_pipe_reports_it() {
+        use rmcp::service::ClientInitializeError;
+
+        let transport = |error: std::io::Error| ClientInitializeError::TransportError {
+            error: rmcp::transport::DynamicTransportError::from_parts(
+                "test",
+                std::any::TypeId::of::<()>(),
+                Box::new(error),
+            ),
+            context: "send initialize request".into(),
+        };
+
+        // The read side: the stream ended before the reply arrived.
+        assert_eq!(
+            handshake_failure_kind(&ClientInitializeError::ConnectionClosed(
+                "initialize response".into()
+            )),
+            StdioUpstreamErrorKind::Exited
+        );
+        // The write side, in each shape a vanished peer produces.
+        for kind in [
+            std::io::ErrorKind::BrokenPipe,
+            std::io::ErrorKind::ConnectionReset,
+            std::io::ErrorKind::ConnectionAborted,
+            std::io::ErrorKind::NotConnected,
+            std::io::ErrorKind::UnexpectedEof,
+            std::io::ErrorKind::WriteZero,
+        ] {
+            assert_eq!(
+                handshake_failure_kind(&transport(std::io::Error::new(kind, "gone"))),
+                StdioUpstreamErrorKind::Exited,
+                "{kind:?} means the child is gone"
+            );
+        }
+        // A live child that simply answered wrongly stays a protocol fault —
+        // the two send the user to different places.
+        assert_eq!(
+            handshake_failure_kind(&transport(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "garbage"
+            ))),
+            StdioUpstreamErrorKind::Protocol
+        );
+        assert_eq!(
+            handshake_failure_kind(&ClientInitializeError::ExpectedInitResult(None)),
+            StdioUpstreamErrorKind::Protocol
+        );
+    }
+
+    /// A JSON-only POST is answered in plain JSON, whatever framing RMCP chose.
+    /// The sandboxed harness cannot parse an event stream and has no other route
+    /// to the gateway.
+    #[test]
+    fn a_streamed_answer_is_unwrapped_for_a_json_only_caller() {
+        let body = b": keep-alive\nevent: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"ok\":true}}\n\n";
+        let mut response = HttpResponse {
+            status: 200,
+            headers: http::HeaderMap::new(),
+            body: body.to_vec(),
+        };
+        response.headers.insert(
+            http::header::CONTENT_TYPE,
+            http::HeaderValue::from_static("text/event-stream"),
+        );
+        response.headers.insert(
+            http::header::CONTENT_LENGTH,
+            http::HeaderValue::from_static("94"),
+        );
+        collapse_stream_to_json(&mut response);
+        assert_eq!(
+            response.headers.get(http::header::CONTENT_TYPE).unwrap(),
+            "application/json"
+        );
+        assert!(
+            response.headers.get(http::header::CONTENT_LENGTH).is_none(),
+            "a stale length would truncate the rewritten body"
+        );
+        let parsed: Value = serde_json::from_slice(&response.body).unwrap();
+        assert_eq!(parsed["result"]["ok"], true);
+
+        // A body that carries no JSON-RPC message is left exactly as it was,
+        // rather than replaced with a guess.
+        let mut untouched = HttpResponse {
+            status: 200,
+            headers: response.headers.clone(),
+            body: b"data: not json\n\n".to_vec(),
+        };
+        untouched.headers.insert(
+            http::header::CONTENT_TYPE,
+            http::HeaderValue::from_static("text/event-stream"),
+        );
+        collapse_stream_to_json(&mut untouched);
+        assert_eq!(untouched.body, b"data: not json\n\n");
     }
 
     /// A legacy client fetches `tools/list` once and, per spec, refetches only

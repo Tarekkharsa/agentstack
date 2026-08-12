@@ -54,13 +54,15 @@ you can see all three policy dimensions compile through `explain`.
    `opsbox__get_status` call is rejected as an unknown tool, and the audit log
    stays empty — the server is never spawned or contacted.
 
-2. **Trusted is not enough — the toolset fence comes first.** This repo
-   declares `[toolsets.default]`, so an unleased gateway over it still offers
-   its control plane only: `tools_search` surfaces no proxied tool, and a direct
-   `opsbox__get_status` is refused with a message that names the missing lease.
-   Opening a lease on `default` (`agentstack_lease_open`) is what puts the
-   server in front of the policy layers at all — and it writes no native files.
-   Policy is the second fence, never the first.
+2. **Trust is the first fence; the toolset decides the width.** This repo
+   declares `[toolsets.default]`, and the reviewed default toolset opens itself
+   for a trusted gateway — no explicit lease, no native files. So the surface a
+   trusted connection sees is the default toolset's servers, and it arrives
+   with the machine floor **already applied**: the first `tools_search` on that
+   connection shows `get_status` and `list_items`, never `delete_everything` or
+   `admin_reset`. Opening a lease on `default` explicitly (legacy clients still
+   can) selects the same toolset and writes no native files either. Policy is
+   the second fence, never the first — trust is.
 
 3. **The floor filters discovery.** Once leased, `tools_search` surfaces only
    `get_status` and `list_items`. `delete_everything` is **invisible** even
