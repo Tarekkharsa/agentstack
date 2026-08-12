@@ -177,7 +177,13 @@ echo '{}' > "$H/.claude.json"
 OUT=$("$AS" init --yes 2>&1)
 grep -qE "Found 1 coding tool" <<<"$OUT" && ok "detects exactly 1 CLI" || bad "detection line: $(grep -iE 'found|detect' <<<"$OUT" | head -1)"
 grep -qE "Imported: +0 MCP server" <<<"$OUT" && ok "imports 0 from an empty config" || bad "$(grep -i import <<<"$OUT")"
-grep -q 'claude-code' .agentstack/agentstack.toml && ok "targets include claude-code" || bad "targets wrong"
+# `[targets]` is a NARROWING, and one that only restates the detection is not
+# written at all — so the check is what an absent list RESOLVES to, not whether
+# the id is spelled in the file. Asserting the spelling passed for the wrong
+# reason: it would fail on a correct manifest that simply had nothing to narrow.
+render_locally
+"$AS" apply --dry-run 2>&1 | grep -q 'Claude Code' \
+  && ok "the manifest resolves to the detected CLI" || bad "targets wrong"
 
 hdr "A3) three CLIs, three formats, one inline bearer token"
 device

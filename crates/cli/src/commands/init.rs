@@ -1920,6 +1920,16 @@ version = 1
     // review, so the line below and the write cannot disagree — and outside
     // the `--verbose` arm, because the WRITE reads it too.
     let machine_settings = machine_settings_to_declare(&settings);
+    // The CLIs the machine layer ALREADY speaks for: counted by the headline's
+    // "settings from N CLIs", and deliberately not declared by this run. Read
+    // out here rather than inside the `--verbose` arm, and printed on every
+    // screen below, because the headline count alone reads as "N CLIs'
+    // settings were declared" — which for these is exactly backwards.
+    let already_declared: Vec<String> = settings
+        .keys()
+        .filter(|id| !machine_settings.contains_key(*id))
+        .map(|id| det_display(&detected, id))
+        .collect();
     if args.verbose {
         for (cli, skip) in &skipped {
             println!(
@@ -1985,27 +1995,23 @@ version = 1
                 )
                 .dimmed()
             );
-            let already: Vec<String> = settings
-                .keys()
-                .filter(|id| !machine_settings.contains_key(*id))
-                .map(|id| det_display(&detected, id))
-                .collect();
-            if !already.is_empty() {
-                println!(
-                    "      {}",
-                    format!(
-                        "Your machine layer already declares settings for {} — those are kept as \
-                         they are, not overwritten.",
-                        already.join(" · ")
-                    )
-                    .dimmed()
-                );
-            }
         }
     } else if let Some(line) =
         render_skipped_summary(&skipped, &tool_managed, tool_managed_included)
     {
         print!("{line}");
+    }
+    if !already_declared.is_empty() {
+        println!(
+            "{} {}",
+            "·".dimmed(),
+            format!(
+                "Your machine layer already declares settings for {} — those are kept as they \
+                 are, not overwritten.",
+                already_declared.join(" · ")
+            )
+            .dimmed()
+        );
     }
 
     // Inline secrets were lifted during detection. This is the moment that
@@ -2566,6 +2572,21 @@ version = 1
     }
 
     println!("{}  Wrote {}", "✅".dimmed(), manifest_path.display());
+    // The other file this import wrote, and the only one outside the project.
+    // Stated on the default screen for the same reason the manifest path is:
+    // "what is written" is the half of the review that never moves behind
+    // `--verbose`, and a value that lands in your home directory without a
+    // word is the surprise the machine layer was meant to prevent. WHY they go
+    // there (personal, machine-wide preferences) is the `--verbose` sentence;
+    // THAT they went there is this one.
+    if !machine_settings.is_empty() {
+        println!(
+            "{}  Wrote {} to your machine layer ({}) — personal preferences, not this repo",
+            "✅".dimmed(),
+            super::count(machine_settings.len(), "CLI's settings"),
+            display_home(&crate::util::paths::agentstack_home())
+        );
+    }
 
     // `--connect` — the one step that makes the default (live) lane deliver
     // anything. It runs HERE, before the closing summary, so the summary's

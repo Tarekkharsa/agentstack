@@ -84,8 +84,17 @@ fn say_yes(proj: &Path) -> anyhow::Result<()> {
 
 // ─────────────────────────────────────────────────────────────── (a) the row
 
-/// One entry, and both undo surfaces can see it. Before this, the list was
-/// empty and the printed undo pointed at nothing.
+/// One undoable action, and both undo surfaces can see it. Before this, the
+/// list was empty and the printed undo pointed at nothing.
+///
+/// "One action" is a claim about what `restore --last` reverses, not about how
+/// many rows the ledger keeps. The funnel writes in phases — its own manifest
+/// and lock declaration, and whatever `use --write` renders (the managed
+/// `.gitignore` block, each CLI's own files) — and each phase records its own
+/// row. They share a batch, which `restore --last` reverses whole, newest phase
+/// first. Asserting a bare row count instead would pass only for a project
+/// where activation happens to render nothing, and would fail the moment the
+/// funnel actually delivered something.
 #[test]
 fn accepting_records_exactly_one_revertable_entry() {
     let _g = agentstack::util::TEST_ENV_LOCK
@@ -97,17 +106,20 @@ fn accepting_records_exactly_one_revertable_entry() {
     say_yes(&proj).expect("the funnel must complete");
 
     let entries = agentstack::history::list();
-    assert_eq!(
-        entries.len(),
-        1,
-        "exactly one row — one yes is one undoable action, not zero and not a \
-         scattering of them: {entries:#?}"
-    );
-    let entry = &entries[0];
+    let entry = entries.first().expect("the funnel must record a row");
     assert_eq!(entry.operation, "yes", "the row must name the command");
     assert!(
         !entry.id.is_empty(),
         "the row needs an id or `restore <id>` cannot address it"
+    );
+    let batch = entry.batch.as_deref().expect(
+        "the yes row must belong to a batch — the screen promises `restore --last`, \
+         and without a batch that reverses only the newest phase",
+    );
+    assert!(
+        entries.iter().all(|e| e.batch.as_deref() == Some(batch)),
+        "every row this one yes produced belongs to that one batch, not a \
+         scattering of separately-undoable ones: {entries:#?}"
     );
 }
 

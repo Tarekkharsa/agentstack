@@ -204,6 +204,16 @@ pub fn run_answered(
     crate::util::atomic::write(&ctx.loaded.manifest_path, &new_text)
         .with_context(|| format!("writing {}", ctx.loaded.manifest_path.display()))?;
 
+    // One yes is one undoable action, and the activation below is the other
+    // half of it. `use --write` records its own row for what it renders (the
+    // managed `.gitignore` block, each CLI's own files), so two rows land for
+    // one yes — and without a batch the `restore --last` promised twice on this
+    // screen would reverse only the newest of them, leaving the declaration it
+    // was activating in place. The batch makes `--last` reverse the whole
+    // funnel, newest phase first: the same seam `setup` uses, for the same
+    // reason. Installed here so the funnel's own row below joins it too.
+    let _history_batch = crate::history::begin_batch("yes");
+
     // The rest runs inside a closure so one `?` cannot escape past the
     // rollback. Only a granted, rendered run leaves the writes in place.
     let outcome = activate(&ctx, &base, args, interactive, answer);
