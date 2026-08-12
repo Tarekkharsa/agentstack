@@ -1019,16 +1019,28 @@ fn upsert_server(a: &AddServerArgs, manifest_dir: Option<&Path>, allow_update: b
     };
     // Validation errors carry the complete retry skeleton — the user should
     // never have to reconstruct the command shape from memory (audit D5).
+    //
+    // The skeleton names the verb the user ACTUALLY RAN. Naming `x set server`
+    // after a failed `add server` sent people to a different command for a
+    // server that does not exist yet — and following it, or retrying `add`
+    // with the flag it asked for, produced a second error instead of a
+    // working server. `add` creates, `set` updates; the retry line should not
+    // silently swap one for the other.
+    let verb = if allow_update {
+        "x set server"
+    } else {
+        "add server"
+    };
     match a.transport {
         ServerType::Http if server.url.is_none() => {
             anyhow::bail!(
-                "http server needs --url\n  fix: agentstack x set server {} --url <URL> --write",
+                "http server needs --url\n  fix: agentstack {verb} {} --url <URL> --write",
                 a.name
             )
         }
         ServerType::Stdio if server.command.is_none() => {
             anyhow::bail!(
-                "stdio server needs --command\n  fix: agentstack x set server {} --type stdio --command <CMD> --write",
+                "stdio server needs --command\n  fix: agentstack {verb} {} --type stdio --command <CMD> --write",
                 a.name
             )
         }

@@ -79,6 +79,27 @@ fn run_with(args: &SelfUpdateArgs, source: &dyn ReleaseSource) -> Result<()> {
     let latest = source
         .latest()
         .context("could not reach the release channel")?;
+
+    // A pre-release is not on the stable channel at all, so neither branch
+    // below can describe one truthfully: `latest` is the newest STABLE
+    // release, which sits BELOW this build before its line is cut and ABOVE
+    // it afterwards. The old code took the first branch in the "below" case
+    // and printed a green tick over "agentstack 0.18.0-rc.5 is the latest
+    // release" — false in both directions, because an rc is never what
+    // `releases/latest` serves.
+    //
+    // `self update` never moves a user onto a pre-release or off one, which
+    // is the promise the README makes. So the honest answer is where they
+    // are, what the stable channel holds, and the one command that moves
+    // them — never a tick, and never a download.
+    if update::current_is_prerelease() {
+        print!(
+            "{}",
+            prerelease_notice(update::current_exact(), &current, &latest)
+        );
+        return Ok(());
+    }
+
     if latest.version <= current {
         println!(
             "{} agentstack {current} is the latest release.",
@@ -379,6 +400,30 @@ impl Blocker {
     }
 }
 
+/// What `self update` says to someone running a pre-release build.
+///
+/// Split out as a pure function so its wording is testable without a release
+/// channel: this is the one path where the command reports a version the user
+/// cannot reach by running it, so the sentence has to carry the way forward
+/// itself rather than implying `--write` will do it.
+fn prerelease_notice(exact: &str, current: &update::Version, latest: &update::Release) -> String {
+    let standing = if latest.version >= *current {
+        format!("stable {} is available", latest.version)
+    } else {
+        format!("the latest stable release is {}", latest.version)
+    };
+    format!(
+        "you are on {exact}, a pre-release; {standing}.\n  \
+         `self update` does not move off a pre-release — install it directly:\n    \
+         curl -fsSL {INSTALLER_URL} | AGENTSTACK_VERSION={} sh\n",
+        latest.tag
+    )
+}
+
+/// The installer one-liner the README and the docs site both publish.
+const INSTALLER_URL: &str =
+    "https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh";
+
 /// Why this binary cannot be replaced in place, if it cannot be. Cheap,
 /// filesystem-only checks — no network, so a preview reports them too.
 fn blocker(exe: &Path) -> Option<Blocker> {
@@ -593,6 +638,41 @@ mod tests {
         ] {
             assert_eq!(checksum_for(bad, "x.tar.gz"), None, "should reject {bad:?}");
         }
+    }
+
+    /// A pre-release build must never be told it is "the latest release".
+    ///
+    /// `update::Version` drops the `-rc.N` suffix so ranking works, which used
+    /// to make `0.18.0-rc.5` compare EQUAL to a released `0.18.0` and take the
+    /// up-to-date branch — printing a green tick over the version the user did
+    /// not have. The notice names the build they are actually running, and the
+    /// command that moves them, because `self update` will not.
+    #[test]
+    fn a_prerelease_is_told_where_it_stands_not_that_it_is_current() {
+        let rc = update::Version::parse("0.18.0-rc.5").unwrap();
+        let stable = update::Release {
+            tag: "v0.18.0".into(),
+            version: update::Version::parse("0.18.0").unwrap(),
+        };
+        let out = prerelease_notice("0.18.0-rc.5", &rc, &stable);
+
+        assert!(out.contains("you are on 0.18.0-rc.5"), "{out}");
+        assert!(out.contains("stable 0.18.0 is available"), "{out}");
+        assert!(out.contains("does not move off a pre-release"), "{out}");
+        assert!(out.contains("AGENTSTACK_VERSION=v0.18.0"), "{out}");
+        // The old, false sentence — and the tick that carried it.
+        assert!(!out.contains("is the latest release"), "{out}");
+        assert!(!out.contains('\u{2713}'), "{out}");
+
+        // Before the stable line is cut, `latest` sits BELOW this build. The
+        // notice must still be true, and must not claim an upgrade exists.
+        let older = update::Release {
+            tag: "v0.17.1".into(),
+            version: update::Version::parse("0.17.1").unwrap(),
+        };
+        let out = prerelease_notice("0.18.0-rc.5", &rc, &older);
+        assert!(out.contains("the latest stable release is 0.17.1"), "{out}");
+        assert!(!out.contains("is available"), "{out}");
     }
 
     #[test]

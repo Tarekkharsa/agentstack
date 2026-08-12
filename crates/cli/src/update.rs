@@ -113,6 +113,23 @@ pub fn current() -> Version {
     Version::parse(env!("CARGO_PKG_VERSION")).expect("our own crate version parses")
 }
 
+/// The running binary's version EXACTLY as its own crate spells it, `-rc.N`
+/// suffix and all.
+///
+/// [`Version`] deliberately discards that suffix so ranking works — an
+/// `0.18.0-rc.5` must not outrank a released `0.18.0` — which is precisely
+/// what makes it the wrong value to PRINT. Reporting the parsed version to
+/// someone on a release candidate names a build they are not running.
+pub fn current_exact() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
+/// Whether this build is a pre-release. Asked of the crate version string,
+/// because [`Version`] has already thrown the evidence away.
+pub fn current_is_prerelease() -> bool {
+    current_exact().contains('-')
+}
+
 /// A published release: the tag exactly as the channel spelled it (already
 /// validated safe for a URL) plus its parsed version.
 #[derive(Debug, Clone, PartialEq, Eq)]
