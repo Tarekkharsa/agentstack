@@ -1082,6 +1082,36 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
+/// The one-line reading of a full `doctor` pass, for a caller that orchestrates
+/// `doctor` inside a larger flow (the `init` wizard's closing check).
+///
+/// The same checks, over the same args, producing the same counts as [`run`] —
+/// only the per-section render and the closing `next:` pointer are left out.
+/// Both belong to `doctor` itself, which the line names: a wizard that ends on
+/// exactly one next step must not print a second one that competes with it, and
+/// a reader who wants the sections is one command away.
+///
+/// Read-only for the same reason [`collect`] is: nothing here writes unless the
+/// caller passes `fix`, which the wizard never does.
+pub(crate) fn summary_line(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<String> {
+    let mut report = Report::new();
+    run_checks(args, manifest_dir, &mut report)?;
+    let notes = if report.advisories > 0 {
+        format!(", {}", super::count(report.advisories, "note"))
+    } else {
+        String::new()
+    };
+    // Counts and the command that shows them, and nothing else. The readiness
+    // gloss `run` prints ("fix the findings above first") names a report that
+    // is deliberately not above this line; the caller's own single next step
+    // carries the verdict instead.
+    Ok(format!(
+        "{}, {}{notes} — agentstack doctor",
+        super::count(report.errors, "error"),
+        super::count(report.warnings, "warning")
+    ))
+}
+
 /// The same checks `doctor` runs, with fix/live off and nothing printed —
 /// read-only integration entry point. Deep stays on because an explicit
 /// check-up surface must keep the content scan's findings.

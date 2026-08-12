@@ -29,6 +29,7 @@ fn args(force: bool) -> InitArgs {
         yes: false,
         consented_plan: None,
         connect: false,
+        verbose: false,
     }
 }
 

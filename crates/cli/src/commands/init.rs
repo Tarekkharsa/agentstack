@@ -181,6 +181,20 @@ fn offer_env_schema(dir: &Path, names: &[String]) -> Result<Option<crate::histor
     if declared.is_empty() || path.exists() {
         return Ok(None);
     }
+    // `confirm` answers false without prompting when there is no terminal, so
+    // a scripted run always ended here — after three lines of context for a
+    // question nobody was asked, plus a line saying it had been skipped. The
+    // recommendation still has to reach that reader (it is how a project opts
+    // into a vault at all), so it becomes one line instead of disappearing.
+    if !crate::util::confirm::is_interactive() {
+        println!(
+            "{}  varlock ({}) can resolve these names from a vault instead — drop a \
+             .env.schema in this project to opt in.",
+            "·".dimmed(),
+            "https://varlock.dev".dimmed()
+        );
+        return Ok(None);
+    }
     println!(
         "\nvarlock ({}) can resolve these names from 1Password, a cloud secret \
          manager, or device-local encryption — no values in this project at all. A \
@@ -588,6 +602,17 @@ fn report_unstored_keychain(unstored: &[String]) {
 /// Report the values init deliberately did NOT store (skip path), each with the
 /// one-liner to store it. This replaces `--no-keychain`'s old silent value-drop.
 fn report_skipped(lifted: &[Lifted]) {
+    // One token is one fact, so it gets one line rather than a header over a
+    // single-row table.
+    if let [one] = lifted {
+        println!(
+            "{}  {} — provide it before running: agentstack secret set {}",
+            "·".dimmed(),
+            "1 token not stored".bold(),
+            one.reference
+        );
+        return;
+    }
     let pronoun = if lifted.len() == 1 { "it" } else { "each" };
     println!(
         "{}  {}",
@@ -655,6 +680,9 @@ fn run_gated(args: &InitArgs, manifest_dir: Option<&Path>, interactive: bool) ->
                 // (see `bare` above): the import still shows its review and
                 // still asks its own confirm.
                 connect: args.connect,
+                // `--verbose` is about volume, not about what runs, so it
+                // travels the same route the import does.
+                verbose: args.verbose,
             };
             return super::setup::run(&wizard, manifest_dir);
         }
@@ -1712,14 +1740,26 @@ version = 1
     // ── The pre-write review (Stage 1.2): what was found, what imports, and
     // where it lands — every fact stated BEFORE anything is written.
     let project_root = crate::manifest::project_root_of(&dir);
-    print!("{}", render_found_clis(&detected, &project_root));
-    if servers.is_empty() {
-        println!(
-            "{}  No MCP servers found in those configs — importing settings only",
-            "📥".dimmed()
-        );
+    // Progressive disclosure (2026-08-12): the default states one line per
+    // fact and `--verbose` spells the same facts out. Nothing moves behind the
+    // flag that changes what the run DOES — only how much of the evidence is
+    // enumerated. The consent-critical half (which servers, which secrets,
+    // what is written) stays on the default screen, as names on one line.
+    if args.verbose {
+        print!("{}", render_found_clis(&detected, &project_root));
+        if servers.is_empty() {
+            println!(
+                "{}  No MCP servers found in those configs — importing settings only",
+                "📥".dimmed()
+            );
+        } else {
+            print!("{}", render_import_servers(&servers));
+        }
     } else {
-        print!("{}", render_import_servers(&servers));
+        print!(
+            "{}",
+            render_review_headline(detected.len(), &servers, settings.len())
+        );
     }
     // "What does this machine have?" and "what does this project use?" are two
     // questions, and `init` used to answer only the first: every detected
@@ -1733,36 +1773,47 @@ version = 1
     // Lossy imports are explained, never silent: name each entry the import
     // left behind, why, and that nothing was deleted. Names come from other
     // CLIs' config files — hostile input; sanitize before display.
-    for (cli, skip) in &skipped {
-        println!(
-            "{} not imported from {cli}: '{}' — {}; it stays in {cli}'s own config, \
-             nothing was deleted",
-            "⚠".yellow(),
-            crate::text::sanitize_line(&skip.name),
-            skip.reason
+    //
+    // Two shapes of skip, one statement. By default they collapse to a single
+    // counted line — the fact ("N entries were left behind, nothing deleted")
+    // is what a reader must not miss, and the per-entry reasons are evidence
+    // for the reader who asks. `--verbose` prints both blocks in full.
+    if args.verbose {
+        for (cli, skip) in &skipped {
+            println!(
+                "{} not imported from {cli}: '{}' — {}; it stays in {cli}'s own config, \
+                 nothing was deleted",
+                "⚠".yellow(),
+                crate::text::sanitize_line(&skip.name),
+                skip.reason
+            );
+        }
+        // Servers another application owns: excluded by default, and named
+        // here whichever way it went. `--dry-run` reaches this same review, so
+        // the preview and the real run make the identical statement.
+        print!(
+            "{}",
+            render_tool_managed(&tool_managed, tool_managed_included)
         );
-    }
-    // Servers another application owns: excluded by default, and named here
-    // whichever way it went. `--dry-run` reaches this same review, so the
-    // preview and the real run make the identical statement.
-    print!(
-        "{}",
-        render_tool_managed(&tool_managed, tool_managed_included)
-    );
-    if !settings.is_empty() {
-        let from: Vec<String> = settings
-            .keys()
-            .map(|id| det_display(&detected, id))
-            .collect();
-        println!(
-            "{}  Importing settings from {}",
-            "⚙".dimmed(),
-            from.join(" · ")
-        );
-        println!(
-            "      {}",
-            "Only settings agentstack understands are imported; every other setting stays in its CLI's own file, untouched.".dimmed()
-        );
+        if !settings.is_empty() {
+            let from: Vec<String> = settings
+                .keys()
+                .map(|id| det_display(&detected, id))
+                .collect();
+            println!(
+                "{}  Importing settings from {}",
+                "⚙".dimmed(),
+                from.join(" · ")
+            );
+            println!(
+                "      {}",
+                "Only settings agentstack understands are imported; every other setting stays in its CLI's own file, untouched.".dimmed()
+            );
+        }
+    } else if let Some(line) =
+        render_skipped_summary(&skipped, &tool_managed, tool_managed_included)
+    {
+        print!("{line}");
     }
 
     // Inline secrets were lifted during detection. This is the moment that
@@ -1774,44 +1825,57 @@ version = 1
     // there afterwards. Saying "lifted" would let a security-conscious reader
     // believe their live config had been cleaned when it hasn't — the one
     // place this output could overstate, so it doesn't.
+    //
+    // Both the counted default and the itemized `--verbose` form keep the two
+    // security sentences whole: the manifest holds references (never values),
+    // and each value was COPIED — the original plaintext is still in the CLI's
+    // own config. Those are the promises a reader could otherwise misread in
+    // the safe direction, so neither is behind a flag.
     if !lifted.is_empty() {
-        println!(
-            "{}  {} — replaced with secure references here:",
-            "🔐".dimmed(),
-            format!(
-                "Found {} in your live CLI configs",
-                super::count(lifted.len(), "plaintext token")
-            )
-            .yellow()
-            .bold()
-        );
-        let width = lifted.iter().map(|l| l.reference.len()).max().unwrap_or(0);
-        for l in &lifted {
+        if args.verbose {
             println!(
-                "      {} {}  {}",
-                format!("${{{}}}", l.reference).green(),
-                " ".repeat(width.saturating_sub(l.reference.len())),
-                l.origin.dimmed()
+                "{}  {} — replaced with secure references here:",
+                "🔐".dimmed(),
+                format!(
+                    "Found {} in your live CLI configs",
+                    super::count(lifted.len(), "plaintext token")
+                )
+                .yellow()
+                .bold()
             );
+            let width = lifted.iter().map(|l| l.reference.len()).max().unwrap_or(0);
+            for l in &lifted {
+                println!(
+                    "      {} {}  {}",
+                    format!("${{{}}}", l.reference).green(),
+                    " ".repeat(width.saturating_sub(l.reference.len())),
+                    l.origin.dimmed()
+                );
+            }
+            println!(
+                "      {}",
+                "The manifest stays commit-safe; real values resolve locally at apply time."
+                    .dimmed()
+            );
+            println!(
+                "      {}",
+                "Each value was COPIED — the original is still in the CLI's own config, unchanged."
+                    .dimmed()
+            );
+        } else {
+            print!("{}", render_lifted_summary(&lifted));
         }
-        println!(
-            "      {}",
-            "The manifest stays commit-safe; real values resolve locally at apply time.".dimmed()
-        );
-        println!(
-            "      {}",
-            "Each value was COPIED — the original is still in the CLI's own config, unchanged."
-                .dimmed()
-        );
     }
 
     // Where it all lands: the manifest this import writes, and each CLI's
     // native destination a follow-up `apply --write` manages — scope spelled
     // out, printed before any write or consent question (Stage 1.2).
-    print!(
-        "{}",
-        render_managed_files(&manifest_path, &destinations, &project_root)
-    );
+    if args.verbose {
+        print!(
+            "{}",
+            render_managed_files(&manifest_path, &destinations, &project_root)
+        );
+    }
 
     // W4: the delivery planner's routing, stated per tool in plain language,
     // in the same pre-write review. A fresh manifest carries no override, so
@@ -1827,13 +1891,22 @@ version = 1
     // still bound to enforcement — the flag is what makes the registration
     // happen, and the closing summary re-reads the real per-harness state
     // afterwards, so a registration that failed is reported as such there.
-    print!(
-        "{}",
-        render_delivery_routing(
-            &target_defaults,
-            args.connect || unconnected_live_harnesses(&target_defaults, None).is_empty()
-        )
-    );
+    //
+    // ONE routing table per run, and only under `--verbose`. This block, the
+    // closing summary's `Delivery:` lines, and the wizard's own Delivery
+    // screen used to print the same answer three times in a single `init`.
+    // The default keeps the honest one-line reading instead — and invariant 8's
+    // "planned live, not connected" disclosure is never inside the flag: it
+    // rides the closing summary, which every route reaches.
+    if args.verbose && !gate_write {
+        print!(
+            "{}",
+            render_delivery_routing(
+                &target_defaults,
+                args.connect || unconnected_live_harnesses(&target_defaults, None).is_empty()
+            )
+        );
+    }
 
     // Counts for the closing summary — `servers`/`settings` move into the
     // manifest below.
@@ -2004,12 +2077,17 @@ version = 1
 
     // The wizard's consent gate: the review above is the evidence; this is
     // the one question. Declining writes nothing (the caller closes the run).
+    //
+    // This question is the ONE place the untouched-configs promise is made on
+    // the guided route: the review above used to repeat it three times, once
+    // per block, which is how a promise stops being read. The question itself
+    // stays a question, and its default stays no.
     if gate_write
-        && !crate::util::confirm::confirm(
-            "\nImport this into one manifest now? Only the manifest and any lifted token \
-             values are written — your CLIs' own configs stay untouched until the later \
-             apply confirm.",
-        )?
+        && !crate::util::confirm::confirm(&format!(
+            "\nImport into {}? Only the manifest and any lifted token values are \
+             written — your CLIs' own configs stay untouched.",
+            display_path(&manifest_path, &project_root)
+        ))?
     {
         println!("\n{} Nothing written.", "·".dimmed());
         return Ok(false);
@@ -2227,7 +2305,10 @@ version = 1
     } else {
         grant_trust_for_import(&base, &toml_text, &manifest, library_import)
     };
-    if project_sourced {
+    // The withheld grant is stated once. On the scripted route the close owns
+    // it — `agentstack trust .` becomes that run's single `Next:` — so saying
+    // it here too would be the same instruction twice, three lines apart.
+    if project_sourced && !show_next {
         println!(
             "  {} servers from this repo's own config were imported — review what they run: `agentstack trust .`",
             "·".dimmed()
@@ -2271,30 +2352,32 @@ version = 1
         };
         print!(
             "{}",
-            render_import_summary(
-                &manifest_path.display().to_string(),
-                &sources,
+            ImportSummary {
+                manifest_path: &manifest_path.display().to_string(),
+                sources: &sources,
                 server_count,
                 settings_count,
-                &refs_needing_values,
-                &also_detected,
+                needing_values: &refs_needing_values,
+                also_detected: &also_detected,
                 // Every file this import read lives inside the project root.
-                detected
+                sources_are_project_scope: detected
                     .iter()
                     .flat_map(|c| c.configs.iter())
                     .all(|p| p.starts_with(&project_root)),
-                &delivery_summary_lines(&target_defaults),
-                &unconnected_live_harnesses(&target_defaults, Some(&manifest)),
-                library_import.then_some((
+                unconnected_live: &unconnected_live_harnesses(&target_defaults, Some(&manifest)),
+                library_dest: library_import.then_some((
                     library_source.name.as_str(),
                     library_root_display.as_str(),
                     library_servers.len(),
                     inline_servers.len(),
                 )),
-                renders_servers(&target_defaults, &manifest),
-                renders_anything(&target_defaults, &manifest, server_count),
+                servers_rendered: renders_servers(&target_defaults, &manifest),
+                rendered_work: renders_anything(&target_defaults, &manifest, server_count),
                 bridge_registered_now,
-            )
+                needs_trust: project_sourced,
+                verbose: args.verbose,
+            }
+            .render()
         );
     }
     Ok(true)
@@ -2459,236 +2542,266 @@ fn grant_trust_for_import(
     crate::trust::trust_reviewed(base, snapshot.digest(), surface).is_ok()
 }
 
-/// Pure formatter for the scripted-import success summary, so its shape is
-/// unit-testable without touching real CLI configs. One block, five facts:
-/// manifest path, source CLIs, imported counts, secrets still needing values,
-/// and the next commands (`apply --write`, then `doctor`).
-// Every parameter here is one display fact the summary states, and the function
-// is pure so those facts stay testable. A struct would name the same eight
-// values once more for a single call site.
-#[allow(clippy::too_many_arguments)]
-fn render_import_summary(
-    manifest_path: &str,
-    sources: &[String],
+/// Every display fact the scripted-import close states, gathered so the
+/// formatter stays pure (and unit-testable without touching real CLI configs)
+/// while the caller names each value once.
+///
+/// It became a struct when progressive disclosure added the last two fields:
+/// fifteen positional booleans past a `#[allow(too_many_arguments)]` is a
+/// formatter nobody can call correctly, and `..Default::default()` is what
+/// keeps each test naming only the facts it is about.
+#[derive(Default)]
+struct ImportSummary<'a> {
+    manifest_path: &'a str,
+    sources: &'a [String],
     server_count: usize,
     settings_count: usize,
-    needing_values: &[String],
-    also_detected: &[String],
-    // True when every source config this import read is a project-scope file —
-    // i.e. exactly the files `apply --write` will manage here. The
-    // two-uncoordinated-places note is then false, and pointing at
-    // `--scope global` would send the user to write machine-wide files they
-    // never asked about.
+    needing_values: &'a [String],
+    also_detected: &'a [String],
+    /// True when every source config this import read is a project-scope file —
+    /// i.e. exactly the files `apply --write` will manage here. The
+    /// two-uncoordinated-places note is then false, and pointing at
+    /// `--scope global` would send the user to write machine-wide files they
+    /// never asked about.
     sources_are_project_scope: bool,
-    // The delivery planner's per-tool routing, already rendered as
-    // "<tool> — <what goes live> · <what is written>" lines. Empty when no tool
-    // could be described, which is the only honest way to say nothing here.
-    delivery_lines: &[String],
-    // Display names of harnesses the plan routes to the LIVE lane while the
-    // bridge is registered in no detected CLI. Non-empty means "planned live,
-    // delivering nothing" — invariant 8 forbids the ordinary "served live"
-    // wording there, so this replaces the routing lines above.
-    unconnected_live: &[String],
-    // Where the imported servers landed: the linked library source's name and
-    // folder, or `None` when `--project-servers` kept them inline.
-    library_dest: Option<(&str, &str, usize, usize)>,
-    // Will `apply --write` write a server config anywhere? False for an
-    // ordinary project of MCP-capable tools, where the servers travel live.
+    /// Display names of harnesses the plan routes to the LIVE lane while the
+    /// bridge is registered in no detected CLI. Non-empty means "planned live,
+    /// delivering nothing" — invariant 8 forbids the ordinary "served live"
+    /// wording there, so this replaces the routing lines above, at every
+    /// verbosity.
+    unconnected_live: &'a [String],
+    /// Where the imported servers landed: the linked library source's name and
+    /// folder, or `None` when `--project-servers` kept them inline.
+    library_dest: Option<(&'a str, &'a str, usize, usize)>,
+    /// Will `apply --write` write a server config anywhere? False for an
+    /// ordinary project of MCP-capable tools, where the servers travel live.
     servers_rendered: bool,
-    // Is there ANY rendered-lane work here? When false, `apply --write` writes
-    // nothing and must not be offered as the next step.
+    /// Is there ANY rendered-lane work here? When false, `apply --write` writes
+    /// nothing and must not be offered as the next step.
     rendered_work: bool,
-    // Did THIS run register the bridge (`--connect`)? Then the source configs
-    // are no longer untouched — each gained exactly one entry — and the note
-    // below must say which, or it contradicts the diff printed above it.
+    /// Did THIS run register the bridge (`--connect`)? Then the source configs
+    /// are no longer untouched — each gained exactly one entry — and the note
+    /// below must say which, or it contradicts the diff printed above it.
     bridge_registered_now: bool,
-) -> String {
-    let mut out = String::new();
-    // The headline is the one line a reader is guaranteed to take away, so it
-    // must not say "complete" about a setup that delivers nothing. When the
-    // live lane has no bridge anywhere, this run imported and stopped — the
-    // wizard's close already says exactly that ("Setup imported, not yet
-    // delivering"), and the scripted close now agrees with it instead of
-    // opening with a success the Delivery block below then retracts.
-    if unconnected_live.is_empty() {
-        out.push_str("\nImport complete.\n");
-    } else {
-        out.push_str("\nImported, and not yet delivering.\n");
-    }
-    out.push_str(&format!(
-        "  Manifest:  {manifest_path}   (the source of truth your CLIs render from)\n"
-    ));
-    out.push_str(&format!("  From:      {}\n", sources.join(" · ")));
-    let mut imported = super::count(server_count, "MCP server");
-    if settings_count > 0 {
-        imported.push_str(&format!(
-            " · settings from {}",
-            super::count(settings_count, "CLI")
-        ));
-    }
-    out.push_str(&format!("  Imported:  {imported}\n"));
-    // Library-first: say where the reusable half went, so nobody has to guess
-    // why the manifest lists names instead of commands.
-    if let Some((name, root, library_count, inline_count)) = library_dest {
-        if inline_count == 0 {
-            out.push_str(&format!(
-                "  Library:   the servers landed in '{name}' ({root}); the manifest\n\
-                 \x20            references them by name, so this project stays clean\n"
-            ));
+    /// Did this import take servers out of the repository's own config, so the
+    /// trust grant was withheld? Then the review is the single most relevant
+    /// next step, and it takes the one `Next:` line.
+    needs_trust: bool,
+    /// Spell every fact out (`--verbose`) rather than stating it as a count.
+    verbose: bool,
+}
+
+impl ImportSummary<'_> {
+    /// The scripted-import close.
+    ///
+    /// Default shape: headline, the manifest, what landed, what still blocks
+    /// the setup, ONE `Next:` line, and one compact line of everything else.
+    /// `--verbose` re-adds the source list, the left-out CLIs' explanation, the
+    /// per-tool routing, and the long-form library sentence.
+    fn render(&self) -> String {
+        let mut out = String::new();
+        // The headline is the one line a reader is guaranteed to take away, so
+        // it must not say "complete" about a setup that delivers nothing. When
+        // the live lane has no bridge anywhere, this run imported and stopped —
+        // the wizard's close says exactly that ("Setup imported, not yet
+        // delivering"), and the scripted close agrees with it instead of
+        // opening with a success the Delivery line below then retracts.
+        if self.unconnected_live.is_empty() {
+            out.push_str("\nImport complete.\n");
         } else {
-            out.push_str(&format!(
-                "  Library:   {} landed in '{name}' ({root}); {} with native names that\n\
-                 \x20            cannot be library filenames stayed inline, unchanged\n",
-                super::count(library_count, "server"),
-                super::count(inline_count, "server")
+            out.push_str("\nImported, and not yet delivering.\n");
+        }
+        out.push_str(&format!("  Manifest:  {}\n", self.manifest_path));
+        if self.verbose {
+            out.push_str(&format!("  From:      {}\n", self.sources.join(" · ")));
+        }
+        let mut imported = super::count(self.server_count, "MCP server");
+        if self.settings_count > 0 {
+            imported.push_str(&format!(
+                " · settings from {}",
+                super::count(self.settings_count, "CLI")
             ));
         }
-    }
-    // M4: the CLIs deliberately left out of `[targets] default`. Naming them —
-    // and why — is what keeps "we only targeted two of your six tools" from
-    // looking like a detection failure. There is no command that edits
-    // `[targets] default` today, so the honest instruction is the manifest key
-    // plus the one-off render flag, not an invented verb.
-    if !also_detected.is_empty() {
-        out.push_str(&format!(
-            "  Also seen: {} — installed, but no config to import, so not\n\
-             \x20            targeted yet. Add one to [targets].default in the manifest, or\n\
-             \x20            render to it once: agentstack apply --target <id> --write\n",
-            also_detected.join(" · ")
-        ));
-    }
-    if !needing_values.is_empty() {
-        let verb = if needing_values.len() == 1 {
-            "needs"
-        } else {
-            "need"
-        };
-        out.push_str(&format!(
-            "  Secrets:   {} still {verb} a value before this setup can run:\n",
-            needing_values.len()
-        ));
-        for name in needing_values {
-            out.push_str(&format!("               agentstack secret set {name}\n"));
-        }
-    }
-    // Import reads the CLIs' own configs and never edits them, so the entries
-    // it copied still live there. After `apply --write` the same server is
-    // described in two uncoordinated places — which is the exact problem this
-    // product exists to remove, so it gets named here rather than discovered
-    // later as drift.
-    if server_count > 0 && bridge_registered_now {
-        // `--connect` just edited these very files, so "unchanged" would be a
-        // lie told directly under the diff that changed them. "Now carry" is
-        // the reading that stays true whether the entry landed in this run or
-        // was already there (a re-import on a connected machine), which is why
-        // it is not phrased as a count of what was added.
-        out.push_str(
-            "  Note:      those CLI configs now carry one agentstack entry — the bridge.\n\
-             \x20            No server was copied back into them; they are served from\n\
-             \x20            this manifest.\n",
-        );
-    } else if server_count > 0 && !servers_rendered {
-        // The double-delivery note is false now: `apply` honours the delivery
-        // planner, so these servers are never copied into a native config
-        // again. The manifest is the one description of them.
-        out.push_str(
-            "  Note:      the CLI configs above are unchanged, and nothing copies these\n\
-             \x20            servers back into them — they are served from this manifest.\n",
-        );
-    } else if server_count > 0 && !sources_are_project_scope {
-        out.push_str(
-            "  Note:      the CLI configs above are unchanged — after `apply --write` these\n\
-             \x20            servers are described in two places. To manage the originals from\n\
-             \x20            this manifest too: agentstack apply --scope global --write\n",
-        );
-    } else if server_count > 0 {
-        out.push_str(
-            "  Note:      those config files are this project's own — `apply --write`\n\
-             \x20            manages them from this manifest, so there is no second copy.\n",
-        );
-    }
-    // W4: the routing, per tool, before the next-step list — so "apply --write"
-    // is read as the command for the rendered lane rather than as the command
-    // for everything. Skills and MCP servers reach an MCP-capable tool live;
-    // saying nothing here would let `apply --write` keep implying otherwise.
-    if !unconnected_live.is_empty() {
-        // The scripted path never offers the bridge, so this is the only place
-        // a non-TTY user learns that the live lane is planned but inert. It
-        // states the plan, the consequence, and the one deliberate command —
-        // and never the words "served live", which would be a false claim.
-        out.push_str(&format!(
-            "  Delivery:  planned live for {} — NOT YET CONNECTED\n",
-            unconnected_live.join(", ")
-        ));
-        out.push_str("             nothing is served until you register the bridge:\n");
-        out.push_str("             agentstack x gateway connect --all --write\n");
-        // The same import in ONE command next time. It belongs beside the
-        // two-step form, not instead of it: a user who is already here needs
-        // the command that fixes this run, and a script author needs the flag
-        // that stops the gap from happening at all.
-        out.push_str(
-            "             (or import and register in one step: agentstack init --connect)\n",
-        );
-        out.push_str(
-            "             agentstack x delivery   (the routing per tool, and how to write \
-             files instead)\n",
-        );
-    } else if !delivery_lines.is_empty() {
-        out.push_str("  Delivery:  ");
-        for (i, line) in delivery_lines.iter().enumerate() {
-            if i > 0 {
-                out.push_str("             ");
+        // Library-first: say where the reusable half went, so nobody has to
+        // guess why the manifest lists names instead of commands. One clause on
+        // the Imported line by default; the full sentence under --verbose.
+        if let Some((name, root, library_count, inline_count)) = self.library_dest {
+            if self.verbose {
+                out.push_str(&format!("  Imported:  {imported}\n"));
+                if inline_count == 0 {
+                    out.push_str(&format!(
+                        "  Library:   the servers landed in '{name}' ({root}); the manifest\n\
+                         \x20            references them by name, so this project stays clean\n"
+                    ));
+                } else {
+                    out.push_str(&format!(
+                        "  Library:   {} landed in '{name}' ({root}); {} with native names that\n\
+                         \x20            cannot be library filenames stayed inline, unchanged\n",
+                        super::count(library_count, "server"),
+                        super::count(inline_count, "server")
+                    ));
+                }
+            } else if inline_count == 0 {
+                out.push_str(&format!(
+                    "  Imported:  {imported} → library '{name}', referenced by name\n"
+                ));
+            } else {
+                out.push_str(&format!(
+                    "  Imported:  {imported} → library '{name}' ({} kept inline, unchanged)\n",
+                    super::count(inline_count, "server")
+                ));
             }
-            out.push_str(line);
-            out.push('\n');
-        }
-        out.push_str(
-            "             agentstack x delivery   (the routing per tool, and how to write \
-             files instead)\n",
-        );
-    }
-    out.push_str("  Undo:      agentstack x restore --last --write\n");
-    // The scripted close now ends where the DEFAULT lane actually becomes live.
-    // `apply --write` used to be the only step named here, in a product whose
-    // default routing writes no server config at all — so the scripted path
-    // ended on a command that delivered nothing while the interactive wizard
-    // offered the bridge. The two paths say the same thing now.
-    //
-    // `gateway` is a mechanism noun the ordinary journey normally suppresses
-    // (`tests/ordinary_journey_vocab.rs`), and this is the same carve-out that
-    // file already makes for the "NOT YET CONNECTED" disclosure: invariant 8
-    // beats the vocabulary rule when silence would leave the summary claiming a
-    // delivery that does not happen.
-    let mut steps: Vec<String> = Vec::new();
-    if !unconnected_live.is_empty() {
-        steps.push(
-            "agentstack x gateway connect --all --write   (start serving what routes live)"
-                .to_string(),
-        );
-    }
-    // The rendered-lane step, only when this project genuinely has files to
-    // write. Offering it otherwise sends a user to a command that reports
-    // nothing to do.
-    if rendered_work {
-        steps.push("agentstack apply --write   (write the files your tools read)".to_string());
-    }
-    steps.push("agentstack doctor          (check the result)".to_string());
-    for (i, step) in steps.iter().enumerate() {
-        if i == 0 {
-            out.push_str(&format!("  Next:      {step}\n"));
         } else {
-            out.push_str(&format!("             {step}\n"));
+            out.push_str(&format!("  Imported:  {imported}\n"));
         }
+        // M4: the CLIs deliberately left out of `[targets] default`. Naming them
+        // is what keeps "we only targeted two of your six tools" from looking
+        // like a detection failure; WHY, and the two ways to add one, are the
+        // evidence behind that and live under --verbose.
+        if !self.also_detected.is_empty() {
+            if self.verbose {
+                out.push_str(&format!(
+                    "  Also seen: {} — installed, but no config to import, so not\n\
+                     \x20            targeted yet. Add one to [targets].default in the manifest, or\n\
+                     \x20            render to it once: agentstack apply --target <id> --write\n",
+                    self.also_detected.join(" · ")
+                ));
+            } else {
+                out.push_str(&format!(
+                    "  Also seen: {} — no config to import, so not targeted\n",
+                    self.also_detected.join(" · ")
+                ));
+            }
+        }
+        if !self.needing_values.is_empty() {
+            let verb = if self.needing_values.len() == 1 {
+                "needs"
+            } else {
+                "need"
+            };
+            out.push_str(&format!(
+                "  Secrets:   {} still {verb} a value before this setup can run:\n",
+                self.needing_values.len()
+            ));
+            for name in self.needing_values {
+                out.push_str(&format!("               agentstack secret set {name}\n"));
+            }
+        }
+        // Import reads the CLIs' own configs and never edits them, so the
+        // entries it copied still live there. This is the scripted route's one
+        // statement of that promise (the guided route makes it in its confirm),
+        // so it is never behind the flag — only compressed to a single line.
+        if self.server_count > 0 && self.bridge_registered_now {
+            // `--connect` just edited these very files, so "unchanged" would be
+            // a lie told directly under the diff that changed them. "Now carry"
+            // is the reading that stays true whether the entry landed in this
+            // run or was already there (a re-import on a connected machine).
+            out.push_str(
+                "  Note:      those CLI configs now carry one agentstack entry — the bridge; no\n\
+                 \x20            server was copied back, they are served from this manifest.\n",
+            );
+        } else if self.server_count > 0 && !self.servers_rendered {
+            // The double-delivery note is false now: `apply` honours the
+            // delivery planner, so these servers are never copied into a native
+            // config again. The manifest is the one description of them.
+            out.push_str(
+                "  Note:      the CLI configs above are unchanged — nothing copies these servers\n\
+                 \x20            back into them; they are served from this manifest.\n",
+            );
+        } else if self.server_count > 0 && !self.sources_are_project_scope {
+            out.push_str(
+                "  Note:      the CLI configs above are unchanged — after `apply --write` these\n\
+                 \x20            servers are described in two places (agentstack apply --scope\n\
+                 \x20            global --write manages the originals from this manifest too).\n",
+            );
+        } else if self.server_count > 0 {
+            out.push_str(
+                "  Note:      those config files are this project's own — `apply --write`\n\
+                 \x20            manages them from this manifest, so there is no second copy.\n",
+            );
+        }
+        // Invariant 8, at every verbosity: the live lane is planned and inert,
+        // so the summary states that rather than a delivery that is not
+        // happening. The repair command is the `Next:` line below.
+        //
+        // The per-tool routing that used to follow this branch is gone from
+        // here: it is the same table `render_delivery_routing` prints in the
+        // pre-write review, and one run printed both plus the wizard's own
+        // Delivery screen. The review's copy is the one that survives — routing
+        // is evidence for a decision the reader has not made yet — so this line
+        // says only what a summary must never leave unsaid.
+        if !self.unconnected_live.is_empty() {
+            out.push_str(&format!(
+                "  Delivery:  planned live for {} — NOT YET CONNECTED, so nothing is served yet\n",
+                self.unconnected_live.join(", ")
+            ));
+        }
+
+        // ONE `Next:`, and it is the single most relevant step — a list of
+        // three "next" commands is a list of none. Order of relevance: a
+        // withheld trust grant blocks everything downstream, an unregistered
+        // bridge means nothing is served, then the rendered lane, then the
+        // check. Everything else goes on the compact `Then:` line, which is
+        // where `x delivery`, `apply --write` and undo stay reachable.
+        //
+        // `gateway` and `trust` are mechanism nouns the ordinary journey
+        // normally suppresses (`tests/ordinary_journey_vocab.rs`); both appear
+        // only in the state that earns them, which is the same carve-out that
+        // file already makes for the "NOT YET CONNECTED" disclosure.
+        let (next, why) = if self.needs_trust {
+            (
+                "agentstack trust .",
+                "review what this repo's own servers run",
+            )
+        } else if !self.unconnected_live.is_empty() {
+            (
+                "agentstack x gateway connect --all --write",
+                "start serving what routes live",
+            )
+        } else if self.rendered_work {
+            (
+                "agentstack apply --write",
+                "write the files your tools read",
+            )
+        } else {
+            ("agentstack doctor", "check the result")
+        };
+        out.push_str(&format!("  Next:      {next}   ({why})\n"));
+
+        let mut also: Vec<String> = Vec::new();
+        if self.needs_trust && !self.unconnected_live.is_empty() {
+            also.push("agentstack x gateway connect --all --write".to_string());
+        }
+        if self.rendered_work && next != "agentstack apply --write" {
+            also.push("agentstack apply --write".to_string());
+        }
+        if next != "agentstack doctor" {
+            also.push("agentstack doctor".to_string());
+        }
+        also.push("undo: agentstack x restore --last --write".to_string());
+        out.push_str(&format!("  Then:      {}\n", also.join("  ·  ")));
+        // The same import in ONE command next time: a script author needs the
+        // flag that stops the not-yet-delivering gap from happening at all.
+        if !self.unconnected_live.is_empty() {
+            out.push_str(
+                "             (or import and register in one step: agentstack init --connect)\n",
+            );
+        }
+        if !self.verbose {
+            out.push_str(
+                "             the config paths, the per-tool routing and every skipped entry: \
+                 --verbose\n",
+            );
+        }
+        // Toolsets are deliberately NOT offered here (review finding H3). Import
+        // is the moment a user has just learned what the manifest is; a
+        // first-time user with a handful of servers has nothing to subset yet,
+        // and naming a subset is a question that only becomes real once they
+        // have felt the whole set be wrong for a task. The recurring loop is
+        // taught where it is needed instead — `doctor`'s next action, and
+        // `session start`'s own empty-state hint.
+        out
     }
-    // Toolsets are deliberately NOT offered here (review finding H3). Import is
-    // the moment a user has just learned what the manifest is; a first-time user
-    // with a handful of servers has nothing to subset yet, and naming a subset
-    // is a question that only becomes real once they have felt the whole set be
-    // wrong for a task. Sending them into a second concept here is what made the
-    // documented happy path end in a cliff. The recurring loop is taught where
-    // it is needed instead — `doctor`'s next action, and `session start`'s own
-    // empty-state hint.
-    out
 }
 
 /// Compact an absolute path for display: inside the project → relative to the
@@ -2705,6 +2818,114 @@ pub(crate) fn display_path(path: &Path, project_root: &Path) -> String {
         }
     }
     path.display().to_string()
+}
+
+/// How many imported server names the default review spells out before it
+/// stops counting. Past this the line stops being readable and the names are
+/// evidence for `--verbose`, not the fact.
+const NAMES_INLINE: usize = 6;
+
+/// The default review's opening line: how many CLIs were read, and exactly
+/// what is coming out of them.
+///
+/// Stage 1.2's claim — the import states its evidence BEFORE writing — is kept
+/// whole here rather than traded for brevity: the server NAMES are what a
+/// person consents to, so they stay on the default screen. What moved behind
+/// `--verbose` is the per-CLI config-path table and what each server runs, both
+/// of which are evidence for the names rather than the names themselves.
+///
+/// Pure (no color), and every name comes from another CLI's config file —
+/// hostile input — so each is sanitized and the list is bounded.
+fn render_review_headline(
+    cli_count: usize,
+    servers: &IndexMap<String, Server>,
+    settings_count: usize,
+) -> String {
+    let mut imported = format!("importing {}", super::count(servers.len(), "MCP server"));
+    if !servers.is_empty() {
+        let shown: Vec<String> = servers
+            .keys()
+            .take(NAMES_INLINE)
+            .map(|n| crate::text::truncate_chars(&crate::text::sanitize_line(n), 40))
+            .collect();
+        let more = if servers.len() > NAMES_INLINE {
+            format!(" + {} more", servers.len() - NAMES_INLINE)
+        } else {
+            String::new()
+        };
+        imported.push_str(&format!(" ({}{more})", shown.join(" · ")));
+    }
+    if settings_count > 0 {
+        imported.push_str(&format!(
+            " + settings from {}",
+            super::count(settings_count, "CLI")
+        ));
+    }
+    format!(
+        "🔍  Found {} · {imported}\n",
+        super::count(cli_count, "coding tool"),
+    )
+}
+
+/// The default review's one line for everything this import deliberately left
+/// behind: entries no reader could parse, and servers another application owns.
+///
+/// Both shapes collapse into one counted statement because the fact that
+/// matters is identical for both — something was left out, and nothing was
+/// deleted. The per-entry reasons are the evidence, and `--verbose` prints
+/// them. `None` when there was nothing to leave behind, so the line is never
+/// an empty one.
+fn render_skipped_summary(
+    skipped: &[(String, crate::adapter::SkippedImport)],
+    tool_managed: &[ToolManagedServer],
+    tool_managed_included: bool,
+) -> Option<String> {
+    let owned = if tool_managed_included {
+        0
+    } else {
+        tool_managed.len()
+    };
+    let total = skipped.len() + owned;
+    if total == 0 {
+        return None;
+    }
+    let reason = match (skipped.is_empty(), owned == 0) {
+        (true, _) => "owned by the apps that installed them",
+        (_, true) => "could not be read",
+        _ => "app-owned or unreadable",
+    };
+    // `super::count` pluralizes by appending "s"; "entry" does not take one.
+    let noun = if total == 1 { "entry" } else { "entries" };
+    Some(format!(
+        "⚠  {total} {noun} not imported ({reason}) — they stay in each CLI's own config, \
+         nothing was deleted; details: --verbose\n"
+    ))
+}
+
+/// The default review's one line for the plaintext tokens this import found.
+///
+/// Both security sentences survive the compression, because both are places a
+/// reader could otherwise be wrong in the dangerous direction: the manifest
+/// holds `${REF}` placeholders (never values), and each value was COPIED — the
+/// original is still sitting in the CLI's own config. Only the per-token origin
+/// table moved behind `--verbose`.
+fn render_lifted_summary(lifted: &[Lifted]) -> String {
+    let refs: Vec<String> = lifted
+        .iter()
+        .take(NAMES_INLINE)
+        .map(|l| format!("${{{}}}", l.reference))
+        .collect();
+    let more = if lifted.len() > NAMES_INLINE {
+        format!(" + {} more", lifted.len() - NAMES_INLINE)
+    } else {
+        String::new()
+    };
+    format!(
+        "🔐  {} in your live CLI configs → {}{more} here; each value was COPIED, the original\n\
+         \x20   is still in its CLI's own config, unchanged\n",
+        super::count(lifted.len(), "plaintext token"),
+        refs.join(" · ")
+    )
 }
 
 /// Stage 1.2 first screen: every detected CLI with the evidence — the exact
@@ -2888,20 +3109,6 @@ fn renders_anything(target_ids: &[String], manifest: &Manifest, server_count: us
         return true;
     }
     server_count > 0 && renders_servers(target_ids, manifest)
-}
-
-fn delivery_summary_lines(target_ids: &[String]) -> Vec<String> {
-    let Ok(registry) = Registry::load() else {
-        return Vec::new();
-    };
-    let plan = crate::delivery::Plan::build(&Delivery::default(), &registry, target_ids);
-    // The real per-harness bridge reading, not `summary_lines`'s
-    // as-if-connected form. That form is only honest when the un-registered
-    // harnesses are disclosed on the same screen, and the disclosure branch
-    // above is gated on `declares_something_live` — so an import that declares
-    // nothing live suppressed the caveat and left "served live" standing alone,
-    // contradicting `status` and `doctor` about the very same harnesses.
-    super::delivery::summary_lines_for(&plan, &registry)
 }
 
 /// `assume_connected` states the plan as if every bridge were registered — the
@@ -3273,32 +3480,24 @@ mod tests {
         assert!(out.contains("agentstack apply --write"));
     }
 
-    /// Stage 1.2: the scripted import ends with ONE concise summary carrying
-    /// the five facts a new user needs — manifest path, source CLIs, imported
-    /// counts, secrets still needing values (with the exact command), and the
-    /// next commands (`apply --write`, then `doctor`).
+    /// Stage 1.2, at the default verbosity: the scripted import ends with ONE
+    /// concise summary carrying the facts a new user needs — manifest path,
+    /// what landed, which secrets still block the setup (with the exact
+    /// command), one next step, and one compact line of everything else.
     #[test]
-    fn import_summary_names_path_sources_counts_secrets_and_next() {
-        let out = render_import_summary(
-            "/tmp/proj/.agentstack/agentstack.toml",
-            &["Claude Code".to_string(), "Codex CLI".to_string()],
-            8,
-            2,
-            &["GITHUB_TOKEN".to_string()],
-            &["Gemini CLI".to_string(), "OpenCode".to_string()],
-            false,
-            &[
-                "Claude Code — skills + MCP servers served live · house rules written to files"
-                    .to_string(),
-            ],
-            &[],
-            None,
-            false,
-            true,
-            false,
-        );
+    fn import_summary_names_path_counts_secrets_and_one_next() {
+        let out = ImportSummary {
+            manifest_path: "/tmp/proj/.agentstack/agentstack.toml",
+            sources: &["Claude Code".to_string(), "Codex CLI".to_string()],
+            server_count: 8,
+            settings_count: 2,
+            needing_values: &["GITHUB_TOKEN".to_string()],
+            also_detected: &["Gemini CLI".to_string(), "OpenCode".to_string()],
+            rendered_work: true,
+            ..Default::default()
+        }
+        .render();
         assert!(out.contains("Manifest:  /tmp/proj/.agentstack/agentstack.toml"));
-        assert!(out.contains("From:      Claude Code · Codex CLI"));
         assert!(out.contains("8 MCP servers · settings from 2 CLIs"));
         assert!(out.contains("1 still needs a value"));
         assert!(out.contains("agentstack secret set GITHUB_TOKEN"));
@@ -3306,178 +3505,168 @@ mod tests {
         assert!(out.contains("agentstack apply --write"));
         assert!(out.contains("agentstack doctor"));
 
-        // W4: the routing is stated before the next-step list, so `apply
-        // --write` reads as the rendered lane's command rather than as the
-        // command for everything. A summary with no routing lines prints no
-        // Delivery block at all — never an empty one.
-        assert!(out.contains("Delivery:  Claude Code — skills + MCP servers served live"));
-        assert!(out.contains("agentstack x delivery"));
-        assert!(!render_import_summary(
-            "/m",
-            &["Claude Code".to_string()],
-            1,
-            0,
-            &[],
-            &[],
-            false,
-            &[],
-            &[],
-            None,
-            false,
-            false,
-            false,
-        )
-        .contains("Delivery:"));
+        // Progressive disclosure: the source list is evidence for the counts,
+        // so it rides `--verbose` and the default names the flag rather than
+        // dropping the fact silently.
+        assert!(!out.contains("From:      Claude Code"), "{out}");
+        assert!(out.contains("--verbose"), "{out}");
+
+        // Exactly ONE `Next:`. The three-command list this replaced was three
+        // recommendations and therefore none; the rest stay reachable on the
+        // compact line under it.
+        assert_eq!(out.matches("Next:").count(), 1, "{out}");
+        assert!(out.contains("Then:"), "{out}");
+
+        // The per-tool routing belongs to the pre-write review and appears in
+        // exactly one place per run, so the close carries no copy of it — at
+        // either verbosity. The only `Delivery:` line it may print is the
+        // invariant-8 disclosure, which this connected case does not earn.
+        assert!(!out.contains("Delivery:"), "{out}");
+        let verbose = ImportSummary {
+            manifest_path: "/tmp/proj/.agentstack/agentstack.toml",
+            sources: &["Claude Code".to_string(), "Codex CLI".to_string()],
+            server_count: 8,
+            verbose: true,
+            ..Default::default()
+        }
+        .render();
+        assert!(
+            verbose.contains("From:      Claude Code · Codex CLI"),
+            "{verbose}"
+        );
+        assert!(!verbose.contains("Delivery:"), "{verbose}");
 
         // F09: import copies, it does not move — say so. With the servers on
         // the live lane, nothing ever copies them back into a native config, so
         // the old "described in two places" note (and the `--scope global`
-        // command that answered it) would now be false.
+        // command that answered it) would now be false. This promise is the
+        // scripted route's only statement of it, so it is never behind a flag.
         assert!(out.contains("the CLI configs above are unchanged"));
         assert!(!out.contains("described in two places"), "{out}");
         assert!(out.contains("they are served from this manifest"));
-        // H3: the summary teaches `apply --write` → `doctor` and stops. No
-        // toolset offer, in any shape — not the command, not a `[profiles.*]`
-        // block to paste, not a forward reference to sessions. A first-time
-        // user with eight servers has nothing to subset yet, and the second
-        // concept here is what turned the happy path into a cliff.
+        // H3: the summary teaches one next step and stops. No toolset offer, in
+        // any shape — not the command, not a `[profiles.*]` block to paste, not
+        // a forward reference to sessions.
         assert!(!out.contains("create-profile"));
         assert!(!out.contains("[profiles."));
         assert!(!out.contains("session start"));
 
-        // M4: the detected-but-silent CLIs are named, with why they were left
-        // out and how to add one. An unexplained two-of-six looks like a
-        // detection failure.
+        // M4: the detected-but-silent CLIs are named, with why — an unexplained
+        // two-of-six looks like a detection failure. How to add one is the
+        // evidence half, so it rides `--verbose`.
         assert!(out.contains("Also seen: Gemini CLI · OpenCode"));
         assert!(out.contains("no config to import"));
-        assert!(out.contains("agentstack apply --target <id> --write"));
+        let also_verbose = ImportSummary {
+            manifest_path: "/m",
+            sources: &["Claude Code".to_string()],
+            also_detected: &["Gemini CLI".to_string()],
+            verbose: true,
+            ..Default::default()
+        }
+        .render();
+        assert!(also_verbose.contains("agentstack apply --target <id> --write"));
 
         // Nothing left out → no "also seen" line at all, not an empty one.
-        let all_contributed = render_import_summary(
-            "/m",
-            &["Claude Code".to_string()],
-            2,
-            0,
-            &[],
-            &[],
-            false,
-            &[],
-            &[],
-            None,
-            false,
-            false,
-            false,
-        );
+        let all_contributed = ImportSummary {
+            manifest_path: "/m",
+            sources: &["Claude Code".to_string()],
+            server_count: 2,
+            ..Default::default()
+        }
+        .render();
         assert!(!all_contributed.contains("Also seen:"));
 
         // Nothing pending → no secrets section at all, not an empty one.
-        let clean = render_import_summary(
-            "/m",
-            &["Claude Code".to_string()],
-            1,
-            0,
-            &[],
-            &[],
-            false,
-            &[],
-            &[],
-            None,
-            false,
-            false,
-            false,
-        );
+        let clean = ImportSummary {
+            manifest_path: "/m",
+            sources: &["Claude Code".to_string()],
+            server_count: 1,
+            ..Default::default()
+        }
+        .render();
         assert!(!clean.contains("Secrets:"));
         assert!(!clean.contains("settings from"));
         assert!(clean.contains("agentstack doctor"));
         assert!(!clean.contains("create-profile"));
 
         // No servers at all → nothing was copied, so no duplication note.
-        let empty = render_import_summary(
-            "/m",
-            &["Claude Code".to_string()],
-            0,
-            1,
-            &[],
-            &[],
-            false,
-            &[],
-            &[],
-            None,
-            false,
-            true,
-            false,
-        );
+        let empty = ImportSummary {
+            manifest_path: "/m",
+            sources: &["Claude Code".to_string()],
+            settings_count: 1,
+            rendered_work: true,
+            ..Default::default()
+        }
+        .render();
         assert!(!empty.contains("the CLI configs above are unchanged"));
         assert!(!empty.contains("create-profile"));
+    }
 
-        // Server count and whether a name was available used to gate the
-        // toolset offer; now no input produces one.
-        let unnamed = render_import_summary(
-            "/m",
-            &["Claude Code".to_string()],
-            4,
-            0,
-            &[],
-            &[],
-            false,
-            &[],
-            &[],
-            None,
-            false,
-            false,
-            false,
+    /// The library destination is one clause on the `Imported:` line by
+    /// default and its own sentence under `--verbose` — never a fact that
+    /// disappears, because a manifest that lists names instead of commands is
+    /// otherwise unexplained.
+    #[test]
+    fn import_summary_says_where_the_definitions_landed_at_both_verbosities() {
+        let facts = |verbose| {
+            ImportSummary {
+                manifest_path: "/m",
+                sources: &["Claude Code".to_string()],
+                server_count: 2,
+                library_dest: Some(("local", "~/.agentstack/lib", 2, 0)),
+                verbose,
+                ..Default::default()
+            }
+            .render()
+        };
+        assert!(
+            facts(false).contains("→ library 'local'"),
+            "{}",
+            facts(false)
         );
-        assert!(!unnamed.contains("create-profile"));
+        assert!(
+            facts(true).contains("the servers landed in 'local' (~/.agentstack/lib)"),
+            "{}",
+            facts(true)
+        );
     }
 
     /// Invariant 8 on the scripted path: the live lane with no CLI connected
     /// delivers nothing, so the summary must not say "served live". It states
     /// the plan, the consequence, and the one deliberate command instead —
-    /// `init --yes` never registers the bridge for anyone.
+    /// `init --yes` never registers the bridge for anyone. At EVERY verbosity:
+    /// this disclosure is about a claim the output must not make, so it can
+    /// never be the thing a flag hides.
     #[test]
     fn import_summary_never_claims_live_delivery_without_a_connected_cli() {
-        let live = ["Claude Code — skills + MCP servers served live".to_string()];
-        let unwired = render_import_summary(
-            "/m",
-            &["Claude Code".to_string()],
-            3,
-            0,
-            &[],
-            &[],
-            false,
-            &live,
-            &["Claude Code".to_string(), "Codex CLI".to_string()],
-            None,
-            false,
-            false,
-            false,
-        );
+        let unwired = ImportSummary {
+            manifest_path: "/m",
+            sources: &["Claude Code".to_string()],
+            server_count: 3,
+            unconnected_live: &["Claude Code".to_string(), "Codex CLI".to_string()],
+            ..Default::default()
+        }
+        .render();
         assert!(
             unwired
                 .contains("Delivery:  planned live for Claude Code, Codex CLI — NOT YET CONNECTED"),
             "{unwired}"
         );
-        assert!(unwired.contains("nothing is served until you register the bridge:"));
+        assert!(unwired.contains("nothing is served yet"), "{unwired}");
         assert!(unwired.contains("agentstack x gateway connect --all --write"));
         assert!(!unwired.contains("served live"), "{unwired}");
 
-        // Connected → today's wording, unchanged.
-        let wired = render_import_summary(
-            "/m",
-            &["Claude Code".to_string()],
-            3,
-            0,
-            &[],
-            &[],
-            false,
-            &live,
-            &[],
-            None,
-            false,
-            false,
-            false,
-        );
-        assert!(wired.contains("Delivery:  Claude Code — skills + MCP servers served live"));
+        // Connected → no disclosure to make, at any verbosity, and no claim of
+        // delivery either: the routing lives in the pre-write review.
+        let wired = ImportSummary {
+            manifest_path: "/m",
+            sources: &["Claude Code".to_string()],
+            server_count: 3,
+            verbose: true,
+            ..Default::default()
+        }
+        .render();
+        assert!(!wired.contains("Delivery:"), "{wired}");
         assert!(!wired.contains("NOT YET CONNECTED"));
     }
 
@@ -3492,21 +3681,15 @@ mod tests {
     #[test]
     fn the_headline_matches_whether_anything_is_actually_delivered() {
         let summarize = |unconnected: &[String], bridge_now: bool| {
-            render_import_summary(
-                "/m",
-                &["Claude Code".to_string()],
-                2,
-                0,
-                &[],
-                &[],
-                false,
-                &[],
-                unconnected,
-                None,
-                false,
-                false,
-                bridge_now,
-            )
+            ImportSummary {
+                manifest_path: "/m",
+                sources: &["Claude Code".to_string()],
+                server_count: 2,
+                unconnected_live: unconnected,
+                bridge_registered_now: bridge_now,
+                ..Default::default()
+            }
+            .render()
         };
 
         let stranded = summarize(&["Claude Code".to_string()], false);
@@ -3549,60 +3732,88 @@ mod tests {
         );
     }
 
-    /// The scripted close ends on the step that makes the DEFAULT lane live.
+    /// The scripted close ends on ONE step, and it is the one standing between
+    /// this run and a delivery.
     ///
-    /// It used to end on `apply --write` in every case — in a product whose
-    /// default routing writes no server config at all, so the recommended next
-    /// command delivered nothing and left nine config files as the mental model
-    /// of what AgentStack does.
+    /// It used to end on a list: the bridge, `apply --write` and `doctor`, all
+    /// labeled `Next:`. Three next steps are none. The order of relevance is
+    /// the order in which each one blocks the others — a withheld trust grant
+    /// first, then an unregistered bridge, then the rendered lane, then the
+    /// check.
     #[test]
-    fn the_scripted_close_ends_on_the_bridge_not_on_apply() {
+    fn the_scripted_close_ends_on_exactly_one_next_step() {
         // Servers only, routed live, no bridge: the bridge is the next step and
         // `apply --write` is not offered at all — it would write nothing.
-        let live_only = render_import_summary(
-            "/m",
-            &["Claude Code".to_string()],
-            2,
-            0,
-            &[],
-            &[],
-            false,
-            &[],
-            &["Claude Code".to_string()],
-            None,
-            false,
-            false,
-            false,
-        );
+        let live_only = ImportSummary {
+            manifest_path: "/m",
+            sources: &["Claude Code".to_string()],
+            server_count: 2,
+            unconnected_live: &["Claude Code".to_string()],
+            ..Default::default()
+        }
+        .render();
         assert!(
             live_only.contains("Next:      agentstack x gateway connect --all --write"),
             "{live_only}"
         );
+        assert_eq!(live_only.matches("Next:").count(), 1, "{live_only}");
         assert!(
             !live_only.contains("agentstack apply --write"),
             "{live_only}"
         );
         assert!(live_only.contains("agentstack doctor"));
 
-        // Genuine rendered-lane work (settings) keeps the rendered step, after
-        // the bridge — both lanes are named, each with its own command.
-        let both = render_import_summary(
-            "/m",
-            &["Claude Code".to_string()],
-            2,
-            1,
-            &[],
-            &[],
-            false,
-            &[],
-            &["Claude Code".to_string()],
-            None,
-            false,
-            true,
-            false,
-        );
+        // Genuine rendered-lane work (settings) keeps the rendered command
+        // reachable — on the secondary line, not as a second `Next:`.
+        let both = ImportSummary {
+            manifest_path: "/m",
+            sources: &["Claude Code".to_string()],
+            server_count: 2,
+            settings_count: 1,
+            unconnected_live: &["Claude Code".to_string()],
+            rendered_work: true,
+            ..Default::default()
+        }
+        .render();
         assert!(both.contains("Next:      agentstack x gateway connect --all --write"));
-        assert!(both.contains("agentstack apply --write"), "{both}");
+        assert_eq!(both.matches("Next:").count(), 1, "{both}");
+        assert!(
+            both.contains("Then:      agentstack apply --write"),
+            "{both}"
+        );
+
+        // A withheld trust grant outranks the bridge: until the repo's own
+        // servers are reviewed, registering the bridge serves nothing.
+        let untrusted = ImportSummary {
+            manifest_path: "/m",
+            sources: &["Claude Code".to_string()],
+            server_count: 2,
+            unconnected_live: &["Claude Code".to_string()],
+            needs_trust: true,
+            ..Default::default()
+        }
+        .render();
+        assert!(
+            untrusted.contains("Next:      agentstack trust ."),
+            "{untrusted}"
+        );
+        assert_eq!(untrusted.matches("Next:").count(), 1, "{untrusted}");
+        assert!(
+            untrusted.contains("Then:      agentstack x gateway connect --all --write"),
+            "{untrusted}"
+        );
+
+        // Nothing pending anywhere → the check is the step, and it is not
+        // repeated on the secondary line.
+        let quiet = ImportSummary {
+            manifest_path: "/m",
+            sources: &["Claude Code".to_string()],
+            server_count: 1,
+            ..Default::default()
+        }
+        .render();
+        assert!(quiet.contains("Next:      agentstack doctor"), "{quiet}");
+        assert_eq!(quiet.matches("agentstack doctor").count(), 1, "{quiet}");
     }
 
     /// S1 witness (init-secrets design §7): a failing credential store must
@@ -3677,6 +3888,7 @@ mod tests {
             yes: false,
             consented_plan: None,
             connect: false,
+            verbose: false,
         };
         let err = run_gated(&args, Some(dir.path()), false)
             .expect_err("a flagless non-TTY init must refuse");
@@ -3710,6 +3922,7 @@ mod tests {
             yes: false,
             consented_plan: None,
             connect: false,
+            verbose: false,
         };
         run_gated(&args, Some(dir.path()), false).expect("plan is read-only and never refuses");
         assert!(!dir.path().join(".agentstack").exists());
@@ -3739,6 +3952,7 @@ mod tests {
             yes: false,
             consented_plan: None,
             connect: false,
+            verbose: false,
         };
         let with_yes = InitArgs {
             yes: true,

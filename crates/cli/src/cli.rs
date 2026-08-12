@@ -1868,6 +1868,12 @@ pub struct SetupArgs {
     /// statement — never widen what is written.
     #[arg(long)]
     pub connect: bool,
+
+    /// Show the wizard's full evidence rather than the one-line-per-fact
+    /// summary — the same switch `agentstack init --verbose` carries, routed
+    /// through to every step this wizard orchestrates.
+    #[arg(long, short)]
+    pub verbose: bool,
 }
 
 #[derive(Args, Debug)]
@@ -2122,6 +2128,15 @@ pub struct InitArgs {
     /// `agentstack x gateway connect --all --write` afterwards.
     #[arg(long)]
     pub connect: bool,
+
+    /// Show the full evidence instead of the one-line-per-fact summary: every
+    /// CLI's config paths, every imported server, every entry that was skipped
+    /// and why, the files a later `apply` would manage, and the per-tool
+    /// delivery routing. The default states the same facts as counts — nothing
+    /// is hidden that changes what the run does, only how much of it is spelled
+    /// out.
+    #[arg(long, short)]
+    pub verbose: bool,
 }
 
 /// Where `init` (and `secret set`) put lifted token values when the manifest's
