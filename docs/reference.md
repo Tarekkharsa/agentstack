@@ -994,13 +994,13 @@ experimental (see [field notes](archive/design/reference-field-notes.md#tools_ex
 cancellation kills the
 [whole process tree](archive/design/reference-field-notes.md#tools_execute-cancellation).
 
-### Governance (`[policy]`)
+## Governance (`[policy]`)
 
 `require`/`forbid` capabilities and an `allowed_sources` glob allowlist (e.g.
 `git:github.com/acme/*`), enforced by `doctor --ci`. Cross-source trust gating
 for executable-intent skills and MCPs.
 
-### MCP firewall (`[policy.tools]`)
+## MCP firewall (`[policy.tools]`)
 
 Per-server tool rules enforced at the runtime gateway:
 `github = ["get_*", "list_*", "!list_secrets"]` — plain globs allow, `!` denies;
@@ -1037,7 +1037,7 @@ a malformed first load or unusable snapshot makes protected activation
 absent machine manifest is the benign **UNCONFIGURED** state. `doctor`
 distinguishes all three.
 
-### Egress rules (`[policy.egress]`)
+## Egress rules (`[policy.egress]`)
 
 Per-server outbound-host rules, keyed and evaluated exactly like `[policy.tools]`
 (globs allow, `!` denies, `"*"` rename-proof, machine layer checked first and no
@@ -1056,7 +1056,7 @@ An unconstrained server is allow-by-default; a constrained server whose
 declared URL host can't be resolved statically (it hides behind a `${REF}`)
 fails closed at write time.
 
-### Secret access (`[policy.secrets]`)
+## Secret access (`[policy.secrets]`)
 
 Per-server allowlists over `${REF}` names, same keyed grammar again (globs, `!`
 denies, `"*"` rename-proof). Enforced **fail-closed at both substitution
@@ -1069,7 +1069,7 @@ github = ["GH_*"]                     # this server may only read GH_* refs
 "*" = ["!AWS_*"]                      # no server resolves an AWS_* secret
 ```
 
-### Filesystem scopes (`[policy.filesystem]`)
+## Filesystem scopes (`[policy.filesystem]`)
 
 Manifest-global path-glob scopes (not per-server) in three lists. `write` gates
 the `run --sandbox` mount, `read` is informational, and `deny` is a pure
@@ -1085,7 +1085,7 @@ write = ["./**"]                      # sandbox: workspace mounts read-write
 deny  = [".env*", "**/*.pem"]         # no tool call may touch these, ever
 ```
 
-### Call log
+## Call log
 
 Every tool call the gateway brokers (MCP proxy and code-mode alike) appends to
 `~/.agentstack/audit/calls.jsonl` (`0600`, dir `0700`): timestamp, run id (under
@@ -1106,7 +1106,7 @@ Best-effort local
 **diagnostics** (logging can never fail a call; size-rotated at ~5 MB × 2), not
 tamper-evident — input to `report calls`/`optimize`, not forensic evidence.
 
-### Content scanning
+## Content scanning
 
 Every `install` scans skill content for hidden Unicode (zero-width
 characters, bidi overrides, tag characters) and prompt-injection heuristics.
@@ -2037,6 +2037,9 @@ A single-glance census of every capability that exists today — the fastest way
 to confirm a feature is real before you go hunting for its section above.
 
 13 adapters · `init`/`add`/`apply`/`diff`/`use`/`instructions`/`adopt` ·
+one-step review and activation of dropped-in files (`yes`) · `undo` (recent
+changes, `--to <n> --write` to step back) · fresh-machine setup
+(`x up` — sync the library, connect installed CLIs, verify the lock) ·
 package manager (`install`/`lock --update`/`remove` + lockfile) · central capability
 library (`lib` skills + servers referenced by name, digest-pinned in the lock,
 drift in `doctor`/`explain`) · secrets (keychain + varlock as the recommended

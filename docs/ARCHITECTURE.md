@@ -30,15 +30,13 @@ and ephemeral generated capabilities — as trusted, portable bundles.
 
 The strategic frame: the **manifest** is the unit. Everything else in the system renders it, gates it, constrains it, or records it. Portability across agent CLIs — import once, render everywhere, switch by task, recover safely — is the product; the trust gate, the policy ceiling, and the call record are what make that portability safe to rely on rather than a second thing to worry about.
 
-> An earlier version of this paragraph called a public registry/marketplace "the endgame". [`STRATEGY.md`](../STRATEGY.md) has since cut that lane: a catalog is not built until local reuse succeeds repeatedly, and it is not a goal the architecture is steering toward. The sentence is corrected rather than deleted so the change of direction is legible to anyone who read the old one.
-
-**A note on vocabulary.** User-facing docs — the README, the getting-started
-walkthrough, and the how-to guides — call the reviewed config file the
-**manifest**. This document keeps **bundle** as its strategic frame: it means
-the manifest, its optional local overlay, and the resolved lockfile taken
-together as the single unit that gets declared, pinned, trusted, and
-distributed. Wherever you read "bundle" below, read "the manifest and its lock
-as one consent unit."
+**Two words, two things.** The **manifest** is the reviewed config file —
+what the README, the walkthrough, and the how-tos mean by that name. A
+**bundle** is the manifest, its optional local overlay, and the resolved
+lockfile taken together as one consent unit: what gets declared, pinned,
+trusted, and distributed, and what `agentstack x share` signs into a `.astack`
+for `receive` to review (see
+[`ENFORCEMENT.md`](ENFORCEMENT.md#bundle-signatures--share--receive)).
 
 Core principle: **nothing executes automatically until its content is trusted;
 governed execution is constrained and recorded.**
@@ -447,8 +445,8 @@ ownership ledger scopes pruning to what agentstack placed, and a hard deny-list
 keeps the renderer from ever authoring, overwriting, or pruning the host
 guard's reserved `agentstack-guard*` artifacts. A protected `run` (the default)
 re-verifies each delivered copy against its pin before launch. What this buys is
-provenance and content binding, not runtime enforcement; the trade-offs and staging are in
-The enforcement limits are recorded in
+provenance and content binding, not runtime enforcement; the trade-offs, the
+staging, and the enforcement limits are recorded in
 [`ENFORCEMENT.md`](ENFORCEMENT.md#native-extensions).
 
 The four runtime modes (host, gateway, sandbox, lockdown) enforce different
@@ -651,7 +649,7 @@ same trust, policy, gateway-dispatch, and audit paths a local call takes (see
 "MCP protocol compatibility" under Layer 4).
 
 `executor` holds no internal edges: it is a self-contained, policy-agnostic
-domain built on `serde`/`sha2`/`thiserror`, and the `cli` crate is what composes
+domain built on `serde`/`serde_json`/`sha2`/`thiserror`, and the `cli` crate is what composes
 it with the runtime and recorder. That is why it "never reads or interprets
 policy" — it structurally cannot.
 
