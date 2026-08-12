@@ -277,14 +277,14 @@
   </details>
 </aside>
   <main id="main-content" tabindex="-1">
-<p class="versionbar">These pages describe <b>v0.18.0-rc.5</b>, a pre-release. <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">The installer</a> serves the current release, <b>v0.17.1</b> — <code>/releases/latest</code> never points at a pre-release — so this is not the build you get unless you ask for it by name: <code>AGENTSTACK_VERSION=v0.18.0-rc.5</code>. <code>agentstack --version</code> says which build you have.</p>
+<p class="versionbar">These pages describe <b>v0.18.0</b>, the current release. That is the build <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">the installer</a> gives you. <code>agentstack --version</code> says which build you have.</p>
 <h1 id="get-started">Get started</h1>
 <p>AgentStack gives every agent CLI the same MCP servers, skills, and instructions without copying their configuration into every project.</p>
 <p>The simple model is:</p>
 <div class="cb"><pre class="block"><code>your library repo  →  each project's manifest + lock  →  every agent CLI</code></pre></div>
 <h2 id="1-install-and-set-up-this-machine">1. Install and set up this machine<a class="hlink" href="#1-install-and-set-up-this-machine" aria-label="Link to this section">#</a></h2>
-<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | AGENTSTACK_VERSION=v0.18.0-rc.5 sh</code></pre></div>
-<p>That installs v0.18.0-rc.5, the release these pages describe, and verifies the download against the checksums published with it. <code>AGENTSTACK_VERSION</code> is what asks for it by name — without it the same line installs v0.17.1, because <code>releases/latest</code> never points at a pre-release. To build from a checkout instead, see <a href="https://github.com/Tarekkharsa/agentstack/blob/main/README.md#install">Install</a>.</p>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh</code></pre></div>
+<p>That installs v0.18.0, the release these pages describe, and verifies the download against the checksums published with it. It is the latest stable release, so no version pin is needed; <code>AGENTSTACK_VERSION=vX.Y.Z</code> still asks for a specific build. To build from a checkout instead, see <a href="https://github.com/Tarekkharsa/agentstack/blob/main/README.md#install">Install</a>.</p>
 <p>Set up this machine:</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack init --connect</code></pre></div>
 <p>A real run on a machine with Claude Code and Codex already configured — shown here in its non-interactive form — prints this. Lines marked <code>…</code> are trimmed:</p>
@@ -316,7 +316,7 @@
 <p>Then check the result:</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack status</code></pre></div>
 <p>On the project above, that prints:</p>
-<div class="cb cb-term" data-language="console"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">console</span></div><pre class="block"><code class="language-console"><span class="out">agentstack 0.18.0-rc.5 — one portable manifest, every agent CLI</span>
+<div class="cb cb-term" data-language="console"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">console</span></div><pre class="block"><code class="language-console"><span class="out">agentstack 0.18.0 — one portable manifest, every agent CLI</span>
 
 <span class="out">  CLIs      2 of 13 supported detected here: Claude Code · Codex CLI</span>
 <span class="out">  Setup  ~/my-project/.agentstack/agentstack.toml — 2 servers → 2 detected CLIs, no CLIs pinned</span>
@@ -431,8 +431,8 @@ targets = ["*"]</code></pre></div>
 <tr><td><code>agentstack up</code></td><td>Preview a machine/library refresh</td></tr>
 <tr><td><code>agentstack undo</code></td><td>Review and reverse AgentStack-managed writes</td></tr>
 </tbody></table></div>
-<h2 id="newer-than-the-stable-release">Newer than the stable release<a class="hlink" href="#newer-than-the-stable-release" aria-label="Link to this section">#</a></h2>
-<p>These pages describe v0.18.0-rc.5. The plain installer one-liner and the Homebrew tap still give you v0.17.1, because <code>releases/latest</code> never points at a pre-release. <code>agentstack --version</code> says which build you have.</p>
+<h2 id="if-homebrew-gives-you-an-older-build">If Homebrew gives you an older build<a class="hlink" href="#if-homebrew-gives-you-an-older-build" aria-label="Link to this section">#</a></h2>
+<p>These pages describe v0.18.0. The installer one-liner above serves it. The Homebrew formula is published by hand after each stable release, so <code>brew install</code> can trail the releases page for a while; <code>agentstack --version</code> says which build you have.</p>
 <p>On v0.17.1 the <code>agentstack x</code> prefix and the <code>yes</code>, <code>undo</code>, <code>x why</code>, and <code>x unrender</code> verbs do not exist — they fail with <code>unrecognized subcommand</code> — and every command that does exist there runs at its own bare name, for example <code>agentstack gateway connect --all --write</code> rather than <code>agentstack x gateway connect --all --write</code>. The install line at the top of this page is the upgrade.</p>
 <h2 id="why-use-it--and-when-not-to">Why use it — and when not to<a class="hlink" href="#why-use-it--and-when-not-to" aria-label="Link to this section">#</a></h2>
 <p>Use AgentStack when you have more than one agent CLI, project, machine, or person and want one reviewed source of truth. It is especially useful when you want reusable private skills, consistent MCP servers, per-machine secrets, and no generated capability files in repositories.</p>

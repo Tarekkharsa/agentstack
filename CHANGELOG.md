@@ -4,6 +4,57 @@ User-facing changes per release. The [GitHub Releases
 page](https://github.com/Tarekkharsa/agentstack/releases) carries the built
 binaries, checksums, and provenance attestations for each entry.
 
+## v0.18.0 — 2026-08-12
+
+**One setup, delivered live, with consent that is bound to bytes.** The stable
+release of the v0.18.0 line: everything from rc.1 through rc.5, now what
+`install.sh` and `agentstack self update` serve by default. No version pin is
+needed any more.
+
+What changed since **v0.17.1**, rolled up:
+
+- **Delivery is routed, not chosen.** Skills and MCP servers reach MCP-capable
+  harnesses live through one gateway, so a project holds `.agentstack/` and
+  nothing else; instructions, settings, hooks and extensions are written as
+  native files, because no live channel a harness is known to consume carries
+  them correctly, as is every capability on a tool without MCP. `agentstack x
+  delivery` prints the routing, and `x delivery render-locally` is the override.
+
+- **The consent gate reaches all five delivered kinds.** Servers, skills,
+  instructions, hooks and extensions all refuse to render for an untrusted
+  project. Hooks and native extensions keep the full ceremony — never a
+  compressed review — and a command can no longer refuse itself: an authoring
+  command is judged against the trust state captured before its own write, and
+  does not re-pin.
+
+- **The surface is fifteen verbs**, with everything else one hop behind
+  `agentstack x <cmd>`. Nothing was removed: every hidden command still runs at
+  its own name with its own `--help`. `yes`, `undo`, `x why` and `x unrender`
+  are new; the Mode axis is retired.
+
+- **Guidance names a command that works.** A long family of defects — a footer,
+  a next step, or a machine `next_action` naming a command that then refuses or
+  loops — is closed and fenced by a state-matrix sweep that prints its own
+  coverage and records what it does not reach.
+
+- **The host guard sees more.** It judges a shell command given as an argv
+  array, reads Codex's `apply_patch` envelope so every path inside a patch takes
+  the same write check, and classifies writes by payload shape rather than by a
+  fixed name list.
+
+- **RMCP on the wire.** The hand-rolled stdio protocol code is replaced by the
+  official MCP SDK, confined behind a JSON backend in `crates/mcp`, with child
+  process groups owned so a killed server takes its descendants with it.
+
+- **Colour is gated.** `NO_COLOR`, `CLICOLOR_FORCE`, `TERM=dumb` and a
+  non-TTY stdout are all honoured; forced output is byte-identical to before.
+
+- **Settings are pinned**, workflows and images ship, the execution relay fails
+  closed rather than binding `0.0.0.0`, and the docs site is generated from
+  Markdown with link, fragment, sitemap and coverage checks in CI.
+
+Full detail is in the rc.1-rc.5 entries below, which this release supersedes.
+
 ## v0.18.0-rc.5 — 2026-08-12
 
 **The candidate that answers what the walk asked.** rc.4 was what came back

@@ -18,17 +18,13 @@
 ## Try it in 60 seconds
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | AGENTSTACK_VERSION=v0.18.0-rc.5 sh
+curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh
 agentstack init                            # finds what your CLIs already have, writes it into .agentstack/
 agentstack x gateway connect --all --write # register the bridge once, so live delivery reaches your CLIs
 agentstack status                          # is it ready — and if not, the one thing that fixes it
 # then restart your coding CLI — a harness reads its config at startup:
 agentstack x why <server>                  # names which CLIs are served it live
 ```
-
-> **Keep the `AGENTSTACK_VERSION` pin.** Without it — and with `brew install` —
-> you get v0.17.1, where `agentstack x` does not exist yet and step 2 fails with
-> an "unrecognized subcommand" error. [Why](#install).
 
 ![Two CLIs with different half-setups: agentstack imports both into one manifest, connects the gateway so both CLIs are served the servers live while the project stays clean, passes doctor with 0 errors, renders each native format on request, and restores the machine byte-for-byte](docs/demos/first-value.svg)
 
@@ -152,13 +148,10 @@ machines, or teammates.
 
 ## Install
 
-The quickstart installs **v0.18.0-rc.5**, the release this README describes, and
-every command on this page runs on it. `AGENTSTACK_VERSION` is what asks for it
-by name: drop it and the same line installs v0.17.1 instead, because
-`releases/latest` never points at a pre-release. On v0.17.1 the `agentstack x`
-prefix and a few newer verbs do not exist yet —
-[newer than the stable release](https://tarekkharsa.github.io/agentstack/start.html#newer-than-the-stable-release)
-says what to type there, and `agentstack --version` says which build you have.
+The quickstart installs **v0.18.0**, the release this README describes, and
+every command on this page runs on it. It is the latest stable release, so the
+installer needs no version pin; `AGENTSTACK_VERSION=vX.Y.Z` still asks for a
+specific build, and `agentstack --version` says which one you have.
 
 The one-line installer verifies the release tarball against the `checksums.txt` published with
 each release. Each release also carries a GitHub build provenance attestation tying the asset to this
@@ -178,11 +171,11 @@ Release binaries ship with sandbox support compiled in; a bare `cargo build` doe
 Once installed, `agentstack x self update` moves you to the latest *stable*
 release; it verifies the download against the release's published checksum
 before replacing anything. It never moves you onto a pre-release, and never
-back off one — for v0.18.0-rc.5 use the install line above.
+back off one — to install a specific build, pass `AGENTSTACK_VERSION`.
 
 There is also a Homebrew tap, `Tarekkharsa/homebrew-tap`, whose
-`Formula/agentstack.rb` pins v0.17.1 — the latest stable release, one release
-behind the pre-release above:
+`Formula/agentstack.rb` is published by hand after each stable release, so it
+can trail the releases page by a little:
 
 ```sh
 brew install Tarekkharsa/tap/agentstack
@@ -246,12 +239,10 @@ Nothing was removed. Every command still runs at its own name with its own
 `--help`, and `agentstack --help --all` prints the whole tree.
 
 The `agentstack x` prefix, and the `yes`, `undo`, `x why`, and `x unrender`
-verbs, arrived in v0.18.0. On v0.17.1 — what the tap pins, and what the
-installer gives you without `AGENTSTACK_VERSION` — they are an
-`unrecognized subcommand` error, and every command that does exist there runs
-at its own bare name. `agentstack --version` says which build you have, and
-[newer than the stable release](https://tarekkharsa.github.io/agentstack/start.html#newer-than-the-stable-release)
-is the whole note.
+verbs, arrived in v0.18.0. On v0.17.1 they are an `unrecognized subcommand`
+error, and every command that does exist there runs at its own bare name — so
+if `brew info` still shows the older formula, that is what you have.
+`agentstack --version` settles it.
 
 ## Documentation
 

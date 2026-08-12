@@ -68,7 +68,7 @@ dependencies = [
 
 [[package]]
 name = "agentstack"
-version = "0.18.0-rc.5"
+version = "0.18.0"
 dependencies = [
  "age",
  "agentstack-adapters",
@@ -168,7 +168,7 @@ dependencies = [
 
 [[package]]
 name = "agentstack-mcp"
-version = "0.18.0-rc.5"
+version = "0.18.0"
 dependencies = [
  "anyhow",
  "bytes",

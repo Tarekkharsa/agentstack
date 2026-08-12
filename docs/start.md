@@ -16,14 +16,14 @@ your library repo  →  each project's manifest + lock  →  every agent CLI
 ## 1. Install and set up this machine
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | AGENTSTACK_VERSION=v0.18.0-rc.5 sh
+curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh
 ```
 
-That installs v0.18.0-rc.5, the release these pages describe, and verifies the
-download against the checksums published with it. `AGENTSTACK_VERSION` is what
-asks for it by name — without it the same line installs v0.17.1, because
-`releases/latest` never points at a pre-release. To build from a checkout
-instead, see [Install](../README.md#install).
+That installs v0.18.0, the release these pages describe, and verifies the
+download against the checksums published with it. It is the latest stable
+release, so no version pin is needed; `AGENTSTACK_VERSION=vX.Y.Z` still asks
+for a specific build. To build from a checkout instead, see
+[Install](../README.md#install).
 
 Set up this machine:
 
@@ -71,7 +71,7 @@ agentstack status
 On the project above, that prints:
 
 ```console
-agentstack 0.18.0-rc.5 — one portable manifest, every agent CLI
+agentstack 0.18.0 — one portable manifest, every agent CLI
 
   CLIs      2 of 13 supported detected here: Claude Code · Codex CLI
   Setup  ~/my-project/.agentstack/agentstack.toml — 2 servers → 2 detected CLIs, no CLIs pinned
@@ -284,11 +284,12 @@ or from another supervisor. T3 Code is not required.
 | `agentstack up` | Preview a machine/library refresh |
 | `agentstack undo` | Review and reverse AgentStack-managed writes |
 
-## Newer than the stable release
+## If Homebrew gives you an older build
 
-These pages describe v0.18.0-rc.5. The plain installer one-liner and the
-Homebrew tap still give you v0.17.1, because `releases/latest` never points at
-a pre-release. `agentstack --version` says which build you have.
+These pages describe v0.18.0. The installer one-liner above serves it. The
+Homebrew formula is published by hand after each stable release, so
+`brew install` can trail the releases page for a while; `agentstack --version`
+says which build you have.
 
 On v0.17.1 the `agentstack x` prefix and the `yes`, `undo`, `x why`, and
 `x unrender` verbs do not exist — they fail with `unrecognized subcommand` —

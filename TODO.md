@@ -2,17 +2,18 @@
 
 > **Purpose:** the only ordered product-wide work queue.
 >
-> **Status:** rebuilt 2026-08-12 against agentstack 0.18.0-rc.5. Closed work and
+> **Status:** rebuilt 2026-08-12 against agentstack 0.18.0. Closed work and
 > the reasoning behind it live in git history and in `CHANGELOG.md`; this file
 > holds only what is open. The queue is the maintainer's to reorder; deviations
 > edit this file, never [`STRATEGY.md`](STRATEGY.md).
 
 ## Release
 
-1. **[ ] Cut stable v0.18.0**, then publish the Homebrew formula for it. Until a
-   stable tag exists, `releases/latest` resolves to v0.17.1, which is why the
-   README quickstart pins `AGENTSTACK_VERSION` and warns about it. The tag
-   retires both the pin and the warning.
+1. **[ ] Publish the Homebrew formula for v0.18.0.** The release generates
+   `agentstack.rb` and attaches it to the release; publishing is manual because
+   it writes to the separate `Tarekkharsa/homebrew-tap` repository
+   (`RELEASING.md` §3). Until it lands, `brew install` still serves v0.17.1
+   while the installer serves v0.18.0.
 
 ## The activation study
 

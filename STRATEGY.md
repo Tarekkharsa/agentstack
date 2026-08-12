@@ -1,6 +1,6 @@
 # AgentStack product strategy
 
-*Current as of agentstack 0.18.0-rc.5, 2026-08-12. Rebuilt from the repository:
+*Current as of agentstack 0.18.0, 2026-08-12. Rebuilt from the repository:
 every claim below describes what the code does today, not what was planned.*
 
 > **Relationship to the other documents:** [`TODO.md`](TODO.md) is the only
@@ -35,7 +35,7 @@ one thing never automated, inferred, or defaulted is consent to new content.
 
 ## What the product is today
 
-All of the following ships in 0.18.0-rc.5:
+All of the following ships in 0.18.0:
 
 - **Thirteen adapters.** One manifest renders to every supported CLI's native
   format; a nightly conformance job proves the real tools still accept it.
