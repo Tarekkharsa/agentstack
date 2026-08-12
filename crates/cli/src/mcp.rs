@@ -425,18 +425,27 @@ done"#;
     }
 
     /// Regression: the stderr capture keeps only a prefix, but it has to keep
-    /// READING past it. An earlier version stopped at the cap, which closed the
-    /// pipe and handed a chatty-but-perfectly-healthy server a SIGPIPE partway
-    /// through startup — the probe killed the thing it was measuring and then
-    /// reported it as broken. Servers log to stderr; that must never be fatal.
+    /// READING past it, and it has to read CONCURRENTLY with the handshake. A
+    /// stderr pipe holds about 64KB. An earlier version stopped at the keep-cap,
+    /// which closed the pipe and handed a chatty-but-perfectly-healthy server a
+    /// SIGPIPE partway through startup; draining only after the handshake would
+    /// be worse still — the server would block on its own log, never read the
+    /// request, and be reported as a hang. Servers log to stderr; that must
+    /// never be fatal.
     #[test]
     fn a_server_that_floods_stderr_still_probes_clean() {
-        // ~120KB of boot logging, thirty times the keep-cap, then a normal
-        // `initialize` reply once the probe writes its request.
+        // ~120KB of boot logging, thirty times the keep-cap and roughly twice
+        // what the pipe itself holds, before the server answers anything.
         let script = r#"i=0
 while [ $i -lt 3000 ]; do echo 'boot: initializing subsystem ..............' >&2; i=$((i+1)); done
-read x
-echo '{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"chatty","version":"1"}}}'"#;
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *server/discover*) printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"unsupported"}}\n' "$id" ;;
+    *'"method":"initialize"'*) printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"chatty","version":"1"}}}\n' "$id" ;;
+    *tools/list*) printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[]}}\n' "$id" ;;
+  esac
+done"#;
 
         let probe = probe_stdio(
             "sh",
@@ -447,6 +456,7 @@ echo '{"jsonrpc":"2.0","id":0,"result":{"protocolVersion":"2025-06-18","capabili
         )
         .expect("a server that merely logs a lot is a healthy server");
         assert_eq!(probe.server_name.as_deref(), Some("chatty"));
+        assert_eq!(probe.tool_count, Some(0));
     }
 
     /// A failing server's stderr reaches a terminal, so it is hostile output.
