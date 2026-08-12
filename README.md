@@ -231,7 +231,7 @@ Everything else lives one hop away under `agentstack x`:
 
 ```bash
 agentstack x                 # the rest of the toolbox, grouped by task
-agentstack x guard install   # same command as `agentstack guard install`
+agentstack x guard install --write   # same command as `agentstack guard install --write`
 ```
 
 Nothing was removed. Every command still runs at its own name with its own

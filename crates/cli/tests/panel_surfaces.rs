@@ -204,7 +204,7 @@ fn lock_and_trust(proj: &Path, home: &Path) {
             "trust",
             proj.to_str().unwrap(),
             "--yes",
-            "--consented-digest",
+            "--consented",
             &digest,
         ])
         .env("HOME", home.parent().unwrap())
@@ -646,10 +646,10 @@ fn no_panel_action_exists_outside_the_closed_digest_bound_set() {
 
     // The two consent digests that bind a reviewed preview are both present —
     // setup and the yes. Losing either would leave a reviewable write unbound.
-    for (name, flag) in [
-        ("setup-apply", "consented-plan"),
-        ("trust-grant", "consented-digest"),
-    ] {
+    // Both spell the binding `--consented`: one flag name across `init`,
+    // `trust`, and every panel-edit verb (the pre-unification `--consented-plan`
+    // / `--consented-digest` survive only as hidden clap aliases).
+    for (name, flag) in [("setup-apply", "consented"), ("trust-grant", "consented")] {
         assert!(
             ui_contract::PANEL_ACTIONS
                 .iter()

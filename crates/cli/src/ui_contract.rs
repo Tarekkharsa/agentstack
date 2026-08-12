@@ -18,7 +18,7 @@ pub const SCHEMA_VERSION: u64 = 1;
 /// external UIs; remove one only with a schema-version bump.
 ///
 /// - `init-plan`: `init --plan` emits the detection plan with `plan_digest`.
-/// - `apply-setup`: `init --yes --consented-plan <digest>` applies a reviewed
+/// - `apply-setup`: `init --yes --consented <digest>` applies a reviewed
 ///   plan and refuses when the detected inputs drifted since the plan.
 /// - `init-tool-managed-v1`: the plan carries `tool_managed[]` — servers whose
 ///   executable lives inside another application's bundle, which `init` leaves
@@ -45,7 +45,7 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   `surface_digest`. This said "the FULL reviewed surface", which was not
 ///   true — see `trust-review-card-v1` for what it covers and what it still
 ///   deliberately does not.
-/// - `trust-consent`: `trust --yes --consented-digest <digest>` grants bound
+/// - `trust-consent`: `trust --yes --consented <digest>` grants bound
 ///   to the previewed bytes and refuses stale or missing digests.
 /// - `trust-server-blockers-v1`: `trust --preview` carries server-resolution
 ///   and local-executable blockers with the safe next step, so an external UI
@@ -143,7 +143,7 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///      single closing yes for the whole project. There is no per-group and no
 ///      per-item question, accept, keep-pinned, or block field, and there never
 ///      will be — grouping the body must not multiply the moments a human
-///      commits to something. The answer is `trust --yes --consented-digest
+///      commits to something. The answer is `trust --yes --consented
 ///      <surface_digest>`, bound to the project's bytes, never to a group.
 ///   3. **Complete.** Every kind appearing in `items` or `removed` appears in
 ///      exactly one group; a kind this binary does not have a label for is
@@ -951,12 +951,12 @@ pub const PANEL_ACTIONS: &[PanelAction] = &[
     PanelAction {
         name: "setup-apply",
         verb: &["init"],
-        consent: Consent::Digest("consented-plan"),
+        consent: Consent::Digest("consented"),
     },
     PanelAction {
         name: "trust-grant",
         verb: &["trust"],
-        consent: Consent::Digest("consented-digest"),
+        consent: Consent::Digest("consented"),
     },
     // Revoking withdraws a yes rather than giving one: there is no reviewed
     // preview to bind to, and failing to revoke is the unsafe direction.
@@ -985,6 +985,9 @@ pub const PANEL_ACTIONS: &[PanelAction] = &[
         verb: &["adopt"],
         consent: Consent::Preconditions,
     },
+    // `guard install` previews by default now, like every other write in the
+    // CLI: this action's fixed argv must carry `--write`, or the panel gets a
+    // description of the install instead of the install.
     PanelAction {
         name: "guard-install",
         verb: &["guard", "install"],

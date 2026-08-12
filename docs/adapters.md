@@ -163,7 +163,7 @@ is running is a separate question, answered in the
 
 Writing a CLI's config and refereeing what that CLI then does are two different
 jobs, and the second is not available on every adapter. `agentstack guard
-install` wires `agentstack guard check` into a **detected** CLI's own
+install --write` wires `agentstack guard check` into a **detected** CLI's own
 pre-tool-use hook; per call it can then block destructive commands, any access
 to `[policy.filesystem] deny` globs (machine ∪ project — a repo can only add),
 and writes outside the workspace plus `[guard] allow_roots` plus temp. It is

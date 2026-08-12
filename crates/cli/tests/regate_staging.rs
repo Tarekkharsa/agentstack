@@ -229,7 +229,7 @@ fn all_three_answers_given_then_declined_leave_no_residue_anywhere() {
 /// Accept must actually land, and this is the sharpest thing in the wiring:
 /// accepting re-locks, the consent digest covers the lock bytes, so accept
 /// moves the very digest the review rendered from. Both naive commit paths are
-/// broken — with `--consented-digest` the grant fails AFTER the lock was
+/// broken — with `--consented` the grant fails AFTER the lock was
 /// rewritten, and without one it records the pre-accept digest and the project
 /// immediately reads `Changed`, i.e. the user accepts and silently gets an
 /// untrusted project. The fix recomputes from the snapshot's manifest/local

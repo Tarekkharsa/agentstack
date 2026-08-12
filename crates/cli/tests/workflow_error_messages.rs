@@ -70,7 +70,7 @@ fn project(home: &Path, script: &str) -> assert_fs::TempDir {
     let trust = agentstack(
         home,
         proj.path(),
-        &["trust", ".", "--yes", "--consented-digest", &consent],
+        &["trust", ".", "--yes", "--consented", &consent],
     );
     assert!(
         trust.status.success(),

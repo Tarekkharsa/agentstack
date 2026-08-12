@@ -120,11 +120,7 @@ fn trust(home: &Path, proj: &Path) {
         .as_str()
         .expect("the preview must carry a surface digest")
         .to_string();
-    let granted = run(
-        &["trust", "--yes", "--consented-digest", &digest],
-        home,
-        proj,
-    );
+    let granted = run(&["trust", "--yes", "--consented", &digest], home, proj);
     assert_eq!(granted.code, 0, "fixture: trust failed:\n{}", granted.text);
 }
 

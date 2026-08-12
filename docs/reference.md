@@ -440,10 +440,20 @@ to `${REF}`s, and renders it to **all your CLIs at once**.
 ```text
 agentstack search <query>
 agentstack add from <id>
+agentstack add from lib:<source>/<name> --write   # a skill from a linked library
 ```
 
 agentstack is the cross-CLI *client* over the registry + marketplaces, not
 another registry.
+
+A skill you already keep in a linked library is named `lib:<source>/<name>` —
+`lib:central/rust-testing`. It is the same selection the `<source>:<name>`
+qualifier makes, spelled so the origin is legible, and `add from` resolves it
+through the link list rather than the bundled catalog. The reference lands in a
+toolset (`--toolset` names which one; with no toolsets yet it goes to
+`default`), never as a `[skills.<name>]` block — an inline block would shadow
+the library copy. The same command pins the body's content digest in
+`agentstack.lock`, so `doctor` can report `library · matches lock` for it.
 
 ### Selective skills via toolsets
 
@@ -834,13 +844,13 @@ agentstack trust --manifest-dir <DIR>   # the same, naming the project instead o
 agentstack trust --list     # every trusted project + whether its manifest still matches
 agentstack trust --revoke   # withdraw
 agentstack trust . --preview                        # emit the review surface as JSON, grant nothing
-agentstack trust . --yes --consented-digest <D>     # grant without a TTY, bound to the reviewed bytes
+agentstack trust . --yes --consented <D>            # grant without a TTY, bound to the reviewed bytes
 ```
 
 `trust` reads the global `--manifest-dir` like every other verb; the positional
 `[PATH]` and a bare cwd still work, and naming the directory either way is the
 same grant. `--preview` emits `surface_digest`, the value a later
-`--yes --consented-digest` must present — the CLI-enforced "a human reviewed
+`--yes --consented` must present — the CLI-enforced "a human reviewed
 these exact bytes" for external UIs and scripts.
 
 `trust .` previews the **effective runtime surface** — inline servers and library
@@ -1955,7 +1965,7 @@ subcommand carries a trailing `*` (e.g. `guard`'s `check*`). Reach for it when
 you need the exact verb, flag, or subcommand.
 
 <!-- agentstack:generated commands -->
-- **`init`** — Setup: find the CLIs you have and bring their setups together — flags `--global/--force/--dry-run/--plan/--secrets/--no-keychain/--project-servers/--include-tool-managed/--yes/--consented-plan/--connect/--verbose`
+- **`init`** — Setup: find the CLIs you have and bring their setups together — flags `--global/--force/--dry-run/--plan/--secrets/--no-keychain/--project-servers/--include-tool-managed/--yes/--consented/--connect/--verbose`
 - **`up`** _(hidden)_ — Set this machine up from a setup that already exists: one command — flags `--library/--json/--write/--targets/--toolset/--no-gitignore`
 - **`status`** — Status: where this project stands, on one screen, and the one next step — flags `--json/--verbose`
 - **`add`** — Add a server or skill to this project's setup — subcommands `from/server/skill`
@@ -1988,7 +1998,7 @@ you need the exact verb, flag, or subcommand.
 - **`gateway`** _(hidden)_ — The zero-files gateway: register it once per CLI (`connect`) and every trusted repo brings its own servers through `agentstack mcp --auto-project` with no per-project files — subcommands `connect/disconnect`
 - **`lease`** _(hidden)_ — Runtime lease registry: which toolset leases are open on this machine — subcommands `status`
 - **`delivery`** _(hidden)_ — How each capability reaches each of your tools — and the one override — subcommands `render-locally` — flags `--json`
-- **`trust`** — Review and approve this project's declared capabilities — required before anything activates them — flags `--list/--revoke/--yes/--consented-digest/--preview`
+- **`trust`** — Review and approve this project's declared capabilities — required before anything activates them — flags `--list/--revoke/--yes/--consented/--preview`
 - **`restore`** _(hidden)_ — Undo a recorded write: revert what apply/use/session changed — flags `--last/--list/--scope/--write/--json`
 - **`undo`** — Take it back: pick a point from your recent changes and revert to it — flags `--to/--write/--json`
 - **`adopt`** — Keep a hand-edit: pull a change you made in a CLI back into this setup — flags `--target/--scope/--write/--no-keychain/--to-library`

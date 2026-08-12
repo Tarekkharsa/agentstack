@@ -63,7 +63,7 @@ own words.
 | You are… | You need | Command | What it actually does |
 |---|---|---|---|
 | just syncing config across your CLIs | config sync | `init` then `apply --write` | Copies your reviewed config into each CLI. No runtime check — nothing is blocked once an agent is running. |
-| worried about `rm -rf` or `.env` accidents | the guard | `guard install` | **Cooperative**: catches an agent's *accidents* through each CLI's own hook. Not a determined attacker. |
+| worried about `rm -rf` or `.env` accidents | the guard | `guard install --write` | **Cooperative**: catches an agent's *accidents* through each CLI's own hook. Not a determined attacker. |
 | cloning repos you didn't write | the trust gate | `gateway connect` then `trust .` | A repo's servers, skills, instructions, hooks and extensions stay **inert** until you trust it — not loaded, and not written to disk either. Trust gates whether they reach your tools; it does not sandbox the code. |
 | launching a frozen, verified surface, no Docker | a Protected run — already the default | `run <cli>` | Fail-closed trust and pin checks before launch, then a frozen surface. This is what a plain `agentstack run` does now; `--unprotected` opts out. Labelled `HOST / PROTECTED`. Not kernel isolation — the agent still runs as you. |
 | running sensitive work that must not leak | Lockdown (Docker) | `run <cli> --sandbox --lockdown` | Container with no route out; egress is **enforced**. Unapproved egress is blocked — that never means exfiltration is impossible. Labelled `LOCKDOWN / ENFORCED`. |
@@ -75,7 +75,7 @@ defined once in the [enforcement matrix](ENFORCEMENT.md), which spells out
 exactly what each mode does and does not stop. `--lockdown` needs Docker; the
 protected default does not.
 
-**Not sure?** Let delivery stay automatic and add `guard install` — that is the
+**Not sure?** Let delivery stay automatic and add `guard install --write` — that is the
 right answer for almost everyone. [Get started](start.md) covers the delivery
 half; [lock down a run](howto/lock-down-a-run.md) walks the protection ladder
 from the protected default upward.

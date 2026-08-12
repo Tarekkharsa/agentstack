@@ -617,3 +617,82 @@ fn demoted_verbs_run_identically_at_both_spellings() {
         );
     }
 }
+
+/// One consent flag, one spelling.
+///
+/// Three commands bound an apply to a reviewed digest and each invented its own
+/// name for the same idea: `trust --consented-digest`, `init --consented-plan`,
+/// `toolset create --consented`. A caller who learned the ceremony on one verb
+/// guessed wrong on the next two, and the shape is the same everywhere:
+/// preview, read, pass the digest back. It is now `--consented` on all three.
+///
+/// The old spellings survive as clap aliases for one release, because a rename
+/// that breaks a working command line is a removal. They are HIDDEN: help must
+/// teach exactly one name, or the unification is only half done.
+#[test]
+fn the_consent_digest_has_one_spelling_and_the_old_ones_are_hidden_aliases() {
+    let root = Cli::command();
+
+    let find = |path: &[&str]| {
+        let mut cmd = &root;
+        for segment in path {
+            cmd = cmd
+                .get_subcommands()
+                .find(|c| c.get_name() == *segment)
+                .unwrap_or_else(|| panic!("`{}` is a subcommand", path.join(" ")));
+        }
+        cmd
+    };
+
+    for (path, retired) in [
+        (vec!["trust"], Some("consented-digest")),
+        (vec!["init"], Some("consented-plan")),
+        (vec!["toolset", "create"], None),
+    ] {
+        let cmd = find(&path);
+        let arg = cmd
+            .get_arguments()
+            .find(|a| a.get_long() == Some("consented"))
+            .unwrap_or_else(|| panic!("`agentstack {}` must take --consented", path.join(" ")));
+        if let Some(old) = retired {
+            assert!(
+                arg.get_all_aliases().unwrap_or_default().contains(&old),
+                "`--{old}` must survive as an alias on `agentstack {}` for one release",
+                path.join(" ")
+            );
+            assert!(
+                !cmd.get_arguments().any(|a| a.get_long() == Some(old)),
+                "`--{old}` must not still be a long name of its own"
+            );
+            let help = find(&path).clone().render_long_help().to_string();
+            assert!(
+                help.contains("--consented"),
+                "help teaches the surviving name:\n{help}"
+            );
+            assert!(
+                !help.contains(&format!("--{old} ")) && !help.contains(&format!("--{old}\n")),
+                "help must not still offer `--{old}` as a choice:\n{help}"
+            );
+        }
+    }
+
+    // Both spellings parse, so nobody's script broke on the rename.
+    for argv in [
+        vec!["agentstack", "trust", "--yes", "--consented", "abc"],
+        vec!["agentstack", "trust", "--yes", "--consented-digest", "abc"],
+        vec!["agentstack", "init", "--yes", "--consented", "abc"],
+        vec!["agentstack", "init", "--yes", "--consented-plan", "abc"],
+        vec![
+            "agentstack",
+            "toolset",
+            "create",
+            "t",
+            "--yes",
+            "--consented",
+            "abc",
+        ],
+    ] {
+        Cli::try_parse_from(&argv)
+            .unwrap_or_else(|e| panic!("`{}` must parse: {e}", argv.join(" ")));
+    }
+}

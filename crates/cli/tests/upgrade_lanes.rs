@@ -163,7 +163,7 @@ impl Sandbox {
             .as_str()
             .expect("preview carries a surface digest")
             .to_string();
-        self.ok(&["trust", "--yes", "--consented-digest", &digest]);
+        self.ok(&["trust", "--yes", "--consented", &digest]);
     }
 }
 

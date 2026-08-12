@@ -368,7 +368,7 @@ const CARD_GROUP_ORDER: &[(&str, &str)] = &[
 /// It is a constant, and there is exactly one of it, because "one card, one
 /// yes" is the contract: grouping the detail body per capability must not
 /// multiply the moments a human commits to something. The answer is given by
-/// `agentstack trust --yes --consented-digest <surface_digest>` — bound to the
+/// `agentstack trust --yes --consented <surface_digest>` — bound to the
 /// bytes this payload described, never to a group or an item.
 const CARD_QUESTION: &str = "Trust this project — allow the capabilities above to activate here?";
 
@@ -1024,7 +1024,7 @@ pub fn run(args: &TrustArgs, manifest_dir: Option<&Path>) -> Result<()> {
     if args.revoke {
         return revoke(&base);
     }
-    grant(&base, args.yes, args.consented_digest.as_deref())
+    grant(&base, args.yes, args.consented.as_deref())
 }
 
 /// Read-only: emit the runtime surface a human would consent to, as JSON,
@@ -1287,7 +1287,7 @@ pub fn preview_value(base: &Path) -> Result<serde_json::Value> {
 
     // §7.2: `surface_digest` (computed above, from the same snapshot the
     // display was parsed from) is exactly what a later grant must present as
-    // `--consented-digest` — so "the surface shown" and "the bytes granted"
+    // `--consented` — so "the surface shown" and "the bytes granted"
     // can never diverge without the digest flipping.
     // `trust-review-card-v1`: the kinds the terminal card discloses that this
     // read-only preview previously did not. All three are computed from the
@@ -1389,7 +1389,7 @@ pub fn preview_value(base: &Path) -> Result<serde_json::Value> {
 
     // §7.2: `surface_digest` (computed above, from the same snapshot the
     // display was parsed from) is exactly what a later grant must present as
-    // `--consented-digest` — so "the surface shown" and "the bytes granted"
+    // `--consented` — so "the surface shown" and "the bytes granted"
     // can never diverge without the digest flipping.
     let out = serde_json::json!({
         "path": base.display().to_string(),
@@ -1675,7 +1675,7 @@ pub(crate) fn grant_with_card(
 /// Typing `agentstack trust` at a terminal IS the consent (direnv-allow style),
 /// so an interactive session is unchanged. When stdin is NOT a terminal — a
 /// pipe, a here-string, or an agent driving the shell — the command refuses
-/// unless `--yes` explicitly acknowledges the review AND `--consented-digest`
+/// unless `--yes` explicitly acknowledges the review AND `--consented`
 /// binds that acknowledgement to the exact previewed bytes (§7.2): `--yes`
 /// alone would let any RPC caller grant without anyone having seen the
 /// surface, which is precisely the UI-enforcement gap this closes.
@@ -2561,7 +2561,7 @@ pub(crate) fn grant_probed(
     // Placement is forced: after the render (so the human has seen the diff
     // they are judging) and before the blocker bail (so an answer can still
     // clear its blocker). `consented.is_none()` is load-bearing beyond the
-    // usual non-interactive check — `--consented-digest` does NOT require
+    // usual non-interactive check — `--consented` does NOT require
     // `--yes`, so a TTY caller passing only a digest is `interactive && !yes`
     // yet bound to a digest that accepting would invalidate.
     let mut answers: Vec<(usize, Answer)> = Vec::new();
@@ -2671,7 +2671,7 @@ pub(crate) fn grant_probed(
     // untrusted-means-inert gate.
     if !interactive && !yes {
         anyhow::bail!(
-            "refusing to trust: stdin is not a terminal — review the declarations above and re-run interactively, or acknowledge non-interactively with --yes --consented-digest <surface_digest from `agentstack trust --preview`>"
+            "refusing to trust: stdin is not a terminal — review the declarations above and re-run interactively, or acknowledge non-interactively with --yes --consented <surface_digest from `agentstack trust --preview`>"
         );
     }
     // §7.2: a non-interactive `--yes` must also present the digest of the
@@ -2679,7 +2679,7 @@ pub(crate) fn grant_probed(
     // be the caller's claim, not a checked fact.
     if !interactive && consented.is_none() {
         anyhow::bail!(
-            "refusing to trust: --yes requires --consented-digest — run `agentstack trust --preview`, review the surface, and pass its `surface_digest` back"
+            "refusing to trust: --yes requires --consented — run `agentstack trust --preview`, review the surface, and pass its `surface_digest` back"
         );
     }
 
@@ -3564,7 +3564,7 @@ mod tests {
     // is the real refusal path; `grant_gated` takes the probe as a parameter so
     // both branches are driven directly. NEVER delete or weaken this test.
     #[test]
-    fn non_tty_grant_refuses_without_yes_and_consented_digest() {
+    fn non_tty_grant_refuses_without_yes_and_consented() {
         let _guard = crate::util::TEST_ENV_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -3585,7 +3585,7 @@ mod tests {
         // (b) Non-TTY with --yes but NO consented digest: still refuses —
         // the §7.2 binding, not just the acknowledgement, is required.
         let err = grant_gated(proj.path(), true, None, false, None).unwrap_err();
-        assert!(format!("{err:#}").contains("--consented-digest"));
+        assert!(format!("{err:#}").contains("--consented"));
         assert_eq!(trust::check(proj.path()), TrustState::Untrusted);
 
         // (c) --yes with a WRONG digest: refuses (the trust-crate witness

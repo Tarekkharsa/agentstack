@@ -101,7 +101,7 @@ fn lock_and_trust(home: &Path, path: &std::ffi::OsString, proj: &Path) {
         home,
         path,
         proj,
-        &["trust", ".", "--yes", "--consented-digest", &consent],
+        &["trust", ".", "--yes", "--consented", &consent],
     );
     assert!(
         trust.status.success(),

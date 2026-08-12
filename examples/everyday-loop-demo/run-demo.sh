@@ -115,7 +115,7 @@ activate() { # $1: the `as*` function to run it through
   "$as" adopt --write >/dev/null
   "$as" lock --write >/dev/null
   digest="$("$as" trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')"
-  "$as" trust . --yes --consented-digest "$digest" >/dev/null
+  "$as" trust . --yes --consented "$digest" >/dev/null
   "$as" use --write >/dev/null
 }
 
@@ -190,7 +190,7 @@ if [ "$YES_EXIT" -ne 0 ]; then
 else
   bad "\`yes --yes\` accepted an asserted consent nobody was shown"
 fi
-if grep -q "agentstack trust --yes --consented-digest" <<< "$YES_OUT"; then
+if grep -q "agentstack trust --yes --consented" <<< "$YES_OUT"; then
   ok "the refusal names the explicit headless path instead of dead-ending"
 else
   bad "the refusal should name the headless alternative"
@@ -337,7 +337,7 @@ say "The colleague reviews it, then brings the whole machine up in one command:"
 asb adopt --write >/dev/null
 asb lock --write >/dev/null
 DIGEST_B="$(asb trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')"
-asb trust . --yes --consented-digest "$DIGEST_B" >/dev/null
+asb trust . --yes --consented "$DIGEST_B" >/dev/null
 # `--write` is load-bearing: bare `up` is a dry run that only prints the plan
 # ("Nothing written. Re-run with --write to apply this plan."), and the three
 # assertions below are about what the write actually did on this machine.

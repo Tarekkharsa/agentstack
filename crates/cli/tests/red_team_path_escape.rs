@@ -116,11 +116,7 @@ fn a_traversal_command_cannot_be_pinned_and_cannot_be_trusted() {
     // …and the non-interactive grant path refuses too, so a driver that skips
     // the preview cannot consent its way past the rule.
     let digest = p["surface_digest"].as_str().unwrap().to_string();
-    let (text, ok) = run(
-        &["trust", "--yes", "--consented-digest", &digest],
-        &home,
-        &proj,
-    );
+    let (text, ok) = run(&["trust", "--yes", "--consented", &digest], &home, &proj);
     assert!(!ok, "an ungrantable project was granted:\n{text}");
 
     // Nothing was created outside the project root.

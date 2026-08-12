@@ -159,7 +159,7 @@ fn panel_argv_and_direct_cli_produce_identical_setup() {
         "--yes",
         "--secrets",
         "skip",
-        "--consented-plan",
+        "--consented",
         &digest,
     ])
     .unwrap();

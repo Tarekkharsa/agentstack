@@ -460,3 +460,154 @@ fn run_cli(agentstack_home: &Path, cwd: &Path, args: &[&str]) -> String {
         String::from_utf8_lossy(&out.stderr)
     )
 }
+
+/// A project with one empty toolset, ready to receive a library reference.
+fn project_with_empty_toolset(proj: &Path) -> PathBuf {
+    fs::create_dir_all(proj).unwrap();
+    let manifest_path = proj.join("agentstack.toml");
+    fs::write(
+        &manifest_path,
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [profiles.p]\nservers = []\nskills = []\n",
+    )
+    .unwrap();
+    manifest_path
+}
+
+/// Claim: a manifest can name a library skill as `lib:<source>/<name>`, and
+/// `agentstack add from` resolves that reference through the linked-libraries
+/// seam.
+///
+/// The route it replaces went through the provider/catalog path: a bare library
+/// name resolved as a skill candidate whose body the *bundled catalog*
+/// extractor was then asked to lay down, which cannot work — a library body is
+/// not compiled into the binary. The explicit spelling says where the bytes
+/// are, so the command reads the link list instead, and the lock/`doctor`
+/// machinery that already verifies `library · matches lock` picks it up
+/// unchanged.
+#[test]
+fn add_from_a_lib_reference_declares_the_library_copy_and_pins_it() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let ash = isolate(tmp.path());
+    let central = tmp.path().join("central");
+    link(&[("central", &central)]);
+    seed_skill(
+        tmp.path(),
+        &central,
+        "rust-testing",
+        "---\ndescription: Rust testing\n---\n# rust testing\n",
+    );
+
+    let proj = tmp.path().join("proj");
+    let manifest_path = project_with_empty_toolset(&proj);
+
+    // Preview first: a dry run must leave the manifest exactly as it was.
+    let dry = run_cli(&ash, &proj, &["add", "from", "lib:central/rust-testing"]);
+    assert!(dry.contains("Dry run"), "the bare form previews:\n{dry}");
+    assert!(
+        !fs::read_to_string(&manifest_path).unwrap().contains("lib:"),
+        "a dry run writes nothing:\n{dry}"
+    );
+
+    let out = run_cli(
+        &ash,
+        &proj,
+        &["add", "from", "lib:central/rust-testing", "--write"],
+    );
+    let manifest = fs::read_to_string(&manifest_path).unwrap();
+    assert!(
+        manifest.contains("lib:central/rust-testing"),
+        "the manifest names the library skill by its explicit reference:\n{manifest}\n{out}"
+    );
+    // The reference is a selector, never a second identity: what got declared
+    // is the skill `rust-testing`, which came from the source `central`.
+    assert_eq!(
+        agentstack::sources::capability_name("lib:central/rust-testing"),
+        "rust-testing"
+    );
+
+    // …and the same command pinned it, so the content digest is in the lock
+    // rather than waiting for a later `lock --write`.
+    let lock = agentstack::lock::Lock::load(&proj).unwrap();
+    let pinned = lock
+        .skills
+        .iter()
+        .find(|s| s.name == "rust-testing")
+        .unwrap_or_else(|| panic!("the lock pins the library skill:\n{out}"));
+    assert!(
+        pinned.checksum.hex().len() == 64,
+        "the pin is a content digest, not an empty placeholder"
+    );
+
+    // Which is what makes doctor's reproducibility row have something to check.
+    let doctor = run_cli(&ash, &proj, &["doctor"]);
+    assert!(
+        doctor.contains("library \u{b7} matches lock"),
+        "the existing reproducibility check sees the new reference form:\n{doctor}"
+    );
+}
+
+/// Claim: the two ways a `lib:` reference can be wrong are told apart — they
+/// are different mistakes with different fixes — and neither one writes.
+#[test]
+fn a_lib_reference_that_resolves_nowhere_refuses_before_it_writes() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let ash = isolate(tmp.path());
+    let central = tmp.path().join("central");
+    link(&[("central", &central)]);
+    seed_skill(tmp.path(), &central, "rust-testing", "# rust testing\n");
+
+    let proj = tmp.path().join("proj");
+    let manifest_path = project_with_empty_toolset(&proj);
+    let before = fs::read_to_string(&manifest_path).unwrap();
+
+    let no_source = run_cli(
+        &ash,
+        &proj,
+        &["add", "from", "lib:nowhere/rust-testing", "--write"],
+    );
+    assert!(
+        no_source.contains("no linked library named 'nowhere'") && no_source.contains("central"),
+        "an unlinked source names itself and lists what IS linked:\n{no_source}"
+    );
+
+    let no_skill = run_cli(
+        &ash,
+        &proj,
+        &["add", "from", "lib:central/absent", "--write"],
+    );
+    assert!(
+        no_skill.contains("no skill 'absent' in library 'central'"),
+        "a linked source missing the name says so:\n{no_skill}"
+    );
+
+    assert_eq!(
+        fs::read_to_string(&manifest_path).unwrap(),
+        before,
+        "neither refusal may leave a partial write behind"
+    );
+}
+
+/// Claim: `add skill <a library name>` still refuses — the ecosystem grammar
+/// really does not take a bare name — but the remedy it offers is now a command
+/// that runs, naming the source the skill is actually in.
+#[test]
+fn the_add_skill_refusal_offers_the_working_lib_reference() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let ash = isolate(tmp.path());
+    let central = tmp.path().join("central");
+    link(&[("central", &central)]);
+    seed_skill(tmp.path(), &central, "rust-testing", "# rust testing\n");
+
+    let proj = tmp.path().join("proj");
+    project_with_empty_toolset(&proj);
+
+    let out = run_cli(&ash, &proj, &["add", "skill", "rust-testing"]);
+    assert!(
+        out.contains("agentstack add from lib:central/rust-testing"),
+        "the refusal names the source the skill is really in:\n{out}"
+    );
+}

@@ -333,7 +333,7 @@
 <li><code>agentstack apply --write</code> writes no native MCP server config, compiles no instruction fragments, renders no hooks and no native extensions;</li>
 <li><code>agentstack use --write</code> materializes no skills.</li>
 </ul>
-<p>Each prints a <code>✗</code> line pointing at <code>agentstack trust .</code> and exits nonzero, so a half-configured setup is not what you get — nothing is written at all. <code>trust .</code> shows the reviewed surface and asks one closing question, so it needs a person at a terminal; a scripted rollout uses the digest-bound pair instead (<code>agentstack trust --preview</code>, then <code>agentstack trust --yes --consented-digest &lt;digest&gt;</code>), which refuses a stale or missing digest.</p>
+<p>Each prints a <code>✗</code> line pointing at <code>agentstack trust .</code> and exits nonzero, so a half-configured setup is not what you get — nothing is written at all. <code>trust .</code> shows the reviewed surface and asks one closing question, so it needs a person at a terminal; a scripted rollout uses the digest-bound pair instead (<code>agentstack trust --preview</code>, then <code>agentstack trust --yes --consented &lt;digest&gt;</code>), which refuses a stale or missing digest.</p>
 <p>Nothing about this is a migration: it is the same first-run review a project gets anywhere, arriving once per machine and per checkout.</p>
 <h2 id="what-changed-on-disk">What changed on disk<a class="hlink" href="#what-changed-on-disk" aria-label="Link to this section">#</a></h2>
 <p>Two notes for anyone tracking the file formats rather than the commands.</p>

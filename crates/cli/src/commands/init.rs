@@ -724,9 +724,9 @@ fn run_gated(args: &InitArgs, manifest_dir: Option<&Path>, interactive: bool) ->
 /// this call and are dropped.
 ///
 /// The emitted `plan_digest` identifies this exact plan: a later scripted
-/// apply may present it as `--consented-plan` and the write then refuses if
+/// apply may present it as `--consented` and the write then refuses if
 /// re-running detection yields a different plan — the same reviewed-bytes
-/// binding `trust --preview` / `--consented-digest` gives the trust grant.
+/// binding `trust --preview` / `--consented` gives the trust grant.
 fn run_plan(args: &InitArgs, manifest_dir: Option<&Path>) -> Result<()> {
     println!(
         "{}",
@@ -1352,7 +1352,7 @@ fn run_global(args: &InitArgs) -> Result<()> {
     let detected = super::guard::detected_target_ids();
     if detected.is_empty() {
         println!(
-            "  {} no hook-capable CLIs detected — run `agentstack guard install` after installing one.",
+            "  {} no hook-capable CLIs detected — run `agentstack guard install --write` after installing one.",
             "·".dimmed()
         );
     } else {
@@ -1363,10 +1363,13 @@ fn run_global(args: &InitArgs) -> Result<()> {
             format!("Install the guard into these {} CLIs?", detected.len())
         };
         if crate::util::confirm::confirm(&prompt)? {
-            super::guard::install()?;
+            // The answered prompt IS the consent for this write, so the
+            // interactive path applies directly rather than printing a
+            // preview the user just approved.
+            super::guard::install(true)?;
         } else {
             println!(
-                "  {} skipped — run `agentstack guard install` anytime.",
+                "  {} skipped — run `agentstack guard install --write` anytime.",
                 "·".dimmed()
             );
         }
@@ -1703,11 +1706,11 @@ fn run_impl(
     // resolved non-interactively exactly as `--plan` resolved it, so both
     // digests describe the same store choice; the write path below reuses
     // this resolution instead of prompting to a different one.
-    let preresolved_store = match args.consented_plan {
+    let preresolved_store = match args.consented {
         Some(_) => Some(resolve_secret_store(args, false)?),
         None => None,
     };
-    if let Some(consented) = args.consented_plan.as_deref() {
+    if let Some(consented) = args.consented.as_deref() {
         let already = existing_manifest(manifest_dir)?.is_some();
         let store = preresolved_store.expect("resolved right above for Some(consented)");
         let actual = plan_digest(&det, &base, already, store_label(store));
@@ -4153,7 +4156,7 @@ mod tests {
             project_servers: false,
             include_tool_managed: false,
             yes: false,
-            consented_plan: None,
+            consented: None,
             connect: false,
             verbose: false,
         };
@@ -4187,7 +4190,7 @@ mod tests {
             project_servers: false,
             include_tool_managed: false,
             yes: false,
-            consented_plan: None,
+            consented: None,
             connect: false,
             verbose: false,
         };
@@ -4217,7 +4220,7 @@ mod tests {
             project_servers: false,
             include_tool_managed: false,
             yes: false,
-            consented_plan: None,
+            consented: None,
             connect: false,
             verbose: false,
         };

@@ -59,12 +59,7 @@ fn preview(bin: &str, home: &Path, proj: &Path) -> serde_json::Value {
 fn grant(bin: &str, home: &Path, proj: &Path) -> serde_json::Value {
     let previewed = preview(bin, home, proj);
     let digest = previewed["surface_digest"].as_str().unwrap().to_string();
-    let (text, ok) = run(
-        bin,
-        &["trust", "--yes", "--consented-digest", &digest],
-        home,
-        proj,
-    );
+    let (text, ok) = run(bin, &["trust", "--yes", "--consented", &digest], home, proj);
     assert!(ok, "grant failed:\n{text}");
     previewed
 }

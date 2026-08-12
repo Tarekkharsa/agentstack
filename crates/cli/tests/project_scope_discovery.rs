@@ -37,7 +37,7 @@ fn init_args() -> InitArgs {
         project_servers: false,
         include_tool_managed: false,
         yes: true,
-        consented_plan: None,
+        consented: None,
         connect: false,
         verbose: false,
     }

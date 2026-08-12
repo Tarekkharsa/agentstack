@@ -133,7 +133,7 @@ fn lib_list_names_what_is_dead_without_ever_inventing_a_zero() {
         .to_string();
     let (out, ok) = run(
         bin,
-        &["trust", "--yes", "--consented-digest", &digest],
+        &["trust", "--yes", "--consented", &digest],
         &home,
         &proj,
     );

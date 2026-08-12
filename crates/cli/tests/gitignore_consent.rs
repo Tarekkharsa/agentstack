@@ -72,11 +72,7 @@ fn grant(home: &Path, proj: &Path) {
         .as_str()
         .expect("preview carries a surface digest")
         .to_string();
-    agentstack(
-        home,
-        proj,
-        &["trust", "--yes", "--consented-digest", &digest],
-    );
+    agentstack(home, proj, &["trust", "--yes", "--consented", &digest]);
 }
 
 /// Record the durable opt-out by hand, the way a committed manifest carries it.

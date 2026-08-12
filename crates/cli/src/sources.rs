@@ -43,6 +43,21 @@ pub const DEFAULT_SOURCE_NAME: &str = "local";
 /// so the split needs no escaping rule.
 pub const QUALIFIER: char = ':';
 
+/// The prefix of the explicit library-reference spelling,
+/// `lib:<source>/<name>`.
+///
+/// The same selection as `<source>:<name>`, written so the *origin* is
+/// legible without knowing the link list: `central:rust-testing` reads like a
+/// name with a colon in it, `lib:central/rust-testing` says out loud that this
+/// capability comes from a linked library called `central`. It is the form
+/// `agentstack add from` accepts, so one command line both selects a library
+/// skill and states that it is one.
+///
+/// Deliberately NOT a second identity: [`capability_name`] returns the same
+/// bare name for both spellings, so the lock key, the rendered directory and
+/// the gateway name are untouched by which spelling a manifest uses.
+pub const LIB_PREFIX: &str = "lib:";
+
 /// One linked source, as recorded on disk. Position in the file is precedence.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SourceEntry {
@@ -288,9 +303,33 @@ fn tildify(path: &Path) -> String {
     path.display().to_string()
 }
 
+/// Split an explicit `lib:<source>/<name>` reference into
+/// `(source, capability)`. `None` for anything else, including a malformed
+/// `lib:` reference — a caller that wants to *report* the malformation asks
+/// for the prefix itself ([`LIB_PREFIX`]) and then finds this returning
+/// `None`.
+pub fn split_lib_reference(reference: &str) -> Option<(&str, &str)> {
+    let rest = reference.strip_prefix(LIB_PREFIX)?;
+    let (source, name) = rest.split_once('/')?;
+    // One segment each: `lib:a/b/c` names nothing this resolver can address,
+    // and silently taking `a` + `b/c` would invent a path where the reference
+    // grammar has none.
+    if source.is_empty() || name.is_empty() || name.contains('/') || source.contains(QUALIFIER) {
+        return None;
+    }
+    Some((source, name))
+}
+
 /// Split a fully-qualified reference into `(source, capability)`. `None` for a
 /// bare reference — the common case, which resolves through the ordered list.
+///
+/// Both qualified spellings land here — `<source>:<name>` and the explicit
+/// `lib:<source>/<name>` — so every resolver, validator and reporter that
+/// already asked this question understands the new form without being told.
 pub fn split_reference(reference: &str) -> Option<(&str, &str)> {
+    if let Some(split) = split_lib_reference(reference) {
+        return Some(split);
+    }
     let (source, name) = reference.split_once(QUALIFIER)?;
     if source.is_empty() || name.is_empty() {
         return None;
@@ -309,6 +348,42 @@ pub fn capability_name(reference: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The explicit spelling selects exactly what the colon spelling selects,
+    /// and names the same capability — a second spelling, never a second
+    /// identity.
+    #[test]
+    fn the_lib_spelling_is_the_colon_spelling_said_out_loud() {
+        assert_eq!(
+            split_reference("lib:central/rust-testing"),
+            Some(("central", "rust-testing"))
+        );
+        assert_eq!(
+            split_reference("central:rust-testing"),
+            Some(("central", "rust-testing"))
+        );
+        assert_eq!(capability_name("lib:central/rust-testing"), "rust-testing");
+        assert_eq!(capability_name("central:rust-testing"), "rust-testing");
+    }
+
+    /// A malformed `lib:` reference must not decay into the colon grammar and
+    /// resolve as a source literally named `lib` — that would turn a typo into
+    /// a lookup in a source the user never linked.
+    #[test]
+    fn a_malformed_lib_reference_names_nothing() {
+        for bad in [
+            "lib:central",
+            "lib:/rust-testing",
+            "lib:central/",
+            "lib:central/nested/name",
+            "lib:",
+        ] {
+            assert_eq!(split_lib_reference(bad), None, "{bad}");
+        }
+        // `lib:central` still splits under the colon grammar — a source really
+        // named `lib` is legal — but it is NOT the library spelling.
+        assert_eq!(split_reference("lib:central"), Some(("lib", "central")));
+    }
 
     #[test]
     fn an_absent_list_is_the_single_central_library() {

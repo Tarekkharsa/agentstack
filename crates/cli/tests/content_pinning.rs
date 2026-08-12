@@ -49,7 +49,7 @@ fn grant_args(proj: &Path) -> TrustArgs {
         list: false,
         revoke: false,
         yes: true,
-        consented_digest: trust::digest_for(proj),
+        consented: trust::digest_for(proj),
         preview: false,
     }
 }
@@ -200,7 +200,7 @@ fn trust_preview_grants_nothing() {
         list: false,
         revoke: false,
         yes: false,
-        consented_digest: None,
+        consented: None,
         preview: true,
     };
 

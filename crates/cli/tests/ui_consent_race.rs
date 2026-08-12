@@ -11,8 +11,8 @@
 //! reviewed.
 //!
 //! Two bindings, two witnesses:
-//!  - trust:  `trust --preview` surface_digest ↔ `trust --yes --consented-digest`
-//!  - setup:  `init --plan` plan_digest ↔ `init --yes --consented-plan`
+//!  - trust:  `trust --preview` surface_digest ↔ `trust --yes --consented`
+//!  - setup:  `init --plan` plan_digest ↔ `init --yes --consented`
 
 use std::fs;
 use std::path::Path;
@@ -39,7 +39,7 @@ fn grant_args(proj: &Path, digest: Option<String>) -> TrustArgs {
         list: false,
         revoke: false,
         yes: true,
-        consented_digest: digest,
+        consented: digest,
         preview: false,
     }
 }
@@ -90,7 +90,7 @@ fn trust_grant_refuses_previewed_digest_after_manifest_edit() {
     assert_eq!(trust::check(&proj), TrustState::Trusted);
 }
 
-fn init_args(yes: bool, consented_plan: Option<String>) -> InitArgs {
+fn init_args(yes: bool, consented: Option<String>) -> InitArgs {
     InitArgs {
         global: false,
         force: false,
@@ -102,7 +102,7 @@ fn init_args(yes: bool, consented_plan: Option<String>) -> InitArgs {
         project_servers: false,
         include_tool_managed: false,
         yes,
-        consented_plan,
+        consented,
         connect: false,
         verbose: false,
     }

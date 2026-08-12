@@ -144,11 +144,7 @@ fn deliver(home: &Path, root: &Path, with_skill: bool) {
         .and_then(|v| v.as_str())
         .expect("the review surface carries the digest a grant must present")
         .to_string();
-    let (out, ok) = run(
-        &["trust", "--yes", "--consented-digest", &digest],
-        home,
-        root,
-    );
+    let (out, ok) = run(&["trust", "--yes", "--consented", &digest], home, root);
     assert!(ok, "trust --yes: {out}");
 
     if with_skill {
@@ -372,11 +368,7 @@ fn trust(home: &Path, root: &Path) {
         .and_then(|v| v.as_str())
         .expect("the review surface carries the digest a grant must present")
         .to_string();
-    let (out, ok) = run(
-        &["trust", "--yes", "--consented-digest", &digest],
-        home,
-        root,
-    );
+    let (out, ok) = run(&["trust", "--yes", "--consented", &digest], home, root);
     assert!(ok, "trust --yes: {out}");
 }
 

@@ -60,11 +60,7 @@ fn grant(home: &Path, proj: &Path) {
         .as_str()
         .expect("preview carries a surface digest")
         .to_string();
-    let granted = run(
-        &["trust", "--yes", "--consented-digest", &digest],
-        home,
-        proj,
-    );
+    let granted = run(&["trust", "--yes", "--consented", &digest], home, proj);
     assert!(granted.ok, "grant failed:\n{}", granted.text);
 }
 

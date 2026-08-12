@@ -67,7 +67,7 @@ Trusted does **not** mean:
   wrapper) reads as interactive — no stronger than the store-file boundary
   above, and not claimed to be. What the gate does enforce is that headless
   callers (pipes, RPC servers) cannot grant without `--yes` plus the reviewed
-  `--consented-digest`. Every store mutation now leaves an identity-only
+  `--consented`. Every store mutation now leaves an identity-only
   event behind (see [Trust-store mutation
   logging](#trust-store-mutation-logging)), which makes silent self-trust
   harder to miss — but the log lives in the same user-writable directory, so
@@ -426,7 +426,7 @@ toolset containing it.
   sandbox, no mount, no kernel path-scoping touches either path — `runs.rs`
   spawns the harness against the real filesystem, and stdio MCP children run
   with the ambient user's full permissions. What DOES run is the host guard:
-  `agentstack guard install` wires `agentstack guard check` into each
+  `agentstack guard install --write` wires `agentstack guard check` into each
   detected CLI's own pre-tool-use hook (Claude Code, Codex, Gemini, Cursor,
   Windsurf, Copilot CLI, Antigravity, OpenCode, Pi; VS Code agent mode reads
   the Claude-format user hooks). (VS Code's hook support is in Preview and
@@ -1192,7 +1192,7 @@ why it qualified. Declining restores the manifest and lockfile to their
 previous bytes, so a refusal leaves the project as it was.
 
 The command requires a terminal. It is a review a human reads and answers;
-headless callers keep the explicit path, where `--consented-digest` binds the
+headless callers keep the explicit path, where `--consented` binds the
 acknowledgement to previewed bytes (§7.2). Content that fails provenance or
 collides with an existing declaration is not filtered out downstream — it is
 never in the set the compressed path acts on, and the user is told which

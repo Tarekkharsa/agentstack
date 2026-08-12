@@ -63,7 +63,7 @@ pub fn run(args: &GuardArgs) -> Result<()> {
     match &args.cmd {
         GuardCmd::Check { protocol } => check(protocol.as_deref()),
         GuardCmd::Test { command } => test(&command.join(" ")),
-        GuardCmd::Install {} => install(),
+        GuardCmd::Install { write } => install(*write),
         GuardCmd::Uninstall {} => uninstall(),
         GuardCmd::Status {} => status(),
     }
@@ -532,13 +532,72 @@ fn test(command: &str) -> Result<()> {
 /// uses to find (only) our own entries in shared config files.
 const MARKER: &str = "agentstack-guard";
 
-/// How the hook is written into one CLI. `detect` is a directory whose
-/// existence means the CLI is present — install touches nothing for absent
-/// CLIs.
+/// How the hook is written into one CLI.
+///
+/// `adapter` is the id of this CLI's adapter descriptor, which is where the
+/// question "is this CLI on this machine?" is answered for the whole product
+/// ([`agentstack_adapters::AdapterDescriptor::detected`]). `detect` is guard's
+/// own hook-config directory — kept as one extra config witness, never as the
+/// only one (see [`detection_for`]).
 struct Target {
     id: &'static str,
+    /// Adapter descriptor id — the shared detection seam `status` and `doctor`
+    /// use. Every guard target has one; a hook we cannot name an adapter for
+    /// is a hook we could not honestly claim to install.
+    adapter: &'static str,
     detect: &'static str,
     kind: Kind,
+}
+
+/// What detection knows about one guard target, kept as two facts rather than
+/// one boolean because the interesting case is the disagreement between them.
+///
+/// Guard used to detect purely by its own hook-config directory (`~/.claude`,
+/// `~/.pi/agent`) while `status` and `doctor` ask the adapter descriptors
+/// (binary on `$PATH`, or the descriptor's config file). Guard therefore
+/// skipped CLIs the rest of the product could see. Detection now comes from
+/// the shared seam, with guard's directory probe folded in as one more config
+/// witness so the set only ever widens.
+#[derive(Clone, Copy, Default)]
+struct Detection {
+    /// The CLI's binary is on `$PATH`.
+    on_path: bool,
+    /// A config for this CLI exists: the adapter descriptor's config file, or
+    /// guard's own hook-config directory.
+    config: bool,
+}
+
+impl Detection {
+    fn present(self) -> bool {
+        self.on_path || self.config
+    }
+
+    /// The honest one-liner for the case a user would otherwise misread: we
+    /// can see this CLI's configuration but not its binary. Install still
+    /// writes the hook there (a CLI installed outside `$PATH` — a GUI app, a
+    /// shell alias, a version manager — is still a CLI whose hook must fire),
+    /// so the line says what happened rather than implying a skip.
+    fn caveat(self) -> Option<&'static str> {
+        (self.config && !self.on_path).then_some("config seen, binary not on PATH")
+    }
+}
+
+/// Load the adapter registry once per command. A registry that will not load
+/// (a malformed user drop-in) must not wedge the guard: detection then falls
+/// back to guard's own directory probe, which is what it always was.
+fn adapter_registry() -> Option<agentstack_adapters::Registry> {
+    agentstack_adapters::Registry::load().ok()
+}
+
+/// Detection for one target, from the shared adapter seam plus guard's own
+/// hook-config directory.
+fn detection_for(registry: Option<&agentstack_adapters::Registry>, t: &Target) -> Detection {
+    let descriptor = registry.and_then(|r| r.get(t.adapter));
+    Detection {
+        on_path: descriptor.is_some_and(|d| d.is_installed()),
+        config: descriptor.is_some_and(|d| d.config_present())
+            || paths::expand_tilde(t.detect).exists(),
+    }
 }
 
 enum Kind {
@@ -564,6 +623,7 @@ fn targets() -> Vec<Target> {
         // so this one entry covers both (per VS Code's own hooks docs).
         Target {
             id: "claude-code (+ vscode agent mode)",
+            adapter: "claude-code",
             detect: "~/.claude",
             kind: Kind::SharedJson {
                 path: "~/.claude/settings.json",
@@ -574,6 +634,7 @@ fn targets() -> Vec<Target> {
         },
         Target {
             id: "codex",
+            adapter: "codex",
             detect: "~/.codex",
             kind: Kind::SharedJson {
                 path: "~/.codex/hooks.json",
@@ -584,6 +645,7 @@ fn targets() -> Vec<Target> {
         },
         Target {
             id: "gemini",
+            adapter: "gemini",
             detect: "~/.gemini",
             kind: Kind::SharedJson {
                 path: "~/.gemini/settings.json",
@@ -594,6 +656,7 @@ fn targets() -> Vec<Target> {
         },
         Target {
             id: "antigravity",
+            adapter: "antigravity",
             detect: "~/.gemini/antigravity-cli",
             kind: Kind::SharedJson {
                 path: "~/.gemini/config/hooks.json",
@@ -604,6 +667,7 @@ fn targets() -> Vec<Target> {
         },
         Target {
             id: "cursor",
+            adapter: "cursor",
             detect: "~/.cursor",
             kind: Kind::SharedJson {
                 path: "~/.cursor/hooks.json",
@@ -618,6 +682,7 @@ fn targets() -> Vec<Target> {
         },
         Target {
             id: "windsurf",
+            adapter: "windsurf",
             detect: "~/.codeium/windsurf",
             kind: Kind::SharedJson {
                 path: "~/.codeium/windsurf/hooks.json",
@@ -636,6 +701,7 @@ fn targets() -> Vec<Target> {
         },
         Target {
             id: "copilot-cli",
+            adapter: "copilot-cli",
             detect: "~/.copilot",
             kind: Kind::OwnedFile {
                 path: "~/.copilot/hooks/agentstack-guard.json",
@@ -644,6 +710,7 @@ fn targets() -> Vec<Target> {
         },
         Target {
             id: "opencode",
+            adapter: "opencode",
             // OpenCode uses XDG ~/.config even on macOS.
             detect: "~/.config/opencode",
             kind: Kind::OwnedFile {
@@ -653,6 +720,7 @@ fn targets() -> Vec<Target> {
         },
         Target {
             id: "pi",
+            adapter: "pi",
             detect: "~/.pi/agent",
             kind: Kind::OwnedFile {
                 path: "~/.pi/agent/extensions/agentstack-guard.ts",
@@ -864,22 +932,130 @@ export default function (pi: any) {{
     )
 }
 
-pub(crate) fn install() -> Result<()> {
+/// Where one target's hook lands, and what would go in it — the unit both the
+/// preview and the write print, so the two screens cannot describe different
+/// installs.
+struct Plan {
+    id: &'static str,
+    path: PathBuf,
+    /// The hook events registered in a shared config file. Empty for a file
+    /// the guard owns outright, where the whole file is the hook.
+    events: &'static [&'static str],
+    detection: Detection,
+}
+
+fn plan_for(t: &Target, detection: Detection) -> Plan {
+    let (path, events): (&str, &'static [&'static str]) = match &t.kind {
+        Kind::SharedJson { path, events, .. } => (path, events),
+        Kind::OwnedFile { path, .. } => (path, &[]),
+    };
+    Plan {
+        id: t.id,
+        path: paths::expand_tilde(path),
+        events,
+        detection,
+    }
+}
+
+impl Plan {
+    /// `~/.claude/settings.json (hooks: PreToolUse)` — what lands, and where.
+    fn describe(&self) -> String {
+        let mut line = self.path.display().to_string();
+        if !self.events.is_empty() {
+            line.push_str(&format!(" (hooks: {})", self.events.join(", ")));
+        }
+        if let Some(caveat) = self.detection.caveat() {
+            line.push_str(&format!(" — {caveat}, hooks still written"));
+        }
+        line
+    }
+}
+
+/// `guard install` — preview by default, write with `--write`.
+///
+/// This is the one write in the CLI that used to have neither a preview nor a
+/// `--write`, while editing *other* products' global config files. It now has
+/// the shape every other write here has: bare invocation shows the files and
+/// hook events it would touch and returns having changed nothing; `--write`
+/// applies exactly what the preview named.
+pub(crate) fn install(write: bool) -> Result<()> {
+    let registry = adapter_registry();
+    let manifest_path = paths::agentstack_home().join("agentstack.toml");
+    let targets = targets();
+    let plans: Vec<(Plan, bool)> = targets
+        .iter()
+        .map(|t| {
+            let detection = detection_for(registry.as_ref(), t);
+            (plan_for(t, detection), detection.present())
+        })
+        .collect();
+
+    if !write {
+        println!(
+            "{} — nothing is written.",
+            "Preview: agentstack guard install".bold()
+        );
+        for (plan, present) in &plans {
+            if *present {
+                println!("  {} {} → {}", "·".dimmed(), plan.id, plan.describe());
+            } else {
+                println!(
+                    "  {} {} — not detected, would be skipped",
+                    "·".dimmed(),
+                    plan.id
+                );
+            }
+        }
+        for (id, status, why) in unguarded() {
+            println!(
+                "  {} {id} — {} ({status}: {why})",
+                "○".dimmed(),
+                "NOT protected".yellow()
+            );
+        }
+        println!(
+            "  {} {} — [guard] enabled = true + [policy.filesystem] deny ({} default entries, \
+             only when you have never written one)",
+            "·".dimmed(),
+            manifest_path.display(),
+            DEFAULT_DENY.len()
+        );
+        println!(
+            "  {} {} — the per-CLI wrapper scripts the hooks invoke",
+            "·".dimmed(),
+            paths::agentstack_home().join("guard").display()
+        );
+        println!(
+            "\nBlocks: destructive commands, reads/writes of [policy.filesystem] deny paths, \
+             writes outside the workspace/[guard] allow_roots.\n\
+             This is cooperative (accident) protection — for hostile code use \
+             `agentstack run --sandbox`.\n\
+             Apply it with {}.",
+            "agentstack guard install --write".bold()
+        );
+        return Ok(());
+    }
+
     seed_machine_config()?;
     write_wrappers()?;
     let exe = exe();
     let mut wrote = 0usize;
-    for t in targets() {
-        if !paths::expand_tilde(t.detect).exists() {
-            println!("  {} {} — not detected, skipped", "·".dimmed(), t.id);
+    for (t, (plan, present)) in targets.iter().zip(&plans) {
+        if !*present {
+            println!("  {} {} — not detected, skipped", "·".dimmed(), plan.id);
             continue;
         }
-        match apply_target(&t, &exe, true) {
+        match apply_target(t, &exe, true) {
             Ok(path) => {
                 wrote += 1;
-                println!("  {} {} → {}", "✓".green(), t.id, path.display());
+                let caveat = plan
+                    .detection
+                    .caveat()
+                    .map(|c| format!("  ({c}, hooks still written)"))
+                    .unwrap_or_default();
+                println!("  {} {} → {}{caveat}", "✓".green(), plan.id, path.display());
             }
-            Err(e) => println!("  {} {} — {e:#}", "✗".red(), t.id),
+            Err(e) => println!("  {} {} — {e:#}", "✗".red(), plan.id),
         }
     }
     for (id, status, why) in unguarded() {
@@ -896,7 +1072,6 @@ pub(crate) fn install() -> Result<()> {
          This is cooperative (accident) protection — for hostile code use `agentstack run --sandbox`.",
         "✓".green().bold()
     );
-    let manifest_path = paths::agentstack_home().join("agentstack.toml");
     // Disclose the deny list this install activates and where it lives (P11):
     // the effective list if the policy loads, else the defaults just seeded.
     let deny: Vec<String> = crate::machine_policy::inspect()
@@ -957,7 +1132,7 @@ fn status() -> Result<()> {
             (_, Some(error)) =>
                 format!("{} — machine config unreadable ({error})", "BLOCKED".red()),
             (Some(cfg), None) if cfg.enabled() => "enabled".green().to_string(),
-            _ => "disabled (run `agentstack guard install`)"
+            _ => "disabled (run `agentstack guard install --write`)"
                 .yellow()
                 .to_string(),
         }
@@ -1006,14 +1181,22 @@ fn status() -> Result<()> {
         println!("  allow_roots: unavailable");
     }
     println!("  destructive-command rules: built-in");
+    let registry = adapter_registry();
     for t in targets() {
-        let detected = paths::expand_tilde(t.detect).exists();
+        let detection = detection_for(registry.as_ref(), &t);
+        let detected = detection.present();
         let installed = detected && target_installed(&t);
-        let mark = match (detected, installed) {
+        let mut mark = match (detected, installed) {
             (false, _) => "· not detected".dimmed().to_string(),
             (true, true) => "✓ hook installed".green().to_string(),
             (true, false) => "✗ detected, hook missing".yellow().to_string(),
         };
+        // Detection now comes from the same seam `status`/`doctor` use, so a
+        // CLI can be detected by its config alone. Say so rather than let the
+        // row imply a binary we never found.
+        if let Some(caveat) = detection.caveat() {
+            mark.push_str(&format!(" ({caveat})"));
+        }
         println!("  {:<32} {mark}", t.id);
     }
     for (id, status, why) in unguarded() {
@@ -1112,10 +1295,11 @@ fn apply_target(t: &Target, exe: &str, add: bool) -> Result<PathBuf> {
 /// section): `(target id, cli detected, hook installed)`. Same detection
 /// rules as `status()` — nothing here writes.
 pub(crate) fn coverage() -> Vec<(&'static str, bool, bool)> {
+    let registry = adapter_registry();
     targets()
         .iter()
         .map(|t| {
-            let detected = paths::expand_tilde(t.detect).exists();
+            let detected = detection_for(registry.as_ref(), t).present();
             (t.id, detected, detected && target_installed(t))
         })
         .collect()
@@ -1261,9 +1445,10 @@ pub(crate) fn seed_machine_config() -> Result<()> {
 /// The hook-capable CLIs actually present on this machine — what the
 /// `init --global` guard offer names before asking.
 pub(crate) fn detected_target_ids() -> Vec<&'static str> {
+    let registry = adapter_registry();
     targets()
         .into_iter()
-        .filter(|t| paths::expand_tilde(t.detect).exists())
+        .filter(|t| detection_for(registry.as_ref(), t).present())
         .map(|t| t.id)
         .collect()
 }
@@ -1462,6 +1647,7 @@ mod tests {
 
         let t = Target {
             id: "test",
+            adapter: "claude-code",
             detect: "~",
             kind: Kind::SharedJson {
                 path: Box::leak(path.display().to_string().into_boxed_str()),

@@ -59,11 +59,7 @@ fn grant(proj: &std::path::Path, home: &std::path::Path) {
         .as_str()
         .expect("preview carries a surface digest")
         .to_string();
-    run(
-        proj,
-        home,
-        &["trust", "--yes", "--consented-digest", &digest],
-    );
+    run(proj, home, &["trust", "--yes", "--consented", &digest]);
 }
 
 fn strip_ansi(s: &str) -> String {

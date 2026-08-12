@@ -120,7 +120,7 @@ fn a_resolved_secret_reaches_the_native_config_and_nothing_else() {
         .unwrap()
         .to_string();
     let (text, ok) = run(
-        &["trust", "--yes", "--consented-digest", &digest],
+        &["trust", "--yes", "--consented", &digest],
         &home,
         &proj,
         true,
@@ -212,7 +212,7 @@ fn an_unresolvable_secret_blocks_the_write_instead_of_emitting_a_blank() {
         .unwrap()
         .to_string();
     let (text, ok) = run(
-        &["trust", "--yes", "--consented-digest", &digest],
+        &["trust", "--yes", "--consented", &digest],
         &home,
         &proj,
         false,

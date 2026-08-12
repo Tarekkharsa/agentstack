@@ -81,7 +81,7 @@ pub fn run(args: &YesArgs, manifest_dir: Option<&Path>) -> Result<()> {
 /// has no one to show it to, and letting `--yes` alone satisfy the gate here
 /// would reopen exactly what §7.2 closed on `trust` — a caller asserting
 /// consent nobody gave. Headless callers keep the explicit path, where
-/// `--consented-digest` binds the acknowledgement to previewed bytes.
+/// `--consented` binds the acknowledgement to previewed bytes.
 pub fn run_gated(args: &YesArgs, manifest_dir: Option<&Path>, interactive: bool) -> Result<()> {
     run_answered(args, manifest_dir, interactive, None)
 }
@@ -99,7 +99,7 @@ pub fn run_answered(
         anyhow::bail!(
             "`agentstack yes` needs a terminal — it is a review you read and answer. \
              Headlessly, use the explicit path: `agentstack adopt --write`, \
-             `agentstack lock --write`, then `agentstack trust --yes --consented-digest <digest>` \
+             `agentstack lock --write`, then `agentstack trust --yes --consented <digest>` \
              (from `agentstack trust --preview`), then `agentstack use --write`."
         );
     }

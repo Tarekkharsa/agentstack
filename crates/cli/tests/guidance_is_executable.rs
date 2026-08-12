@@ -582,11 +582,7 @@ fn grant(home: &Path, proj: &Path) {
     let v: serde_json::Value =
         serde_json::from_str(&strip_ansi(&preview.text)).expect("preview is JSON");
     let digest = v["surface_digest"].as_str().unwrap().to_string();
-    let out = run(
-        &["trust", "--yes", "--consented-digest", &digest],
-        home,
-        proj,
-    );
+    let out = run(&["trust", "--yes", "--consented", &digest], home, proj);
     assert!(out.ok, "fixture: trust grant failed:\n{}", out.text);
 }
 
@@ -597,7 +593,7 @@ fn apply(home: &Path, proj: &Path) {
     assert!(out.ok, "fixture: apply --write failed:\n{}", out.text);
 }
 
-/// Name a toolset, non-interactively, via the same preview → consented-digest
+/// Name a toolset, non-interactively, via the same preview → `--consented`
 /// ceremony a panel drives. This is what takes a rendered project off the
 /// "group these for a task" rung and onto the verified one.
 fn create_toolset(home: &Path, proj: &Path, name: &str, server: &str) {

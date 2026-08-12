@@ -86,7 +86,7 @@ copied, so a clone, a second checkout, or a fresh worktree of a project someone
 already approved is untrusted at its new path. An unattended pipeline against
 one does not silently render a partial setup: it stops, and the fix is a human
 review. Budget for it — clone, `agentstack x install --locked`, then the
-digest-bound `trust --preview` → `trust --yes --consented-digest` pair on this
+digest-bound `trust --preview` → `trust --yes --consented` pair on this
 page, before any `--write`. (`agentstack trust .` is the interactive form: it
 asks one closing question, so it exits nonzero with no terminal to answer it.)
 
@@ -155,8 +155,8 @@ the digest back to apply.
 
 | Command | Contract name | Notes |
 | --- | --- | --- |
-| `agentstack init --yes --consented-plan <digest>` | `apply-setup` | refuses when the detected inputs drifted since the plan |
-| `agentstack trust --yes --consented-digest <digest>` | `trust-consent` | grants bound to the previewed bytes; refuses stale or missing digests |
+| `agentstack init --yes --consented <digest>` | `apply-setup` | refuses when the detected inputs drifted since the plan |
+| `agentstack trust --yes --consented <digest>` | `trust-consent` | grants bound to the previewed bytes; refuses stale or missing digests |
 | `agentstack add-skill-to-profile` | `profiles-edit-v1` | re-locks and re-renders |
 | `agentstack add-server-to-profile` | `profiles-edit-v1` | re-locks and re-renders |
 | `agentstack use-profile` | `profiles-edit-v1` | re-locks and re-renders |

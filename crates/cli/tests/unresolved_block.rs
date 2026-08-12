@@ -244,7 +244,7 @@ fn partially_blocked_apply_counts_once_and_exits_nonzero() {
         .and_then(|rest| rest.split('"').nth(1))
         .expect("trust --preview carries a surface digest")
         .to_string();
-    ast(&["trust", "--yes", "--consented-digest", &digest]);
+    ast(&["trust", "--yes", "--consented", &digest]);
 
     // --scope global: the assertions read ~/.claude/CLAUDE.md, and a repo
     // manifest defaults to project scope.

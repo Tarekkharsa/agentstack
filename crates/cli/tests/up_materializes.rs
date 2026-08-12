@@ -793,7 +793,7 @@ fn a_machine_whose_only_cli_is_file_only_still_renders() {
         .as_str()
         .expect("the preview must carry a surface digest")
         .to_string();
-    let (granted, code) = run(&["trust", "--yes", "--consented-digest", &digest]);
+    let (granted, code) = run(&["trust", "--yes", "--consented", &digest]);
     assert_eq!(code, 0, "fixture: trust failed:\n{granted}");
 
     let (text, code) = run(&["up", "--write"]);

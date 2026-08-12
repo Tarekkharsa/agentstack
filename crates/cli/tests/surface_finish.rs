@@ -68,12 +68,7 @@ fn grant(bin: &str, home: &Path, proj: &Path) {
         .as_str()
         .unwrap()
         .to_string();
-    let (text, ok) = run(
-        bin,
-        &["trust", "--yes", "--consented-digest", &digest],
-        home,
-        proj,
-    );
+    let (text, ok) = run(bin, &["trust", "--yes", "--consented", &digest], home, proj);
     assert!(ok, "grant failed:\n{text}");
 }
 

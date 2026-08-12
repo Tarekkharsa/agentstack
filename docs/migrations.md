@@ -139,7 +139,7 @@ Each prints a `✗` line pointing at `agentstack trust .` and exits nonzero, so 
 half-configured setup is not what you get — nothing is written at all. `trust .`
 shows the reviewed surface and asks one closing question, so it needs a person
 at a terminal; a scripted rollout uses the digest-bound pair instead
-(`agentstack trust --preview`, then `agentstack trust --yes --consented-digest
+(`agentstack trust --preview`, then `agentstack trust --yes --consented
 <digest>`), which refuses a stale or missing digest.
 
 Nothing about this is a migration: it is the same first-run review a project
