@@ -48,6 +48,9 @@ touch "$MARKER"
 while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
   case "$line" in
+    *'"method":"server/discover"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id"
+      ;;
     *'"method":"initialize"'*)
       printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"probe","version":"0"}}}\n' "$id"
       ;;
@@ -159,7 +162,7 @@ impl McpSession {
             stdin,
             stdout,
         };
-        s.request(1, "initialize", json!({}));
+        s.request(1, "initialize", legacy_initialize_params());
         s
     }
 
@@ -194,6 +197,14 @@ impl McpSession {
         drop(self.stdin);
         let _ = self.child.wait();
     }
+}
+
+fn legacy_initialize_params() -> Value {
+    json!({
+        "protocolVersion": "2025-11-25",
+        "capabilities": {},
+        "clientInfo": { "name": "agentstack-test", "version": "1" }
+    })
 }
 
 fn tool_names(list: &Value) -> Vec<String> {

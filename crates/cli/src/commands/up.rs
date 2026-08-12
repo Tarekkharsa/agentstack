@@ -45,17 +45,115 @@
 //! next is what `up` says, because it *is* what `doctor` says.
 
 use agentstack_core::paint::OwoColorize;
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 use std::path::Path;
 
-use crate::cli::{ApplyArgs, InstallArgs, UpArgs};
+use crate::cli::{ApplyArgs, ConnectArgs, InstallArgs, UpArgs};
 use crate::scope::Scope;
 
 pub fn run(args: &UpArgs, manifest_dir: Option<&Path>) -> Result<()> {
+    if args.json {
+        return run_json(args, manifest_dir);
+    }
+    if !args.write {
+        return preview(args, manifest_dir);
+    }
+    run_human(args, manifest_dir)
+}
+
+fn preview(args: &UpArgs, manifest_dir: Option<&Path>) -> Result<()> {
+    let base = super::project_base(manifest_dir)?;
+    let dir = crate::manifest::resolve_manifest_dir(&base);
+    let harnesses = detected_harnesses(&dir)?;
+    println!("New-machine setup plan\n");
+    if let Some(remote) = &args.library {
+        println!("  library   clone or update from {remote}");
+    } else {
+        println!("  library   pull the linked library if it has a remote");
+    }
+    println!(
+        "  CLIs      {}",
+        if harnesses.is_empty() {
+            "none detected".to_string()
+        } else {
+            harnesses.join(" · ")
+        }
+    );
+    // Predict the step `--write` will actually take. A machine whose CLIs are
+    // all file-only (or which has none) registers nothing, and a plan promising
+    // a registration that will be skipped is the dry-run lying about the write.
+    match gateway_targets(&args.targets) {
+        Ok(targets) if targets.is_empty() => {
+            println!("  gateway   skipped — no detected CLI here takes an MCP server")
+        }
+        _ => println!("  gateway   register once in each detected MCP-capable CLI"),
+    }
+    println!("  project   verify the committed lock; never silently re-pin it");
+    println!("  machine   report missing secret names and local trust review");
+    println!("  delivery  serve live where supported; write only compatibility lanes");
+    println!("\nNothing written. Re-run with --write to apply this plan.");
+    Ok(())
+}
+
+/// Run the ordinary bootstrap in a child process so its human transcript
+/// cannot corrupt stdout's single JSON document. The child uses the exact same
+/// command path and omits only `--json`; this wrapper owns no alternate setup
+/// behavior.
+fn run_json(args: &UpArgs, manifest_dir: Option<&Path>) -> Result<()> {
+    let exe = std::env::current_exe().context("locating the agentstack executable")?;
+    let mut command = std::process::Command::new(exe);
+    command.arg("up");
+    if let Some(url) = &args.library {
+        command.args(["--library", url]);
+    }
+    for target in &args.targets {
+        command.args(["--targets", target]);
+    }
+    if let Some(profile) = &args.profile {
+        command.args(["--toolset", profile]);
+    }
+    if args.no_gitignore {
+        command.arg("--no-gitignore");
+    }
+    if args.write {
+        command.arg("--write");
+    }
+    if let Some(dir) = manifest_dir {
+        command.arg("--manifest-dir").arg(dir);
+    }
+    command.env("NO_COLOR", "1");
+    let output = command.output().context("running the bootstrap")?;
+    let report = super::doctor::collect(manifest_dir)?;
+    let failure = if output.status.success() {
+        serde_json::Value::Null
+    } else {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        serde_json::Value::String(stderr)
+    };
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&serde_json::json!({
+            "schema_version": crate::ui_contract::SCHEMA_VERSION,
+            "command": "up",
+            "success": output.status.success(),
+            "applied": args.write,
+            "state": report,
+            "failure": failure,
+        }))?
+    );
+    Ok(())
+}
+
+fn run_human(args: &UpArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let base = super::project_base(manifest_dir)?;
     let dir = crate::manifest::resolve_manifest_dir(&base);
     let scope = Scope::default_for(&dir);
+
+    // ------------------------------------------------------------ library
+    // A fresh machine may know only the Git remote. Reuse the library sync
+    // command's clone/transport/secret-scan path; `up` owns no Git behavior.
+    super::lib::sync_for_bootstrap(args.library.as_deref())?;
 
     // ---------------------------------------------------------- harnesses
     // What this machine actually has. Reported first because it is the one
@@ -83,13 +181,58 @@ pub fn run(args: &UpArgs, manifest_dir: Option<&Path>) -> Result<()> {
         }
     );
 
+    // ------------------------------------------------------------- gateway
+    // Register once in every installed MCP-capable harness. This is
+    // idempotent and uses the ordinary connect writer/history ledger.
+    //
+    // The guard asks the question `connect` will answer, not the one the
+    // harness line above answered. "A CLI is installed" and "a CLI the gateway
+    // can be registered in" are different facts: `pi` manages skills and
+    // settings and has no MCP config at all, and a repo carrying only a
+    // project-scope `.mcp.json` has no globally detected harness either. On
+    // either machine the old guard passed, `connect` bailed with "no installed
+    // harness with MCP support detected", and `?` took the whole bootstrap down
+    // BEFORE the lock verification and the render — so a machine whose CLIs are
+    // all file-only could never be set up at all. Having nowhere to register the
+    // bridge is a fact about the machine, not a failure of `up`.
+    match gateway_targets(&args.targets) {
+        Ok(targets) if targets.is_empty() => crate::outln!(
+            "{:<20}{}",
+            "gateway".dimmed(),
+            "skipped — no detected CLI here takes an MCP server; skills, settings and \
+             instructions still render"
+                .dimmed()
+        ),
+        // A real failure registering the bridge in a harness that DOES take one
+        // stays fatal, as it always was: `up`'s promise is that the environment
+        // materialized, and a half-connected machine has not.
+        Ok(targets) => super::connect::run_connect(&ConnectArgs {
+            // Named targets are passed through filtered; with none named the
+            // `--all` path runs exactly as before, so its per-harness "no MCP
+            // config support, skipped" notes still print.
+            harnesses: if args.targets.is_empty() {
+                Vec::new()
+            } else {
+                targets
+            },
+            all: args.targets.is_empty(),
+            transparent: false,
+            write: true,
+            command: None,
+        })?,
+        // The registry did not load. The harness line above already reported
+        // that as ours; repeating it here as a bootstrap-ending error would
+        // charge the user twice for one fault.
+        Err(_) => {}
+    }
+
     // -------------------------------------------------------- environment
     let ctx = super::load(Some(&dir))?;
     let m = &ctx.loaded.manifest;
     let shape = format!(
         "{} · {} · {}",
         count(m.profiles.len(), "toolset"),
-        count(m.skills.len(), "skill"),
+        count(m.declared_skill_names().len(), "skill"),
         count(m.servers.len(), "server"),
     );
 
@@ -114,7 +257,7 @@ pub fn run(args: &UpArgs, manifest_dir: Option<&Path>) -> Result<()> {
         // same vacuous pass P3.1 removed from `doctor` — a line that looks like
         // evidence and is only an absence. So the claim is made only when
         // something backed it, and the absence is stated in words instead.
-        Ok(()) if m.skills.is_empty() => crate::outln!(
+        Ok(()) if m.declared_skill_names().is_empty() => crate::outln!(
             "{:<20}{shape} · {}",
             "your environment".dimmed(),
             "no pinned skill sources to verify".dimmed()
@@ -122,7 +265,7 @@ pub fn run(args: &UpArgs, manifest_dir: Option<&Path>) -> Result<()> {
         Ok(()) => crate::outln!(
             "{:<20}{shape} · {} {}",
             "your environment".dimmed(),
-            count(m.skills.len(), "skill source").green(),
+            count(m.declared_skill_names().len(), "skill source").green(),
             "verified against lock".green()
         ),
         Err(err) => {
@@ -305,6 +448,36 @@ fn detected_harnesses(dir: &Path) -> Result<Vec<String>> {
         .iter()
         .filter(|d| d.detected() || (project && d.project_config_present(dir)))
         .map(|d| d.display.clone())
+        .collect())
+}
+
+/// The harnesses the gateway can actually be registered in, by adapter id.
+///
+/// This is `connect`'s own rule, asked before `connect` is called so `up` can
+/// skip a step that has nothing to do rather than die on its refusal: a
+/// descriptor with both an `mcp` block and a `config` file to merge it into,
+/// and machine-scope `detected` — the exact three conditions
+/// `connect::select_targets` applies. Named targets are filtered by the same
+/// rule, except that an id no descriptor claims is kept, so `connect` still
+/// produces its "unknown adapter" error instead of it vanishing into a skip.
+fn gateway_targets(requested: &[String]) -> Result<Vec<String>> {
+    let registry = crate::adapter::Registry::load()?;
+    let takes_a_bridge =
+        |d: &crate::adapter::AdapterDescriptor| d.mcp.is_some() && d.config.is_some();
+    if requested.is_empty() {
+        return Ok(registry
+            .iter()
+            .filter(|d| takes_a_bridge(d) && d.detected())
+            .map(|d| d.id.clone())
+            .collect());
+    }
+    Ok(requested
+        .iter()
+        .filter(|id| match registry.get(id) {
+            Some(desc) => takes_a_bridge(desc),
+            None => true,
+        })
+        .cloned()
         .collect())
 }
 

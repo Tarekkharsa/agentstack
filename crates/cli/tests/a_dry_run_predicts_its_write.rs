@@ -142,6 +142,8 @@ fn skill_toolset(root: &Path, name: &str) -> (PathBuf, PathBuf) {
     .unwrap();
     let manifest = format!(
         "version = 1\n\
+         [delivery]\n\
+         render_locally = true\n\
          [targets]\n\
          default = [\"claude-code\"]\n\
          [skills.notes]\n\

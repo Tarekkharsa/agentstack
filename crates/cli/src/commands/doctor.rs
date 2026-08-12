@@ -128,10 +128,28 @@ struct Report {
     /// with no project. In the JSON so consumers stop inferring the mode from
     /// section prose (`doctor-mode-v1`).
     mode: Option<&'static str>,
-    /// Whether this project was ever activated (`locked`, a lockfile exists)
-    /// or not (`never_activated`) — the same fact `status` words as
-    /// "not locked (never activated)". `None` when doctor ran with no project.
+    /// Whether this project has ever been activated — i.e. whether an
+    /// `agentstack.lock` exists (`locked` / `never_activated`). This is the
+    /// `doctor-mode-v1` reading and it keeps that contract's shipped values:
+    /// a panel gating on those two words must not have them change meaning
+    /// under its users. `None` when doctor ran with no project.
+    ///
+    /// It is deliberately NOT a liveness reading — a lockfile is a pin, never
+    /// evidence that an agent connection is open. That question has its own
+    /// field ([`Report::live_state`]) under its own contract name,
+    /// `doctor-liveness-v1`.
     activation: Option<&'static str>,
+    /// Whether a process-scoped toolset is live right now (`live` /
+    /// `not_live`), derived from the runtime lease registry — the honest
+    /// answer to "is anything actually serving this project?"
+    /// (`doctor-liveness-v1`). `None` when doctor ran with no project.
+    live_state: Option<&'static str>,
+    /// The same fact `activation` words, as a boolean: does `agentstack.lock`
+    /// exist? Both are emitted because `activation` is the older spelling with
+    /// external consumers and this is the one the internal ladders read.
+    locked: Option<bool>,
+    default_toolset: Option<String>,
+    live_toolsets: Vec<String>,
     /// Whether this project maintains the managed `.gitignore` block
     /// (`[meta] gitignore`). `None` when doctor ran with no project. A panel
     /// needs it to label its toggle honestly — offering "Keep .gitignore as
@@ -272,6 +290,10 @@ impl Report {
             trust: None,
             mode: None,
             activation: None,
+            live_state: None,
+            locked: None,
+            default_toolset: None,
+            live_toolsets: Vec::new(),
             gitignore: None,
             clis: None,
             probe: None,
@@ -531,7 +553,7 @@ impl Report {
             self.unlocked_aware_next_action(),
             // `None` reads as locked, which is how every report that never set
             // the field behaved before this rung existed.
-            self.activation != Some("never_activated"),
+            self.locked.unwrap_or(true),
             self.lock_pins.unwrap_or(false),
         )
     }
@@ -722,6 +744,14 @@ impl Report {
             // machine field was already `null` here (`machine_command` filters
             // the placeholder), so this changes the human sentence only, and
             // the two surfaces still agree where it counts.
+            super::overview::Rung::Verified if self.default_toolset.is_some() => (
+                "nothing to repair — this setup is verified".to_string(),
+                if self.live_state == Some("live") {
+                    "the default toolset is live on an agent connection"
+                } else {
+                    "the default toolset opens automatically on the next trusted agent connection"
+                },
+            ),
             super::overview::Rung::Verified if self.declares_a_server == Some(true) => (
                 "nothing to repair — this setup is verified".to_string(),
                 "group servers for a task with `agentstack toolset create <name> --server <server>`, then switch between toolsets",
@@ -793,6 +823,12 @@ impl Report {
         if self.declares_anything == Some(false) {
             return "empty";
         }
+        // Consented or not, nothing was ever rendered from this project, so
+        // "ready" would claim a setup that has never been made live. This is
+        // the `status-honesty-v1` value, restored to the field that decides it:
+        // it reads the lockfile, exactly as `activation` does, and NOT the
+        // lease registry — a project that is set up and simply has no agent
+        // connected right now is ready, not un-activated.
         if self.activation == Some("never_activated") {
             return "never_activated";
         }
@@ -823,13 +859,12 @@ impl Report {
                 "not ready",
                 "set up but never activated — `agentstack use --write` makes it live",
             ),
-            // "reviewed", not "trusted": the verdict WORD is what the JSON and
-            // this line must share, and it still does. The gloss is ordinary
-            // copy, and `trust` is a mechanism noun the ordinary journey may
-            // not print (`tests/ordinary_journey_vocab.rs`). This clause was
-            // simply unreachable there until the readiness fix: a library-first
-            // manifest always fell out at "empty" first.
-            _ => ("ready", "reviewed, activated, and verified"),
+            _ if self.live_state == Some("live") => ("ready", "reviewed, live, and verified"),
+            _ if self.default_toolset.is_some() => (
+                "ready",
+                "reviewed and verified — the default opens on the next agent connection",
+            ),
+            _ => ("ready", "reviewed and verified"),
         };
         Some(format!("{}: {}", word, gloss).to_string())
     }
@@ -905,6 +940,12 @@ impl Report {
             // section prose like "Mode zero-files" or "never activated".
             "mode": self.mode,
             "activation": self.activation,
+            // Whether anything is serving this project RIGHT NOW
+            // (`doctor-liveness-v1`) — beside `activation`, never inside it.
+            "live_state": self.live_state,
+            "locked": self.locked,
+            "default_toolset": self.default_toolset,
+            "live_toolsets": self.live_toolsets,
             "gitignore": self.gitignore,
             "clis": self.clis.as_ref().map(|c| serde_json::json!({
                 "detected": c.detected,
@@ -963,6 +1004,10 @@ pub fn run(args: &DoctorArgs, manifest_dir: Option<&Path>) -> Result<()> {
                 // binary that advertises the name" as a third case.
                 "mode": serde_json::Value::Null,
                 "activation": serde_json::Value::Null,
+                "live_state": serde_json::Value::Null,
+                "locked": serde_json::Value::Null,
+                "default_toolset": serde_json::Value::Null,
+                "live_toolsets": [],
                 "gitignore": serde_json::Value::Null,
                 "clis": serde_json::Value::Null,
                 "probe": serde_json::Value::Null,
@@ -1648,8 +1693,26 @@ fn run_checks(
     let all_ids: Vec<String> = ctx.registry.ids().map(str::to_string).collect();
     let mode = super::overview::detect_mode(&ctx, &all_ids);
     let locked = crate::lock::Lock::path(&ctx.dir).exists();
+    let live_toolsets: Vec<String> = crate::lease_registry::live_for_project(&ctx.dir)
+        .into_iter()
+        .map(|lease| lease.toolset)
+        .collect();
     report.mode = Some(mode.label());
+    // `activation` keeps its `doctor-mode-v1` values: it answers "was this
+    // project ever activated?", which the lockfile's existence decides. The
+    // liveness reading — is a lease open right now — is a DIFFERENT question
+    // and gets its own field rather than new words in this one, so a consumer
+    // gating on `locked` / `never_activated` keeps working and a consumer that
+    // wants liveness negotiates `doctor-liveness-v1` for it.
     report.activation = Some(if locked { "locked" } else { "never_activated" });
+    report.live_state = Some(if live_toolsets.is_empty() {
+        "not_live"
+    } else {
+        "live"
+    });
+    report.locked = Some(locked);
+    report.default_toolset = manifest.resolved_default_toolset().map(str::to_string);
+    report.live_toolsets = live_toolsets;
     // Coverage term for `readiness` (F11): does this project declare anything
     // at all? Every inert and executable kind counts — a project can be a pure
     // instruction or settings setup — so "ready" is never reported over a husk.
@@ -5790,12 +5853,41 @@ mod tests {
         let body = report.to_json();
         assert_eq!(body["mode"], serde_json::Value::Null);
         assert_eq!(body["activation"], serde_json::Value::Null);
+        assert_eq!(body["live_state"], serde_json::Value::Null);
 
         report.mode = Some("zero-files");
         report.activation = Some("never_activated");
+        report.live_state = Some("not_live");
         let body = report.to_json();
         assert_eq!(body["mode"], "zero-files");
         assert_eq!(body["activation"], "never_activated");
+        // `doctor-liveness-v1` rides BESIDE the older reading: the two answer
+        // different questions and a report may hold "never activated" and a
+        // liveness word at once.
+        assert_eq!(body["live_state"], "not_live");
+    }
+
+    /// The two readings are independent, and the older one keeps its
+    /// `doctor-mode-v1` words. A lease being open says nothing about whether
+    /// the project was ever pinned, and a pin says nothing about a live
+    /// connection — collapsing them into one field is the drift this pair of
+    /// fields exists to prevent.
+    #[test]
+    fn activation_and_liveness_are_separate_readings() {
+        let mut report = Report::new();
+        report.activation = Some("locked");
+        report.live_state = Some("live");
+        report.live_toolsets = vec!["dev".to_string()];
+        let body = report.to_json();
+        assert_eq!(body["activation"], "locked");
+        assert_eq!(body["live_state"], "live");
+
+        // Locked and nothing connected: still `locked`, and not live.
+        report.live_state = Some("not_live");
+        report.live_toolsets.clear();
+        let body = report.to_json();
+        assert_eq!(body["activation"], "locked");
+        assert_eq!(body["live_state"], "not_live");
     }
 
     /// N1: Codex is detected by binary-on-PATH and lands in `targets.default`,

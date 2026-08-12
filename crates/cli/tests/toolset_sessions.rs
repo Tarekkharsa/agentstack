@@ -189,8 +189,8 @@ fn create_names_the_review_it_just_made_come_due() {
         "the footer names the review first:\n{out}"
     );
     assert!(
-        out.contains("Then switch to it:  agentstack use backend --write"),
-        "and the switch after it, in the order it has to happen:\n{out}"
+        out.contains("Then make it the default:  agentstack toolset default backend --write"),
+        "and the default selection after it, in the order it has to happen:\n{out}"
     );
     assert!(
         !out.contains("Switch to it:  agentstack use backend --write"),

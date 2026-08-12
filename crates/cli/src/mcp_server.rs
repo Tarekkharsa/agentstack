@@ -1,11 +1,11 @@
 //! `agentstack mcp` — exposes agentstack itself as an MCP server over stdio, so
-//! the agent can discover and propose capabilities (PLAN §9g). Newline-delimited
-//! JSON-RPC.
+//! the agent can discover and propose capabilities (PLAN §9g). RMCP owns the
+//! dual-era MCP lifecycle and newline-framed stdio transport.
 //!
 //! Trust gate (D20): writes go to the **manifest only** (commit-safe `${REF}`s,
 //! nothing executed). The agent proposes; a human still runs `apply`.
 
-use std::io::{BufRead, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -13,374 +13,536 @@ use serde_json::{json, Value};
 
 use crate::manifest::load::MANIFEST_FILE;
 
-const PROTOCOL_VERSION: &str = "2025-06-18";
-
-/// The id of the one client-bound request we make (`roots/list` in auto mode).
-/// Server-initiated ids live in their own namespace, so a string is safe.
-const ROOTS_REQUEST_ID: &str = "agentstack:roots";
-
 pub fn serve(
     manifest_dir: Option<&Path>,
     auto_project: bool,
     transparent: bool,
     grant: Option<&Path>,
 ) -> Result<()> {
-    // `--grant` is the eager one-project locked bridge; `--auto-project`
-    // re-derives a gateway per session from disk. Combined, the grant gateway
-    // would be computed and then silently ignored by the auto-project loop —
-    // a silent downgrade to disk re-derivation, exactly what grant mode
-    // exists to prevent. Refuse the combination outright (fail closed).
     if auto_project && grant.is_some() {
         anyhow::bail!(
             "`--grant` cannot be combined with `--auto-project`: a frozen run grant fixes one project's surface for the whole process"
         );
     }
-    let mut dir = manifest_dir.map(Path::to_path_buf);
-    let stdin = std::io::stdin();
-    // On stdio, stdout must carry only JSON-RPC. Library code (apply, profiles,
-    // packs…) prints human progress to stdout, which would corrupt the stream,
-    // so reserve the real stdout for responses and redirect fd 1 to stderr.
-    let out = protocol_writer();
 
-    // D2 grant mode (`--grant`, written into the launch-scoped config by
-    // `run --locked`): consume the frozen run-grant artifact VERBATIM — the
-    // same ruleset and server set the gates admitted — instead of re-deriving
-    // authority from disk. Fail closed on any mismatch: a missing, stale,
-    // wrong-project, or version-skewed artifact serves an empty gateway with
-    // a loud reason. NEVER a fallback to disk re-derivation: the harness was
-    // launched under the locked contract, and a silent downgrade to weaker
-    // re-derived authority is exactly what the artifact exists to prevent.
+    let mut dir = manifest_dir.map(Path::to_path_buf);
     let grant_mode = grant.is_some();
-    let grant_gateway: Option<crate::gateway::Gateway> = match grant {
+    let grant_gateway = match grant {
         None => None,
         Some(path) => match grant_gateway(path) {
-            Ok((gw, base)) => {
+            Ok((gateway, base)) => {
                 eprintln!(
                     "agentstack mcp: serving the frozen run grant for {} (no re-derivation)",
                     base.display()
                 );
                 dir = Some(base);
-                Some(gw)
+                Some(gateway)
             }
-            Err(e) => {
+            Err(error) => {
                 eprintln!(
-                    "agentstack mcp: REFUSING the frozen run grant — {e:#}. Nothing is \
-                     proxied (fail closed; a locked run's bridge never falls back to \
-                     disk re-derivation)."
+                    "agentstack mcp: REFUSING the frozen run grant — {error:#}. Nothing is proxied (fail closed; a locked run's bridge never falls back to disk re-derivation)."
                 );
                 Some(crate::gateway::Gateway::empty())
             }
         },
     };
 
-    if !auto_project {
-        // Eager, one-project-per-process mode (the default): the manifest is
-        // cwd-or-flag and the gateway is built ONCE for this launch, shared by
-        // the stdio loop and the code-mode endpoint (one set of upstream
-        // connections / stdio children per process, not one per surface).
-        // No global lock: the gateway is Sync with per-upstream mutexes, so
-        // concurrent calls to different servers proceed in parallel.
-        let mut gateway = std::sync::Arc::new(match grant_gateway {
-            Some(gw) => gw,
+    let project = if auto_project {
+        RmcpProject::Auto {
+            project: AutoProject::new(dir),
+            automatic_lease_decided: false,
+        }
+    } else {
+        let gateway = std::sync::Arc::new(match grant_gateway {
+            Some(gateway) => gateway,
             None => crate::gateway::Gateway::from_manifest(dir.as_deref()),
         });
         if !gateway.is_empty() {
             eprintln!("agentstack mcp: gateway active — proxying this project's MCP servers");
         }
-        // W2 — eager mode has no `AutoProject`, so it passed `trust_note: None`
-        // for the whole life of the connection: a skill could still be loaded
-        // from a project whose trust had been revoked ten minutes earlier.
-        // Borrowed from the gateway rather than re-derived, so the digest that
-        // gates a dispatch is the digest that gates a load. `None` for a
-        // project trust never gated (an explicit `--manifest-dir` launch is
-        // itself the consent), which keeps that path exactly as it was.
-        let mut trust_anchor = gateway.trust_anchor().cloned();
-
-        // Code mode (Phase 2): expose a loopback, token-gated endpoint the generated
-        // client POSTs to. Best-effort and contained — None when there's nothing to
-        // proxy. agentstack only brokers the call here; it never runs the agent's code.
-        let mut runtime =
+        let trust_anchor = gateway.trust_anchor().cloned();
+        let runtime =
             crate::codemode::endpoint::start(dir.as_deref(), std::sync::Arc::clone(&gateway));
-        if let Some(rt) = &runtime {
-            eprintln!(
-                "agentstack mcp: code-mode runtime at {} (loopback · token-gated). Agents fetch the client via the `tools_bindings` tool.",
-                rt.url
-            );
+        RmcpProject::Eager {
+            dir,
+            gateway,
+            trust_anchor,
+            runtime,
         }
+    };
 
-        let out = std::sync::Arc::new(std::sync::Mutex::new(out));
-        let mut workers = WorkerPool::new();
-        let lease = new_lease_store();
-        for line in stdin.lock().lines() {
-            let line = line?;
-            if line.trim().is_empty() {
-                continue;
-            }
-            let Ok(req) = serde_json::from_str::<Value>(&line) else {
-                continue;
-            };
-            if grant_mode {
-                // Under a frozen run grant the served surface is FIXED —
-                // refuse every control-plane tool that would swap it (lease
-                // transitions re-derive a gateway from disk), resolve secrets
-                // into native configs (`session_start`), or mutate project /
-                // session state mid-run. Refuse loudly (the client learns the
-                // truth) rather than silently ignoring the request.
-                if let Some(tool) = grant_refused_tool(&req) {
-                    respond(
-                        &out,
-                        &result(
-                            req.get("id").cloned(),
-                            json!({ "content": [{ "type": "text", "text": format!("Error: {tool} is unavailable under a frozen run grant — the served surface was fixed by `agentstack run --locked`; state-mutating and secret-resolving control-plane tools are refused for the run's duration (fail closed).") }], "isError": true }),
-                        ),
-                    );
-                    continue;
-                }
-            } else if is_lease_mutation(&req) {
-                // A tighter/looser profile boundary must not race an in-flight
-                // call through the previous gateway.
-                workers.join_all();
-            }
-            if req.get("method").and_then(Value::as_str) == Some("tools/call")
-                && is_upstream_call(&req)
-            {
-                // An upstream call can block on a slow server for up to 60s —
-                // serve it on its own thread so a parallel call to another
-                // server isn't queued behind it. Out-of-order responses are
-                // fine: JSON-RPC clients match by id.
-                let gw = std::sync::Arc::clone(&gateway);
-                let out = std::sync::Arc::clone(&out);
-                let dir = dir.clone();
-                let lease = std::sync::Arc::clone(&lease);
-                workers.spawn(move || {
-                    if let Some(resp) = handle_with_lease(
-                        &req,
-                        dir.as_deref(),
-                        &gw,
-                        None,
-                        transparent,
-                        &lease,
-                        true,
-                    ) {
-                        respond(&out, &resp);
-                    }
-                });
-            } else {
-                let before = lease_profile(&lease);
-                // Recomputed per request, not cached: the whole point is to
-                // catch a change no command in this process made.
-                let note = trust_anchor.as_ref().and_then(|a| a.note());
-                let resp = handle_with_lease(
-                    &req,
-                    dir.as_deref(),
-                    &gateway,
-                    note.as_deref(),
-                    transparent,
-                    &lease,
-                    true,
-                );
-                let after = lease_profile(&lease);
-                if before != after {
-                    if let Some(rt) = runtime.take() {
-                        rt.shutdown();
-                    }
-                    // A lease transition rebuilds the gateway from disk. If the
-                    // anchor no longer verifies, that rebuild would produce an
-                    // UNGATED gateway (`build` only anchors a project that is
-                    // trusted right now, and this one is not) — handing back a
-                    // live upstream surface the connection just lost the right
-                    // to. So the transition fails closed instead.
-                    let violated = trust_anchor.as_ref().is_some_and(|a| a.verify().is_err());
-                    gateway = match (violated, after.as_deref()) {
-                        (true, _) => std::sync::Arc::new(crate::gateway::Gateway::empty()),
-                        (false, Some(profile)) => std::sync::Arc::new(
-                            crate::gateway::Gateway::from_manifest_lease(dir.as_deref(), profile),
-                        ),
-                        (false, None) => std::sync::Arc::new(
-                            crate::gateway::Gateway::from_manifest(dir.as_deref()),
-                        ),
-                    };
-                    // Re-borrow the loop's anchor from the gateway that now
-                    // serves the connection — asymmetrically. On the clean
-                    // path the rebuild may have ANCHORED a project that had
-                    // none at launch (never trusted then, trusted now), and a
-                    // stale `None` would leave later skill loads ungated after
-                    // a revoke. On the violated path we keep the OLD anchor:
-                    // the empty gateway carries none, and that old anchor is
-                    // exactly what keeps yielding the refusal note for loads.
-                    if !violated {
-                        trust_anchor = gateway.trust_anchor().cloned();
-                    }
-                    runtime = crate::codemode::endpoint::start(
-                        dir.as_deref(),
-                        std::sync::Arc::clone(&gateway),
-                    );
-                    if transparent {
-                        respond(
-                            &out,
-                            &json!({ "jsonrpc": "2.0", "method": "notifications/tools/list_changed" }),
-                        );
-                    }
-                }
-                if let Some(resp) = resp {
-                    respond(&out, &resp);
-                }
-            }
-        }
-        // stdin EOF: drain in-flight calls before exiting, or their responses
-        // (and the stdio children's polite shutdown) would be lost mid-call.
-        workers.join_all();
-        release_lease_record(&lease);
-        // Remove the machine-local endpoint coordinate file so a dead port+token
-        // isn't left behind for the next shim call.
-        if let Some(rt) = runtime {
-            rt.shutdown();
-        }
-        return Ok(());
+    let backend = std::sync::Arc::new(RmcpBackend {
+        project: std::sync::Mutex::new(project),
+        dispatch: DispatchBarrier::default(),
+        tools_changed: std::sync::atomic::AtomicBool::new(false),
+        lease: new_lease_store(),
+        transparent,
+        grant_mode,
+    });
+    let server =
+        agentstack_mcp::AgentStackServer::new(backend, "agentstack", env!("CARGO_PKG_VERSION"));
+    agentstack_mcp::run_stdio_with_writer(server, protocol_writer())
+}
+
+enum RmcpProject {
+    Eager {
+        dir: Option<PathBuf>,
+        gateway: std::sync::Arc<crate::gateway::Gateway>,
+        trust_anchor: Option<crate::trust_anchor::TrustAnchor>,
+        runtime: Option<crate::codemode::endpoint::RuntimeHandle>,
+    },
+    Auto {
+        project: AutoProject,
+        automatic_lease_decided: bool,
+    },
+}
+
+struct RmcpBackend {
+    project: std::sync::Mutex<RmcpProject>,
+    dispatch: DispatchBarrier,
+    /// Set whenever the served tool list stops matching the one a client was
+    /// last given, drained by the protocol adapter into
+    /// `notifications/tools/list_changed`.
+    tools_changed: std::sync::atomic::AtomicBool,
+    lease: LeaseStore,
+    transparent: bool,
+    grant_mode: bool,
+}
+
+/// The rule that keeps a served call and the authority it was served under from
+/// coming apart.
+///
+/// RMCP serves calls concurrently, and every one of them takes its own
+/// `Arc<Gateway>` snapshot. Without a barrier, `agentstack_lease_open` (or any
+/// trust-refreshing control call) could install a NARROWER gateway while an
+/// upstream call was still completing against the old, wider one — the call
+/// finishing under authority that had already been withdrawn. The pre-RMCP loop
+/// joined its worker threads before every lease mutation for exactly this
+/// reason; this is that join, expressed as a lock.
+///
+/// Shared side: proxied upstream calls, which stay parallel with each other.
+/// Exclusive side: every control-plane call, so a swap waits for the calls
+/// already in flight and calls that start afterwards see the new gateway. It
+/// doubles as the serialization control tools need among themselves — several
+/// read-modify-write the manifest.
+#[derive(Default)]
+struct DispatchBarrier(std::sync::RwLock<()>);
+
+impl DispatchBarrier {
+    /// Hold while dispatching one upstream call. Rides through poison: a panic
+    /// in another call must not wedge the connection.
+    fn shared(&self) -> std::sync::RwLockReadGuard<'_, ()> {
+        self.0.read().unwrap_or_else(|error| error.into_inner())
     }
 
-    // --auto-project (the zero-files gateway, registered once globally by
-    // `agentstack gateway connect`): discover the active project per session — client
-    // roots → cwd walk-up → $AGENTSTACK_MANIFEST_DIR — and trust-gate it. The
-    // gateway is built lazily on the first tools/call, which gives the client
-    // time to answer our roots/list request; tools/list is static and needs
-    // no gateway.
-    let mut auto = AutoProject::new(dir);
-    let out = std::sync::Arc::new(std::sync::Mutex::new(out));
-    let mut workers = WorkerPool::new();
-    let lease = new_lease_store();
-    for line in stdin.lock().lines() {
-        let line = line?;
-        if line.trim().is_empty() {
-            continue;
-        }
-        let Ok(req) = serde_json::from_str::<Value>(&line) else {
-            continue;
+    /// Hold while dispatching anything that may swap the gateway.
+    fn exclusive(&self) -> std::sync::RwLockWriteGuard<'_, ()> {
+        self.0.write().unwrap_or_else(|error| error.into_inner())
+    }
+}
+
+/// Whether a `tools/call` targets a proxied upstream (`<server>__<tool>`) or
+/// the governed execution domain (`tools_execute`, which dispatches through the
+/// same gateway and may run for a minute).
+///
+/// These are the long-blocking calls and the only ones served concurrently.
+/// agentstack's own control-plane tools take the exclusive side: several of
+/// them read-modify-write the manifest or session files, and serialization is
+/// what keeps two parallel `agentstack_add_server` calls from losing an update.
+fn is_upstream_call(name: &str) -> bool {
+    name.contains("__") || name == "tools_execute"
+}
+
+struct RequestSnapshot {
+    dir: Option<PathBuf>,
+    gateway: std::sync::Arc<crate::gateway::Gateway>,
+    trust_note: Option<String>,
+    project_known: bool,
+}
+
+impl RmcpBackend {
+    /// Re-derive modern authority from reviewed project bytes on every
+    /// request. The process-local store is only a cache/audit record; a
+    /// manifest default change cannot leave an older hidden fence active.
+    fn sync_modern_default(&self) {
+        let mut state = self
+            .project
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let RmcpProject::Auto {
+            project,
+            automatic_lease_decided,
+        } = &mut *state
+        else {
+            return;
         };
-        // The client's answer to our roots/list request is ours, not a request
-        // to serve. In transparent mode the roots answer is also the natural
-        // "project known" moment: build the (trust-gated) gateway now and tell
-        // the client its tool list grew, so upstream tools become callable
-        // without an agent ever invoking a control-plane tool first.
-        if auto.absorb_roots_response(&req) {
-            if transparent {
-                notify_if_gateway_appears(&mut auto, &out);
-            }
-            continue;
+        project.ensure_project();
+        project.refresh_trust();
+        if project.trust_note().is_some() {
+            return;
         }
-        // All AutoProject state changes stay on this thread; only the
-        // already-built gateway crosses into workers.
-        let method = req
-            .get("method")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_string();
-        let tool_name = req.pointer("/params/name").and_then(Value::as_str);
-        // Trust is refreshed before content-loading calls (stale-window fix,
-        // Activation and refresh_trust's
-        // trust-flip branch tears the runtime down and swaps the gateway, so
-        // those calls need the same worker barrier lease mutations get.
-        let refreshes_trust = matches!(
-            tool_name,
-            Some("agentstack_load" | "agentstack_session_start")
-        );
-        if is_lease_mutation(&req) || refreshes_trust {
-            workers.join_all();
+        let Some(dir) = project.dir().map(Path::to_path_buf) else {
+            return;
+        };
+        let Ok(context) = crate::commands::load(Some(&dir)) else {
+            return;
+        };
+        let wanted = context
+            .loaded
+            .manifest
+            .resolved_default_toolset()
+            .map(str::to_owned);
+        if lease_profile(&self.lease) == wanted {
+            return;
         }
-        match method.as_str() {
-            "initialize" => auto.note_client_capabilities(&req),
-            "notifications/initialized" => {
-                if let Some(request) = auto.roots_request() {
-                    respond(&out, &request);
-                }
-            }
-            // A roots-incapable client will never trigger the roots path, so
-            // its first transparent tools/list builds the gateway via the
-            // cwd-walk-up ladder directly.
-            "tools/list" if transparent && !auto.client_has_roots => {
-                notify_if_gateway_appears(&mut auto, &out);
-            }
-            "tools/call" => {
-                if tool_name == Some("agentstack_lease_open") {
-                    // Resolve + trust-check only. The validated lease profile
-                    // becomes the first gateway fence below, so compact
-                    // zero-file mode never constructs the unrestricted surface
-                    // merely to select a profile.
-                    auto.ensure_project();
-                    auto.refresh_trust();
-                } else if refreshes_trust {
-                    // Content-loading calls re-check trust so a mid-connection
-                    // manifest+lock edit (now pinnable in one `add skill
-                    // --write`) can't serve under a stale Trusted snapshot.
-                    // Workers were joined above; this SUPPLEMENTS the
-                    // transparent-mode handling rather than replacing it.
-                    auto.ensure_project();
-                    auto.refresh_trust();
-                    if transparent {
-                        notify_if_gateway_appears(&mut auto, &out);
-                    } else {
-                        auto.ensure_gateway();
-                    }
-                } else if transparent {
-                    notify_if_gateway_appears(&mut auto, &out);
-                } else {
-                    auto.ensure_gateway();
-                }
-            }
-            _ => {}
+        if lease_profile(&self.lease).is_some() {
+            let _ = lease_close(&self.lease);
         }
-        if method == "tools/call" && is_upstream_call(&req) {
-            // Same as eager mode: a blocking upstream call gets its own
-            // thread, so parallel calls to other servers aren't serialized.
-            let gw = auto.gateway_arc();
-            let out = std::sync::Arc::clone(&out);
-            let dir = auto.dir().map(Path::to_path_buf);
-            let note = auto.trust_note();
-            let lease = std::sync::Arc::clone(&lease);
-            workers.spawn(move || {
-                if let Some(resp) = handle_with_lease(
-                    &req,
-                    dir.as_deref(),
-                    &gw,
-                    note.as_deref(),
-                    transparent,
-                    &lease,
-                    false,
-                ) {
-                    respond(&out, &resp);
-                }
-            });
-        } else {
-            let before = lease_profile(&lease);
-            let resp = handle_with_lease(
-                &req,
-                auto.dir(),
-                auto.gateway(),
-                auto.trust_note().as_deref(),
-                transparent,
-                &lease,
-                false,
+        // The previous toolset's lease is already closed above. If the declared
+        // default cannot be opened, returning here would leave the OLD
+        // toolset's gateway serving with no lease behind it — a surface wider
+        // than anything the project now declares, held open by a bookkeeping
+        // failure. Fall back to the unleased (control-plane-only) gateway
+        // instead, and record the decision so the connection does not retry the
+        // same refusal on every request.
+        let opened = match wanted.as_deref() {
+            None => true,
+            Some(profile) => lease_open(
+                &json!({ "profile": profile }),
+                Some(&dir),
+                None,
+                &self.lease,
+            )
+            .is_ok(),
+        };
+        *automatic_lease_decided = true;
+        let fence = opened.then_some(wanted.as_deref()).flatten();
+        if !opened {
+            eprintln!(
+                "agentstack mcp: could not open the declared default toolset — serving no upstream servers until one is opened explicitly"
             );
-            let after = lease_profile(&lease);
-            if before != after {
-                auto.rebuild_for_lease(after.as_deref());
-                if transparent {
-                    respond(
-                        &out,
-                        &json!({ "jsonrpc": "2.0", "method": "notifications/tools/list_changed" }),
-                    );
+        }
+        project.rebuild_for_lease(fence);
+        self.note_tool_list_changed();
+    }
+
+    /// Record that the tool list a client was last given no longer matches the
+    /// one this connection would serve now. Drained by the protocol adapter.
+    ///
+    /// Transparent mode only, and that is the whole scope of the problem: only
+    /// there do the proxied upstream tools appear in `tools/list`, so only
+    /// there can the list change after a client has fetched it. Compact mode
+    /// advertises a fixed control-plane surface and would gain nothing but an
+    /// unexplained frame.
+    fn note_tool_list_changed(&self) {
+        if !self.transparent {
+            return;
+        }
+        self.tools_changed
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn snapshot(&self, tool_name: Option<&str>) -> RequestSnapshot {
+        let mut state = self
+            .project
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        match &mut *state {
+            RmcpProject::Eager {
+                dir,
+                gateway,
+                trust_anchor,
+                ..
+            } => RequestSnapshot {
+                dir: dir.clone(),
+                gateway: std::sync::Arc::clone(gateway),
+                trust_note: trust_anchor.as_ref().and_then(|anchor| anchor.note()),
+                project_known: true,
+            },
+            RmcpProject::Auto {
+                project,
+                automatic_lease_decided,
+            } => {
+                let lease_mutation = matches!(
+                    tool_name,
+                    Some("agentstack_lease_open" | "agentstack_lease_close")
+                );
+                if !lease_mutation
+                    && maybe_open_default_lease(project, &self.lease, automatic_lease_decided)
+                {
+                    // The default toolset just opened, so the surface a legacy
+                    // client already fetched is now stale.
+                    self.note_tool_list_changed();
                 }
-            }
-            if let Some(resp) = resp {
-                respond(&out, &resp);
+                project.ensure_project();
+                project.refresh_trust();
+                if self.transparent || tool_name.is_some() {
+                    project.ensure_gateway();
+                }
+                RequestSnapshot {
+                    dir: project.dir().map(Path::to_path_buf),
+                    gateway: project.gateway_arc(),
+                    trust_note: project.trust_note(),
+                    project_known: project.dir().is_some(),
+                }
             }
         }
     }
-    // stdin EOF: drain in-flight calls before tearing the session down.
-    workers.join_all();
-    release_lease_record(&lease);
-    auto.shutdown();
-    Ok(())
+
+    fn rebuild_after_lease(&self, before: Option<String>) {
+        let after = lease_profile(&self.lease);
+        if before == after {
+            return;
+        }
+        // A lease that opened or closed changes which servers are proxied, and
+        // a legacy client only refetches `tools/list` when it is told so.
+        self.note_tool_list_changed();
+        let mut state = self
+            .project
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        match &mut *state {
+            RmcpProject::Auto {
+                project,
+                automatic_lease_decided,
+            } => {
+                *automatic_lease_decided = true;
+                project.rebuild_for_lease(after.as_deref());
+            }
+            RmcpProject::Eager {
+                dir,
+                gateway,
+                trust_anchor,
+                runtime,
+            } => {
+                if let Some(handle) = runtime.take() {
+                    handle.shutdown();
+                }
+                let violated = trust_anchor
+                    .as_ref()
+                    .is_some_and(|anchor| anchor.verify().is_err());
+                *gateway = match (violated, after.as_deref()) {
+                    (true, _) => std::sync::Arc::new(crate::gateway::Gateway::empty()),
+                    (false, Some(profile)) => std::sync::Arc::new(
+                        crate::gateway::Gateway::from_manifest_lease(dir.as_deref(), profile),
+                    ),
+                    (false, None) => {
+                        std::sync::Arc::new(crate::gateway::Gateway::from_manifest(dir.as_deref()))
+                    }
+                };
+                if !violated {
+                    *trust_anchor = gateway.trust_anchor().cloned();
+                }
+                *runtime = crate::codemode::endpoint::start(
+                    dir.as_deref(),
+                    std::sync::Arc::clone(gateway),
+                );
+            }
+        }
+    }
+}
+
+impl agentstack_mcp::Backend for RmcpBackend {
+    fn instructions(&self) -> Option<String> {
+        // Building the instructions can bind the project and open its default
+        // toolset, so it takes the exclusive side like any other swap.
+        let _exclusive = self.dispatch.exclusive();
+        let snapshot = self.snapshot(None);
+        initialize_instructions(
+            snapshot.dir.as_deref(),
+            snapshot.trust_note.as_deref(),
+            &self.lease,
+            snapshot.project_known,
+        )
+    }
+
+    fn list_tools(
+        &self,
+        era: agentstack_mcp::ProtocolEra,
+    ) -> std::result::Result<Vec<agentstack_mcp::ToolDefinition>, String> {
+        // Listing takes the exclusive side because deriving the modern default
+        // can swap the gateway, and because the list it returns has to be the
+        // list a concurrently arriving call would be served from.
+        let _exclusive = self.dispatch.exclusive();
+        if era == agentstack_mcp::ProtocolEra::Modern {
+            self.sync_modern_default();
+        }
+        let snapshot = self.snapshot(None);
+        let mut tools = tool_defs().as_array().cloned().unwrap_or_default();
+        if self.transparent {
+            tools.extend(snapshot.gateway.namespaced_tools().iter().cloned());
+        }
+        tools
+            .into_iter()
+            .map(agentstack_mcp::ToolDefinition::try_from)
+            .map(|result| result.map_err(|error| error.to_string()))
+            .collect()
+    }
+
+    fn call_tool(
+        &self,
+        name: &str,
+        arguments: Value,
+        era: agentstack_mcp::ProtocolEra,
+    ) -> std::result::Result<agentstack_mcp::ToolOutcome, String> {
+        if era == agentstack_mcp::ProtocolEra::Modern
+            && matches!(
+                name,
+                "agentstack_lease_open" | "agentstack_lease_close" | "agentstack_lease_freeze"
+            )
+        {
+            return Ok(agentstack_mcp::ToolOutcome::error(Value::String(
+                "Error: connection-only toolset leases are legacy-only. Modern MCP requests derive the trusted default toolset from the project each time; set it with `agentstack toolset default <name> --write` or pin the toolset in the launcher.".into(),
+            )));
+        }
+        if self.grant_mode && grant_refused_tool(name) {
+            return Ok(agentstack_mcp::ToolOutcome::error(Value::String(format!(
+                "Error: {name} is unavailable under a frozen run grant — the served surface was fixed by `agentstack run --locked`"
+            ))));
+        }
+        // Re-deriving the modern default may close one lease and open another,
+        // which swaps the served gateway. It runs on the exclusive side, in its
+        // own scope, so the swap waits for every upstream call already in
+        // flight — and so the guard is released before the dispatch below takes
+        // its own side of the barrier.
+        if era == agentstack_mcp::ProtocolEra::Modern {
+            let _exclusive = self.dispatch.exclusive();
+            self.sync_modern_default();
+        }
+        if is_upstream_call(name) {
+            // Shared side: upstream calls stay parallel with each other, and
+            // the snapshot (which may connect to or spawn an upstream) is taken
+            // here rather than under a control lock — but no gateway swap can
+            // interleave with the call it authorizes.
+            let _shared = self.dispatch.shared();
+            let snapshot = self.snapshot(Some(name));
+            let result = dispatch_tool_with_lease(
+                name,
+                &arguments,
+                snapshot.dir.as_deref(),
+                &snapshot.gateway,
+                snapshot.trust_note.as_deref(),
+                &self.lease,
+            );
+            // No upstream name reaches a lease transition, so there is nothing
+            // to rebuild for — and a rebuild here would be the very race the
+            // shared side exists to prevent.
+            return Ok(agentstack_mcp::ToolOutcome::from_mcp_result(result));
+        }
+        let _exclusive = self.dispatch.exclusive();
+        let before = lease_profile(&self.lease);
+        let snapshot = self.snapshot(Some(name));
+        let result = dispatch_tool_with_lease(
+            name,
+            &arguments,
+            snapshot.dir.as_deref(),
+            &snapshot.gateway,
+            snapshot.trust_note.as_deref(),
+            &self.lease,
+        );
+        self.rebuild_after_lease(before);
+        Ok(agentstack_mcp::ToolOutcome::from_mcp_result(result))
+    }
+
+    fn set_legacy_roots(&self, roots: Vec<String>) {
+        let mut state = self
+            .project
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let RmcpProject::Auto { project, .. } = &mut *state else {
+            return;
+        };
+        if project.resolved {
+            return;
+        }
+        project
+            .roots
+            .extend(roots.into_iter().filter_map(|uri| file_uri_to_path(&uri)));
+        // Roots are how a legacy client names the project: the surface this
+        // connection serves is about to become that project's, and the client
+        // has already been handed the empty pre-binding list.
+        drop(state);
+        self.note_tool_list_changed();
+    }
+
+    fn take_tool_list_changed(&self) -> bool {
+        self.tools_changed
+            .swap(false, std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+impl Drop for RmcpBackend {
+    fn drop(&mut self) {
+        release_lease_record(&self.lease);
+        let state = self
+            .project
+            .get_mut()
+            .unwrap_or_else(|error| error.into_inner());
+        match state {
+            RmcpProject::Eager { runtime, .. } => {
+                if let Some(handle) = runtime.take() {
+                    handle.shutdown();
+                }
+            }
+            RmcpProject::Auto { project, .. } => project.shutdown(),
+        }
+    }
+}
+
+/// Open the portable default toolset for a trusted auto-project connection.
+///
+/// This composes the ordinary lease gate rather than creating a privileged
+/// shortcut: trust, active native-session exclusion, toolset existence, lease
+/// registry recording, and the process-local lifetime all remain identical to
+/// an explicit `agentstack_lease_open` call.
+fn maybe_open_default_lease(
+    auto: &mut AutoProject,
+    lease: &LeaseStore,
+    decided: &mut bool,
+) -> bool {
+    if *decided || lease_profile(lease).is_some() {
+        return false;
+    }
+    auto.ensure_project();
+    auto.refresh_trust();
+    if auto.trust_note().is_some() {
+        // Trust can be granted later in this same connection. Leave the
+        // decision pending so the next request can recover automatically.
+        return false;
+    }
+    let Some(dir) = auto.dir().map(Path::to_path_buf) else {
+        return false;
+    };
+    let Ok(ctx) = crate::commands::load(Some(&dir)) else {
+        return false;
+    };
+    let Some(default) = ctx.loaded.manifest.resolved_default_toolset() else {
+        *decided = true;
+        return false;
+    };
+    let default = default.to_string();
+    match lease_open(&json!({ "profile": default }), Some(&dir), None, lease) {
+        Ok(_) => {
+            *decided = true;
+            auto.rebuild_for_lease(Some(&default));
+            eprintln!(
+                "agentstack mcp: opened trusted default toolset '{}' for this connection",
+                default
+            );
+            true
+        }
+        Err(err) => {
+            // Do not loop noisily on a stable refusal such as an active native
+            // session. The explicit lease tool remains available and reports
+            // the full error if the user wants to retry after fixing it.
+            *decided = true;
+            eprintln!(
+                "agentstack mcp: could not open default toolset '{}': {err:#}",
+                default
+            );
+            false
+        }
+    }
 }
 
 /// Drop this process's lease record on a clean exit. A crash skips this by
@@ -391,23 +553,6 @@ fn release_lease_record(store: &LeaseStore) {
     if let Some(instance) = lease_snapshot(store).and_then(|l| l.registry_instance) {
         crate::lease_registry::unregister(&instance);
     }
-}
-
-/// Write one protocol frame through the thread-shared writer (line-delimited
-/// JSON — `Value`'s `Display` is compact). Best-effort: a closed stdout means
-/// the client is gone and the stdin loop is about to end anyway.
-fn respond(out: &std::sync::Mutex<Box<dyn Write + Send>>, frame: &Value) {
-    let mut o = out.lock().unwrap_or_else(|e| e.into_inner());
-    let _ = writeln!(o, "{frame}");
-    let _ = o.flush();
-}
-
-/// In-flight per-call worker threads, so stdin EOF can drain them instead of
-/// exiting mid-call (which would drop responses and skip the stdio children's
-/// polite shutdown). Finished handles are pruned on each spawn, keeping the
-/// set bounded by concurrent — not total — calls.
-struct WorkerPool {
-    handles: Vec<std::thread::JoinHandle<()>>,
 }
 
 /// One zero-file profile selection owned by this MCP stdio process. It is
@@ -490,14 +635,6 @@ fn grant_gateway(path: &Path) -> Result<(crate::gateway::Gateway, PathBuf)> {
     Ok((gateway, base))
 }
 
-fn is_lease_mutation(req: &Value) -> bool {
-    req.get("method").and_then(Value::as_str) == Some("tools/call")
-        && matches!(
-            req.pointer("/params/name").and_then(Value::as_str),
-            Some("agentstack_lease_open" | "agentstack_lease_close")
-        )
-}
-
 /// Control-plane tools refused under a frozen run grant (D2), by name. The
 /// grant fixed the served surface at `run --locked` time; anything that would
 /// swap that surface (lease transitions), resolve secrets into native configs
@@ -507,11 +644,7 @@ fn is_lease_mutation(req: &Value) -> bool {
 /// duration. Read-only discovery (list/search/explain/diff/doctor/status) and
 /// trust-gated skill loading stay available: they grant nothing beyond the
 /// frozen surface. Returns the offending tool name so the refusal names it.
-fn grant_refused_tool(req: &Value) -> Option<&str> {
-    if req.get("method").and_then(Value::as_str) != Some("tools/call") {
-        return None;
-    }
-    let name = req.pointer("/params/name").and_then(Value::as_str)?;
+fn grant_refused_tool(name: &str) -> bool {
     const REFUSED: [&str; 11] = [
         "agentstack_lease_open",
         "agentstack_lease_close",
@@ -527,57 +660,7 @@ fn grant_refused_tool(req: &Value) -> Option<&str> {
         // refused under a grant for exactly the same reason as the new name.
         "agentstack_create_profile",
     ];
-    REFUSED.contains(&name).then_some(name)
-}
-
-impl WorkerPool {
-    fn new() -> Self {
-        WorkerPool {
-            handles: Vec::new(),
-        }
-    }
-
-    fn spawn(&mut self, f: impl FnOnce() + Send + 'static) {
-        self.handles.retain(|h| !h.is_finished());
-        self.handles.push(std::thread::spawn(f));
-    }
-
-    fn join_all(&mut self) {
-        for h in self.handles.drain(..) {
-            let _ = h.join();
-        }
-    }
-}
-
-/// Transparent auto-mode: build the gateway if it isn't yet (trust-gated as
-/// always) and, when it just came up non-empty, send
-/// `notifications/tools/list_changed` so the client re-fetches `tools/list`
-/// and sees the upstream tools — the lazy-build handshake for clients that
-/// only call advertised tools.
-fn notify_if_gateway_appears(
-    auto: &mut AutoProject,
-    out: &std::sync::Arc<std::sync::Mutex<Box<dyn Write + Send>>>,
-) {
-    let was_built = auto.built;
-    auto.ensure_gateway();
-    if !was_built && auto.built && !auto.gateway().is_empty() {
-        respond(
-            out,
-            &json!({ "jsonrpc": "2.0", "method": "notifications/tools/list_changed" }),
-        );
-    }
-}
-
-/// Whether a `tools/call` targets a proxied upstream (`<server>__<tool>`) —
-/// the only long-blocking kind, and the only kind served off-thread.
-/// agentstack's own control-plane tools stay inline on the main loop: several
-/// of them mutate the manifest or session files with read-modify-write, and
-/// sequential handling is their serialization (two parallel
-/// `agentstack_add_server` calls would otherwise lose one update).
-fn is_upstream_call(req: &Value) -> bool {
-    req.pointer("/params/name")
-        .and_then(Value::as_str)
-        .is_some_and(|n| n.contains("__") || n == "tools_execute")
+    REFUSED.contains(&name)
 }
 
 /// Does the project at `base` declare any toolset? The question W4's toolset
@@ -706,8 +789,6 @@ struct AutoProject {
     /// a directory on the command line is itself the consent, exactly like the
     /// default eager mode).
     explicit: Option<PathBuf>,
-    client_has_roots: bool,
-    roots_requested: bool,
     /// Project base candidates from the client's roots/list answer.
     roots: Vec<PathBuf>,
     /// The resolved project base — set even when untrusted, so control-plane
@@ -742,8 +823,6 @@ impl AutoProject {
     fn new(explicit: Option<PathBuf>) -> Self {
         AutoProject {
             explicit,
-            client_has_roots: false,
-            roots_requested: false,
             roots: Vec::new(),
             dir: None,
             trust: None,
@@ -767,47 +846,6 @@ impl AutoProject {
     /// Clone the shared gateway handle for a worker thread.
     fn gateway_arc(&self) -> std::sync::Arc<crate::gateway::Gateway> {
         std::sync::Arc::clone(&self.gateway)
-    }
-
-    /// Record whether the client can answer `roots/list` (from its declared
-    /// capabilities at `initialize`).
-    fn note_client_capabilities(&mut self, req: &Value) {
-        if req
-            .pointer("/params/capabilities/roots")
-            .is_some_and(|v| !v.is_null())
-        {
-            self.client_has_roots = true;
-        }
-    }
-
-    /// The one request we send: ask the client for its workspace roots, right
-    /// after `notifications/initialized` (the earliest the protocol allows).
-    fn roots_request(&mut self) -> Option<Value> {
-        if !self.client_has_roots || self.roots_requested || self.resolved {
-            return None;
-        }
-        self.roots_requested = true;
-        Some(json!({ "jsonrpc": "2.0", "id": ROOTS_REQUEST_ID, "method": "roots/list" }))
-    }
-
-    /// Absorb the client's answer to our roots/list request. Returns true when
-    /// the message was ours (and must not be dispatched to `handle`).
-    fn absorb_roots_response(&mut self, msg: &Value) -> bool {
-        if msg.get("method").is_some() || msg.get("id") != Some(&json!(ROOTS_REQUEST_ID)) {
-            return false;
-        }
-        if let Some(roots) = msg.pointer("/result/roots").and_then(Value::as_array) {
-            for root in roots {
-                if let Some(path) = root
-                    .get("uri")
-                    .and_then(Value::as_str)
-                    .and_then(file_uri_to_path)
-                {
-                    self.roots.push(path);
-                }
-            }
-        }
-        true
     }
 
     /// Resolve and trust-check the project without constructing any upstream
@@ -1067,7 +1105,7 @@ impl AutoProject {
         }
     }
 
-    fn shutdown(mut self) {
+    fn shutdown(&mut self) {
         if let Some(rt) = self.runtime.take() {
             rt.shutdown();
         }
@@ -1114,71 +1152,15 @@ fn handle(
     trust_note: Option<&str>,
     transparent: bool,
 ) -> Option<Value> {
-    // Unit tests and non-session helpers keep the historical stateless entry
-    // point. The stdio server uses `handle_with_lease` with one store shared
-    // across every request in that MCP connection.
-    handle_with_lease(
-        req,
-        dir,
-        gateway,
-        trust_note,
-        transparent,
-        &new_lease_store(),
-        true,
-    )
-}
-
-fn handle_with_lease(
-    req: &Value,
-    dir: Option<&Path>,
-    gateway: &std::sync::Arc<crate::gateway::Gateway>,
-    trust_note: Option<&str>,
-    transparent: bool,
-    lease: &LeaseStore,
-    // Eager mode knows its project at launch; auto mode only establishes it
-    // after the client answers roots/list — which is AFTER initialize, so the
-    // ambient skill index must not probe the cwd there (wrong-project risk,
-    // and the trust gate hasn't been computed yet).
-    project_known: bool,
-) -> Option<Value> {
-    let id = req.get("id").cloned();
     let method = req.get("method")?.as_str()?;
+    let id = req.get("id").cloned().unwrap_or(Value::Null);
     match method {
-        "initialize" => {
-            let mut body = json!({
-                // listChanged is declared unconditionally (harmless when never
-                // sent); transparent auto-mode uses it to announce the lazily
-                // built gateway's upstream tools.
-                "protocolVersion": PROTOCOL_VERSION,
-                "capabilities": { "tools": { "listChanged": true } },
-                "serverInfo": { "name": "agentstack", "version": env!("CARGO_PKG_VERSION") }
-            });
-            if let Some(text) = initialize_instructions(dir, trust_note, lease, project_known) {
-                body["instructions"] = Value::String(text);
-            }
-            Some(result(id, body))
-        }
-        "notifications/initialized" | "notifications/cancelled" => None,
         "tools/list" => {
-            // Compact mode (default): agentstack's own control-plane tools
-            // only. The project's proxied upstream tools are NOT listed — they
-            // collapse behind the one `tools_search` discovery tool, so this
-            // surface stays bounded no matter how many tools the upstreams
-            // expose (PLAN code-mode Phase 1).
-            //
-            // Transparent mode (--transparent): additionally advertise the
-            // policy-filtered upstream tools, namespaced `<server>__<tool>`,
-            // so any standard MCP client — one that only calls advertised
-            // tools — can use the proxied surface with zero agentstack
-            // knowledge. First listing pays discovery (bounded per-server
-            // timeouts, partial results).
             let mut tools = tool_defs().as_array().cloned().unwrap_or_default();
             if transparent {
-                // namespaced_tools() now hands back a shared `Arc<Vec<Value>>`
-                // (read-only cache); clone the entries we advertise out of it.
                 tools.extend(gateway.namespaced_tools().iter().cloned());
             }
-            Some(result(id, json!({ "tools": tools })))
+            Some(json!({ "jsonrpc": "2.0", "id": id, "result": { "tools": tools } }))
         }
         "tools/call" => {
             let params = req.get("params").cloned().unwrap_or_else(|| json!({}));
@@ -1187,101 +1169,85 @@ fn handle_with_lease(
                 .get("arguments")
                 .cloned()
                 .unwrap_or_else(|| json!({}));
-            // Discovery over the proxied surface needs the gateway, which only
-            // `handle` holds — route it here rather than threading it into
-            // `run_tool`. Read-only: it never writes the manifest or calls a tool.
-            if name == "tools_search" {
-                return Some(result(
-                    id,
-                    json!({ "content": [{ "type": "text", "text": tools_search_text(gateway, &args, trust_note) }], "isError": false }),
-                ));
-            }
-            // Code-mode binding generation also needs the gateway. Generator, not
-            // executor: it returns the client text + a recipe; the harness runs it.
-            if name == "tools_bindings" {
-                return Some(result(
-                    id,
-                    json!({ "content": [{ "type": "text", "text": tools_bindings_text(gateway, dir) }], "isError": false }),
-                ));
-            }
-            if name == "tools_execute" {
-                if !crate::execution::enabled() {
-                    return Some(result(
-                        id,
-                        json!({ "content": [{ "type": "text", "text": "Error: isolated execution is not enabled by machine policy" }], "isError": true }),
-                    ));
-                }
-                let request = match serde_json::from_value::<agentstack_executor::ExecuteRequest>(
-                    args,
-                ) {
-                    Ok(request) => request,
-                    Err(_) => {
-                        return Some(result(
-                            id,
-                            json!({ "content": [{ "type": "text", "text": "Error: invalid tools_execute request" }], "isError": true }),
-                        ));
-                    }
-                };
-                return Some(
-                    match crate::execution::execute(request, dir, std::sync::Arc::clone(gateway)) {
-                        Ok(output) => result(
-                            id,
-                            json!({ "content": [{ "type": "text", "text": serde_json::to_string(&output).unwrap_or_else(|_| "{}".into()) }], "isError": false }),
-                        ),
-                        Err(error) => result(
-                            id,
-                            json!({ "content": [{ "type": "text", "text": crate::text::sanitize_block(&format!("Error [{}]: {}", serde_json::to_value(error.category).unwrap_or(Value::String("execution-error".into())).as_str().unwrap_or("execution-error"), error.public_message())) }], "isError": true }),
-                        ),
-                    },
-                );
-            }
-            // A namespaced call (server__tool) is forwarded to that upstream;
-            // its MCP result is returned verbatim. Otherwise it's our own tool.
-            if let Some(forwarded) = gateway.try_call(name, &args) {
-                return Some(match forwarded {
-                    Ok(v) => result(id, v),
-                    // Error text can embed remote bytes (upstream stderr,
-                    // registry HTTP, git output) and this path never reaches
-                    // main.rs's sanitized sink — strip here (§A.2 #9).
-                    Err(e) => result(
-                        id,
-                        json!({ "content": [{ "type": "text", "text": crate::text::sanitize_block(&format!("Error: {e}")) }], "isError": true }),
-                    ),
-                });
-            }
-            // A namespaced name no upstream held. When the project declares
-            // that server and the toolset fence is why it is not exposed, the
-            // refusal is recorded and says how to open the fence. The trust
-            // gate empties the gateway too, and its own note already explains
-            // that — a fence sentence there would name the wrong fix.
-            if trust_note.is_none() {
-                if let Some(sentence) = fence_refusal(name, dir, gateway) {
-                    return Some(result(
-                        id,
-                        json!({ "content": [{ "type": "text", "text": crate::text::sanitize_block(&format!("Error: {sentence}")) }], "isError": true }),
-                    ));
-                }
-            }
-            let (text, is_error) = match run_tool_with_lease(name, &args, dir, trust_note, lease) {
-                Ok(t) => (t, false),
-                Err(e) => (crate::text::sanitize_block(&format!("Error: {e}")), true),
-            };
-            Some(result(
-                id,
-                json!({ "content": [{ "type": "text", "text": text }], "isError": is_error }),
-            ))
+            let result =
+                dispatch_tool_with_lease(name, &args, dir, gateway, trust_note, &new_lease_store());
+            Some(json!({ "jsonrpc": "2.0", "id": id, "result": result }))
         }
-        // Requests we don't implement → JSON-RPC error; notifications → silence.
-        _ => id.map(|id| error(id, -32601, &format!("method not found: {method}"))),
+        _ => None,
     }
 }
 
-fn result(id: Option<Value>, result: Value) -> Value {
-    json!({ "jsonrpc": "2.0", "id": id.unwrap_or(Value::Null), "result": result })
-}
-
-fn error(id: Value, code: i64, message: &str) -> Value {
-    json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } })
+/// Protocol-neutral tool dispatch. RMCP owns initialization, lifecycle,
+/// JSON-RPC envelopes, errors, and capability negotiation; this function owns
+/// only AgentStack's tool behavior.
+fn dispatch_tool_with_lease(
+    name: &str,
+    args: &Value,
+    dir: Option<&Path>,
+    gateway: &std::sync::Arc<crate::gateway::Gateway>,
+    trust_note: Option<&str>,
+    lease: &LeaseStore,
+) -> Value {
+    // Discovery over the proxied surface needs the gateway, which only
+    // this dispatcher holds. Read-only: it never writes the manifest
+    // or calls a tool.
+    if name == "tools_search" {
+        return json!({ "content": [{ "type": "text", "text": tools_search_text(gateway, args, trust_note) }], "isError": false });
+    }
+    // Code-mode binding generation also needs the gateway. Generator, not
+    // executor: it returns the client text + a recipe; the harness runs it.
+    if name == "tools_bindings" {
+        return json!({ "content": [{ "type": "text", "text": tools_bindings_text(gateway, dir) }], "isError": false });
+    }
+    if name == "tools_execute" {
+        if !crate::execution::enabled() {
+            return json!({ "content": [{ "type": "text", "text": "Error: isolated execution is not enabled by machine policy" }], "isError": true });
+        }
+        let request = match serde_json::from_value::<agentstack_executor::ExecuteRequest>(
+            args.clone(),
+        ) {
+            Ok(request) => request,
+            Err(_) => {
+                return json!({ "content": [{ "type": "text", "text": "Error: invalid tools_execute request" }], "isError": true });
+            }
+        };
+        return match crate::execution::execute(request, dir, std::sync::Arc::clone(gateway)) {
+            Ok(output) => {
+                json!({ "content": [{ "type": "text", "text": serde_json::to_string(&output).unwrap_or_else(|_| "{}".into()) }], "isError": false })
+            }
+            Err(error) => {
+                json!({ "content": [{ "type": "text", "text": crate::text::sanitize_block(&format!("Error [{}]: {}", serde_json::to_value(error.category).unwrap_or(Value::String("execution-error".into())).as_str().unwrap_or("execution-error"), error.public_message())) }], "isError": true })
+            }
+        };
+    }
+    // A namespaced call (server__tool) is forwarded to that upstream;
+    // its MCP result is returned verbatim. Otherwise it's our own tool.
+    if let Some(forwarded) = gateway.try_call(name, args) {
+        return match forwarded {
+            Ok(v) => v,
+            // Error text can embed remote bytes (upstream stderr,
+            // registry HTTP, git output) and this path never reaches
+            // main.rs's sanitized sink — strip here (§A.2 #9).
+            Err(e) => {
+                json!({ "content": [{ "type": "text", "text": crate::text::sanitize_block(&format!("Error: {e}")) }], "isError": true })
+            }
+        };
+    }
+    // A namespaced name no upstream held. When the project declares
+    // that server and the toolset fence is why it is not exposed, the
+    // refusal is recorded and says how to open the fence. The trust
+    // gate empties the gateway too, and its own note already explains
+    // that — a fence sentence there would name the wrong fix.
+    if trust_note.is_none() {
+        if let Some(sentence) = fence_refusal(name, dir, gateway) {
+            return json!({ "content": [{ "type": "text", "text": crate::text::sanitize_block(&format!("Error: {sentence}")) }], "isError": true });
+        }
+    }
+    let (text, is_error) = match run_tool_with_lease(name, args, dir, trust_note, lease) {
+        Ok(t) => (t, false),
+        Err(e) => (crate::text::sanitize_block(&format!("Error: {e}")), true),
+    };
+    json!({ "content": [{ "type": "text", "text": text }], "isError": is_error })
 }
 
 fn tool_defs() -> Value {
@@ -3180,6 +3146,64 @@ mod tests {
         std::sync::Arc::new(gateway)
     }
 
+    /// Only proxied `<server>__<tool>` calls — and `tools_execute`, which
+    /// dispatches through the same gateway — take the concurrent side.
+    /// agentstack's own control-plane tools (several of which read-modify-write
+    /// the manifest) stay serialized, and `tools_execute` must NOT be one of
+    /// them: it can run for a minute, and holding the control lock for that
+    /// long stalls every lease and trust transition behind it.
+    #[test]
+    fn upstream_calls_are_detected_by_namespace() {
+        assert!(is_upstream_call("figma__get_file"));
+        assert!(is_upstream_call("tools_execute"));
+        assert!(!is_upstream_call("agentstack_add_server"));
+        assert!(!is_upstream_call("tools_search"));
+        assert!(!is_upstream_call(""));
+    }
+
+    /// The invariant the pre-RMCP loop kept with `workers.join_all()` before
+    /// every lease mutation, and that the RMCP rework dropped: a call served
+    /// against one gateway must FINISH before a narrower gateway replaces it.
+    /// RMCP serves calls concurrently and each takes its own `Arc<Gateway>`, so
+    /// without this a lease transition could withdraw authority out from under
+    /// a call that was still running on the old, wider surface.
+    #[test]
+    fn a_gateway_swap_waits_for_the_upstream_calls_already_in_flight() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let barrier = std::sync::Arc::new(DispatchBarrier::default());
+        let finished = std::sync::Arc::new(AtomicBool::new(false));
+        // Proves the upstream call really is in flight before the swap tries.
+        let in_flight = std::sync::Arc::new(std::sync::Barrier::new(2));
+
+        let call = {
+            let barrier = std::sync::Arc::clone(&barrier);
+            let finished = std::sync::Arc::clone(&finished);
+            let in_flight = std::sync::Arc::clone(&in_flight);
+            std::thread::spawn(move || {
+                let _shared = barrier.shared();
+                in_flight.wait();
+                std::thread::sleep(std::time::Duration::from_millis(150));
+                finished.store(true, Ordering::SeqCst);
+            })
+        };
+
+        in_flight.wait();
+        let swap = barrier.exclusive();
+        assert!(
+            finished.load(Ordering::SeqCst),
+            "a lease transition swapped the gateway while an upstream call was still running against the old one"
+        );
+        drop(swap);
+        call.join().expect("the upstream call thread");
+
+        // And the other half of the contract: two upstream calls still run
+        // side by side. Taking the shared side twice must not deadlock.
+        let first = barrier.shared();
+        let second = barrier.shared();
+        drop((first, second));
+    }
+
     /// Transparent mode appends the (policy-filtered, namespaced) upstream
     /// tools to `tools/list`; compact mode keeps them behind `tools_search`.
     #[test]
@@ -3250,52 +3274,8 @@ mod tests {
         );
     }
 
-    /// listChanged is declared so transparent auto-mode can announce the
-    /// lazily built gateway's tools; clients that never see the notification
-    /// lose nothing.
-    #[test]
-    fn initialize_declares_list_changed_capability() {
-        // The env lock + temp home keep the new instructions index from
-        // reading the developer's real library during this test.
-        let _guard = crate::util::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let home = assert_fs::TempDir::new().unwrap();
-        std::env::set_var("AGENTSTACK_HOME", home.path());
-        let req = json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize" });
-        let gw = shared(crate::gateway::Gateway::empty());
-        let resp = handle(&req, None, &gw, None, false).unwrap();
-        assert_eq!(
-            resp["result"]["capabilities"]["tools"]["listChanged"],
-            json!(true)
-        );
-        std::env::remove_var("AGENTSTACK_HOME");
-    }
-
-    /// Only proxied `<server>__<tool>` calls go to worker threads; agentstack's
-    /// own control-plane tools (some of which read-modify-write the manifest)
-    /// must stay serialized on the main loop.
-    #[test]
-    fn upstream_calls_are_detected_by_namespace() {
-        let call = |name: &str| {
-            json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-                    "params": { "name": name, "arguments": {} } })
-        };
-        assert!(is_upstream_call(&call("figma__get_file")));
-        assert!(is_upstream_call(&call("tools_execute")));
-        assert!(!is_upstream_call(&call("agentstack_add_server")));
-        assert!(!is_upstream_call(&call("tools_search")));
-        assert!(!is_upstream_call(
-            &json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call" })
-        ));
-    }
-
     #[test]
     fn grant_mode_refuses_mutating_and_secret_resolving_control_plane_tools() {
-        let call = |name: &str| {
-            json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-                    "params": { "name": name, "arguments": {} } })
-        };
         // Everything that swaps the frozen surface, resolves secrets into
         // native configs, or mutates manifest/session state mid-run.
         for name in [
@@ -3311,7 +3291,7 @@ mod tests {
             "agentstack_create_toolset",
             "agentstack_create_profile",
         ] {
-            assert_eq!(grant_refused_tool(&call(name)), Some(name));
+            assert!(grant_refused_tool(name));
         }
         // Read-only discovery, trust-gated loading, and upstream proxying
         // stay served — they grant nothing beyond the frozen surface.
@@ -3327,28 +3307,8 @@ mod tests {
             "agentstack_session_list",
             "figma__get_file",
         ] {
-            assert_eq!(grant_refused_tool(&call(name)), None);
+            assert!(!grant_refused_tool(name));
         }
-        // Non-tools/call frames are never classified.
-        assert_eq!(
-            grant_refused_tool(&json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" })),
-            None
-        );
-    }
-
-    #[test]
-    fn initialize_returns_server_info() {
-        let _guard = crate::util::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let home = assert_fs::TempDir::new().unwrap();
-        std::env::set_var("AGENTSTACK_HOME", home.path());
-        let req = json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize" });
-        let gw = shared(crate::gateway::Gateway::empty());
-        let resp = handle(&req, None, &gw, None, false).unwrap();
-        assert_eq!(resp["result"]["serverInfo"]["name"], "agentstack");
-        assert_eq!(resp["id"], 1);
-        std::env::remove_var("AGENTSTACK_HOME");
     }
 
     /// The initialize result carries an ambient index of loadable skills
@@ -3362,12 +3322,10 @@ mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let (_home, proj) = pinned_inline_project();
-        let req = json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize" });
-        let gw = shared(crate::gateway::Gateway::empty());
 
         // Trusted: names + descriptions, plus the built-in manual.
-        let resp = handle(&req, Some(proj.path()), &gw, None, false).unwrap();
-        let text = resp["result"]["instructions"].as_str().unwrap();
+        let text =
+            initialize_instructions(Some(proj.path()), None, &new_lease_store(), true).unwrap();
         assert!(text.contains("- helper — helps"), "{text}");
         assert!(text.contains(BUILTIN_MANUAL), "{text}");
         assert!(text.contains("agentstack_load"), "{text}");
@@ -3375,24 +3333,15 @@ mod tests {
         // Untrusted: the name is listed, the description (bundle content)
         // is not — identical to the list_loadable trust gate.
         let note = "This project is not trusted yet.";
-        let resp = handle(&req, Some(proj.path()), &gw, Some(note), false).unwrap();
-        let text = resp["result"]["instructions"].as_str().unwrap();
+        let text = initialize_instructions(Some(proj.path()), Some(note), &new_lease_store(), true)
+            .unwrap();
         assert!(text.contains("- helper\n"), "{text}");
         assert!(!text.contains("helps"), "{text}");
 
         // Auto mode (project not yet established): no probe, just the
         // pointer at the tool.
-        let resp = handle_with_lease(
-            &req,
-            Some(proj.path()),
-            &gw,
-            None,
-            false,
-            &new_lease_store(),
-            false,
-        )
-        .unwrap();
-        let text = resp["result"]["instructions"].as_str().unwrap();
+        let text =
+            initialize_instructions(Some(proj.path()), None, &new_lease_store(), false).unwrap();
         assert!(text.contains("No project established yet"), "{text}");
         assert!(!text.contains("helper"), "{text}");
 
@@ -3633,49 +3582,6 @@ mod tests {
     }
 
     #[test]
-    fn auto_project_requests_roots_only_when_client_supports_them() {
-        // No roots capability declared → never ask.
-        let mut auto = AutoProject::new(None);
-        auto.note_client_capabilities(
-            &json!({ "method": "initialize", "params": { "capabilities": {} } }),
-        );
-        assert!(auto.roots_request().is_none());
-
-        // Roots declared → ask exactly once.
-        let mut auto = AutoProject::new(None);
-        auto.note_client_capabilities(
-            &json!({ "method": "initialize", "params": { "capabilities": { "roots": {} } } }),
-        );
-        let req = auto.roots_request().expect("roots requested");
-        assert_eq!(req["method"], "roots/list");
-        assert_eq!(req["id"], ROOTS_REQUEST_ID);
-        assert!(
-            auto.roots_request().is_none(),
-            "asked once, not per message"
-        );
-    }
-
-    #[test]
-    fn auto_project_absorbs_only_its_own_roots_response() {
-        let mut auto = AutoProject::new(None);
-        // A normal request must pass through.
-        assert!(!auto
-            .absorb_roots_response(&json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" })));
-        // Someone else's response id must pass through too.
-        assert!(!auto.absorb_roots_response(&json!({ "jsonrpc": "2.0", "id": 7, "result": {} })));
-        // Ours is absorbed and its file roots recorded.
-        let ours = json!({
-            "jsonrpc": "2.0", "id": ROOTS_REQUEST_ID,
-            "result": { "roots": [
-                { "uri": "file:///tmp/repo", "name": "repo" },
-                { "uri": "https://remote/ws" }
-            ] }
-        });
-        assert!(auto.absorb_roots_response(&ours));
-        assert_eq!(auto.roots, vec![std::path::PathBuf::from("/tmp/repo")]);
-    }
-
-    #[test]
     fn auto_project_gates_untrusted_manifests_to_control_plane_only() {
         use assert_fs::prelude::*;
         let _guard = crate::util::TEST_ENV_LOCK
@@ -3731,6 +3637,190 @@ mod tests {
             "changed trust must be surfaced after a lease transition"
         );
         auto.shutdown();
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    #[test]
+    fn trusted_project_opens_its_declared_default_toolset_without_writing_files() {
+        use assert_fs::prelude::*;
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+
+        let proj = assert_fs::TempDir::new().unwrap();
+        proj.child(".agentstack/agentstack.toml")
+            .write_str(
+                "version = 1\ndefault_toolset = \"p\"\n\
+                 [servers.x]\ntype = \"http\"\nurl = \"https://x/mcp\"\n\
+                 [toolsets.p]\nservers = [\"x\"]\n",
+            )
+            .unwrap();
+        crate::trust::trust_unreviewed(proj.path()).unwrap();
+
+        let mut auto = AutoProject::new(None);
+        auto.roots.push(proj.path().to_path_buf());
+        let lease = new_lease_store();
+        let mut decided = false;
+        assert!(maybe_open_default_lease(&mut auto, &lease, &mut decided));
+        assert_eq!(lease_profile(&lease).as_deref(), Some("p"));
+        assert!(!auto.gateway().is_empty());
+        assert!(!proj.child(".mcp.json").path().exists());
+        assert!(!proj.child(".claude/skills").path().exists());
+
+        release_lease_record(&lease);
+        auto.shutdown();
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    #[test]
+    fn modern_requests_rederive_the_default_while_legacy_keeps_connection_state() {
+        use agentstack_mcp::Backend;
+        use assert_fs::prelude::*;
+
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+        let project = assert_fs::TempDir::new().unwrap();
+        let manifest = project.child(".agentstack/agentstack.toml");
+        manifest
+            .write_str(
+                "version = 1\ndefault_toolset = \"p\"\n\
+                 [servers.x]\ntype = \"http\"\nurl = \"https://x/mcp\"\n\
+                 [servers.y]\ntype = \"http\"\nurl = \"https://y/mcp\"\n\
+                 [toolsets.p]\nservers = [\"x\"]\n\
+                 [toolsets.q]\nservers = [\"y\"]\n",
+            )
+            .unwrap();
+
+        let backend = auto_backend(project.path());
+        backend
+            .list_tools(agentstack_mcp::ProtocolEra::Modern)
+            .unwrap();
+        assert_eq!(lease_profile(&backend.lease).as_deref(), Some("p"));
+
+        manifest
+            .write_str(
+                "version = 1\ndefault_toolset = \"q\"\n\
+                 [servers.x]\ntype = \"http\"\nurl = \"https://x/mcp\"\n\
+                 [servers.y]\ntype = \"http\"\nurl = \"https://y/mcp\"\n\
+                 [toolsets.p]\nservers = [\"x\"]\n\
+                 [toolsets.q]\nservers = [\"y\"]\n",
+            )
+            .unwrap();
+        backend
+            .list_tools(agentstack_mcp::ProtocolEra::Legacy)
+            .unwrap();
+        assert_eq!(
+            lease_profile(&backend.lease).as_deref(),
+            Some("p"),
+            "legacy keeps its connection-scoped selection"
+        );
+        backend
+            .list_tools(agentstack_mcp::ProtocolEra::Modern)
+            .unwrap();
+        assert_eq!(
+            lease_profile(&backend.lease).as_deref(),
+            Some("q"),
+            "modern derives the reviewed project default again per request"
+        );
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    /// One auto-project backend over an explicit directory (which is its own
+    /// consent, so the trust gate stays out of the way of what is being
+    /// tested).
+    fn auto_backend(dir: &Path) -> RmcpBackend {
+        RmcpBackend {
+            project: std::sync::Mutex::new(RmcpProject::Auto {
+                project: AutoProject::new(Some(dir.to_path_buf())),
+                automatic_lease_decided: false,
+            }),
+            dispatch: DispatchBarrier::default(),
+            tools_changed: std::sync::atomic::AtomicBool::new(false),
+            lease: new_lease_store(),
+            transparent: false,
+            grant_mode: false,
+        }
+    }
+
+    /// Re-deriving the modern default CLOSES the current lease before it opens
+    /// the new one. When the open then fails, returning early left the previous
+    /// toolset's gateway live with no lease behind it — a surface wider than
+    /// anything the project declared, kept open by a bookkeeping failure. The
+    /// fall-back is the unleased, control-plane-only gateway, and the decision
+    /// is recorded so the refusal is not retried on every request.
+    #[test]
+    fn a_default_toolset_that_cannot_reopen_falls_back_to_no_upstream_surface() {
+        use agentstack_mcp::Backend;
+        use assert_fs::prelude::*;
+
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+        let project = assert_fs::TempDir::new().unwrap();
+        let manifest = project.child(".agentstack/agentstack.toml");
+        let write = |default: &str| {
+            manifest
+                .write_str(&format!(
+                    "version = 1\ndefault_toolset = \"{default}\"\n\
+                     [servers.x]\ntype = \"http\"\nurl = \"https://x/mcp\"\n\
+                     [servers.y]\ntype = \"http\"\nurl = \"https://y/mcp\"\n\
+                     [toolsets.p]\nservers = [\"x\"]\n\
+                     [toolsets.q]\nservers = [\"y\"]\n"
+                ))
+                .unwrap()
+        };
+        write("p");
+
+        let backend = auto_backend(project.path());
+        backend
+            .list_tools(agentstack_mcp::ProtocolEra::Modern)
+            .unwrap();
+        assert_eq!(lease_profile(&backend.lease).as_deref(), Some("p"));
+        assert!(
+            !backend.snapshot(None).gateway.is_empty(),
+            "the declared default must be served in the first place"
+        );
+
+        // The default moves, and a native-file session now blocks any MCP
+        // lease — so closing 'p' succeeds and opening 'q' cannot.
+        write("q");
+        crate::session::record_for_test(&crate::manifest::project_root_of(project.path()), "p");
+
+        backend
+            .list_tools(agentstack_mcp::ProtocolEra::Modern)
+            .unwrap();
+        assert_eq!(
+            lease_profile(&backend.lease),
+            None,
+            "the failed reopen must leave no lease claiming a toolset"
+        );
+        assert!(
+            backend.snapshot(None).gateway.is_empty(),
+            "the old toolset's gateway must not keep serving without a lease"
+        );
+        let RmcpProject::Auto {
+            automatic_lease_decided,
+            ..
+        } = &*backend
+            .project
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+        else {
+            panic!("auto-project backend");
+        };
+        assert!(
+            *automatic_lease_decided,
+            "the decision must be recorded so the refusal is not retried per request"
+        );
 
         std::env::remove_var("AGENTSTACK_HOME");
     }
@@ -3913,7 +4003,7 @@ mod tests {
         assert!(v["instructions"]
             .as_str()
             .unwrap()
-            .contains("# Using agentstack"));
+            .contains("# Use AgentStack"));
 
         // With a project manifest that doesn't define it, it rides along.
         let proj = assert_fs::TempDir::new().unwrap();

@@ -24,7 +24,7 @@
 //! pipes and a well-behaved MCP server exits on stdin EOF. Secrets are resolved
 //! into the child's env at spawn time and are never logged.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
@@ -33,7 +33,6 @@ use serde_json::{json, Value};
 use crate::manifest::ServerType;
 
 const TIMEOUT: Duration = Duration::from_secs(5);
-const PROTOCOL: &str = "2025-06-18";
 const DESC_CAP: usize = 600;
 
 /// How long a stdio tool call may run. Generous: upstream tools do real work
@@ -60,8 +59,6 @@ pub struct Upstream {
     /// error.
     unresolved: Vec<String>,
     transport: Transport,
-    initialized: RefCell<bool>,
-    next_id: Cell<i64>,
 }
 
 enum Transport {
@@ -73,8 +70,7 @@ enum Transport {
 struct HttpTransport {
     url: String,
     headers: Vec<(String, String)>,
-    client: reqwest::blocking::Client,
-    session: RefCell<Option<String>>,
+    client: RefCell<Option<agentstack_mcp::HttpUpstreamClient>>,
 }
 
 /// A stdio child-process JSON-RPC client (one line = one message). The child is
@@ -89,151 +85,7 @@ struct StdioTransport {
     /// Never the gateway's own cwd — that depends on where the client launched
     /// `agentstack mcp`, so relative commands/args would resolve unpredictably.
     cwd: std::path::PathBuf,
-    child: RefCell<Option<StdioChild>>,
-}
-
-struct StdioChild {
-    proc: std::process::Child,
-    /// `Some` for the child's whole working life; taken (closed → EOF) first
-    /// during Drop, because stdin EOF is the polite MCP shutdown signal.
-    stdin: Option<std::process::ChildStdin>,
-    rx: std::sync::mpsc::Receiver<Value>,
-}
-
-impl StdioChild {
-    /// Poll `try_wait` for up to `dur`; true once the child has exited.
-    fn wait_for_exit(&mut self, dur: Duration) -> bool {
-        let deadline = Instant::now() + dur;
-        loop {
-            if matches!(self.proc.try_wait(), Ok(Some(_))) {
-                return true;
-            }
-            if Instant::now() >= deadline {
-                return false;
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
-    }
-}
-
-impl Drop for StdioChild {
-    fn drop(&mut self) {
-        // Escalation ladder: stdin EOF (polite MCP shutdown) → SIGTERM to the
-        // process group → SIGKILL to the group. The child is its own group
-        // leader (see spawn), so anything *it* spawned goes too — the same
-        // tree-kill contract as `agentstack kill`.
-        drop(self.stdin.take());
-        if self.wait_for_exit(Duration::from_millis(200)) {
-            return;
-        }
-        #[cfg(unix)]
-        {
-            let pgid = self.proc.id() as i32;
-            let _ = crate::sys::signal_group(pgid, crate::sys::Signal::Term);
-            if self.wait_for_exit(Duration::from_millis(300)) {
-                return;
-            }
-            let _ = crate::sys::signal_group(pgid, crate::sys::Signal::Kill);
-        }
-        #[cfg(not(unix))]
-        {
-            let _ = self.proc.kill();
-        }
-        let _ = self.proc.wait();
-    }
-}
-
-/// Bound on the stdio reader's message queue — deep enough to absorb a burst
-/// of notifications between requests, small enough that a runaway server can't
-/// grow host memory. JSON-RPC frames, so this is a modest buffer.
-const STDIO_QUEUE_CAP: usize = 256;
-
-impl StdioTransport {
-    fn spawn(&self) -> Result<StdioChild> {
-        let mut cmd = std::process::Command::new(&self.command);
-        cmd.args(&self.args)
-            .envs(self.env.iter().cloned())
-            .current_dir(&self.cwd)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            // The child's stderr flows to ours: `agentstack mcp` keeps the
-            // protocol on the real stdout, so this is debug-visible and safe.
-            .stderr(std::process::Stdio::inherit());
-        // Own process group, so Drop can tree-kill the child and anything it
-        // spawns.
-        crate::sys::spawn_in_new_process_group(&mut cmd);
-        let mut proc = cmd
-            .spawn()
-            .with_context(|| format!("spawning '{}' in {}", self.command, self.cwd.display()))?;
-        let stdin = Some(proc.stdin.take().expect("piped stdin"));
-        let stdout = proc.stdout.take().expect("piped stdout");
-        // Bounded so a chatty server (a flood of notifications between the
-        // requests that drain them) can't grow this queue without limit. A
-        // full channel parks the reader thread on `send`, which lets the
-        // child's stdout pipe fill and applies backpressure to the child —
-        // no deadlock, since `request` drains one message at a time while it
-        // waits, freeing slots for the reply it's looking for.
-        let (tx, rx) = std::sync::mpsc::sync_channel(STDIO_QUEUE_CAP);
-        std::thread::spawn(move || {
-            use std::io::BufRead;
-            for line in std::io::BufReader::new(stdout).lines() {
-                let Ok(line) = line else { break };
-                // Skip non-JSON stdout noise; only JSON-RPC frames go through.
-                if let Ok(v) = serde_json::from_str::<Value>(&line) {
-                    if tx.send(v).is_err() {
-                        break;
-                    }
-                }
-            }
-        });
-        Ok(StdioChild { proc, stdin, rx })
-    }
-
-    /// Send one JSON-RPC message; for a request (has an id), wait for the
-    /// matching response until `timeout`. Server-initiated notifications and
-    /// stale replies are skipped, not fatal.
-    fn request(&self, body: &Value, timeout: Duration) -> Result<Option<Value>> {
-        let mut slot = self.child.borrow_mut();
-        let mut child = match slot.take() {
-            Some(c) => c,
-            None => self.spawn()?,
-        };
-        use std::io::Write;
-        let line = serde_json::to_string(body)?;
-        let stdin = child.stdin.as_mut().expect("stdin open until drop");
-        if let Err(e) = writeln!(stdin, "{line}").and_then(|()| stdin.flush()) {
-            // Dead child: drop it (reaps + group-kills); the next call respawns.
-            drop(child);
-            anyhow::bail!("server process is not accepting input: {e}");
-        }
-        let Some(id) = body.get("id").cloned() else {
-            *slot = Some(child);
-            return Ok(None);
-        };
-        let deadline = Instant::now() + timeout;
-        loop {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            match child.rx.recv_timeout(remaining) {
-                Ok(msg) => {
-                    if msg.get("id") == Some(&id) && msg.get("method").is_none() {
-                        *slot = Some(child);
-                        return Ok(Some(msg));
-                    }
-                    // A notification, a server-initiated request, or a stale
-                    // reply to a timed-out call — skip and keep waiting.
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                    // Keep the child: a slow tool call is not a dead server.
-                    *slot = Some(child);
-                    anyhow::bail!("no response after {}s", timeout.as_secs());
-                }
-                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                    drop(child);
-                    anyhow::bail!("server process exited");
-                }
-            }
-        }
-    }
+    rmcp_client: RefCell<Option<agentstack_mcp::StdioUpstreamClient>>,
 }
 
 impl Upstream {
@@ -243,20 +95,14 @@ impl Upstream {
         headers: Vec<(String, String)>,
         unresolved: Vec<String>,
     ) -> Result<Self> {
-        let client = reqwest::blocking::Client::builder()
-            .timeout(TIMEOUT)
-            .build()?;
         Ok(Self {
             name,
             unresolved,
             transport: Transport::Http(HttpTransport {
                 url,
                 headers,
-                client,
-                session: RefCell::new(None),
+                client: RefCell::new(None),
             }),
-            initialized: RefCell::new(false),
-            next_id: Cell::new(1),
         })
     }
 
@@ -276,74 +122,16 @@ impl Upstream {
                 args,
                 env,
                 cwd,
-                child: RefCell::new(None),
+                rmcp_client: RefCell::new(None),
             }),
-            initialized: RefCell::new(false),
-            next_id: Cell::new(1),
         }
-    }
-
-    /// Send one JSON-RPC message over whichever transport. `None` for an
-    /// accepted notification with no body. `timeout` bounds stdio waits; the
-    /// HTTP client carries its own request timeout.
-    fn send(&self, body: &Value, timeout: Duration) -> Result<Option<Value>> {
-        match &self.transport {
-            Transport::Http(h) => h.post(&self.name, body),
-            Transport::Stdio(s) => s
-                .request(body, timeout)
-                .with_context(|| format!("contacting {}", self.name)),
-        }
-    }
-
-    fn rpc(&self, method: &str, params: Value) -> Result<Value> {
-        let id = self.next_id.get();
-        self.next_id.set(id + 1);
-        let timeout = if method == "initialize" {
-            stdio_start_timeout()
-        } else {
-            STDIO_CALL_TIMEOUT
-        };
-        let body = json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params });
-        let resp = self
-            .send(&body, timeout)?
-            .ok_or_else(|| anyhow!("{}: empty response to {method}", self.name))?;
-        if let Some(err) = resp.get("error") {
-            let msg = err
-                .get("message")
-                .and_then(Value::as_str)
-                .unwrap_or("error");
-            anyhow::bail!("{}: {msg}", self.name);
-        }
-        Ok(resp.get("result").cloned().unwrap_or(Value::Null))
-    }
-
-    fn ensure_init(&self) -> Result<()> {
-        if *self.initialized.borrow() {
-            return Ok(());
-        }
-        self.rpc(
-            "initialize",
-            json!({
-                "protocolVersion": PROTOCOL,
-                "capabilities": {},
-                "clientInfo": { "name": "agentstack-gateway", "version": env!("CARGO_PKG_VERSION") }
-            }),
-        )?;
-        let _ = self.send(
-            &json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
-            STDIO_CALL_TIMEOUT,
-        );
-        *self.initialized.borrow_mut() = true;
-        Ok(())
     }
 
     fn list_tools(&self) -> Result<Vec<Value>> {
-        self.ensure_init()?;
-        let r = self.rpc("tools/list", json!({}))?;
-        Ok(r.get("tools")
-            .and_then(Value::as_array)
-            .cloned()
-            .unwrap_or_default())
+        match &self.transport {
+            Transport::Http(http) => http.list_tools(&self.name),
+            Transport::Stdio(stdio) => stdio.list_tools(&self.name),
+        }
     }
 
     fn call_tool(&self, tool: &str, args: Value) -> Result<Value> {
@@ -374,54 +162,112 @@ impl Upstream {
                 self.unresolved.join(", ")
             );
         }
-        self.ensure_init()?;
-        self.rpc("tools/call", json!({ "name": tool, "arguments": args }))
+        match &self.transport {
+            Transport::Http(http) => http.call_tool(&self.name, tool, args),
+            Transport::Stdio(stdio) => stdio.call_tool(&self.name, tool, args),
+        }
+    }
+}
+
+/// Drop a cached upstream client whose connection just died.
+///
+/// One crashed upstream must not poison its slot for the life of the process.
+/// The pre-RMCP transport dropped the child on a failed write, so the next call
+/// respawned it; the cached RMCP client kept a dead session forever. A TIMEOUT
+/// deliberately keeps the client — a slow tool call is not a dead server, which
+/// is the same line the old loop drew.
+fn discard_dead_client<C, T>(
+    slot: &RefCell<Option<C>>,
+    outcome: &std::result::Result<T, agentstack_mcp::UpstreamError>,
+) {
+    if outcome
+        .as_ref()
+        .err()
+        .is_some_and(agentstack_mcp::UpstreamError::is_transport)
+    {
+        *slot.borrow_mut() = None;
     }
 }
 
 impl HttpTransport {
-    /// POST a JSON-RPC message; parse a JSON or SSE response. `None` for an
-    /// accepted notification with no body.
-    fn post(&self, name: &str, body: &Value) -> Result<Option<Value>> {
-        let mut req = self
+    fn ensure_client(&self, name: &str) -> Result<()> {
+        if self.client.borrow().is_none() {
+            let client =
+                agentstack_mcp::HttpUpstreamClient::connect(&self.url, &self.headers, TIMEOUT)
+                    .with_context(|| format!("contacting {name}"))?;
+            *self.client.borrow_mut() = Some(client);
+        }
+        Ok(())
+    }
+
+    fn list_tools(&self, name: &str) -> Result<Vec<Value>> {
+        self.ensure_client(name)?;
+        // The borrow guard ends with this statement, so the discard below can
+        // take the mutable borrow.
+        let outcome = self
             .client
-            .post(&self.url)
-            .header("Content-Type", "application/json")
-            .header("Accept", "application/json, text/event-stream")
-            .header("MCP-Protocol-Version", PROTOCOL);
-        for (k, v) in &self.headers {
-            req = req.header(k, v);
-        }
-        if let Some(sid) = self.session.borrow().as_ref() {
-            req = req.header("Mcp-Session-Id", sid);
-        }
-        let resp = req
-            .json(body)
-            .send()
+            .borrow()
+            .as_ref()
+            .ok_or_else(|| anyhow!("{name}: client unavailable"))?
+            .list_tools();
+        discard_dead_client(&self.client, &outcome);
+        outcome.with_context(|| format!("contacting {name}"))
+    }
+
+    fn call_tool(&self, name: &str, tool: &str, args: Value) -> Result<Value> {
+        self.ensure_client(name)?;
+        let outcome = self
+            .client
+            .borrow()
+            .as_ref()
+            .ok_or_else(|| anyhow!("{name}: client unavailable"))?
+            .call_tool(tool, args);
+        discard_dead_client(&self.client, &outcome);
+        outcome.with_context(|| format!("contacting {name}"))
+    }
+}
+
+impl StdioTransport {
+    fn ensure_rmcp_client(&self, name: &str) -> Result<()> {
+        if self.rmcp_client.borrow().is_none() {
+            let client = agentstack_mcp::StdioUpstreamClient::connect(
+                &self.command,
+                &self.args,
+                &self.env,
+                &self.cwd,
+                stdio_start_timeout(),
+                STDIO_CALL_TIMEOUT,
+            )
             .with_context(|| format!("contacting {name}"))?;
-        if let Some(sid) = resp
-            .headers()
-            .get("mcp-session-id")
-            .and_then(|v| v.to_str().ok())
-        {
-            *self.session.borrow_mut() = Some(sid.to_string());
+            *self.rmcp_client.borrow_mut() = Some(client);
         }
-        let ctype = resp
-            .headers()
-            .get("content-type")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("")
-            .to_string();
-        let text = resp.text()?;
-        if text.trim().is_empty() {
-            return Ok(None);
-        }
-        let val = if ctype.contains("text/event-stream") {
-            parse_sse(&text)
-        } else {
-            serde_json::from_str(&text).ok()
-        };
-        Ok(val)
+        Ok(())
+    }
+
+    fn list_tools(&self, name: &str) -> Result<Vec<Value>> {
+        self.ensure_rmcp_client(name)?;
+        let outcome = self
+            .rmcp_client
+            .borrow()
+            .as_ref()
+            .ok_or_else(|| anyhow!("{name}: client unavailable"))?
+            .list_tools();
+        // Dropping the client drops the RMCP child transport, which
+        // group-kills the dead server's process tree; the next call respawns.
+        discard_dead_client(&self.rmcp_client, &outcome);
+        outcome.with_context(|| format!("contacting {name}"))
+    }
+
+    fn call_tool(&self, name: &str, tool: &str, args: Value) -> Result<Value> {
+        self.ensure_rmcp_client(name)?;
+        let outcome = self
+            .rmcp_client
+            .borrow()
+            .as_ref()
+            .ok_or_else(|| anyhow!("{name}: client unavailable"))?
+            .call_tool(tool, args);
+        discard_dead_client(&self.rmcp_client, &outcome);
+        outcome.with_context(|| format!("contacting {name}"))
     }
 }
 
@@ -1645,17 +1491,6 @@ fn namespace_tool(server: &str, tool: &Value) -> Option<Value> {
     }))
 }
 
-/// Concatenate `data:` lines of an SSE body and parse the JSON-RPC message.
-fn parse_sse(text: &str) -> Option<Value> {
-    let mut data = String::new();
-    for line in text.lines() {
-        if let Some(rest) = line.strip_prefix("data:") {
-            data.push_str(rest.trim());
-        }
-    }
-    serde_json::from_str(&data).ok()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1730,6 +1565,52 @@ mod tests {
             ]
             .contains(&got));
         }
+    }
+
+    /// One upstream crash must not poison that server for the life of the
+    /// process. The pre-RMCP transport dropped the child whenever a write to it
+    /// failed, so the next call respawned; a cached RMCP client has to be
+    /// cleared explicitly or the slot serves "client closed" forever. The other
+    /// half of the rule is just as load-bearing: a TIMEOUT keeps the client,
+    /// because a slow tool call is not a dead server and reconnecting would
+    /// abandon the work in flight.
+    #[test]
+    fn a_dead_upstream_is_dropped_but_a_slow_one_is_kept() {
+        use agentstack_mcp::UpstreamError;
+
+        let slot: RefCell<Option<&str>> = RefCell::new(Some("live client"));
+
+        discard_dead_client(&slot, &Ok::<_, UpstreamError>(json!({})));
+        assert!(slot.borrow().is_some(), "a success must keep the client");
+
+        discard_dead_client::<_, Value>(
+            &slot,
+            &Err(UpstreamError::Timeout(
+                "tools/call timed out after 60s".into(),
+            )),
+        );
+        assert!(
+            slot.borrow().is_some(),
+            "a slow tool call is not a dead server — reconnecting would abandon it"
+        );
+
+        discard_dead_client::<_, Value>(
+            &slot,
+            &Err(UpstreamError::Decode("reply was not an object".into())),
+        );
+        assert!(
+            slot.borrow().is_some(),
+            "a reply we could not read still proves the connection works"
+        );
+
+        discard_dead_client::<_, Value>(
+            &slot,
+            &Err(UpstreamError::Transport("server process exited".into())),
+        );
+        assert!(
+            slot.borrow().is_none(),
+            "a transport failure must clear the cache so the next call respawns"
+        );
     }
 
     /// The gateway is shared as a bare `Arc` across the serve loop, per-call
@@ -1878,7 +1759,7 @@ mod tests {
     /// the fixture's command is `/bin/false`, so any spawn attempt would
     /// surface as a spawn error, not a policy denial.
     #[test]
-    fn http_endpoint_denies_by_policy_before_touching_the_upstream() {
+    fn gateway_denies_by_policy_before_touching_the_upstream() {
         let _guard = crate::util::TEST_ENV_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -1906,15 +1787,11 @@ mod tests {
             frozen: Vec::new(),
             trust_gate: None,
         };
-        let req = serde_json::json!({
-            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-            "params": { "name": "figma__post_comment", "arguments": {} }
-        });
-        let (status, body) = crate::gateway_http::handle_mcp_post(&gw, &req.to_string());
-        assert_eq!(status, 200);
-        let v: Value = serde_json::from_str(&body.unwrap()).unwrap();
-        assert_eq!(v["result"]["isError"], true);
-        let text = v["result"]["content"][0]["text"].as_str().unwrap();
+        let error = gw
+            .try_call("figma__post_comment", &json!({}))
+            .expect("server namespace is routed")
+            .expect_err("policy must deny the call");
+        let text = error.to_string();
         // Still a denial (`isError` above), and now a legible one: the
         // Phase-3 seatbelt shape — what was stopped, why (the rule, named,
         // with its source), and the safe next step.
@@ -1950,13 +1827,6 @@ mod tests {
             .unwrap()
             .starts_with("[via figma] "));
         assert!(n["description"].as_str().unwrap().chars().count() <= DESC_CAP + 13);
-    }
-
-    #[test]
-    fn parses_sse_payload() {
-        let body =
-            "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"ok\":true}}\n\n";
-        assert_eq!(parse_sse(body).unwrap()["result"]["ok"], true);
     }
 
     fn must(t: Option<Value>) -> Value {

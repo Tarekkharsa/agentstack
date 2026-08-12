@@ -113,11 +113,11 @@ fn house_rules_seed_is_idempotent_and_compiles() {
         .expect("[instructions.agentstack] declared");
     assert_eq!(instr.path.as_deref(), Some("./instructions/agentstack.md"));
     let body = fs::read_to_string(home.join("instructions/agentstack.md")).unwrap();
-    assert!(body.contains("agentstack house rules"));
+    assert!(body.contains("# AgentStack"));
     // The routed-delivery lesson: a capability served live over the lease
     // leaves no native file behind, and an agent must not invent one.
-    assert!(body.contains("served live"));
-    assert!(body.contains("do not create one"));
+    assert!(body.contains("In live mode"));
+    assert!(body.contains("missing native capability files are intentional"));
 
     // And it compiles into a managed region for a harness.
     let reg = agentstack::adapter::Registry::load().unwrap();
@@ -133,7 +133,7 @@ fn house_rules_seed_is_idempotent_and_compiles() {
     )
     .unwrap();
     assert_eq!(plan.fragments, vec![init::HOUSE_RULES_NAME.to_string()]);
-    assert!(plan.proposed.contains("agentstack house rules"));
+    assert!(plan.proposed.contains("# AgentStack"));
     assert!(plan.proposed.contains("<!-- agentstack:start -->"));
 
     std::env::remove_var("AGENTSTACK_HOME");

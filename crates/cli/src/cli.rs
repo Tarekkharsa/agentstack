@@ -187,11 +187,10 @@ pub enum Command {
 
     /// Set this machine up from a setup that already exists: one command.
     ///
-    /// For a fresh machine holding a checkout. Finds the CLIs you have,
-    /// verifies the environment against `agentstack.lock`, renders each CLI's
-    /// config, and names what is left — which on a new machine is this
-    /// machine's secrets. `init` is for a setup that does not exist yet; this
-    /// is for one that does.
+    /// For a fresh machine holding a checkout. Syncs the personal library,
+    /// finds and connects installed CLIs, verifies `agentstack.lock`, keeps
+    /// live-capable delivery zero-files, and names this machine's remaining
+    /// secrets and trust review. Preview first; add `--write` to apply.
     #[command(hide = true)]
     Up(UpArgs),
 
@@ -293,12 +292,12 @@ pub enum Command {
     ///
     /// A toolset is a named subset of this project's servers and skills — one
     /// for backend work, one for incident response — so you switch context
-    /// without editing five config files. `agentstack use <name>` activates
-    /// one; `agentstack use --list` shows them all.
+    /// without editing five config files. A trusted project's declared default
+    /// opens automatically on each new gateway connection.
     #[command(subcommand)]
     Toolset(ToolsetCmd),
 
-    /// Toolset: switch to one — its servers and skills go live in your CLIs.
+    /// Compatibility activation for tools that need local files.
     Use(UseArgs),
 
     /// Review and activate the files you dropped into this project — one step.
@@ -345,12 +344,13 @@ pub enum Command {
 
     /// Run a reviewed multi-agent task using toolsets you already approved.
     ///
-    /// Visible since the six interpreter-boundary review findings closed, each
-    /// with its own witness (the watchdog's no-I/O exit, interpreter memory
-    /// bounds, host-native re-entrancy, a run-total native call budget,
-    /// cross-host resume determinism, and the crate boundary). Un-hiding
-    /// changed DISCOVERABILITY only — not one enforcement boundary moved with
-    /// it, and `docs/workflows.md`'s *Honest limits* still hold in full: a
+    /// Kept off the default help and listed under `agentstack x`, though the
+    /// six interpreter-boundary review findings are closed, each with its own
+    /// witness (the watchdog's no-I/O exit, interpreter memory bounds,
+    /// host-native re-entrancy, a run-total native call budget, cross-host
+    /// resume determinism, and the crate boundary). Where the command is
+    /// listed is DISCOVERABILITY only — not one enforcement boundary moves
+    /// with it, and `docs/workflows.md`'s *Honest limits* still hold: a
     /// host-tier step is cooperative-guard only, step outputs are untrusted
     /// model data, and the interpreter's residual bounds are stated in
     /// `agentstack workflow report`'s posture block rather than papered over.
@@ -705,12 +705,23 @@ and renders nothing.
       at a terminal: shows what it will create, asks, then writes and re-locks
 
   agentstack toolset list                see every toolset here
-  agentstack use backend --write         switch to it
+  agentstack toolset default backend --write
 
 Scripts and graphical clients get the two-step contract instead: --preview
 emits the plan plus a consent digest, and applying needs
 `--yes --consented <digest>`. A bare non-interactive call refuses and says so.")]
     Create(ToolsetCreateArgs),
+
+    /// Choose what trusted agent connections open automatically.
+    #[command(after_help = "\
+The default is part of the project manifest. New trusted gateway connections
+open it automatically, and a modern MCP connection re-derives it on its next
+request — a running agent picks the change up without reconnecting. Only a
+legacy connection keeps the selection it opened with; reconnect that one.
+
+  agentstack toolset default backend          preview the change
+  agentstack toolset default backend --write  write it, re-lock, then review trust")]
+    Default(ToolsetDefaultArgs),
 
     /// Rename a toolset, keeping everything in it.
     #[command(after_help = "\
@@ -752,10 +763,20 @@ references pinned in agentstack.lock and matching?
   agentstack toolset list                see every toolset here
   agentstack toolset list --json         the same read, machine-readable
 
-Listing never activates anything and writes nothing. To switch:
-`agentstack use <toolset> --write`; to switch only for now:
-`agentstack session start <toolset>`.")]
+Listing never activates anything and writes nothing. The declared default opens
+automatically on each new trusted gateway connection. Change it with
+`agentstack toolset default <name> --write`.")]
     List(ToolsetListArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct ToolsetDefaultArgs {
+    /// Declared toolset to open for new trusted agent connections.
+    pub name: String,
+
+    /// Write the manifest and refresh the lock. Without this, show the change.
+    #[arg(long)]
+    pub write: bool,
 }
 
 /// `toolset list` is a fixed-argv alias of `use --list` — one read path, one
@@ -1659,7 +1680,20 @@ pub enum PublisherCmd {
 
 #[derive(Args, Debug)]
 pub struct UpArgs {
-    /// Only render these CLIs (default: every detected one).
+    /// Clone the personal capability library from this Git remote on a new
+    /// machine. Omit after the first bootstrap.
+    #[arg(long, value_name = "URL")]
+    pub library: Option<String>,
+
+    /// Emit one machine-readable bootstrap result (including readiness).
+    #[arg(long)]
+    pub json: bool,
+
+    /// Apply the bootstrap. Without this, show the safe plan.
+    #[arg(long)]
+    pub write: bool,
+
+    /// Only connect/reconcile these CLIs (default: every detected one).
     #[arg(long)]
     pub targets: Vec<String>,
 
@@ -1669,7 +1703,8 @@ pub struct UpArgs {
     // help, so explaining the word "profile" here would itself put "profile"
     // on the visible surface, which is what the rule forbids. (That is how
     // this failed the first time.)
-    /// Materialize this toolset rather than the active one.
+    /// Select this toolset for compatibility lanes; live connections use the
+    /// project's declared default.
     #[arg(long = "toolset", alias = "profile", value_name = "NAME")]
     pub profile: Option<String>,
 
@@ -2173,9 +2208,9 @@ pub struct UseArgs {
     #[arg(skip)]
     pub quiet: bool,
 
-    /// Toolset to activate. Optional: with one toolset declared it is chosen
-    /// automatically, and with none declared the implicit default — every
-    /// inline skill and server — activates. Several toolsets need a name.
+    /// Toolset to reconcile for compatibility/file delivery. Live gateway
+    /// connections use the declared default or a control-plane lease instead.
+    /// With one toolset declared, it is chosen automatically.
     #[arg(value_name = "TOOLSET")]
     pub profile: Option<String>,
 

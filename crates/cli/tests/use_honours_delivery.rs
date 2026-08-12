@@ -32,11 +32,13 @@ fn set_home(home: &Path) {
     std::env::set_var("AGENTSTACK_HOME", home.join(".agentstack"));
 }
 
-/// A project targeting one MCP-capable harness with one stdio server.
-/// `render_locally` decides which lane that server travels.
+/// A project targeting one MCP-capable harness with one server and one skill.
+/// `render_locally` decides which lane those capabilities travel.
 fn project(root: &Path, render_locally: bool) -> std::path::PathBuf {
     let proj = root.join("proj");
     fs::create_dir_all(proj.join(".git")).unwrap();
+    fs::create_dir_all(proj.join("skill-sources/demo")).unwrap();
+    fs::write(proj.join("skill-sources/demo/SKILL.md"), "# Demo\n").unwrap();
     let delivery = if render_locally {
         "[delivery]\nrender_locally = true\n"
     } else {
@@ -46,8 +48,9 @@ fn project(root: &Path, render_locally: bool) -> std::path::PathBuf {
         proj.join("agentstack.toml"),
         format!(
             "version = 1\n{delivery}[targets]\ndefault = [\"claude-code\"]\n\
+             [skills.demo]\npath = \"./skill-sources/demo\"\n\
              [servers.demo]\ntype = \"stdio\"\ncommand = \"/bin/echo\"\nargs = [\"hi\"]\n\
-             [profiles.p]\nservers = [\"demo\"]\nskills = []\n"
+             [profiles.p]\nservers = [\"demo\"]\nskills = [\"demo\"]\n"
         ),
     )
     .unwrap();
@@ -84,6 +87,10 @@ fn use_write_does_not_write_servers_under_default_routing() {
         !proj.join(".mcp.json").exists(),
         "activation must not write a server config for a live-routed harness"
     );
+    assert!(
+        !proj.join(".claude/skills").exists(),
+        "activation must not create a skills directory for a live-routed harness"
+    );
     // …and it must not hide a phantom file in the managed .gitignore block
     // either: a block naming a file nobody wrote is the same lie in a second
     // place (it is what kept `git status` quiet about the write).
@@ -91,6 +98,10 @@ fn use_write_does_not_write_servers_under_default_routing() {
     assert!(
         !gitignore.contains("/.mcp.json"),
         "no config was written, so none may be ignored: {gitignore}"
+    );
+    assert!(
+        !gitignore.contains("/.claude/skills"),
+        "no skills were written, so no skills directory may be ignored: {gitignore}"
     );
 }
 
@@ -112,6 +123,42 @@ fn render_locally_makes_use_write_servers_again() {
         cfg.contains("demo"),
         "the selected server is written: {cfg}"
     );
+    assert!(
+        proj.join(".claude/skills/demo/SKILL.md").exists(),
+        "render locally must still materialize the selected skill"
+    );
+}
+
+/// Moving from rendered delivery back to the default live lane removes only
+/// AgentStack-managed skill artifacts; users do not need to clean stale
+/// folders by hand.
+#[test]
+fn switching_to_live_delivery_prunes_previously_rendered_skills() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    set_home(&tmp.path().join("home"));
+    let proj = project(tmp.path(), true);
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
+    use_profile::run(&use_args(), Some(&proj)).unwrap();
+    assert!(proj.join(".claude/skills/demo").exists());
+
+    let manifest_path = proj.join("agentstack.toml");
+    let manifest = fs::read_to_string(&manifest_path)
+        .unwrap()
+        .replace("[delivery]\nrender_locally = true\n", "");
+    fs::write(&manifest_path, manifest).unwrap();
+
+    use_profile::run(&use_args(), Some(&proj)).unwrap();
+
+    assert!(
+        !proj.join(".claude/skills").exists(),
+        "the empty AgentStack-managed skills parent should disappear"
+    );
+    let gitignore = fs::read_to_string(proj.join(".gitignore")).unwrap_or_default();
+    assert!(
+        !gitignore.contains("/.claude/skills"),
+        "the removed rendered lane must also leave .gitignore"
+    );
 }
 
 /// `session start` activates through `use_profile::activate`, so it inherits
@@ -131,6 +178,10 @@ fn session_start_does_not_write_servers_under_default_routing() {
     assert!(
         !proj.join(".mcp.json").exists(),
         "a session must not write a server config for a live-routed harness"
+    );
+    assert!(
+        !proj.join(".claude/skills").exists(),
+        "a session must not write skills for a live-routed harness"
     );
     agentstack::session::end(Some(&proj)).unwrap();
 }

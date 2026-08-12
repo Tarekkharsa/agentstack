@@ -373,7 +373,7 @@ impl McpSession {
             stdin,
             stdout,
         };
-        s.request(1, "initialize", json!({}));
+        s.request(1, "initialize", legacy_initialize_params());
         s
     }
 
@@ -462,7 +462,7 @@ fn the_cwd_still_resolves_when_nothing_is_configured() {
         stdin,
         stdout,
     };
-    s.request(1, "initialize", json!({}));
+    s.request(1, "initialize", legacy_initialize_params());
     let text = call_text(&s.call(2, "agentstack_lease_open", json!({ "profile": "beta" })));
     s.close();
 
@@ -470,4 +470,12 @@ fn the_cwd_still_resolves_when_nothing_is_configured() {
         text.contains(OTHER),
         "with nothing configured the cwd's project should still bind; it said: {text}"
     );
+}
+
+fn legacy_initialize_params() -> Value {
+    json!({
+        "protocolVersion": "2025-11-25",
+        "capabilities": {},
+        "clientInfo": { "name": "agentstack-test", "version": "1" }
+    })
 }

@@ -425,7 +425,7 @@ fn leftover_managed_config_keeps_mcp_entry() {
     fs::write(proj.join("skills/local/SKILL.md"), "# local\n").unwrap();
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        "version = 1\n[delivery]\nrender_locally = true\n[targets]\ndefault = [\"claude-code\"]\n\
          [skills.local]\npath = \"./skills/local\"\n\
          [profiles.p]\nservers = []\nskills = [\"local\"]\n",
     )

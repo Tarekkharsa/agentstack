@@ -23,7 +23,8 @@
 //! manages at global scope — `previously_managed` is read per manifest-scoped
 //! state key, so another project's global entries are simply not in the list.
 
-use std::path::Path;
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
 
 use agentstack_core::paint::OwoColorize;
 use anyhow::Result;
@@ -74,10 +75,22 @@ pub fn run(args: &UninstallArgs, manifest_dir: Option<&Path>) -> Result<()> {
         }
     }
 
+    // Skill materialization creates adapter namespace paths such as
+    // `.agents/skills/` and `.gemini/skills/`. The skills removal already
+    // takes the leaf directory back off; remember its project-local ancestors
+    // so the write can also remove any that become empty. The repository root
+    // is an absolute boundary, and global paths are outside it, so this can
+    // never walk into a home-level CLI directory or remove the project itself.
+    let empty_parent_candidates = if scopes.contains(&Scope::Project) {
+        project_empty_parent_candidates(&ctx, &root, &removals)
+    } else {
+        Vec::new()
+    };
+
     let home = crate::util::paths::agentstack_home();
     let remove_home = home.exists() && !args.keep_home;
 
-    if removals.is_empty() && !remove_home {
+    if removals.is_empty() && empty_parent_candidates.is_empty() && !remove_home {
         println!("Nothing to remove — AgentStack manages no files here.");
         return Ok(());
     }
@@ -86,6 +99,7 @@ pub fn run(args: &UninstallArgs, manifest_dir: Option<&Path>) -> Result<()> {
         args,
         &root,
         &removals,
+        &empty_parent_candidates,
         remove_home.then_some(home.as_path()),
     );
 
@@ -94,7 +108,10 @@ pub fn run(args: &UninstallArgs, manifest_dir: Option<&Path>) -> Result<()> {
         return Ok(());
     }
 
-    apply_removals(&root, removals)?;
+    if !removals.is_empty() {
+        apply_removals(&root, removals)?;
+    }
+    prune_empty_project_parents(&root, &empty_parent_candidates)?;
     if remove_home {
         // Last, and separately: this is the undo ledger, so everything above
         // stays revertible until the moment it goes.
@@ -315,7 +332,13 @@ fn machine_state_only(args: &UninstallArgs, no_manifest: anyhow::Error) -> Resul
     Ok(())
 }
 
-fn print_plan(args: &UninstallArgs, root: &Path, removals: &[Removal], home: Option<&Path>) {
+fn print_plan(
+    args: &UninstallArgs,
+    root: &Path,
+    removals: &[Removal],
+    empty_parent_candidates: &[PathBuf],
+    home: Option<&Path>,
+) {
     println!(
         "{}\n",
         if args.write {
@@ -336,6 +359,13 @@ fn print_plan(args: &UninstallArgs, root: &Path, removals: &[Removal], home: Opt
             }
         }
     }
+    for path in empty_parent_candidates {
+        println!(
+            "  {}  {}",
+            "Empty skill parent (if empty after cleanup)".bold(),
+            crate::commands::init::display_path(path, root).dimmed()
+        );
+    }
     if let Some(home) = home {
         println!(
             "  {}  {}",
@@ -348,6 +378,106 @@ fn print_plan(args: &UninstallArgs, root: &Path, removals: &[Removal], home: Opt
         );
     }
     println!();
+}
+
+/// Project-local ancestors of materialized skill directories that are empty
+/// now or may become empty after the skills removal runs.
+///
+/// The adapter sweep handles a previous AgentStack version that removed its
+/// managed skill records but left an empty `.agents` / `.gemini` / `.pi`
+/// namespace behind: a second uninstall can finish that cleanup without a
+/// manual `rmdir`. `capture == false` is the current skills leg's discriminator;
+/// those ancestors are included even while the managed skill links still make
+/// them non-empty. Every candidate still passes `remove_dir` after cleanup.
+fn project_empty_parent_candidates(
+    ctx: &super::Context,
+    root: &Path,
+    removals: &[Removal],
+) -> Vec<PathBuf> {
+    let mut removal_ancestors = BTreeSet::new();
+    for removal in removals.iter().filter(|r| !r.capture) {
+        collect_project_ancestors(root, &removal.path, &mut removal_ancestors);
+    }
+
+    let mut candidates = removal_ancestors.clone();
+    for id in ctx.registry.ids() {
+        let Some(desc) = ctx.registry.get(id) else {
+            continue;
+        };
+        if let Some(skills_dir) = desc.skills_dir_for(Scope::Project, &ctx.dir) {
+            collect_project_ancestors(root, &skills_dir, &mut candidates);
+        }
+    }
+
+    let mut candidates: Vec<PathBuf> = candidates
+        .into_iter()
+        .filter(|path| removal_ancestors.contains(path) || is_empty_real_dir(path))
+        .collect();
+    // Children first: `.junie/mcp` must be removed before `.junie` can become
+    // empty. Path order makes duplicates adjacent within equal depth.
+    candidates.sort_by(|a, b| {
+        b.components()
+            .count()
+            .cmp(&a.components().count())
+            .then_with(|| a.cmp(b))
+    });
+    candidates.dedup();
+    candidates
+}
+
+fn collect_project_ancestors(root: &Path, path: &Path, out: &mut BTreeSet<PathBuf>) {
+    let mut current = path.parent();
+    while let Some(parent) = current {
+        if parent == root || !parent.starts_with(root) {
+            break;
+        }
+        out.insert(parent.to_path_buf());
+        current = parent.parent();
+    }
+}
+
+fn is_empty_real_dir(path: &Path) -> bool {
+    let Ok(metadata) = std::fs::symlink_metadata(path) else {
+        return false;
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return false;
+    }
+    std::fs::read_dir(path)
+        .map(|mut entries| entries.next().is_none())
+        .unwrap_or(false)
+}
+
+/// Remove only candidate directories that are empty after skill cleanup.
+///
+/// `remove_dir` is the final ownership guard: it cannot remove a directory
+/// containing user files. Symlinks are skipped explicitly so a project-local
+/// path can never redirect cleanup outside the project boundary.
+fn prune_empty_project_parents(root: &Path, candidates: &[PathBuf]) -> Result<()> {
+    for path in candidates {
+        let metadata = match std::fs::symlink_metadata(path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error).with_context_path(path),
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            continue;
+        }
+        match std::fs::remove_dir(path) {
+            Ok(()) => println!(
+                "  {} removed empty {}",
+                "✓".green(),
+                crate::commands::init::display_path(path, root)
+            ),
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::DirectoryNotEmpty
+                ) => {}
+            Err(error) => return Err(error).with_context_path(path),
+        }
+    }
+    Ok(())
 }
 
 fn print_dry_run_footer(remove_home: bool) {

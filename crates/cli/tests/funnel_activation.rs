@@ -38,7 +38,11 @@ fn isolate_home(tmp: &Path) -> std::path::PathBuf {
 fn project(tmp: &Path, name: &str) -> std::path::PathBuf {
     let proj = tmp.join(name);
     fs::create_dir_all(proj.join(".agentstack/skills")).unwrap();
-    fs::write(proj.join(".agentstack/agentstack.toml"), "version = 1\n").unwrap();
+    fs::write(
+        proj.join(".agentstack/agentstack.toml"),
+        "version = 1\n[delivery]\nrender_locally = true\n",
+    )
+    .unwrap();
     proj
 }
 

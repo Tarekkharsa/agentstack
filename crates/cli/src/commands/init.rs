@@ -1928,6 +1928,7 @@ version = 1
         },
         servers: manifest_servers,
         skills: IndexMap::new(),
+        default_toolset: library_import.then(|| "default".to_string()),
         profiles,
         instructions: IndexMap::new(),
         settings,

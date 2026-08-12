@@ -2,15 +2,9 @@
 //! Session 1).
 //!
 //! A sandboxed harness cannot spawn a host process, so it cannot reach the
-//! gateway over stdio the way a `connect`-ed harness does. This module serves
-//! the MINIMAL server side of MCP streamable HTTP that the harness's client
-//! actually needs — spike-verified against claude-code 2.1.207
-//! (`docs/spikes/2026-07-11-gateway-http-transport.md`):
-//!
-//! - plain `application/json` POST responses (no SSE — the client's optional
-//!   `GET` for a server→client stream is answered `405` and tolerated),
-//! - an `Mcp-Session-Id` header on every response (the client echoes it),
-//! - `202` for notifications.
+//! gateway over stdio the way a `connect`-ed harness does. The socket and
+//! per-run token gate remain here; MCP parsing, lifecycle negotiation, and
+//! response headers are delegated to the official RMCP SDK.
 //!
 //! `tiny_http` on detached threads, the same no-tokio pattern as the
 //! code-mode endpoint (`crate::codemode::endpoint`).
@@ -80,7 +74,14 @@ pub fn start(gateway: Arc<Gateway>, bind: &str) -> Option<GatewayHttp> {
     let server = Server::http(bind).ok()?;
     let port = server.server_addr().to_ip().map(|a| a.port())?;
     let token = hex_token();
-    let session_id = hex_token();
+    let protocol = Arc::new(
+        agentstack_mcp::HttpServer::new(
+            Arc::new(GatewayBackend(Arc::clone(&gateway))),
+            "agentstack-gateway",
+            env!("CARGO_PKG_VERSION"),
+        )
+        .ok()?,
+    );
 
     let token_for_thread = token.clone();
     let inflight = Arc::new(AtomicUsize::new(0));
@@ -102,12 +103,11 @@ pub fn start(gateway: Arc<Gateway>, bind: &str) -> Option<GatewayHttp> {
                 continue;
             }
             let guard = InflightGuard(Arc::clone(&inflight));
-            let gateway = Arc::clone(&gateway);
             let token = token_for_thread.clone();
-            let session_id = session_id.clone();
+            let protocol = Arc::clone(&protocol);
             std::thread::spawn(move || {
                 let _guard = guard; // released (decrementing) on thread exit
-                serve_one(req, &gateway, &token, &session_id);
+                serve_one(req, &protocol, &token);
             });
         }
     });
@@ -116,7 +116,11 @@ pub fn start(gateway: Arc<Gateway>, bind: &str) -> Option<GatewayHttp> {
 }
 
 /// Handle one HTTP request: token first, then method, then MCP dispatch.
-fn serve_one(mut req: tiny_http::Request, gateway: &Gateway, token: &str, session_id: &str) {
+fn serve_one(
+    mut req: tiny_http::Request,
+    protocol: &agentstack_mcp::HttpServer<GatewayBackend>,
+    token: &str,
+) {
     let authed = req.headers().iter().any(|h| {
         h.field.equiv("X-Agentstack-Token")
             && crate::util::ct_eq(h.value.as_str().as_bytes(), token.as_bytes())
@@ -156,34 +160,18 @@ fn serve_one(mut req: tiny_http::Request, gateway: &Gateway, token: &str, sessio
                 let _ = req.respond(resp);
                 return;
             }
-            let (status, payload) = handle_mcp_post(gateway, &body);
-            let resp = match payload {
-                Some(p) => Response::from_string(p)
-                    .with_status_code(status)
-                    .with_header(json_ctype())
-                    .with_header(session_header(session_id)),
-                None => Response::from_string(String::new())
-                    .with_status_code(status)
-                    .with_header(session_header(session_id)),
-            };
-            let _ = req.respond(resp);
+            forward(req, protocol, "POST", body.into_bytes());
         }
         // The optional SSE channel: refusing it is spec-legal and
         // spike-verified — the client proceeds without a stream.
         Method::Get => {
             let resp = Response::from_string(String::new())
                 .with_status_code(405)
-                .with_header(allow_post())
-                .with_header(session_header(session_id));
+                .with_header(allow_post());
             let _ = req.respond(resp);
         }
-        // Session teardown: nothing to tear down server-side (the endpoint is
-        // single-session by construction), acknowledge politely.
         Method::Delete => {
-            let resp = Response::from_string(String::new())
-                .with_status_code(200)
-                .with_header(session_header(session_id));
-            let _ = req.respond(resp);
+            forward(req, protocol, "DELETE", Vec::new());
         }
         _ => {
             let resp = Response::from_string(String::new())
@@ -194,108 +182,90 @@ fn serve_one(mut req: tiny_http::Request, gateway: &Gateway, token: &str, sessio
     }
 }
 
-/// Dispatch one POSTed JSON-RPC message. Pure over the gateway (no socket),
-/// so it is unit-testable — the same split as the code-mode endpoint.
-/// Returns `(http_status, Some(json_body))`, or `(202, None)` for
-/// notifications and client-to-server responses, which get no body.
-pub fn handle_mcp_post(gateway: &Gateway, body: &str) -> (u16, Option<String>) {
-    let Ok(msg) = serde_json::from_str::<Value>(body) else {
-        return (
-            400,
-            Some(json!({ "error": "invalid JSON in request body" }).to_string()),
-        );
-    };
-    let method = msg.get("method").and_then(Value::as_str);
-    let id = msg.get("id").filter(|v| !v.is_null()).cloned();
-    match (method, id) {
-        (Some("initialize"), Some(id)) => {
-            // Echo the client's protocol version: this endpoint implements the
-            // subset that is stable across the revisions the harness speaks.
-            let ver = msg
-                .pointer("/params/protocolVersion")
-                .and_then(Value::as_str)
-                .unwrap_or("2025-03-26");
+fn forward(
+    req: tiny_http::Request,
+    protocol: &agentstack_mcp::HttpServer<GatewayBackend>,
+    method: &str,
+    body: Vec<u8>,
+) {
+    let headers = req
+        .headers()
+        .iter()
+        .map(|header| {
             (
-                200,
-                Some(rpc_result(
-                    id,
-                    json!({
-                        "protocolVersion": ver,
-                        "capabilities": { "tools": {} },
-                        "serverInfo": {
-                            "name": "agentstack-gateway",
-                            "version": env!("CARGO_PKG_VERSION"),
-                        },
-                    }),
-                )),
+                header.field.as_str().to_string(),
+                header.value.as_str().to_string(),
             )
-        }
-        (Some("ping"), Some(id)) => (200, Some(rpc_result(id, json!({})))),
-        (Some("tools/list"), Some(id)) => {
-            // The policy-filtered namespaced surface, verbatim — denied tools
-            // were already filtered out of discovery by the gateway.
-            let tools: Vec<Value> = gateway.namespaced_tools().iter().cloned().collect();
-            (200, Some(rpc_result(id, json!({ "tools": tools }))))
-        }
-        (Some("tools/call"), Some(id)) => {
-            let name = msg
-                .pointer("/params/name")
-                .and_then(Value::as_str)
-                .unwrap_or("");
-            let args = msg
-                .pointer("/params/arguments")
-                .cloned()
-                .unwrap_or_else(|| json!({}));
-            match gateway.try_call(name, &args) {
-                Some(Ok(v)) => (200, Some(rpc_result(id, v))),
-                // Policy denials and upstream failures ride the MCP tool-error
-                // shape (isError result), not a protocol error — same shaping
-                // as the stdio serve loop.
-                Some(Err(e)) => (
-                    200,
-                    Some(rpc_result(id, tool_error(&format!("Error: {e}")))),
-                ),
-                None => (
-                    200,
-                    Some(rpc_result(
-                        id,
-                        tool_error(&format!(
-                            "Error: '{name}' is not a proxied tool for this project"
-                        )),
-                    )),
-                ),
+        })
+        .collect();
+    let result = protocol.handle_parts(agentstack_mcp::HttpRequest {
+        method: method.into(),
+        uri: req.url().to_owned(),
+        headers,
+        body,
+    });
+    match result {
+        Ok(result) => {
+            let mut response = Response::from_data(result.body).with_status_code(result.status);
+            for (name, value) in &result.headers {
+                if let Ok(header) = Header::from_bytes(name.as_str().as_bytes(), value.as_bytes()) {
+                    response = response.with_header(header);
+                }
             }
+            let _ = req.respond(response);
         }
-        (Some(m), Some(id)) => (
-            200,
-            Some(rpc_error(id, -32601, &format!("method not found: {m}"))),
-        ),
-        // A notification (no id) or a client→server response (no method):
-        // accepted with no body, per streamable-HTTP.
-        _ => (202, None),
+        Err(_) => {
+            let response =
+                Response::from_string(json!({ "error": "MCP transport failure" }).to_string())
+                    .with_status_code(500)
+                    .with_header(json_ctype());
+            let _ = req.respond(response);
+        }
     }
 }
 
-fn rpc_result(id: Value, result: Value) -> String {
-    json!({ "jsonrpc": "2.0", "id": id, "result": result }).to_string()
-}
+struct GatewayBackend(Arc<Gateway>);
 
-fn rpc_error(id: Value, code: i64, message: &str) -> String {
-    json!({ "jsonrpc": "2.0", "id": id, "error": { "code": code, "message": message } }).to_string()
-}
+impl agentstack_mcp::Backend for GatewayBackend {
+    fn list_tools(
+        &self,
+        _era: agentstack_mcp::ProtocolEra,
+    ) -> Result<Vec<agentstack_mcp::ToolDefinition>, String> {
+        self.0
+            .namespaced_tools()
+            .iter()
+            .cloned()
+            .map(agentstack_mcp::ToolDefinition::try_from)
+            .map(|result| result.map_err(|error| error.to_string()))
+            .collect()
+    }
 
-fn tool_error(text: &str) -> Value {
-    json!({ "content": [{ "type": "text", "text": text }], "isError": true })
+    fn call_tool(
+        &self,
+        name: &str,
+        arguments: Value,
+        _era: agentstack_mcp::ProtocolEra,
+    ) -> Result<agentstack_mcp::ToolOutcome, String> {
+        match self.0.try_call(name, &arguments) {
+            Some(Ok(value)) => Ok(agentstack_mcp::ToolOutcome::from_mcp_result(value)),
+            Some(Err(error)) => Ok(agentstack_mcp::ToolOutcome::error(Value::String(format!(
+                "Error: {error}"
+            )))),
+            // A name this project does not proxy is a TOOL error, not a
+            // protocol error — the same shape the stdio serve loop returns, so
+            // an agent reaching both transports reads one answer. Returning
+            // `Err` here made RMCP emit a JSON-RPC error instead, which many
+            // harnesses surface as a broken server rather than a wrong call.
+            None => Ok(agentstack_mcp::ToolOutcome::error(Value::String(format!(
+                "Error: '{name}' is not a proxied tool for this project"
+            )))),
+        }
+    }
 }
 
 fn json_ctype() -> Header {
     Header::from_bytes(&b"Content-Type"[..], &b"application/json"[..])
         .expect("literal ASCII header name and value are always valid")
-}
-
-fn session_header(session_id: &str) -> Header {
-    Header::from_bytes(&b"Mcp-Session-Id"[..], session_id.as_bytes())
-        .expect("literal header name; session_id is server-generated hex")
 }
 
 fn allow_post() -> Header {
@@ -317,74 +287,38 @@ fn hex_token() -> String {
 mod tests {
     use super::*;
 
-    #[test]
-    fn initialize_echoes_protocol_version_and_names_the_server() {
-        let gw = Gateway::empty();
-        let req = json!({
-            "jsonrpc": "2.0", "id": 0, "method": "initialize",
-            "params": { "protocolVersion": "2025-11-25", "capabilities": {} }
-        });
-        let (status, body) = handle_mcp_post(&gw, &req.to_string());
-        assert_eq!(status, 200);
-        let v: Value = serde_json::from_str(&body.unwrap()).unwrap();
-        assert_eq!(v["result"]["protocolVersion"], "2025-11-25");
-        assert_eq!(v["result"]["serverInfo"]["name"], "agentstack-gateway");
-    }
-
-    #[test]
-    fn notifications_are_202_with_no_body() {
-        let gw = Gateway::empty();
-        let req = json!({ "jsonrpc": "2.0", "method": "notifications/initialized" });
-        let (status, body) = handle_mcp_post(&gw, &req.to_string());
-        assert_eq!(status, 202);
-        assert!(body.is_none());
-    }
-
-    #[test]
-    fn tools_list_on_an_empty_gateway_serves_zero_tools() {
-        // The untrusted-bundle path yields an empty gateway; the endpoint
-        // serves that surface faithfully — it never widens it.
-        let gw = Gateway::empty();
-        let req = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" });
-        let (status, body) = handle_mcp_post(&gw, &req.to_string());
-        assert_eq!(status, 200);
-        let v: Value = serde_json::from_str(&body.unwrap()).unwrap();
-        assert_eq!(v["result"]["tools"], json!([]));
-    }
-
+    /// Both transports answer an unproxied name the same way: an MCP tool
+    /// result carrying `isError`, never a JSON-RPC protocol error. Policy
+    /// denials and upstream failures already ride that shape on this path, and
+    /// a name the project does not proxy is the same class of answer — the
+    /// call was wrong, the server is not.
     #[test]
     fn unknown_tool_is_a_tool_error_not_a_protocol_error() {
-        let gw = Gateway::empty();
-        let req = json!({
-            "jsonrpc": "2.0", "id": 2, "method": "tools/call",
-            "params": { "name": "figma__get_file", "arguments": {} }
-        });
-        let (status, body) = handle_mcp_post(&gw, &req.to_string());
-        assert_eq!(status, 200);
-        let v: Value = serde_json::from_str(&body.unwrap()).unwrap();
-        assert_eq!(v["result"]["isError"], true);
-        assert!(v["result"]["content"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("not a proxied tool"));
+        use agentstack_mcp::Backend;
+
+        let backend = GatewayBackend(Arc::new(Gateway::empty()));
+        let outcome = backend
+            .call_tool(
+                "figma__get_file",
+                json!({}),
+                agentstack_mcp::ProtocolEra::Legacy,
+            )
+            .expect("an unproxied name must not fail the protocol");
+        assert!(outcome.is_error, "the tool result must be flagged an error");
+        assert!(
+            outcome
+                .value
+                .as_str()
+                .is_some_and(|text| text.contains("not a proxied tool")),
+            "the text must say what went wrong: {:?}",
+            outcome.value
+        );
     }
 
+    /// The outer token gate remains authoritative. RMCP creates a session for
+    /// a legacy initialize, while a modern discover request stays stateless.
     #[test]
-    fn malformed_body_is_400_and_unknown_method_is_32601() {
-        let gw = Gateway::empty();
-        let (s, _) = handle_mcp_post(&gw, "{not json");
-        assert_eq!(s, 400);
-        let req = json!({ "jsonrpc": "2.0", "id": 3, "method": "resources/list" });
-        let (s, body) = handle_mcp_post(&gw, &req.to_string());
-        assert_eq!(s, 200);
-        let v: Value = serde_json::from_str(&body.unwrap()).unwrap();
-        assert_eq!(v["error"]["code"], -32601);
-    }
-
-    /// Socket-level contract the spike proved the client needs: 401 without
-    /// the token, and Mcp-Session-Id + JSON on an authed initialize.
-    #[test]
-    fn socket_gates_on_token_and_stamps_the_session_header() {
+    fn socket_gates_token_and_selects_session_behavior_by_protocol_era() {
         let handle = start(std::sync::Arc::new(Gateway::empty()), "127.0.0.1:0").unwrap();
         let url = format!("http://127.0.0.1:{}/mcp", handle.port);
         let client = reqwest::blocking::Client::builder()
@@ -393,7 +327,11 @@ mod tests {
             .unwrap();
         let init = json!({
             "jsonrpc": "2.0", "id": 0, "method": "initialize",
-            "params": { "protocolVersion": "2025-03-26" }
+            "params": {
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": { "name": "agentstack-test", "version": "1" }
+            }
         });
 
         // No token → 401 before any MCP handling.
@@ -404,11 +342,65 @@ mod tests {
         let resp = client
             .post(&url)
             .header("X-Agentstack-Token", &handle.token)
+            .header("Accept", "application/json, text/event-stream")
             .json(&init)
             .send()
             .unwrap();
         assert_eq!(resp.status().as_u16(), 200);
         assert!(resp.headers().get("mcp-session-id").is_some());
+
+        let discover = json!({
+            "jsonrpc": "2.0", "id": 1, "method": "server/discover",
+            "params": { "_meta": {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientInfo": { "name": "agentstack-test", "version": "1" },
+                "io.modelcontextprotocol/clientCapabilities": {}
+            }}
+        });
+        let resp = client
+            .post(&url)
+            .header("X-Agentstack-Token", &handle.token)
+            .header("Accept", "application/json, text/event-stream")
+            .header("MCP-Protocol-Version", "2026-07-28")
+            .header("Mcp-Method", "server/discover")
+            .json(&discover)
+            .send()
+            .unwrap();
+        assert_eq!(resp.status().as_u16(), 200);
+        assert!(resp.headers().get("mcp-session-id").is_none());
+        let body: Value = resp.json().unwrap();
+        assert!(body["result"]["supportedVersions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|version| version == "2026-07-28"));
+
+        let list = json!({
+            "jsonrpc": "2.0", "id": 2, "method": "tools/list",
+            "params": { "_meta": {
+                "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                "io.modelcontextprotocol/clientInfo": { "name": "agentstack-test", "version": "1" },
+                "io.modelcontextprotocol/clientCapabilities": {}
+            }}
+        });
+        let mut surfaces = Vec::new();
+        for _ in 0..2 {
+            let resp = client
+                .post(&url)
+                .header("X-Agentstack-Token", &handle.token)
+                .header("Accept", "application/json, text/event-stream")
+                .header("MCP-Protocol-Version", "2026-07-28")
+                .header("Mcp-Method", "tools/list")
+                .json(&list)
+                .send()
+                .unwrap();
+            assert_eq!(resp.status().as_u16(), 200);
+            assert!(resp.headers().get("mcp-session-id").is_none());
+            let body: Value = resp.json().unwrap();
+            surfaces.push(body["result"]["tools"].clone());
+        }
+        assert_eq!(surfaces[0], surfaces[1]);
+
         let resp = client
             .get(&url)
             .header("X-Agentstack-Token", &handle.token)

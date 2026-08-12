@@ -86,6 +86,7 @@ fn project(root: &Path, with_skill: bool) {
     let mut manifest = String::from(
         "version = 1\n\n\
          [targets]\ndefault = [\"claude-code\"]\n\n\
+         [delivery]\nrender_locally = true\n\n\
          [instructions.house]\npath = \"./instructions/house.md\"\n\n",
     );
     if with_skill {
@@ -156,6 +157,10 @@ fn uninstall_says_the_restore_it_names_will_not_bring_skills_back() {
     let (out, ok) = run(&["x", "uninstall", "--write", "--keep-home"], &home, &root);
     assert!(ok, "{out}");
     assert!(
+        out.contains("Empty skill parent (if empty after cleanup)"),
+        "the preview/write plan must disclose the conditional parent cleanup: {out}"
+    );
+    assert!(
         out.contains("undo with `agentstack restore`"),
         "the promise under test is still made: {out}"
     );
@@ -180,6 +185,11 @@ fn uninstall_says_the_restore_it_names_will_not_bring_skills_back() {
         !root.join(".claude/skills/greet").exists(),
         "the uninstall pruned the delivered skill"
     );
+    assert!(
+        !root.join(".claude").exists(),
+        "uninstall must remove the project-local CLI parent once its managed skills dir \
+         was the last thing in it"
+    );
     let (out, ok) = run(&["x", "restore", "--last", "--write"], &home, &root);
     assert!(ok, "the named restore runs: {out}");
     assert!(
@@ -190,6 +200,60 @@ fn uninstall_says_the_restore_it_names_will_not_bring_skills_back() {
         !root.join(".claude/skills/greet").exists(),
         "the skill does NOT come back. If this ever fails, the ledger has learned to carry \
          skills and this notice — plus G31 — should be revisited rather than patched: {out}"
+    );
+}
+
+#[test]
+fn uninstall_keeps_a_skill_parent_that_contains_user_content() {
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    let root = tmp.path().join("proj");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&root).unwrap();
+    project(&root, /*with_skill=*/ true);
+    deliver(&home, &root, true);
+    fs::write(root.join(".claude/notes.txt"), "user-owned\n").unwrap();
+
+    let (out, ok) = run(&["x", "uninstall", "--write", "--keep-home"], &home, &root);
+    assert!(ok, "{out}");
+    assert_eq!(
+        fs::read_to_string(root.join(".claude/notes.txt")).unwrap(),
+        "user-owned\n",
+        "an otherwise-empty CLI parent is prunable, but user content makes it untouchable"
+    );
+    assert!(
+        root.join(".claude").exists(),
+        "the parent that holds user content must survive uninstall"
+    );
+}
+
+#[test]
+fn uninstall_prunes_a_legacy_empty_skill_parent_without_managed_skill_state() {
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    let root = tmp.path().join("proj");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&root).unwrap();
+    project(&root, /*with_skill=*/ false);
+    fs::create_dir_all(root.join(".claude")).unwrap();
+
+    let (out, ok) = run(
+        &[
+            "x",
+            "uninstall",
+            "--scope",
+            "project",
+            "--write",
+            "--keep-home",
+        ],
+        &home,
+        &root,
+    );
+    assert!(ok, "{out}");
+    assert!(
+        !root.join(".claude").exists(),
+        "a prior version's empty skill namespace should be cleaned without a surviving \
+         managed-skill record: {out}"
     );
 }
 

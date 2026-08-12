@@ -2440,6 +2440,55 @@ fn ensure_trash_ignored(lib: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Whether a dirty library working tree holds nothing but AgentStack's own
+/// managed `.gitignore` line.
+///
+/// [`ensure_trash_ignored`] writes `.trash/` into a `.gitignore` that predates
+/// the trash, and not every caller commits afterwards — `lib sync --status`
+/// returns before [`sync_now`] ever runs. That single added line is OUR edit,
+/// not the user's local work, and the bootstrap's clean-tree gate used to
+/// refuse it forever: every `agentstack up --write` aborted on dirt AgentStack
+/// had made, until the user hand-committed our line.
+///
+/// Nothing else is forgiven. Exactly one changed path, exactly `.gitignore`,
+/// exactly one added line, that line the trash line, and nothing removed — any
+/// other edit in the same file is the user's and still blocks the pull.
+fn dirt_is_only_the_managed_ignore(lib: &Path, dirty: &str) -> bool {
+    let mut lines = dirty.lines();
+    let (Some(entry), None) = (lines.next(), lines.next()) else {
+        return false;
+    };
+    // Porcelain short format: status columns, then the path. Read it by token
+    // rather than by column, because `git_out` trims the leading blank of the
+    // ` M` (worktree-modified) form. Anything with a third token — a rename's
+    // `->`, a second path — is not the one edit this forgives.
+    let mut parts = entry.split_whitespace();
+    let (Some(status), Some(path), None) = (parts.next(), parts.next(), parts.next()) else {
+        return false;
+    };
+    if path != ".gitignore" || !matches!(status, "M" | "MM") {
+        return false;
+    }
+    let Ok(diff) = git_out(lib, &["diff", "HEAD", "--", ".gitignore"]) else {
+        return false;
+    };
+    let mut added = 0usize;
+    for line in diff.lines() {
+        if line.starts_with("+++") || line.starts_with("---") {
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix('+') {
+            if rest.trim() != LIB_GITIGNORE_TRASH_LINE {
+                return false;
+            }
+            added += 1;
+        } else if line.starts_with('-') {
+            return false;
+        }
+    }
+    added == 1
+}
+
 /// Run git in `dir`, returning trimmed stdout; a non-zero exit is an error
 /// carrying git's stderr.
 /// Library sync runs under the `Sync` profile — the user's own remote, so
@@ -2564,6 +2613,105 @@ fn sync_init(lib: &Path, remote: Option<&str>) -> Result<()> {
         set_remote(lib, url)?;
         println!("  remote → {url}");
         println!("  run `agentstack lib sync` to push");
+    }
+    Ok(())
+}
+
+/// Bring the primary library up to date for `agentstack up` without ever
+/// committing or pushing local work.  Bootstrap is intentionally one-way:
+/// receiving the shared library is safe to automate, publishing this
+/// machine's edits remains the explicit `agentstack lib sync` action.
+pub(crate) fn sync_for_bootstrap(remote: Option<&str>) -> Result<()> {
+    let source = Sources::load_or_warn().primary();
+    let lib = source.root;
+
+    if let Some(url) = remote {
+        sync_init(&lib, Some(url))?;
+    }
+    if !lib.join(".git").exists() {
+        println!(
+            "{} library is local-only at {} — nothing to pull",
+            "·".dimmed(),
+            lib.display()
+        );
+        return Ok(());
+    }
+    // Deliberately NOT `ensure_trash_ignored` here. That call edits a tracked
+    // file, bootstrap never commits (see this function's doc), and the
+    // clean-tree gate below is unconditional — so on a library whose committed
+    // `.gitignore` predates the trash, `up --write` created the dirt itself and
+    // then refused to run ever again over its own edit. The line is ensured by
+    // `agentstack lib sync`, which commits in the same breath; bootstrap only
+    // receives, so it has nothing to protect from an uncommitted removal.
+    if !git_ok(&lib, &["remote", "get-url", "origin"]) {
+        println!("{} library has no remote — nothing to pull", "·".dimmed());
+        return Ok(());
+    }
+    if !git_ok(&lib, &["rev-parse", "--verify", "HEAD"]) {
+        println!("{} library remote has no content yet", "·".dimmed());
+        return Ok(());
+    }
+
+    // The user's local work blocks the pull, because a fast-forward over it is
+    // not ours to decide. A `.gitignore` carrying only the managed trash line
+    // is not their work — some other AgentStack command wrote it — so it is
+    // forgiven rather than turned into a permanent refusal.
+    let dirty = git_out(&lib, &["status", "--short"])?;
+    if !dirty.is_empty() && !dirt_is_only_the_managed_ignore(&lib, &dirty) {
+        bail!(
+            "library has local changes at {} — commit or discard them explicitly, then re-run `agentstack up`; nothing was pulled",
+            lib.display()
+        );
+    }
+
+    let branch = git_out(&lib, &["rev-parse", "--abbrev-ref", "HEAD"])?;
+    let has_upstream = git_ok(&lib, &["rev-parse", "--abbrev-ref", "@{u}"]);
+    let mut pull = vec!["pull", "--ff-only"];
+    if !has_upstream {
+        let fetch = crate::gitx::run_raw(
+            crate::gitx::Profile::Sync,
+            &["fetch", "origin", "--quiet"],
+            Some(&lib),
+        )
+        .context("fetching the shared library")?;
+        if !fetch.success {
+            bail!("library fetch failed: {}", fetch.stderr.trim());
+        }
+        if !git_ok(
+            &lib,
+            &["rev-parse", "--verify", &format!("origin/{branch}")],
+        ) {
+            println!(
+                "{} library remote has no '{branch}' branch yet",
+                "·".dimmed()
+            );
+            return Ok(());
+        }
+        pull.extend(["origin", branch.as_str()]);
+    }
+
+    let before = git_out(&lib, &["rev-parse", "HEAD"])?;
+    let out = crate::gitx::run_raw(crate::gitx::Profile::Sync, &pull, Some(&lib))
+        .context("pulling the shared library")?;
+    if !out.success {
+        bail!(
+            "library pull failed: {}\nresolve the library at {}, then re-run `agentstack up`",
+            out.stderr.trim(),
+            lib.display()
+        );
+    }
+    let after = git_out(&lib, &["rev-parse", "HEAD"])?;
+    if before == after {
+        println!("{} shared library already current", "✓".green());
+    } else {
+        match git_out(
+            &lib,
+            &["diff", "--name-only", &format!("{before}..{after}")],
+        ) {
+            Ok(changed) => scan_changed_skills(&lib, &changed),
+            Err(_) => scan_pulled_skills(&lib),
+        }
+        println!("{} pulled shared library", "✓".green());
     }
     Ok(())
 }

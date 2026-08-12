@@ -131,7 +131,8 @@ fn machine(tmp: &Path, skill_toml: &str) -> Machine {
     fs::write(
         proj.join("agentstack.toml"),
         format!(
-            "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+            "version = 1\n[delivery]\nrender_locally = true\n\
+             [targets]\ndefault = [\"claude-code\"]\n\
              [profiles.p]\nskills = [\"helper\"]\n\
              [instructions.house]\npath = \"./instructions/house.md\"\n{skill_toml}"
         ),
@@ -267,7 +268,7 @@ impl McpSession {
             stdin,
             stdout,
         };
-        session.request(1, "initialize", json!({}));
+        session.request(1, "initialize", legacy_initialize_params());
         session
     }
 
@@ -299,6 +300,14 @@ impl McpSession {
         drop(self.stdin);
         let _ = self.child.wait();
     }
+}
+
+fn legacy_initialize_params() -> Value {
+    json!({
+        "protocolVersion": "2025-11-25",
+        "capabilities": {},
+        "clientInfo": { "name": "agentstack-test", "version": "1" }
+    })
 }
 
 /// The text of a `tools/call` result, whatever its outcome.

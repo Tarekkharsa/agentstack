@@ -48,7 +48,7 @@ fn profile_less_manifest_activates_and_locks_the_full_inline_set() {
     fs::create_dir_all(proj.join("skills/helper")).unwrap();
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        "version = 1\n[delivery]\nrender_locally = true\n[targets]\ndefault = [\"claude-code\"]\n\
          [skills.helper]\npath = \"./skills/helper\"\n",
     )
     .unwrap();
@@ -95,7 +95,7 @@ fn several_profiles_without_a_name_is_an_error_naming_them() {
     fs::create_dir_all(&proj).unwrap();
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        "version = 1\n[delivery]\nrender_locally = true\n[targets]\ndefault = [\"claude-code\"]\n\
          [profiles.a]\nskills = []\n[profiles.b]\nskills = []\n",
     )
     .unwrap();
@@ -121,7 +121,7 @@ fn a_single_declared_profile_is_selected_automatically() {
     fs::create_dir_all(proj.join("skills/solo")).unwrap();
     fs::write(
         proj.join("agentstack.toml"),
-        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+        "version = 1\n[delivery]\nrender_locally = true\n[targets]\ndefault = [\"claude-code\"]\n\
          [skills.solo]\npath = \"./skills/solo\"\n\
          [profiles.only]\nskills = [\"solo\"]\n",
     )

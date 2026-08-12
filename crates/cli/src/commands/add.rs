@@ -1569,6 +1569,12 @@ fn preview_and_commit(
                 dir.display()
             );
         }
+        for id in &outcome.live {
+            println!(
+                "  {} {id}: skills are served live — no skill folder written",
+                "✓".green()
+            );
+        }
         for (id, name) in &outcome.conflicts {
             println!(
                 "  {} {id}: skill '{}' already exists (not managed) — left as is",
@@ -1582,7 +1588,7 @@ fn preview_and_commit(
         for (id, err) in &outcome.failed {
             println!("  {} {id}: {err}", "✗".red());
         }
-        if outcome.written.is_empty() && outcome.failed.is_empty() {
+        if outcome.written.is_empty() && outcome.live.is_empty() && outcome.failed.is_empty() {
             // Declared and pinned, materialized nowhere: a successful add
             // that must not read as an activation.
             println!(
@@ -2076,6 +2082,16 @@ pub fn add_profile_json(manifest_dir: Option<&Path>, args: &Value) -> Result<Str
     }
     for s in &skills {
         text = add_to_profile(&text, name, "skills", s)?;
+    }
+    // The first toolset is unambiguous, so make that project intent explicit.
+    // Later toolsets do not silently replace it; changing the default is a
+    // normal manifest edit and therefore re-enters the trust review.
+    if parsed.profiles.is_empty() && parsed.default_toolset.is_none() {
+        let mut doc = text
+            .parse::<toml_edit::DocumentMut>()
+            .context("parsing manifest while setting its first default toolset")?;
+        doc["default_toolset"] = toml_edit::value(name);
+        text = doc.to_string();
     }
     toml::from_str::<Manifest>(&text).context("resulting manifest would be invalid")?;
     crate::util::atomic::write(&manifest_path, &text)

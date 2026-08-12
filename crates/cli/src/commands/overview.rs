@@ -1061,6 +1061,9 @@ pub(crate) struct ProjectFacts {
     /// Without it the line cannot be phrased truthfully.
     fanout_detected: bool,
     toolsets: Vec<String>,
+    default_toolset: Option<String>,
+    /// Process-scoped zero-files leases that are genuinely live right now.
+    live_toolsets: Vec<String>,
     session: Option<SessionFacts>,
     locked: bool,
     trust: crate::trust::TrustState,
@@ -1481,6 +1484,8 @@ fn project_json(f: &ProjectFacts) -> serde_json::Value {
             "fanout": f.fanout_targets,
         },
         "toolsets": f.toolsets.iter().map(|t| crate::text::sanitize_line(t)).collect::<Vec<_>>(),
+        "default_toolset": f.default_toolset.as_deref().map(crate::text::sanitize_line),
+        "live_toolsets": f.live_toolsets.iter().map(|t| crate::text::sanitize_line(t)).collect::<Vec<_>>(),
         "session": f.session.as_ref().map(|s| serde_json::json!({
             "profile": crate::text::sanitize_line(&s.profile),
             "started_unix": s.started_unix,
@@ -2077,6 +2082,10 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
         age_secs: now.saturating_sub(s.started_unix),
         abandoned: s.is_abandoned(now),
     });
+    let live_toolsets: Vec<String> = crate::lease_registry::live_for_project(&ctx.dir)
+        .into_iter()
+        .map(|lease| lease.toolset)
+        .collect();
 
     // Where this project actually stands, from cheap signals: lockfile (was it
     // ever activated/pinned?) and trust state.
@@ -2364,7 +2373,7 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
             // servers in `[toolsets.*]`, and counting `[servers]` reported
             // "0 servers" one line under six pinned ones.
             servers: m.declared_server_names().len(),
-            skills: m.skills.len(),
+            skills: m.declared_skill_names().len(),
             instructions: m.instructions.len(),
             settings: m.settings.len(),
             hooks: m.hooks.len(),
@@ -2373,6 +2382,8 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
             fanout_targets,
             fanout_detected: any_detected,
             toolsets: m.profiles.keys().cloned().collect(),
+            default_toolset: m.resolved_default_toolset().map(str::to_string),
+            live_toolsets,
             session,
             locked,
             trust,
@@ -2563,17 +2574,27 @@ fn print_orientation(o: &Orientation, status: bool) {
             println!(
                 "  {}  {}{}",
                 "Status  ".bold(),
-                if f.locked {
-                    "locked"
-                } else {
-                    "not locked (never activated)"
-                },
+                if f.locked { "locked" } else { "not locked" },
                 match f.trust {
                     crate::trust::TrustState::Trusted => " · trusted",
                     crate::trust::TrustState::Changed => " · trust stale (content changed)",
                     crate::trust::TrustState::Untrusted => " · untrusted",
                 }
             );
+            if !f.live_toolsets.is_empty() {
+                println!(
+                    "  {}  {} — live on {}",
+                    "Toolset ".bold(),
+                    f.live_toolsets.join(", "),
+                    super::count(f.live_toolsets.len(), "connection")
+                );
+            } else if let Some(default) = &f.default_toolset {
+                println!(
+                    "  {}  {} — default; opens on the next trusted agent connection",
+                    "Toolset ".bold(),
+                    default
+                );
+            }
 
             // Untrusted (or trust-stale) teaches the human what that state
             // *means*, not just the label (P16). Only shown when trust is
@@ -3390,6 +3411,8 @@ mod tests {
                 fanout_targets: 1,
                 fanout_detected: true,
                 toolsets: vec!["dev".into(), "prod".into()],
+                default_toolset: None,
+                live_toolsets: Vec::new(),
                 session: Some(SessionFacts {
                     profile: "dev".into(),
                     started_unix: 1_700_000_000,

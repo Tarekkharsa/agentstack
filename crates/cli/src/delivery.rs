@@ -327,6 +327,19 @@ impl Plan {
         Plan { harnesses }
     }
 
+    /// Does this capability travel the dynamic lane for this harness?
+    ///
+    /// This is the shared reading every writer must use. An id with no entry
+    /// in the plan, or a kind the harness cannot carry, is NOT live: the
+    /// fail-safe answer for a writer is to keep using its rendered path.
+    pub fn routes_live(&self, id: &str, kind: Kind) -> bool {
+        self.harnesses.iter().find(|h| h.id == id).is_some_and(|h| {
+            h.routes
+                .iter()
+                .any(|route| route.kind == kind && route.lane == Lane::Dynamic)
+        })
+    }
+
     /// Do this harness's MCP servers travel the dynamic lane?
     ///
     /// The single reading every server-writing command shares. It existed as a
@@ -337,10 +350,12 @@ impl Plan {
     /// entry in the plan is NOT live: it is a harness the planner never
     /// described, and the fail-safe answer for a writer is to keep writing.
     pub fn servers_route_live(&self, id: &str) -> bool {
-        self.harnesses
-            .iter()
-            .find(|h| h.id == id)
-            .is_some_and(|h| h.kinds_in(Lane::Dynamic).contains(&Kind::Server))
+        self.routes_live(id, Kind::Server)
+    }
+
+    /// Do this harness's skills travel the dynamic lane?
+    pub fn skills_route_live(&self, id: &str) -> bool {
+        self.routes_live(id, Kind::Skill)
     }
 
     /// Is any capability actually served live in this project?

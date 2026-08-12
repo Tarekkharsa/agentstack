@@ -24,6 +24,12 @@ pub struct Manifest {
     #[serde(default)]
     pub skills: IndexMap<String, Skill>,
 
+    /// Toolset selected automatically for a trusted zero-files connection.
+    /// The value is portable project intent; the live lease it creates is
+    /// process-local and still subject to this machine's trust and policy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_toolset: Option<String>,
+
     /// Named bundles for selective loading — the **toolset**, one of the four
     /// user-facing ideas.
     ///
@@ -1453,6 +1459,17 @@ impl Server {
 }
 
 impl Manifest {
+    /// The declared default toolset, if it still resolves. Validation reports
+    /// a dangling name; runtime callers use this fail-closed helper so a stale
+    /// default never widens to the union of all capabilities.
+    pub fn resolved_default_toolset(&self) -> Option<&str> {
+        match self.default_toolset.as_deref() {
+            Some(name) => self.profiles.contains_key(name).then_some(name),
+            None if self.profiles.len() == 1 => self.profiles.keys().next().map(String::as_str),
+            None => None,
+        }
+    }
+
     /// Every server name this manifest names — inline definitions first, then
     /// anything a toolset references, de-duplicated in first-seen order.
     ///
@@ -1480,6 +1497,22 @@ impl Manifest {
         names
     }
 
+    /// Every skill name this manifest defines or selects through a toolset,
+    /// de-duplicated in first-seen order. Library-first projects commonly have
+    /// no inline `[skills]` entries, so status must count the selection rather
+    /// than only the local definitions.
+    pub fn declared_skill_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self.skills.keys().cloned().collect();
+        for profile in self.profiles.values() {
+            for name in &profile.skills {
+                if name != "*" && !names.iter().any(|n| n == name) {
+                    names.push(name.clone());
+                }
+            }
+        }
+        names
+    }
+
     /// Does this manifest declare any capability at all?
     ///
     /// The readiness question behind `doctor`'s verdict and `status`'s
@@ -1487,7 +1520,7 @@ impl Manifest {
     /// reason in [`Manifest::declared_server_names`]: a library-first manifest
     /// declares plenty and defines none.
     pub fn declares_anything(&self) -> bool {
-        !self.skills.is_empty()
+        !self.declared_skill_names().is_empty()
             || !self.declared_server_names().is_empty()
             || !self.instructions.is_empty()
             || !self.settings.is_empty()
@@ -1575,6 +1608,39 @@ mod tests {
         let husk: Manifest = toml::from_str("version = 1\n").unwrap();
         assert!(husk.declared_server_names().is_empty());
         assert!(!husk.declares_anything());
+    }
+
+    #[test]
+    fn declared_skills_include_library_first_toolset_references() {
+        let manifest: Manifest = toml::from_str(
+            "version = 1\n[skills.local]\npath = \"./local\"\n\
+             [toolsets.default]\nskills = [\"local\", \"rust-testing\"]\n",
+        )
+        .unwrap();
+        assert_eq!(
+            manifest.declared_skill_names(),
+            vec!["local".to_string(), "rust-testing".to_string()]
+        );
+        assert!(manifest.declares_anything());
+    }
+
+    #[test]
+    fn explicit_default_wins_and_one_toolset_is_backward_compatible() {
+        let explicit: Manifest = toml::from_str(
+            "version = 1\ndefault_toolset = \"two\"\n[profiles.one]\nservers = []\n[profiles.two]\nservers = []\n",
+        )
+        .unwrap();
+        assert_eq!(explicit.resolved_default_toolset(), Some("two"));
+
+        let legacy_one: Manifest =
+            toml::from_str("version = 1\n[profiles.only]\nservers = []\n").unwrap();
+        assert_eq!(legacy_one.resolved_default_toolset(), Some("only"));
+
+        let ambiguous: Manifest = toml::from_str(
+            "version = 1\n[profiles.one]\nservers = []\n[profiles.two]\nservers = []\n",
+        )
+        .unwrap();
+        assert_eq!(ambiguous.resolved_default_toolset(), None);
     }
 
     /// The precedence table from `docs/design/instruction-variants.md`, in one

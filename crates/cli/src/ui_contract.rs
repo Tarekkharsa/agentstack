@@ -278,10 +278,17 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   answers "is this project actually live?" over the same report and takes
 ///   one of: `needs_attention` (findings to repair), `untrusted` /
 ///   `drifted` (the consent gate is what stands between here and live),
+///   `empty` (the manifest declares nothing to be ready with),
 ///   `never_activated` (consented or not, no lockfile — nothing was ever
 ///   rendered), `ready` (findings-free, trusted, activated), or `unknown`
 ///   (doctor ran with no project, so there is no project readiness to claim).
 ///   `needs_setup` appears in the pre-manifest payload, matching `state`.
+///
+///   `never_activated` here is decided by the LOCKFILE, the same reading
+///   `doctor-mode-v1`'s `activation` publishes — never by the lease registry.
+///   A set-up project with no agent connected at this instant is `ready` and
+///   `live_state: "not_live"` (`doctor-liveness-v1`); the two must not be
+///   confused.
 ///
 ///   A consumer migrating off `state`: render `readiness`, and treat every
 ///   value except `ready` as "not live", with `next_action` as the step. The
@@ -402,6 +409,37 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   when doctor ran with no project (`needs_setup`). A separate name rather
 ///   than a wider reading of `status-v1`, because a binary predating the
 ///   fields legitimately advertises that contract without them.
+///
+///   `activation` answers ONE question — was this project ever activated, i.e.
+///   does an `agentstack.lock` exist — and it keeps those two words for good.
+///   It is not a liveness reading: a lockfile is a pin, never evidence that an
+///   agent connection is open. A build once answered `live` / `not_live` here
+///   under this same name, which quietly told a panel that a locked project had
+///   never been activated; the runtime reading now ships beside it as
+///   `live_state` under `doctor-liveness-v1`, which is the name to gate on for
+///   it.
+/// - `doctor-liveness-v1`: `doctor --json` carries `live_state` (`live` /
+///   `not_live`), `locked` (bool), `default_toolset`, and `live_toolsets[]` —
+///   the runtime reading `doctor-mode-v1` deliberately does not make. `live`
+///   means the machine-level lease registry holds a live record for THIS
+///   project (the same derivation `lease-status-v1` publishes per row), so a
+///   panel can say "something is serving this project right now" instead of
+///   inferring it from a pin. All four are `null` (`live_toolsets` `[]`) when
+///   doctor ran with no project.
+///
+///   **Additive, and separately named for the usual reason.** `activation`
+///   keeps its `doctor-mode-v1` words byte for byte, so a consumer that reads
+///   only that field is unaffected; a binary predating this contract emits no
+///   `live_state` at all, and a UI reading it on the strength of
+///   `doctor-mode-v1` would be sniffing a field — exactly what these names
+///   replace.
+///
+///   **What it does not promise.** A lease is process-scoped and derived at
+///   read time, so `not_live` means "nothing is serving it at this instant",
+///   never "this project is broken" or "it was never set up" — `activation`
+///   and `readiness` answer those. And it is not a trust or delivery reading:
+///   a live lease says a connection is open, not that every declared
+///   capability reaches every harness.
 /// - `diff-existence-v1`: each `diff --json` target carries `existed_before` —
 ///   whether the config file was on disk when the diff was computed. With
 ///   `changed` it splits the two stories a pending render tells: absent file
@@ -838,6 +876,7 @@ pub const FEATURES: &[&str] = &[
     "workflow-serial-roles-v1",
     "doctor-advisories-v1",
     "doctor-mode-v1",
+    "doctor-liveness-v1",
     "doctor-probe-v1",
     "diff-existence-v1",
     "json-reads-v1",

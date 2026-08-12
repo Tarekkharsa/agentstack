@@ -103,6 +103,9 @@ fn run(argv: Vec<String>) -> Result<()> {
         Command::Toolset(agentstack::cli::ToolsetCmd::Create(args)) => {
             commands::panel_edit::create_profile(&args.to_panel_args(), dir)
         }
+        Command::Toolset(agentstack::cli::ToolsetCmd::Default(args)) => {
+            commands::panel_edit::set_default_toolset(args, dir)
+        }
         // Same authority path as the hidden fixed-argv aliases the panel emits:
         // one implementation, one consent digest, two spellings.
         Command::Toolset(agentstack::cli::ToolsetCmd::Rename(args)) => {

@@ -485,6 +485,7 @@ fn init_pipeline_roundtrips_through_valid_toml() {
         },
         servers,
         skills: IndexMap::new(),
+        default_toolset: None,
         profiles: IndexMap::new(),
         instructions: IndexMap::new(),
         settings: IndexMap::new(),
