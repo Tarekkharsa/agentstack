@@ -775,6 +775,117 @@ export const tools = Object.fromEntries(Object.entries(bindings).map(([server, e
 "#;
 }
 
+/// The fake upstream the Docker executor witness proxies a `tools.demo.echo`
+/// call through.
+///
+/// The `server/discover` arm is load-bearing and was missing. The gateway
+/// probes `server/discover` FIRST and only falls back to the dated
+/// `initialize` handshake once the peer ANSWERS — so a fixture that stays
+/// silent on that method burns the whole stdio start budget
+/// (`crate::gateway::stdio_start_timeout`) before the fallback begins. On a
+/// fast machine the fallback still lands inside the budget and the test
+/// passes; on a loaded CI runner it does not, the gateway logs
+/// `'demo' unavailable, skipping`, and the executor then fails with
+/// `UnknownTool("demo__echo")` — a fixture defect wearing a product defect's
+/// clothes. This is the same class as the 11s `lease_registry` stall fixed in
+/// `7b7c59f`, and it is why the integration-test fixtures now share one
+/// builder (`crates/cli/tests/common/mod.rs`) that always emits this arm.
+/// Lib tests cannot reach that module, so this copy is kept honest by
+/// [`fixture_conformance::the_demo_server_refuses_discover_in_one_round_trip`]
+/// instead.
+///
+/// It also echoes the request `id` rather than hardcoding 1/2/3, so a client
+/// that correlates replies by id cannot mismatch them.
+#[cfg(test)]
+const DEMO_SERVER: &str = r#"#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"server/discover"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id"
+      ;;
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-03-26","capabilities":{},"serverInfo":{"name":"fixture","version":"1"}}}\n' "$id"
+      ;;
+    *'"method":"tools/list"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"echo","description":"echo","inputSchema":{"type":"object"}}]}}\n' "$id"
+      ;;
+    *'"method":"tools/call"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"relay-ok"}],"isError":false}}\n' "$id"
+      ;;
+  esac
+done
+"#;
+
+/// Deliberately NOT `feature = "sandbox"`-gated.
+///
+/// The fixture above is only *used* by a Docker-gated, sandbox-gated test, and
+/// that is exactly how its missing `server/discover` arm survived: the one
+/// place that would have noticed ran in a single CI job, and skipped entirely
+/// on a developer machine with no Docker. Proving the fixture speaks the
+/// protocol needs no Docker and no feature flag, so it happens on every
+/// ordinary test run instead.
+#[cfg(test)]
+mod fixture_conformance {
+    use super::DEMO_SERVER;
+    use assert_fs::prelude::*;
+    use std::time::Duration;
+
+    /// The precondition the Docker witness silently depends on: a gateway
+    /// built from that project's manifest actually CONTACTS the demo server
+    /// and serves `demo__echo`.
+    ///
+    /// This is the failure CI hit, reproduced without Docker. The gateway
+    /// logged `'demo' unavailable, skipping: contacting demo` and the executor
+    /// then reported `UnknownTool("demo__echo")` — the executor's error, the
+    /// gateway's fault, the fixture's bug. Everything up to that point is
+    /// Docker-free, so it belongs in a test that runs everywhere rather than
+    /// in one gated behind both a feature flag and a daemon.
+    #[test]
+    fn the_gateway_can_contact_the_demo_server() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let home = assert_fs::TempDir::new().expect("temp home");
+        let project = assert_fs::TempDir::new().expect("temp project");
+        project
+            .child(".agentstack/agentstack.toml")
+            .write_str(
+                "version = 1\n[servers.demo]\ntype = \"stdio\"\ncommand = \"sh\"\nargs = [\"server.sh\"]\n",
+            )
+            .expect("write manifest");
+        project
+            .child("server.sh")
+            .write_str(DEMO_SERVER)
+            .expect("write fixture");
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+        crate::trust::trust_unreviewed(project.path()).expect("trust the fixture project");
+
+        let started = std::time::Instant::now();
+        let gateway = crate::gateway::Gateway::from_manifest(Some(project.path()));
+        let elapsed = started.elapsed();
+
+        assert!(
+            gateway.describe("demo__echo").is_some(),
+            "the gateway must serve demo__echo — it skipped the server instead, \
+             which is what makes the executor report UnknownTool"
+        );
+        // The stdio start budget is 10s, and an unanswered `server/discover`
+        // consumes it before the dated `initialize` handshake even begins.
+        // Landing in a fraction of that is the evidence the probe was REFUSED
+        // rather than waited out — precisely the difference between passing on
+        // a fast machine and failing on a loaded runner.
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "the gateway took {elapsed:?} to contact one local fixture: it is not \
+             answering `server/discover`, so the client waits out the modern probe \
+             before falling back to the dated handshake"
+        );
+
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+}
+
 #[cfg(all(test, feature = "sandbox"))]
 mod tests {
     use super::*;
@@ -908,20 +1019,7 @@ args = ["server.sh"]
 "#,
             )
             .unwrap();
-        project
-            .child("server.sh")
-            .write_str(
-                r#"#!/bin/sh
-while IFS= read -r line; do
-  case "$line" in
-    *\"method\":\"initialize\"*) printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-03-26","capabilities":{},"serverInfo":{"name":"fixture","version":"1"}}}' ;;
-    *\"method\":\"tools/list\"*) printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"echo","description":"echo","inputSchema":{"type":"object"}}]}}' ;;
-    *\"method\":\"tools/call\"*) printf '%s\n' '{"jsonrpc":"2.0","id":3,"result":{"content":[{"type":"text","text":"relay-ok"}],"isError":false}}' ;;
-  esac
-done
-"#,
-            )
-            .unwrap();
+        project.child("server.sh").write_str(DEMO_SERVER).unwrap();
         std::env::set_var("AGENTSTACK_HOME", home.path());
         std::env::set_var("AGENTSTACK_EGRESS_IMAGE", "agentstack/egress-proxy:test");
         agentstack_trust::trust_unreviewed(project.path()).unwrap();
