@@ -24,13 +24,14 @@ release channels, and other spaces where someone represents AgentStack.
 
 ## Enforcement
 
-Report conduct concerns privately to <tarekkh1997@gmail.com>. For a security
+Report conduct concerns privately by contacting the maintainer on GitHub,
+[@Tarekkharsa](https://github.com/Tarekkharsa). For a security
 vulnerability, use the separate private route in [`SECURITY.md`](SECURITY.md).
 Do not post sensitive evidence publicly.
 
 The maintainer may edit or remove content, close or lock threads, reject
 contributions, issue a warning, or temporarily or permanently ban participation.
 The response will be proportional to the behavior and will protect the privacy
-of reporters where possible. If a report concerns the maintainer, email is
-still the current private route; the solo-maintainer limitation is recorded in
-[`GOVERNANCE.md`](GOVERNANCE.md) rather than hidden.
+of reporters where possible. If a report concerns the maintainer, that same
+GitHub route is still the only private one; the solo-maintainer limitation is
+recorded in [`GOVERNANCE.md`](GOVERNANCE.md) rather than hidden.

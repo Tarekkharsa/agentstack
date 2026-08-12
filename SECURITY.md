@@ -13,9 +13,9 @@ receives security fixes. There are no maintained older branches.
 
 Please report vulnerabilities privately — do not open a public issue.
 
-- Preferred: [GitHub private vulnerability reporting](https://github.com/Tarekkharsa/agentstack/security/advisories/new)
-  on `Tarekkharsa/agentstack`.
-- Alternatively: email the maintainer at <tarekkh1997@gmail.com>.
+Use [GitHub private vulnerability reporting](https://github.com/Tarekkharsa/agentstack/security/advisories/new)
+on `Tarekkharsa/agentstack`. It is the only private channel, and it keeps the
+report, the fix, and the advisory in one place.
 
 Include what you can: affected version, reproduction steps, and impact
 (e.g. which trust, policy, secret, or sandbox guarantee is bypassed).
