@@ -40,6 +40,64 @@ pub enum RelayCallError {
 
 pub type ExecutionCall = Arc<dyn Fn(&str, Value) -> Result<Value, RelayCallError> + Send + Sync>;
 
+/// The one opt-in that lets an operator name the host address every
+/// container-reachable listener binds — the per-execution tool-call relay, the
+/// run's MCP gateway endpoint, and the `--sandbox` egress proxy. It accepts a
+/// bare IP address; `AGENTSTACK_RELAY_BIND=0.0.0.0` is the deliberate,
+/// LAN-reachable wildcard choice that used to be taken silently.
+///
+/// One mechanism for all four bind paths, so "when may this listener be
+/// LAN-reachable" cannot drift between them.
+pub const RELAY_BIND_ENV: &str = "AGENTSTACK_RELAY_BIND";
+
+/// Parse the value of [`RELAY_BIND_ENV`]. Trimmed, because an address that
+/// arrived from a shell export with stray whitespace is an obvious typo, not a
+/// reason to refuse the run; anything else that is not an IP literal IS a
+/// refusal, since guessing what the operator meant by a wrong bind address is
+/// exactly the silent widening this seam exists to stop.
+pub fn parse_relay_bind(value: &str) -> io::Result<IpAddr> {
+    value.trim().parse::<IpAddr>().map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("{RELAY_BIND_ENV} is not an IP address: {value:?}"),
+        )
+    })
+}
+
+/// The operator's explicit bind choice, or `None` when unset/empty.
+///
+/// Split from [`parse_relay_bind`] so the decision itself stays a pure,
+/// env-free function that tests can drive without touching process state.
+pub fn relay_bind_opt_in() -> io::Result<Option<IpAddr>> {
+    match std::env::var(RELAY_BIND_ENV) {
+        Ok(value) if !value.trim().is_empty() => parse_relay_bind(&value).map(Some),
+        _ => Ok(None),
+    }
+}
+
+/// The single refusal every bind path raises when it has no narrow,
+/// container-reachable host address. `listener` names what refused; `reason`
+/// says why no narrow address was available.
+///
+/// It is an error, not a fallback: binding `0.0.0.0` publishes a
+/// token-authenticated tool-execution listener to every host on the local
+/// network, and that is now a choice the operator makes by name, never a
+/// consequence of an undetectable `docker0`.
+pub fn relay_bind_refusal(listener: &str, reason: &str) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::AddrNotAvailable,
+        format!(
+            "{listener}: refusing to start — no container-reachable host address could be \
+             determined ({reason}), and falling back to the 0.0.0.0 wildcard would make this \
+             token-authenticated listener reachable from every host on your local network. \
+             Set {RELAY_BIND_ENV} to bind explicitly: {RELAY_BIND_ENV}=<ip> for a private \
+             host interface the container can reach (e.g. the Docker bridge gateway \
+             172.17.0.1), or {RELAY_BIND_ENV}=0.0.0.0 to accept the LAN-reachable wildcard \
+             deliberately."
+        ),
+    )
+}
+
 /// Decide the narrowest host interface the per-execution relay can bind to
 /// while staying reachable from the sandbox's sidecar, which dials the host
 /// through `host.docker.internal`. The goal is defence-in-depth: never expose
@@ -55,8 +113,7 @@ pub type ExecutionCall = Arc<dyn Fn(&str, Value) -> Result<Value, RelayCallError
 ///   interface on a private, non-routable bridge subnet. Binding there is
 ///   reachable from any Docker container via the gateway but never from other
 ///   LAN hosts. `docker_bridge_gateway` carries that address (looked up by the
-///   caller); when it is unknown we fall back to the wildcard so the feature
-///   keeps working (documented residual exposure).
+///   caller); when it is unknown there is no narrow answer and we REFUSE.
 /// * **macOS / Windows, Docker Desktop** — the daemon runs inside a VM, so the
 ///   bridge gateway (`172.17.0.1`) lives in that VM, *not* on the host, and
 ///   cannot be bound here. Docker Desktop instead forwards
@@ -64,23 +121,47 @@ pub type ExecutionCall = Arc<dyn Fn(&str, Value) -> Result<Value, RelayCallError
 ///   reachable from containers and the tightest possible bind — narrower even
 ///   than the Linux case (empirically verified against Docker Desktop). We
 ///   ignore any reported bridge gateway on these platforms.
+/// * **Anything else** — unknown platform, no known-good narrow address, so
+///   there is nothing to guess at safely: REFUSE.
 ///
-/// This is a pure function of the two inputs so the decision can be unit
-/// tested without a Docker daemon; the actual bind (and the "not assignable"
-/// fallback for Docker-Desktop-on-Linux) lives in
-/// [`BlockingExecutionRelay::start_on_or_unspecified`].
-pub fn relay_bind_address(os: &str, docker_bridge_gateway: Option<IpAddr>) -> IpAddr {
+/// `explicit` is the operator's [`RELAY_BIND_ENV`] opt-in and outranks the
+/// derivation entirely — including the wildcard, which is the one way back to
+/// the old always-functional behaviour. The token, exact grant, and call
+/// ceiling are unchanged by any of this; the bind scope is defence in depth on
+/// top of them.
+///
+/// This is a pure function of its inputs so the decision can be unit tested
+/// without a Docker daemon; the actual bind (and the "not assignable" refusal
+/// for Docker-Desktop-on-Linux) lives in
+/// [`BlockingExecutionRelay::start_on_or_refuse`].
+pub fn relay_bind_address(
+    os: &str,
+    docker_bridge_gateway: Option<IpAddr>,
+    explicit: Option<IpAddr>,
+    listener: &str,
+) -> io::Result<IpAddr> {
+    if let Some(bind) = explicit {
+        return Ok(bind);
+    }
     match os {
         // Docker Desktop's VM forwards host.docker.internal to the host
         // loopback; the in-VM bridge gateway is not a host interface.
-        "macos" | "windows" => IpAddr::V4(Ipv4Addr::LOCALHOST),
-        // Native Linux: bind the docker0 gateway when known, else keep working
-        // on the wildcard. Loopback is intentionally NOT a fallback here — a
-        // container cannot reach the host loopback via host-gateway on native
-        // Linux, so binding it would silently break tool calls.
-        "linux" => docker_bridge_gateway.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
-        // Unknown platform: stay functional on the wildcard rather than guess.
-        _ => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+        "macos" | "windows" => Ok(IpAddr::V4(Ipv4Addr::LOCALHOST)),
+        // Native Linux: bind the docker0 gateway when known. Loopback is
+        // intentionally NOT a fallback here — a container cannot reach the host
+        // loopback via host-gateway on native Linux, so binding it would
+        // silently break tool calls — and neither is the wildcard.
+        "linux" => docker_bridge_gateway.ok_or_else(|| {
+            relay_bind_refusal(
+                listener,
+                "this Linux host reported no docker0 bridge gateway (no daemon, no bridge \
+                 network, or no IPv4 gateway on it)",
+            )
+        }),
+        other => Err(relay_bind_refusal(
+            listener,
+            &format!("no container-reachable address is known for platform {other:?}"),
+        )),
     }
 }
 
@@ -294,47 +375,37 @@ impl BlockingExecutionRelay {
         })
     }
 
-    /// Bind to `preferred`, transparently falling back to the wildcard
-    /// (`0.0.0.0`) when that address is not assignable on this host. The
-    /// fallback covers Docker-Desktop-on-Linux, where [`relay_bind_address`]
-    /// hands back the in-VM bridge gateway (`172.17.0.1`) that has no host
-    /// interface — binding it fails with `AddrNotAvailable`, and re-widening to
-    /// the wildcard keeps the feature working (documented residual exposure).
-    /// Loopback and native-Linux gateway binds never hit this path.
+    /// Bind to `preferred`, and REFUSE with [`relay_bind_refusal`] when that
+    /// address is not assignable on this host.
     ///
-    /// `token`/`grant` are cloned before the first attempt so the fallback can
-    /// re-issue them; `call` is an `Arc`, so its clone is just a refcount bump.
-    pub fn start_on_or_unspecified(
+    /// The unassignable case is Docker-Desktop-on-Linux, where
+    /// [`relay_bind_address`] hands back the in-VM bridge gateway
+    /// (`172.17.0.1`) that has no host interface. That used to re-widen to
+    /// `0.0.0.0`, publishing this relay to the LAN; now it stops the execution
+    /// and names [`RELAY_BIND_ENV`], so the wildcard is only ever an operator's
+    /// explicit choice. Loopback and native-Linux gateway binds never hit this
+    /// path.
+    ///
+    /// Any other error (invalid authority, port exhaustion) is real and
+    /// propagates unchanged.
+    pub fn start_on_or_refuse(
         preferred: IpAddr,
+        listener: &str,
         token: String,
         grant: BTreeSet<String>,
         max_calls: u32,
         call: ExecutionCall,
     ) -> io::Result<Self> {
-        let wildcard = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
-        match Self::start_on(
-            preferred,
-            token.clone(),
-            grant.clone(),
-            max_calls,
-            Arc::clone(&call),
-        ) {
-            Ok(relay) => Ok(relay),
-            // Only a genuinely-unassignable preferred address earns the
-            // fallback; any other error (invalid authority, port exhaustion)
-            // is real and propagates. If `preferred` already was the wildcard,
-            // there is nothing narrower to retry — surface the original error.
-            Err(error)
-                if error.kind() == io::ErrorKind::AddrNotAvailable && preferred != wildcard =>
-            {
-                eprintln!(
-                    "tools_execute: relay bind to {preferred} unavailable ({error}); \
-                     falling back to 0.0.0.0 (LAN-reachable for this execution)"
-                );
-                Self::start_on(wildcard, token, grant, max_calls, call)
+        Self::start_on(preferred, token, grant, max_calls, call).map_err(|error| {
+            if error.kind() == io::ErrorKind::AddrNotAvailable {
+                relay_bind_refusal(
+                    listener,
+                    &format!("{preferred} is not assignable on this host ({error})"),
+                )
+            } else {
+                error
             }
-            Err(error) => Err(error),
-        }
+        })
     }
 
     pub fn addr(&self) -> SocketAddr {
@@ -392,43 +463,101 @@ mod tests {
     fn bind_address_is_never_the_wildcard_when_a_narrow_route_exists() {
         let gw: IpAddr = "172.17.0.1".parse().unwrap();
         // Native Linux with a known bridge gateway → bind that gateway.
-        assert_eq!(relay_bind_address("linux", Some(gw)), gw);
-        // Linux without a discoverable gateway → wildcard fallback (functional,
-        // documented residual exposure).
         assert_eq!(
-            relay_bind_address("linux", None),
-            IpAddr::V4(Ipv4Addr::UNSPECIFIED)
+            relay_bind_address("linux", Some(gw), None, "relay").unwrap(),
+            gw
         );
         // Docker Desktop forwards host.docker.internal to the host loopback;
         // the reported in-VM gateway must be ignored.
         assert_eq!(
-            relay_bind_address("macos", Some(gw)),
+            relay_bind_address("macos", Some(gw), None, "relay").unwrap(),
             IpAddr::V4(Ipv4Addr::LOCALHOST)
         );
         assert_eq!(
-            relay_bind_address("windows", None),
+            relay_bind_address("windows", None, None, "relay").unwrap(),
             IpAddr::V4(Ipv4Addr::LOCALHOST)
         );
-        // Unknown platform stays functional on the wildcard rather than guess.
+    }
+
+    /// The two undetermined cases fail CLOSED and say how to opt in, rather
+    /// than publishing the relay on `0.0.0.0`.
+    #[test]
+    fn undetermined_bind_refuses_and_names_the_opt_in() {
+        for (os, gateway) in [
+            ("linux", None),
+            ("freebsd", Some("172.17.0.1".parse().unwrap())),
+        ] {
+            let error = relay_bind_address(os, gateway, None, "tools_execute relay")
+                .expect_err("an undetermined bind address must refuse");
+            let message = error.to_string();
+            assert!(message.contains("tools_execute relay"), "{message}");
+            assert!(message.contains("refusing to start"), "{message}");
+            assert!(message.contains("local network"), "{message}");
+            assert!(message.contains(RELAY_BIND_ENV), "{message}");
+            assert!(
+                message.contains("AGENTSTACK_RELAY_BIND=0.0.0.0"),
+                "{message}"
+            );
+        }
+    }
+
+    /// The opt-in outranks the derivation everywhere, so an operator who names
+    /// the wildcard gets exactly the old behaviour back — on the platforms that
+    /// now refuse and on the ones that already had a narrow answer.
+    #[test]
+    fn explicit_opt_in_restores_the_wildcard() {
+        let wildcard = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
+        for os in ["linux", "macos", "windows", "freebsd"] {
+            assert_eq!(
+                relay_bind_address(os, None, Some(wildcard), "relay").unwrap(),
+                wildcard
+            );
+        }
+        // Any explicit address is honoured, not just the wildcard.
+        let lan: IpAddr = "192.168.7.5".parse().unwrap();
         assert_eq!(
-            relay_bind_address("freebsd", Some(gw)),
+            relay_bind_address("linux", None, Some(lan), "relay").unwrap(),
+            lan
+        );
+        // A set-but-unparseable opt-in is itself a refusal — never a silent
+        // fall-through to the derivation.
+        assert!(parse_relay_bind("localhost").is_err());
+        assert_eq!(
+            parse_relay_bind(" 0.0.0.0\n").unwrap(),
             IpAddr::V4(Ipv4Addr::UNSPECIFIED)
         );
     }
 
     #[test]
-    fn unassignable_preferred_bind_falls_back_to_the_wildcard() {
+    fn unassignable_preferred_bind_refuses_instead_of_widening() {
         // 203.0.113.9 is TEST-NET-3 (RFC 5737): guaranteed not assigned to any
-        // local interface, so the preferred bind fails and we fall back.
+        // local interface, so the preferred bind fails.
         let unassignable: IpAddr = "203.0.113.9".parse().unwrap();
-        let relay = BlockingExecutionRelay::start_on_or_unspecified(
+        let error = BlockingExecutionRelay::start_on_or_refuse(
             unassignable,
+            "tools_execute relay",
             "a".repeat(64),
             BTreeSet::from(["github__get_issue".into()]),
             1,
             Arc::new(|_, _| Ok(Value::Null)),
         )
-        .expect("fallback should bind the wildcard");
+        .err()
+        .expect("an unassignable bind must refuse, never widen to 0.0.0.0");
+        let message = error.to_string();
+        assert!(message.contains("203.0.113.9"), "{message}");
+        assert!(message.contains(RELAY_BIND_ENV), "{message}");
+
+        // With the opt-in the operator can still name the wildcard, and the
+        // relay starts exactly as it used to.
+        let relay = BlockingExecutionRelay::start_on_or_refuse(
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED),
+            "tools_execute relay",
+            "a".repeat(64),
+            BTreeSet::from(["github__get_issue".into()]),
+            1,
+            Arc::new(|_, _| Ok(Value::Null)),
+        )
+        .expect("an explicit wildcard still binds");
         assert_eq!(relay.addr().ip(), IpAddr::V4(Ipv4Addr::UNSPECIFIED));
     }
 

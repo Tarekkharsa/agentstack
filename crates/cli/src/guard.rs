@@ -39,6 +39,19 @@ pub enum GuardEvent {
     FileRead { path: String },
     /// A write-shaped file tool (Write / Edit / NotebookEdit …).
     FileWrite { path: String },
+    /// A write-shaped call whose targets are carried by the PAYLOAD rather
+    /// than a path field — Codex's `apply_patch`, whose one argument is a
+    /// patch envelope naming every file it adds, updates, deletes or moves.
+    /// Every path takes the identical [`write_target_check`] a `FileWrite`
+    /// takes, and the first refusal refuses the whole call: a patch applies
+    /// as a unit, so allowing the confined half of it is not a decision the
+    /// guard can make.
+    ///
+    /// An EMPTY list is a refusal by construction, not an oversight — see
+    /// [`check_write_set`]. A known writer whose target the guard could not
+    /// determine cannot be confined to the workspace, and the guard says so
+    /// rather than allowing it.
+    FileWrites { paths: Vec<String> },
     /// Anything else — allowed (the guard constrains files and shells, not
     /// e.g. web fetches; egress is the proxy's dimension).
     Other,
@@ -89,6 +102,7 @@ pub fn check_event(ctx: &GuardContext, event: &GuardEvent) -> Decision {
         GuardEvent::Other => Decision::Allow,
         GuardEvent::FileRead { path } => deny_glob_check(ctx, Access::Read, path),
         GuardEvent::FileWrite { path } => write_target_check(ctx, path),
+        GuardEvent::FileWrites { paths } => check_write_set(ctx, paths),
         GuardEvent::Bash { command } => check_bash(ctx, command),
     }
 }
@@ -226,6 +240,34 @@ fn write_target_check(ctx: &GuardContext, path: &str) -> Decision {
         return d;
     }
     write_scope_check(ctx, path)
+}
+
+/// Every target of a multi-target write (a patch envelope), through the SAME
+/// [`write_target_check`] a single-path write takes — deny globs and the
+/// writable-root boundary, no second spelling of either. The first refusal
+/// refuses the whole call.
+///
+/// The empty case is the fail-closed one: the call was write-shaped (a name on
+/// `WRITERS`, or an envelope) but named no target the guard could read. A
+/// write whose target is unknown cannot be confined to the workspace, so it is
+/// refused rather than allowed as `Other` — the pre-G25 outcome, which let
+/// every Codex `apply_patch` through unjudged.
+fn check_write_set(ctx: &GuardContext, paths: &[String]) -> Decision {
+    if paths.is_empty() {
+        return Decision::deny(format!(
+            "blocked: a write was refused — the call is write-shaped but names no target \
+             the guard could read (no file path, and no parseable '*** Begin Patch' envelope)\n  \
+             nothing was written · a write whose target cannot be determined cannot be \
+             confined to the workspace · rules: {}",
+            machine_manifest(ctx).display()
+        ));
+    }
+    for path in paths {
+        if let d @ Decision::Deny { .. } = write_target_check(ctx, path) {
+            return d;
+        }
+    }
+    Decision::Allow
 }
 
 /// [`write_target_check`] for writes reached through the SHELL (in-place
@@ -1058,6 +1100,11 @@ impl Protocol {
 /// tools this build has never heard of. A path-bearing tool that matches
 /// neither is still treated as a read (deny globs apply, workspace
 /// confinement does not) — the safe default that can't wedge a harness.
+///
+/// The PATH-LESS call is where those two signals used to run out, and it is no
+/// longer allowed to end in `Other`. A patch envelope carries its targets in
+/// its text, and a known writer that names no target at all is refused — see
+/// [`GuardEvent::FileWrites`].
 fn classify_tool(tool: &str, input: &Value) -> GuardEvent {
     let path = path_from_input(input);
     // The text-editor dialect (`str_replace_based_edit_tool` and its clones)
@@ -1075,6 +1122,30 @@ fn classify_tool(tool: &str, input: &Value) -> GuardEvent {
             _ => {}
         }
     }
+    // Both branches below are for the PATH-LESS call only. A payload that
+    // names its file needs neither: the path field is what the call is about,
+    // and reading targets out of a patch that a `Write` is merely storing to
+    // disk (`{"file_path": "fix.patch", "content": "*** Begin Patch…"}`) would
+    // judge the wrong file.
+    if path.is_none() {
+        // A patch ENVELOPE is a write whatever the tool is called, and it
+        // carries its targets in the text — Codex hands `apply_patch` to the
+        // hook as `tool_input: {"command": "*** Begin Patch…"}`, which without
+        // this branch reads as a shell command line and confines nothing (G25).
+        if let Some(text) = patch_envelope(input) {
+            return GuardEvent::FileWrites {
+                paths: patch_targets(text),
+            };
+        }
+        // A known writer that named no target is refused, not analysed as a
+        // shell line and not allowed as `Other`: nothing on `WRITERS` is a
+        // shell tool, so a `command` here is payload, not a command, and a
+        // write the guard cannot locate is a write it cannot confine. The
+        // empty set IS the refusal.
+        if is_known_writer(tool) {
+            return GuardEvent::FileWrites { paths: Vec::new() };
+        }
+    }
     if let Some(command) = command_line_at(input, "command") {
         // Shell-shaped input regardless of the tool's name (Bash,
         // run_shell_command, execute_bash, run_in_terminal …).
@@ -1083,29 +1154,135 @@ fn classify_tool(tool: &str, input: &Value) -> GuardEvent {
     let Some(path) = path else {
         return GuardEvent::Other;
     };
-    const WRITERS: &[&str] = &[
-        "Write",
-        "Edit",
-        "MultiEdit",
-        "NotebookEdit",
-        "write_file",
-        "replace",
-        "edit_file",
-        "fs_write",
-        "create_file",
-        "str_replace_editor",
-        // VS Code agent mode's in-place edit tools — without these the edits
-        // classify as reads, so workspace confinement never runs for them (the
-        // deny globs still fire, but out-of-workspace writes would slip through).
-        "replace_string_in_file",
-        "multi_replace_string_in_file",
-        "apply_patch",
-    ];
-    if WRITERS.iter().any(|w| tool.eq_ignore_ascii_case(w)) || payload_is_write(input) {
+    if is_known_writer(tool) || payload_is_write(input) {
         GuardEvent::FileWrite { path }
     } else {
         GuardEvent::FileRead { path }
     }
+}
+
+/// Tool names that are writes by NAME — the floor under the payload-shape
+/// signal, unchanged in content since it lived inside [`classify_tool`]; it is
+/// a module item now only because two places consult it.
+const WRITERS: &[&str] = &[
+    "Write",
+    "Edit",
+    "MultiEdit",
+    "NotebookEdit",
+    "write_file",
+    "replace",
+    "edit_file",
+    "fs_write",
+    "create_file",
+    "str_replace_editor",
+    // VS Code agent mode's in-place edit tools — without these the edits
+    // classify as reads, so workspace confinement never runs for them (the
+    // deny globs still fire, but out-of-workspace writes would slip through).
+    "replace_string_in_file",
+    "multi_replace_string_in_file",
+    "apply_patch",
+];
+
+fn is_known_writer(tool: &str) -> bool {
+    WRITERS.iter().any(|w| tool.eq_ignore_ascii_case(w))
+}
+
+// ── The `apply_patch` envelope ──────────────────────────────────────────────
+//
+// Codex's `apply_patch` takes ONE argument: patch text in the envelope format
+// below, with the target paths inside it. The hook payload is
+// `{"tool_name": "apply_patch", "tool_input": {"command": "<patch text>"}}`,
+// so no path key exists to read and the guard used to judge the patch as if it
+// were a shell line. The format and these exact marker spellings (including
+// the trailing space after each colon) are Codex's own parser constants:
+// https://github.com/openai/codex/blob/main/codex-rs/apply-patch/src/parser.rs
+// (`BEGIN_PATCH_MARKER`, `END_PATCH_MARKER`, `ADD_FILE_MARKER`,
+// `DELETE_FILE_MARKER`, `UPDATE_FILE_MARKER`, `MOVE_TO_MARKER`), whose grammar
+// requires the first line to be `*** Begin Patch` and the last to be
+// `*** End Patch`. Nothing here is guessed.
+
+const PATCH_BEGIN: &str = "*** Begin Patch";
+const PATCH_END: &str = "*** End Patch";
+
+/// The directives that NAME a file the patch will write. `*** Move to: ` is on
+/// the list because a rename WRITES its destination as surely as an add does;
+/// `*** Delete File: ` is a write in the only sense that matters here (the
+/// path stops existing).
+const PATCH_TARGET_MARKERS: &[&str] = &[
+    "*** Add File: ",
+    "*** Update File: ",
+    "*** Delete File: ",
+    "*** Move to: ",
+];
+
+/// Bounds. The hook payload is already capped upstream (`MAX_PAYLOAD`); these
+/// keep one hostile string from dominating the check anyway. Exceeding the
+/// line bound is treated as UNPARSEABLE (an empty target set, i.e. a refusal),
+/// never as "no more targets" — truncating a patch would fail open on whatever
+/// the tail names.
+const MAX_PATCH_LINES: usize = 20_000;
+const MAX_PATCH_TARGETS: usize = 500;
+
+/// The patch envelope a payload carries, if any: a string value whose first
+/// non-empty line is `*** Begin Patch` and whose last is `*** End Patch`.
+///
+/// Both ends are required, which is what keeps this branch off the shell path.
+/// The begin marker alone would let a payload PREFIX a patch to a real command
+/// (`"*** Begin Patch\n…\n*** End Patch\nrm -rf ~"`) and suppress the
+/// destructive-command analysis; demanding the envelope be the whole string
+/// leaves any such payload on the shell path exactly as before. Values are
+/// scanned one level deep (the object's own string fields), because the key
+/// differs by harness — Codex sends `command`, the API's function form sends
+/// `input` — and neither spelling is worth guessing at.
+fn patch_envelope(input: &Value) -> Option<&str> {
+    fn envelope(v: &Value) -> Option<&str> {
+        v.as_str().filter(|s| is_patch_envelope(s))
+    }
+    match input {
+        Value::String(_) => envelope(input),
+        Value::Object(obj) => obj.values().find_map(envelope),
+        _ => None,
+    }
+}
+
+fn is_patch_envelope(text: &str) -> bool {
+    let mut lines = text.lines().map(str::trim_end).filter(|l| !l.is_empty());
+    let first = lines.next();
+    let last = lines.next_back().or(first);
+    first == Some(PATCH_BEGIN) && last == Some(PATCH_END)
+}
+
+/// Every file path the envelope names. Hostile input is assumed: only lines
+/// that START with a marker count (patch CONTENT lines are prefixed with
+/// `+`/`-`/space, so a marker quoted inside the new text cannot pose as a
+/// directive), duplicates collapse, and an empty result means "no target found"
+/// — which [`check_write_set`] refuses.
+///
+/// Over-matching is the safe direction and is left deliberately possible: an
+/// extra path can only ADD a write check, never remove one.
+fn patch_targets(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for (n, line) in text.lines().enumerate() {
+        if n >= MAX_PATCH_LINES {
+            return Vec::new(); // unparseable → refuse, never a partial answer
+        }
+        let line = line.trim_end();
+        let Some(path) = PATCH_TARGET_MARKERS
+            .iter()
+            .find_map(|m| line.strip_prefix(m))
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+        else {
+            continue;
+        };
+        if !out.iter().any(|p| p == path) {
+            out.push(path.to_string());
+        }
+        if out.len() >= MAX_PATCH_TARGETS {
+            break;
+        }
+    }
+    out
 }
 
 /// Lowercase a payload key or verb and drop `_`/`-`, so one table covers the
@@ -1683,6 +1860,195 @@ mod tests {
                 "{tool} must still be a write"
             );
         }
+    }
+
+    /// A Codex `apply_patch` hook payload, in the shape Codex actually sends
+    /// it: `tool_input: {"command": "<patch text>"}`, the patch in the
+    /// documented `*** Begin Patch` envelope. The fixture exercises every
+    /// directive that names a file.
+    fn apply_patch(patch: &str) -> Value {
+        json!({ "command": patch })
+    }
+
+    const PATCH_IN_WORKSPACE: &str = "\
+*** Begin Patch
+*** Update File: src/main.rs
+@@ fn main() {
+-    println!(\"a\");
++    println!(\"b\");
+*** Add File: docs/new.md
++hello
+*** Delete File: old.txt
+*** End Patch
+";
+
+    /// G25: the envelope's targets are read out of the patch TEXT and each one
+    /// takes the ordinary write check. Inside the workspace the call is
+    /// allowed, and the event names exactly the files the patch touches — the
+    /// same paths the audit line will carry.
+    #[test]
+    fn apply_patch_envelope_targets_are_write_checked() {
+        let c = ctx();
+        let ev = classify_tool("apply_patch", &apply_patch(PATCH_IN_WORKSPACE));
+        assert_eq!(
+            ev,
+            GuardEvent::FileWrites {
+                paths: vec!["src/main.rs".into(), "docs/new.md".into(), "old.txt".into(),]
+            }
+        );
+        assert_eq!(check_event(&c, &ev), Decision::Allow);
+    }
+
+    /// One target outside the workspace refuses the WHOLE patch, wherever in
+    /// the envelope it sits and whichever directive names it — a rename's
+    /// destination included, because a move writes where it lands.
+    #[test]
+    fn apply_patch_target_outside_the_workspace_refuses_the_call() {
+        let c = ctx();
+        for patch in [
+            "*** Begin Patch\n*** Add File: /Users/me/.zshrc\n+evil\n*** End Patch",
+            "*** Begin Patch\n*** Update File: ../../Users/me/.zshrc\n@@\n+evil\n*** End Patch",
+            "*** Begin Patch\n*** Delete File: /Users/me/.ssh/config\n*** End Patch",
+            // a good first target cannot buy the bad second one
+            "*** Begin Patch\n*** Add File: src/ok.rs\n+ok\n\
+             *** Update File: src/moved.rs\n*** Move to: /etc/cron.d/pwn\n*** End Patch",
+        ] {
+            let ev = classify_tool("apply_patch", &apply_patch(patch));
+            assert!(
+                denied(check_event(&c, &ev)),
+                "an out-of-workspace patch target must be refused: {patch}"
+            );
+        }
+    }
+
+    /// A deny-globbed path is refused inside the workspace too — the patch
+    /// path reaches the same `[policy.filesystem] deny` blocklist every other
+    /// write reaches.
+    #[test]
+    fn apply_patch_target_on_a_deny_glob_refuses_the_call() {
+        let c = ctx();
+        for patch in [
+            "*** Begin Patch\n*** Add File: .env\n+SECRET=1\n*** End Patch",
+            "*** Begin Patch\n*** Update File: config/.env.local\n@@\n+X=1\n*** End Patch",
+            "*** Begin Patch\n*** Delete File: keys/id_rsa\n*** End Patch",
+        ] {
+            let ev = classify_tool("apply_patch", &apply_patch(patch));
+            // The classification is part of the claim: before G25 a denial
+            // here was an accident of the shell tokenizer noticing the name,
+            // not the write path judging the patch's target.
+            assert!(
+                matches!(ev, GuardEvent::FileWrites { .. }),
+                "{patch} must classify as a patch write, got {ev:?}"
+            );
+            let d = check_event(&c, &ev);
+            assert!(
+                denied(d.clone()),
+                "deny-globbed target must be refused: {patch}"
+            );
+            if let Decision::Deny { reason } = d {
+                assert!(reason.contains("policy.filesystem"), "{reason}");
+            }
+        }
+    }
+
+    /// Fail closed: a call the guard KNOWS is a write, whose target it cannot
+    /// determine, is refused. Before G25 each of these was allowed outright —
+    /// `apply_patch` carries no path key, so the call fell through unjudged.
+    #[test]
+    fn a_write_whose_target_cannot_be_determined_is_refused() {
+        let c = ctx();
+        for input in [
+            // a well-formed envelope that names no file
+            json!({"command": "*** Begin Patch\n*** End Patch"}),
+            // a truncated envelope (no end marker) — unparseable, not shell
+            json!({"command": "*** Begin Patch\n*** Update File: src/main.rs"}),
+            // patch text under a key the guard does not read, and not an
+            // envelope either
+            json!({"input": "some patch-ish text"}),
+            json!({}),
+        ] {
+            let ev = classify_tool("apply_patch", &input);
+            let d = check_event(&c, &ev);
+            assert!(denied(d.clone()), "{input} must be refused");
+            if let Decision::Deny { reason } = d {
+                assert!(
+                    reason.contains("names no target"),
+                    "the refusal must say the target is unknown: {reason}"
+                );
+            }
+        }
+        // The same fail-closed rule covers every name on the writer floor.
+        for tool in WRITERS {
+            assert!(
+                denied(check_event(&c, &classify_tool(tool, &json!({})))),
+                "{tool} with no target must be refused"
+            );
+        }
+    }
+
+    /// A patch envelope is judged by SHAPE, so the same call is confined under
+    /// the API's `input` key as under Codex's `command`.
+    #[test]
+    fn a_patch_envelope_is_confined_under_any_key_or_tool_name() {
+        let c = ctx();
+        let patch = "*** Begin Patch\n*** Add File: /Users/me/.zshrc\n+evil\n*** End Patch";
+        for input in [json!({"input": patch}), json!({"patch_text": patch})] {
+            assert!(
+                denied(check_event(&c, &classify_tool("conjure_patch", &input))),
+                "{input} must be confined"
+            );
+        }
+    }
+
+    /// The negative control: nothing outside the writer floor and the envelope
+    /// shape changes. Reads stay reads, shells stay shells, path-less
+    /// non-writers stay `Other` (allowed), and a shell line that merely
+    /// CONTAINS an envelope is still analysed as a command — the envelope must
+    /// be the whole argument, or a hostile payload could prefix a patch to a
+    /// destructive command and suppress the command analysis.
+    #[test]
+    fn non_writer_tools_are_unchanged_by_the_envelope_branch() {
+        let c = ctx();
+        assert_eq!(
+            classify_tool("Read", &json!({"file_path": "/etc/hosts"})),
+            GuardEvent::FileRead {
+                path: "/etc/hosts".into()
+            }
+        );
+        assert_eq!(
+            classify_tool("WebFetch", &json!({"url": "https://x"})),
+            GuardEvent::Other
+        );
+        assert_eq!(
+            classify_tool("Bash", &json!({"command": "ls -la"})),
+            bash("ls -la")
+        );
+        // A call that NAMES its file is judged by that file, even when the
+        // content it stores happens to be a patch: saving `fix.patch` writes
+        // `fix.patch`, not whatever the patch inside it mentions.
+        let stored = "*** Begin Patch\n*** Add File: /etc/cron.d/pwn\n+evil\n*** End Patch";
+        let ev = classify_tool(
+            "Write",
+            &json!({"file_path": "fix.patch", "content": stored}),
+        );
+        assert_eq!(
+            ev,
+            GuardEvent::FileWrite {
+                path: "fix.patch".into()
+            }
+        );
+        assert_eq!(check_event(&c, &ev), Decision::Allow);
+
+        let smuggled = "*** Begin Patch\n*** Add File: src/ok.rs\n+ok\n*** End Patch\nrm -rf ~";
+        assert_eq!(
+            classify_tool("Bash", &json!({"command": smuggled})),
+            bash(smuggled),
+            "an envelope must not swallow the command around it"
+        );
+        assert!(denied(check_event(
+            &c,
+            &classify_tool("Bash", &json!({"command": smuggled}))
+        )));
     }
 
     /// The text-editor dialect (`command` is an editor VERB, not a shell

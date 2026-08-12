@@ -275,19 +275,37 @@ mod hosted {
         // docker0 bridge gateway (a private, non-routable host interface); on
         // Docker Desktop it is the host loopback. The bridge gateway is only
         // looked up on Linux, because on Docker Desktop that gateway lives
-        // inside the daemon's VM and is not a host interface. The per-run random
-        // token, exact grant, call cap, and bounded frames remain the authority
+        // inside the daemon's VM and is not a host interface. Where no narrow
+        // address is knowable or bindable the execution REFUSES rather than
+        // widening: `AGENTSTACK_RELAY_BIND` is the operator's one way to choose
+        // a bind (including the wildcard) on purpose. The per-run random token,
+        // exact grant, call cap, and bounded frames remain the authority
         // boundary regardless of bind scope.
         let bridge_gateway = if std::env::consts::OS == "linux" {
             backend.default_bridge_gateway()
         } else {
             None
         };
-        let relay_bind =
-            agentstack_egress::relay_bind_address(std::env::consts::OS, bridge_gateway);
+        const RELAY: &str = "tools_execute relay";
+        let explicit_bind = setup!(
+            agentstack_egress::relay_bind_opt_in()
+                .map_err(|error| runtime_unavailable("reading the relay bind opt-in", error)),
+            "relay-error"
+        );
+        let relay_bind = setup!(
+            agentstack_egress::relay_bind_address(
+                std::env::consts::OS,
+                bridge_gateway,
+                explicit_bind,
+                RELAY,
+            )
+            .map_err(|error| runtime_unavailable("choosing the relay bind address", error)),
+            "relay-error"
+        );
         let relay = setup!(
-            agentstack_egress::BlockingExecutionRelay::start_on_or_unspecified(
+            agentstack_egress::BlockingExecutionRelay::start_on_or_refuse(
                 relay_bind,
+                RELAY,
                 token,
                 grant,
                 plan.limits.max_calls,

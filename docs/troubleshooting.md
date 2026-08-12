@@ -645,7 +645,9 @@ and the ordering rule: [lock first, then trust](#lock-first-then-trust).
 **`error: refusing to apply without --consented <digest> — run --preview first, review, then pass the digest it printed`**
 
 From the digest-bound panel actions (`create-profile`, `use-profile`,
-`add-server-to-profile`, `add-skill-to-profile`). Run the same command with
+`add-server-to-profile`, `add-skill-to-profile` — fixed integration-contract
+names that predate the toolset rename, which is why the verbs keep their old
+spelling). Run the same command with
 `--preview`, read the JSON, then re-run with `--yes --consented <digest>`.
 
 To withdraw consent at any time:

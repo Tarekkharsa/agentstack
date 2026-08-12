@@ -30,6 +30,15 @@ The tag **must** be `v<version>` where `<version>` is the cli crate's
 egress-image tag is derived from it, and the `egress-image` job fails the
 release on a mismatch. Bump the crate version first, then:
 
+**Only `crates/cli`'s version is the product version.** Every other crate in
+the workspace is versioned independently and may sit on an older number
+(`agentstack-core` and friends at `0.17.0` while the CLI is on an rc, for
+example). Nothing depends on them agreeing: each library crate is
+`publish = false` and every dependent names it by bare path
+(`agentstack-core = { path = "../core" }`), with no version requirement to
+satisfy. So a release bumps `crates/cli/Cargo.toml` and leaves the libraries
+alone unless one of them has its own reason to move.
+
 ```sh
 git tag "v$(grep -m1 '^version' crates/cli/Cargo.toml | cut -d'"' -f2)"
 git push --tags

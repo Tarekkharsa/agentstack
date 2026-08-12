@@ -40,7 +40,8 @@ pub use bridge::{EgressBridge, ProxyEndpoint};
 pub use connect::{parse_connect_target, Target};
 pub use decide::{Decision, EgressGuard};
 pub use execution_relay::{
-    relay_bind_address, BlockingExecutionRelay, ExecutionCall, RelayCallError,
+    parse_relay_bind, relay_bind_address, relay_bind_opt_in, relay_bind_refusal,
+    BlockingExecutionRelay, ExecutionCall, RelayCallError, RELAY_BIND_ENV,
 };
 pub use proxy::{EventSink, ServerProxy};
 pub use relay::start_relay;

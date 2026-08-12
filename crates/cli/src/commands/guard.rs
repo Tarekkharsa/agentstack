@@ -341,6 +341,14 @@ fn rule_subject(event: &GuardEvent) -> String {
         GuardEvent::Bash { command } => format!("bash: {command}"),
         GuardEvent::FileRead { path } => format!("read: {path}"),
         GuardEvent::FileWrite { path } => format!("write: {path}"),
+        // A multi-target write (a patch envelope) keeps the `write: ` prefix,
+        // so the closed set of four rule prefixes is unchanged. An empty set is
+        // the fail-closed refusal of a write whose target could not be read;
+        // it still needs a subject, and the subject is machine-authored.
+        GuardEvent::FileWrites { paths } if paths.is_empty() => {
+            "write: (target undetermined)".to_string()
+        }
+        GuardEvent::FileWrites { paths } => format!("write: {}", paths.join(", ")),
         GuardEvent::Other => "other".to_string(),
     }
 }
@@ -461,8 +469,13 @@ fn first_denial_teach_line() -> Option<String> {
     fs::create_dir_all(paths::agentstack_home()).ok()?;
     fs::write(&marker, b"agentstack guard first-denial teach shown\n").ok()?;
     Some(
+        // The anchor is a real heading on the generated site
+        // (`docs/concepts.md` "## Policy, guard, and protected runs", slugged
+        // by `tools/make-docs-pages.py`). `start.html#s-guard` never existed —
+        // the start page has no guard section at all — so the line taught a
+        // 404 on the one occasion a user ever sees it.
         "this was agentstack's guard — how it works: \
-         https://tarekkharsa.github.io/agentstack/start.html#s-guard"
+         https://tarekkharsa.github.io/agentstack/concepts.html#policy-guard-and-protected-runs"
             .to_string(),
     )
 }
@@ -1870,7 +1883,7 @@ mod tests {
         assert!(
             first
                 .as_deref()
-                .is_some_and(|l| l.contains("start.html#s-guard")),
+                .is_some_and(|l| l.contains("concepts.html#policy-guard-and-protected-runs")),
             "the first denial must carry the teach line, got {first:?}"
         );
         // The marker now exists, so the machine is flagged as introduced.
