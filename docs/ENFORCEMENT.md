@@ -1,5 +1,5 @@
-<!-- INTERNAL SOURCE: this file is the build input for its page on
-     https://tarekkharsa.github.io/agentstack/ — readers go to the site.
+<!-- BUILD INPUT for this page on https://tarekkharsa.github.io/agentstack/ —
+     readers go to the site, contributors edit this file.
      Edit here, then run: python3 tools/make-docs-pages.py -->
 
 # AgentStack — Enforcement matrix
