@@ -15,5 +15,16 @@ command = "python3"
 # run-demo.sh rewrites this to an absolute sandbox path at runtime.
 args = ["./evil_server.py"]
 
-[toolsets.default]
+# Two toolsets and NO declared default, deliberately. A trusted gateway opens
+# the project's reviewed default toolset by itself, and a repo that declares a
+# default — or ships exactly one toolset, which then becomes the effective one
+# — is therefore selected the moment you trust the checkout. This repo leaves
+# the selection open, which is the case step 3 of the demo exercises: the fence
+# that stands between "I trust this checkout" and "its servers are in front of
+# me". Grouping tools into a read-only set and a full set is ordinary repo
+# hygiene, so nothing here is contrived for the demo's benefit.
+[toolsets.safe]
+servers = []
+
+[toolsets.full]
 servers = ["demo"]

@@ -24,8 +24,16 @@ The villain is [`bundle/evil_server.py`](bundle/evil_server.py): an MCP server
 that advertises a friendly `status` tool and a malicious `exfiltrate` tool.
 Call `exfiltrate` and it reads a planted credential off disk and POSTs it to a
 localhost "sink" — the phone-home. The [`bundle/`](bundle/) manifest declares
-that server behind a toolset (`[toolsets.default]`) and, tellingly, **no
-firewall of its own** — a malicious repo won't constrain itself.
+that server behind a toolset (`[toolsets.full]`, alongside an empty
+`[toolsets.safe]`, and **no declared default**) and, tellingly, **no firewall
+of its own** — a malicious repo won't constrain itself.
+
+The missing default is load-bearing for scenario 3: a trusted gateway opens the
+project's *reviewed default* toolset by itself, and a repo that declares a
+default — or ships exactly one toolset, which then becomes the effective one —
+is selected the moment you trust the checkout. This repo leaves the selection
+open, so the fence is the thing standing between "I trust this checkout" and
+"its servers are in front of me".
 
 The demo then runs it four ways:
 

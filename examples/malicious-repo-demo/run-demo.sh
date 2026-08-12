@@ -82,7 +82,12 @@ export SINK_URL="http://127.0.0.1:$PORT"
 sink_received() { [ -s "$SINK_LOG" ]; }
 reset_sink()    { : > "$SINK_LOG"; }
 
-INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"demo","version":"0"}}}
+# The version must be one the server knows. An unrecognized string is NOT
+# negotiated down — the handshake settles on the server's latest instead — and
+# a modern connection refuses `agentstack_lease_open` outright, because
+# connection-scoped toolset leases are legacy-only (docs/concepts.md). Step 4
+# needs a real lease to expose the server, so the firewall is what refuses it.
+INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"demo","version":"0"}}}
 {"jsonrpc":"2.0","method":"notifications/initialized"}'
 
 printf '\n\033[1mAgentStack — malicious-repo demo (asserting)\033[0m\n'
@@ -137,8 +142,9 @@ version = 1
 EOF
 consent=$("$AS" trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')
 "$AS" trust . --yes --consented-digest "$consent" > /dev/null 2>&1
-# The bundle declares a toolset ([toolsets.default]), so trusting it exposes
-# nothing on its own — a lease has to select the toolset first.
+# The bundle declares TWO toolsets and no default, so there is no reviewed
+# default for a trusted gateway to open by itself: trusting the checkout
+# exposes nothing until something selects a toolset.
 printf '%s\n%s\n' "$INIT" \
   '{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"demo__exfiltrate","arguments":{}}}' \
   | "$AS" mcp --auto-project > /dev/null 2>&1 || true
@@ -162,16 +168,69 @@ reset_sink
 # Opening the lease is what EXPOSES the toolset's server — which is the only
 # way the `[policy.tools]` firewall can be the thing that refuses. Same
 # connection, so the lease is still open when the exfil call arrives.
-printf '%s\n%s\n%s\n' "$INIT" \
-  '{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"agentstack_lease_open","arguments":{"profile":"default"}}}' \
-  '{"jsonrpc":"2.0","id":9,"method":"tools/call","params":{"name":"demo__exfiltrate","arguments":{}}}' \
-  | "$AS" mcp --auto-project > /dev/null 2>&1 || true
+#
+# These two calls must land in ORDER, and the server answers requests
+# concurrently: a pipelined pair can be served in either order, and an exfil
+# call served BEFORE the lease that exposes the server would silently turn this
+# step into a second copy of step 3. So drive the one session
+# request-by-request, in a dozen lines of the python3 this demo already needs.
+LEASED_OUT="$(python3 - "$AS" <<'PY' 2>&1 || true
+import json
+import subprocess
+import sys
+
+proc = subprocess.Popen(
+    [sys.argv[1], "mcp", "--auto-project"],
+    stdin=subprocess.PIPE,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.DEVNULL,
+    text=True,
+)
+
+
+def send(message):
+    proc.stdin.write(json.dumps(message) + "\n")
+    proc.stdin.flush()
+
+
+def request(rid, method, params):
+    send({"jsonrpc": "2.0", "id": rid, "method": method, "params": params})
+    while True:
+        line = proc.stdout.readline()
+        if not line:
+            raise SystemExit("agentstack mcp closed its stdout before answering")
+        try:
+            message = json.loads(line)
+        except ValueError:
+            continue
+        if message.get("id") == rid:
+            return message
+
+
+request(1, "initialize", {
+    "protocolVersion": "2025-11-25",
+    "capabilities": {},
+    "clientInfo": {"name": "demo", "version": "0"},
+})
+send({"jsonrpc": "2.0", "method": "notifications/initialized"})
+opened = request(2, "tools/call", {
+    "name": "agentstack_lease_open", "arguments": {"profile": "full"},
+})
+print(opened["result"]["content"][0]["text"])
+called = request(3, "tools/call", {
+    "name": "demo__exfiltrate", "arguments": {},
+})
+print(called["result"]["content"][0]["text"])
+proc.stdin.close()
+proc.wait()
+PY
+)"
 sleep 0.3
 LAST="$(tail -1 "$AGENTSTACK_HOME/audit/calls.jsonl" 2>/dev/null || true)"
 if grep -q 'denied' <<< "$LAST" && ! grep -q '"fence"' <<< "$LAST"; then
   ok "the call was firewalled and written to the audit log as denied"
 else
-  bad "expected a denied audit record; got: ${LAST:-<none>}"
+  bad "expected a denied audit record; got: ${LAST:-<none>}. The session said: $LEASED_OUT"
 fi
 if ! sink_received; then
   ok "the sink stayed empty — the exfil call never reached the server"

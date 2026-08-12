@@ -10,10 +10,12 @@
 #
 #     1. Untrusted           → the server is inert; the gateway serves only its
 #                              control plane. Nothing spawned, nothing audited.
-#     2. Trusted, unleased   → still nothing. This project declares a toolset,
-#                              so the gateway offers its control plane only
-#                              until a lease NAMES one. Policy is the second
-#                              fence, not the first.
+#     2. Trusted             → the project's declared default toolset opens
+#                              ITSELF for a trusted gateway (docs/concepts.md:
+#                              "The default toolset opens automatically for a
+#                              trusted gateway"), so trust — not a lease — is
+#                              the first fence, and policy is the second. What
+#                              the connection then sees is already filtered.
 #     3. Leased, discovery   → `tools_search` returns only the read-only tools.
 #                              `delete_everything` is INVISIBLE, even though the
 #                              repo allowlisted it.
@@ -25,9 +27,10 @@
 #     5. `explain opsbox`    → shows BOTH policy layers (project + machine).
 #     6. `doctor`            → reports the machine-policy summary as "restrictive".
 #
-# Steps 2-4 run in ONE gateway session (gateway_probe.py), so the fence and the
-# intersection are proven against the same connection: it sees nothing, then it
-# sees exactly the filtered set.
+# Steps 2-4 run in ONE gateway session (gateway_probe.py), so the automatic
+# default and the intersection are proven against the same connection: the
+# filtered set is the ONLY set that connection ever sees, before and after an
+# explicit lease names the same toolset.
 #
 # Exits nonzero and prints FAIL on any mismatch; safe to run unattended. Runs
 # entirely inside an isolated sandbox — nothing touches your real config.
@@ -84,7 +87,11 @@ mkdir -p "$PROJECT"
 cp -R "$HERE/bundle/." "$PROJECT/"
 cd "$PROJECT"
 
-INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}
+# A version the server actually knows. An unrecognized string is not negotiated
+# down — the handshake settles on the server's latest instead — so pinning a
+# real one keeps these probes in the era gateway_probe.py drives (see its
+# header for why that matters to the lease).
+INIT='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"probe","version":"0"}}}
 {"jsonrpc":"2.0","method":"notifications/initialized"}'
 
 printf '\033[1;36m  agentstack — two-layer policy intersection\033[0m\n'
@@ -148,18 +155,23 @@ del_text="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['delete_e
 adm_err="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['admin_reset'][0])" "$PROBE")"
 adm_text="$(python3 -c "import json,sys; print(json.loads(sys.argv[1])['admin_reset'][1])" "$PROBE")"
 
-# the fence: trusted is not enough. This project declares [toolsets.default],
-# so nothing is proxied until a lease names a toolset — the policy layers below
-# only ever get to decide about a server the fence has already let through.
-if ! grep -q 'opsbox__' <<< "$fenced_search_text"; then
-  ok "fenced: trusted but unleased, tools_search still surfaces no proxied tool"
+# The fence a trusted connection gets for free: this project declares
+# [toolsets.default], and the reviewed default toolset opens itself for a
+# trusted gateway — no explicit lease, and still no native files. What matters
+# for this demo is that the machine floor is ALREADY applied to that automatic
+# surface: the very first thing the connection can see is the filtered set, not
+# the manifest's own wish list.
+if grep -q 'opsbox__get_status' <<< "$fenced_search_text" \
+   && ! grep -q 'delete_everything' <<< "$fenced_search_text" \
+   && ! grep -q 'admin_reset' <<< "$fenced_search_text"; then
+  ok "automatic: the trusted default toolset opens itself, already filtered by the machine floor"
 else
-  bad "fenced: an unleased gateway exposed proxied tools: $fenced_search_text"
+  bad "automatic: expected the filtered default-toolset surface; got: $fenced_search_text"
 fi
-if [ "$fenced_call_err" = "True" ] && grep -q 'no open lease' <<< "$fenced_call_text"; then
-  ok "fenced: a direct opsbox__get_status is refused, and the refusal names the missing lease"
+if [ "$fenced_call_err" = "False" ] && grep -q 'get_status: ok' <<< "$fenced_call_text"; then
+  ok "automatic: an allowed tool is callable on that surface without an explicit lease"
 else
-  bad "fenced: expected a no-lease refusal; got err=$fenced_call_err text=$fenced_call_text"
+  bad "automatic: expected get_status to succeed on the automatic default; got err=$fenced_call_err text=$fenced_call_text"
 fi
 if grep -q '"opened": "default"' <<< "$lease_text" \
    && grep -q '"native_files_written": false' <<< "$lease_text"; then
@@ -260,6 +272,6 @@ else
   bad "doctor: expected a restrictive machine-policy line; got: ${SUMMARY:-<none>}"
 fi
 
-say "A lease to get in the door. Two layers past it. The floor wins."
+say "Trust to get in the door. Two layers past it. The floor wins."
 printf '\n\033[1mSummary:\033[0m %d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

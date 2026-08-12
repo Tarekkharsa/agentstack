@@ -6,19 +6,71 @@ import subprocess
 import sys
 
 
-def request(request_id, name, arguments):
-    return {
-        "jsonrpc": "2.0",
-        "id": request_id,
-        "method": "tools/call",
-        "params": {"name": name, "arguments": arguments},
-    }
-
-
 def result_text(response):
     if "error" in response:
         raise RuntimeError(response["error"])
-    return json.loads(response["result"]["content"][0]["text"])
+    text = response["result"]["content"][0]["text"]
+    if response["result"].get("isError"):
+        raise RuntimeError(text)
+    return json.loads(text)
+
+
+class Session:
+    """One stdio MCP connection, driven strictly one request at a time.
+
+    Sequential is load-bearing, not tidiness: the server handles requests
+    CONCURRENTLY, so a whole script poured into stdin at once comes back out
+    of order — `lease_status` can be answered before `lease_open` has run, and
+    the demo would read a lease it had not opened yet. Each call below writes
+    one line and waits for the reply carrying its own id.
+    """
+
+    def __init__(self, argv, cwd=None):
+        self.proc = subprocess.Popen(
+            argv,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=True,
+            cwd=cwd,
+        )
+        self.next_id = 0
+
+    def notify(self, method):
+        self._send({"jsonrpc": "2.0", "method": method})
+
+    def call(self, message):
+        self.next_id += 1
+        message = dict(message, jsonrpc="2.0", id=self.next_id)
+        self._send(message)
+        while True:
+            line = self.proc.stdout.readline()
+            if not line:
+                self.proc.wait()
+                raise SystemExit(
+                    f"agentstack mcp closed its stdout before answering "
+                    f"{message['method']} (exit {self.proc.returncode})"
+                )
+            try:
+                response = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(response, dict) and response.get("id") == message["id"]:
+                return response
+
+    def tool(self, name, arguments):
+        return self.call(
+            {"method": "tools/call", "params": {"name": name, "arguments": arguments}}
+        )
+
+    def _send(self, message):
+        self.proc.stdin.write(json.dumps(message) + "\n")
+        self.proc.stdin.flush()
+
+    def close(self):
+        self.proc.stdin.close()
+        code = self.proc.wait()
+        if code != 0:
+            raise SystemExit(f"agentstack mcp exited {code}")
 
 
 def main():
@@ -26,37 +78,46 @@ def main():
         raise SystemExit("usage: lease_demo.py AGENTSTACK_BIN PROJECT_DIR")
 
     agentstack, project = sys.argv[1:]
-    messages = [
-        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}},
-        request(2, "agentstack_lease_open", {"profile": "backend"}),
-        request(3, "agentstack_list_loadable", {}),
-        request(
-            4,
+    # A real MCP handshake, not a stub: the server speaks the protocol proper,
+    # so `initialize` must carry protocolVersion/capabilities/clientInfo and be
+    # followed by the `notifications/initialized` notification before any
+    # tools/call is accepted. The notification has no id and gets no response,
+    # which is why the replies below are matched BY ID rather than by position.
+    #
+    # The version is load-bearing, and it must be one the server actually
+    # supports: an unknown string (the old "2024-11-05") is not negotiated down
+    # — the handshake settles on the server's LATEST instead, and a modern
+    # connection refuses connection-scoped toolset leases by design ("a modern
+    # MCP connection re-derives the trusted default on each request", see
+    # docs/concepts.md). This demo's whole subject is the connection lease, so
+    # it speaks the era in which that lease exists.
+    session = Session([agentstack, "mcp", "--manifest-dir", project])
+    session.call(
+        {
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": {"name": "lease-demo", "version": "0"},
+            },
+        }
+    )
+    session.notify("notifications/initialized")
+
+    opened = result_text(session.tool("agentstack_lease_open", {"profile": "backend"}))
+    loadable = result_text(session.tool("agentstack_list_loadable", {}))
+    loaded = result_text(
+        session.tool(
             "agentstack_load",
             {"name": "review-checklist", "reason": "review the backend change"},
-        ),
-        request(5, "agentstack_lease_status", {}),
-        request(6, "agentstack_lease_freeze", {"name": "backend-observed"}),
-        request(7, "agentstack_lease_close", {}),
-    ]
-    payload = "".join(json.dumps(message) + "\n" for message in messages)
-    completed = subprocess.run(
-        [agentstack, "mcp", "--manifest-dir", project],
-        input=payload,
-        text=True,
-        capture_output=True,
-        check=True,
+        )
     )
-    responses = [json.loads(line) for line in completed.stdout.splitlines()]
-    if len(responses) != len(messages):
-        raise RuntimeError(f"expected {len(messages)} responses, got {len(responses)}")
-
-    opened = result_text(responses[1])
-    loadable = result_text(responses[2])
-    loaded = result_text(responses[3])
-    status = result_text(responses[4])
-    frozen_text = responses[5]["result"]["content"][0]["text"]
-    closed = result_text(responses[6])
+    status = result_text(session.tool("agentstack_lease_status", {}))
+    frozen_text = session.tool(
+        "agentstack_lease_freeze", {"name": "backend-observed"}
+    )["result"]["content"][0]["text"]
+    closed = result_text(session.tool("agentstack_lease_close", {}))
+    session.close()
 
     assert opened["opened"] == "backend"
     assert opened["native_files_written"] is False
