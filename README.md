@@ -21,11 +21,16 @@
 curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"       # only if the installer printed "Add to PATH"
 agentstack init                            # finds what your CLIs already have, writes it into .agentstack/
-agentstack x gateway connect --all --write # register the bridge once, so live delivery reaches your CLIs
+agentstack x gateway connect --all --write # register the bridge once (the interactive wizard may have done it)
 agentstack status                          # is it ready — and if not, the one thing that fixes it
 # then restart your coding CLI — a harness reads its config at startup:
 agentstack x why <server>                  # names which CLIs are served it live
 ```
+
+If you ran `agentstack init` interactively and let the wizard register the
+gateway, step 3 has nothing left to do and prints `already connected` or
+`Updated 0 harness configs`. That is success, not a failure — the bridge only
+needs registering once per tool.
 
 The installer puts the binary in `/usr/local/bin` when it can write there and in
 `$HOME/.local/bin` otherwise. It names the directory it chose, and when that

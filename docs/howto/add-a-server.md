@@ -76,15 +76,22 @@ prompt for the value`. The non-interactive forms are:
 
 ```bash
 agentstack trust --preview                  # JSON review surface; read `surface_digest` from it
-agentstack trust . --yes --consented sha256:<the surface_digest you just reviewed>
-agentstack secret set GITHUB_TOKEN --value <VALUE>
+agentstack trust . --yes --consented <surface_digest>   # the value already includes sha256:
+agentstack secret set GITHUB_TOKEN --value <VALUE>              # OS keychain
+agentstack secret set GITHUB_TOKEN --value <VALUE> --env-file  # project env file
 ```
 
 `trust --preview` emits JSON on its own (there is no `--json` flag) and its
-`surface_digest` value already carries the `sha256:` prefix; the grant refuses
-unless that digest still matches the bytes on disk. Inline `--value` can land in
-shell history — prefer the prompt when you have a terminal — and add
-`--env-file` to write the project `.env` instead of the OS keychain.
+`surface_digest` value already carries the `sha256:` prefix, so pass it
+verbatim — a second `sha256:` is refused. The grant refuses too unless that
+digest still matches the bytes on disk.
+
+**Two stores, and on some machines only one of them works.** `--value` alone
+writes to the OS keychain; `--env-file` writes the project env file next to the
+manifest. A headless box, a container, or a Linux machine with no secret
+service has no keychain to write to, and there `--env-file` is the working
+path rather than a fallback. Inline values can land in shell history either
+way — prefer the prompt when you have a terminal.
 
 The next trusted agent connection opens the default and can discover the
 server's tools through `tools_search`. The server definition is not copied into

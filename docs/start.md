@@ -249,7 +249,7 @@ already emits JSON (there is no `--json` flag), and the field to read out of it 
 
 ```bash
 agentstack trust --preview                  # JSON review surface; read `surface_digest` from it
-agentstack trust . --yes --consented sha256:<the surface_digest you just reviewed>
+agentstack trust . --yes --consented <surface_digest>   # the value already includes sha256:
 ```
 
 `--yes` requires `--consented`, and the grant refuses unless the digest still
