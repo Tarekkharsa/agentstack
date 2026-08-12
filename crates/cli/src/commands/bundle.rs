@@ -168,12 +168,23 @@ fn decrypt(encrypted: &[u8], passphrase: &str) -> Result<Vec<u8>> {
 mod tests {
     use super::*;
 
+    // The two arms below were one test. Each `encrypt`/`decrypt` pays the
+    // password-KDF work factor in full — which is the point, a weakened KDF
+    // would make the test lie — so the single test serialized three of those
+    // costs at ~3.9s. Split, the runner overlaps them and the assertions,
+    // inputs and work factor are all unchanged.
+
     #[test]
     fn encrypt_decrypt_roundtrip() {
         let enc = encrypt(b"hello bundle", "pw123").unwrap();
         assert_ne!(enc, b"hello bundle");
         let dec = decrypt(&enc, "pw123").unwrap();
         assert_eq!(dec, b"hello bundle");
+    }
+
+    #[test]
+    fn decrypt_refuses_the_wrong_passphrase() {
+        let enc = encrypt(b"hello bundle", "pw123").unwrap();
         assert!(decrypt(&enc, "wrong").is_err());
     }
 }

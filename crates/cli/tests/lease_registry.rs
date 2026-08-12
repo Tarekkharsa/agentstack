@@ -35,33 +35,15 @@ static ENV_LOCK: Mutex<()> = Mutex::new(());
 
 const BIN: &str = env!("CARGO_BIN_EXE_agentstack");
 
-/// A minimal MCP stdio server in POSIX sh exposing one named tool, so a test
-/// can tell which upstream a discovery result came from.
-fn fixture(tool: &str) -> String {
-    format!(
-        r#"#!/bin/sh
-while IFS= read -r line; do
-  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
-  case "$line" in
-    *'"method":"server/discover"'*)
-      printf '{{"jsonrpc":"2.0","id":%s,"error":{{"code":-32601,"message":"method not found"}}}}\n' "$id"
-      ;;
-    *'"method":"initialize"'*)
-      printf '{{"jsonrpc":"2.0","id":%s,"result":{{"protocolVersion":"2025-06-18","capabilities":{{}},"serverInfo":{{"name":"fix","version":"0"}}}}}}\n' "$id"
-      ;;
-    *'"method":"tools/list"'*)
-      printf '{{"jsonrpc":"2.0","id":%s,"result":{{"tools":[{{"name":"{tool}","description":"Fixture tool {tool}.","inputSchema":{{"type":"object"}}}}]}}}}\n' "$id"
-      ;;
-  esac
-done
-"#
-    )
-}
+mod common;
+use common::{write_executable, StdioServer};
 
-fn write_executable(path: &Path, body: &str) {
-    use std::os::unix::fs::PermissionsExt;
-    std::fs::write(path, body).unwrap();
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+/// A minimal MCP stdio server exposing one named tool, so a test can tell which
+/// upstream a discovery result came from.
+fn fixture(tool: &str) -> String {
+    StdioServer::new("fix")
+        .tool(tool, &format!("Fixture tool {tool}."))
+        .script()
 }
 
 /// Point HOME/AGENTSTACK_HOME at a sandbox and return the agentstack home.

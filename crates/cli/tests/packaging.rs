@@ -14,11 +14,12 @@
 //! being a property of one machine's files and becomes a property of something
 //! that can be handed to somebody else.
 //!
-//! The end-to-end build is Docker-gated exactly the way `sandbox_cli_e2e.rs`
-//! and `sandbox_lockdown.rs` gate theirs: probe the daemon, print `SKIP:` and
-//! early-return where there is none. Everything else here — the plan, the
-//! staged context, every refusal — runs with no daemon at all, which is itself
-//! part of the contract.
+//! The end-to-end build is Docker-gated much the way `sandbox_cli_e2e.rs` and
+//! `sandbox_lockdown.rs` gate theirs — probe the daemon, print `SKIP:` and
+//! early-return where there is none — with one difference: a skip is a PASS to
+//! the test runner, so [`skip_or_fail`] refuses to skip when `CI` is set. See
+//! its doc comment. Everything else here — the plan, the staged context, every
+//! refusal — runs with no daemon at all, which is itself part of the contract.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -550,6 +551,27 @@ fn docker_up() -> bool {
         .unwrap_or(false)
 }
 
+/// Report a Docker-gated witness that could not run.
+///
+/// A skip that returns `Ok` is counted as a PASS by the test runner, so on a
+/// developer's machine this reads as "the image is fine" when the image was
+/// never built. That is tolerable locally — it keeps the rest of the file
+/// runnable without a daemon — and NOT tolerable in CI, where this job exists
+/// precisely because the runner ships Docker. A daemon outage there would
+/// silently turn this witness green and nobody would learn the image had
+/// stopped being proven.
+///
+/// So: skip loudly off CI, fail on CI.
+fn skip_or_fail(reason: &str) {
+    assert!(
+        std::env::var_os("CI").is_none(),
+        "REFUSING to report a skipped Docker witness as a pass on CI: {reason}. \
+         This job runs on a runner that ships Docker; if the daemon is missing, \
+         the image below was never built and this test proved nothing."
+    );
+    eprintln!("SKIP: {reason}");
+}
+
 fn pull(image: &str) -> bool {
     Command::new("docker")
         .args(["pull", image])
@@ -571,11 +593,11 @@ fn pull(image: &str) -> bool {
 fn a_built_image_carries_its_labels_and_refuses_to_start_without_its_secret() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     if !docker_up() {
-        eprintln!("SKIP: no Docker daemon");
+        skip_or_fail("no Docker daemon");
         return;
     }
     if !pull("alpine:3") {
-        eprintln!("SKIP: cannot pull alpine:3");
+        skip_or_fail("cannot pull alpine:3");
         return;
     }
 

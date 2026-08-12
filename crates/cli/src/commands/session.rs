@@ -294,7 +294,7 @@ mod tests {
         // line, no materialized skills — so there is nothing the promise
         // overstates and the bound is not printed. A caveat on every `session
         // start` is read by no one. (The behaviour behind both branches is
-        // pinned by tests/session_promises_only_the_undo_it_has.rs, which runs
+        // pinned by tests/undo_promises.rs (group 2), which runs
         // the restore that used to be offered and looks at the disk.)
         let no_skills = crate::session::StartReport {
             skill_adds: Vec::new(),

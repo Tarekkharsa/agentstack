@@ -858,6 +858,28 @@ mod tests {
         )
     }
 
+    /// A run whose loop ceiling is `limit` instead of the 10,000,000 default.
+    ///
+    /// `RuntimeLimits` is already a parameter of [`WorkflowRun::new`]; this is
+    /// the same seam, exposed to the tests that reach the ceiling on purpose.
+    /// The witness in those tests is that the ceiling is NON-CATCHABLE and the
+    /// engine survives it — properties independent of the number. Boa really
+    /// executes `while (true) {}` up to the limit, so proving that at the
+    /// production default costs ~6s of pure CPU to learn nothing the same test
+    /// learns ~100x faster at 100,000. Production is untouched.
+    fn new_run_with_limits(script: &str, limit: u64) -> Result<WorkflowRun, WorkflowError> {
+        let grant = permissive_grant(script);
+        WorkflowRun::new(
+            script,
+            RuntimeLimits {
+                loop_iteration_limit: limit,
+                ..RuntimeLimits::default()
+            },
+            serde_json::Value::Null,
+            grant,
+        )
+    }
+
     fn new_run_with_grant(script: &str, grant: Grant) -> Result<WorkflowRun, WorkflowError> {
         WorkflowRun::new(
             script,
@@ -896,7 +918,11 @@ mod tests {
         let script = "const meta = { roles: [] };\n\
              try { while (true) {} } catch (e) { globalThis.__leaked = true; }\n\
              return 1;";
-        let mut run = new_run(script).unwrap();
+        // The ceiling's VALUE is not the witness — non-catchability and engine
+        // survival are, and neither depends on the number. Boa genuinely spins
+        // through every iteration, so asserting this at the 10,000,000
+        // production default cost ~6s of pure CPU to learn nothing extra.
+        let mut run = new_run_with_limits(script, 100_000).unwrap();
         match run.step(Vec::new()) {
             StepOutcome::Failed(err) => {
                 assert_eq!(err.kind, WorkflowErrorKind::IterationLimit)

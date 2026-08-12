@@ -1,0 +1,32 @@
+# Workspace-scoped Cargo configuration.
+#
+# Keep this file to environment defaults only. It must NOT set `build.target-dir`
+# or anything else that would fight the developer's own `~/.cargo/config.toml`
+# or the shared-cache arrangement worktrees rely on.
+
+[env]
+# HERMETICITY: pin the MCP Registry provider at a dead local address so no test
+# — and no `cargo run` from inside this workspace — reaches the live third-party
+# host `registry.modelcontextprotocol.io`.
+#
+# Why this is needed. `RegistryProvider` (crates/cli/src/provider/registry.rs)
+# is a DEFAULT provider, so a real blocking HTTPS GET sat behind every `search`,
+# `add --from` and `explain` path in the suite. `search()` degrades a failed
+# request to an empty result — deliberately, so the catalog keeps working
+# offline — which means a failed request and an empty answer are
+# indistinguishable. The tests therefore passed whether or not the network
+# answered, whether the registry was up, and whether its response shape had
+# changed: an uncontrolled third-party input to a green suite.
+#
+# Port 1 refuses instantly on every platform, so the pin also removes the 8s
+# per-call timeout that dominated local runs of `vendor_packs`, `explain` and
+# friends. Remote-response PARSING stays covered without the network by the
+# unit test `parses_remote_and_package_servers` in that same module, and the
+# pin itself is witnessed by `the_suite_never_reaches_the_live_registry`.
+#
+# `[env]` does not force: a value already in the environment wins. To talk to
+# the real registry from a checkout, set the variable explicitly —
+#   AGENTSTACK_REGISTRY_URL=https://registry.modelcontextprotocol.io cargo run …
+# Installed release binaries are unaffected; this applies only to processes
+# Cargo launches from within this workspace.
+AGENTSTACK_REGISTRY_URL = "http://127.0.0.1:1"

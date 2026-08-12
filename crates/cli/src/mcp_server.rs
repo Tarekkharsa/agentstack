@@ -1144,39 +1144,6 @@ fn protocol_writer() -> Box<dyn Write + Send> {
     crate::sys::reserve_stdout_for_protocol()
 }
 
-#[cfg(test)]
-fn handle(
-    req: &Value,
-    dir: Option<&Path>,
-    gateway: &std::sync::Arc<crate::gateway::Gateway>,
-    trust_note: Option<&str>,
-    transparent: bool,
-) -> Option<Value> {
-    let method = req.get("method")?.as_str()?;
-    let id = req.get("id").cloned().unwrap_or(Value::Null);
-    match method {
-        "tools/list" => {
-            let mut tools = tool_defs().as_array().cloned().unwrap_or_default();
-            if transparent {
-                tools.extend(gateway.namespaced_tools().iter().cloned());
-            }
-            Some(json!({ "jsonrpc": "2.0", "id": id, "result": { "tools": tools } }))
-        }
-        "tools/call" => {
-            let params = req.get("params").cloned().unwrap_or_else(|| json!({}));
-            let name = params.get("name").and_then(Value::as_str).unwrap_or("");
-            let args = params
-                .get("arguments")
-                .cloned()
-                .unwrap_or_else(|| json!({}));
-            let result =
-                dispatch_tool_with_lease(name, &args, dir, gateway, trust_note, &new_lease_store());
-            Some(json!({ "jsonrpc": "2.0", "id": id, "result": result }))
-        }
-        _ => None,
-    }
-}
-
 /// Protocol-neutral tool dispatch. RMCP owns initialization, lifecycle,
 /// JSON-RPC envelopes, errors, and capability negotiation; this function owns
 /// only AgentStack's tool behavior.
@@ -3205,31 +3172,55 @@ mod tests {
     }
 
     /// Transparent mode appends the (policy-filtered, namespaced) upstream
-    /// tools to `tools/list`; compact mode keeps them behind `tools_search`.
+    /// tools to `tools/list`; compact mode keeps them behind `tools_search`,
+    /// so even a populated gateway advertises only the control plane.
+    ///
+    /// Referenced as the witness for the compact/transparent split by
+    /// `crates/cli/tests/package_layer.rs`.
     #[test]
     fn transparent_tools_list_advertises_upstream_tools() {
-        let req = json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" });
-        let gw = shared(crate::gateway::Gateway::with_tools(vec![json!({
-            "name": "figma__get_file",
-            "description": "[via figma] Get a file.",
-            "inputSchema": { "type": "object" }
-        })]));
-        let names = |resp: &Value| -> Vec<String> {
-            resp["result"]["tools"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .map(|t| t["name"].as_str().unwrap().to_string())
-                .collect()
+        let fixture = || {
+            shared(crate::gateway::Gateway::with_tools(vec![
+                json!({
+                    "name": "figma__get_file",
+                    "description": "[via figma] Get a file.",
+                    "inputSchema": { "type": "object" }
+                }),
+                json!({
+                    "name": "github__list_issues",
+                    "description": "[via github] List issues in a repository.",
+                    "inputSchema": { "type": "object" }
+                }),
+            ]))
         };
-        // Compact (default): control-plane tools only.
-        let compact = names(&handle(&req, None, &gw, None, false).unwrap());
-        assert!(!compact.iter().any(|n| n == "figma__get_file"));
-        assert!(compact.iter().any(|n| n == "tools_search"));
+
+        // Compact (default): control-plane tools only. The proxied surface
+        // stays behind tools_search however full the gateway is.
+        let compact = advertised_names(fixture(), false);
+        assert!(compact.iter().any(|n| n == "tools_search"), "{compact:?}");
+        assert!(
+            !compact.iter().any(|n| n == "figma__get_file"),
+            "{compact:?}"
+        );
+        assert!(
+            !compact.iter().any(|n| n == "github__list_issues"),
+            "{compact:?}"
+        );
+
         // Transparent: upstream tools advertised too, control plane intact.
-        let transparent = names(&handle(&req, None, &gw, None, true).unwrap());
-        assert!(transparent.iter().any(|n| n == "figma__get_file"));
-        assert!(transparent.iter().any(|n| n == "tools_search"));
+        let transparent = advertised_names(fixture(), true);
+        assert!(
+            transparent.iter().any(|n| n == "figma__get_file"),
+            "{transparent:?}"
+        );
+        assert!(
+            transparent.iter().any(|n| n == "github__list_issues"),
+            "{transparent:?}"
+        );
+        assert!(
+            transparent.iter().any(|n| n == "tools_search"),
+            "{transparent:?}"
+        );
     }
 
     /// The zero-files loadable index is skill-only: a library extension is a
@@ -3348,28 +3339,24 @@ mod tests {
         std::env::remove_var("AGENTSTACK_HOME");
     }
 
+    /// The named control-plane surface. `tests/lease_registry.rs` asserts on
+    /// the real wire only that no `__` upstream names leak into the compact
+    /// list; nothing else pins that these seventeen are actually advertised,
+    /// so a tool quietly dropped from `tool_defs` would otherwise land green.
     #[test]
     fn tools_list_includes_search_and_add() {
-        let req = json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" });
-        let gw = shared(crate::gateway::Gateway::empty());
-        let resp = handle(&req, None, &gw, None, false).unwrap();
-        let names: Vec<&str> = resp["result"]["tools"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|t| t["name"].as_str().unwrap())
-            .collect();
-        assert!(names.contains(&"agentstack_search"));
-        assert!(names.contains(&"tools_search"));
-        assert!(names.contains(&"tools_bindings"));
-        assert!(names.contains(&"agentstack_add_server"));
-        assert!(names.contains(&"agentstack_list_loadable"));
-        assert!(names.contains(&"agentstack_load"));
-        assert!(names.contains(&"agentstack_lease_open"));
-        assert!(names.contains(&"agentstack_lease_status"));
-        assert!(names.contains(&"agentstack_lease_close"));
-        assert!(names.contains(&"agentstack_lease_freeze"));
-        for t in [
+        let names = advertised_names(shared(crate::gateway::Gateway::empty()), false);
+        for tool in [
+            "agentstack_search",
+            "tools_search",
+            "tools_bindings",
+            "agentstack_add_server",
+            "agentstack_list_loadable",
+            "agentstack_load",
+            "agentstack_lease_open",
+            "agentstack_lease_status",
+            "agentstack_lease_close",
+            "agentstack_lease_freeze",
             "agentstack_diff",
             "agentstack_add_skill",
             "agentstack_create_toolset",
@@ -3378,7 +3365,10 @@ mod tests {
             "agentstack_session_list",
             "agentstack_session_freeze",
         ] {
-            assert!(names.contains(&t), "missing tool {t}");
+            assert!(
+                names.iter().any(|name| name == tool),
+                "missing tool {tool} from {names:?}"
+            );
         }
     }
 
@@ -3420,32 +3410,32 @@ mod tests {
 
         // Trust is checked before runtime setup. A hostile repository cannot
         // turn machine opt-in into container launch or upstream dispatch.
+        // Driven through the real `Backend::call_tool`, so the refusal has to
+        // survive the dispatch barrier and the protocol-era gate as well.
+        use agentstack_mcp::Backend;
         let gw = shared(crate::gateway::Gateway::with_tools(vec![json!({
             "name": "demo__echo",
             "description": "echo",
             "inputSchema": { "type": "object" }
         })]));
-        let request = json!({
-            "jsonrpc": "2.0", "id": 9, "method": "tools/call",
-            "params": { "name": "tools_execute", "arguments": {
-                "code": "export default 1", "allowTools": ["demo__echo"]
-            }}
-        });
-        let response = handle(&request, Some(project.path()), &gw, None, false).unwrap();
-        assert_eq!(response["result"]["isError"], true);
-        assert!(response["result"]["content"][0]["text"]
-            .as_str()
-            .unwrap()
-            .contains("untrusted"));
+        let outcome = fixture_backend(gw, Some(project.path()), false)
+            .call_tool(
+                "tools_execute",
+                json!({ "code": "export default 1", "allowTools": ["demo__echo"] }),
+                agentstack_mcp::ProtocolEra::Modern,
+            )
+            .expect("the call is served, not a protocol error");
+        assert!(outcome.is_error, "{:?}", outcome.value);
+        assert!(
+            outcome.value["content"][0]["text"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("untrusted"),
+            "{:?}",
+            outcome.value
+        );
 
         std::env::remove_var("AGENTSTACK_HOME");
-    }
-
-    #[test]
-    fn notifications_get_no_response() {
-        let req = json!({ "jsonrpc": "2.0", "method": "notifications/initialized" });
-        let gw = shared(crate::gateway::Gateway::empty());
-        assert!(handle(&req, None, &gw, None, false).is_none());
     }
 
     /// A namespaced fixture tool, shaped like the gateway's discovered cache.
@@ -3457,111 +3447,75 @@ mod tests {
     }
 
     #[test]
-    fn tools_list_excludes_proxied_upstream_tools() {
-        // Even with a populated gateway, tools/list stays bounded to the
-        // control-plane tools — the proxied surface hides behind tools_search.
-        let gw = shared(crate::gateway::Gateway::with_tools(proxied_fixture()));
-        let req = json!({ "jsonrpc": "2.0", "id": 7, "method": "tools/list" });
-        let resp = handle(&req, None, &gw, None, false).unwrap();
-        let names: Vec<&str> = resp["result"]["tools"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|t| t["name"].as_str().unwrap())
-            .collect();
-        assert!(names.contains(&"tools_search"));
-        assert!(!names.contains(&"figma__get_file"));
-        assert!(!names.contains(&"github__list_issues"));
-    }
-
-    #[test]
     fn tools_search_query_returns_ranked_cards() {
-        let gw = shared(crate::gateway::Gateway::with_tools(proxied_fixture()));
-        let req = json!({
-            "jsonrpc": "2.0", "id": 8, "method": "tools/call",
-            "params": { "name": "tools_search", "arguments": { "query": "file" } }
-        });
-        let resp = handle(&req, None, &gw, None, false).unwrap();
-        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
-        assert!(text.contains("figma__get_file"));
-        assert!(text.contains("entity=\"figma__get_file:tool\""));
-        assert_eq!(resp["result"]["isError"], false);
+        let gw = crate::gateway::Gateway::with_tools(proxied_fixture());
+        let text = tools_search_text(&gw, &json!({ "query": "file" }), None);
+        assert!(text.contains("figma__get_file"), "{text}");
+        assert!(text.contains("entity=\"figma__get_file:tool\""), "{text}");
     }
 
     #[test]
     fn tools_search_entity_returns_schema_and_snippet() {
-        let gw = shared(crate::gateway::Gateway::with_tools(proxied_fixture()));
-        let req = json!({
-            "jsonrpc": "2.0", "id": 9, "method": "tools/call",
-            "params": { "name": "tools_search", "arguments": { "entity": "figma__get_file:tool" } }
-        });
-        let resp = handle(&req, None, &gw, None, false).unwrap();
-        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
-        assert!(text.contains("**Server:** figma"));
-        assert!(text.contains("fileKey"));
-        assert!(text.contains("await codemode.figma.get_file(input)"));
-        // unknown entity is a graceful message, not an error
-        let req = json!({
-            "jsonrpc": "2.0", "id": 10, "method": "tools/call",
-            "params": { "name": "tools_search", "arguments": { "entity": "figma__nope:tool" } }
-        });
-        let resp = handle(&req, None, &gw, None, false).unwrap();
-        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
-        assert!(text.contains("No proxied tool matches"));
+        let gw = crate::gateway::Gateway::with_tools(proxied_fixture());
+        let text = tools_search_text(&gw, &json!({ "entity": "figma__get_file:tool" }), None);
+        assert!(text.contains("**Server:** figma"), "{text}");
+        assert!(text.contains("fileKey"), "{text}");
+        assert!(
+            text.contains("await codemode.figma.get_file(input)"),
+            "{text}"
+        );
+
+        // An unknown entity is a graceful message, not an error.
+        let text = tools_search_text(&gw, &json!({ "entity": "figma__nope:tool" }), None);
+        assert!(text.contains("No proxied tool matches"), "{text}");
     }
 
+    /// An empty proxied surface has two causes and they must not be described
+    /// with the same sentence.
+    ///
+    /// The trust-gated case is the load-bearing one, and it is the SOLE
+    /// WITNESS for this refusal wording on the MCP path (every other
+    /// `agentstack trust <path>` string in the suite is a CLI-path test): when
+    /// the gate is why nothing is proxied, the answer must name the command
+    /// that lifts it, and must NOT claim the project "proxies no upstream" —
+    /// a sentence that sends the reader looking for servers to add instead of
+    /// a review to run. The un-gated case is the control: without a note the
+    /// wording stays neutral, and does not resurrect the stale HTTP-only claim
+    /// from before stdio servers shipped.
     #[test]
     fn tools_search_empty_surface_names_the_trust_command_when_untrusted() {
-        let gw = shared(crate::gateway::Gateway::empty());
+        let gw = crate::gateway::Gateway::empty();
         let note = "This project (/tmp/repo) is not trusted for auto mode, so none of its MCP servers are proxied (spawned or contacted). Ask a human to review the manifest and run `agentstack trust /tmp/repo` to enable them.";
+
+        // Gated: both the bare listing and a query must name the command.
         for args in [json!({}), json!({ "query": "figma" })] {
-            let req = json!({
-                "jsonrpc": "2.0", "id": 12, "method": "tools/call",
-                "params": { "name": "tools_search", "arguments": args }
-            });
-            let resp = handle(&req, None, &gw, Some(note), false).unwrap();
-            let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+            let text = tools_search_text(&gw, &args, Some(note));
             assert!(text.contains("agentstack trust /tmp/repo"), "got: {text}");
             assert!(
                 !text.contains("proxies no upstream"),
-                "the misleading no-tools message must not appear when the gate is the cause"
+                "the misleading no-tools message must not appear when the gate \
+                 is the cause: {text}"
             );
         }
-    }
 
-    #[test]
-    fn tools_search_empty_surface_without_trust_note_stays_neutral() {
-        // No trust note (eager mode, or a trusted project with no servers) —
-        // the plain message, without the stale HTTP-only claim.
-        let gw = shared(crate::gateway::Gateway::empty());
-        let req = json!({
-            "jsonrpc": "2.0", "id": 13, "method": "tools/call",
-            "params": { "name": "tools_search", "arguments": {} }
-        });
-        let resp = handle(&req, None, &gw, None, false).unwrap();
-        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
-        assert!(text.contains("proxies no upstream MCP tools"));
+        // Not gated (eager mode, or a trusted project with no servers).
+        let text = tools_search_text(&gw, &json!({}), None);
+        assert!(text.contains("proxies no upstream MCP tools"), "{text}");
         assert!(
             !text.contains("HTTP MCP servers"),
-            "stdio shipped — wording"
+            "stdio shipped — wording: {text}"
         );
     }
 
     #[test]
     fn tools_bindings_returns_client_and_recipe() {
-        let gw = shared(crate::gateway::Gateway::with_tools(proxied_fixture()));
-        let req = json!({
-            "jsonrpc": "2.0", "id": 11, "method": "tools/call",
-            "params": { "name": "tools_bindings", "arguments": {} }
-        });
-        let resp = handle(&req, None, &gw, None, false).unwrap();
-        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
+        let gw = crate::gateway::Gateway::with_tools(proxied_fixture());
+        let text = tools_bindings_text(&gw, None);
         // The generated client + shim + recipe, all secret-free.
-        assert!(text.contains("export const codemode = {"));
-        assert!(text.contains(r#"call("figma__get_file", input)"#));
-        assert!(text.contains("agentstack-runtime.ts"));
-        assert!(text.contains("## Recipe"));
-        assert_eq!(resp["result"]["isError"], false);
+        assert!(text.contains("export const codemode = {"), "{text}");
+        assert!(text.contains(r#"call("figma__get_file", input)"#), "{text}");
+        assert!(text.contains("agentstack-runtime.ts"), "{text}");
+        assert!(text.contains("## Recipe"), "{text}");
     }
 
     #[test]
@@ -3730,6 +3684,51 @@ mod tests {
         );
 
         std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    /// One backend over a gateway the test supplies, in the EAGER shape — the
+    /// production variant that serves a gateway it was handed rather than
+    /// deriving one from disk. That is what lets a test inject a fixture
+    /// upstream surface and still go through the real
+    /// [`agentstack_mcp::Backend`] impl: the dispatch barrier, the protocol-era
+    /// gate, the grant-mode refusals and the lease rebuild all run.
+    ///
+    /// `trust_anchor: None` means the snapshot carries no trust note (the
+    /// tests that need one call the pure text helpers directly), and
+    /// `runtime: None` means no code-mode endpoint is started — neither is
+    /// under test here, and both would cost a port.
+    fn fixture_backend(
+        gateway: std::sync::Arc<crate::gateway::Gateway>,
+        dir: Option<&Path>,
+        transparent: bool,
+    ) -> RmcpBackend {
+        RmcpBackend {
+            project: std::sync::Mutex::new(RmcpProject::Eager {
+                dir: dir.map(Path::to_path_buf),
+                gateway,
+                trust_anchor: None,
+                runtime: None,
+            }),
+            dispatch: DispatchBarrier::default(),
+            tools_changed: std::sync::atomic::AtomicBool::new(false),
+            lease: new_lease_store(),
+            transparent,
+            grant_mode: false,
+        }
+    }
+
+    /// The advertised tool names, read off the real `list_tools` surface.
+    fn advertised_names(
+        gateway: std::sync::Arc<crate::gateway::Gateway>,
+        transparent: bool,
+    ) -> Vec<String> {
+        use agentstack_mcp::Backend;
+        fixture_backend(gateway, None, transparent)
+            .list_tools(agentstack_mcp::ProtocolEra::Modern)
+            .expect("the control-plane tool definitions must convert")
+            .into_iter()
+            .map(|tool| tool.name)
+            .collect()
     }
 
     /// One auto-project backend over an explicit directory (which is its own
@@ -4080,19 +4079,6 @@ mod tests {
         auto.shutdown();
 
         std::env::remove_var("AGENTSTACK_HOME");
-    }
-
-    #[test]
-    fn search_tool_finds_github() {
-        let req = json!({
-            "jsonrpc": "2.0", "id": 3, "method": "tools/call",
-            "params": { "name": "agentstack_search", "arguments": { "query": "github" } }
-        });
-        let gw = shared(crate::gateway::Gateway::empty());
-        let resp = handle(&req, None, &gw, None, false).unwrap();
-        let text = resp["result"]["content"][0]["text"].as_str().unwrap();
-        assert!(text.contains("github"));
-        assert_eq!(resp["result"]["isError"], false);
     }
 
     /// A project with one inline skill, pinned in the lock. Returns the temp

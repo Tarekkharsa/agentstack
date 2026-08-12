@@ -272,11 +272,22 @@ fn remove_pack_fully_reverses_install_and_spares_user_files() {
         .expect("manifest still parses after removal");
 }
 
+/// One witness that `remove::run` reaches the containment guard, over every
+/// class of path a hand-edited ledger can name: the project root, the bare
+/// shared `skills` tree, a relative escape ABOVE the manifest dir, and an
+/// absolute path OUTSIDE it. All four must delete nothing — only nested
+/// `skills/<x>/...` paths are ever removed.
+///
+/// The exhaustive classification itself is pinned one layer down by the unit
+/// test `contained_skill_dir_only_accepts_nested_paths_under_skills`
+/// (`src/commands/remove.rs`), which enumerates the same cases against
+/// `contained_skill_dir` directly. What the integration layer adds — and all
+/// it needs to add — is that the command actually consults that guard: delete
+/// the single `if let Some(dir) = contained_skill_dir(&ctx.dir, path)` line in
+/// `remove::safe_skill_dirs` and this fails.
 #[test]
 fn remove_pack_never_deletes_root_or_the_shared_skills_tree() {
-    // A hand-edited ledger that points a pack skill at "." (the project root) or
-    // at the bare "skills" tree must delete NOTHING — only nested skills/<x>/...
-    // paths are ever removed.
+    // Broad in-tree paths: the root, and the tree shared with other skills.
     for evil_path in [".", "./", "skills", "skills/"] {
         let (tmp, _path) = seed(&format!(
             r#"
@@ -314,45 +325,82 @@ fn remove_pack_never_deletes_root_or_the_shared_skills_tree() {
             "path {evil_path:?}: shared skills/ tree must be untouched"
         );
     }
-}
 
-#[test]
-fn remove_pack_spares_skill_dirs_pointed_above_the_manifest_dir() {
-    // Regression for corrupt ledgers like "../x": even if that sibling exists,
-    // pack removal must not delete anything outside the manifest-owned area.
-    let (tmp, _path) = seed("");
-    let dir = tmp.path();
-    let sibling_name = format!("{}-escape", dir.file_name().unwrap().to_string_lossy());
-    let escape = dir.with_file_name(&sibling_name);
-    fs::create_dir_all(&escape).unwrap();
-    fs::write(escape.join("keep.txt"), "do not delete\n").unwrap();
+    // A relative escape above the manifest dir ("../x"): even when that
+    // sibling really exists, nothing outside the manifest-owned area goes.
+    {
+        let (tmp, _path) = seed("");
+        let dir = tmp.path();
+        let sibling_name = format!("{}-escape", dir.file_name().unwrap().to_string_lossy());
+        let escape = dir.with_file_name(&sibling_name);
+        fs::create_dir_all(&escape).unwrap();
+        fs::write(escape.join("keep.txt"), "do not delete\n").unwrap();
 
-    let manifest = format!(
-        r#"
-        version = 1
+        fs::write(
+            dir.join("agentstack.toml"),
+            format!(
+                r#"
+                version = 1
 
-        [skills.evil]
-        path = "../{sibling_name}"
+                [skills.evil]
+                path = "../{sibling_name}"
 
-        [packs.linear-pack]
-        version = "0.1.0"
-        description = "Linear pack"
-        skills = ["evil"]
-        "#
-    );
-    fs::write(dir.join("agentstack.toml"), manifest).unwrap();
+                [packs.linear-pack]
+                version = "0.1.0"
+                description = "Linear pack"
+                skills = ["evil"]
+                "#
+            ),
+        )
+        .unwrap();
 
-    let remove = RemoveArgs {
-        name: "linear-pack".into(),
-        write: true,
-    };
-    agentstack::commands::remove::run(&remove, Some(dir)).unwrap();
+        let remove = RemoveArgs {
+            name: "linear-pack".into(),
+            write: true,
+        };
+        agentstack::commands::remove::run(&remove, Some(dir)).unwrap();
 
-    assert!(
-        escape.join("keep.txt").exists(),
-        "../ skill path must never be deleted"
-    );
-    fs::remove_dir_all(&escape).unwrap();
+        assert!(
+            escape.join("keep.txt").exists(),
+            "../ skill path must never be deleted"
+        );
+        fs::remove_dir_all(&escape).unwrap();
+    }
+
+    // An absolute path outside the managed tree: containment caps the blast
+    // radius wherever the path points.
+    {
+        let outside = assert_fs::TempDir::new().unwrap();
+        let victim = outside.path().join("precious");
+        fs::create_dir_all(&victim).unwrap();
+        fs::write(victim.join("keep.txt"), "do not delete\n").unwrap();
+
+        let (tmp, _path) = seed(&format!(
+            r#"
+            version = 1
+
+            [skills.evil]
+            path = "{}"
+
+            [packs.linear-pack]
+            version = "0.1.0"
+            description = "Linear pack"
+            skills = ["evil"]
+            "#,
+            victim.display()
+        ));
+
+        let remove = RemoveArgs {
+            name: "linear-pack".into(),
+            write: true,
+        };
+        agentstack::commands::remove::run(&remove, Some(tmp.path())).unwrap();
+
+        assert!(
+            victim.join("keep.txt").exists(),
+            "absolute out-of-tree skill path must never be deleted"
+        );
+    }
 }
 
 #[test]
@@ -377,43 +425,6 @@ fn remove_then_reinstall_round_trips_cleanly() {
     let m = load(dir);
     assert!(m.skills.contains_key("linear_breakdown"));
     assert!(dir.join("skills/linear/breakdown/SKILL.md").exists());
-}
-
-#[test]
-fn remove_pack_spares_skill_dirs_pointed_outside_the_manifest_dir() {
-    // A hand-edited ledger that points a pack skill at an absolute path outside the
-    // managed tree must NOT be deleted: containment guards the blast radius.
-    let outside = assert_fs::TempDir::new().unwrap();
-    let victim = outside.path().join("precious");
-    fs::create_dir_all(&victim).unwrap();
-    fs::write(victim.join("keep.txt"), "do not delete\n").unwrap();
-
-    let (tmp, _path) = seed(&format!(
-        r#"
-        version = 1
-
-        [skills.evil]
-        path = "{}"
-
-        [packs.linear-pack]
-        version = "0.1.0"
-        description = "Linear pack"
-        skills = ["evil"]
-        "#,
-        victim.display()
-    ));
-    let dir = tmp.path();
-
-    let remove = RemoveArgs {
-        name: "linear-pack".into(),
-        write: true,
-    };
-    agentstack::commands::remove::run(&remove, Some(dir)).unwrap();
-
-    assert!(
-        victim.join("keep.txt").exists(),
-        "absolute out-of-tree skill path must never be deleted"
-    );
 }
 
 #[test]
@@ -507,49 +518,15 @@ fn upgrade_repins_lock_for_pack_skills() {
     assert!(lock.contains("checksum"), "lock row carries a checksum");
 }
 
-#[test]
-fn upgrade_never_deletes_skill_dirs_outside_the_manifest_dir() {
-    // Regression: a corrupt/hand-edited ledger that points a pack skill at an
-    // absolute path outside the managed tree must not be deleted during the
-    // upgrade's old-asset cleanup. Containment caps the blast radius.
-    let outside = assert_fs::TempDir::new().unwrap();
-    let victim = outside.path().join("precious");
-    fs::create_dir_all(&victim).unwrap();
-    fs::write(victim.join("keep.txt"), "do not delete\n").unwrap();
-
-    let (tmp, _path) = seed(&format!(
-        r#"
-        version = 1
-
-        [skills.linear_breakdown]
-        path = "{}"
-
-        [packs.linear-pack]
-        version = "0.1.0"
-        source = "catalog:linear-pack"
-        description = "Linear pack"
-        skills = ["linear_breakdown"]
-        "#,
-        victim.display()
-    ));
-    let dir = tmp.path();
-
-    agentstack::commands::upgrade::run(&upgrade_args("linear-pack", false, false, true), Some(dir))
-        .unwrap();
-
-    assert!(
-        victim.join("keep.txt").exists(),
-        "absolute out-of-tree skill path must never be deleted by upgrade"
-    );
-    // And the canonical, contained destination is what actually gets the asset.
-    assert!(dir.join("skills/linear/breakdown/SKILL.md").exists());
-}
-
+/// Upgrade uses the same ownership guard as remove — but through its OWN call
+/// site (`upgrade.rs` → `remove::safe_skill_dirs`), which is why this stays a
+/// separate witness rather than collapsing into the `remove_pack_*` test
+/// above: `upgrade` can stop calling the guard without any remove test
+/// noticing. Same four path classes: broad in-tree, relative escape, absolute
+/// outside. In every case the old-asset cleanup deletes nothing it does not
+/// own, and the canonical contained destination still gets the asset.
 #[test]
 fn upgrade_never_deletes_broad_or_escaping_skill_dirs() {
-    // Upgrade uses the same ownership guard as remove: broad paths and parent
-    // escapes are ignored during old-asset cleanup, then the canonical pack
-    // asset is installed under skills/linear/breakdown.
     for evil_path in [".", "./", "skills", "skills/"] {
         let (tmp, _path) = seed(&format!(
             r#"
@@ -622,6 +599,39 @@ fn upgrade_never_deletes_broad_or_escaping_skill_dirs() {
     );
     assert!(dir.join("skills/linear/breakdown/SKILL.md").exists());
     fs::remove_dir_all(&escape).unwrap();
+
+    // An absolute path outside the managed tree, through the same cleanup.
+    let outside = assert_fs::TempDir::new().unwrap();
+    let victim = outside.path().join("precious");
+    fs::create_dir_all(&victim).unwrap();
+    fs::write(victim.join("keep.txt"), "do not delete\n").unwrap();
+
+    let (tmp, _path) = seed(&format!(
+        r#"
+        version = 1
+
+        [skills.linear_breakdown]
+        path = "{}"
+
+        [packs.linear-pack]
+        version = "0.1.0"
+        source = "catalog:linear-pack"
+        description = "Linear pack"
+        skills = ["linear_breakdown"]
+        "#,
+        victim.display()
+    ));
+    let dir = tmp.path();
+
+    agentstack::commands::upgrade::run(&upgrade_args("linear-pack", false, false, true), Some(dir))
+        .unwrap();
+
+    assert!(
+        victim.join("keep.txt").exists(),
+        "absolute out-of-tree skill path must never be deleted by upgrade"
+    );
+    // And the canonical, contained destination is what actually gets the asset.
+    assert!(dir.join("skills/linear/breakdown/SKILL.md").exists());
 }
 
 #[test]
