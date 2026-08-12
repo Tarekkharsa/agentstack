@@ -1,14 +1,12 @@
 <img alt="agentstack" src="docs/logo.svg" width="380">
 
 > **One agent setup. Every coding CLI.**
-> AgentStack collects the MCP servers, skills, and instructions you already use
-> into one `.agentstack/` directory, then **serves them live** to Claude Code,
-> Codex, Cursor, Gemini CLI, OpenCode, and
-> [eight more](https://tarekkharsa.github.io/agentstack/adapters.html) — so the
-> project stays clean. What no live channel can carry, and every tool without
-> MCP, is written into native files instead. Named toolsets let you switch by
-> project or task; doctor, diff, and restore keep every change understandable
-> and recoverable.
+> You configure the same MCP server once per tool, in a different format each
+> time, with your tokens sitting in plain JSON.
+> AgentStack keeps one `.agentstack/` directory and delivers it to Claude Code,
+> Codex, Cursor, Gemini CLI, OpenCode and
+> [eight more](https://tarekkharsa.github.io/agentstack/adapters.html) — served
+> live where the tool speaks MCP, written as native files where it does not.
 
 **[Website](https://tarekkharsa.github.io/agentstack/)** ·
 [Docs](https://tarekkharsa.github.io/agentstack/docs.html) ·
@@ -24,20 +22,15 @@ curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install
 agentstack init                            # finds what your CLIs already have, writes it into .agentstack/
 agentstack x gateway connect --all --write # register the bridge once, so live delivery reaches your CLIs
 agentstack status                          # is it ready — and if not, the one thing that fixes it
+# then restart your coding CLI — a harness reads its config at startup:
+agentstack x why <server>                  # names which CLIs are served it live
 ```
 
-> **Use the line above as written — keep the `AGENTSTACK_VERSION` pin.** The
-> unpinned installer and `brew install` both give you **v0.17.1**, where the
-> `agentstack x` prefix does not exist yet, so step 2 fails with an
-> "unrecognized subcommand" error.
+> **Keep the `AGENTSTACK_VERSION` pin.** Without it — and with `brew install` —
+> you get v0.17.1, where `agentstack x` does not exist yet and step 2 fails with
+> an "unrecognized subcommand" error. [Why](#install).
 
-That installs **v0.18.0-rc.5**, the release this README describes, and every
-command above runs on it. `AGENTSTACK_VERSION` is what asks for it by name:
-drop it and the same line installs v0.17.1 instead, because `releases/latest`
-never points at a pre-release. On v0.17.1 the `agentstack x` prefix and a few
-newer verbs do not exist yet —
-[newer than the stable release](https://tarekkharsa.github.io/agentstack/start.html#newer-than-the-stable-release)
-says what to type there, and `agentstack --version` says which build you have.
+![Two CLIs with different half-setups: agentstack imports both into one manifest, connects the gateway so both CLIs are served the servers live while the project stays clean, passes doctor with 0 errors, renders each native format on request, and restores the machine byte-for-byte](docs/demos/first-value.svg)
 
 That is the whole first run. Here is what it left in your project — plain files
 you can open, read, and commit:
@@ -102,9 +95,8 @@ loosen the limits your own machine sets.
 `init` is a guided wizard. Scripting or CI?
 [Use it in CI](https://tarekkharsa.github.io/agentstack/howto/ci.html).
 
-Here is the whole loop, condensed from a real run of the current binary:
-
-![Two CLIs with different half-setups: agentstack imports both into one manifest, connects the gateway so both CLIs are served the servers live while the project stays clean, passes doctor with 0 errors, renders each native format on request, and restores the machine byte-for-byte](docs/demos/first-value.svg)
+The diagram at the top is that whole loop, condensed from a real run of the
+current binary. Step by step:
 
 1. **Start** — two real native configs: Claude Code knows a `github` server
    (inline token), Codex knows `tldraw`. Neither knows the other's.
@@ -160,7 +152,15 @@ machines, or teammates.
 
 ## Install
 
-The one-line installer above verifies the release tarball against the `checksums.txt` published with
+The quickstart installs **v0.18.0-rc.5**, the release this README describes, and
+every command on this page runs on it. `AGENTSTACK_VERSION` is what asks for it
+by name: drop it and the same line installs v0.17.1 instead, because
+`releases/latest` never points at a pre-release. On v0.17.1 the `agentstack x`
+prefix and a few newer verbs do not exist yet —
+[newer than the stable release](https://tarekkharsa.github.io/agentstack/start.html#newer-than-the-stable-release)
+says what to type there, and `agentstack --version` says which build you have.
+
+The one-line installer verifies the release tarball against the `checksums.txt` published with
 each release. Each release also carries a GitHub build provenance attestation tying the asset to this
 repository and the workflow that built it — check it with
 `gh attestation verify agentstack-<target>.tar.gz --repo Tarekkharsa/agentstack`. That establishes
@@ -175,7 +175,7 @@ cargo build --release                  # add --features sandbox for `run --sandb
 Release binaries ship with sandbox support compiled in; a bare `cargo build` does not — pass
 `--features sandbox` to get `run --sandbox` / `--lockdown`.
 
-Once installed, `agentstack self update` moves you to the latest *stable*
+Once installed, `agentstack x self update` moves you to the latest *stable*
 release; it verifies the download against the release's published checksum
 before replacing anything. It never moves you onto a pre-release, and never
 back off one — for v0.18.0-rc.5 use the install line above.
@@ -192,7 +192,7 @@ The formula is published by hand after each stable release, so it can lag a tag;
 `brew info` shows an older version than the
 [releases page](https://github.com/Tarekkharsa/agentstack/releases), use the
 installer or a checkout. On a Homebrew install, upgrade with
-`brew upgrade agentstack` rather than `agentstack self update` — replacing the
+`brew upgrade agentstack` rather than `agentstack x self update` — replacing the
 file directly desynchronizes the formula.
 
 **Supported platforms: macOS and Linux.** A Windows binary is published, but it is not
@@ -202,7 +202,7 @@ evidence that would move it.
 
 ### Upgrading
 
-`agentstack self update` previews; `--write` verifies the sha256 before
+`agentstack x self update` previews; `--write` verifies the sha256 before
 installing.
 [Details](https://tarekkharsa.github.io/agentstack/reference.html).
 
@@ -273,14 +273,10 @@ Everything is explained on the website — that is the one place docs live:
 
 ## Develop
 
-```bash
-cargo test              # unit + golden + integration
-cargo clippy --all-targets
-cargo fmt --check
-```
-
-Install your build with `agentstack x self link`. Ground rules and the security invariants:
-[CONTRIBUTING.md](CONTRIBUTING.md). Release history: [CHANGELOG.md](CHANGELOG.md).
+[CONTRIBUTING.md](CONTRIBUTING.md) has the fast inner loop, every CI gate with
+the command that reproduces it locally, and the security invariants a change
+has to preserve. Install your build with `agentstack x self link`. Release
+history: [CHANGELOG.md](CHANGELOG.md).
 
 ## Community and support
 
