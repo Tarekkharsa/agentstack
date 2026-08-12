@@ -2,6 +2,7 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url><loc>https://tarekkharsa.github.io/agentstack/</loc></url>
   <url><loc>https://tarekkharsa.github.io/agentstack/start.html</loc></url>
+  <url><loc>https://tarekkharsa.github.io/agentstack/library.html</loc></url>
   <url><loc>https://tarekkharsa.github.io/agentstack/docs.html</loc></url>
   <url><loc>https://tarekkharsa.github.io/agentstack/examples.html</loc></url>
   <url><loc>https://tarekkharsa.github.io/agentstack/tutorial/</loc></url>
@@ -20,6 +21,7 @@
   <url><loc>https://tarekkharsa.github.io/agentstack/howto/add-a-server.html</loc></url>
   <url><loc>https://tarekkharsa.github.io/agentstack/howto/add-a-skill.html</loc></url>
   <url><loc>https://tarekkharsa.github.io/agentstack/howto/name-a-toolset.html</loc></url>
+  <url><loc>https://tarekkharsa.github.io/agentstack/howto/run-a-workflow.html</loc></url>
   <url><loc>https://tarekkharsa.github.io/agentstack/howto/trust-a-repo.html</loc></url>
   <url><loc>https://tarekkharsa.github.io/agentstack/howto/lock-down-a-run.html</loc></url>
   <url><loc>https://tarekkharsa.github.io/agentstack/howto/team-setup.html</loc></url>

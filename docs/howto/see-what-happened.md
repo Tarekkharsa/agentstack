@@ -69,4 +69,4 @@ the [enforcement matrix](../ENFORCEMENT.md#the-matrix).
 
 - [Concepts](../concepts.md) — flight recorder, call audit log, posture
 - [Reference: live runs and `report`](../reference.md#live-runs-agentstack-run)
-- [Reference: optimize](../reference.md#optimize-agentstack-optimize)
+- [Reference: optimize](../reference.md#optimize-agentstack-x-optimize)

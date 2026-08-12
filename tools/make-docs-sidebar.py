@@ -36,6 +36,7 @@ GH = "https://github.com/Tarekkharsa/agentstack"
 TREE = [
     ("Start", None, [
         ("Get started", "start.html", "start"),
+        ("Central library", "library.html", "library"),
         ("Tutorial", "tutorial/", "tutorial"),
         ("Install", "index.html#install", "install"),
         ("Concepts", "concepts.html", "concepts"),
@@ -51,6 +52,7 @@ TREE = [
         ("Add a server", "howto/add-a-server.html", "howto-server"),
         ("Add a skill", "howto/add-a-skill.html", "howto-skill"),
         ("Name a toolset", "howto/name-a-toolset.html", "howto-toolset"),
+        ("Run a workflow", "howto/run-a-workflow.html", "howto-workflow"),
         ("Migration recipes", "migrations.html", "migrations"),
         ("Undo anything", "howto/undo.html", "howto-undo"),
         ("See what happened", "howto/see-what-happened.html", "howto-audit"),
@@ -68,7 +70,7 @@ TREE = [
     ("Configure deeper", "agentstack use · session", [
         ("How it works", "architecture.html", "how-it-works"),
         ("Workflows", "workflows.html", "workflows"),
-        ("Library sources", "reference.html#the-library-linked-source-folders", "library"),
+        ("Library internals", "reference.html#the-library-linked-source-folders", "library-internals"),
         ("Delivery modes", "concepts.html#delivery-modes", "modes"),
     ], "deeper"),
     ("Protect", "agentstack trust · guard", [

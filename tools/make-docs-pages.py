@@ -37,6 +37,7 @@ SITE = "https://tarekkharsa.github.io/agentstack"
 # (markdown source relative to docs/, html output relative to docs/, sidebar key)
 PAGES = [
     ("start.md", "start.html", "start"),
+    ("library.md", "library.html", "library"),
     ("tutorial.md", "tutorial/index.html", "tutorial"),
     ("concepts.md", "concepts.html", "concepts"),
     ("choose.md", "choose.html", "choose"),
@@ -53,6 +54,7 @@ PAGES = [
     ("howto/add-a-server.md", "howto/add-a-server.html", "howto-server"),
     ("howto/add-a-skill.md", "howto/add-a-skill.html", "howto-skill"),
     ("howto/name-a-toolset.md", "howto/name-a-toolset.html", "howto-toolset"),
+    ("howto/run-a-workflow.md", "howto/run-a-workflow.html", "howto-workflow"),
     ("howto/trust-a-repo.md", "howto/trust-a-repo.html", "howto-trust"),
     ("howto/lock-down-a-run.md", "howto/lock-down-a-run.html", "howto-lockdown"),
     ("howto/team-setup.md", "howto/team-setup.html", "howto-team"),

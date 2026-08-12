@@ -143,6 +143,8 @@
     <ul>
       <li><a href="start.html">Get started</a>
       </li>
+      <li><a href="library.html">Central library</a>
+      </li>
       <li><a href="tutorial/">Tutorial</a>
       </li>
       <li><a href="index.html#install">Install</a>
@@ -176,6 +178,8 @@
       <li><a href="howto/add-a-skill.html">Add a skill</a>
       </li>
       <li><a href="howto/name-a-toolset.html">Name a toolset</a>
+      </li>
+      <li><a href="howto/run-a-workflow.html">Run a workflow</a>
       </li>
       <li><a href="migrations.html">Migration recipes</a>
       </li>
@@ -215,7 +219,7 @@
       </li>
       <li><a href="workflows.html">Workflows</a>
       </li>
-      <li><a href="reference.html#the-library-linked-source-folders">Library sources</a>
+      <li><a href="reference.html#the-library-linked-source-folders">Library internals</a>
       </li>
       <li><a href="concepts.html#delivery-modes">Delivery modes</a>
       </li>
@@ -276,7 +280,7 @@
 <p class="versionbar">These pages describe <b>v0.18.0-rc.3</b>, a pre-release. <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">The installer</a> serves the current release, <b>v0.17.1</b> — <code>/releases/latest</code> never points at a pre-release — so this is not the build you get unless you ask for it by name: <code>AGENTSTACK_VERSION=v0.18.0-rc.3</code>. <code>agentstack --version</code> says which build you have.</p>
 <h1 id="automation-contract">Automation contract</h1>
 <p>Everything AgentStack can tell you, it can tell a program. This page is the single list: which commands emit JSON, what each body looks like, and which contract name to check before you depend on one.</p>
-<p>If you are driving the CLI from an agent, a script, or a graphical companion such as t3code, this is the page to read. If you want the human-facing flags, see <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/reference.html">Every command</a>.</p>
+<p>If you are driving the CLI from an agent, a script, or a graphical companion such as t3code, this is the page to read. If you want the human-facing flags, see <a href="reference.html">Every command</a>.</p>
 <h2 id="the-envelope">The envelope<a class="hlink" href="#the-envelope" aria-label="Link to this section">#</a></h2>
 <p>Every machine-readable <strong>read</strong> wraps its body in the same two fields:</p>
 <div class="cb" data-language="json"><div class="cb-bar"><span class="cb-lang">json</span></div><pre class="block"><code class="language-json">{
@@ -323,7 +327,8 @@
 <tr><td><code>agentstack x session list --json</code></td><td><code>json-reads-v1</code></td><td><code>sessions[]</code></td></tr>
 <tr><td><code>agentstack doctor --json</code></td><td><code>status-v1</code></td><td><code>state</code>, <code>next_action</code>, <code>sections</code>, <code>errors</code>, <code>warnings</code>, <code>trust</code>, <code>protection</code></td></tr>
 <tr><td><code>agentstack doctor --json</code></td><td><code>doctor-advisories-v1</code></td><td>top-level <code>advisories</code> count; section lines may carry <code>level: "advisory"</code></td></tr>
-<tr><td><code>agentstack doctor --json</code></td><td><code>doctor-mode-v1</code></td><td>top-level <code>mode</code> (<code>static</code> / <code>clean-at-rest</code> / <code>zero-files</code>) and <code>activation</code> (<code>locked</code> / <code>never_activated</code>) — the same derived readings <code>status</code> prints, so no prose-matching</td></tr>
+<tr><td><code>agentstack doctor --json</code></td><td><code>doctor-mode-v1</code></td><td>top-level <code>mode</code> (<code>static</code> / <code>clean-at-rest</code> / <code>zero-files</code>) and <code>activation</code> (<code>locked</code> / <code>never_activated</code>) — the same derived readings <code>status</code> prints, so no prose-matching. <code>activation</code> answers "was this project ever activated", i.e. does a lockfile exist; it is <strong>not</strong> a liveness reading</td></tr>
+<tr><td><code>agentstack doctor --json</code></td><td><code>doctor-liveness-v1</code></td><td>top-level <code>live_state</code> (<code>live</code> / <code>not_live</code>), <code>locked</code>, <code>default_toolset</code>, <code>live_toolsets[]</code> — whether the lease registry holds a live record for this project right now. Additive: <code>activation</code> keeps its <code>doctor-mode-v1</code> values, so gate on this name for the runtime reading</td></tr>
 <tr><td><code>agentstack doctor --json</code></td><td><code>doctor-cli-coverage-v1</code></td><td>per-CLI coverage — which detected CLIs the current delivery mode actually configures</td></tr>
 <tr><td><code>agentstack status --json</code> / <code>doctor --json</code></td><td><code>status-honesty-v1</code></td><td><code>state</code> never reports ready over unverified coverage — gate on this name before trusting <code>state: "ready"</code></td></tr>
 <tr><td><code>agentstack doctor --probe --json</code></td><td><code>doctor-probe-v1</code></td><td>top-level <code>probe</code> object. <strong>This one spawns</strong>: it starts each stdio server, speaks the MCP <code>initialize</code> handshake, and stops it again</td></tr>
@@ -334,10 +339,10 @@
 <tr><td><code>agentstack x diff --json</code></td><td><code>diff-existence-v1</code></td><td>per-target <code>existed_before</code> — splits "never rendered here / file absent" from "the manifest moved ahead of a rendered file"</td></tr>
 <tr><td><code>agentstack x restore --json</code></td><td><code>restore-last</code></td><td><code>entries</code> (newest first) and <code>adapter_backups</code></td></tr>
 <tr><td><code>agentstack undo --json</code></td><td><code>json-reads-v1</code></td><td><code>entries[]</code> (newest first) — the same recorded writes <code>restore --json</code> lists, keyed for timeline display</td></tr>
-<tr><td><code>agentstack x workflow list --json</code></td><td><code>workflow-observe-v1</code></td><td><code>workflows[]</code> with per-entry trust and lock state</td></tr>
-<tr><td><code>agentstack x workflow list --json</code></td><td><code>workflow-serial-roles-v1</code></td><td>per-entry <code>serial_roles</code></td></tr>
-<tr><td><code>agentstack x workflow list --json</code> / <code>workflow explain --json</code></td><td><code>workflow-role-selection-v1</code></td><td>per-entry <code>role_details[]</code> — each role's <code>harness</code>, <code>model</code>, <code>effort</code>, <code>serial</code>, and any declared value that would not reach the child. <code>explain</code> carries the envelope too; it is the deeper per-workflow read and <strong>re-gates on trust</strong></td></tr>
-<tr><td><code>agentstack x workflow runs --json</code></td><td><code>workflow-observe-v1</code></td><td><code>runs[]</code> from the machine-global runs directory</td></tr>
+<tr><td><code>agentstack workflow list --json</code></td><td><code>workflow-observe-v1</code></td><td><code>workflows[]</code> with per-entry trust and lock state</td></tr>
+<tr><td><code>agentstack workflow list --json</code></td><td><code>workflow-serial-roles-v1</code></td><td>per-entry <code>serial_roles</code></td></tr>
+<tr><td><code>agentstack workflow list --json</code> / <code>workflow explain --json</code></td><td><code>workflow-role-selection-v1</code></td><td>per-entry <code>role_details[]</code> — each role's <code>harness</code>, <code>model</code>, <code>effort</code>, <code>serial</code>, and any declared value that would not reach the child. <code>explain</code> carries the envelope too; it is the deeper per-workflow read and <strong>re-gates on trust</strong></td></tr>
+<tr><td><code>agentstack workflow runs --json</code></td><td><code>workflow-observe-v1</code></td><td><code>runs[]</code> from the machine-global runs directory</td></tr>
 <tr><td><code>agentstack x lease status --json</code></td><td><code>lease-status-v1</code></td><td><code>leases[]</code> — the machine-level runtime lease registry, each row's <code>liveness</code> derived at read time from the PID and that process's start time. <code>unknown</code> never means live. Writes nothing; on macOS it does run <code>/bin/ps</code> per recorded PID to read a start time, because there is no <code>/proc</code> to read instead</td></tr>
 <tr><td><code>agentstack x delivery --json</code></td><td><code>delivery-routing-v1</code></td><td><code>default</code> plus one <code>harnesses[]</code> row per targeted CLI with its per-kind <code>routes[]</code> (where the bytes go) and that harness's own <code>bridge_registered</code>. Decide on those two typed fields; the row's <code>summary</code> and <code>why</code> are display copy and must never be matched on</td></tr>
 <tr><td><code>agentstack x image --json</code></td><td><code>image-plan-v1</code></td><td>the packaging plan: every pinned <code>members[]</code> entry, <code>required_secrets</code> (names only), <code>blockers</code>, <code>buildable</code></td></tr>
@@ -373,11 +378,12 @@
 <tr><td><code>agentstack remove-capability</code></td><td><code>manifest-remove-v1</code></td><td>removes a project definition and memberships, then re-locks and re-renders; library untouched</td></tr>
 <tr><td><code>agentstack x restore --last --write</code></td><td><code>restore-last</code></td><td>undoes the newest recorded write</td></tr>
 </tbody></table></div>
+<p><code>profile</code> in these command and contract names is the older spelling of <strong>toolset</strong>; they name the same object.</p>
 <h2 id="payload-shapes">Payload shapes<a class="hlink" href="#payload-shapes" aria-label="Link to this section">#</a></h2>
 <h3 id="status---json"><code>status --json</code><a class="hlink" href="#status---json" aria-label="Link to this section">#</a></h3>
 <p>The orientation screen, keyed. Branch on <code>project</code>: it is <code>null</code> whenever the manifest is absent or unreadable, and <code>manifest.error</code> says which.</p>
 <div class="cb" data-language="json"><div class="cb-bar"><span class="cb-lang">json</span></div><pre class="block"><code class="language-json">{
-  "version": "0.17.1",
+  "version": "0.18.0",
   "clis_detected": ["Claude Code", "Codex CLI", "Gemini CLI"],
   "manifest": {
     "path": "/repo/.agentstack/agentstack.toml",
@@ -543,7 +549,7 @@
 <li><code>agentstack x explain &lt;name&gt; --json</code></li>
 <li><code>agentstack x report run --json</code>, <code>report runs --json</code>, <code>report calls --json</code>, <code>report wire --json</code></li>
 <li><code>agentstack x optimize --json</code></li>
-<li><code>agentstack x workflow report --json</code> (<code>workflow explain --json</code> left this list when it gained the envelope and <code>workflow-role-selection-v1</code>)</li>
+<li><code>agentstack workflow report --json</code> (<code>workflow explain --json</code> left this list when it gained the envelope and <code>workflow-role-selection-v1</code>)</li>
 </ul>
 <p>The append-only evidence files are the same kind of thing: JSON Lines with no envelope and no feature name, self-describing per row, and free to gain variants. Three moved recently and are worth knowing if you parse them:</p>
 <ul>

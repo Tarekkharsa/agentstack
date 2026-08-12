@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Which protection do I need? — agentstack</title>
-<meta name="description" content="This page used to ask you two questions. Only one of them is still yours: how much protection you want. Where capabilities land is no longer a decision — d">
+<meta name="description" content="This page asks you one question: how much protection you want. Where capabilities land is not a decision — delivery is routed for you, and the first sectio">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="canonical" href="https://tarekkharsa.github.io/agentstack/choose.html">
@@ -143,6 +143,8 @@
     <ul>
       <li><a href="start.html">Get started</a>
       </li>
+      <li><a href="library.html">Central library</a>
+      </li>
       <li><a href="tutorial/">Tutorial</a>
       </li>
       <li><a href="index.html#install">Install</a>
@@ -176,6 +178,8 @@
       <li><a href="howto/add-a-skill.html">Add a skill</a>
       </li>
       <li><a href="howto/name-a-toolset.html">Name a toolset</a>
+      </li>
+      <li><a href="howto/run-a-workflow.html">Run a workflow</a>
       </li>
       <li><a href="migrations.html">Migration recipes</a>
       </li>
@@ -215,7 +219,7 @@
       </li>
       <li><a href="workflows.html">Workflows</a>
       </li>
-      <li><a href="reference.html#the-library-linked-source-folders">Library sources</a>
+      <li><a href="reference.html#the-library-linked-source-folders">Library internals</a>
       </li>
       <li><a href="concepts.html#delivery-modes">Delivery modes</a>
       </li>
@@ -275,10 +279,10 @@
   <main id="main-content" tabindex="-1">
 <p class="versionbar">These pages describe <b>v0.18.0-rc.3</b>, a pre-release. <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">The installer</a> serves the current release, <b>v0.17.1</b> — <code>/releases/latest</code> never points at a pre-release — so this is not the build you get unless you ask for it by name: <code>AGENTSTACK_VERSION=v0.18.0-rc.3</code>. <code>agentstack --version</code> says which build you have.</p>
 <h1 id="which-protection-do-i-need">Which protection do I need?</h1>
-<p>This page used to ask you two questions. Only one of them is still yours: <strong>how much protection you want</strong>. Where capabilities land is no longer a decision — delivery is routed for you, and the first section below says what that routing is so the second one makes sense. New to a word below? Every term is defined in <a href="concepts.html">concepts</a>.</p>
+<p>This page asks you one question: <strong>how much protection you want</strong>. Where capabilities land is not a decision — delivery is routed for you, and the first section below says what that routing is so the second one makes sense. New to a word below? Every term is defined in <a href="concepts.html">concepts</a>.</p>
 <p>Your <em>CLIs</em> are the agent tools you run — Claude Code, Codex, Cursor, and the rest.</p>
 <h2 id="first-already-decided-how-capabilities-reach-your-clis">First, already decided: how capabilities reach your CLIs<a class="hlink" href="#first-already-decided-how-capabilities-reach-your-clis" aria-label="Link to this section">#</a></h2>
-<p><strong>You do not have to choose.</strong> Since 2026-08-03 delivery is <em>routed</em>, not picked: AgentStack decides per capability, from what kind it is and which CLI it is going to, and says what it decided. <code>agentstack x delivery</code> shows the routing for your project.</p>
+<p><strong>You do not have to choose.</strong> Delivery is <em>routed</em>, not picked: AgentStack decides per capability, from what kind it is and which CLI it is going to, and says what it decided. <code>agentstack x delivery</code> shows the routing for your project.</p>
 <div class="tblwrap"><table>
 <thead><tr><th>Capability</th><th>Where it goes</th><th>Why</th></tr></thead><tbody>
 <tr><td>Skills · MCP servers, on a CLI that speaks MCP</td><td>served live, on demand</td><td>brokered, policy-checked, digest-verified, recorded — and nothing generated lands in your repo for them</td></tr>
@@ -287,9 +291,9 @@
 <tr><td>Anything, on a CLI that reads files only</td><td>written into native files</td><td>that CLI has no live channel</td></tr>
 </tbody></table></div>
 <p>A project is normally in <strong>both</strong> lanes at once, and that is the ordinary case, not a compromise.</p>
-<p><strong>The one escape hatch: render locally.</strong> <code>agentstack x delivery render-locally --write</code> (add <code>--harness &lt;id&gt;</code> for a single CLI) writes files even where the live channel would have worked. Pick it for offline work, deterministic native files, inspection with ordinary filesystem tools, a rule against a persistent background process, debugging without another runtime dependency, or testing a CLI's own behaviour. Switching it changes only <em>where the bytes go</em> — never what you trust or what your policy allows, and it costs you no review: a preference declares no capability, so a grant that was valid before the write is carried across it.</p>
+<p><strong>The delivery override: render locally.</strong> <code>agentstack x delivery render-locally --write</code> (add <code>--harness &lt;id&gt;</code> for a single CLI) writes files even where the live channel would have worked. It is the only setting that changes the <em>routing</em>; materializing one toolset's files right now, without changing the routing, is <code>agentstack use &lt;toolset&gt; --write</code> instead. Pick it for offline work, deterministic native files, inspection with ordinary filesystem tools, a rule against a persistent background process, debugging without another runtime dependency, or testing a CLI's own behaviour. Switching it changes only <em>where the bytes go</em> — never what you trust or what your policy allows, and it costs you no review: a preference declares no capability, so a grant that was valid before the write is carried across it.</p>
 <p>Either lane still passes the trust gate. On an untrusted or drifted project neither the live channel nor the file lane delivers servers, skills, instructions, hooks or extensions — see <a href="concepts.html#trust-and-the-consent-digest">concepts — trust</a>.</p>
-<p>The older per-project delivery modes (<code>static</code>, <code>clean-at-rest</code>, <code>zero-files</code>) are readings of a project's current shape, not choices: <code>agentstack set-mode</code> is retired and delivery is routed for you. See <a href="concepts.html">delivery modes in concepts</a> for what each still means, and <a href="architecture.html#delivery-is-routed-not-chosen">ARCHITECTURE — delivery is routed, not chosen</a> for the routing itself and how delivery sits beside selection and isolation.</p>
+<p>The older per-project delivery modes (<code>static</code>, <code>clean-at-rest</code>, <code>zero-files</code>) are readings of a project's current shape, not choices: <code>agentstack set-mode</code> is retired and delivery is routed for you. See <a href="reference.html#delivery--routing-and-where-rendered-files-live">delivery in the reference</a> for what each still means, and <a href="architecture.html#delivery-is-routed-not-chosen">ARCHITECTURE — delivery is routed, not chosen</a> for the routing itself and how delivery sits beside selection and isolation.</p>
 <h2 id="then-your-decision-how-much-protection">Then, your decision: how much protection?<a class="hlink" href="#then-your-decision-how-much-protection" aria-label="Link to this section">#</a></h2>
 <p>Find the row that sounds like you. The last column says how strongly each option is <em>actually</em> enforced, in the <a href="enforcement.html">enforcement matrix's</a> own words.</p>
 <div class="tblwrap"><table>
@@ -301,7 +305,7 @@
 <tr><td>running sensitive work that must not leak</td><td>Lockdown (Docker)</td><td><code>run &lt;cli&gt; --sandbox --lockdown</code></td><td>Container with no route out; egress is <strong>enforced</strong>. Unapproved egress is blocked — that never means exfiltration is impossible. Labelled <code>LOCKDOWN / ENFORCED</code>.</td></tr>
 </tbody></table></div>
 <p>The rows stack: guard, the trust gate, and a protected or lockdown run each add protection the one above does not, so most people end up combining several. The legend words — <strong>cooperative</strong>, <strong>enforced</strong>, coarse, unsupported — are defined once in the <a href="enforcement.html">enforcement matrix</a>, which spells out exactly what each mode does and does not stop. <code>--lockdown</code> needs Docker; the protected default does not.</p>
-<p><strong>Not sure?</strong> Let delivery stay automatic and add <code>guard install</code> — that is the right answer for almost everyone. <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/start.html">Get started</a> sets both up.</p>
+<p><strong>Not sure?</strong> Let delivery stay automatic and add <code>guard install</code> — that is the right answer for almost everyone. <a href="start.html">Get started</a> covers the delivery half; <a href="howto/lock-down-a-run.html">lock down a run</a> walks the protection ladder from the protected default upward.</p>
   <p class="srcline">Source of truth: <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/choose.md">docs/choose.md</a> — this page is generated from it.</p>
   </main>
 </div>

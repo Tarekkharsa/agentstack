@@ -4,295 +4,123 @@
 
 # Integrations
 
-The AgentStack CLI is the complete, standalone interface: every plan, write,
-consent check, and enforcement decision lives there. An **integration** is an
-optional surface that calls those same stable read APIs and fixed actions to
-make the product easier to discover and use where you already work. An
-integration presents; it never becomes the enforcement boundary, and it never
-becomes a second implementation.
+AgentStack is standalone. Its manifest, lock, trust, policy, dynamic delivery,
+and machine bootstrap work without a supervisor or custom UI.
 
-Today there is one.
+An integration may launch a supported CLI, but it does not become a second
+configuration system.
 
-## t3code
+## T3 Code
 
-t3code is AgentStack's optional graphical companion. The obtainable AgentStack
-CLI is the launch channel; as of v0.17.0 the integrated t3code fork has no public
-download, so this page documents the compatibility contract for source users
-rather than presenting an unavailable app as the way to begin. When a packaged
-t3code build becomes public, it can make AgentStack useful where people already
-start and supervise coding agents without becoming a second authority system.
+Stock T3 Code can launch and supervise Claude Code, Codex, Cursor, OpenCode,
+and other providers. Those processes read the same global gateway and managed
+provider configuration AgentStack already owns.
 
-### The released CLI serves the whole panel
+The practical setup is therefore only:
 
-The half that is public — the CLI — is already complete for this integration.
-The panel gates each of its features on a contract the CLI advertises, and the
-**published `v0.17.0` release serves every affordance the panel gates a button
-on**, so a source-built t3code needs no locally-built AgentStack behind it.
-The table below is what **this build** advertises in `FEATURES`. A panel
-negotiating against an older release does not see the newer names and degrades
-to its older wording; it never guesses:
+```bash
+agentstack init --connect
+agentstack status     # inspect this worktree
+```
 
-| Panel capability | Contract | In this build |
-| --- | --- | --- |
-| Setup — render the plan, apply it | `init-plan`, `apply-setup` | yes |
-| Setup — servers another app owns, left out and named | `init-tool-managed-v1` | yes |
-| Status — one state, one next action | `status-v1`, `doctor-advisories-v1` | yes |
-| Status — `state` honest over unverified coverage | `status-honesty-v1` | yes |
-| Status — a consent something is actually waiting on | `needs-your-yes-v1` | yes |
-| Status — pinned packs with a newer tag already fetched | `update-offer-v1` | yes |
-| Status — the effective members of each pinned package | `package-members-v1` | yes |
-| Status — names more than one linked library source holds | `library-sources-v1` | yes |
-| Status — says whether the trust gate would refuse a write right now | `trust-gate-reading-v1` | yes |
-| Status — where house rules reach each targeted CLI | `instruction-channels-v1` | yes |
-| Undo — revert this project's last write | `restore-last` | yes |
-| Toolsets — browse, create, add, activate | `profiles-v1`, `profiles-edit-v1`, `toolset-create-v2` | yes |
-| Toolsets — edit membership, rename, delete | `profiles-edit-batch-v1`, `toolset-rename-v1`, `toolset-delete-v1` | yes |
-| Use temporarily | `sessions-v1` | yes |
-| Review this project | `trust-preview`, `trust-server-blockers-v1`, `trust-consent` | yes |
-| Review this project — per-item consent card + re-gate diff | `trust-review-card-v1` | yes |
-| Review this project — the consent card itself, structured | `trust-card-diff-v1` | yes |
-| Review this project — the card body grouped, one closing question | `trust-card-groups-v1` | yes |
-| Review this project — content edited away from its pin | `trust-content-drift-v1` | yes |
-| Drift review | `diff-v1`, `diff-ownership-v1` | yes |
-| Drift review — first render vs moved-ahead | `diff-existence-v1` | yes |
-| Drift review — a render the live lane left behind | `abandoned-render-v1` | yes |
-| Library remove | `library-remove-v1` | yes |
-| Project server/skill remove | `manifest-remove-v1` | yes |
-| Workflow monitor (read-only) | `workflow-observe-v1` | yes |
-| Serial-role scheduling warning | `workflow-serial-roles-v1` | yes |
-| Workflow monitor — per-role model and effort | `workflow-role-selection-v1` | yes |
-| Activity feed — on-demand skill loads beside calls | `activity-skill-load-v1` | yes |
-| Runtime leases — one row each, with derived liveness | `lease-status-v1` | yes |
-| Delivery routing — the lane per capability kind, plus each harness's own `bridge_registered` | `delivery-routing-v1` | yes |
-| Image plan — one toolset's packaging plan | `image-plan-v1` | yes |
-| Startup test — actually start the servers | `doctor-probe-v1` | yes |
-| Status — typed delivery mode + activation | `doctor-mode-v1` | yes |
-| Gitignore opt-out (durable, previewed) | `gitignore-opt-out-v1` | yes |
-| Delivery-mode switch | `set-mode-v1` — superseded | retired; do not build a mode picker |
-| Footer CLI count / live-delivery coverage | `doctor-cli-coverage-v1` | yes |
+When `doctor` detects T3 Code it checks provider guard coverage and reports
+provider-instance home overrides that could point a session away from the
+global configuration.
 
-Sixteen of those names post-date the published `v0.17.1`: `status-honesty-v1`,
+### Several projects and machines
+
+T3 Code Connect can control work on remote machines. AgentStack handles the
+configuration on each machine independently:
+
+```text
+T3 Code UI
+  ├── machine A → project A → local AgentStack gateway
+  └── machine B → project B → local AgentStack gateway
+                          ↑
+                same central library Git repo
+```
+
+Bootstrap each machine with the same library:
+
+```bash
+agentstack up --library https://github.com/you/ai-setup.git
+agentstack up --library https://github.com/you/ai-setup.git --write
+```
+
+Project manifests and locks travel with their repositories. Library content
+travels through its Git remote. Secrets, trust, policy, and audit evidence stay
+on the machine where the agent runs.
+
+No T3 Code fork or AgentStack panel is required. The earlier experimental
+custom panel is not the supported setup path; its lasting lesson is that a UI
+should present AgentStack's JSON status and preview/consent contracts while the
+standalone CLI remains the authority. AgentStack can expose those stable JSON
+read and preview/apply contracts without moving authority out of the CLI.
+
+For integrations, `agentstack init --plan` advertises the `init-plan` contract:
+it emits JSON with the detected setup and a `plan_digest` without changing the
+machine. There is no separate `--json` flag; `--plan` is already the JSON read.
+Pass that digest to the approved write step so a UI cannot apply a different
+plan from the one the human reviewed.
+
+### JSON contract discovery
+
+Read `features` in every JSON envelope before using an integration contract.
+This release advertises: `init-plan`, `apply-setup`, `init-tool-managed-v1`,
+`trust-preview`, `trust-consent`, `status-v1`, `profiles-v1`, `diff-v1`,
+`restore-last`, `sessions-v1`, `profiles-edit-v1`, `diff-ownership-v1`,
+`toolset-create-v2`, `profiles-edit-batch-v1`, `toolset-rename-v1`,
+`toolset-delete-v1`, `library-remove-v1`, `manifest-remove-v1`,
+`trust-server-blockers-v1`, `trust-review-card-v1`, `trust-card-diff-v1`,
+`trust-card-groups-v1`, `activity-skill-load-v1`, `workflow-observe-v1`,
+`workflow-serial-roles-v1`, `doctor-advisories-v1`, `doctor-mode-v1`,
+`doctor-liveness-v1`, `doctor-probe-v1`, `diff-existence-v1`, `json-reads-v1`,
+`gitignore-opt-out-v1`, `doctor-cli-coverage-v1`, `status-honesty-v1`,
 `needs-your-yes-v1`, `update-offer-v1`, `package-members-v1`,
-`library-sources-v1`, `trust-gate-reading-v1`, `instruction-channels-v1`, `trust-review-card-v1`,
-`trust-card-diff-v1`, `trust-card-groups-v1`, `trust-content-drift-v1`,
-`abandoned-render-v1`, `workflow-role-selection-v1`, `activity-skill-load-v1`,
-`lease-status-v1`, `delivery-routing-v1` and `image-plan-v1`. A panel
-negotiating against that release sees none of them.
+`lease-status-v1`, `delivery-routing-v1`, `library-sources-v1`,
+`trust-gate-reading-v1`, `instruction-channels-v1`, `image-plan-v1`,
+`workflow-role-selection-v1`, `trust-content-drift-v1`, and
+`abandoned-render-v1`.
 
-One name in `FEATURES` is deliberately absent from this table.
-`json-reads-v1` names the `--json` form of `status`, `search`, `adapters list`
-and `session list` — an integrator contract for callers that scrape those
-screens, which the panel does not use because it reads the richer payloads
-directly. Every other name appears above; `profiles-edit-v1` covers the
-digest-bound add verbs and is listed with the toolset rows.
+### Fresh worktrees
 
-The table is checked against `FEATURES` by
-`crates/cli/src/ui_contract.rs::tests::every_served_contract_is_documented`,
-so a contract added to the binary without a row here fails the build rather
-than reaching an integrator as a name nobody wrote down.
+A fresh worktree has the committed project manifest and lock. With zero-files
+delivery it does not need generated MCP configs or copied skill directories.
+It still needs local trust because consent is tied to the checkout path.
 
-Check any build yourself — the envelope is part of the read:
+Run in the worktree:
 
 ```bash
-agentstack doctor --json | jq '{schema_version, features}'
+agentstack status
 ```
 
-A panel feature whose contract is absent disables that action with upgrade
-guidance; it never guesses or degrades silently.
-
-### What works today
-
-AgentStack already manages the native configuration read by the coding CLIs
-t3code launches. Static activation and clean-at-rest sessions therefore apply
-to those launches without t3code reimplementing configuration logic.
-
-Run:
+Then review the checkout:
 
 ```bash
-agentstack doctor
+agentstack trust .
 ```
 
-When t3code is installed, doctor checks the supervisor integration, including
-provider guard coverage and home-directory overrides that can move a CLI away
-from the configuration AgentStack manages.
+The next agent connection receives the default toolset automatically. A file-
+only provider may additionally need the rendered command printed by status.
 
-**Guard coverage is per provider, and it is not universal.** Whichever CLI
-t3code launches, AgentStack manages its native configuration; whether a host
-guard can referee that session afterwards depends on the CLI. Claude Code (and
-VS Code agent mode, which reads the same user-scope hooks), Codex, Gemini,
-Antigravity, Cursor, Windsurf, Copilot CLI, OpenCode and Pi all have a
-pre-tool-use hook the guard rides. Three do not, for two different reasons:
-Claude Desktop and Junie expose **no hook surface** — there is nothing to build
-— while Kiro is simply **not wired yet**, a gap in AgentStack rather than in
-Kiro. A panel must not flatten those into one "unsupported" label: one is a
-limit, the other is a to-do. The per-CLI table, and what the guard blocks once
-wired, is in [the adapter support
-matrix](adapters.md#which-adapters-get-the-host-guard);
-`agentstack guard status` prints the same list for the machine in front of you.
+### Per-run evidence
 
-For per-session run identity, create a transparent launcher:
+T3 Code sessions normally attribute to the machine's global audit. For a
+separate run identity, create a transparent AgentStack shim and configure that
+provider instance to launch it:
 
 ```bash
 agentstack x shim make claude
 ```
 
-Point the matching t3code provider's binary-path setting at the generated shim.
-Each launched session then appears in `agentstack x report runs` and receives its
-own run report.
+This is optional and does not change the provider's capabilities.
 
-### Project actions: fresh worktrees set themselves up
+## Other supervisors
 
-t3code runs each task in a fresh git worktree — a clean checkout in which
-AgentStack's rendered configuration (`.mcp.json`, `.claude/skills/`, and the
-other native files) does not exist, because the managed `.gitignore` block
-deliberately keeps generated artifacts out of git. Left alone, every t3code
-task therefore starts without the project's servers and skills, and nothing
-announces the loss.
+The same rule applies to any launcher: if it starts a supported CLI with its
+normal home and working directory, AgentStack works unchanged. If the launcher
+overrides either, run `agentstack doctor` on that machine and follow the
+reported adapter-specific fix.
 
-t3code's project actions close that gap with no panel and no new AgentStack
-surface, so they work in any t3code build. A `t3.json` checked into the
-repository root offers named commands; t3code shows them for one-click import,
-runs them in a real terminal inside the worktree, and can run one of them
-automatically when a worktree is created:
-
-```json
-{
-  "$schema": "https://t3.codes/schema/t3.json",
-  "scripts": [
-    {
-      "name": "Set up toolset",
-      "command": "agentstack use --write",
-      "icon": "configure",
-      "runOnWorktreeCreate": true
-    },
-    {
-      "name": "Check setup",
-      "command": "agentstack doctor",
-      "icon": "lint"
-    }
-  ]
-}
-```
-
-- **Set up toolset** runs the moment a worktree is created, before the coding
-  agent starts. With the project's manifest and lockfile committed,
-  `agentstack use --write` activates the single declared toolset and renders
-  every native config in place; a project that declares several toolsets must
-  name one (`agentstack use <toolset> --write`).
-
-  **A fresh worktree is a fresh project, and the trust gate says so.** Trust is
-  recorded per project directory, so a new worktree of a repo you already
-  trusted is *untrusted* at its new path. `agentstack use --write` there
-  refuses to write server definitions and refuses to materialize skills, prints
-  a `✗` line per blocked target naming `agentstack trust .`, and **exits
-  nonzero** — the action's terminal shows the refusal rather than a
-  half-configured session. That is the gate working, not the action failing:
-  run `agentstack trust .` in the worktree once, then re-run the action. Once
-  trusted, activation exits 0 and materializes servers and skills for every CLI
-  with project scope, and re-runs are idempotent. An automation that must not
-  stop at a human review should not import this action.
-- **Check setup** is the same `agentstack doctor` the CLI journey already
-  teaches, one click — or one keybinding — away when a session seems to be
-  missing a capability.
-
-What to expect:
-
-- t3code runs only the **first** `runOnWorktreeCreate` script. If the project
-  already has a worktree setup command, chain them:
-  `"command": "bun install && agentstack use --write"`.
-- If AgentStack needs a decision — an unfamiliar project awaiting review (which
-  every new worktree is), a drifted lockfile — the action's terminal shows the
-  same message the CLI shows anywhere else, with the exact next step. The
-  action adds no authority and skips no consent check.
-- `t3.json` is repository content. t3code never runs a file script before you
-  import it, and it shows the literal command at import time — read it,
-  particularly in repositories you did not author. AgentStack's own review
-  gate for repository-declared capabilities is unchanged underneath.
-- Keybindings are personal. The file format deliberately has none; each person
-  attaches their own after importing.
-- Clean-at-rest projects should not import the setup action — materializing
-  configuration on worktree creation is exactly what that mode avoids. Keep
-  the doctor action, and launch through `agentstack run <cli>` instead.
-- Switching toolsets stays in the CLI: actions take no arguments, so a
-  generic switcher is not possible, and one imported action per toolset ages
-  badly. `agentstack use <toolset> --write` remains the way to switch.
-
-### The panel journey
-
-The native t3code panel implements the first launch slice end to end:
-
-1. **Setup** — an uninitialized project shows the coding tools and importable
-   capabilities detected by `agentstack init --plan`, and one action applies
-   that reviewed plan. The apply is bound to the exact plan shown: if a CLI
-   config changes in between, the CLI refuses and asks for a fresh review.
-2. **Status** — one state (Ready, Needs attention, or Needs setup) with the
-   single recommended next action; the full doctor report stays available as
-   the detail layer.
-3. **Undo** — the panel shows this project's most recent AgentStack-managed
-   write and can revert it, by identity, without touching other projects.
-4. **Toolset** — browse the library, add a capability to a named toolset, create
-   one, and use it temporarily. The panel negotiates the stable machine
-   contracts for toolsets and sessions and disables edits against an
-   incompatible CLI.
-
-Reads and actions are version-negotiated: each CLI response names its schema
-version and usable contracts, and a mismatched pair disables the affected
-action with upgrade guidance instead of guessing.
-
-Safety appears progressively:
-
-- Normal local setup does not start with policy or sandbox configuration.
-- Unfamiliar repository content introduces a contextual “Review this project”
-  step bound to the exact previewed surface.
-- A blocked action explains what was blocked, what is protected, and the exact
-  safe next action.
-- Gateway, sandbox, and lockdown choices live under a later “More protection”
-  path with honest coverage labels.
-
-### The integration boundary
-
-t3code owns presentation. The AgentStack CLI owns decisions and authority.
-
-- Reads use explicit, versioned JSON schemas.
-- Workspace identity is resolved by the t3code server, never supplied as an
-  arbitrary browser path.
-- Writes are a closed enum of actions mapped to fixed CLI arguments.
-- The CLI repeats every validation and consent check.
-- Secret values never enter the browser payload.
-- A frontend bug may break the UI, but it cannot grant more authority.
-
-Trust is the clearest example. A preview returns a digest of the immutable
-content snapshot that produced it. A grant action must return that digest, and
-the CLI refuses stale or missing consent. The digest proves content
-consistency, not human attention; t3code's dedicated `agentstack:admin`
-authorization — required for every authority-changing action, granted only to
-administrative sessions, never implied by an open browser tab — is the
-separate human-authority boundary. Both halves are enforced independently:
-read-only status and planning need no administrative authority, and a
-frontend bug can break the panel but cannot mint a grant.
-
-### Limits
-
-- There is no public t3code package or supported acquisition path today. The
-  CLI journey is complete without it; do not make a launch or onboarding claim
-  depend on the private fork.
-- t3code injects its own browser-preview MCP endpoint directly into sessions,
-  outside native CLI configuration. AgentStack can gate calls on governed
-  paths, but the endpoint is not declared in the project manifest or lockfile.
-  That endpoint is not currently treated as a governed cross-harness workflow
-  launcher. Using t3code MCP for child launch and supervision is a separate
-  research item and must preserve AgentStack's admitted execution plan,
-  authority, cancellation, and evidence path.
-- t3code's most permissive provider modes can disable the coding CLI's own
-  approval prompts. AgentStack guard coverage matters more in those sessions;
-  doctor reports missing coverage. For Claude Desktop, Junie and Kiro there is
-  no coverage to report — see [guard coverage is per
-  provider](#what-works-today) above for which of those is a missing hook
-  surface and which is unbuilt.
-- A source-built t3code may keep state in a different location from the
-  packaged app, so doctor may not observe that development state.
-- Read and write parity across CLI/t3code versions is feature-negotiated.
-  Unsupported combinations must fail with an upgrade message, never guess.
-
-The CLI remains a complete standalone interface. t3code makes the same product
-easier to discover and use; it does not become a second implementation.
+Next: [Another machine](start.md#6-set-up-another-machine) ·
+[Team setup](howto/team-setup.md) · [Adapter support](adapters.md)

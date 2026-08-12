@@ -9,6 +9,11 @@ The complete, implemented-and-tested feature inventory. The
 target, gateway, posture, trust, …) are defined once in
 [concepts.md](concepts.md) — this page assumes them and stays operational.
 
+If you are setting up AgentStack rather than checking an exact flag, use the
+short [Get started](start.md) and [Central library](library.md) pages first.
+The normal path is zero-files: a trusted default toolset opens automatically,
+skills load by name and description, and MCP schemas stay behind `tools_search`.
+
 Deeper rationale and field notes — edge cases, crate-level caveats, and
 implementation internals — live in
 [reference field notes](archive/design/reference-field-notes.md).
@@ -17,12 +22,12 @@ implementation internals — live in
 
 **[Part I — The everyday loop](#part-i--the-everyday-loop)**
 
-- [The everyday loop, new in v0.18.0](#the-everyday-loop-new-in-v0180)
+- [The everyday loop](#the-everyday-loop)
   - [Drop a file, say yes (`agentstack yes`)](#drop-a-file-say-yes-agentstack-yes)
   - [Undo: `undo` and `restore`](#undo-undo-and-restore)
   - [Where did this come from? (`agentstack x why`)](#where-did-this-come-from-agentstack-x-why)
   - [Sharing is signing: `share` and `receive`](#sharing-is-signing-share-and-receive)
-  - [A setup that already exists (`agentstack x up`)](#a-setup-that-already-exists-agentstack-up)
+  - [A setup that already exists (`agentstack up`)](#a-setup-that-already-exists-agentstack-up)
 - [Secrets and trust](#secrets-and-trust)
   - [Secret resolution](#secret-resolution)
   - [Where lifted secrets go (`init`)](#where-lifted-secrets-go-init)
@@ -46,7 +51,7 @@ implementation internals — live in
   - [Scopes](#scopes)
 - [Delivery — routing, and where rendered files live](#delivery--routing-and-where-rendered-files-live)
   - [Owned servers (`owner = "codex"`)](#owned-servers-owner--codex)
-- [Agent-operable (`agentstack x mcp`)](#agent-operable-agentstack-mcp)
+- [Agent-operable (`agentstack x mcp`)](#agent-operable-agentstack-x-mcp)
   - [Transparent mode (`--transparent`)](#transparent-mode---transparent)
   - [The zero-files gateway (`--auto-project` + `trust`)](#the-zero-files-gateway---auto-project--trust)
   - [MCP toolset leases](#mcp-toolset-leases-one-connection-one-capability-fence)
@@ -59,7 +64,7 @@ implementation internals — live in
 - [Filesystem scopes (`[policy.filesystem]`)](#filesystem-scopes-policyfilesystem)
 - [Call log](#call-log)
 - [Content scanning](#content-scanning)
-- [Ephemeral sessions (`agentstack x session`)](#ephemeral-sessions-agentstack-session)
+- [Ephemeral sessions (`agentstack x session`)](#ephemeral-sessions-agentstack-x-session)
   - [Execution posture](#execution-posture)
   - [The Protected tier in detail (the default `run`)](#the-protected-tier-in-detail-the-default-run)
 - [The library: linked source folders](#the-library-linked-source-folders)
@@ -82,12 +87,12 @@ implementation internals — live in
   - [`report usage` (usage analytics)](#report-usage-usage-analytics)
   - [Wire proxy (`proxy`)](#wire-proxy-proxy)
   - [`export` / `import`](#export--import)
-- [Optimize (`agentstack x optimize`)](#optimize-agentstack-optimize)
-- [Staying current (`agentstack x self update`)](#staying-current-agentstack-self-update)
+- [Optimize (`agentstack x optimize`)](#optimize-agentstack-x-optimize)
+- [Staying current (`agentstack x self update`)](#staying-current-agentstack-x-self-update)
   - [The version note in `doctor`](#the-version-note-in-doctor)
 - [Which build am I running? (`--version`)](#which-build-am-i-running---version)
 - [Colour output (`NO_COLOR`, `CLICOLOR_FORCE`)](#colour-output-no_color-clicolor_force)
-- [Shell completions (`agentstack x completions`)](#shell-completions-agentstack-completions)
+- [Shell completions (`agentstack x completions`)](#shell-completions-agentstack-x-completions)
 - [Integrations](#integrations)
 
 **[Part III — Full command reference](#part-iii--full-command-reference)**
@@ -99,17 +104,14 @@ implementation internals — live in
 
 This part is everything `agentstack --help` shows by default: the everyday commands — `init`, `status`, `add`, `search`, `apply`, `doctor`, `lock`, `toolset`, `use`, `yes`, `run`, `trust`, `undo`, `adopt`, `secret` — and the machinery directly behind them. Read only what is here and you can reach a working setup: one manifest rendered into every CLI's native config, credentials kept out of that config, hand-edits caught, and a toolset activated. The power surface in Part II is entirely opt-in — nothing in the everyday loop requires it.
 
-## The everyday loop, new in v0.18.0
+## The everyday loop
 
 Four moments the older releases spell out as several commands each: taking in
 a file you wrote, taking a write back, handing a setup to someone else, and
 standing one up on a new machine.
 
-> These five verbs — `yes`, `undo`, `share`, `receive`, and `up` — are v0.18.0
-> and later; the current stable install serves v0.17.1, which spells the same
-> moments out the long way. Where there is a longer equivalent, the section
-> below names it. `agentstack --version` says which you have, and
-> `agentstack x self update --write` upgrades once v0.18.0 is final.
+The common commands are `status`, `lock`, `trust`, `up`, `doctor`, and `undo`.
+The sections below document the complete lower-level surface when you need it.
 
 ### Drop a file, say yes (`agentstack yes`)
 
@@ -188,31 +190,30 @@ remain the scriptable primitives on the lockfile itself, and on releases
 without `share` they are how a lockfile gets signed at all.
 
 <a id="a-setup-that-already-exists-agentstack-up"></a>
-### A setup that already exists (`agentstack x up`)
+### A setup that already exists (`agentstack up`)
 
 The moment is sitting down at a machine that has the checkout but nothing
-configured. `agentstack x up` (v0.18.0+) is that whole moment in one command: it
-finds the agent CLIs this machine actually has, verifies the environment
-against `agentstack.lock`, renders each CLI's config, and then names what is
-left — which on a new machine is this machine's secrets, since values never
-travel with a manifest.
+configured. `agentstack up` previews the whole bootstrap: link or refresh the
+central library, find and connect the CLIs this machine has, verify the project
+lock, preserve zero-files delivery where supported, and name the remaining
+local secrets and trust review. Add `--write` to apply the preview.
 
 The division of labour with `init` is the easy way to remember it: **`init`
 creates a setup that does not exist yet** (it reads what your CLIs already
-hold and writes the manifest), while **`up` materializes one that already
-does**. You run `init` once, ever, per project; you run `up` once per machine.
+hold and writes the manifest), while **`up` reconciles one that already
+does**. Use `init` for the first setup and `up` for a new or existing machine.
 
 ```text
-agentstack x up                     # detect, verify, render, then say what's missing
-agentstack x up --targets claude    # only render these CLIs
-agentstack x up --toolset review    # materialize this toolset rather than the active one
-agentstack x up --no-gitignore      # skip the managed .gitignore block
+agentstack up --library <git-url>         # preview first bootstrap + library clone
+agentstack up --library <git-url> --write # apply first bootstrap
+agentstack up                             # preview a later refresh
+agentstack up --write                     # apply a later refresh
+agentstack up --targets claude            # only reconcile these CLIs
 ```
 
 `--manifest-dir <DIR>` points it at a project or manifest directory other than
-the current one. On v0.17.1 the same journey is `agentstack apply --write`
-followed by `agentstack doctor`, reading the missing-secret fix off the doctor
-report yourself. Walkthrough: [share one setup with your
+the current one. `--json` emits the same plan and readiness result for a UI or
+script. Walkthrough: [share one setup with your
 team](howto/team-setup.md).
 
 ## Secrets and trust
@@ -446,21 +447,19 @@ another registry.
 
 ### Selective skills via toolsets
 
-`use <toolset>` materializes only that toolset's skills, pruning the rest it
-owns and never clobbering hand-made skill dirs.
+Toolsets select the servers and skills for a task. A trusted new live connection
+opens the declared default automatically:
 
 ```text
-agentstack use <toolset> --write   # materialize only that toolset's skills
+agentstack toolset default <toolset>
+agentstack toolset default <toolset> --write
 ```
 
-The toolset is optional: one declared toolset is chosen automatically, and a
-manifest with **no** toolsets activates its full inline set — `agentstack use
---write` just works; several toolsets need a name. Materialization is
-symlink-with-copy-fallback; when a prune empties the managed skills dir
-(deactivation, `session end`) the dir is removed too, but rmdir semantics spare
-any dir holding user content. Interactive `init` activates through this exact
-`use` code path; plain `apply` never touches skills, it only names which toolset
-activates them.
+Exactly one declared toolset is also an effective default. Several toolsets
+need an explicit default or a connection-local lease. Existing connections keep
+their frozen selection. `agentstack use <toolset> --write` remains the
+compatibility command for file-only or intentionally rendered lanes; pruning
+removes empty AgentStack-managed parents but preserves user content.
 
 ## Live runs (`agentstack run`)
 
@@ -670,7 +669,7 @@ not settings. `agentstack set-mode` is retired and delivery is routed for you:
   `.gitignore` block; pass `--no-gitignore` to commit them instead.
 - **clean-at-rest** — `agentstack lock --write` pins name refs *without rendering*, so
   `git status` stays silent; a toolset arrives via
-  [`session start`](#ephemeral-sessions-agentstack-session) /
+  [`session start`](#ephemeral-sessions-agentstack-x-session) /
   [`run`](#live-runs-agentstack-run) and reverts on exit.
 - **zero-files** — `agentstack x gateway connect` registers the gateway once per
   CLI (one write to each CLI's global config) and every **trusted** repo serves
@@ -683,20 +682,23 @@ not settings. `agentstack set-mode` is retired and delivery is routed for you:
 path where the CLI supports MCP and to files where it does not. Reach for
 `render locally` only when you actively need files. Add `--sandbox --lockdown` when the agent process
 itself needs isolation — a lease is a capability fence, not a sandbox. See
-[the primitives and decision table](ARCHITECTURE.md#operating-model--choose-the-boundary-you-need).
+[the primitives and decision table](ARCHITECTURE.md#operating-model--one-question-per-boundary).
 
-Interactive `init` asks **one** question before any write — automatic, or "more
-control" — and the answer **forks** the run. **Automatic** (the default, and
-what a non-interactive `init` takes on a project that has never rendered) states
-the routing per CLI, offers to register the bridge
-(`gateway connect --all --write`), points at `agentstack trust .` (which the
-wizard never runs for you — trust is human consent), and renders nothing itself:
-the rendered lane's command is the explicit `apply --write`. Behind **more
-control** sit **render locally** (record the override, then the render path:
-preview → confirm → `apply --write` → activate skills → doctor) and the three
-older modes, unchanged — **static** takes the render path; **clean-at-rest**
-renders nothing and pins the lockfile, teaching the `session start`/`session
-end` rhythm; **zero-files** renders nothing and offers the bridge. A project
+`init` never asks you to pick a delivery mode. There is no automatic / "more
+control" fork and no static, clean-at-rest or zero-files branch to choose:
+routing is not a question, so the wizard states it instead of asking it. Before
+any write it prints the routing per CLI, and the questions it does ask are the
+ones that are genuinely yours — where lifted secret values go, whether an
+imported definition may replace a colliding library one, whether to import at
+all, whether to install the guard, and whether to seed the house rules.
+`init --connect` registers the bridge in the same run; otherwise the closing
+summary names `agentstack x gateway connect --all --write` for the live lane and
+`agentstack x delivery` for the routing and how to write files instead. `init`
+points at `agentstack trust .` (which it never runs for you — trust is human
+consent) and renders nothing itself: the rendered lane's command is the explicit
+`apply --write`. Recording the **render locally** override is a separate,
+deliberate `agentstack x delivery render-locally --write`, never an init branch.
+A project
 that already has rendered files keeps its render path in a scripted run: the
 files are a fact, and un-rendering stays the explicit `agentstack x uninstall`
 act. Bare `agentstack` no longer prints a `Mode` line — the `Delivery` lines
@@ -751,10 +753,10 @@ executed — the agent proposes, a human runs `apply`):
 | `agentstack_add_from` | *propose:* add a catalog/registry server | [search](#search-across-providers) |
 | `agentstack_add_server` | *propose:* add a server | [`adopt`/`add`](#adopt-and-add) |
 | `agentstack_add_skill` | *propose:* add a skill | [`add skill`](#add-skill-source--install-from-any-skills-repo) |
-| `agentstack_create_profile` | *propose:* create a toolset | [toolsets](#selective-skills-via-toolsets) |
-| `agentstack_list_loadable`, `agentstack_load` | the two-step skill loader (below) | this section |
+| `agentstack_create_toolset` | *propose:* create a toolset (the older `agentstack_create_profile` spelling stays dispatchable as an unadvertised alias) | [toolsets](#selective-skills-via-toolsets) |
+| `agentstack_list_loadable`, `agentstack_load` | skill name/description search, then one full body on demand | this section |
 | `agentstack_lease_open` / `_status` / `_close` / `_freeze` | MCP toolset lease lifecycle (below) | [leases](#mcp-toolset-leases-one-connection-one-capability-fence) |
-| `agentstack_session_start` / `_end` / `_list` / `_freeze` | render/revert a native session (`start` takes a `profile`) | [sessions](#ephemeral-sessions-agentstack-session) |
+| `agentstack_session_start` / `_end` / `_list` / `_freeze` | render/revert a native session (`start` takes a `profile`) | [sessions](#ephemeral-sessions-agentstack-x-session) |
 | `tools_search`, `tools_bindings` | the compact proxied tool surface + code mode (below) | [code mode](#compact-proxied-surface--code-mode) |
 | `tools_execute` | *experimental, sandbox builds only* — host the code-mode program | [below](#experimental-tools_execute) |
 
@@ -765,7 +767,7 @@ agentstack x gateway connect claude-code codex   # dry-run: shows the config dif
 agentstack x gateway connect --all --write       # every installed harness
 ```
 
-`gateway connect` writes one small entry — `agentstack x mcp --auto-project` — into
+`gateway connect` writes one small entry — `agentstack mcp --auto-project` — into
 the CLI's **global** MCP config (undo with `gateway disconnect`, verify with
 `doctor`). Register it by hand like any stdio MCP server if you prefer:
 
@@ -791,16 +793,16 @@ Two ways to expose the proxied surface:
   consumes with zero agentstack knowledge. The firewall, trust gate, and audit
   log apply identically; the first listing pays upstream discovery.
 
-In auto-project mode the gateway builds lazily, so transparent mode declares the
-`listChanged` capability and sends `notifications/tools/list_changed` once the
-(trust-gated) gateway comes up — clients re-fetch `tools/list` and see the
-upstream tools without ever calling a control-plane tool first.
+In auto-project mode the gateway builds lazily. Each `tools/list` reflects the
+current trust-gated surface. AgentStack does not advertise `listChanged` until
+it implements the matching subscription behavior required by modern MCP.
 
 ### The zero-files gateway (`--auto-project` + `trust`)
 
-With `--auto-project`, one global registration serves **every** repo: at session
-start the gateway discovers the active project — MCP client roots → cwd walk-up →
-`$AGENTSTACK_MANIFEST_DIR` — and exposes that repo's stack. No `.mcp.json`, no
+With `--auto-project`, one global registration serves **every** repo. Modern
+clients use the launcher/project coordinate, then
+`$AGENTSTACK_MANIFEST_DIR`, then a supported cwd walk-up; legacy clients may
+also supply MCP roots. No `.mcp.json`, no
 rendered files; a repo needs only its `.agentstack/agentstack.toml` (+ lock,
 pinned with `agentstack lock --write`, which renders nothing).
 
@@ -811,6 +813,18 @@ you review and trust it. Trust is pinned to the consent digest (concept:
 [ENFORCEMENT.md](ENFORCEMENT.md#what-trusted-does-and-does-not-mean)); any edit —
 a `git pull`, a re-lock — drops the repo back to control-plane-only until
 re-trusted.
+
+When the project is trusted, the gateway uses its `default_toolset`. With
+exactly one declared toolset, that toolset is the effective default. Several
+toolsets without a default keep the gateway on control-plane tools until the
+launcher supplies a selection or a legacy client opens a lease. Modern
+2026-07-28 requests re-derive the reviewed default on every request and carry
+no protocol session; legacy 2025 connections keep a frozen selection.
+
+Protocol handling is automatic. Current clients can keep using the dated 2025
+`initialize` lifecycle. Modern clients use 2026-07-28 discovery and stateless
+HTTP, with no `Mcp-Session-Id`. Both reach the same trust, policy, tool fence,
+and audit path.
 
 ```bash
 agentstack trust .          # preview what the manifest runs/contacts, then pin its digest
@@ -851,14 +865,13 @@ untrusted — see
 [field notes](archive/design/reference-field-notes.md#zero-files-gateway-always-on-manual).
 
 Honest limits: MCP servers, secrets, the tool firewall, the call audit log, and
-skills-over-MCP create no per-project native artifacts. Native skill folders and
-instruction files (`CLAUDE.md`/`AGENTS.md`) are read from disk by the CLIs
-themselves and still need render mode (`apply`/`use`) — `gateway connect` prints
-this per CLI.
+skills-over-MCP create no per-project native capability artifacts. Instructions,
+settings, hooks, extensions, and file-only CLIs still use the managed files
+their confirmed channels require; `status` prints the route per CLI.
 
 ### MCP toolset leases: one connection, one capability fence
 
-An MCP toolset lease is process-local state owned by one `agentstack x mcp`
+For dated 2025 clients, an MCP toolset lease is process-local state owned by one `agentstack x mcp`
 process — the zero-file counterpart of a native `session start`, but with no
 cleanup contract: a lease never renders harness config, creates a native skill
 folder, or writes `sessions.json`, so close/process exit has nothing to restore.
@@ -885,7 +898,9 @@ manifest-only proposal; review the edit, then `agentstack lock --write`.
 The control plane refuses to place a lease over an active native session, or a
 native session over an active lease. A lease is deliberately invisible to
 separate processes — read `agentstack_lease_status` from the same connection;
-opening a different valid toolset replaces the current lease. See
+opening a different valid toolset replaces the current lease. Modern
+2026-07-28 requests refuse lease mutation because authorization may not hide in
+a protocol session; use the trusted default or a launch-pinned selection. See
 [`examples/mcp-profile-lease`](../examples/mcp-profile-lease/) for a runnable
 lifecycle, and
 [field notes](archive/design/reference-field-notes.md#lease-survival-across-a-mid-connection-change)
@@ -1221,10 +1236,11 @@ the [protected-run enforcement contract](ENFORCEMENT.md#the-protected-runs-froze
 
 Managed folders that projects reference **by name** instead of copying files
 between repos. Any folder on the device can be linked as a source, and several
-at once — `~/.agentstack/lib/` is simply the first one on a fresh machine.
-`agentstack x lib link <path> --write` adds one, `lib unlink` removes one,
+at once — `~/.agentstack/lib/` is simply the one a fresh machine starts with.
+`agentstack lib link <path> --write` adds one, `lib unlink` removes one,
 `lib sources` shows the order, and `lib reorder` changes it. The full contract
-is [`design/linked-library-sources.md`](design/linked-library-sources.md).
+is on the short [Central library](library.md) page and in
+[`design/linked-library-sources.md`](design/linked-library-sources.md).
 
 **Precedence is `PATH` semantics:** the first source holding a capability of
 the requested kind and name wins. A name held by more than one source is
@@ -1282,11 +1298,11 @@ stale and must be re-granted with `agentstack trust .` — new pins are new cons
 ### Adding capabilities
 
 ```text
-agentstack x lib add ./<dir> --name <name>               # copy a local skill in
-agentstack x lib add owner/repo --skill <name>           # from any skills repo
-agentstack x lib add owner/repo --subpath <dir>          # from a repo subdirectory
-agentstack x lib add-server <name>                        # reusable server definition
-agentstack x lib new <name>                               # scaffold a new skill
+agentstack lib add ./<dir> --name <name>                  # copy a local skill in
+agentstack lib add owner/repo --skill <name>              # from any skills repo
+agentstack lib add owner/repo --subpath <dir>             # from a repo subdirectory
+agentstack lib add-server <name> --file <definition.toml> # reusable server
+agentstack lib new <name>                                 # scaffold a new skill
 ```
 
 `lib add ./<dir>` **copies** the source into `<first linked source>/skills/<name>`
@@ -1305,11 +1321,11 @@ canonical (high findings block unless `--allow-flagged`) and warns above ~10 MiB
 ### Removing capabilities (and getting them back)
 
 ```text
-agentstack x lib remove <name> --write             # skill
-agentstack x lib remove-server <name> --write      # MCP server
-agentstack x lib trash                             # what's recoverable
-agentstack x lib trash --restore <id> --write      # put one back
-agentstack x lib trash --empty --write             # delete it for good
+agentstack lib remove <name> --write             # skill
+agentstack lib remove-server <name> --write      # MCP server
+agentstack lib trash                             # what's recoverable
+agentstack lib trash --restore <id> --write      # put one back
+agentstack lib trash --empty --write             # delete it for good
 ```
 
 Every `lib remove*` (skills, servers, extensions, hooks) **moves** the entry to
@@ -1336,8 +1352,8 @@ now-unresolvable name surfaces. Removing a project's *own* entry is
 ### Syncing across machines (`lib sync`)
 
 ```text
-agentstack x lib sync [--status]
-agentstack x lib sync --allow-secrets   # override the fail-closed secret gate
+agentstack lib sync [--status]
+agentstack lib sync --allow-secrets   # override the fail-closed secret gate
 ```
 
 `lib sync` versions the library as a git repo (init/clone/pull/commit/push,
@@ -1418,7 +1434,7 @@ diff, and re-pins.
 ```text
 agentstack add from git:<host>/<repo>[@<tag>][#subdir]
 agentstack lock --upgrade <pack> --yes --write
-agentstack x lib pack-init
+agentstack lib pack-init
 ```
 
 No tag → the newest version-shaped tag; a repo with no version tags is an error,
@@ -1488,6 +1504,11 @@ dereference one), and `doctor` names leftover try dirs with the remedy.
 Compile shared + harness-specific `[instructions.*]` fragments into each CLI's
 `CLAUDE.md` / `AGENTS.md`, inside a managed `<!-- agentstack -->` region that
 preserves surrounding hand-written prose.
+
+The built-in AgentStack fragment deliberately stays at three operational
+bullets: start with status; use the dynamic skill/tool loaders in live mode;
+change sources, keep `${REF}` secrets, lock changes, and leave trust to a human.
+Detailed operation lives in the always-loadable `using-agentstack` skill.
 
 ```text
 agentstack x instructions --write   # compile [instructions.*] into CLAUDE.md / AGENTS.md
@@ -1625,7 +1646,7 @@ content binding), never runtime — see
 
 ```text
 [extensions.<name>]                                                # path/git + exactly one target
-agentstack x lib add-extension <name> --target <adapter> --path <dir>
+agentstack lib add-extension <name> --target <adapter> --path <dir>
 agentstack lock --write                                            # pin (strict integrity-root digest)
 ```
 
@@ -1812,13 +1833,13 @@ you have, and — when it was built from a git checkout — which commit:
 
 ```console
 $ agentstack --version
-agentstack 0.17.1 (sandbox: yes)              # a release binary — run --sandbox works
+agentstack 0.18.0 (sandbox: yes)              # a release binary — run --sandbox works
 $ agentstack --version
-agentstack 0.17.1 (sandbox: no)               # a plain source build — it does not
+agentstack 0.18.0 (sandbox: no)               # a plain source build — it does not
 $ agentstack --version
-agentstack 0.17.1 (sandbox: no, a1b2c3d)      # built from commit a1b2c3d
+agentstack 0.18.0 (sandbox: no, a1b2c3d)      # built from commit a1b2c3d
 $ agentstack --version
-agentstack 0.17.1 (sandbox: no, a1b2c3d-dirty) # …with uncommitted changes on top
+agentstack 0.18.0 (sandbox: no, a1b2c3d-dirty) # …with uncommitted changes on top
 ```
 
 The commit is there because the version number alone does not name a build: it
@@ -1931,7 +1952,7 @@ you need the exact verb, flag, or subcommand.
 
 <!-- agentstack:generated commands -->
 - **`init`** — Setup: find the CLIs you have and bring their setups together — flags `--global/--force/--dry-run/--plan/--secrets/--no-keychain/--project-servers/--include-tool-managed/--yes/--consented-plan/--connect`
-- **`up`** _(hidden)_ — Set this machine up from a setup that already exists: one command — flags `--targets/--toolset/--no-gitignore`
+- **`up`** _(hidden)_ — Set this machine up from a setup that already exists: one command — flags `--library/--json/--write/--targets/--toolset/--no-gitignore`
 - **`status`** — Status: where this project stands, on one screen, and the one next step — flags `--json`
 - **`add`** — Add a server or skill to this project's setup — subcommands `from/server/skill`
 - **`set`** _(hidden)_ — Create or update a manifest entry in place (idempotent `add`) — subcommands `server`
@@ -1947,8 +1968,8 @@ you need the exact verb, flag, or subcommand.
 - **`lock`** — Resolve each toolset's skill + server refs and pin `agentstack.lock` — flags `--toolset/--update/--upgrade/--all/--with-instructions/--yes/--write`
 - **`try`** _(hidden)_ — Try a skill without installing anything: stage, scan, and emit a wrapper prompt on stdout for piping into any agent CLI — flags `--skill/--rev/--subpath/--allow-flagged`
 - **`lib`** _(hidden)_ — The central library: the capabilities you keep, ready for any project — subcommands `new/add/add-server/add-extension/add-hook/list/remove/remove-server/remove-extension/remove-hook/trash/sync/pack-init/link/unlink/sources/reorder`
-- **`toolset`** — Work with toolsets: name one that bundles what you already have — subcommands `create/rename/delete/list`
-- **`use`** — Toolset: switch to one — its servers and skills go live in your CLIs — flags `--target/--scope/--write/--allow-unresolved/--prune-foreign/--no-gitignore/--list/--json`
+- **`toolset`** — Work with toolsets: name one that bundles what you already have — subcommands `create/default/rename/delete/list`
+- **`use`** — Compatibility activation for tools that need local files — flags `--target/--scope/--write/--allow-unresolved/--prune-foreign/--no-gitignore/--list/--json`
 - **`yes`** — Review and activate the files you dropped into this project — one step — flags `--yes`
 - **`session`** _(hidden)_ — Use a toolset temporarily: load it for now, then put every file back — subcommands `start/end/list/freeze`
 - **`run`** — Launch an agent CLI as a tracked run — flags `--locked/--unprotected/--prompt/--toolset/--scope/--keep/--sandbox/--lockdown/--plan`

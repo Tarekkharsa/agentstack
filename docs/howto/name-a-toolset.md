@@ -4,134 +4,80 @@
 
 # Name a toolset
 
-A **toolset** is a named subset of the setup you already have — "backend",
-"incident", "design" — that you activate together. In the manifest it is a
-`[toolsets.<name>]` block. (`[profiles.<name>]` is the older spelling; it is
-still parsed silently so existing manifests keep working, but everything you
-read, type, and write says *toolset*.) It names *which* of your
-servers and skills come along for a task; it is **not** a policy, a permission
-level, or a workflow role. A manifest with no toolset named activates its whole
-inline set, so you only name one once you want more than one.
+A toolset is the small group of MCP servers and skills one kind of task needs.
+It selects capabilities; it does not grant extra permission.
 
-Prerequisite: a project with an `.agentstack/agentstack.toml`
-[manifest](../concepts.md) (run `agentstack init` if you don't have one).
-
-## The one-command way
-
-The capabilities are already in your manifest. A toolset just *names a subset*
-of them — no re-import, no copying. The shortest path is one command:
+## Create one
 
 ```bash
-agentstack toolset create --name backend --server postgres --server github --skill sql-review
+agentstack toolset create backend --server github --server postgres --skill api-review
+agentstack toolset list
 ```
 
-At a terminal it shows what it will create, asks, and on yes writes the
-`[toolsets.backend]` block and re-locks. `--skill '*'` means every inline skill.
+At a terminal, `create` shows the change and asks before writing. It updates the
+manifest and lock but does not render native MCP or skill files.
 
-**Naming a toolset does not switch to it.** Nothing is rendered and none of your
-CLIs change — you have defined a subset, not chosen it. To undo the creation
-itself, delete the `[toolsets.backend]` block from the manifest.
-
-**Review it before you activate it.** `toolset create` writes the manifest and
-re-locks, and both files are part of the
-[consent surface](../concepts.md#trust-and-the-consent-digest) — so creating a
-toolset re-opens the review, even though it added no new capability:
-
-```bash
-agentstack trust .                    # approve the manifest and lock as they now stand
-agentstack x session start backend    # …now it activates
-```
-
-Activate it when you want it, and pick how — see
-[which activation](#which-activation-session-or-apply).
-
-Skip it and the activation refuses rather than half-applying: `use --write`
-reports "refusing to materialize skills … review and `agentstack trust .`" for
-each blocked target, and `session start` stops with "refusing to start a
-session: the manifest or lockfile changed since this project was trusted". See
-[trust a cloned repo](trust-a-repo.md) for what else the gate covers.
-
-Scripts and graphical clients get a two-step consent contract instead —
-[reference: selective skills via toolsets](../reference.md#selective-skills-via-toolsets).
-
-## Or write it by hand
-
-A toolset is four lines of TOML, and reading it is often clearer than reading a
-command. Add one `[toolsets.<name>]` block that lists the servers and skills
-that task needs:
-
-```toml
-# .agentstack/agentstack.toml — you already have these servers and skills.
-[servers.postgres]      # ...
-[servers.github]        # ...
-[skills.sql-review]     # ...
-[skills.oncall-runbook] # ...
-
-# A new toolset: name the subset "backend" needs. Nothing else changes.
-[toolsets.backend]
-servers = ["postgres", "github"]
-skills  = ["sql-review"]
-```
-
-Then pin the new set, approve it, and activate it — temporarily for a task, or
-applied on disk:
-
-```bash
-agentstack lock --write               # pin what this toolset selects
-agentstack trust .                    # the edit re-opened the review; approve it
-agentstack use --list                 # see every toolset and its readiness
-agentstack x session start backend      # use it for now; `session end` reverts
-agentstack use backend --write        # or apply it on disk (stable/offline)
-```
-
-Lock first, then trust: re-locking after you approve throws the approval away.
-
-Prefer to **capture what you actually used** instead of writing the list by
-hand? During a session, `agentstack x session freeze --name backend` pins the
-resolved set — the toolset's servers plus exactly the skills the agent loaded —
-into a new toolset you can replay deterministically.
-
-## Two toolsets, two tasks
-
-**Backend development vs. incident response.** Everyday coding wants your
-database and code servers and the review skills; a 2 a.m. page wants read-only
-observability and the runbook, and nothing that can write:
+The result is simple TOML:
 
 ```toml
 [toolsets.backend]
-servers = ["postgres", "github"]
-skills  = ["sql-review", "api-conventions"]
+servers = ["github", "postgres"]
+skills = ["api-review"]
+```
+
+## Make it automatic
+
+```bash
+agentstack toolset default backend
+agentstack toolset default backend --write
+agentstack trust .
+```
+
+A trusted new gateway connection opens the default automatically. There is no
+daily `use` command in the normal zero-files workflow.
+
+If a project declares exactly one toolset, AgentStack can use it as the
+effective default. Declaring `default_toolset` is still clearer for people and
+becomes necessary when the project has several toolsets.
+
+## Several tasks
+
+```toml
+default_toolset = "backend"
+
+[toolsets.backend]
+servers = ["github", "postgres"]
+skills = ["api-review", "sql-review"]
 
 [toolsets.incident]
 servers = ["grafana", "logs"]
-skills  = ["oncall-runbook"]
+skills = ["oncall-runbook"]
 ```
 
-`agentstack x session start incident` for the duration of the page, then
-`agentstack x session end` puts every file back exactly as it was — the incident
-tools never linger in your everyday setup.
+New connections open `backend`. A protected run can choose another fence:
 
-A project toolset can be committed and deliberately minimal while your machine
-manifest keeps a broader personal one — see [team setup](team-setup.md).
-Neither grants extra authority: a toolset only selects from capabilities that
-already passed review.
+```bash
+agentstack run claude-code --toolset incident
+```
 
-## Which activation: session or apply
+To move every new request onto another toolset, change the project default with
+`agentstack toolset default <name> --write`; to pin one launch instead, use the
+launcher flag above. A modern connection re-derives the trusted default on its
+next request, so it picks the change up without reconnecting. Only a legacy
+connection keeps its opening selection — connection-scoped toolset leases are
+legacy-only, and the binary refuses one for a modern connection.
 
-- **Beginner path — use it temporarily.** `agentstack x session start <name>`
-  renders the toolset, and `agentstack x session end` restores every native file
-  to its pre-session bytes. Nothing lingers between tasks, and an interrupted
-  session is always one `session end` from clean — this is the recommended way
-  to switch toolsets.
-- **Stable / offline path — apply it.** `agentstack use <name> --write` renders
-  the toolset onto disk and leaves it there. Reach for this when you want the
-  configuration to persist without a live agentstack around — a CI runner, an
-  offline machine, a long-lived checkout.
+## After editing a toolset
 
-Both are reversible: a session reverts on `end`, and an applied toolset is
-undone with [`agentstack x restore`](undo.md).
+```bash
+agentstack lock          # preview
+agentstack lock --write
+agentstack trust .
+agentstack status
+```
 
-- [Concepts](../concepts.md) — toolset, manifest, delivery modes
-- [Reference: selective skills via toolsets](../reference.md#selective-skills-via-toolsets)
-- [Reference: ephemeral sessions](../reference.md#ephemeral-sessions-agentstack-session)
-- [Team setup](team-setup.md) — project vs. machine manifests
+Use `agentstack use <name> --write` only for a file-only CLI or an intentional
+rendered compatibility lane. It is not how live zero-files switching works.
+
+Next: [Central library](../library.md) · [Trust](trust-a-repo.md) ·
+[Concepts](../concepts.md)

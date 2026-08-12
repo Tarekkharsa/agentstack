@@ -12,18 +12,32 @@ verifier to refute the weak ones. Claude Code has an ungoverned version of
 this today; AgentStack's version pins the orchestration code and gives every
 step its own reviewed authority.
 
+For the shortest practical path, start with
+[Run a multi-agent workflow](howto/run-a-workflow.md). The complete loop is:
+
+```bash
+agentstack workflow declare ... --preview
+agentstack workflow declare ... --write
+agentstack trust .
+agentstack workflow explain <name>
+agentstack workflow run <name>
+agentstack workflow report <run-id>
+```
+
 **The full path ships today.** Declare, pin, and trust a
-workflow, run it end to end with `agentstack x workflow run`, render its
-evidence tree with `agentstack x workflow report`, and resume an interrupted
+workflow, run it end to end with `agentstack workflow run`, render its
+evidence tree with `agentstack workflow report`, and resume an interrupted
 run with `--resume` (replay from the recorded journal — byte-identical
 script and args, or it refuses). Every agent step runs as a governed
-[protected run](reference.html). The interpreter boundary was independently
-security-reviewed on 2026-07-23, and all six findings that review raised are
-now closed, each with its own witness. `agentstack x workflow` is therefore a
-listed command rather than a hidden one.
+[protected run](reference.md#execution-posture). The interpreter boundary was
+independently security-reviewed on 2026-07-23, and all six findings that review
+raised are now closed, each with its own witness. `agentstack workflow` is
+therefore listed one hop away: it is grouped out of the everyday `agentstack
+--help` list and named under **Run** on `agentstack x`. It runs at both
+`agentstack x workflow` and `agentstack workflow`.
 
 That change is **discoverability, not enforcement**. Not one boundary moved
-when the command became visible: what the review settled is the *posture*, and
+when the command became listed: what the review settled is the *posture*, and
 a host-tier step is still cooperative-guard only, exactly as *Honest limits*
 below describes.
 
@@ -34,7 +48,7 @@ each with tool access, filesystem reach, and token spend, with the control
 flow decided at runtime by script code. That is exactly the thing a security
 tool should not run on trust. So AgentStack treats the orchestration script
 the same way it treats any other executable content from a repo — as
-[untrusted input](enforcement.html#what-trusted-does-and-does-not-mean)
+[untrusted input](ENFORCEMENT.md#what-trusted-does-and-does-not-mean)
 until you review and pin it.
 
 ## The security model
@@ -92,7 +106,7 @@ report labels each step's posture rather than implying uniform containment.
 The orchestration script runs under host-set ceilings, and two of them are
 **partial on purpose**. A partial bound that reads as total is the failure
 this section exists to prevent, so both residuals are stated here and in the
-posture block `agentstack x workflow report` prints verbatim:
+posture block `agentstack workflow report` prints verbatim:
 
 - **There is no JS heap cap.** Every path by which *untrusted* input reaches
   the interpreter heap is bounded — the invoker's args and every child result
@@ -144,6 +158,7 @@ model are properties of the role's toolset, not something a script may choose.
 export const meta = {
   name: 'nightly-review',
   description: "Review the day's diff, then verify the findings",
+  roles: ['reader', 'writer', 'verifier'],
 }
 
 const FINDINGS = {
@@ -211,7 +226,7 @@ dimension and the reason, and **the run proceeds** on that harness's own
 default — an undeliverable model is a capability gap, not a manifest error. A
 value the adapter's own catalog *rejects* (an effort outside its enum) is a
 manifest error, and a run refuses that child before launch.
-`agentstack x workflow explain <name>` reports the same facts statically,
+`agentstack workflow explain <name>` reports the same facts statically,
 spawning nothing.
 
 ### Named algorithms
@@ -284,7 +299,7 @@ stages returning kilobytes — on short results they are simply pointless.
 
 ### Before you run it
 
-`agentstack x workflow explain <name>` reports the effective ceilings, which
+`agentstack workflow explain <name>` reports the effective ceilings, which
 roles launch serially, and how many `agent()` call **sites** the pinned
 script has — statically, spawning nothing. Sites are not calls: one site
 inside a loop runs once per item, so real fan-out is data-dependent. The

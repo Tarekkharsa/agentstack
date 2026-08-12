@@ -141,18 +141,11 @@ Skills and MCP servers use the live zero-files gateway where supported.
 
 ## When to lock again
 
-Run this after you intentionally change what the project selects or want it to
-accept updated library content:
-
-```bash
-agentstack lock          # preview
-agentstack lock --write
-agentstack trust .
-```
-
-The preview shows exactly which source and digest would change. An updated
-library alone does not silently update a locked project. Re-locking changes the
-consent surface, so the project asks for trust again.
+Lock again after you intentionally change what the project selects, or when you
+want it to accept updated library content. The preview shows exactly which
+source and digest would change; an updated library alone never updates a locked
+project silently. Re-locking changes the consent surface, so the project asks
+for [trust](howto/trust-a-repo.md) again.
 
 ## Sync it to another machine
 

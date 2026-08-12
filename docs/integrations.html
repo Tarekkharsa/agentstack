@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Integrations — agentstack</title>
-<meta name="description" content="The AgentStack CLI is the complete, standalone interface: every plan, write, consent check, and enforcement decision lives there. An integration is an opti">
+<meta name="description" content="AgentStack is standalone. Its manifest, lock, trust, policy, dynamic delivery, and machine bootstrap work without a supervisor or custom UI.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
 <link rel="canonical" href="https://tarekkharsa.github.io/agentstack/integrations.html">
@@ -143,6 +143,8 @@
     <ul>
       <li><a href="start.html">Get started</a>
       </li>
+      <li><a href="library.html">Central library</a>
+      </li>
       <li><a href="tutorial/">Tutorial</a>
       </li>
       <li><a href="index.html#install">Install</a>
@@ -176,6 +178,8 @@
       <li><a href="howto/add-a-skill.html">Add a skill</a>
       </li>
       <li><a href="howto/name-a-toolset.html">Name a toolset</a>
+      </li>
+      <li><a href="howto/run-a-workflow.html">Run a workflow</a>
       </li>
       <li><a href="migrations.html">Migration recipes</a>
       </li>
@@ -215,7 +219,7 @@
       </li>
       <li><a href="workflows.html">Workflows</a>
       </li>
-      <li><a href="reference.html#the-library-linked-source-folders">Library sources</a>
+      <li><a href="reference.html#the-library-linked-source-folders">Library internals</a>
       </li>
       <li><a href="concepts.html#delivery-modes">Delivery modes</a>
       </li>
@@ -275,137 +279,43 @@
   <main id="main-content" tabindex="-1">
 <p class="versionbar">These pages describe <b>v0.18.0-rc.3</b>, a pre-release. <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">The installer</a> serves the current release, <b>v0.17.1</b> — <code>/releases/latest</code> never points at a pre-release — so this is not the build you get unless you ask for it by name: <code>AGENTSTACK_VERSION=v0.18.0-rc.3</code>. <code>agentstack --version</code> says which build you have.</p>
 <h1 id="integrations">Integrations</h1>
-<p>The AgentStack CLI is the complete, standalone interface: every plan, write, consent check, and enforcement decision lives there. An <strong>integration</strong> is an optional surface that calls those same stable read APIs and fixed actions to make the product easier to discover and use where you already work. An integration presents; it never becomes the enforcement boundary, and it never becomes a second implementation.</p>
-<p>Today there is one.</p>
-<h2 id="t3code">t3code<a class="hlink" href="#t3code" aria-label="Link to this section">#</a></h2>
-<p>t3code is AgentStack's optional graphical companion. The obtainable AgentStack CLI is the launch channel; as of v0.17.0 the integrated t3code fork has no public download, so this page documents the compatibility contract for source users rather than presenting an unavailable app as the way to begin. When a packaged t3code build becomes public, it can make AgentStack useful where people already start and supervise coding agents without becoming a second authority system.</p>
-<h3 id="the-released-cli-serves-the-whole-panel">The released CLI serves the whole panel<a class="hlink" href="#the-released-cli-serves-the-whole-panel" aria-label="Link to this section">#</a></h3>
-<p>The half that is public — the CLI — is already complete for this integration. The panel gates each of its features on a contract the CLI advertises, and the <strong>published <code>v0.17.0</code> release serves every affordance the panel gates a button on</strong>, so a source-built t3code needs no locally-built AgentStack behind it. The table below is what <strong>this build</strong> advertises in <code>FEATURES</code>. A panel negotiating against an older release does not see the newer names and degrades to its older wording; it never guesses:</p>
-<div class="tblwrap"><table>
-<thead><tr><th>Panel capability</th><th>Contract</th><th>In this build</th></tr></thead><tbody>
-<tr><td>Setup — render the plan, apply it</td><td><code>init-plan</code>, <code>apply-setup</code></td><td>yes</td></tr>
-<tr><td>Setup — servers another app owns, left out and named</td><td><code>init-tool-managed-v1</code></td><td>yes</td></tr>
-<tr><td>Status — one state, one next action</td><td><code>status-v1</code>, <code>doctor-advisories-v1</code></td><td>yes</td></tr>
-<tr><td>Status — <code>state</code> honest over unverified coverage</td><td><code>status-honesty-v1</code></td><td>yes</td></tr>
-<tr><td>Status — a consent something is actually waiting on</td><td><code>needs-your-yes-v1</code></td><td>yes</td></tr>
-<tr><td>Status — pinned packs with a newer tag already fetched</td><td><code>update-offer-v1</code></td><td>yes</td></tr>
-<tr><td>Status — the effective members of each pinned package</td><td><code>package-members-v1</code></td><td>yes</td></tr>
-<tr><td>Status — names more than one linked library source holds</td><td><code>library-sources-v1</code></td><td>yes</td></tr>
-<tr><td>Status — says whether the trust gate would refuse a write right now</td><td><code>trust-gate-reading-v1</code></td><td>yes</td></tr>
-<tr><td>Status — where house rules reach each targeted CLI</td><td><code>instruction-channels-v1</code></td><td>yes</td></tr>
-<tr><td>Undo — revert this project's last write</td><td><code>restore-last</code></td><td>yes</td></tr>
-<tr><td>Toolsets — browse, create, add, activate</td><td><code>profiles-v1</code>, <code>profiles-edit-v1</code>, <code>toolset-create-v2</code></td><td>yes</td></tr>
-<tr><td>Toolsets — edit membership, rename, delete</td><td><code>profiles-edit-batch-v1</code>, <code>toolset-rename-v1</code>, <code>toolset-delete-v1</code></td><td>yes</td></tr>
-<tr><td>Use temporarily</td><td><code>sessions-v1</code></td><td>yes</td></tr>
-<tr><td>Review this project</td><td><code>trust-preview</code>, <code>trust-server-blockers-v1</code>, <code>trust-consent</code></td><td>yes</td></tr>
-<tr><td>Review this project — per-item consent card + re-gate diff</td><td><code>trust-review-card-v1</code></td><td>yes</td></tr>
-<tr><td>Review this project — the consent card itself, structured</td><td><code>trust-card-diff-v1</code></td><td>yes</td></tr>
-<tr><td>Review this project — the card body grouped, one closing question</td><td><code>trust-card-groups-v1</code></td><td>yes</td></tr>
-<tr><td>Review this project — content edited away from its pin</td><td><code>trust-content-drift-v1</code></td><td>yes</td></tr>
-<tr><td>Drift review</td><td><code>diff-v1</code>, <code>diff-ownership-v1</code></td><td>yes</td></tr>
-<tr><td>Drift review — first render vs moved-ahead</td><td><code>diff-existence-v1</code></td><td>yes</td></tr>
-<tr><td>Drift review — a render the live lane left behind</td><td><code>abandoned-render-v1</code></td><td>yes</td></tr>
-<tr><td>Library remove</td><td><code>library-remove-v1</code></td><td>yes</td></tr>
-<tr><td>Project server/skill remove</td><td><code>manifest-remove-v1</code></td><td>yes</td></tr>
-<tr><td>Workflow monitor (read-only)</td><td><code>workflow-observe-v1</code></td><td>yes</td></tr>
-<tr><td>Serial-role scheduling warning</td><td><code>workflow-serial-roles-v1</code></td><td>yes</td></tr>
-<tr><td>Workflow monitor — per-role model and effort</td><td><code>workflow-role-selection-v1</code></td><td>yes</td></tr>
-<tr><td>Activity feed — on-demand skill loads beside calls</td><td><code>activity-skill-load-v1</code></td><td>yes</td></tr>
-<tr><td>Runtime leases — one row each, with derived liveness</td><td><code>lease-status-v1</code></td><td>yes</td></tr>
-<tr><td>Delivery routing — the lane per capability kind, plus each harness's own <code>bridge_registered</code></td><td><code>delivery-routing-v1</code></td><td>yes</td></tr>
-<tr><td>Image plan — one toolset's packaging plan</td><td><code>image-plan-v1</code></td><td>yes</td></tr>
-<tr><td>Startup test — actually start the servers</td><td><code>doctor-probe-v1</code></td><td>yes</td></tr>
-<tr><td>Status — typed delivery mode + activation</td><td><code>doctor-mode-v1</code></td><td>yes</td></tr>
-<tr><td>Gitignore opt-out (durable, previewed)</td><td><code>gitignore-opt-out-v1</code></td><td>yes</td></tr>
-<tr><td>Delivery-mode switch</td><td><code>set-mode-v1</code> — superseded</td><td>retired; do not build a mode picker</td></tr>
-<tr><td>Footer CLI count / live-delivery coverage</td><td><code>doctor-cli-coverage-v1</code></td><td>yes</td></tr>
-</tbody></table></div>
-<p>Sixteen of those names post-date the published <code>v0.17.1</code>: <code>status-honesty-v1</code>, <code>needs-your-yes-v1</code>, <code>update-offer-v1</code>, <code>package-members-v1</code>, <code>library-sources-v1</code>, <code>trust-gate-reading-v1</code>, <code>instruction-channels-v1</code>, <code>trust-review-card-v1</code>, <code>trust-card-diff-v1</code>, <code>trust-card-groups-v1</code>, <code>trust-content-drift-v1</code>, <code>abandoned-render-v1</code>, <code>workflow-role-selection-v1</code>, <code>activity-skill-load-v1</code>, <code>lease-status-v1</code>, <code>delivery-routing-v1</code> and <code>image-plan-v1</code>. A panel negotiating against that release sees none of them.</p>
-<p>One name in <code>FEATURES</code> is deliberately absent from this table. <code>json-reads-v1</code> names the <code>--json</code> form of <code>status</code>, <code>search</code>, <code>adapters list</code> and <code>session list</code> — an integrator contract for callers that scrape those screens, which the panel does not use because it reads the richer payloads directly. Every other name appears above; <code>profiles-edit-v1</code> covers the digest-bound add verbs and is listed with the toolset rows.</p>
-<p>The table is checked against <code>FEATURES</code> by <code>crates/cli/src/ui_contract.rs::tests::every_served_contract_is_documented</code>, so a contract added to the binary without a row here fails the build rather than reaching an integrator as a name nobody wrote down.</p>
-<p>Check any build yourself — the envelope is part of the read:</p>
-<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack doctor --json | jq '{schema_version, features}'</code></pre></div>
-<p>A panel feature whose contract is absent disables that action with upgrade guidance; it never guesses or degrades silently.</p>
-<h3 id="what-works-today">What works today<a class="hlink" href="#what-works-today" aria-label="Link to this section">#</a></h3>
-<p>AgentStack already manages the native configuration read by the coding CLIs t3code launches. Static activation and clean-at-rest sessions therefore apply to those launches without t3code reimplementing configuration logic.</p>
-<p>Run:</p>
-<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack doctor</code></pre></div>
-<p>When t3code is installed, doctor checks the supervisor integration, including provider guard coverage and home-directory overrides that can move a CLI away from the configuration AgentStack manages.</p>
-<p><strong>Guard coverage is per provider, and it is not universal.</strong> Whichever CLI t3code launches, AgentStack manages its native configuration; whether a host guard can referee that session afterwards depends on the CLI. Claude Code (and VS Code agent mode, which reads the same user-scope hooks), Codex, Gemini, Antigravity, Cursor, Windsurf, Copilot CLI, OpenCode and Pi all have a pre-tool-use hook the guard rides. Three do not, for two different reasons: Claude Desktop and Junie expose <strong>no hook surface</strong> — there is nothing to build — while Kiro is simply <strong>not wired yet</strong>, a gap in AgentStack rather than in Kiro. A panel must not flatten those into one "unsupported" label: one is a limit, the other is a to-do. The per-CLI table, and what the guard blocks once wired, is in <a href="adapters.html#which-adapters-get-the-host-guard">the adapter support matrix</a>; <code>agentstack guard status</code> prints the same list for the machine in front of you.</p>
-<p>For per-session run identity, create a transparent launcher:</p>
+<p>AgentStack is standalone. Its manifest, lock, trust, policy, dynamic delivery, and machine bootstrap work without a supervisor or custom UI.</p>
+<p>An integration may launch a supported CLI, but it does not become a second configuration system.</p>
+<h2 id="t3-code">T3 Code<a class="hlink" href="#t3-code" aria-label="Link to this section">#</a></h2>
+<p>Stock T3 Code can launch and supervise Claude Code, Codex, Cursor, OpenCode, and other providers. Those processes read the same global gateway and managed provider configuration AgentStack already owns.</p>
+<p>The practical setup is therefore only:</p>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack init --connect
+<span class="pr">$ </span>agentstack status     <span class="cm"># inspect this worktree</span></code></pre></div>
+<p>When <code>doctor</code> detects T3 Code it checks provider guard coverage and reports provider-instance home overrides that could point a session away from the global configuration.</p>
+<h3 id="several-projects-and-machines">Several projects and machines<a class="hlink" href="#several-projects-and-machines" aria-label="Link to this section">#</a></h3>
+<p>T3 Code Connect can control work on remote machines. AgentStack handles the configuration on each machine independently:</p>
+<div class="cb"><pre class="block"><code>T3 Code UI
+  ├── machine A → project A → local AgentStack gateway
+  └── machine B → project B → local AgentStack gateway
+                          ↑
+                same central library Git repo</code></pre></div>
+<p>Bootstrap each machine with the same library:</p>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack up --library https://github.com/you/ai-setup.git
+<span class="pr">$ </span>agentstack up --library https://github.com/you/ai-setup.git --write</code></pre></div>
+<p>Project manifests and locks travel with their repositories. Library content travels through its Git remote. Secrets, trust, policy, and audit evidence stay on the machine where the agent runs.</p>
+<p>No T3 Code fork or AgentStack panel is required. The earlier experimental custom panel is not the supported setup path; its lasting lesson is that a UI should present AgentStack's JSON status and preview/consent contracts while the standalone CLI remains the authority. AgentStack can expose those stable JSON read and preview/apply contracts without moving authority out of the CLI.</p>
+<p>For integrations, <code>agentstack init --plan</code> advertises the <code>init-plan</code> contract: it emits JSON with the detected setup and a <code>plan_digest</code> without changing the machine. There is no separate <code>--json</code> flag; <code>--plan</code> is already the JSON read. Pass that digest to the approved write step so a UI cannot apply a different plan from the one the human reviewed.</p>
+<h3 id="json-contract-discovery">JSON contract discovery<a class="hlink" href="#json-contract-discovery" aria-label="Link to this section">#</a></h3>
+<p>Read <code>features</code> in every JSON envelope before using an integration contract. This release advertises: <code>init-plan</code>, <code>apply-setup</code>, <code>init-tool-managed-v1</code>, <code>trust-preview</code>, <code>trust-consent</code>, <code>status-v1</code>, <code>profiles-v1</code>, <code>diff-v1</code>, <code>restore-last</code>, <code>sessions-v1</code>, <code>profiles-edit-v1</code>, <code>diff-ownership-v1</code>, <code>toolset-create-v2</code>, <code>profiles-edit-batch-v1</code>, <code>toolset-rename-v1</code>, <code>toolset-delete-v1</code>, <code>library-remove-v1</code>, <code>manifest-remove-v1</code>, <code>trust-server-blockers-v1</code>, <code>trust-review-card-v1</code>, <code>trust-card-diff-v1</code>, <code>trust-card-groups-v1</code>, <code>activity-skill-load-v1</code>, <code>workflow-observe-v1</code>, <code>workflow-serial-roles-v1</code>, <code>doctor-advisories-v1</code>, <code>doctor-mode-v1</code>, <code>doctor-liveness-v1</code>, <code>doctor-probe-v1</code>, <code>diff-existence-v1</code>, <code>json-reads-v1</code>, <code>gitignore-opt-out-v1</code>, <code>doctor-cli-coverage-v1</code>, <code>status-honesty-v1</code>, <code>needs-your-yes-v1</code>, <code>update-offer-v1</code>, <code>package-members-v1</code>, <code>lease-status-v1</code>, <code>delivery-routing-v1</code>, <code>library-sources-v1</code>, <code>trust-gate-reading-v1</code>, <code>instruction-channels-v1</code>, <code>image-plan-v1</code>, <code>workflow-role-selection-v1</code>, <code>trust-content-drift-v1</code>, and <code>abandoned-render-v1</code>.</p>
+<h3 id="fresh-worktrees">Fresh worktrees<a class="hlink" href="#fresh-worktrees" aria-label="Link to this section">#</a></h3>
+<p>A fresh worktree has the committed project manifest and lock. With zero-files delivery it does not need generated MCP configs or copied skill directories. It still needs local trust because consent is tied to the checkout path.</p>
+<p>Run in the worktree:</p>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack status</code></pre></div>
+<p>Then review the checkout:</p>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack trust .</code></pre></div>
+<p>The next agent connection receives the default toolset automatically. A file- only provider may additionally need the rendered command printed by status.</p>
+<h3 id="per-run-evidence">Per-run evidence<a class="hlink" href="#per-run-evidence" aria-label="Link to this section">#</a></h3>
+<p>T3 Code sessions normally attribute to the machine's global audit. For a separate run identity, create a transparent AgentStack shim and configure that provider instance to launch it:</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack x shim make claude</code></pre></div>
-<p>Point the matching t3code provider's binary-path setting at the generated shim. Each launched session then appears in <code>agentstack x report runs</code> and receives its own run report.</p>
-<h3 id="project-actions-fresh-worktrees-set-themselves-up">Project actions: fresh worktrees set themselves up<a class="hlink" href="#project-actions-fresh-worktrees-set-themselves-up" aria-label="Link to this section">#</a></h3>
-<p>t3code runs each task in a fresh git worktree — a clean checkout in which AgentStack's rendered configuration (<code>.mcp.json</code>, <code>.claude/skills/</code>, and the other native files) does not exist, because the managed <code>.gitignore</code> block deliberately keeps generated artifacts out of git. Left alone, every t3code task therefore starts without the project's servers and skills, and nothing announces the loss.</p>
-<p>t3code's project actions close that gap with no panel and no new AgentStack surface, so they work in any t3code build. A <code>t3.json</code> checked into the repository root offers named commands; t3code shows them for one-click import, runs them in a real terminal inside the worktree, and can run one of them automatically when a worktree is created:</p>
-<div class="cb" data-language="json"><div class="cb-bar"><span class="cb-lang">json</span></div><pre class="block"><code class="language-json">{
-  "$schema": "https://t3.codes/schema/t3.json",
-  "scripts": [
-    {
-      "name": "Set up toolset",
-      "command": "agentstack use --write",
-      "icon": "configure",
-      "runOnWorktreeCreate": true
-    },
-    {
-      "name": "Check setup",
-      "command": "agentstack doctor",
-      "icon": "lint"
-    }
-  ]
-}</code></pre></div>
-<ul>
-<li><strong>Set up toolset</strong> runs the moment a worktree is created, before the coding agent starts. With the project's manifest and lockfile committed, <code>agentstack use --write</code> activates the single declared toolset and renders every native config in place; a project that declares several toolsets must name one (<code>agentstack use &lt;toolset&gt; --write</code>).</li>
-</ul>
-<p><strong>A fresh worktree is a fresh project, and the trust gate says so.</strong> Trust is recorded per project directory, so a new worktree of a repo you already trusted is <em>untrusted</em> at its new path. <code>agentstack use --write</code> there refuses to write server definitions and refuses to materialize skills, prints a <code>✗</code> line per blocked target naming <code>agentstack trust .</code>, and <strong>exits nonzero</strong> — the action's terminal shows the refusal rather than a half-configured session. That is the gate working, not the action failing: run <code>agentstack trust .</code> in the worktree once, then re-run the action. Once trusted, activation exits 0 and materializes servers and skills for every CLI with project scope, and re-runs are idempotent. An automation that must not stop at a human review should not import this action.</p>
-<ul>
-<li><strong>Check setup</strong> is the same <code>agentstack doctor</code> the CLI journey already teaches, one click — or one keybinding — away when a session seems to be missing a capability.</li>
-</ul>
-<p>What to expect:</p>
-<ul>
-<li>t3code runs only the <strong>first</strong> <code>runOnWorktreeCreate</code> script. If the project already has a worktree setup command, chain them: <code>"command": "bun install &amp;&amp; agentstack use --write"</code>.</li>
-<li>If AgentStack needs a decision — an unfamiliar project awaiting review (which every new worktree is), a drifted lockfile — the action's terminal shows the same message the CLI shows anywhere else, with the exact next step. The action adds no authority and skips no consent check.</li>
-<li><code>t3.json</code> is repository content. t3code never runs a file script before you import it, and it shows the literal command at import time — read it, particularly in repositories you did not author. AgentStack's own review gate for repository-declared capabilities is unchanged underneath.</li>
-<li>Keybindings are personal. The file format deliberately has none; each person attaches their own after importing.</li>
-<li>Clean-at-rest projects should not import the setup action — materializing configuration on worktree creation is exactly what that mode avoids. Keep the doctor action, and launch through <code>agentstack run &lt;cli&gt;</code> instead.</li>
-<li>Switching toolsets stays in the CLI: actions take no arguments, so a generic switcher is not possible, and one imported action per toolset ages badly. <code>agentstack use &lt;toolset&gt; --write</code> remains the way to switch.</li>
-</ul>
-<h3 id="the-panel-journey">The panel journey<a class="hlink" href="#the-panel-journey" aria-label="Link to this section">#</a></h3>
-<p>The native t3code panel implements the first launch slice end to end:</p>
-<ol>
-<li><strong>Setup</strong> — an uninitialized project shows the coding tools and importable capabilities detected by <code>agentstack init --plan</code>, and one action applies that reviewed plan. The apply is bound to the exact plan shown: if a CLI config changes in between, the CLI refuses and asks for a fresh review.</li>
-<li><strong>Status</strong> — one state (Ready, Needs attention, or Needs setup) with the single recommended next action; the full doctor report stays available as the detail layer.</li>
-<li><strong>Undo</strong> — the panel shows this project's most recent AgentStack-managed write and can revert it, by identity, without touching other projects.</li>
-<li><strong>Toolset</strong> — browse the library, add a capability to a named toolset, create one, and use it temporarily. The panel negotiates the stable machine contracts for toolsets and sessions and disables edits against an incompatible CLI.</li>
-</ol>
-<p>Reads and actions are version-negotiated: each CLI response names its schema version and usable contracts, and a mismatched pair disables the affected action with upgrade guidance instead of guessing.</p>
-<p>Safety appears progressively:</p>
-<ul>
-<li>Normal local setup does not start with policy or sandbox configuration.</li>
-<li>Unfamiliar repository content introduces a contextual “Review this project” step bound to the exact previewed surface.</li>
-<li>A blocked action explains what was blocked, what is protected, and the exact safe next action.</li>
-<li>Gateway, sandbox, and lockdown choices live under a later “More protection” path with honest coverage labels.</li>
-</ul>
-<h3 id="the-integration-boundary">The integration boundary<a class="hlink" href="#the-integration-boundary" aria-label="Link to this section">#</a></h3>
-<p>t3code owns presentation. The AgentStack CLI owns decisions and authority.</p>
-<ul>
-<li>Reads use explicit, versioned JSON schemas.</li>
-<li>Workspace identity is resolved by the t3code server, never supplied as an arbitrary browser path.</li>
-<li>Writes are a closed enum of actions mapped to fixed CLI arguments.</li>
-<li>The CLI repeats every validation and consent check.</li>
-<li>Secret values never enter the browser payload.</li>
-<li>A frontend bug may break the UI, but it cannot grant more authority.</li>
-</ul>
-<p>Trust is the clearest example. A preview returns a digest of the immutable content snapshot that produced it. A grant action must return that digest, and the CLI refuses stale or missing consent. The digest proves content consistency, not human attention; t3code's dedicated <code>agentstack:admin</code> authorization — required for every authority-changing action, granted only to administrative sessions, never implied by an open browser tab — is the separate human-authority boundary. Both halves are enforced independently: read-only status and planning need no administrative authority, and a frontend bug can break the panel but cannot mint a grant.</p>
-<h3 id="limits">Limits<a class="hlink" href="#limits" aria-label="Link to this section">#</a></h3>
-<ul>
-<li>There is no public t3code package or supported acquisition path today. The CLI journey is complete without it; do not make a launch or onboarding claim depend on the private fork.</li>
-<li>t3code injects its own browser-preview MCP endpoint directly into sessions, outside native CLI configuration. AgentStack can gate calls on governed paths, but the endpoint is not declared in the project manifest or lockfile. That endpoint is not currently treated as a governed cross-harness workflow launcher. Using t3code MCP for child launch and supervision is a separate research item and must preserve AgentStack's admitted execution plan, authority, cancellation, and evidence path.</li>
-<li>t3code's most permissive provider modes can disable the coding CLI's own approval prompts. AgentStack guard coverage matters more in those sessions; doctor reports missing coverage. For Claude Desktop, Junie and Kiro there is no coverage to report — see <a href="#what-works-today">guard coverage is per provider</a> above for which of those is a missing hook surface and which is unbuilt.</li>
-<li>A source-built t3code may keep state in a different location from the packaged app, so doctor may not observe that development state.</li>
-<li>Read and write parity across CLI/t3code versions is feature-negotiated. Unsupported combinations must fail with an upgrade message, never guess.</li>
-</ul>
-<p>The CLI remains a complete standalone interface. t3code makes the same product easier to discover and use; it does not become a second implementation.</p>
+<p>This is optional and does not change the provider's capabilities.</p>
+<h2 id="other-supervisors">Other supervisors<a class="hlink" href="#other-supervisors" aria-label="Link to this section">#</a></h2>
+<p>The same rule applies to any launcher: if it starts a supported CLI with its normal home and working directory, AgentStack works unchanged. If the launcher overrides either, run <code>agentstack doctor</code> on that machine and follow the reported adapter-specific fix.</p>
+<p>Next: <a href="start.html#6-set-up-another-machine">Another machine</a> · <a href="howto/team-setup.html">Team setup</a> · <a href="adapters.html">Adapter support</a></p>
   <p class="srcline">Source of truth: <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/integrations.md">docs/integrations.md</a> — this page is generated from it.</p>
   </main>
 </div>

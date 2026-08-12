@@ -4,21 +4,20 @@
 
 # Which protection do I need?
 
-This page used to ask you two questions. Only one of them is still yours:
-**how much protection you want**. Where capabilities land is no longer a
-decision — delivery is routed for you, and the first section below says what
-that routing is so the second one makes sense. New to a word below? Every term
-is defined in [concepts](concepts.md).
+This page asks you one question: **how much protection you want**. Where
+capabilities land is not a decision — delivery is routed for you, and the first
+section below says what that routing is so the second one makes sense. New to a
+word below? Every term is defined in [concepts](concepts.md).
 
 Your *CLIs* are the agent tools you run — Claude Code, Codex, Cursor, and the
 rest.
 
 ## First, already decided: how capabilities reach your CLIs
 
-**You do not have to choose.** Since 2026-08-03 delivery is *routed*, not
-picked: AgentStack decides per capability, from what kind it is and which CLI it
-is going to, and says what it decided. `agentstack x delivery` shows the routing
-for your project.
+**You do not have to choose.** Delivery is *routed*, not picked: AgentStack
+decides per capability, from what kind it is and which CLI it is going to, and
+says what it decided. `agentstack x delivery` shows the routing for your
+project.
 
 | Capability | Where it goes | Why |
 |---|---|---|
@@ -30,9 +29,11 @@ for your project.
 A project is normally in **both** lanes at once, and that is the ordinary case,
 not a compromise.
 
-**The one escape hatch: render locally.** `agentstack x delivery render-locally
+**The delivery override: render locally.** `agentstack x delivery render-locally
 --write` (add `--harness <id>` for a single CLI) writes files even where the
-live channel would have worked. Pick it for offline work, deterministic native
+live channel would have worked. It is the only setting that changes the
+*routing*; materializing one toolset's files right now, without changing the
+routing, is `agentstack use <toolset> --write` instead. Pick it for offline work, deterministic native
 files, inspection with ordinary filesystem tools, a rule against a persistent
 background process, debugging without another runtime dependency, or testing a
 CLI's own behaviour. Switching it changes only *where the bytes go* — never what
@@ -48,7 +49,8 @@ instructions, hooks or extensions — see
 The older per-project delivery modes (`static`, `clean-at-rest`, `zero-files`)
 are readings of a project's current shape, not choices: `agentstack set-mode`
 is retired and delivery is routed for you. See
-[delivery modes in concepts](concepts.md) for what each still means, and
+[delivery in the reference](reference.md#delivery--routing-and-where-rendered-files-live)
+for what each still means, and
 [ARCHITECTURE — delivery is routed, not chosen](ARCHITECTURE.md#delivery-is-routed-not-chosen)
 for the routing itself and how delivery sits beside selection and isolation.
 
@@ -74,5 +76,7 @@ exactly what each mode does and does not stop. `--lockdown` needs Docker; the
 protected default does not.
 
 **Not sure?** Let delivery stay automatic and add `guard install` — that is the
-right answer for almost everyone. [Get started](start.html) sets both up.
+right answer for almost everyone. [Get started](start.md) covers the delivery
+half; [lock down a run](howto/lock-down-a-run.md) walks the protection ladder
+from the protected default upward.
 

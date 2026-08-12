@@ -5,7 +5,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Add a skill — agentstack</title>
-<meta name="description" content="For anyone giving their agent CLIs a skill — a portable directory with a SKILL.md of instructions. Prerequisite: a project with an .agentstack/agentstack.t">
+<meta name="description" content="For a skill you want across projects, put it in the central library.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="../favicon.svg" type="image/svg+xml">
 <link rel="canonical" href="https://tarekkharsa.github.io/agentstack/howto/add-a-skill.html">
@@ -143,6 +143,8 @@
     <ul>
       <li><a href="../start.html">Get started</a>
       </li>
+      <li><a href="../library.html">Central library</a>
+      </li>
       <li><a href="../tutorial/">Tutorial</a>
       </li>
       <li><a href="../index.html#install">Install</a>
@@ -176,6 +178,8 @@
       <li><a class="on-page" aria-current="page" href="../howto/add-a-skill.html">Add a skill</a>
       </li>
       <li><a href="../howto/name-a-toolset.html">Name a toolset</a>
+      </li>
+      <li><a href="../howto/run-a-workflow.html">Run a workflow</a>
       </li>
       <li><a href="../migrations.html">Migration recipes</a>
       </li>
@@ -215,7 +219,7 @@
       </li>
       <li><a href="../workflows.html">Workflows</a>
       </li>
-      <li><a href="../reference.html#the-library-linked-source-folders">Library sources</a>
+      <li><a href="../reference.html#the-library-linked-source-folders">Library internals</a>
       </li>
       <li><a href="../concepts.html#delivery-modes">Delivery modes</a>
       </li>
@@ -275,56 +279,43 @@
   <main id="main-content" tabindex="-1">
 <p class="versionbar">These pages describe <b>v0.18.0-rc.3</b>, a pre-release. <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">The installer</a> serves the current release, <b>v0.17.1</b> — <code>/releases/latest</code> never points at a pre-release — so this is not the build you get unless you ask for it by name: <code>AGENTSTACK_VERSION=v0.18.0-rc.3</code>. <code>agentstack --version</code> says which build you have.</p>
 <h1 id="add-a-skill">Add a skill</h1>
-<p>For anyone giving their agent CLIs a skill — a portable directory with a <code>SKILL.md</code> of instructions. Prerequisite: a project with an <code>.agentstack/agentstack.toml</code> <a href="../concepts.html">manifest</a> (run <code>agentstack init</code> if you don't have one).</p>
-<h2 id="writing-one-yourself-write-it-declare-it-approve-it">Writing one yourself: write it, declare it, approve it<a class="hlink" href="#writing-one-yourself-write-it-declare-it-approve-it" aria-label="Link to this section">#</a></h2>
-<p>Write the directory where skills live, then take it through the four steps that turn a file on disk into a capability your CLIs can use:</p>
-<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>mkdir -p .agentstack/skills/pdf-review
-<span class="pr">$ </span>$EDITOR .agentstack/skills/pdf-review/SKILL.md   <span class="cm"># your instructions</span>
+<p>For a skill you want across projects, put it in the central library.</p>
+<h2 id="create-one">Create one<a class="hlink" href="#create-one" aria-label="Link to this section">#</a></h2>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack lib new api-review</code></pre></div>
+<p>Edit <code>api-review/SKILL.md</code>. The frontmatter description matters because it is the small routing hint every agent sees before the full body is loaded:</p>
+<div class="cb"><pre class="block"><code>---
+name: api-review
+description: Review API changes for compatibility, error handling, and migration risk. Use when a task adds or changes a public endpoint, request, response, or schema.
+---
 
-<span class="pr">$ </span>agentstack adopt --write     <span class="cm"># declare it in the manifest</span>
-<span class="pr">$ </span>agentstack lock --write      <span class="cm"># pin its bytes in agentstack.lock</span>
-<span class="pr">$ </span>agentstack trust .           <span class="cm"># review the changed consent surface and approve it</span>
-<span class="pr">$ </span>agentstack use --write       <span class="cm"># activate it</span></code></pre></div>
-<p>Until you approve it, the file is <strong>inert</strong> — nothing resolves, pins, renders, or reads it, and no agent sees it. <code>agentstack trust .</code> shows the review: what will run, what it will contact, what secrets it can read, and the bytes each item is pinned to. Skip it and <code>use --write</code> refuses out loud and exits nonzero — "refusing to materialize skills … review and <code>agentstack trust .</code> before putting its words into an agent's context". Undo any of it with <code>agentstack x restore --last --write</code>.</p>
-<p><strong>The order is not interchangeable.</strong> The lockfile is part of the consent surface, so <code>lock --write</code> re-opens the review — lock first, <em>then</em> trust. Doing it the other way round throws away the approval you just gave, and re-locking is never a way past a refusal: accepting new bytes is not an answer to the question they reopen. See <a href="../howto/trust-a-repo.html">trust a cloned repo</a>.</p>
-<p><code>agentstack x lib new &lt;name&gt;</code> scaffolds the template if you'd rather not start from an empty file.</p>
-<p>In v0.18.0 and later, <code>agentstack yes</code> performs the same four steps behind one review and one confirmation — through the same functions and the same gate. See <a href="../start.html#newer-than-the-stable-release">newer than the stable release</a>.</p>
-<h2 id="bringing-in-someone-elses-skill">Bringing in someone else's skill<a class="hlink" href="#bringing-in-someone-elses-skill" aria-label="Link to this section">#</a></h2>
-<div class="tblwrap"><table>
-<thead><tr><th>You have</th><th>Use</th></tr></thead><tbody>
-<tr><td>Any skills repo (GitHub shorthand, git URL) or a local dir</td><td><code>agentstack add skill &lt;source&gt;</code></td></tr>
-<tr><td>A skill you want reusable across projects by name</td><td><code>agentstack x lib add &lt;source&gt;</code> + reference it from a <a href="../concepts.html">toolset</a></td></tr>
-<tr><td>Curiosity — run it once, install nothing</td><td>`agentstack x try &lt;source&gt; \</td><td>&lt;your agent CLI&gt;`</td></tr>
-</tbody></table></div>
-<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="cm"># 1. From the ecosystem: inspect, preview, then write</span>
-<span class="pr">$ </span>agentstack add skill anthropics/skills --list
-<span class="pr">$ </span>agentstack add skill anthropics/skills --skill pdf          <span class="cm"># dry run: scan + diff + digest</span>
-<span class="pr">$ </span>agentstack add skill anthropics/skills --skill pdf --write
+# Review an API change
 
-<span class="cm"># Sources: owner/repo, owner/repo@skill, tree URLs, git remotes, ./local-dir</span>
-<span class="pr">$ </span>agentstack add skill https://github.com/o/r/tree/main/skills/pdf --write
-<span class="pr">$ </span>agentstack add skill ./my-skill --write
-
-<span class="cm"># 2. Reusable across projects: into your first linked library source, then name it in a toolset</span>
-<span class="pr">$ </span>agentstack x lib add anthropics/skills --skill pdf --write
-<span class="cm">#   then in any manifest:  [toolsets.backend]  skills = ["pdf"]</span>
-
-<span class="cm"># 3. Author one from scratch (see "write it, declare it, approve it" above)</span>
-<span class="pr">$ </span>agentstack x lib new code-review        <span class="cm"># scaffolds ./code-review/SKILL.md</span>
-
-<span class="cm"># 4. Try before anything: ephemeral, manifest-free</span>
-<span class="pr">$ </span>agentstack x try anthropics/skills --skill pdf | claude</code></pre></div>
-<p>Every source is content-scanned (hidden-unicode / prompt-injection) before anything is offered, and a dry run fetches into transient staging — the <a href="../concepts.html">manifest</a>, <a href="../concepts.html">lockfile</a>, and content store stay untouched until <code>--write</code>. The write records the exact commit and content checksum in the lockfile, and — where the skill is <a href="../concepts.html#delivery-modes">routed to the rendered lane</a>, the active toolset is unambiguous, <strong>and the project was trusted when the command started</strong> — materializes it into your CLIs' skills directories immediately. That last condition is the one that surprises people. <code>add</code> is allowed to deliver what it just wrote, because a command must not refuse the thing you typed it to get; it is not allowed to deliver into a project that was already untrusted or already drifted. In that case the manifest and lock writes stand, nothing is materialized, and the command exits nonzero naming the two steps in order:</p>
-<div class="cb"><pre class="block"><code>error: 3 targets failed to materialize (the manifest and lock writes stand —
-  each ✗ above names the blocker; if it is consent, review with
-  `agentstack trust .`, then `agentstack use --write`)</code></pre></div>
-<p>Even a successful add leaves the project reading drifted afterwards — the new skill still owes a review — so the <em>next</em> command asks for <code>agentstack trust .</code>. Where the skill is served live instead, the honest next step is printed straight away: <code>agentstack trust .</code>, because the manifest edit re-gates trust (<a href="../howto/trust-a-repo.html">trust a repo</a>); a clean-at-rest project gets <code>session start</code>.</p>
-<p><strong>Limits.</strong> Adding a skill never runs it, and a scan finding that blocks is a decision for you, not a flag to reach for reflexively (<code>--allow-flagged</code> admits it with the warnings on record). Skill names obey one contract — lowercase <code>[a-z0-9._-]</code>, 64 chars — and a source directory that doesn't fit gets <code>--name</code> to choose. Update later with <code>agentstack lock --update --write</code> (branch and rev-less pins re-track their upstream; a vanished repo errors instead of pretending).</p>
-<ul>
-<li><a href="../concepts.html">Concepts</a> — skill, toolset, library, lockfile</li>
-<li><a href="../reference.html#add-skill-source--install-from-any-skills-repo">Reference: <code>add skill &lt;source&gt;</code></a></li>
-<li><a href="../reference.html#the-library-linked-source-folders">Reference: the library</a></li>
-</ul>
+1. Inspect the public contract and its callers.
+2. Check backward compatibility and failure behavior.
+3. Report concrete findings before proposing broad redesign.</code></pre></div>
+<p>Keep the body focused. Put long examples in a <code>references/</code> folder and link only the ones the agent should open for a matching task.</p>
+<h2 id="add-it-to-the-library">Add it to the library<a class="hlink" href="#add-it-to-the-library" aria-label="Link to this section">#</a></h2>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack lib add ./api-review
+<span class="pr">$ </span>agentstack lib add ./api-review --write
+<span class="pr">$ </span>agentstack lib list</code></pre></div>
+<p>The first command previews the destination, content scan, and provenance. New content goes into the first writable linked source.</p>
+<p>Import from Git in the same way:</p>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack lib add anthropics/skills --list
+<span class="pr">$ </span>agentstack lib add anthropics/skills --skill pdf
+<span class="pr">$ </span>agentstack lib add anthropics/skills --skill pdf --write</code></pre></div>
+<h2 id="select-it-in-a-project">Select it in a project<a class="hlink" href="#select-it-in-a-project" aria-label="Link to this section">#</a></h2>
+<div class="cb" data-language="toml"><div class="cb-bar"><span class="cb-lang">toml</span></div><pre class="block"><code class="language-toml">[toolsets.backend]
+skills = ["api-review"]</code></pre></div>
+<p>Then preview, pin, and review:</p>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack lock          <span class="cm"># preview</span>
+<span class="pr">$ </span>agentstack lock --write
+<span class="pr">$ </span>agentstack trust .</code></pre></div>
+<p>On the next trusted connection the agent sees <code>api-review</code> plus its one-line description. It calls <code>agentstack_load</code> only when a task matches. No copied project skill folder or <code>agentstack use</code> step is needed in the live lane.</p>
+<h2 id="keep-a-skill-inside-one-project-instead">Keep a skill inside one project instead<a class="hlink" href="#keep-a-skill-inside-one-project-instead" aria-label="Link to this section">#</a></h2>
+<p>Use a project-local skill when it makes sense only with that repository. The guided quick path is:</p>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack yes</code></pre></div>
+<p>It reviews undeclared content under <code>.agentstack/skills/</code>, then declares, pins, and activates approved files through one human confirmation. Content from an untrusted clone is not eligible for this shortcut.</p>
+<p>Next: <a href="../library.html">Central library</a> · <a href="../howto/trust-a-repo.html">Trust</a> · <a href="../reference.html#add-skill-source--install-from-any-skills-repo">Skill reference</a></p>
   <p class="srcline">Source of truth: <a href="https://github.com/Tarekkharsa/agentstack/blob/main/docs/howto/add-a-skill.md">docs/howto/add-a-skill.md</a> — this page is generated from it.</p>
   </main>
 </div>
