@@ -51,9 +51,18 @@ fn entry(name: &str) -> Result<keyring::Entry> {
 
 /// Store a secret value (overwrites any existing one).
 pub fn set(name: &str, value: &str) -> Result<()> {
-    entry(name)?
-        .set_password(value)
-        .with_context(|| format!("storing secret '{name}' in keychain"))
+    match entry(name)?.set_password(value) {
+        Ok(()) => Ok(()),
+        // Same dedup as `get` and `lookup`: keyring's Display already folds
+        // its platform cause into its own text, so `.with_context()` over the
+        // raw error made `{e:#}` print that sentence twice. Two layers only —
+        // our context over the bare root.
+        Err(e) => {
+            let e = anyhow::Error::new(e);
+            let root = e.root_cause().to_string();
+            Err(anyhow::anyhow!(root).context(format!("storing secret '{name}' in keychain")))
+        }
+    }
 }
 
 /// Read a secret value, if present.

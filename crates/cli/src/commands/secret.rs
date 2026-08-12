@@ -63,9 +63,30 @@ fn set(name: &str, value: Option<&str>, env_file: bool, manifest_dir: Option<&Pa
         );
         return Ok(());
     }
-    keychain::set(name, &value)?;
+    keychain::set(name, &value).map_err(|e| anyhow::anyhow!(keychain_unavailable(name, &e)))?;
     println!("{} stored '{name}' in the OS keychain", "✓".green());
     Ok(())
+}
+
+/// What to say when the keychain refuses the write.
+///
+/// Two problems, one sentence each. The cause is taken from `root_cause()`
+/// because keyring folds its platform text into its own Display, so rendering
+/// the context chain printed the same sentence twice — which read as a stutter
+/// rather than an error. And a machine with no keychain at all (headless CI, a
+/// container, a Linux box with no secret service) is not a machine the user can
+/// fix from here, so the message names the store that does work instead of
+/// stopping at the failure.
+///
+/// Pure so the wording is testable without breaking a real keychain.
+fn keychain_unavailable(name: &str, err: &anyhow::Error) -> String {
+    format!(
+        "could not store '{name}' in the OS keychain: {}\n\
+         \n  \
+         no keychain on this machine? keep it in the project's env file instead:\n    \
+         agentstack secret set {name} --value <VALUE> --env-file",
+        err.root_cause()
+    )
 }
 
 fn get(name: &str) -> Result<()> {
@@ -140,4 +161,22 @@ fn list(manifest_dir: Option<&Path>) -> Result<()> {
         println!("{} all secrets resolve.", "✓".green());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_keychain_refusal_says_it_once_and_names_the_store_that_works() {
+        let err = anyhow::anyhow!("No such keychain exists.")
+            .context("storing secret 'TOKEN' in keychain");
+        let msg = keychain_unavailable("TOKEN", &err);
+        assert_eq!(msg.matches("No such keychain exists.").count(), 1, "{msg}");
+        assert!(msg.contains("--env-file"), "{msg}");
+        assert!(
+            msg.contains("agentstack secret set TOKEN --value <VALUE> --env-file"),
+            "{msg}"
+        );
+    }
 }

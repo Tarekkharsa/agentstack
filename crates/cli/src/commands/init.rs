@@ -251,6 +251,13 @@ fn differing_fields(existing: &Server, incoming: &Server) -> Vec<String> {
     keys
 }
 
+/// What `init` says when it writes plaintext secrets outside a git repository.
+///
+/// Shared with the test that covers the branch, so the sentence and its
+/// witness cannot drift apart.
+pub(crate) const NOT_A_REPO_CAUTION: &str =
+    "     note: not a git repository, so nothing was gitignored — protect this file yourself";
+
 /// Split imported native server names by whether the library can store them.
 ///
 /// Native MCP configs commonly use namespaced identifiers such as
@@ -2446,10 +2453,21 @@ version = 1
                         }
                     }
                     secret_notice = Some(format!(
-                        "{}  Stored {} in .env{}",
+                        "{}  Stored {} in .env{}{}",
                         "🔑".dimmed(),
                         super::count(entries.len(), "token"),
-                        if is_git { " (gitignored)" } else { "" }
+                        if is_git { " (gitignored)" } else { "" },
+                        // F6: outside a repository there is no ignore file to
+                        // write, so the plaintext token has nothing protecting
+                        // it — and the line above says only where it went. The
+                        // absence of "(gitignored)" is not a warning; a reader
+                        // who never saw the git case cannot notice a missing
+                        // word. Say it.
+                        if is_git {
+                            String::new()
+                        } else {
+                            format!("\n{}", NOT_A_REPO_CAUTION.dimmed())
+                        }
                     ));
                 }
                 SecretStore::Skip => {

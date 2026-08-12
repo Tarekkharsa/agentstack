@@ -711,3 +711,66 @@ fn dry_run_connect_writes_nothing_anywhere() {
         "a preview must say what --connect would do:\n{text}"
     );
 }
+
+/// F6: outside a git repository, `init` writes a plaintext secrets file that
+/// nothing is ignoring — and used to say only where it went.
+///
+/// Inside a repository the line ends "(gitignored)". Outside one that word is
+/// simply absent, which is invisible to anyone who has not seen the other
+/// case. Both branches are driven here, because the claim is about the
+/// DIFFERENCE: the caution must appear in exactly one of them.
+#[test]
+fn a_plaintext_secrets_file_outside_a_repo_is_flagged() {
+    let bin = env!("CARGO_BIN_EXE_agentstack");
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    seed_fixtures(&home);
+
+    let stub_bin = tmp.path().join("bin");
+    fs::create_dir_all(&stub_bin).unwrap();
+    write_stub(&stub_bin, "claude");
+    write_stub(&stub_bin, "codex");
+
+    // (a) Not a repository: the token lands unprotected, and the run says so.
+    let plain = tmp.path().join("plain");
+    fs::create_dir_all(&plain).unwrap();
+    let (text, ok) = run(
+        bin,
+        &["init", "--yes", "--secrets", "env"],
+        &home,
+        &plain,
+        &stub_bin,
+    );
+    assert!(ok, "{text}");
+    assert!(
+        text.contains("not a git repository"),
+        "the caution must fire outside a repo: {text}"
+    );
+    assert!(
+        text.contains("protect this file yourself"),
+        "and it must say what to do about it: {text}"
+    );
+    assert!(
+        !text.contains("(gitignored)"),
+        "nothing was gitignored here: {text}"
+    );
+
+    // (b) A repository: the ignore rule is written, so the caution must NOT
+    // fire — otherwise it is noise on the common path.
+    let repo = tmp.path().join("repo");
+    fs::create_dir_all(repo.join(".git")).unwrap();
+    let (text, ok) = run(
+        bin,
+        &["init", "--yes", "--secrets", "env"],
+        &home,
+        &repo,
+        &stub_bin,
+    );
+    assert!(ok, "{text}");
+    assert!(text.contains("(gitignored)"), "{text}");
+    assert!(
+        !text.contains("not a git repository"),
+        "the caution must stay off the protected path: {text}"
+    );
+}

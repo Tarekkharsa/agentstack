@@ -63,6 +63,16 @@ pub enum TrustError {
         "consented digest is the right hash in the wrong form — the surface has NOT changed (given {consented}, expected {actual}); pass the `surface_digest` from `agentstack trust --preview` verbatim, including its `sha256:` prefix"
     )]
     ConsentDigestFormat { consented: String, actual: String },
+    /// The consented value carries the `sha256:` prefix TWICE. Its own cause:
+    /// the documented placeholder was `--consented sha256:<the surface_digest
+    /// you just reviewed>` while `surface_digest` already includes the prefix,
+    /// so substituting it literally doubles it. Split from the two above
+    /// because its fix is to REMOVE something, and both of them tell the user
+    /// to add a prefix or to go and re-review content that never changed.
+    #[error(
+        "consented digest carries the `sha256:` prefix twice — the surface has NOT changed (given {consented}); `surface_digest` already includes the prefix, so pass it as-is: --consented {actual}"
+    )]
+    ConsentDigestDoubledPrefix { consented: String, actual: String },
 }
 
 pub type Result<T> = std::result::Result<T, TrustError>;
@@ -474,7 +484,19 @@ pub fn trust_with_consent(
         let same_bytes = actual
             .strip_prefix("sha256:")
             .is_some_and(|hex| consented == hex);
-        return Err(if same_bytes {
+        // Asked BEFORE the mismatch fallback, because a doubled prefix is a
+        // typing accident with an exact signature, and diagnosing it as
+        // changed content sends the user to re-preview, get a byte-identical
+        // digest, and loop.
+        let doubled_prefix = consented
+            .strip_prefix("sha256:")
+            .is_some_and(|rest| rest == actual);
+        return Err(if doubled_prefix {
+            TrustError::ConsentDigestDoubledPrefix {
+                consented: consented.to_string(),
+                actual,
+            }
+        } else if same_bytes {
             TrustError::ConsentDigestFormat {
                 consented: consented.to_string(),
                 actual,
@@ -1148,6 +1170,51 @@ mod tests {
     // say which of the two problems it is, because "the content changed" sent
     // users to re-preview an unchanged project forever. NEVER relax this into
     // accepting the bare form.
+    /// F2: a DOUBLED `sha256:` prefix is refused, and diagnosed as what it is.
+    ///
+    /// The docs wrote the placeholder as `--consented sha256:<the
+    /// surface_digest you just reviewed>` while `surface_digest` already
+    /// carries the prefix, so substituting literally produced
+    /// `sha256:sha256:<hex>` — which fell through to `ConsentMismatch` and
+    /// told the user the manifest had changed. It had not. Re-previewing then
+    /// returns the identical digest, so the old message was a loop with no
+    /// exit.
+    ///
+    /// The acceptance rule is untouched: this still REFUSES and grants
+    /// nothing. Only the sentence changed.
+    #[test]
+    fn consent_grant_refuses_a_doubled_prefix_and_says_so() {
+        with_home(|_| {
+            let proj = project_with_manifest();
+            let previewed = digest_for(proj.path()).unwrap();
+            let doubled = format!("sha256:{previewed}");
+            assert!(doubled.starts_with("sha256:sha256:"), "fixture: {doubled}");
+
+            let err = trust_with_consent(proj.path(), Vec::new(), &doubled).unwrap_err();
+            assert_eq!(
+                check(proj.path()),
+                TrustState::Untrusted,
+                "a doubled prefix must still grant nothing"
+            );
+            assert!(
+                matches!(err, TrustError::ConsentDigestDoubledPrefix { .. }),
+                "got {err:?}"
+            );
+            let msg = err.to_string();
+            assert!(msg.contains("carries the `sha256:` prefix twice"), "{msg}");
+            assert!(msg.contains("pass it as-is"), "{msg}");
+            assert!(
+                msg.contains(&previewed),
+                "the message must show the value to send: {msg}"
+            );
+            // The false diagnosis this replaces.
+            assert!(
+                !msg.contains("changed since the preview"),
+                "must not claim the surface changed: {msg}"
+            );
+        });
+    }
+
     #[test]
     fn consent_grant_refuses_bare_hex_but_names_it_a_format_problem() {
         with_home(|_| {
