@@ -781,3 +781,62 @@ fn the_undo_surfaces_name_the_skills_they_cannot_reach() {
 
     std::env::remove_var("AGENTSTACK_HOME");
 }
+
+/// C3: `undo` and `x restore` do not list the same set, and each must say so.
+///
+/// The history ledger is machine-global; `undo` filters it to writes that
+/// landed inside the project you are standing in, so that a timeline can never
+/// offer to revert a repository you are not looking at. The cost is that a
+/// machine-scope write — `x gateway connect --all --write`, `apply --scope
+/// global` — is recorded and undoable but absent from `undo`. A walkthrough hit
+/// exactly that: `undo` showed one entry, `x restore` showed more.
+///
+/// The scope difference stays. What changed is that both surfaces now state
+/// their own boundary, so neither list reads as the complete record.
+#[test]
+fn undo_and_restore_each_state_which_writes_they_cover() {
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let home = tmp.path().join("home");
+    let root = tmp.path().join("proj");
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&root).unwrap();
+    // `use --write` is what actually lands a history entry, so the fixture
+    // needs the skill: an empty ledger would prove nothing about either list.
+    uninstall_project(&root, /*with_skill=*/ true);
+    deliver(&home, &root, true);
+
+    // Land a real ledger entry. `render-locally --write` records a project
+    // change (crates/cli/src/commands/delivery.rs), which is enough to put
+    // both lists into their populated branch.
+    let (out, _) = run(
+        &["x", "delivery", "render-locally", "--write"],
+        &home,
+        &root,
+    );
+    let populated = out.contains("wrote") || out.contains("rendered");
+
+    let (out, ok) = run(&["undo"], &home, &root);
+    assert!(ok, "{out}");
+    // Both branches — a populated timeline and an empty one — have to name the
+    // wider list, because "nothing recorded to undo for this project" is the
+    // reading most likely to be mistaken for "nothing was written".
+    assert!(
+        out.contains("agentstack x restore --list"),
+        "undo must name where the machine-wide writes are: {out}"
+    );
+    if out.contains("recent changes") {
+        assert!(
+            out.contains("this project only"),
+            "a populated timeline must bound itself: {out}"
+        );
+    }
+
+    let (out, ok) = run(&["x", "restore", "--list"], &home, &root);
+    assert!(ok, "{out}");
+    if populated || out.contains("Recorded changes") {
+        assert!(
+            out.contains("everything on this machine"),
+            "restore must state the wider scope that makes it the answer: {out}"
+        );
+    }
+}

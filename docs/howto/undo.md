@@ -15,10 +15,20 @@ to a point. Nothing changes until you add the shown `--write` form.
 
 ```console
 recent changes (newest first)
+  this project only — machine-wide writes: agentstack x restore --list
   1  1m ago       init                                         7 files · Claude Code, Codex CLI
 
   pick a point: agentstack undo --to <n> --write
 ```
+
+**`undo` is scoped to this project, and that is deliberate.** The ledger is
+machine-global, so `undo` filters it to writes that landed inside the directory
+you are standing in — offering another repository's applies would be offering
+to break a project you are not looking at. A machine-scope write is therefore
+recorded but not listed here: `agentstack x gateway connect --all --write`
+registers the bridge in each harness's own config, and `apply --scope global`
+writes outside the project too. Both are undoable, through `x restore` below,
+which lists everything this machine recorded.
 
 ## Undo one recorded write
 
@@ -34,7 +44,7 @@ The bare form lists every recorded point and every adapter backup:
 
 ```console
 $ agentstack x restore
-Recorded changes (newest first):
+Recorded changes (newest first) — everything on this machine:
 
   18cb1a4c48  1m ago   global   gateway connect            2 files · Claude Code, Codex CLI
   18cb1a4c46  1m ago   project  init                       7 files · Claude Code, Codex CLI

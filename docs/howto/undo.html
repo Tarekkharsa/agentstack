@@ -283,9 +283,11 @@
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack undo</code></pre></div>
 <p>It shows recent AgentStack-managed writes and the exact command for returning to a point. Nothing changes until you add the shown <code>--write</code> form.</p>
 <div class="cb cb-term" data-language="console"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">console</span></div><pre class="block"><code class="language-console"><span class="out">recent changes (newest first)</span>
+<span class="out">  this project only — machine-wide writes: agentstack x restore --list</span>
 <span class="out">  1  1m ago       init                                         7 files · Claude Code, Codex CLI</span>
 
 <span class="out">  pick a point: agentstack undo --to &lt;n&gt; --write</span></code></pre></div>
+<p><strong><code>undo</code> is scoped to this project, and that is deliberate.</strong> The ledger is machine-global, so <code>undo</code> filters it to writes that landed inside the directory you are standing in — offering another repository's applies would be offering to break a project you are not looking at. A machine-scope write is therefore recorded but not listed here: <code>agentstack x gateway connect --all --write</code> registers the bridge in each harness's own config, and <code>apply --scope global</code> writes outside the project too. Both are undoable, through <code>x restore</code> below, which lists everything this machine recorded.</p>
 <h2 id="undo-one-recorded-write">Undo one recorded write<a class="hlink" href="#undo-one-recorded-write" aria-label="Link to this section">#</a></h2>
 <p>The script-friendly form is:</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack x restore
@@ -293,7 +295,7 @@
 <span class="pr">$ </span>agentstack x restore &lt;id&gt; --write</code></pre></div>
 <p>The bare form lists every recorded point and every adapter backup:</p>
 <div class="cb cb-term" data-language="console"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">console</span></div><pre class="block"><code class="language-console"><span class="pr">$ </span>agentstack x restore
-<span class="out">Recorded changes (newest first):</span>
+<span class="out">Recorded changes (newest first) — everything on this machine:</span>
 
 <span class="out">  18cb1a4c48  1m ago   global   gateway connect            2 files · Claude Code, Codex CLI</span>
 <span class="out">  18cb1a4c46  1m ago   project  init                       7 files · Claude Code, Codex CLI</span>

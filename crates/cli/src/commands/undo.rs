@@ -153,6 +153,15 @@ fn when(time_unix: u64) -> String {
 
 fn print_timeline(rows: &[Row]) {
     println!("{}", "recent changes (newest first)".bold());
+    // `timeline` filters the machine-global ledger down to writes that landed
+    // inside this project, so a machine-scope write — `x gateway connect
+    // --all --write` into a harness's own config, an `apply --scope global` —
+    // is recorded but never listed here. Saying so is the difference between
+    // a bounded list and a list that looks complete and is not.
+    println!(
+        "  {}",
+        "this project only — machine-wide writes: agentstack x restore --list".dimmed()
+    );
     for r in rows {
         println!(
             "  {}  {:<12} {:<44} {}",
@@ -207,6 +216,10 @@ pub fn run(args: &UndoArgs, manifest_dir: Option<&Path>) -> Result<()> {
 
     if rows.is_empty() {
         println!("nothing recorded to undo for this project.");
+        println!(
+            "  {}",
+            "machine-wide writes are listed by: agentstack x restore --list".dimmed()
+        );
         // The line that closed G31. "Nothing recorded" straight after
         // `use --write` reported writing skills to three locations reads as a
         // bug in the ledger; it is a boundary of it, and the boundary has to be

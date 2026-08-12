@@ -198,7 +198,10 @@ fn list(registry: &Registry, dir: &Path) -> Result<()> {
         // boundary, and the commands that DO take those skills back.
         super::undo::print_skills_note(dir);
     } else {
-        println!("Recorded changes (newest first):\n");
+        // The counterpart to `undo`'s project filter: this list is everything
+        // this machine recorded, which is why it can hold entries `undo` never
+        // shows.
+        println!("Recorded changes (newest first) — everything on this machine:\n");
         for e in entries.iter().take(15) {
             let mark = if e.undone {
                 "· undone".dimmed().to_string()
