@@ -149,8 +149,17 @@ jobs:
         # fast; this dedicated job is where they actually execute.
         run: cargo test -p agentstack-egress --test sidecar_image -- --include-ignored --nocapture
       - name: Sandbox egress + lockdown end-to-end (Docker)
+        # `--lib` is load-bearing, not tidiness. Naming `--test` targets
+        # explicitly EXCLUDES the lib unit-test target, so the crate's four
+        # `#[cfg(feature = "sandbox")]` unit tests were compiled by the clippy
+        # step above and executed nowhere — including
+        # `tools_execute_is_advertised_only_by_machine_opt_in`, the sole witness
+        # that code execution stays behind a machine-level opt-in and that a
+        # hostile repository cannot reach dispatch. A security witness that
+        # never runs is not a witness.
         run: |
           cargo test -p agentstack --features sandbox \
+            --lib \
             --test sandbox_egress \
             --test sandbox_cli_e2e \
             --test sandbox_fs \

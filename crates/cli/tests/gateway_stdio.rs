@@ -21,80 +21,51 @@ use agentstack::gateway::Gateway;
 // Tests mutate the process-global HOME/AGENTSTACK_HOME and secret env; serialize.
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
-/// A minimal MCP stdio server in POSIX sh: answers `initialize`, `tools/list`
-/// (one `echo` tool), and `tools/call` (echoes the `msg` argument and its own
-/// `$FIX_TOKEN` env, proving env made it into the child resolved). Writes its
-/// pid to `$PIDFILE` on start so tests can watch its lifetime.
-const FIXTURE: &str = r#"#!/bin/sh
-if [ -n "$PIDFILE" ]; then echo $$ > "$PIDFILE"; fi
-while IFS= read -r line; do
-  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
-  case "$line" in
-    *'"method":"server/discover"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id"
-      ;;
-    *'"method":"initialize"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"fix","version":"0"}}}\n' "$id"
-      ;;
-    *'"method":"tools/list"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"echo","description":"Echo the input back.","inputSchema":{"type":"object","properties":{"msg":{"type":"string"}},"required":["msg"]}}]}}\n' "$id"
-      ;;
-    *'"method":"tools/call"'*)
-      msg=$(printf '%s' "$line" | sed -n 's/.*"msg":"\([^"]*\)".*/\1/p')
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"echo:%s:token=%s"}]}}\n' "$id" "$msg" "$FIX_TOKEN"
-      ;;
-  esac
-done
-"#;
+mod common;
+use common::StdioServer;
 
-/// A deliberately slow server: sleeps 1.5s before answering a `tools/call` —
-/// the fixture for proving per-upstream locking (a call here must not block a
-/// call to a different server).
-const SLOW_FIXTURE: &str = r#"#!/bin/sh
-while IFS= read -r line; do
-  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
-  case "$line" in
-    *'"method":"server/discover"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id"
-      ;;
-    *'"method":"initialize"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"slow","version":"0"}}}\n' "$id"
-      ;;
-    *'"method":"tools/list"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"wait","description":"Answer slowly.","inputSchema":{"type":"object","properties":{}}}]}}\n' "$id"
-      ;;
-    *'"method":"tools/call"'*)
-      sleep 1.5
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"finally"}]}}\n' "$id"
-      ;;
-  esac
-done
-"#;
+/// A minimal MCP stdio server: answers `tools/list` with one `echo` tool, and
+/// `tools/call` by echoing the `msg` argument and its own `$FIX_TOKEN` env
+/// (proving env made it into the child resolved). Writes its pid to `$PIDFILE`
+/// on start so tests can watch its lifetime.
+fn fixture() -> String {
+    StdioServer::new("fix")
+        .prologue(r#"if [ -n "$PIDFILE" ]; then echo $$ > "$PIDFILE"; fi"#)
+        .tools(
+            r#"{"name":"echo","description":"Echo the input back.","inputSchema":{"type":"object","properties":{"msg":{"type":"string"}},"required":["msg"]}}"#,
+        )
+        .on_call(
+            r#"      msg=$(printf '%s' "$line" | sed -n 's/.*"msg":"\([^"]*\)".*/\1/p')
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"echo:%s:token=%s"}]}}\n' "$id" "$msg" "$FIX_TOKEN""#,
+        )
+        .script()
+}
 
-/// A server that starts but never answers anything — the timeout fixture.
-const HANG_FIXTURE: &str = "#!/bin/sh\nexec sleep 3600\n";
+/// A deliberately slow server: sleeps before answering a `tools/call` — the
+/// fixture for proving per-upstream locking (a call here must not block a call
+/// to a different server).
+fn slow_fixture() -> String {
+    StdioServer::new("slow")
+        .tools(r#"{"name":"wait","description":"Answer slowly.","inputSchema":{"type":"object","properties":{}}}"#)
+        .on_call(
+            r#"      sleep 1.5
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"finally"}]}}\n' "$id""#,
+        )
+        .script()
+}
 
 /// A server whose one tool (`where`) reports the directory it runs in — the
 /// fixture for cwd anchoring.
-const CWD_FIXTURE: &str = r#"#!/bin/sh
-while IFS= read -r line; do
-  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
-  case "$line" in
-    *'"method":"server/discover"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id"
-      ;;
-    *'"method":"initialize"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"cwd","version":"0"}}}\n' "$id"
-      ;;
-    *'"method":"tools/list"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"where","description":"Report the working directory.","inputSchema":{"type":"object","properties":{}}}]}}\n' "$id"
-      ;;
-    *'"method":"tools/call"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"cwd:%s"}]}}\n' "$id" "$(pwd)"
-      ;;
-  esac
-done
-"#;
+fn cwd_fixture() -> String {
+    StdioServer::new("cwd")
+        .tools(r#"{"name":"where","description":"Report the working directory.","inputSchema":{"type":"object","properties":{}}}"#)
+        .on_call(
+            r#"      printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"cwd:%s"}]}}\n' "$id" "$(pwd)""#,
+        )
+        .script()
+}
+
+const HANG_FIXTURE: &str = "#!/bin/sh\nexec sleep 3600\n";
 
 fn write_script(dir: &Path, name: &str, body: &str) -> PathBuf {
     let path = dir.join(name);
@@ -138,7 +109,7 @@ fn stdio_round_trip_env_secrets_and_group_kill() {
     setup_home(&tmp.path().join("home"));
     let proj = tmp.path().join("proj");
     std::fs::create_dir_all(&proj).unwrap();
-    let script = write_script(&proj, "fix.sh", FIXTURE);
+    let script = write_script(&proj, "fix.sh", &fixture());
     let pidfile = proj.join("fix.pid");
     // The secret resolves from process env (first link in the chain) and must
     // land, resolved, in the child's env.
@@ -216,7 +187,7 @@ fn stdio_spawns_in_project_root_so_relative_args_resolve() {
     setup_home(&tmp.path().join("home"));
     let proj = tmp.path().join("proj");
     std::fs::create_dir_all(&proj).unwrap();
-    write_script(&proj, "cwdfix.sh", CWD_FIXTURE);
+    write_script(&proj, "cwdfix.sh", &cwd_fixture());
     // A *relative* script path: it only resolves if the child is spawned from
     // the manifest's project root — the test process itself runs elsewhere.
     write_manifest(
@@ -240,7 +211,7 @@ fn stdio_manifest_cwd_anchors_the_child_relative_to_project_root() {
     let proj = tmp.path().join("proj");
     let srv = proj.join("srv");
     std::fs::create_dir_all(&srv).unwrap();
-    write_script(&srv, "cwdfix.sh", CWD_FIXTURE);
+    write_script(&srv, "cwdfix.sh", &cwd_fixture());
     // `cwd = "srv"` is relative to the project root; the relative script path
     // then resolves against that cwd, matching the rendered-config contract.
     write_manifest(
@@ -267,7 +238,7 @@ fn call_log_classifies_real_failures() {
     setup_home(&tmp.path().join("home"));
     let proj = tmp.path().join("proj");
     std::fs::create_dir_all(&proj).unwrap();
-    write_script(&proj, "fix.sh", FIXTURE);
+    write_script(&proj, "fix.sh", &fixture());
     write_manifest(
         &proj,
         "[servers.missing]\ntype = \"stdio\"\ncommand = \"/bin/definitely-not-a-binary\"\n\
@@ -314,7 +285,7 @@ fn machine_policy_denies_with_precedence_over_the_project() {
     .unwrap();
     let proj = tmp.path().join("proj");
     std::fs::create_dir_all(&proj).unwrap();
-    write_script(&proj, "fix.sh", FIXTURE);
+    write_script(&proj, "fix.sh", &fixture());
     write_manifest(
         &proj,
         "[servers.fix]\ntype = \"stdio\"\ncommand = \"/bin/sh\"\nargs = [\"./fix.sh\"]\n",
@@ -360,8 +331,8 @@ fn slow_upstream_does_not_block_calls_to_another_server() {
     setup_home(&tmp.path().join("home"));
     let proj = tmp.path().join("proj");
     std::fs::create_dir_all(&proj).unwrap();
-    write_script(&proj, "slow.sh", SLOW_FIXTURE);
-    write_script(&proj, "fast.sh", CWD_FIXTURE);
+    write_script(&proj, "slow.sh", &slow_fixture());
+    write_script(&proj, "fast.sh", &cwd_fixture());
     write_manifest(
         &proj,
         "[servers.slow]\ntype = \"stdio\"\ncommand = \"/bin/sh\"\nargs = [\"./slow.sh\"]\n\
@@ -400,7 +371,7 @@ fn stdio_agentstack_layout_anchors_at_project_root_not_manifest_dir() {
     let proj = tmp.path().join("proj");
     let sub = proj.join(".agentstack");
     std::fs::create_dir_all(&sub).unwrap();
-    write_script(&proj, "cwdfix.sh", CWD_FIXTURE);
+    write_script(&proj, "cwdfix.sh", &cwd_fixture());
     // Preferred `.agentstack/` layout: the manifest dir is NOT the project
     // root. Relative paths must anchor at the root, not at `.agentstack/`.
     std::fs::write(
@@ -425,7 +396,7 @@ fn stdio_unresolved_secret_refuses_calls_but_still_lists() {
     setup_home(&tmp.path().join("home"));
     let proj = tmp.path().join("proj");
     std::fs::create_dir_all(&proj).unwrap();
-    let script = write_script(&proj, "fix.sh", FIXTURE);
+    let script = write_script(&proj, "fix.sh", &fixture());
     std::env::remove_var("AGENTSTACK_TEST_UNSET_REF");
     write_manifest(
         &proj,
@@ -458,7 +429,7 @@ fn stdio_startup_timeout_yields_partial_results() {
     setup_home(&tmp.path().join("home"));
     let proj = tmp.path().join("proj");
     std::fs::create_dir_all(&proj).unwrap();
-    let good = write_script(&proj, "fix.sh", FIXTURE);
+    let good = write_script(&proj, "fix.sh", &fixture());
     let hang = write_script(&proj, "hang.sh", HANG_FIXTURE);
     write_manifest(
         &proj,
@@ -495,7 +466,7 @@ fn stats_live_measures_context_cost_through_gateway() {
     setup_home(&home);
     let proj = tmp.path().join("proj");
     std::fs::create_dir_all(&proj).unwrap();
-    let script = write_script(&proj, "fix.sh", FIXTURE);
+    let script = write_script(&proj, "fix.sh", &fixture());
     write_manifest(
         &proj,
         &format!(
@@ -527,7 +498,7 @@ fn policy_firewall_hides_denied_tools_and_refuses_calls() {
     setup_home(&tmp.path().join("home"));
     let proj = tmp.path().join("proj");
     std::fs::create_dir_all(&proj).unwrap();
-    let script = write_script(&proj, "fix.sh", FIXTURE);
+    let script = write_script(&proj, "fix.sh", &fixture());
     write_manifest(
         &proj,
         &format!(
@@ -585,7 +556,7 @@ fn audit_log_records_ok_calls_with_digest_only() {
     setup_home(&tmp.path().join("home"));
     let proj = tmp.path().join("proj");
     std::fs::create_dir_all(&proj).unwrap();
-    let script = write_script(&proj, "fix.sh", FIXTURE);
+    let script = write_script(&proj, "fix.sh", &fixture());
     write_manifest(
         &proj,
         &format!(

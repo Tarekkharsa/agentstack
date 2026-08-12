@@ -41,28 +41,21 @@ const SKILL_SENTINEL: &str = "INERT-BODY-SENTINEL-4c1f";
 /// The value the manifest's `${RT_INERT_SECRET}` would resolve to.
 const SECRET: &str = "sk-inert-DEADBEEF-neverresolved";
 
+mod common;
+use common::StdioServer;
+
 /// A stdio "server" that announces its own start on the filesystem and then
-/// speaks just enough MCP to be proxied.
-const ANNOUNCER: &str = r#"#!/bin/sh
-touch "$MARKER"
-while IFS= read -r line; do
-  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
-  case "$line" in
-    *'"method":"server/discover"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id"
-      ;;
-    *'"method":"initialize"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"probe","version":"0"}}}\n' "$id"
-      ;;
-    *'"method":"tools/list"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"ping","description":"Ping.","inputSchema":{"type":"object","properties":{}}}]}}\n' "$id"
-      ;;
-    *'"method":"tools/call"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"pong"}]}}\n' "$id"
-      ;;
-  esac
-done
-"#;
+/// speaks just enough MCP to be proxied. The marker file is the whole point:
+/// if the trust gate leaks, this touches it.
+fn announcer() -> String {
+    StdioServer::new("probe")
+        .prologue(r#"touch "$MARKER""#)
+        .tools(r#"{"name":"ping","description":"Ping.","inputSchema":{"type":"object","properties":{}}}"#)
+        .on_call(
+            r#"      printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"pong"}]}}\n' "$id""#,
+        )
+        .script()
+}
 
 struct Fixture {
     home: PathBuf,
@@ -77,7 +70,7 @@ fn fixture(tmp: &Path) -> Fixture {
     fs::create_dir_all(&home).unwrap();
     fs::create_dir_all(proj.join("skills/secretive")).unwrap();
     let script = proj.join("probe.sh");
-    fs::write(&script, ANNOUNCER).unwrap();
+    fs::write(&script, announcer()).unwrap();
     fs::write(
         proj.join("skills/secretive/SKILL.md"),
         format!("---\nname: secretive\ndescription: does things\n---\n\n{SKILL_SENTINEL}\n"),

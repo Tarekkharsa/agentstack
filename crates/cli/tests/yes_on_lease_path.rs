@@ -31,6 +31,9 @@ use std::sync::Mutex;
 
 use serde_json::{json, Value};
 
+mod common;
+use common::StdioServer;
+
 // These tests mutate the process-global HOME/AGENTSTACK_HOME (children inherit
 // them, and the in-process card read below uses them directly); serialize them.
 static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -605,31 +608,20 @@ fn status_names_needs_your_yes_after_a_refusal() {
     cleanup();
 }
 
-/// A minimal MCP stdio server in POSIX sh: answers `initialize`, `tools/list`
-/// (one `echo` tool), and `tools/call`. Copied from `trust_at_dispatch.rs`
-/// rather than shared — test binaries cannot import each other, and a helper
-/// crate for one shell script would cost more than it saves.
+/// A minimal MCP stdio server: answers `tools/list` with one `echo` tool and
+/// `tools/call` by echoing the `msg` argument back.
 #[cfg(unix)]
-const UPSTREAM_FIXTURE: &str = r#"#!/bin/sh
-while IFS= read -r line; do
-  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
-  case "$line" in
-    *'"method":"server/discover"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id"
-      ;;
-    *'"method":"initialize"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"fix","version":"0"}}}\n' "$id"
-      ;;
-    *'"method":"tools/list"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"echo","description":"Echo the input back.","inputSchema":{"type":"object","properties":{"msg":{"type":"string"}},"required":["msg"]}}]}}\n' "$id"
-      ;;
-    *'"method":"tools/call"'*)
-      msg=$(printf '%s' "$line" | sed -n 's/.*"msg":"\([^"]*\)".*/\1/p')
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"echo:%s"}]}}\n' "$id" "$msg"
-      ;;
-  esac
-done
-"#;
+fn upstream_fixture() -> String {
+    StdioServer::new("fix")
+        .tools(
+            r#"{"name":"echo","description":"Echo the input back.","inputSchema":{"type":"object","properties":{"msg":{"type":"string"}},"required":["msg"]}}"#,
+        )
+        .on_call(
+            r#"      msg=$(printf '%s' "$line" | sed -n 's/.*"msg":"\([^"]*\)".*/\1/p')
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"echo:%s"}]}}\n' "$id" "$msg""#,
+        )
+        .script()
+}
 
 /// A trusted project whose one server is a REAL stdio child, so the connection
 /// the W2 refusal interrupts is a live one. Same sandboxed-home shape as
@@ -644,7 +636,7 @@ fn project_with_upstream(tmp: &Path) -> PathBuf {
     let proj = tmp.join("proj");
     std::fs::create_dir_all(proj.join(".agentstack")).unwrap();
     let script = proj.join("fix.sh");
-    std::fs::write(&script, UPSTREAM_FIXTURE).unwrap();
+    std::fs::write(&script, upstream_fixture()).unwrap();
     std::fs::write(
         proj.join(".agentstack/agentstack.toml"),
         format!(

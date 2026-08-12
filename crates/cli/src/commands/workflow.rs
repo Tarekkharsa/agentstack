@@ -88,7 +88,21 @@ const WATCHDOG_EXIT_CODE: i32 = 124;
 /// proportionally huge for a tiny ceiling (a 1s `meta.maxWallSeconds` → 31s
 /// hard kill) — acceptable, since a genuinely stalled run isn't escalating,
 /// just burning CPU, and both paths fail closed.
-const WATCHDOG_GRACE_SECS: u64 = 30;
+///
+/// Env-overridable so tests can exercise the force-exit path without waiting
+/// out the real default — the same knob, for the same reason, as
+/// [`crate::gateway::stdio_start_timeout`]. The watchdog's witnesses prove
+/// that it fires at ceiling+grace and records `watchdog_kill`, NOT that the
+/// grace is thirty seconds; paying 30s of wall clock twice to re-assert a
+/// constant is the cost this removes. The default is unchanged, an
+/// unparseable value falls back to it, and nothing in production sets it.
+fn watchdog_grace_secs() -> u64 {
+    const DEFAULT: u64 = 30;
+    std::env::var("AGENTSTACK_WATCHDOG_GRACE_SECS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(DEFAULT)
+}
 
 /// How long the watchdog's *best-effort reporting* gets before the guaranteed
 /// no-I/O exit fires anyway (see [`arm_no_io_exit`]).
@@ -725,7 +739,7 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
                              outcome recorded — see `agentstack x workflow report {}`)",
                             wf.name,
                             effective_wall,
-                            WATCHDOG_GRACE_SECS,
+                            watchdog_grace_secs(),
                             run_id
                         ),
                     ));
@@ -1249,7 +1263,7 @@ fn script_entry_path(anchor: &Path, declared: &str) -> Result<PathBuf> {
 }
 
 /// Arm the out-of-thread watchdog at `effective_wall` (the effective,
-/// possibly script-narrowed ceiling in seconds) plus [`WATCHDOG_GRACE_SECS`].
+/// possibly script-narrowed ceiling in seconds) plus [`watchdog_grace_secs`].
 /// Returns the completion sender: dropping it (any normal exit path) retires
 /// the watchdog; a wall-clock overrun prints an honest line — naming the
 /// effective ceiling and the grace SEPARATELY, so the message never
@@ -1293,7 +1307,10 @@ fn spawn_watchdog(
     exhausted: Arc<AtomicBool>,
     started: Instant,
 ) -> mpsc::Sender<()> {
-    let armed = Duration::from_secs(effective_wall.saturating_add(WATCHDOG_GRACE_SECS));
+    // Read once, so the armed deadline and the line that reports it can never
+    // disagree about what the grace was.
+    let grace = watchdog_grace_secs();
+    let armed = Duration::from_secs(effective_wall.saturating_add(grace));
     let (done_tx, done_rx) = mpsc::channel::<()>();
     std::thread::spawn(move || match done_rx.recv_timeout(armed) {
         // Completion (or the sender dropped on any exit path): retire.
@@ -1308,7 +1325,7 @@ fn spawn_watchdog(
             });
             eprintln!(
                 "✗ workflow '{name}' ran past its effective wall-clock ceiling ({effective_wall}s) \
-                 plus the {WATCHDOG_GRACE_SECS}s watchdog grace — force-exiting (out-of-thread \
+                 plus the {grace}s watchdog grace — force-exiting (out-of-thread \
                  watchdog: a stalled engine slice cannot be interrupted cooperatively). Live \
                  children receive SIGTERM; the outcome is recorded best-effort — see \
                  `agentstack x workflow report {run_id}`.",

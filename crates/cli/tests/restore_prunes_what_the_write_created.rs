@@ -17,7 +17,7 @@
 //! ledger — `FileChange::created_dirs`, recorded by `history::capture` at the
 //! one instant the answer exists (was the path there yet?) — and everything
 //! else is out of reach by construction. `x uninstall` reached the same shape
-//! first (`uninstall_promises_only_the_undo_it_has.rs`); this shares its guards
+//! first (`undo_promises.rs`, group 1); this shares its guards
 //! through `util::fsx::prune_empty_dirs` rather than keeping a second copy.
 //!
 //! The three negative controls are the point of the file. A prune that fires

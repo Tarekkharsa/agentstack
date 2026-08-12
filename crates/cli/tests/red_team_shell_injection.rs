@@ -32,34 +32,26 @@ use std::sync::Mutex;
 use agentstack::gateway::Gateway;
 use serde_json::json;
 
+mod common;
+use common::StdioServer;
+
 // The in-process test mutates the process-global HOME; serialize.
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
-/// A minimal MCP stdio server in POSIX sh that reports, on `tools/call`, the
-/// first argument and the `EVIL` env value it was actually given. If a shell
-/// ever expanded them, the `$(touch …)` payloads run and `echo` reports the
-/// *expanded* (empty) text instead — so this fixture detects interpolation
-/// two ways at once.
-const REPORTER: &str = r#"#!/bin/sh
-arg1="$1"
-while IFS= read -r line; do
-  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
-  case "$line" in
-    *'"method":"server/discover"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id"
-      ;;
-    *'"method":"initialize"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"probe","version":"0"}}}\n' "$id"
-      ;;
-    *'"method":"tools/list"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"report","description":"Report received argv and env.","inputSchema":{"type":"object","properties":{}}}]}}\n' "$id"
-      ;;
-    *'"method":"tools/call"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"argv1=[%s] evil=[%s]"}]}}\n' "$id" "$arg1" "$EVIL"
-      ;;
-  esac
-done
-"#;
+/// A minimal MCP stdio server that reports, on `tools/call`, the first
+/// argument and the `EVIL` env value it was actually given. If a shell ever
+/// expanded them, the `$(touch …)` payloads run and `echo` reports the
+/// *expanded* (empty) text instead — so this fixture detects interpolation two
+/// ways at once.
+fn reporter() -> String {
+    StdioServer::new("probe")
+        .prologue(r#"arg1="$1""#)
+        .tools(r#"{"name":"report","description":"Report received argv and env.","inputSchema":{"type":"object","properties":{}}}"#)
+        .on_call(
+            r#"      printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"argv1=[%s] evil=[%s]"}]}}\n' "$id" "$arg1" "$EVIL""#,
+        )
+        .script()
+}
 
 /// The payload, parameterised on a marker directory so each test can prove
 /// "nothing ran" by looking for files that would only exist if it had.
@@ -97,7 +89,7 @@ fn a_hostile_argv_entry_reaches_the_child_verbatim_and_never_a_shell() {
     let proj = tmp.path().join("proj");
     fs::create_dir_all(&proj).unwrap();
     let script = proj.join("probe.sh");
-    fs::write(&script, REPORTER).unwrap();
+    fs::write(&script, reporter()).unwrap();
 
     let arg = payload(&marker, "ARG");
     let env = payload(&marker, "ENV");

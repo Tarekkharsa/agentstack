@@ -38,31 +38,22 @@ use agentstack::gateway::Gateway;
 // env; serialize them.
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
-/// A minimal MCP stdio server in POSIX sh: answers `initialize`,
-/// `tools/list` (one `echo` tool), and `tools/call`. Deliberately the same
-/// shape as `gateway_stdio.rs`'s fixture — copied rather than shared, because
-/// test binaries cannot import each other and a helper crate for one script
-/// would cost more than it saves.
-const FIXTURE: &str = r#"#!/bin/sh
-while IFS= read -r line; do
-  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
-  case "$line" in
-    *'"method":"server/discover"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id"
-      ;;
-    *'"method":"initialize"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"fix","version":"0"}}}\n' "$id"
-      ;;
-    *'"method":"tools/list"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"echo","description":"Echo the input back.","inputSchema":{"type":"object","properties":{"msg":{"type":"string"}},"required":["msg"]}}]}}\n' "$id"
-      ;;
-    *'"method":"tools/call"'*)
-      msg=$(printf '%s' "$line" | sed -n 's/.*"msg":"\([^"]*\)".*/\1/p')
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"echo:%s"}]}}\n' "$id" "$msg"
-      ;;
-  esac
-done
-"#;
+mod common;
+use common::StdioServer;
+
+/// A minimal MCP stdio server: answers `tools/list` with one `echo` tool and
+/// `tools/call` by echoing the `msg` argument back.
+fn fixture() -> String {
+    StdioServer::new("fix")
+        .tools(
+            r#"{"name":"echo","description":"Echo the input back.","inputSchema":{"type":"object","properties":{"msg":{"type":"string"}},"required":["msg"]}}"#,
+        )
+        .on_call(
+            r#"      msg=$(printf '%s' "$line" | sed -n 's/.*"msg":"\([^"]*\)".*/\1/p')
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"echo:%s"}]}}\n' "$id" "$msg""#,
+        )
+        .script()
+}
 
 /// A lock document that parses — the "before" bytes of the replacement case.
 const LOCK_BEFORE: &str = "version = 2\n";
@@ -85,7 +76,7 @@ fn trusted_project(tmp: &Path, server_key: &str) -> PathBuf {
     let proj = tmp.join("proj");
     std::fs::create_dir_all(proj.join(".agentstack")).unwrap();
     let script = proj.join("fix.sh");
-    std::fs::write(&script, FIXTURE).unwrap();
+    std::fs::write(&script, fixture()).unwrap();
     std::fs::write(
         proj.join(".agentstack/agentstack.toml"),
         format!(

@@ -25,6 +25,9 @@ use agentstack::commands::lock as lock_cmd;
 use agentstack::library::{Library, LibraryPackage, LibrarySkill};
 use agentstack::lock::{Lock, PackageMemberKind, PackageMemberOrigin};
 
+mod common;
+use common::StdioServer;
+
 // These tests mutate the process-global HOME/AGENTSTACK_HOME; serialize them.
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -1015,31 +1018,20 @@ fn a_package_instruction_member_renders_into_an_existing_managed_region_only() {
     assert!(!plan_only.contains("Prefer exciting Rust."));
 }
 
-/// A minimal MCP stdio server in POSIX sh that records the fact that it ran:
-/// it touches `$SENTINEL` the moment it starts, before reading a line. So the
-/// sentinel's existence is exactly "this server was started", independent of
-/// whether anything was ever asked of it.
+/// A minimal MCP stdio server that records the fact that it ran: it touches
+/// `$SENTINEL` the moment it starts, before reading a line. So the sentinel's
+/// existence is exactly "this server was started", independent of whether
+/// anything was ever asked of it.
 #[cfg(unix)]
-const SENTINEL_FIXTURE: &str = r#"#!/bin/sh
-[ -n "$SENTINEL" ] && : > "$SENTINEL"
-while IFS= read -r line; do
-  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
-  case "$line" in
-    *'"method":"server/discover"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id"
-      ;;
-    *'"method":"initialize"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":"2025-06-18","capabilities":{},"serverInfo":{"name":"fix","version":"0"}}}\n' "$id"
-      ;;
-    *'"method":"tools/list"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"tools":[{"name":"ping","description":"Ping.","inputSchema":{"type":"object"}}]}}\n' "$id"
-      ;;
-    *'"method":"tools/call"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"pong"}]}}\n' "$id"
-      ;;
-  esac
-done
-"#;
+fn sentinel_fixture() -> String {
+    StdioServer::new("fix")
+        .prologue(r#"[ -n "$SENTINEL" ] && : > "$SENTINEL""#)
+        .tool("ping", "Ping.")
+        .on_call(
+            r#"      printf '{"jsonrpc":"2.0","id":%s,"result":{"content":[{"type":"text","text":"pong"}]}}\n' "$id""#,
+        )
+        .script()
+}
 
 /// *A server starts on first tool use, not on activation.*
 ///
@@ -1081,7 +1073,7 @@ fn a_server_is_not_started_until_one_of_its_tools_is_called() {
     });
 
     let script = proj.join("srv.sh");
-    fs::write(&script, SENTINEL_FIXTURE).unwrap();
+    fs::write(&script, sentinel_fixture()).unwrap();
     let called = proj.join("called.started");
     let idle = proj.join("idle.started");
     write_manifest(
@@ -1163,40 +1155,20 @@ fn a_server_is_not_started_until_one_of_its_tools_is_called() {
 /// Write a minimal stdio MCP server in POSIX sh whose sentinel path and tool
 /// name are baked in.
 ///
-/// Baked in rather than passed through `$SENTINEL` (as [`SENTINEL_FIXTURE`]
+/// Baked in rather than passed through `$SENTINEL` (as [`sentinel_fixture`]
 /// does) because a package's `[server]` table can only declare `secret_env`
 /// names, which become unresolved `${REF}`s — the fixture has to be
 /// self-contained to say anything about a package-carried server.
 #[cfg(unix)]
 fn write_pinned_server(script: &Path, sentinel: &Path, tool: &str) {
-    fs::write(
-        script,
-        format!(
-            r#"#!/bin/sh
-: > '{sentinel}'
-while IFS= read -r line; do
-  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
-  case "$line" in
-    *'"method":"server/discover"'*)
-      printf '{{"jsonrpc":"2.0","id":%s,"error":{{"code":-32601,"message":"method not found"}}}}\n' "$id"
-      ;;
-    *'"method":"initialize"'*)
-      printf '{{"jsonrpc":"2.0","id":%s,"result":{{"protocolVersion":"2025-06-18","capabilities":{{}},"serverInfo":{{"name":"pkg","version":"0"}}}}}}\n' "$id"
-      ;;
-    *'"method":"tools/list"'*)
-      printf '{{"jsonrpc":"2.0","id":%s,"result":{{"tools":[{{"name":"{tool}","description":"Ping.","inputSchema":{{"type":"object"}}}}]}}}}\n' "$id"
-      ;;
-    *'"method":"tools/call"'*)
-      printf '{{"jsonrpc":"2.0","id":%s,"result":{{"content":[{{"type":"text","text":"{tool}-pong"}}]}}}}\n' "$id"
-      ;;
-  esac
-done
-"#,
-            sentinel = sentinel.display(),
-            tool = tool,
-        ),
-    )
-    .unwrap();
+    let body = StdioServer::new("pkg")
+        .prologue(&format!(": > '{}'", sentinel.display()))
+        .tool(tool, "Ping.")
+        .on_call(&format!(
+            r#"      printf '{{"jsonrpc":"2.0","id":%s,"result":{{"content":[{{"type":"text","text":"{tool}-pong"}}]}}}}\n' "$id""#
+        ))
+        .script();
+    fs::write(script, body).unwrap();
 }
 
 /// A `pack.toml` carrying one stdio server member (named after the package, as

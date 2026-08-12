@@ -184,6 +184,39 @@ struct ApiInput {
 mod tests {
     use super::*;
 
+    /// HERMETICITY WITNESS. `RegistryProvider` is a default provider, so a live
+    /// HTTPS GET to `registry.modelcontextprotocol.io` sat behind every
+    /// `search` / `add --from` / `explain` path in the suite — and because
+    /// [`RegistryProvider::search`] degrades a failure to an empty result, a
+    /// dead network and an empty answer look identical. The suite passed either
+    /// way, which made a third-party host an uncontrolled input to a green run.
+    ///
+    /// `.cargo/config.toml` pins `AGENTSTACK_REGISTRY_URL` at a dead local
+    /// address for everything Cargo launches in this workspace. This test is
+    /// what makes that pin load-bearing rather than a comment: if the file is
+    /// deleted, renamed, or stops being read, this fails instead of the suite
+    /// quietly going back on the network.
+    #[test]
+    fn the_suite_never_reaches_the_live_registry() {
+        let provider = RegistryProvider::default();
+        assert_ne!(
+            provider.base, DEFAULT_BASE,
+            "the test environment must override the live registry base — is \
+             .cargo/config.toml still there, and is the runner reading it?"
+        );
+        assert!(
+            !provider.base.contains("modelcontextprotocol.io"),
+            "the override must not point at the third-party host either: {}",
+            provider.base
+        );
+        // And the pin actually answers (refuses) rather than hanging: a search
+        // against it completes here, in-band, with an empty result.
+        assert!(
+            provider.search("github", 5).is_empty(),
+            "a pinned, unreachable registry must yield nothing"
+        );
+    }
+
     #[test]
     fn parses_remote_and_package_servers() {
         let json = r#"{ "servers": [

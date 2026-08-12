@@ -66,9 +66,23 @@ fn agentstack(
         .current_dir(cwd)
         .env("AGENTSTACK_HOME", home)
         .env("PATH", path)
+        // The watchdog's real grace above the wall ceiling is 30s, so the two
+        // force-exit witnesses below used to cost ~31s of wall clock EACH —
+        // 62s, the two longest tests in the whole suite, spent waiting out a
+        // constant rather than testing anything. What they prove is that the
+        // watchdog fires at ceiling+grace and records `watchdog_kill`; the
+        // NUMBER is not under test. Shrinking the grace keeps every assertion
+        // and every code path identical.
+        .env("AGENTSTACK_WATCHDOG_GRACE_SECS", WATCHDOG_GRACE_SECS)
         .output()
         .expect("agentstack binary runs")
 }
+
+/// The watchdog grace these tests run under. Large enough that a loaded runner
+/// cannot mistake a slow-but-healthy start for a stall (the cooperative in-band
+/// path must still lose the race to the watchdog, which is the scenario), small
+/// enough that the force-exit lands in seconds rather than half a minute.
+const WATCHDOG_GRACE_SECS: &str = "3";
 
 fn copy_tree(from: &Path, to: &Path) {
     std::fs::create_dir_all(to).unwrap();
@@ -151,8 +165,9 @@ fn acceptance_bundle_admits_and_runs_end_to_end() {
 /// Witness 5, the Stage C half: a drive stalled on a long-running child is
 /// force-exited by the OUT-OF-THREAD watchdog at the PROCESS level — exit
 /// code 124, an honest stderr line, well before the child's own duration.
-/// Stage D arms the watchdog at the EFFECTIVE ceiling plus the fixed grace
-/// (1s + 30s here), so the force-exit lands at ~31s — the cooperative
+/// Stage D arms the watchdog at the EFFECTIVE ceiling plus the grace (1s plus
+/// the injected [`WATCHDOG_GRACE_SECS`] here), so the force-exit lands at ~4s
+/// — the cooperative
 /// in-band path cannot fire in this scenario (the drive thread is blocked
 /// joining the batch while the child sleeps), which is precisely the stall
 /// class the watchdog backstop exists for. The "outcome is recorded" clause
@@ -217,10 +232,11 @@ fn watchdog_force_exits_a_stalled_run_at_the_process_level() {
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(stderr.contains("wall-clock ceiling"), "{stderr}");
     // Far below the child's 300 s sleep: the exit came from the watchdog
-    // (1 s effective ceiling + 30 s grace), not from the child finishing.
+    // (1 s effective ceiling + the injected grace), not from the child
+    // finishing.
     assert!(
-        elapsed.as_secs() < 60,
-        "watchdog should fire at ~31s (ceiling+grace), took {elapsed:?}"
+        elapsed.as_secs() < 30,
+        "watchdog should fire at ~4s (ceiling+grace), took {elapsed:?}"
     );
 
     // Stage E, witness 5's recorded half: the dying watchdog appended its
@@ -310,11 +326,11 @@ fn watchdog_force_exits_a_non_yielding_interpreter_slice() {
     );
     let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(stderr.contains("wall-clock ceiling"), "{stderr}");
-    // The regex would take astronomically longer than the ~31s ceiling+grace;
+    // The regex would take astronomically longer than the ~4s ceiling+grace;
     // an exit under 60s proves the watchdog ended it, not the slice finishing.
     assert!(
-        elapsed.as_secs() < 60,
-        "watchdog should fire at ~31s (ceiling+grace), took {elapsed:?}"
+        elapsed.as_secs() < 30,
+        "watchdog should fire at ~4s (ceiling+grace), took {elapsed:?}"
     );
 
     let run_id = stderr

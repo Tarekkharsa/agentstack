@@ -283,9 +283,12 @@ mod tests {
     #[test]
     fn request_over_the_inflight_cap_is_shed_with_503() {
         let port = spawn_test_endpoint();
-        // Hold every parked connection open — dropping one frees its slot.
+
+        // Flood FIRST, read afterwards. Every connection is held open — dropping
+        // one frees its slot — and none is read from until the flood is
+        // complete, so the cap is genuinely saturated before anything is
+        // asserted.
         let mut held = Vec::new();
-        let mut saw_503 = false;
         for _ in 0..(MAX_INFLIGHT * 3) {
             let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
             // A shed 503 is written by the accept loop immediately; a pinned
@@ -300,21 +303,52 @@ mod tests {
                 b"POST /call HTTP/1.1\r\nHost: x\r\nX-Agentstack-Token: tok\r\nContent-Length: 2048\r\n\r\n",
             )
             .unwrap();
+            held.push(s);
+        }
+
+        // Now read, and read only where an answer can already be waiting.
+        //
+        // The accept loop takes connections in order, so the first
+        // `MAX_INFLIGHT` of them are the ones that win a slot and park forever
+        // in the body read; every connection after that is shed with a 503 the
+        // accept loop writes immediately. So the first socket worth reading is
+        // index `MAX_INFLIGHT` — skipping the pinned prefix entirely, because
+        // reading it proves nothing and can only time out.
+        //
+        // That skip is the whole cost of this test. The previous shape read
+        // each socket as soon as it was opened, so the first `MAX_INFLIGHT`
+        // reads each waited out the full 300 ms timeout just to learn the slot
+        // was pinned: 64 x 300 ms ~ 19 s, which was this test's entire runtime
+        // and made it the fourth-slowest test in the suite. Scanning forward
+        // from the cap instead answers in one read.
+        //
+        // (Reading from the NEWEST connection backwards looks tempting and is
+        // worse: the newest connections are the LAST the accept loop reaches,
+        // so those reads wait on the accept loop rather than on a slot.)
+        //
+        // The scan continues past the first candidate only to absorb the
+        // scheduling case where the accept loop has not reached that index
+        // yet. The guarantee asserted is unchanged, and it stays bounded by a
+        // CONNECTION COUNT rather than by wall-clock time — the property the
+        // comment above protects.
+        let mut saw_503 = false;
+        for socket in held.iter_mut().skip(MAX_INFLIGHT) {
             let mut buf = [0u8; 64];
-            match s.read(&mut buf) {
+            match socket.read(&mut buf) {
                 Ok(n) if String::from_utf8_lossy(&buf[..n]).starts_with("HTTP/1.1 503") => {
                     saw_503 = true;
                     break;
                 }
-                // Parked (read timed out) or any other reply — keep the socket
-                // open so its slot stays pinned, and keep flooding.
-                _ => held.push(s),
+                // Not answered yet — try the next over-cap connection.
+                _ => continue,
             }
         }
         assert!(
             saw_503,
             "the accept loop must shed at least one over-cap request with 503"
         );
+        // Held to here on purpose: an early drop would free slots and let the
+        // endpoint accept again mid-assertion.
         drop(held);
     }
 }
