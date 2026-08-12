@@ -161,7 +161,11 @@ machines, or teammates.
 ## Install
 
 The one-line installer above verifies the release tarball against the `checksums.txt` published with
-each release. Or build from a checkout:
+each release. Each release also carries a GitHub build provenance attestation tying the asset to this
+repository and the workflow that built it — check it with
+`gh attestation verify agentstack-<target>.tar.gz --repo Tarekkharsa/agentstack`. That establishes
+*where* the artifact was built and does not replace the checksum comparison; see
+[`RELEASING.md`](RELEASING.md). Or build from a checkout:
 
 ```sh
 cargo build --release                  # add --features sandbox for `run --sandbox`
