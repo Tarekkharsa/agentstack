@@ -668,5 +668,6 @@ deliberate architecture change, not a Cargo.toml edit.
 `core` depends on nothing internal; nothing depends on `cli`. `trust` and
 `policy` are the security-critical crates: they depend on `core` only, stay
 as small as possible, carry `#![forbid(unsafe_code)]`, keep the restricted
-dependency list (see CLAUDE.md rule 6), and their property-tested invariants
-are human-reviewed line by line.
+dependency list (see the ground rules in
+[`CONTRIBUTING.md`](https://github.com/Tarekkharsa/agentstack/blob/main/CONTRIBUTING.md)),
+and their property-tested invariants are human-reviewed line by line.
