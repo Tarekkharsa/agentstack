@@ -40,3 +40,16 @@ examples/workflow-scale/results.jsonl
 # internal planning material — kept on disk for the maintainer, not published
 /plan/
 /PLAN.md
+
+# archived records nothing current cites — kept on disk and in git history,
+# not published. docs/archive/README.md says what keeps the rest tracked.
+/docs/archive/BUILD-LOG.md
+/docs/archive/FINDINGS-v0.18.0-rc1-review.md
+/docs/archive/docs-architecture-proposal.md
+/docs/archive/dogfooding-findings.md
+/docs/archive/prompt-check-subsystem.md
+/docs/archive/spikes/
+/docs/archive/design/codex-workflow-review-2026-07-29.md
+/docs/archive/design/launch-plan.md
+/docs/archive/design/panel-wireframe.md
+/docs/archive/design/strategy-v2-vision.html
