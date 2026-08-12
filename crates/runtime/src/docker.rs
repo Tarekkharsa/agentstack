@@ -77,6 +77,25 @@ impl DockerSandbox {
         self.docker.clone()
     }
 
+    /// Make sure `image` is present locally, pulling it if it is not. Returns
+    /// `true` when a pull actually happened, so the caller can record the
+    /// moment it went to the network.
+    ///
+    /// This exists because bollard's `create_container` does NOT auto-pull the
+    /// way the `docker` CLI does: a published image that has never been used on
+    /// this machine makes container creation fail with a bare
+    /// `404 No such image`, which reads to a user as a broken product rather
+    /// than a first run. Every published, version-pinned image AgentStack
+    /// starts goes through here.
+    ///
+    /// A locally present image is never re-pulled, so a digest-pinned
+    /// reference resolves to exactly the bytes it names, once.
+    #[cfg(feature = "docker")]
+    pub fn ensure_image(&self, image: &str) -> Result<bool> {
+        self.rt
+            .block_on(crate::lockdown::ensure_image(&self.docker, image))
+    }
+
     /// The gateway IP of Docker's default `bridge` network (`docker0`, e.g.
     /// `172.17.0.1`) — the address `host.docker.internal:host-gateway` resolves
     /// to on a *native* Linux daemon, and therefore the narrowest host

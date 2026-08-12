@@ -350,6 +350,38 @@ mod hosted {
         let sink: agentstack_runtime::LockdownSink = Arc::new(move |line: &str| {
             events.send(line.to_string());
         });
+        // Acquire every published image this execution needs BEFORE the
+        // topology starts.
+        //
+        // bollard's `create_container` does not auto-pull the way the `docker`
+        // CLI does, and `Lockdown::start` only ensures the SIDECAR. The
+        // executor runtime was never ensured by anything, so the first
+        // `tools_execute` on a machine that had not already cached
+        // `node:22-slim@sha256:…` failed with a bare
+        // `404 No such image` from deep inside container creation — a first-run
+        // condition wearing a broken-product error message. The runtime image is
+        // published and digest-pinned, not user-built like the `run --sandbox`
+        // runner, so it belongs on the same acquisition path as the sidecar.
+        //
+        // Ensuring the sidecar here too is deliberate and costs one cheap
+        // `inspect` when it is already present: `Lockdown::start` keeps its own
+        // call so `run --lockdown` stays self-sufficient, and this loop makes
+        // the executor's requirements explicit in one list that a test can read.
+        for image in required_images(plan) {
+            let pulled = setup!(
+                backend
+                    .ensure_image(&image)
+                    .map_err(|error| runtime_unavailable("acquiring the runtime image", error)),
+                "runtime-unavailable"
+            );
+            if pulled {
+                log.append(&agentstack_recorder::RunEvent::RuntimeImagePulled {
+                    ts: agentstack_recorder::now_epoch(),
+                    image: image.clone(),
+                });
+            }
+        }
+
         let relay_dest = format!("host.docker.internal:{}", relay.addr().port());
         // The executor never receives this token. Even if guest code imports
         // `node:net` and addresses the sidecar's normal proxy port directly,
@@ -678,6 +710,17 @@ mod hosted {
             .collect()
     }
 
+    /// Every published image this execution must have locally before it can
+    /// start, in acquisition order.
+    ///
+    /// A list rather than two inline calls so the requirement is a value a test
+    /// can inspect without Docker. The defect this encodes was an ABSENCE: the
+    /// runtime image was in no acquisition set at all, which is invisible when
+    /// the check is spelled out inline at the one call site.
+    pub(super) fn required_images(plan: &ExecutePlan) -> Vec<String> {
+        vec![egress_image(), plan.runtime.image.clone()]
+    }
+
     fn egress_image() -> String {
         std::env::var("AGENTSTACK_EGRESS_IMAGE").unwrap_or_else(|_| {
             concat!(
@@ -945,6 +988,62 @@ mod tests {
         );
         assert!(served.skipped_servers().is_empty());
         assert!(super::hosted::refuse_if_servers_skipped(&served).is_ok());
+        std::env::remove_var("AGENTSTACK_HOME");
+    }
+
+    /// The acquisition seam, proved without a daemon.
+    ///
+    /// CI reached `starting executor container` and died on
+    /// `404 No such image: node:22-slim@sha256:…`. The cause was not a broken
+    /// pull — it was that the runtime image was in NO acquisition set: the same
+    /// execution pulled its egress sidecar on demand and never asked for its
+    /// own runtime, so every user whose machine had not already cached that
+    /// digest hit the same 404 on their first `tools_execute`.
+    ///
+    /// This asserts the requirement rather than the pull: given a real plan,
+    /// the runtime image is among the images the run declares it must have.
+    /// `docker rmi` in a test would be far too invasive, and the pull itself is
+    /// exercised for real by the Docker-gated witness below — on a runner where
+    /// the image is genuinely absent, which is precisely the reported failure.
+    #[test]
+    fn the_runtime_image_is_among_the_images_the_run_acquires() {
+        let _guard = crate::util::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let home = assert_fs::TempDir::new().unwrap();
+        std::env::set_var("AGENTSTACK_HOME", home.path());
+        let project = assert_fs::TempDir::new().unwrap();
+        project
+            .child(".agentstack/agentstack.toml")
+            .write_str(
+                "version = 1\n[servers.demo]\ntype = \"stdio\"\ncommand = \"sh\"\nargs = [\"server.sh\"]\n",
+            )
+            .unwrap();
+        project.child("server.sh").write_str(DEMO_SERVER).unwrap();
+        crate::trust::trust_unreviewed(project.path()).unwrap();
+
+        let gateway = Arc::new(crate::gateway::Gateway::from_manifest(Some(project.path())));
+        let request: ExecuteRequest = serde_json::from_value(json!({
+            "code": "export default 1;",
+            "allowTools": ["demo__echo"]
+        }))
+        .unwrap();
+        let (plan, _authority) =
+            build(request, Some(project.path()), gateway).expect("the plan must build");
+
+        let images = super::hosted::required_images(&plan);
+        assert!(
+            images.contains(&EXECUTOR_IMAGE.to_string()),
+            "the executor runtime must be acquired before the container is created, \
+             else a machine without it cached gets `404 No such image`: {images:?}"
+        );
+        // The supply-chain posture ENFORCEMENT.md claims: acquiring by digest
+        // means the pull can only ever yield the exact bytes named.
+        assert!(
+            EXECUTOR_IMAGE.contains("@sha256:"),
+            "the runtime image must stay digest-pinned: {EXECUTOR_IMAGE}"
+        );
+
         std::env::remove_var("AGENTSTACK_HOME");
     }
 

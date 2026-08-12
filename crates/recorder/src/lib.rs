@@ -547,6 +547,20 @@ pub enum RunEvent {
         limit: String,
         observed: u64,
     },
+    /// A published, version-pinned image was absent locally and was fetched
+    /// from its registry before the run could start.
+    ///
+    /// Worth an event because it is the one moment a governed execution goes
+    /// out to the network for its own runtime. `docs/ENFORCEMENT.md` records
+    /// the executor's supply-chain posture as "Node image is pinned by
+    /// repository digest"; this is the evidence of WHEN those bytes arrived on
+    /// this machine. A run with no such event used an image that was already
+    /// here.
+    RuntimeImagePulled {
+        ts: u64,
+        /// The full reference asked for, digest included.
+        image: String,
+    },
     /// The sandbox container was created and started.
     SandboxStarted {
         ts: u64,
