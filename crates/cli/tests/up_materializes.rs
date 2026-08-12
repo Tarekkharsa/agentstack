@@ -135,6 +135,39 @@ fn library_flag_clones_the_personal_library_on_a_fresh_machine() {
         fs::read_to_string(home.join(".agentstack/lib/library.toml")).unwrap(),
         "version = 1\n"
     );
+
+    // `--library` records the URL before the pull proves it, so one typo
+    // repoints the library and every later `agentstack up` fails here. The
+    // refusal must therefore name a command that RUNS in this state: telling
+    // the user to "re-run `agentstack up`" is naming the command that just
+    // failed, with nothing in between that repoints the remote.
+    let bad = Command::new(exe)
+        .args(["up", "--write", "--library", "file:///nonexistent/nope.git"])
+        .args(["--manifest-dir"])
+        .arg(&proj)
+        .env("HOME", &home)
+        .env("AGENTSTACK_HOME", home.join(".agentstack"))
+        .env_remove("SEARCH_API_KEY")
+        .env("NO_COLOR", "1")
+        .output()
+        .unwrap();
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&bad.stdout),
+        String::from_utf8_lossy(&bad.stderr)
+    );
+    assert!(
+        !bad.status.success(),
+        "an unreachable remote must fail:\n{text}"
+    );
+    assert!(
+        text.contains("agentstack up --library <url>"),
+        "the refusal must name the way to repoint the remote:\n{text}"
+    );
+    assert!(
+        text.contains("/nonexistent/nope.git"),
+        "…and the remote it actually tried, so the typo is visible:\n{text}"
+    );
 }
 
 #[test]

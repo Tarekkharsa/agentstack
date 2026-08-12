@@ -276,7 +276,10 @@ pub fn start(manifest_dir: Option<&Path>, profile: &str, scope: Scope) -> Result
     let ctx = crate::commands::load(manifest_dir)?;
     let key_dir = dir_key(&ctx.dir);
     if load_all().contains_key(&key_dir) {
-        anyhow::bail!("a session is already active here — end it first");
+        anyhow::bail!(
+            "a session is already active here — end it first: `agentstack x session end` \
+             (`agentstack x session list` shows which one)"
+        );
     }
     let manifest = &ctx.loaded.manifest;
     manifest
@@ -397,6 +400,21 @@ pub fn start(manifest_dir: Option<&Path>, profile: &str, scope: Scope) -> Result
         if let Some(sd) = desc.skills_dir_for(scope, &ctx.dir) {
             skill_before.push((sd.clone(), sd.exists(), dir_entries(&sd)));
         }
+    }
+
+    // The activation below maintains the managed `.gitignore` block (the
+    // session's own skill dirs and server configs join it), so the session's
+    // snapshot has to hold that file too — `session end` promises "every file
+    // above goes back exactly", and without this capture the block survived the
+    // session, still listing artifacts `end` had just removed. Captured
+    // unconditionally in project scope: `ensure_block` may or may not change
+    // the file, and restoring identical bytes is a no-op either way.
+    if scope == Scope::Project && ctx.loaded.manifest.meta.manages_gitignore() {
+        let project_root = crate::manifest::project_root_of(&ctx.dir);
+        backups.push(crate::history::capture(
+            &project_root.join(".gitignore"),
+            crate::render::gitignore::HISTORY_LABEL,
+        ));
     }
 
     // Activate the profile (servers + skills) in this scope.

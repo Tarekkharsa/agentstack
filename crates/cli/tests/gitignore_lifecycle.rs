@@ -470,3 +470,103 @@ fn leftover_managed_config_keeps_mcp_entry() {
 
     clear_home();
 }
+
+/// Write a minimal rendered-lane project with one inline skill and one server,
+/// pinned and trusted, and return its root. Shared by the two undo witnesses
+/// below, which differ only in which command they take back.
+fn undoable_project(tmp: &std::path::Path) -> std::path::PathBuf {
+    let proj = tmp.join("proj");
+    fs::create_dir_all(proj.join(".git")).unwrap();
+    fs::create_dir_all(proj.join("skills/notes")).unwrap();
+    fs::write(proj.join("skills/notes/SKILL.md"), "# notes\n").unwrap();
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[delivery]\nrender_locally = true\n\
+         [targets]\ndefault = [\"claude-code\"]\n\
+         [servers.demo]\ntype = \"http\"\nurl = \"https://x/mcp\"\n\
+         [skills.notes]\npath = \"./skills/notes\"\n\
+         [profiles.p]\nservers = [\"demo\"]\nskills = [\"notes\"]\n",
+    )
+    .unwrap();
+    agentstack::commands::lock::run(
+        &agentstack::cli::LockArgs {
+            write: true,
+            ..Default::default()
+        },
+        Some(&proj),
+    )
+    .unwrap();
+    agentstack::trust::trust_unreviewed(&proj).unwrap();
+    proj
+}
+
+/// `use --write` opens by naming `agentstack x restore --last --write` as the
+/// way back. That hint is a lie unless this activation's own `.gitignore` edit
+/// is IN the ledger: without it the newest entry belongs to some earlier
+/// command, and following the hint takes back somebody else's change.
+#[test]
+fn use_records_its_gitignore_edit_so_restore_last_takes_back_this_change() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    set_home(&tmp.path().join("home"));
+    let proj = undoable_project(tmp.path());
+    fs::write(proj.join(".gitignore"), "target/\n").unwrap();
+    let before = fs::read_to_string(proj.join(".gitignore")).unwrap();
+
+    use_profile::run(&use_args("p"), Some(&proj)).unwrap();
+    let after = fs::read_to_string(proj.join(".gitignore")).unwrap();
+    assert!(
+        after.contains("/.mcp.json"),
+        "the activation wrote a managed block: {after}"
+    );
+
+    // The newest entry is this activation's, and it holds the .gitignore.
+    let newest = agentstack::history::list()
+        .into_iter()
+        .next()
+        .expect("use --write must record an undoable entry");
+    assert!(
+        newest.files.iter().any(|f| f.path.ends_with(".gitignore")),
+        "the .gitignore edit must be in the entry restore --last would take back: {:?}",
+        newest.files
+    );
+    agentstack::history::undo(&newest.id).unwrap();
+    assert_eq!(
+        fs::read_to_string(proj.join(".gitignore")).unwrap(),
+        before,
+        "undoing the activation must put .gitignore back to its pre-write bytes"
+    );
+
+    clear_home();
+}
+
+/// `session start` says "every file above goes back exactly" and `session end`
+/// says "your tools are back to before". The managed block the activation
+/// writes is one of those files: leaving it behind left the project ignoring
+/// artifacts `end` had just removed, on a `.gitignore` a team may have
+/// committed.
+#[test]
+fn session_end_restores_the_gitignore_it_edited() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    set_home(&tmp.path().join("home"));
+    let proj = undoable_project(tmp.path());
+    fs::write(proj.join(".gitignore"), "target/\n").unwrap();
+    let before = fs::read_to_string(proj.join(".gitignore")).unwrap();
+
+    agentstack::session::start(Some(&proj), "p", Scope::Project).unwrap();
+    let during = fs::read_to_string(proj.join(".gitignore")).unwrap();
+    assert!(
+        during.contains("/.mcp.json"),
+        "the session wrote a managed block: {during}"
+    );
+
+    agentstack::session::end(Some(&proj)).unwrap();
+    assert_eq!(
+        fs::read_to_string(proj.join(".gitignore")).unwrap(),
+        before,
+        "session end must put .gitignore back exactly, like every other file it named"
+    );
+
+    clear_home();
+}
