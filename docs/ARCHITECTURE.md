@@ -25,12 +25,12 @@ the [README](../README.md) and the [getting-started walkthrough](start.md).
 
 ## Vision
 
-AgentStack packages, runs, and governs AI agents — skills, tools, MCP servers,
-and ephemeral generated capabilities — as trusted, portable bundles.
+AgentStack packages, runs, and governs AI agents as trusted, portable bundles:
+skills, tools, MCP servers, and ephemeral generated capabilities.
 
-The strategic frame: the **manifest** is the unit. Everything else in the system renders it, gates it, constrains it, or records it. Portability across agent CLIs — import once, render everywhere, switch by task, recover safely — is the product; the trust gate, the policy ceiling, and the call record are what make that portability safe to rely on rather than a second thing to worry about.
+The **manifest** is the unit. Every other part renders, gates, constrains, or records it. Portability across agent CLIs is the product: import once, render everywhere, switch by task, recover safely. The trust gate, the policy ceiling, and the call record are what make that portability safe, so portability does not add its own risk.
 
-**Two words, two things.** The **manifest** is the reviewed config file —
+**Two words, two things.** The **manifest** is the reviewed config file:
 what the README, the walkthrough, and the how-tos mean by that name. A
 **bundle** is the manifest, its optional local overlay, and the resolved
 lockfile taken together as one consent unit: what gets declared, pinned,
@@ -88,14 +88,14 @@ egress, brokered tool-call, and secret-reference events enter the per-run log.
 <a id="operating-model--choose-the-boundary-you-need"></a>
 ## Operating model — one question per boundary
 
-Three orthogonal questions keep the rest of the system easy to reason about. A
+Three questions are independent of each other. A
 **toolset** answers *which capabilities does this task select?* **Delivery**
-answers *how does each selected capability reach the agent?* — and the system
+answers *how does each selected capability reach the agent?*, and the system
 answers that one, per capability kind per harness, rather than offering it as a
 setting. The **lifetime** answers *when does it go away?* Selection is not
 delivery, and delivery is not isolation.
 
-Each primitive answers exactly one question and — just as importantly — does not
+Each row in the table below answers exactly one question and does not
 answer the others. Mixing them up is the common category error (a lock is not
 trust, trust is not policy, policy is not a sandbox, audit is not enforcement):
 
@@ -104,7 +104,7 @@ trust, trust is not policy, policy is not a sandbox, audit is not enforcement):
 | Bundle | What intent is declared? `agentstack.toml` names servers, skills, toolsets, and requested policy. | Does not certify the referenced code as safe. |
 | Integrity | Which capability bytes were reviewed? `agentstack.lock` pins resolved inputs; signatures can attest to the lock bytes. | Does not grant local consent to execute. |
 | Selection | What does this task need? A toolset names the intended server and skill set. | Does not decide how the harness receives it. |
-| Delivery | How does selection reach the harness? Routed into one of two lanes — served live through the gateway, or written into native config files. | Does not confine the agent process, and is not a per-project mode anyone picks. |
+| Delivery | How does selection reach the harness? Routed into one of two lanes: served live through the gateway, or written into native config files. | Does not confine the agent process, and is not a per-project mode anyone picks. |
 | Consent | May this repo auto-activate here? `agentstack trust` binds local approval to manifest + overlay + lock. | Does not mean "safe to run unsandboxed." |
 | Authority | Which tools, hosts, secrets, and paths are allowed? Machine and project policy intersect, deny wins. | Does not create process isolation by itself. |
 | Isolation | Where may the process run and connect? Sandbox and lockdown provide the runtime boundary. | Allowed destinations can still receive sensitive data. |
@@ -113,7 +113,7 @@ trust, trust is not policy, policy is not a sandbox, audit is not enforcement):
 ### Delivery is routed, not chosen
 
 Delivery has no mode switch. The planner (`crates/cli/src/delivery.rs`) takes
-two facts — a capability's **kind**, and the **harness** it is going to — and
+two facts, a capability's **kind** and the **harness** it is going to, and
 routes it into one of two lanes: the **dynamic** lane, served live through the
 gateway, or the **rendered** lane, written into that harness's native config
 files. That is the whole decision. The planner is a pure function over the
@@ -125,17 +125,16 @@ the routing, and never writes.
 | Skills · MCP servers, on an MCP-capable harness | dynamic | brokered, policy-checked, digest-verified per load, recorded |
 | Instructions (house rules) | rendered | no live channel a harness is *known* to consume can carry an instruction per model or behind a lease (`docs/design/instruction-variants.md`) |
 | Settings | rendered | only a native file carries them |
-| Hooks · extensions | rendered | executable kinds — they run code, so they are always written and always carry the full consent ceremony |
+| Hooks · extensions | rendered | executable kinds: they run code, so they are always written and always carry the full consent ceremony |
 | Any kind, on a harness with no live channel | rendered | there is nothing to serve it over |
 
-A project is normally in **both** lanes at once; that is the ordinary shape, not
-a compromise. Rendering is therefore not a legacy path being removed — it stays
+A project is normally in **both** lanes at once. Rendering is therefore not a legacy path being removed. It stays
 the only correct answer for what no live channel can carry, and for harnesses
 that have none.
 
 The single override is **render locally** (`[delivery] render_locally`, per
 project or per harness), which forces the rendered lane where the live channel
-would have worked — offline operation, deterministic native files, inspection
+would have worked: offline operation, deterministic native files, inspection
 with ordinary filesystem tools, a rule against a persistent background process,
 or compatibility testing against a harness's own behaviour. It moves capabilities
 only *towards* files, declares no capability, and changes neither trust nor
@@ -168,9 +167,9 @@ section are [concepts.md — delivery](concepts.md#delivery-modes) and
 
 ### Product boundary and non-goals
 
-Keep AgentStack narrow: it should own the **portable security contract** —
+Keep AgentStack narrow: it should own the **portable security contract**,
 which declared or generated capability may run, with which tools and secrets,
-inside which boundary, and with what evidence afterward — and be the control
+inside which boundary, and with what evidence afterward. It is the control
 plane *beneath* assistants rather than an assistant itself. Personal memory,
 values, durable assistant state, OAuth onboarding, and user-facing apps are the
 province of assistant products layered on top; AgentStack does not add them.
@@ -178,7 +177,7 @@ Background jobs and schedules are a possible later layer, not part of the
 current control-plane mission. Content-addressed **library packages** are the
 intended forward path for persistence: a successful `tools_execute` run can be
 promoted into a reviewed library entry that re-enters the existing lock, review,
-trust, signing, and distribution lifecycle — turning an ephemeral generated
+trust, signing, and distribution lifecycle, turning an ephemeral generated
 capability into a governed, distributable one.
 
 *Design lineage: the capability-layer framing behind `tools_execute` — discovery
@@ -205,7 +204,7 @@ Capability kinds a manifest declares: **servers** (MCP), **skills** (inert
 text), **instructions** (compiled into `CLAUDE.md`/`AGENTS.md`), **settings**
 (native per-CLI config), **hooks** (declarative, compiled per-CLI), and
 **extensions** (native executable add-ons). Extensions are the highest-risk
-kind and the one agentstack governs *only before delivery* — see Layer 4.
+kind and the one agentstack governs *only before delivery* (see Layer 4).
 
 Minimal `agentstack.toml` sketch:
 
@@ -230,15 +229,15 @@ web-search = ["*", "!*_delete"]
 
 `agentstack.lock` pins resolved server definitions, skill-directory content,
 instruction bytes, extension and workflow sources, and native settings to
-SHA-256 digests. Settings are pinned at the grain agentstack owns — one
+SHA-256 digests. Settings are pinned at the grain agentstack owns: one
 `[[setting]]` row per (target, key), checksummed over the canonical JSON of
-the value as declared with `${REF}` unresolved — so an undeclared key a user
-edited themselves can never read as drift. That pin is a review signal, not a
+the value as declared with `${REF}` unresolved. An undeclared key a user
+edited themselves can therefore never read as drift. That pin is a review signal, not a
 delivery gate: unlike an unpinned skill or instruction, a drifted settings key
 warns rather than refusing a render, because settings are inert config merged
 into a file the harness owns. Trust separately binds the manifest, local
 overlay, and lockfile into one consent digest. Detached ed25519 signing
-and verification of the lockfile are available as distribution primitives.
+and verification of the lockfile are available as distribution tools.
 
 Each pin has a matching deposit. The machine-local content store keeps a
 verbatim, content-addressed copy of the bytes a pin covers, which is what lets
@@ -260,7 +259,7 @@ Key decisions:
   library server drift likewise blocks trust and governed execution.
 - Secrets appear only as `${REF}` placeholders, resolved through the chain
   process env → varlock → OS keychain (`keyring`) → project `.env`. varlock is
-  the recommended vault — a project opts in with a `.env.schema` (which `init`
+  the recommended vault: a project opts in with a `.env.schema` (which `init`
   offers to write and `doctor` health-checks), and that file carries names, never
   values. Resolution happens in memory at run time.
   Unresolvable secret → fail closed.
@@ -276,7 +275,7 @@ The implemented states are **untrusted** and **trusted**. Before confirmation,
 references, and skill pin status. Trust binds to the consent digest, so a
 manifest, local-overlay, or lockfile change re-gates automatically. Automatic
 project loading, experimental execution, and **delivery** all refuse untrusted
-content: the gate covers the five kinds `apply` and `use` deliver — servers,
+content: the gate covers the five kinds `apply` and `use` deliver: servers,
 skills, instructions, hooks, and extensions.
 
 Two rules qualify *when* the gate reads the store, and they are deliberately
@@ -288,21 +287,21 @@ separate seams in `crates/cli` because they answer different questions:
   gate reading the store afterwards would refuse the delivery the human just
   asked for. The gate is therefore judged against the trust state as of
   command start, captured from a pre-write snapshot. It authorizes nothing
-  new — an untrusted or drifted project was untrusted or drifted before the
-  command ran too — and it does **not** re-pin: the project is left reading
+  new, since an untrusted or drifted project was untrusted or drifted before
+  the command ran too, and it does **not** re-pin: the project is left reading
   `Changed` so the next command re-gates. `PriorTrust::STRICT` is the
   `Default`, so a call site that captures nothing gets the unrelaxed gate.
   Hooks take no relaxation at all: `render::hooks` reads the store directly,
   because hooks always get the full consent ceremony.
 - **`trust_carry::TrustCarry` — a preference-shaped rewrite carries trust.**
-  A write that records only *where* declared capabilities land — `[delivery]
-  render_locally`, `[meta] gitignore` — moves the consent digest without
+  A write that records only *where* declared capabilities land, such as
+  `[delivery] render_locally` or `[meta] gitignore`, moves the consent digest without
   moving the reviewed surface. Trust that was valid immediately before such a
   write is re-pinned across it. Four properties bound it: it never creates
   trust, never resolves a pending review, never blesses a race (the digest
   comes from the pre-write snapshot with the caller's own bytes spliced in,
   never a disk re-read), and it fails closed on any path that is not one of
-  the two manifest layers — `agentstack.lock` is excluded structurally,
+  the two manifest layers. `agentstack.lock` is excluded structurally,
   because accepting content digests is a human's to give.
 
 Invariant: changing any byte in the manifest/local/lock consent surface changes
@@ -311,15 +310,15 @@ content fails lock verification until the project is deliberately re-locked
 and re-trusted.
 
 **Verification always hashes current bytes; there is no stat-fingerprint digest
-cache.** Trust granting, lock verification, and governed execution — and skill
-content digesting specifically — read and hash the current bytes on every call.
+cache.** Trust granting, lock verification, and governed execution, and skill
+content digesting specifically, read and hash the current bytes on every call.
 The mtime/size memoization that once accelerated skill-directory digests was
 removed: its only consumers were authoritative paths, where a same-stat content
 change (same size, restored mtime) could serve a stale digest and become a trust
 bypass. Reintroducing any stat-keyed digest cache on a verification path requires
 an explicit security review plus regression proof.
 
-**Principle — content identity and local consent are separate.** The consent
+**Principle: content identity and local consent are separate.** The consent
 digest is content-shaped, but the trust decision is deliberately stored under
 the project's canonical path on one machine. Detached signatures provide the
 portable claim: a maintainer signs lockfile bytes, CI or a recipient verifies
@@ -327,11 +326,11 @@ them, and the recipient still makes its own local trust decision. Hostnames and
 usernames never enter the content digest.
 
 **Honest limitation:** the trust store and machine policy live under
-`~/.agentstack/`, which is writable by the user — and in host mode the agent
+`~/.agentstack/`, which is writable by the user, and in host mode the agent
 CLI runs *as* the user, so a compromised agent could modify them and
 self-trust a bundle. Only sandbox mode removes this. What ships today is the
 evidence half: every trust-store mutation appends an identity-only event
-(timestamp, action `grant`/`regrant`/`repin`/`revoke`, project key, digest —
+(timestamp, action `grant`/`regrant`/`repin`/`revoke`, project key, digest,
 never content) to `~/.agentstack/audit/trust.jsonl`. The append is best-effort
 and never gates the mutation, the file is `0600` and append-only by
 convention, and it is **not tamper-evident**: a compromised agent in host mode
@@ -339,7 +338,7 @@ can still delete or rewrite it. It makes unnoticed self-trust harder, not
 impossible. See [`ENFORCEMENT.md`](ENFORCEMENT.md) for the exact per-mode
 enforcement status.
 
-This layer must work standalone — valuable with no sandbox, no registry.
+This layer must work standalone: valuable with no sandbox, no registry.
 
 ## Layer 3 — Policy engine (`crates/policy`)
 
@@ -347,15 +346,15 @@ Two inputs: the bundle's requested policy (`[policy.*]` in its manifest) and
 the machine policy — the `[policy.*]` tables of the machine-local
 `~/.agentstack/agentstack.toml` manifest (TOML, loaded by
 `manifest::machine_policy()`; not a separate `policy.yaml`). The machine
-policy lives outside every repo's tree, so no repo content can alter it — but
+policy lives outside every repo's tree, so no repo content can alter it. But
 see the host-mode limitation in Layer 2: it is still a user-writable file.
 
 Output: effective policy = **intersection**. Bundles can narrow, never widen.
 (The shipped machine-first `[policy.tools]` check is the v0 of this rule;
 It is now a general intersection engine with multiple dimensions.)
 
-Four dimensions ship, each a top-level, name-keyed map — **not** nested under
-each MCP server entry in the manifest — every one sharing the same glob
+Four dimensions ship, each a top-level, name-keyed map, **not** nested under
+each MCP server entry in the manifest. Every one shares the same glob
 grammar: a plain pattern allows, a `!`-prefixed pattern denies, and the `"*"`
 key is rename-proof (it constrains every server regardless of what a manifest
 calls it, so a repo can't dodge a machine rule by renaming a server):
@@ -367,10 +366,10 @@ calls it, so a repo can't dodge a machine rule by renaming a server):
   `CompiledRuleset::egress_decision`).
 - `[policy.secrets]` — per-server `${REF}` name globs (`policy.secret_allowed`).
 - `[policy.filesystem]` — bundle-global `read`/`write`/`deny` path globs
-  (`FsPolicy`; no per-server split — a sandbox mount is per-run, not
+  (`FsPolicy`; no per-server split, because a sandbox mount is per-run, not
   per-server). `read`/`write` are allow scopes; `deny` is a pure blocklist that
   no tool call may touch either way, and it is the one dimension whose layers
-  UNION rather than intersect — a repo can add denies but never drop the
+  UNION rather than intersect: a repo can add denies but never drop the
   machine's. It is matched against the workspace-relative path, the absolute
   path, and the bare file name, so `".env*"` catches a `.env` anywhere in the
   tree. Enforced by the host-mode hook guard (`agentstack guard`); sandbox
@@ -379,14 +378,14 @@ calls it, so a repo can't dodge a machine rule by renaming a server):
 Tools, egress, and secrets are **allow-by-default**: an absent key constrains
 nothing. Filesystem writes are the deliberate exception on sandboxed paths:
 an absent effective write scope leaves the workspace read-only, as described
-below. Least privilege for the other dimensions is an explicit machine opt-in
-— e.g. `[policy.tools] * = ["!*"]` to deny everything unless a bundle's own
+below. Least privilege for the other dimensions is an explicit machine opt-in,
+e.g. `[policy.tools] * = ["!*"]` to deny everything unless a bundle's own
 allowlist narrows further. (No approval/confirm channel exists yet;
 a future "confirm before calling" tier is unbuilt work, not a shipped
 dimension.)
 
 `compile(machine, bundle, servers)` folds both layers into a
-`CompiledRuleset` — the canonical, serializable artifact every enforcer
+`CompiledRuleset`, the canonical, serializable artifact every enforcer
 consumes. It is lossless (each layer's allowlist is kept as an independent
 AND-bound, so `tool_decision`/`egress_decision`/`secret_decision` can still
 say *which* layer blocked a call) and rename-proof by construction (`"*"`
@@ -399,7 +398,7 @@ not part of the trust digest**: one of its two inputs (machine policy) lives
 outside the pinned bundle by design, so folding it into the digest would
 create a second, machine-varying source of trust truth.
 
-Enforcement honesty, per dimension (today) — the authoritative
+Enforcement honesty, per dimension (today). The authoritative
 mode-by-dimension matrix, with every caveat, lives in
 [`ENFORCEMENT.md`](ENFORCEMENT.md#the-matrix). The policy-engine summary:
 - **Tools** — enforced at the gateway (Layer 4's single enforcement point).
@@ -424,10 +423,10 @@ non-destructive; explicit `init`, `adopt`, and owned-server workflows can read
 native state back into the manifest. The 13 adapters are data-driven YAML
 descriptors, and writes stay blocked while any `${REF}` is unresolved.
 Resolution completes *before* the renderer runs: render receives
-a concrete server and a resolver, never a library or store to consult — which
+a concrete server and a resolver, never a library or store to consult, which
 is what lets a sandbox runtime materialize configs from core + adapters
 alone. One trust note, stated plainly: user drop-in adapter descriptors
-(`~/.agentstack/adapters/`) are part of the trusted computing base — they
+(`~/.agentstack/adapters/`) are part of the trusted computing base: they
 alter how configs render and are trusted *because the user placed them*,
 unlike bundle content, which is hostile. Inside a container that dir is
 simply absent, which is expected and correct.
@@ -438,7 +437,7 @@ inside the harness process at full user permission, outside every ceiling
 below. The design draws the honest line at *delivery*. The source is pinned in
 `agentstack.lock` with the strict integrity-root digest, so a byte change
 re-gates trust; `apply` renders fail-closed (an untrusted or drifted project
-writes nothing) by **copying** — never symlinking — the pinned bytes into the
+writes nothing) by **copying**, never symlinking, the pinned bytes into the
 target harness's extension directory, so the harness loads exactly the reviewed
 bytes rather than whatever a later source edit leaves behind. A per-directory
 ownership ledger scopes pruning to what agentstack placed, and a hard deny-list
@@ -454,7 +453,7 @@ dimensions to different depths; [`ENFORCEMENT.md`](ENFORCEMENT.md) is the
 authoritative per-cell matrix. This section describes the mechanisms behind it.
 
 **Host mode:** adapters write configs onto the bare machine. Honest framing:
-advisory enforcement — a static apply is trust-gated at the write choke point,
+advisory enforcement. A static apply is trust-gated at the write choke point,
 and render-time policy plus fail-closed secret checks govern what gets
 written, but once the bytes are on disk they are the harness's to execute.
 A CLI on the host can still bypass that config and could in principle
@@ -462,24 +461,24 @@ tamper with the trust store itself (Layer 2). What each dimension actually
 enforces on this path is in [`ENFORCEMENT.md`](ENFORCEMENT.md#the-matrix).
 
 **Single enforcement point (declared, not just observed):** every MCP tool
-call agentstack itself brokers — the gateway serve loop, the `agentstack mcp`
-bridge, code mode — dispatches through one function, `Gateway::try_call`,
+call agentstack itself brokers (the gateway serve loop, the `agentstack mcp`
+bridge, code mode) dispatches through one function, `Gateway::try_call`,
 which consults the policy engine before any upstream I/O; the upstream
 transport is private to it, so no other module *can* reach a server directly.
-Any new brokered path must route through it — adding a second dispatch path
+Any new brokered path must route through it. Adding a second dispatch path
 is a security-review event, not a refactor. (The rendered lane hands the
-transport to the harness itself and is governed at write time — the
+transport to the harness itself and is governed at write time, the
 advisory framing above.)
 
 **One enforcement-plan boundary for a sandbox run:** `run --sandbox` assembles
-its security model in exactly one seam, `ExecutionPlan::build` — it checks
+its security model in exactly one seam, `ExecutionPlan::build`: it checks
 trust, compiles the effective (machine ∩ bundle) policy, resolves the mounts +
 command, and picks the egress mode, returning one immutable plan. A command then
 `execute`s that plan (which creates the fail-closed run log and the per-run proxy
 token once, then dispatches to the mode) or `display`s it (`--plan`: a
 Docker-free dry run that names the trust state, mode, and exact command). The
 mode executors no longer re-derive any of it, so a run can't skip a check by
-taking a different path — the same discipline as the single gateway dispatch,
+taking a different path, the same discipline as the single gateway dispatch,
 applied to run assembly.
 
 **Sandbox mode:** `agentstack run --sandbox` launches the CLI in a container
@@ -490,17 +489,17 @@ per decision (allow/block, host, server, tool). Two confinement strengths ship:
 - **`--sandbox`** (host-process proxy): the container gets an ordinary bridge
   network and its `HTTPS_PROXY` points at a proxy on the host
   (`host.docker.internal`). This enforces the agent's *configured* egress and
-  gates anything reachable only via the proxy — but a container that ignored
+  gates anything reachable only via the proxy, but a container that ignored
   the proxy env could still reach the open internet directly. The listener
   necessarily binds a broad address so the container can reach it, so the
   peer is authenticated: a per-run random token rides in the proxy URL's
-  userinfo and the proxy 407s any CONNECT that doesn't present it — the
+  userinfo and the proxy 407s any CONNECT that doesn't present it. The
   token, not the bind address, is what stops a LAN neighbor from using the
   proxy as an open relay (and the same token authenticates the sandbox to
   the lockdown sidecar).
 - **`--lockdown`** (no direct route): the container is attached ONLY to an
-  internal Docker network — no host route, no internet, no DNS beyond it —
-  whose single reachable peer is the **egress-proxy sidecar container**
+  internal Docker network with no host route, no internet, and no DNS beyond
+  it, whose single reachable peer is the **egress-proxy sidecar container**
   (`docker/egress-proxy.Dockerfile`, the `egress` crate's binary). The sidecar
   is dual-homed onto a second ordinary network so it (and only it) forwards
   allowed traffic out. Ignoring the proxy env then reaches nothing: the
@@ -522,47 +521,47 @@ per decision (allow/block, host, server, tool). Two confinement strengths ship:
   normalized endpoints: AgentStack does not discover every undeclared DNS alias
   the same upstream service may operate.
 
-The egress proxy is the hardest engineering in the system — harder than the
-async learning curve. Known-hard sub-problems, stated up front:
+The egress proxy has five known-hard sub-problems, listed below:
 - **Per-server attribution**: attributing egress to a specific MCP server
   requires one proxy identity per server (distinct ports, containers, or
   credentials), not one shared funnel.
 - **HTTPS filtering** (enforced): the proxy decides on the CONNECT authority
-  and, once TLS starts, requires the ClientHello's SNI to match that host —
+  and, once TLS starts, requires the ClientHello's SNI to match that host,
   so a client can't tunnel to an allowed front and then ask for a denied host
   behind it (domain fronting). No TLS interception/MITM. Hostnames are
   normalized (lowercase, trailing dot stripped) before matching so casing
   can't dodge a deny.
 - **Anti-SSRF** (enforced): an allowed *name* can still resolve to the host's
   own network. The proxy resolves once and requires every resolved address to
-  be global unicast — loopback, private, link-local (incl. the
-  `169.254.169.254` metadata IP), unique-local, and reserved ranges are
-  refused — then dials the validated address (no second resolution, closing
+  be global unicast, refusing loopback, private, link-local (incl. the
+  `169.254.169.254` metadata IP), unique-local, and reserved ranges,
+  then dials the validated address (no second resolution, closing
   DNS rebinding). Literal-IP CONNECTs flow through the same check. Tests/demos
   that dial the host gateway opt out via `AGENTSTACK_ALLOW_LOCAL_TARGETS`;
   production never sets it.
 - **DNS** is itself an exfiltration channel and needs to be routed and
-  filtered, not left open — the container resolves nothing directly; the proxy
+  filtered, not left open: the container resolves nothing directly; the proxy
   resolves only allowed names.
 - **Peer authentication** (enforced): the listener must bind a broad address so
-  the container can reach it, so a per-run token — minted by the CLI, injected
-  as the sandbox's `HTTPS_PROXY` credentials and into the sidecar's env — is
-  what authenticates the peer, not the bind. A CONNECT without valid
+  the container can reach it, so a per-run token, minted by the CLI and
+  injected as the sandbox's `HTTPS_PROXY` credentials and into the sidecar's
+  env, is what authenticates the peer, not the bind. A CONNECT without valid
   `Proxy-Authorization` gets a 407 and is recorded, so the proxy can't be used
   as an open relay by anything else that can route to it.
 
 **Scope honesty — exfiltration through allowed channels:** even a perfectly
 enforced allowlist permits traffic to allowed hosts, including the model API
-itself — a prompt-injected agent can leak data through any host the policy
+itself. A prompt-injected agent can leak data through any host the policy
 allows. AgentStack's claim is *untrusted declarations are not auto-activated
-and unapproved egress is blocked on the enforced paths* — not that
+and unapproved egress is blocked on the enforced paths*, not that
 exfiltration is impossible.
 
 (The shipped `agentstack proxy` token-observation relay is unrelated to this
 crate and keeps its name; the enforcement crate is `egress`.)
 
-Design references (not dependencies): Sandcastle's provider model, branch
-strategy, and event hooks are good prior art for orchestration shape.
+Design references (not dependencies): Sandcastle, an external executor that runs
+multi-agent loops on their own git branches, has a provider model, branch
+strategy, and event hooks that are good prior art for orchestration shape.
 
 ### MCP protocol compatibility
 
@@ -590,19 +589,20 @@ older runs from the separate global call audit log.
 Trust-store mutations have their own stream: `crates/trust` appends one
 identity-only event per store mutation (timestamp, action, project key,
 digest) to `~/.agentstack/audit/trust.jsonl`, inside the store lock and only
-after the store write succeeds — so log order is store order and an event
+after the store write succeeds, so log order is store order and an event
 always describes a mutation that happened. It is deliberately unrotated: the
 consent metrics count over the full history. Per-run token/cost events are
 still not wired. All of this JSONL is append-only by convention, not
 cryptographically tamper-evident; a compromised host-mode agent can delete it.
 
-Scope discipline: a log with a good viewer, not an observability platform.
+Scope discipline: the recorder is a log plus a viewer. It is not an
+observability platform.
 
 ## Layer 6 — Registry (evidence-gated future)
 
 Push/pull of signed bundles. The trust gate verifies signatures against
 publisher keys; content-pinning and review flow are inherited unchanged.
-Starts life as a curated Git repository of signed bundles — no infrastructure
+Starts life as a curated Git repository of signed bundles: no infrastructure
 until demand proves it.
 
 ## Crate dependency rules
@@ -628,12 +628,12 @@ It keeps `trust` a small review boundary: `recorder` depends on `core` alone
 and forbids unsafe code, so the edge adds no new external dependency and no
 new authority. The recording call sits *inside* the store lock, immediately
 after the successful save, which is what makes evidence unskippable by
-construction and makes log order equal store order. The alternative — a
-callback the caller supplies — was rejected: it is skippable by construction,
+construction and makes log order equal store order. The alternative, a
+callback the caller supplies, was rejected: it is skippable by construction,
 and a mutation path that forgets to record would be silently unwitnessed.
 
 `runtime` lost its `core` edge on 2026-08-12: it never named a `core` type. It
-is the container-lifecycle crate — it takes an already-decided policy and an
+is the container-lifecycle crate: it takes an already-decided policy and an
 already-opened recorder and runs a sandbox, so `core`'s manifest and lockfile
 vocabulary is the composing `cli` crate's business, not its own.
 
@@ -641,7 +641,7 @@ vocabulary is the composing `cli` crate's business, not its own.
 owns the wire: RMCP supplies models, validation, framing, lifecycle
 negotiation, and Streamable HTTP, and this crate wraps all of it behind a
 `Backend` trait that speaks plain JSON values. That is the whole point of the
-crate existing separately — protocol SDK types stop here and never reach
+crate existing separately: protocol SDK types stop here and never reach
 `trust`, `policy`, or manifest code, so an RMCP version bump can never become a
 change to what AgentStack consents to or enforces. It is a *compatibility*
 boundary, never an enforcement one: every request it decodes is handed to the
@@ -651,7 +651,7 @@ same trust, policy, gateway-dispatch, and audit paths a local call takes (see
 `executor` holds no internal edges: it is a self-contained, policy-agnostic
 domain built on `serde`/`serde_json`/`sha2`/`thiserror`, and the `cli` crate is what composes
 it with the runtime and recorder. That is why it "never reads or interprets
-policy" — it structurally cannot.
+policy": it structurally cannot.
 
 The experimental execution boundary is specified in the
 [`tools_execute` threat model](archive/design/tools-execute-threat-model.md) and

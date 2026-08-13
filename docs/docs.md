@@ -114,5 +114,5 @@ Common ones:
   and its limits.
 - **[Enforcement matrix](ENFORCEMENT.md)** — every enforcement claim, what
   backs it, and what it deliberately does not cover.
-- **[Demos](examples.html)** — self-asserting scripts that prove the promises
-  on this site.
+- **[Demos](examples.html)** — scripts that check the claims on this site and
+  fail loudly.

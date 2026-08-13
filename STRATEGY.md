@@ -12,23 +12,23 @@ every claim below describes what the code does today, not what was planned.*
 
 ## The goal
 
-> **Any capability, from anywhere, live in every agent you run — seconds after
-> one deliberate yes, and never any other way.**
+> **Any capability reaches every agent you run, after one content-bound
+> approval.**
 
-Identity in one line: **feels like a filesystem, thinks like a vault.**
+Capabilities are plain files; every activation needs a content-bound consent.
 
 **From anywhere** means origin stops mattering because review does — a file
 dropped in, a repo cloned, a teammate's bundle, an external registry.
-**Every agent you run** is the portability promise a single-runtime framework
-structurally cannot make. **One deliberate yes** is consent compressed into a
-single glanceable, content-bound moment — compressed, never removed.
+**Every agent you run**: a framework that owns its own runtime cannot deliver
+to other CLIs; AgentStack can. **One deliberate yes** is consent shown as one
+content-bound screen; it is shortened, not skipped.
 
-## The design law
+## The design rule
 
 > **Automate everything except the yes.**
 
-Pinning, locking, staging, rendering, drift repair, recovery: all of it is the
-system's job, done silently and correctly. The manifest and lock are
+The system does the pinning, locking, staging, rendering, drift repair, and
+recovery, silently and correctly. The manifest and lock are
 system-maintained — written by the machine in the common path, read by humans,
 reviewed in pull requests — and the manifest remains the source of truth. The
 one thing never automated, inferred, or defaulted is consent to new content.
@@ -75,17 +75,18 @@ welcome. What has not happened yet is the launch push.
 
 ## What never changes
 
-The floor under the plan. None of this is negotiable; the plan relocates
-cost, never relaxes guarantees.
+The floor under the plan. None of this is negotiable; the plan moves work
+around, and it does not weaken any guarantee.
 
-- Untrusted repository content is inert. The funnel stages; it never activates.
+- Untrusted repository content is inert. The import/receive path stages
+  content; it never activates it.
 - All repository content is hostile input: parsed defensively, bounded, never
   interpolated into shell commands.
 - No new unsafe code. One dated exception, approved 2026-08-13: the
   `clonefile(2)` call behind `cli::sys::clone_tree`, confined to
   `cli/src/sys.rs` with the rest of the FFI. Every other crate keeps `forbid`.
-- Consent is content-bound. A byte change re-gates — the presentation of
-  re-gating improves; the fact of it does not.
+- Consent is content-bound. A byte change re-gates. We can improve how
+  re-gating looks, but not remove it.
 - Policy only narrows. Machine ceiling always wins.
 - Secrets never serialize. `${REF}` resolves in memory; unresolved fails closed.
 - Single authority and dispatch paths, with witnesses.
@@ -93,7 +94,7 @@ cost, never relaxes guarantees.
   and does not enforce.
 - **Executable kinds — native extensions and hooks — keep the full ceremony.**
   Never a compressed review, in a package or out of one.
-- Progressive disclosure must never become progressive enforcement.
+- Hiding an option in the UI must never mean loosening what it enforces.
 
 ## Also binding
 
@@ -104,8 +105,8 @@ cost, never relaxes guarantees.
   graphical companion works over the same fixed, digest-bound action contract
   — never a second authority, never a second enforcement boundary.
 - **Composition:** manifest, toolset, and the library. The linked library
-  sources are the reuse path across projects; the funnel feeds it, it does not
-  replace it.
+  sources are the reuse path across projects; the import/receive path feeds it,
+  it does not replace it.
 - **Engineering:** extend existing seams; never reimplement working trust,
   policy, gateway, runtime, recording, import, render, or restore paths.
   `trust` and `policy` stay small review boundaries.
@@ -123,8 +124,8 @@ adoption. No second embedded dashboard, and no second UI of any kind.
 
 *As of 2026-08.* eve (Vercel) is not a category competitor: it builds and hosts
 one new agent rather than managing the environment of existing CLIs, and it has
-no content trust gate. Its ecosystem is machine-readable supply for governed
-intake.
+no content trust gate. Its registry is machine-readable, so we can import from
+it under review.
 
 No tripwire has fired. Tripwire 3 is trending: the de-facto skill distributor
 today is **vercel-labs/skills** (`npx skills`, 75+ target agents including both
@@ -143,8 +144,7 @@ Each tripwire warrants a strategy revisit, never an automatic build:
 ## Open design question
 
 **Scoped-MITM credential brokering** — it extends what the vault protects, not
-how the yes works. It keeps its own design-doc lane and is not part of this
-plan.
+how the yes works. It has its own design doc and is not part of this plan.
 
 ## What happens next
 
@@ -163,7 +163,7 @@ plan.
    registries distribute. The announcement leads with portability, with trust
    as the second beat, and never hitches to a competitor's name.
 
-The documentation site and release candidates ride ahead of that moment — they
+The documentation site and release candidates ship before the launch — they
 ship as the product ships. Only the launch push waits on the study.
 
 ## How this document is used

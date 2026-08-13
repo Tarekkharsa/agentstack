@@ -1,15 +1,14 @@
 # Contributing to agentstack
 
-Thanks for looking under the hood. Participation is governed by the
+Thanks for your interest. Participation is governed by the
 [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md); support scope and maintainer roles
 are in [`SUPPORT.md`](SUPPORT.md) and [`GOVERNANCE.md`](GOVERNANCE.md).
 AgentStack is a solo-maintained, pre-1.0 cross-CLI environment manager for AI
 coding tools. It keeps one portable
 configuration usable across otherwise incompatible clients, with trust,
 policy, locking, and evidence as its security foundation. Contributions are
-welcome, and the bar that matters most is the one the code already holds
-itself to: **product behavior stays understandable, claims match enforcement,
-and security claims ship with a test that witnesses them.**
+welcome. **Three rules matter most: product behavior stays understandable,
+claims match enforcement, and every security claim ships with a test.**
 
 ## Orientation
 
@@ -32,7 +31,7 @@ cargo check -p <crate>            # the loop you run constantly
 cargo test -p <crate>             # or: --test <name> for a single test file
 ```
 
-`-p` takes the *package* name, which is not the directory name — and
+`-p` takes the *package* name, which is not the directory name, and
 `crates/cli` is the odd one, since its package is the binary's name. The
 mapping:
 
@@ -59,7 +58,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --check
 ```
 
-`cargo nextest` is the preferred runner — process-per-test isolation keeps the
+`cargo nextest` is the preferred runner: process-per-test isolation keeps the
 env-var-mutating integration tests from interfering, and it is roughly 3x
 faster. Install it with `cargo install cargo-nextest --locked`.
 
@@ -70,7 +69,7 @@ sandbox job runs them with `--include-ignored`.
 ## Before you push
 
 Every gate CI enforces, with the command that reproduces it locally. Run the
-ones your change can plausibly break — you do not need the whole list for a
+ones your change can plausibly break; you do not need the whole list for a
 typo. They are transcribed from the three workflows that gate a pull request —
 [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (build, lint, tests,
 examples, MSRV, sandbox, docs, enforcement pairing, structure lint),
@@ -91,7 +90,7 @@ cargo nextest run --workspace
 ```
 
 **The feature-gated enforcement code**, which the two commands above do *not*
-compile — so a regression there passes an otherwise green run:
+compile, so a regression there passes an otherwise green run:
 
 ```bash
 cargo clippy -p agentstack-runtime --features docker --all-targets -- -D warnings
@@ -106,7 +105,7 @@ python3 tools/make-docs-pages.py          # regenerate the HTML pages
 git diff --exit-code docs/                # must be clean: never hand-edit generated HTML
 ```
 
-`docs.yml` additionally runs a headless-browser smoke (`tools/site-smoke.mjs`)
+`docs.yml` also runs a headless-browser smoke (`tools/site-smoke.mjs`)
 over the key pages; it needs Playwright and Chromium, so most contributors let
 CI run it.
 
@@ -117,7 +116,7 @@ python3 tools/check-structure.py
 ```
 
 **If you changed `crates/workflow`'s dependencies**, re-bless the snapshot in
-the same PR — the gate exists so a transitive-dependency change is a reviewed
+the same PR. The gate exists so a transitive-dependency change is a reviewed
 event rather than a silent one:
 
 ```bash
@@ -126,7 +125,7 @@ cargo tree -p agentstack-workflow --edges normal --color never \
   | grep -v '^agentstack-workflow ' | sort -u > crates/workflow/deps.snapshot
 ```
 
-To check the snapshot without rewriting it — the exact form CI runs, which
+To check the snapshot without rewriting it, in the exact form CI runs, which
 fails on any drift:
 
 ```bash
@@ -155,7 +154,7 @@ cargo +1.88 check --workspace --all-targets --locked
 **The asserted example suite** (`examples/*/run-demo.sh`,
 `examples/projects/*/assert.sh`) and the conformance self-test run against a
 release build. Every one of these demos is CI-grade — isolated `HOME`,
-PASS/FAIL checks, nonzero exit on failure — so CI runs the whole set, not a
+PASS/FAIL checks, nonzero exit on failure, so CI runs the whole set, not a
 sample. The script list is transcribed from `ci.yml` (the
 `Malicious-repo demo` and `Example suite` steps); re-read it there when this
 list looks stale:
@@ -188,7 +187,7 @@ done
 The Python MCP clients among them (lease demo, gateway probe, skills workout)
 are stdlib-only, so a system `python3` is enough.
 
-**Docker-backed enforcement**, run by CI's dedicated `sandbox` job — reproduce
+**Docker-backed enforcement**, run by CI's dedicated `sandbox` job. Reproduce
 locally only when you touched the sandbox, egress, or lockdown paths:
 
 ```bash
@@ -210,7 +209,7 @@ ENFORCEMENT-WAIVER: <one-line reason>
 ```
 
 The reason is required: a bare marker with nothing after it is not a waiver and
-does not satisfy the gate. Keeping it greppable is the point — every waiver
+does not satisfy the gate. Keeping it greppable is the point: every waiver
 ever granted is findable with
 `git log --grep 'ENFORCEMENT-WAIVER:'`. Test-only and comment-only changes in
 those crates are already exempt, so a waiver should be rare. You can self-test
@@ -250,13 +249,13 @@ when the change "works":
   `src/main.rs`. The difference is deliberate and narrow: `forbid` cannot be
   downgraded by a local `#[allow]`, and the crate needs exactly one. That
   single `#[allow(unsafe_code)]` — the only one in the workspace — sits on
-  the `mod sys;` declaration in `src/lib.rs`, so the entire unsafe surface of
-  the workspace is one greppable file, `crates/cli/src/sys.rs`: a handful of
+  the `mod sys;` declaration in `src/lib.rs`, so all unsafe code in the
+  workspace sits in one greppable file, `crates/cli/src/sys.rs`: a handful of
   libc calls for signal delivery, process-group setup, one stdout fd dance,
   and a writability probe, each wrapped in a safe function, and the module
   itself stays crate-private. Don't add unsafe anywhere else. A second
   `#[allow(unsafe_code)]`, or a `forbid` weakened to `deny`, changes a
-  reviewable property of the whole workspace — raise it in the PR
+  reviewable property of the whole workspace, so raise it in the PR
   description first.
 - **Policy can only narrow.** The effective policy is the intersection of
   bundle policy and machine policy — never more permissive than the machine.
@@ -275,7 +274,7 @@ when the change "works":
   on anything derived from them.
 - **Dependencies are restricted.** `trust` and `policy` have a fixed,
   minimal dependency list; adding any new dependency anywhere in the
-  workspace needs maintainer approval first — propose it in the PR
+  workspace needs maintainer approval first: propose it in the PR
   description, don't just add it.
 - **Crate edges are fixed.** The permitted internal dependency graph is in
   `docs/ARCHITECTURE.md`; anything not listed is forbidden.
@@ -298,7 +297,7 @@ when the change "works":
 
 The standard GitHub flow: fork the repository, branch from `main`, push the
 branch to your fork, and open a pull request against `main`. Fill in the
-[pull-request template](.github/PULL_REQUEST_TEMPLATE.md) — the checklist is
+[pull-request template](.github/PULL_REQUEST_TEMPLATE.md). The checklist is
 the same set of gates described above, and the body is where an enforcement
 waiver or a new-dependency proposal has to appear.
 
@@ -310,12 +309,12 @@ MIT / Apache-2.0 licence
 
 ## Easiest first contribution
 
-Adding a CLI adapter is one data-driven YAML descriptor — copy
+Adding a CLI adapter is one data-driven YAML descriptor: copy
 `crates/adapters/descriptors/codex.yaml`, check it with
 `agentstack adapters validate my-adapter.yaml`, and drop it into
 `~/.agentstack/adapters/` to test without a rebuild.
 
 ## Reporting a vulnerability
 
-See [`SECURITY.md`](SECURITY.md) — please use private reporting rather than
+See [`SECURITY.md`](SECURITY.md). Please use private reporting rather than
 a public issue.

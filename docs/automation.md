@@ -14,7 +14,7 @@ see [Every command](reference.md).
 
 ## The envelope
 
-Every machine-readable **read** wraps its body in the same two fields:
+Every machine-readable read wraps its body in the same two fields:
 
 ```json
 {
@@ -79,11 +79,16 @@ command:
 | `agentstack apply --write` | write native MCP server config, compile instruction fragments, render hooks, render native extensions |
 | `agentstack use --write` | materialize skills (and the server half above) |
 
-Every refusal line has the same shape — *refusing to …: project at `<path>` is
-not trusted — review and* `agentstack trust .` *before …* — naming the item it
-withheld in parentheses. Trust is recorded per project directory and never
-copied, so a clone, a second checkout, or a fresh worktree of a project someone
-already approved is untrusted at its new path. An unattended pipeline against
+Every refusal line has the same shape, naming the item it withheld in
+parentheses:
+
+```text
+refusing to …: project at <path> is not trusted — review and agentstack trust . before …
+```
+
+Trust is recorded per project directory and never copied, so a clone, a second
+checkout, or a fresh worktree of a project someone already approved is
+untrusted at its new path. An unattended pipeline against
 one does not silently render a partial setup: it stops, and the fix is a human
 review. Budget for it — clone, `agentstack more install --locked`, then the
 digest-bound `trust --preview` → `trust --yes --consented` pair on this
@@ -224,22 +229,22 @@ Field notes:
   that.
 - `trust` is `"trusted"`, `"drifted"`, or `"untrusted"` — the same three values
   `use --list --json` uses.
-- `trust_relevant` is a **prompting hint, not a capability reading**. It is
+- `trust_relevant` is a prompting hint, not a capability reading. It is
   `true` when a bridge is registered for a harness or the derived `mode` is
   `zero-files` / `clean-at-rest` — the states where an untrusted project is
   served nothing at all, so `trust .` is the one next step worth pushing. It is
-  `false` for a static project with no bridge. That `false` does **not** mean
-  trusting buys nothing there: the trust gate refuses MCP server config,
+  `false` for a static project with no bridge. That `false` does not mean
+  trusting buys nothing there. The trust gate refuses MCP server config,
   instruction fragments, hooks, extensions and skill materialization in every
   mode (see [Errors](#errors)), so an untrusted static project still cannot
   render. Use `trust` — the three-value state — for "can this project write?",
   and `trust_relevant` only to decide how loudly to ask.
 - `mode` is `"static"`, `"clean-at-rest"`, or `"zero-files"`.
-- `secrets` carries a **count** and the **names** that resolve from no layer.
+- `secrets` carries a count and the names that resolve from no layer.
   A value never appears. `null` means the reading was not taken.
 - `next_action` is the one step to surface. It is never a command that would
   refuse. On `status --json` it is an object; on `doctor --json` it is a bare
-  command string **or `null`** when no step is runnable verbatim, so a consumer
+  command string or `null` when no step is runnable verbatim, so a consumer
   must handle null there.
 
 ### `search --json`
@@ -280,7 +285,7 @@ Field notes:
   `in_manifest` is already true, or it is an extension, which is referenced by
   name in `[extensions.*]` rather than added.
 - Descriptions ship whole. The 70-column truncation is for a terminal.
-- This read reaches the **network**: it queries the official MCP Registry
+- This read reaches the network: it queries the official MCP Registry
   alongside your linked library sources and the embedded catalog. It writes nothing.
 
 ### `adapters list --json`
@@ -365,10 +370,10 @@ settings, hooks — trimmed to one here.
 
 Field notes:
 
-- `lane` is the routing — where the bytes for that kind go. It is **not** an
+- `lane` is the routing — where the bytes for that kind go. It is not an
   activation reading: `dynamic` does not say a lease is open, a bridge is
   registered, or the project is trusted.
-- `bridge_registered` is **this harness's own** bridge state, never a
+- `bridge_registered` is this harness's own bridge state, never a
   project-wide any-of: one connected CLI delivers nothing to the harnesses that
   have no bridge. Branch on it whenever you would otherwise be tempted to read
   liveness out of the prose. It is still not a full activation reading —
@@ -379,7 +384,7 @@ Field notes:
   rationale ("the live channel here can carry it on demand") instead of a
   delivery claim, and `summary` says "planned live (not connected)". Neither
   field's shape moved, so this stayed `delivery-routing-v1` — which is exactly
-  why **neither may be matched on**: the same routing reads two ways.
+  why neither may be matched on: the same routing reads two ways.
 - `full_ceremony` says a kind is executable (hooks, extensions), never that a
   ceremony has happened.
 
@@ -424,7 +429,7 @@ Field notes:
 ## JSON that is not part of this contract
 
 Some commands emit JSON that is evidence or analysis rather than control-plane
-state. These carry **no envelope** and **no feature name**, and their shape may
+state. These carry no envelope and no feature name, and their shape may
 change without a `schema_version` bump. Treat them as reports, not APIs:
 
 - `agentstack more explain <name> --json`
@@ -441,9 +446,9 @@ variants. Three moved recently and are worth knowing if you parse them:
 - `~/.agentstack/runs/<id>/events.jsonl` — each row carries its own `event`
   tag. Toolset-fence refusals arrive as `"event": "fence_refused"` (server,
   tool, the `toolset` that would expose it, and the reason), deliberately
-  **not** as a `tool_call` with a denied outcome, so a refusal never inflates
+  not as a `tool_call` with a denied outcome, so a refusal never inflates
   the count of calls a run made. `agentstack more report run <id>` prints them in
-  their own **Fence refusals** section.
+  their own "Fence refusals" section.
 - `~/.agentstack/audit/calls.jsonl` — the guard's three fail-closed *system*
   refusals are filed under synthetic `system: <tag>` subjects
   (`system: machine-config-unreadable`, `system: machine-policy-unavailable`,
@@ -456,8 +461,8 @@ variants. Three moved recently and are worth knowing if you parse them:
   and `undecide`; the last two record and withdraw a standing re-gate answer
   and re-pin nothing, carrying the digest the entry already stood on.
 
-What those files prove about enforcement — recorded is not prevented — is
-[the enforcement matrix](ENFORCEMENT.md)'s question, not this page's.
+Recorded is not prevented. What those files prove about enforcement is answered
+in [the enforcement matrix](ENFORCEMENT.md), not here.
 
 ## Guarantees
 

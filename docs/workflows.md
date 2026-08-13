@@ -24,28 +24,28 @@ agentstack workflow run <name>
 agentstack workflow report <run-id>
 ```
 
-**The full path ships today.** Declare, pin, and trust a
-workflow, run it end to end with `agentstack workflow run`, render its
+Declare, pin, and trust a workflow, run it end to end with
+`agentstack workflow run`, render its
 evidence tree with `agentstack workflow report`, and resume an interrupted
 run with `--resume` (replay from the recorded journal — byte-identical
 script and args, or it refuses). Every agent step runs as a governed
 [protected run](reference.md#execution-posture). The interpreter boundary was
 independently security-reviewed on 2026-07-23, and all six findings that review
 raised are now closed, each with its own witness. `agentstack workflow` is
-therefore listed one hop away: it is grouped out of the everyday `agentstack
+therefore listed one hop away. It is grouped out of the everyday `agentstack
 --help` list and named under **Run** on `agentstack more`. It runs at both
 `agentstack more workflow` and `agentstack workflow`.
 
-That change is **discoverability, not enforcement**. Not one boundary moved
-when the command became listed: what the review settled is the *posture*, and
+That change is discoverability, not enforcement. Not one boundary moved
+when the command became listed. What the review settled is the *posture*, and
 a host-tier step is still cooperative-guard only, exactly as *Honest limits*
 below describes.
 
 ## Why a workflow needs governing
 
-A workflow is **authority, multiplied**: one command spawns N agent runs,
-each with tool access, filesystem reach, and token spend, with the control
-flow decided at runtime by script code. That is exactly the thing a security
+One workflow command spawns N agent runs, each with tool access, filesystem
+reach, and token spend. The control flow is decided at runtime by script
+code. That is exactly the thing a security
 tool should not run on trust. So AgentStack treats the orchestration script
 the same way it treats any other executable content from a repo — as
 [untrusted input](ENFORCEMENT.md#what-trusted-does-and-does-not-mean)
@@ -55,9 +55,9 @@ until you review and pin it.
 
 - **Pinned, re-gated on change.** Workflow source is pinned in the lockfile
   by a strict content digest (a symlink anywhere is a hard error). Change one
-  byte and trust re-gates — you review again before it can run.
-- **Untrusted means inert.** Until the bundle is trusted, a workflow never
-  parses as script and its name is not even invocable. No dev-mode exception.
+  byte and you review again before it can run.
+- **Untrusted means inert.** A workflow's name is not even invocable, and its
+  source never parses as script. No dev-mode exception.
 - **Roles can only narrow.** Each `agent()` call names a **role** — a toolset
   with its own tools, servers, folders, secrets, and egress. A workflow
   *requests* a closed set of roles; it can never grant or widen authority. A
@@ -76,19 +76,19 @@ until you review and pin it.
   capabilities into toolsets and no open lease selects one that exposes the
   named server) appears there in its own **Fence refusals** section, naming
   the server, the tool, the toolset that would have exposed it, and the
-  reason. It is a `fence_refused` row in that run's `events.jsonl`, kept
-  deliberately out of the Tool-calls section: a refused call was never
-  dispatched, so it must not inflate the count of calls the step made.
+  reason. It is a `fence_refused` row in that run's `events.jsonl`, kept out
+  of the Tool-calls section, because a refused call was never dispatched and
+  must not inflate the count of calls the step made.
 - **Resume without re-running.** The evidence log doubles as the resume
-  journal: an interrupted run replays its completed steps' results (verified
-  against each step's recorded output digest) and only executes what never
+  journal. An interrupted run replays its completed steps' results (verified
+  against each step's recorded output digest) and executes only what never
   finished. Any divergence — script bytes, args, ceilings, roles, or an
   edited artifact — refuses; a completed step never runs twice, and a
   failed one is never silently retried.
 
 ## Honest limits
 
-What AgentStack can promise here has a sharp edge, and the docs say it plainly:
+What it can and cannot do:
 
 | It can | It cannot |
 |---|---|
@@ -104,35 +104,34 @@ report labels each step's posture rather than implying uniform containment.
 ### What the interpreter bounds, and what it does not
 
 The orchestration script runs under host-set ceilings, and two of them are
-**partial on purpose**. A partial bound that reads as total is the failure
-this section exists to prevent, so both residuals are stated here and in the
-posture block `agentstack workflow report` prints verbatim:
+partial. A partial bound must not read as total, so both residuals are stated
+here and in the posture block `agentstack workflow report` prints verbatim:
 
 - **There is no JS heap cap.** Every path by which *untrusted* input reaches
   the interpreter heap is bounded — the invoker's args and every child result
   cross a depth-bounded JSON boundary under the resident-result ceiling,
   progress output is capped per line and per run, and the one allocation a
   script can name directly (`ArrayBuffer` / `SharedArrayBuffer`) has an
-  engine-owned ceiling. But a **trusted, reviewed, pinned** script that
-  allocates *on purpose* — doubling a string in a loop — is bounded by nothing
-  here. The bound covers hostile ingress, not intent.
+  engine-owned ceiling. But a trusted, reviewed, pinned script that allocates
+  on its own account, doubling a string in a loop, is bounded by nothing here.
+  The bound covers hostile ingress, not intent.
 - **The native call budget covers our natives, not Boa's built-ins.** Calls
   into the host functions AgentStack installs (`agent`, `phase`, `log`,
   `budget.*`) are charged against a run-total ceiling. Work *inside a single
   built-in* — a backtracking regex, a large `sort`, `String.prototype.repeat`
-  — **ticks no counter at any setting**, because the engine exposes no
+  — ticks no counter at any setting, because the engine exposes no
   instruction counter or interrupt hook to build one on.
 
 Both residuals are defects in *reviewed* content rather than hostile-input
-paths, and both are contained by the out-of-thread watchdog — which force-exits
-the process at the wall ceiling plus grace, behind an armed no-I/O exit so a
-blocked write cannot keep a runaway alive — rather than by a ceiling. Removing
-them is what the recorded QuickJS-in-wasmtime fallback is for.
+paths. A ceiling does not contain them; the out-of-thread watchdog does. It
+force-exits the process at the wall ceiling plus grace, behind an armed no-I/O
+exit so a blocked write cannot keep a runaway alive. Removing them is what the
+recorded QuickJS-in-wasmtime fallback is for.
 
 **The wall-clock budget is not an engine ceiling.** `max_wall_seconds` is inert
-inside the interpreter: the engine is clock-free, and the number is surfaced to
-the script through `budget` only. Enforcement lives in two places outside it,
-both in the CLI:
+inside the interpreter, because the engine is clock-free; the number is
+surfaced to the script through `budget` only. Enforcement lives in two places
+outside it, both in the CLI:
 
 - the **drive loop's cooperative deadline**, checked at every batch boundary.
   Once the effective ceiling has passed it refuses the *next* batch and fails
@@ -141,10 +140,10 @@ both in the CLI:
   effective ceiling plus a fixed grace, which force-exits the process
   (exit `124`) whatever the interpreter is doing.
 
-The clock is therefore live-run state, never replayable state — which is
-deliberate: a `--resume` must not spuriously time out replaying a run that
-originally used its full wall clock, so a resumed run restarts at the full
-effective ceiling. The effective ceiling itself is the narrowest of the machine
+The clock is therefore live-run state, never replayable state, because a
+`--resume` must not spuriously time out replaying a run that originally used
+its full wall clock. A resumed run restarts at the full effective
+ceiling. The effective ceiling itself is the narrowest of the machine
 cap, the manifest request and the script's own `meta` request.
 
 ## Writing one
@@ -214,15 +213,15 @@ touch. Which flags (or whether any exist) is the adapter's answer, not
 AgentStack's: each adapter descriptor declares what its CLI calls the setting
 and how to select it for one headless launch.
 
-That means a harness can honestly be unable to carry a value, and the run says
-so rather than dropping it silently. Two different facts, kept apart:
+That means a harness can be unable to carry a value, and the run says so
+rather than dropping it silently. Two different facts, kept apart:
 
-- the harness has **no notion** of the dimension at all, or
-- the harness **has the setting** but no confirmed way to select it for a
+- the harness has no notion of the dimension at all, or
+- the harness has the setting but no confirmed way to select it for a
   single launch.
 
-Either way you get a `⚠` line per child naming the role, the harness, the
-dimension and the reason, and **the run proceeds** on that harness's own
+Either way you get a warning line per child naming the role, the harness, the
+dimension and the reason, and the run proceeds on that harness's own
 default — an undeliverable model is a capability gap, not a manifest error. A
 value the adapter's own catalog *rejects* (an effort outside its enum) is a
 manifest error, and a run refuses that child before launch.
@@ -235,7 +234,7 @@ Five helpers spell out the shapes scripts kept re-deriving by hand. All five
 are **pure compositions of `parallel` / `pipeline` / `shard` / `partition`**,
 and not one of them calls `agent()` — an agent run happens only when *your*
 callback calls it, through the same bridge a hand-written script uses. So a
-helper can never widen a role or manufacture fan-out: the `role ∈ meta.roles`
+helper can never widen a role or manufacture fan-out. The `role ∈ meta.roles`
 check and the `max_agents` ceiling remain the only authority path.
 
 | Helper | Shape |
@@ -254,25 +253,24 @@ data.
 
 `keepUnrefuted` is the reason this set exists at all: the worked example above
 has always called it, and until now **it was never defined in the prelude** —
-copying the documented example raised a `ReferenceError`. The gap is closed by
-shipping the helper, not by quietly editing the example to stop calling it.
+copying the documented example raised a `ReferenceError`.
 
-⚠ **`keepUnrefuted`'s default predicate is a text heuristic, not a trust
+**`keepUnrefuted`'s default predicate is a text heuristic, not a trust
 boundary.** It greps the stringified verdict for "refuted". A refuter that
 phrases its finding differently ("this claim is false") reads as unrefuted, a
 claim whose own text contains the word reads as refuted, and a prompt-injected
-refuter can say whatever it likes. This is the same honesty the schema section
-states: it constrains shape, not content. Pass your own `isRefuted` — ideally
-over a schema-validated verdict field — whenever the answer matters. A `null`
-verdict (the refuter died) is deliberately **not** treated as refuted: failing
-closed there would silently delete claims whenever a child run failed.
+refuter can say whatever it likes. The schema section says the same: shape,
+not content. Pass your own `isRefuted` — ideally over a schema-validated
+verdict field — whenever the answer matters. A `null` verdict (the refuter
+died) is not treated as refuted, because failing closed there would silently
+delete claims whenever a child run failed.
 
 ### Getting structured results back
 
 Pass a `schema` and the promise resolves with a **parsed value** instead of
 text, so a later stage can index it rather than parse prose. A result that
 does not satisfy the schema fails that step closed — the script sees `null`
-and decides. There is deliberately no automatic re-ask: a retry would spend
+and decides. There is no automatic re-ask, because a retry would spend
 an agent slot your ceiling never granted.
 
 Validation constrains **shape, not content**. A schema-validated result is
@@ -286,7 +284,7 @@ over values you already have — no agent, no tokens. `partition` returns
 exactly `r` buckets (empty ones included, so your reducer count never varies
 with the data) and always places the same key in the same bucket, which is
 what lets one reducer see all of a file's findings. It is not a balanced
-split: skewed keys make skewed buckets, and the fix is a better key.
+split. Skewed keys make skewed buckets, and the fix is a better key.
 
 ### Keeping wide runs in memory
 
@@ -295,21 +293,21 @@ A run that fans out over large outputs can ask for
 `{ digest, bytes, preview }` instead of the full text. There is also a
 machine ceiling on total result bytes; a run that exceeds it fails closed and
 tells you to use handles. Handles cost about 620 bytes each, so they are for
-stages returning kilobytes — on short results they are simply pointless.
+stages returning kilobytes. On short results they are simply pointless.
 
 ### Before you run it
 
 `agentstack workflow explain <name>` reports the effective ceilings, which
 roles launch serially, and how many `agent()` call **sites** the pinned
-script has — statically, spawning nothing. Sites are not calls: one site
+script has — statically, spawning nothing. Sites are not calls. One site
 inside a loop runs once per item, so real fan-out is data-dependent. The
 enforced bound on total spawns is `max_agents`, refused per call.
 
 ## Status
 
 Everything above is the guide. This last section is project status — how mature
-the capability is and what its security review found — kept separate so the two
-are not read as one, and kept honest rather than trimmed.
+the capability is and what its security review found, kept separate so the two
+are not read as one.
 
 The full technical contract and security rationale live in the
 [workflows capability design doc](archive/design/workflows-capability.md). The
@@ -331,14 +329,14 @@ well-worn. Repeated-use evidence — running real workflows on separate
 occasions and confirming each is easier to repeat than hand-rolled
 orchestration — stands at **1 of 3 occasions**: the 2026-07-23 acceptance run.
 That is a maturity signal for you to weigh, not a gate anything is waiting on.
-Expect the rough edges of a young capability: the vocabulary (admission,
-ceilings, locked child runs) is the densest in the product, and the honest
-limits above are the ones to read before you rely on it.
+Expect the rough edges of a young capability. The vocabulary (admission,
+ceilings, locked child runs) is the densest in the product, and *Honest limits*
+above is the section to read before you rely on it.
 
 Scaling work — how the drive loop behaves at width, and what it costs — is
 tracked separately in the
 [workflow scaling plan](archive/design/workflow-scaling.md), which also records two
-things it deliberately did **not** build: automatic retry and straggler
+things it did not build: automatic retry and straggler
 speculation (nothing in the current model can prove a role is side-effect
 free, and a claim the enforcement cannot back does not ship), and distributed
 workers (the measured bottleneck is the latency tail, not a shortage of

@@ -7,11 +7,11 @@ Releases are published from tags (v0.2.0 onward). Per release:
 - CI (`.github/workflows/ci.yml`) must be green on `main` — fmt + clippy +
   tests + the asserted example suite + the Docker sandbox job.
 - The README on `main` documents whatever binary the installer serves as
-  `latest`, so tag the commit whose README matches the surface you are
-  shipping — a version bump left untagged means the installer hands users a
+  `latest`, so tag the commit whose README matches the commands and flags you
+  are shipping. A version bump left untagged means the installer hands users a
   binary that no longer matches the docs.
 - Update `CHANGELOG.md` with the release entry.
-- Sweep doc version pins to the new tag — they lag silently otherwise:
+- Sweep doc version pins to the new tag; they lag silently otherwise:
   `rg -n "@v0\.|agentstack 0\." README.md docs/*.html docs/start.html action.yml`
   (the Action `uses:` examples and start.html's `--version` capture are the
   known offenders).
@@ -194,8 +194,8 @@ present local image is never re-pulled.
 Make `agentstack-egress-proxy` public (package settings → Danger Zone →
 Change visibility), or anonymous pulls — i.e. every lockdown user — fail.
 
-The **sandbox runner** image (the harness cage) is *not* published: it must carry
-your chosen harness. Users build it from
+The sandbox runner image (the container the harness runs in) is *not*
+published: it must carry your chosen harness. Users build it from
 [`docker/sandbox.Dockerfile`](docker/sandbox.Dockerfile) and set
 `AGENTSTACK_SANDBOX_IMAGE`.
 

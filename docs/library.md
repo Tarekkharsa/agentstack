@@ -81,7 +81,7 @@ targets = ["*"]
 ```
 
 There are no `[skills.api-review]` or `[servers.github]` definitions here.
-That absence means “resolve this name from my linked libraries.” The lock then
+That absence means "resolve this name from my linked libraries." The lock then
 records the exact source and digest that won.
 
 ## Add reusable content

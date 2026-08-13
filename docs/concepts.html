@@ -317,7 +317,7 @@ skills = ["api-review", "sql-review"]</code></pre></div>
 <tr><td>Settings, hooks, extensions</td><td>Managed files required by the CLI</td></tr>
 <tr><td>File-only CLI</td><td>Rendered compatibility files</td></tr>
 </tbody></table></div>
-<p>“Zero files” means no generated project MCP configs or copied skill folders for the live lane. The manifest, lock, and any required managed instruction files still exist.</p>
+<p>"Zero files" means no generated project MCP configs or copied skill folders for the live lane. The manifest, lock, and any required managed instruction files still exist.</p>
 <p>Use <code>agentstack use &lt;toolset&gt; --write</code> only for a file-only CLI or an intentional rendered compatibility lane. A missing <code>.mcp.json</code> or <code>.claude/skills/</code> is not a problem when status says the capability is served live.</p>
 <p>Two commands are easy to confuse. <code>agentstack use &lt;toolset&gt; --write</code> <strong>materializes one toolset's files now</strong> and records nothing about routing; <code>agentstack more delivery render-locally --write</code> <strong>records a durable preference</strong> that routes kinds to files from then on, for every toolset. One is an action, the other is a setting.</p>
 <h2 id="what-agentstack-owns">What AgentStack owns<a class="hlink" href="#what-agentstack-owns" aria-label="Link to this section">#</a></h2>
@@ -331,7 +331,7 @@ skills = ["api-review", "sql-review"]</code></pre></div>
 - rust-testing — Plan and write focused Rust tests
 - using-agentstack — Operate an AgentStack-managed setup</code></pre></div>
 <p>It is names plus one-line descriptions, capped per entry and in total to keep context small; when the cap bites, names are kept and descriptions are dropped, because the name is what a load is called with. Because it travels with the tool list, it is re-read whenever that list changes — a project bound from client roots, a lease opened or closed — instead of being frozen at connect time. The agent can also refresh or search it with <code>agentstack_list_loadable(query)</code>. When a task matches a description, it calls <code>agentstack_load(name, reason)</code> and receives only that skill's full body.</p>
-<p>The user may ask for a skill by name, but does not have to. A clear frontmatter description tells the agent when the skill is relevant. The embedded <code>using-agentstack</code> manual is always available, even before a project is trusted. An untrusted project lists names only: descriptions are bundle content, and untrusted content stays inert wherever it would be read.</p>
+<p>The user may ask for a skill by name, but does not have to. A clear frontmatter description tells the agent when the skill is relevant. The embedded <code>using-agentstack</code> manual is always available, even before a project is trusted. An untrusted project lists names only, because descriptions are bundle content, and untrusted content stays inert wherever it would be read.</p>
 <h2 id="dynamic-mcp-tool-discovery">Dynamic MCP tool discovery<a class="hlink" href="#dynamic-mcp-tool-discovery" aria-label="Link to this section">#</a></h2>
 <p>The default gateway keeps upstream MCP schemas out of the initial tool list. The agent calls <code>tools_search({ query })</code> to find a tool, then asks for that tool's schema and invokes it by its namespaced name. This keeps the agent's context bounded even when several MCP servers expose hundreds of tools.</p>
 <p>Toolsets decide which MCP servers can be discovered. Machine and project policy still apply to every brokered call.</p>
@@ -351,7 +351,7 @@ path = "./instructions/opus.md"</code></pre></div>
 <p>In the central library, use <code>instructions/&lt;name&gt;/instruction.toml</code> with the same <code>[[variant]]</code> grammar. A project selects the library fragment with a sourceless <code>[instructions.&lt;name&gt;]</code> table. See <a href="library.html#put-cli--and-model-specific-instructions-in-the-library">the complete example</a>.</p>
 <h2 id="trust-and-the-consent-digest">Trust and the consent digest<a class="hlink" href="#trust-and-the-consent-digest" aria-label="Link to this section">#</a></h2>
 <p>Trust is the local human approval for one project's current manifest and lock. A new clone is inert until reviewed. Editing either file, pulling a changed version, or re-locking makes trust stale.</p>
-<p>Trust means “I reviewed these declared capabilities.” It does not prove that third-party code is safe and it does not copy approval to another machine.</p>
+<p>Trust means "I reviewed these declared capabilities." It does not prove that third-party code is safe and it does not copy approval to another machine.</p>
 <p>The <strong>consent digest</strong> is the hash AgentStack records for that reviewed manifest and lock. If either changes, the digest no longer matches and the project becomes inert again.</p>
 <h2 id="secrets">Secrets<a class="hlink" href="#secrets" aria-label="Link to this section">#</a></h2>
 <p>Manifests and library definitions use references such as <code>${GITHUB_TOKEN}</code>. Each machine stores its own value:</p>

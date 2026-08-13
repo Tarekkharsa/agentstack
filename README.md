@@ -28,21 +28,21 @@ agentstack status                             # is it ready — and if not, the 
 agentstack more why <server>                  # names which CLIs are served it live
 ```
 
-`more` is the extended toolbox — every `more` command also runs at its bare name.
+`more` is the extended toolbox. Every `more` command also runs at its bare name.
 
 If you ran `agentstack init` interactively and let the wizard register the
 gateway, step 3 has nothing left to do and prints `already connected` or
-`Updated 0 harness configs`. That is success, not a failure — the bridge only
-needs registering once per tool.
+`Updated 0 harness configs`. That is success; the bridge only needs registering
+once per tool.
 
 The installer puts the binary in `/usr/local/bin` when it can write there and in
 `$HOME/.local/bin` otherwise. It names the directory it chose, and when that
 directory is not already on your `PATH` it prints
-`Add to PATH:  export PATH="<dir>:$PATH"` — copy that printed line (the `export`
+`Add to PATH:  export PATH="<dir>:$PATH"`. Copy that printed line (the `export`
 above is the `~/.local/bin` case) into your shell startup file, so a new shell
 still finds the binary.
 
-![Two CLIs with different half-setups: agentstack imports both into one manifest, connects the gateway so both CLIs are served the servers live while the project stays clean, passes doctor with 0 errors, renders each native format on request, and restores the machine byte-for-byte](docs/demos/first-value.svg)
+![Two CLIs start with different half-setups. agentstack imports both into one manifest and connects the gateway, so both CLIs receive the servers live while the project stays clean; it then passes doctor with 0 errors, renders each native format on request, and restores the machine byte-for-byte](docs/demos/first-value.svg)
 
 That is the whole first run. Here is what it left in your project — plain files
 you can open, read, and commit:
@@ -63,7 +63,7 @@ without the `(gitignored)` suffix, so run `git init` before `init` — or add
 goes anywhere.
 
 That is normally the whole footprint. On MCP-capable tools a project carries
-only `.agentstack/` — no `.mcp.json`, no `.claude/skills/`, no generated
+only `.agentstack/`, with no `.mcp.json`, no `.claude/skills/`, and no generated
 `CLAUDE.md`.
 
 `.agentstack/agentstack.toml` records your whole setup. It is called
@@ -101,24 +101,27 @@ error — `no bridge for <the CLIs missing it> — nothing routed live is reachi
 them` — naming the command above.
 Files in the rendered lane are written either way.
 
-That same directory arriving in a repository you *cloned* behaves differently: it
-stays inert until you review it — no server spawns, no skill enters an agent's
-context, no secret resolves, and no file is written for it either. `apply --write`
-and `use --write` refuse to render an untrusted project's servers, skills,
-instructions, hooks, and extensions, and name `agentstack trust .` as the fix;
-editing the manifest or the lock afterwards drops the project out of trust —
-`status` then reads `trust stale (content changed)` — until you review it again.
-Running `init` yourself needs no such step: the guided wizard shows you the
+That same directory arriving in a repository you *cloned* behaves differently,
+because it stays inert until you review it. No server spawns, no skill enters an
+agent's context, no secret resolves, and no file is written for it either.
+`apply --write` and `use --write` refuse to render an untrusted project's
+servers, skills, instructions, hooks, and extensions, and name
+`agentstack trust .` as the fix; editing the manifest or the lock afterwards
+drops the project out of trust — `status` then reads
+`trust stale (content changed)` — until you review it again.
+
+Running `init` yourself needs no such step. The guided wizard shows you the
 plan, and your confirm grants the review for the bytes it just wrote, so
-`status` reads `trusted` straight after it — building the setup *is* the
-consent. A scripted import is the same deal in two commands, because `--yes`
-acknowledges the write and not the servers: `agentstack init --plan` prints the
+`status` reads `trusted` straight after it; building the setup *is* the consent.
+
+A scripted import is the same deal in two commands, because `--yes`
+acknowledges the write and not the servers. `agentstack init --plan` prints the
 plan and its `plan_digest`, and `agentstack init --yes --consented <digest>`
 imports and grants against the plan you read. Without the digest the import
 still happens and the project simply stays untrusted, one `agentstack trust .`
-away. Either way the consent is bound to those exact bytes and nothing wider —
-every later edit still comes back through `agentstack trust .`. And nothing a
-project declares can loosen the limits your own machine sets.
+away. Either way the consent is bound to those exact bytes and nothing wider,
+and every later edit still comes back through `agentstack trust .`. And nothing
+a project declares can loosen the limits your own machine sets.
 
 `init` is a guided wizard. Scripting or CI?
 [Use it in CI](https://tarekkharsa.github.io/agentstack/howto/ci.html).
@@ -136,27 +139,27 @@ current binary. Step by step:
    `${GITHUB_PERSONAL_ACCESS_TOKEN}` if that is what your config calls it.
 3. **Review** — `agentstack trust .`: nothing here runs until the setup is
    reviewed. At a terminal the wizard asks this inside `init`; a scripted run
-   consents in two commands, previewing the surface and handing back its
-   digest.
+   consents in two commands, previewing what would be granted and handing back
+   its digest.
 4. **Connect** — `agentstack more gateway connect --all --write`: the live lane
    needs one bridge registered per MCP-capable CLI.
 5. **Route** — `agentstack more delivery`: both CLIs are MCP-capable, so the servers
    are served live and no file is written for them. The project holds
-   `.agentstack/` and the `.gitignore` that hides the lifted secret — no native
+   `.agentstack/` and the `.gitignore` that hides the lifted secret. No native
    config at all.
 6. **Verify** — `agentstack doctor`: 0 errors, 0 warnings. On your own machine
-   expect a note or two — advisories like "these servers launch via bare `npx`"
+   expect a note or two. Advisories like "these servers launch via bare `npx`"
    are stated once and do not count against readiness; a first Codex project
    also warns until you open Codex there once and accept its trust prompt.
 7. **Render anyway** — `agentstack more delivery render-locally --write`, then
    `agentstack apply --toolset default --scope global --write`: the rendered
-   lane is routed, not removed, so asking for files is an explicit opt-in. Both
-   CLIs then carry both servers, each in its own format.
+   lane is still there on request, so asking for files is an explicit opt-in.
+   Both CLIs then carry both servers, each in its own format.
 8. **Undo** — `agentstack more restore --last --write`, four times (the render, the
    render-locally override, the bridge, the import): every file byte-identical
    to where it started.
 
-Reproduce it yourself, fenced (an isolated temp `HOME` — it never touches your
+Reproduce it yourself, fenced (an isolated temp `HOME`; it never touches your
 real configs, and it asserts every step, so it doubles as the witness that this
 output stays accurate):
 [`examples/first-value-demo/run-demo.sh`](examples/first-value-demo/run-demo.sh).
@@ -186,18 +189,16 @@ install the same underlying capabilities. AgentStack gives the whole lifecycle
 one source of truth:
 
 - **Stop repeating configuration.** Import what you already have; one manifest
-  then reaches every supported CLI — served live where it can be, rendered into
-  that CLI's native format where it cannot.
+  then reaches every supported CLI, served live where it can be and rendered
+  into that CLI's native format where it cannot.
 - **Switch by project or task.** A toolset is a named subset of your setup;
   temporary sessions activate it and restore the previous native files afterward.
-- **Understand and repair drift.** `doctor` finds the problem, `diff` shows the
-  consequence, `adopt` keeps an intentional hand edit, and `restore` undoes a
-  bad change.
-- **Share without sharing credentials.** Manifests and lockfiles contain
-  `${REF}` placeholders, never secret values; each machine supplies its own.
-- **Stay safe as setups become portable.** Unfamiliar repository declarations
-  stay inert until reviewed, machine policy remains the ceiling, and governed
-  calls are recorded.
+- `doctor` finds the problem, `diff` shows the consequence, `adopt` keeps an
+  intentional hand edit, and `restore` undoes a bad change.
+- **Share without sharing credentials.** Manifests and lockfiles carry `${REF}`
+  placeholders only; each machine supplies its own secret values.
+- Repository declarations stay inert until you review them, machine policy
+  remains the ceiling, and governed calls are recorded.
 
 Using one CLI with a small hand-managed setup? You may not need AgentStack yet.
 It becomes useful when you repeat the same setup across tools, projects,
@@ -212,7 +213,7 @@ specific build, and `agentstack --version` says which one you have.
 
 The one-line installer verifies the release tarball against the `checksums.txt` published with
 each release. Each release also carries a GitHub build provenance attestation tying the asset to this
-repository and the workflow that built it — check it with
+repository and the workflow that built it. Check it with
 `gh attestation verify agentstack-<target>.tar.gz --repo Tarekkharsa/agentstack`. That establishes
 *where* the artifact was built and does not replace the checksum comparison; see
 [`RELEASING.md`](RELEASING.md). Or build from a checkout:
@@ -222,17 +223,16 @@ cargo build --release                  # add --features sandbox for `run --sandb
 ./target/release/agentstack more self link  # symlink onto your PATH
 ```
 
-Release binaries ship with sandbox support compiled in; a bare `cargo build` does not — pass
+Release binaries ship with sandbox support compiled in; a bare `cargo build` does not. Pass
 `--features sandbox` to get `run --sandbox` / `--lockdown`.
 
 Once installed, `agentstack more self update` moves you to the latest *stable*
 release; it verifies the download against the release's published checksum
 before replacing anything. It never moves you onto a pre-release, and never
-back off one — to install a specific build, pass `AGENTSTACK_VERSION`.
+back off one. To install a specific build, pass `AGENTSTACK_VERSION`.
 
-There is also a Homebrew tap, `Tarekkharsa/homebrew-tap`, whose
-`Formula/agentstack.rb` is published by hand after each stable release, so it
-can trail the releases page by a little:
+There is also a Homebrew tap, `Tarekkharsa/homebrew-tap`, carrying
+`Formula/agentstack.rb`:
 
 ```sh
 brew install Tarekkharsa/tap/agentstack
@@ -242,11 +242,11 @@ The formula is published by hand after each stable release, so it can lag a tag;
 `brew info` shows an older version than the
 [releases page](https://github.com/Tarekkharsa/agentstack/releases), use the
 installer or a checkout. On a Homebrew install, upgrade with
-`brew upgrade agentstack` rather than `agentstack more self update` — replacing the
-file directly desynchronizes the formula.
+`brew upgrade agentstack` rather than `agentstack more self update`, because
+replacing the file directly desynchronizes the formula.
 
 **Supported platforms: macOS and Linux.** A Windows binary is published, but it is not
-exercised by CI and the codebase carries almost no Windows-specific handling — treat it as
+exercised by CI and the codebase carries almost no Windows-specific handling. Treat it as
 untested rather than supported. If you use it and it works, say so in an issue; that is the
 evidence that would move it.
 
@@ -270,7 +270,7 @@ governance only when you need them:
 | [5 — Share](https://tarekkharsa.github.io/agentstack/howto/team-setup.html) | manifest · lock · library | locked, secret-free setups |
 | [6 — Govern](https://tarekkharsa.github.io/agentstack/howto/trust-a-repo.html) | trust · policy · lockdown | trust, policy, confined runs |
 
-## The command surface
+## The commands
 
 `agentstack --help` lists the sixteen everyday verbs — `init`, `up`, `status`,
 `add`, `search`, `apply`, `doctor`, `lock`, `toolset`, `use`, `yes`, `run`,
@@ -283,7 +283,7 @@ first-run step, a `doctor` fix line, or a machine-readable `next_action`.
 `agentstack more why <name>` is the one to reach for when nothing is on disk: under
 the default routing a served capability writes no file, so `why` is where its
 origin, pin, approval, live tools and reach are stated. `agentstack more unrender`
-is the opposite direction — it takes back a server config the rendered lane
+is the opposite direction; it takes back a server config the rendered lane
 left behind.
 
 Everything else lives one hop away under `agentstack more`:
@@ -297,20 +297,20 @@ Nothing was removed. Every command still runs at its own name with its own
 `--help`, and `agentstack --help --all` prints the whole tree.
 
 The extended toolbox, and the `yes`, `undo`, `why`, and `unrender` verbs,
-arrived in v0.18.0 — where the prefix was spelled `agentstack x`. That spelling
+arrived in v0.18.0, where the prefix was spelled `agentstack x`. That spelling
 still works and always will; `more` is what the help screens teach now. On
-v0.17.1 none of it exists: the prefix is an `unrecognized subcommand` error and
-every command that does exist there runs at its own bare name — so if
+v0.17.1 none of it exists. The prefix is an `unrecognized subcommand` error, and
+every command that does exist there runs at its own bare name. So if
 `brew info` still shows the older formula, that is what you have.
 `agentstack --version` settles it.
 
 ## Documentation
 
-Everything is explained on the website — that is the one place docs live:
+Everything is explained on the website, the one place docs live:
 
 - **[Get started](https://tarekkharsa.github.io/agentstack/start.html)** — guided setup, ~10 minutes, expected output at every step
 - **[Concepts](https://tarekkharsa.github.io/agentstack/concepts.html)** — every term in two or three plain sentences
-- **[Which protection do I need?](https://tarekkharsa.github.io/agentstack/choose.html)** — how much protection to ask for; delivery is routed for you, not chosen
+- **[Which protection do I need?](https://tarekkharsa.github.io/agentstack/choose.html)** — how much protection to ask for; AgentStack routes delivery for you
 - **[How-tos](https://tarekkharsa.github.io/agentstack/docs.html)** — add a server or skill, trust a repo, lock down a run, team setup, CI, undo
 - **[Migration recipes](https://tarekkharsa.github.io/agentstack/migrations.html)** — Claude + Codex, Cursor + Gemini, dotfiles, teams without shared secrets, complete removal
 - **[Troubleshooting](https://tarekkharsa.github.io/agentstack/troubleshooting.html)** — search for the error text you got; every message is quoted from the binary and paired with its fix
@@ -320,7 +320,7 @@ Everything is explained on the website — that is the one place docs live:
 - **[Reference](https://tarekkharsa.github.io/agentstack/reference.html)** — the complete feature and command inventory
 - **[Adapter support matrix](https://tarekkharsa.github.io/agentstack/adapters.html)** — which of the thirteen CLIs is verified nightly against the real tool, which is best-effort, and what each one manages
 
-**Go deeper** — the [enforcement matrix](https://tarekkharsa.github.io/agentstack/enforcement.html) (what each mode actually enforces, checked against the source), the [architecture](https://tarekkharsa.github.io/agentstack/architecture.html) (how it works inside), and [16 runnable walkthroughs](https://tarekkharsa.github.io/agentstack/examples.html).
+For more depth, see the [enforcement matrix](https://tarekkharsa.github.io/agentstack/enforcement.html) (what each mode actually enforces, checked against the source), the [architecture](https://tarekkharsa.github.io/agentstack/architecture.html) (how it works inside), and [16 runnable walkthroughs](https://tarekkharsa.github.io/agentstack/examples.html).
 
 ## Develop
 

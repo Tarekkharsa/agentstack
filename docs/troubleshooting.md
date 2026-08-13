@@ -32,13 +32,13 @@ startup**. After any write, `apply` says so itself.
 
 Restart the CLI first, then work down this list.
 
-Under the default routing there is often **no file to look at** — an MCP-capable
+Under the default routing there is often no file to look at; an MCP-capable
 CLI is served live. `agentstack more why <name>` states where that capability came
 from, whether it is pinned and approved, which CLIs serve it live, which get a
 file, and what it reaches. Start there before hunting for a config on disk.
 
 If a write was *refused* rather than skipped, the cause is almost always the
-trust gate — jump to
+trust gate. Jump to
 [it refuses because the project isn't trusted](#it-refuses-because-the-project-isnt-trusted).
 
 **`Claude Code    1 change pending ↳ agentstack apply --write`**
@@ -70,7 +70,7 @@ agentstack apply --target claude-code --write
 A note, not a fault. agentstack ships adapters for many CLIs and reports the
 ones it did not find so a machine with 5 of 13 installed is not greeted by 8
 warnings. If you *do* use that CLI, it is installed somewhere agentstack does
-not look — check that its config lives at the standard path.
+not look. Check that its config lives at the standard path.
 
 **`1 target in sync — wrote 1.` but the CLI still shows nothing**
 
@@ -92,7 +92,7 @@ not rendering configs — clean-at-rest keeps them off disk
 
 In clean-at-rest mode nothing is generated between sessions; capabilities exist
 only inside `agentstack run` or between `agentstack more session start` and
-`agentstack more session end`. A missing `.mcp.json` here is the design. Do not
+`agentstack more session end`. Nothing writes a `.mcp.json` in this mode. Do not
 create one. See
 [delivery in the reference](reference.md#delivery--routing-and-where-rendered-files-live).
 
@@ -118,8 +118,8 @@ agentstack more instructions --write
 
 ## A secret won't resolve
 
-agentstack never stores secret values in the manifest — only `${REF}`
-placeholders resolved per machine. An unresolved ref **blocks the write**; that
+agentstack never stores secret values in the manifest, only `${REF}`
+placeholders resolved per machine. An unresolved ref blocks the write; that
 is the intended behaviour, not a bug to route around.
 
 **`✗ unresolved secret LINEAR_TOKEN (server 'linear') ↳ agentstack secret set LINEAR_TOKEN`**
@@ -141,7 +141,7 @@ itself) and usually not.
 
 **`error: 1 blocked write on 1 target — fix: agentstack secret set LINEAR_TOKEN (or pass --allow-unresolved)`**
 
-The closing line, and a **nonzero exit** — scripts and CI must not read a
+The closing line, and a nonzero exit; scripts and CI must not read a
 blocked `apply --write` as success. It names every missing ref, so the fix is
 copy-pasteable.
 
@@ -177,7 +177,7 @@ chmod 600 .env
 **`✗ blocked by policy: <entry>`**
 
 Not a missing secret — a refusal. `[policy.secrets]` or `[policy.egress]`
-denied that resolution, and `--allow-unresolved` does **not** override policy.
+denied that resolution, and `--allow-unresolved` does not override policy.
 Widen the machine ceiling or narrow what the project asks for.
 
 Three more lines `doctor` prints in the same **Secrets** section speak about the
@@ -185,8 +185,8 @@ recommended vault rather than about one ref:
 
 **`varlock  .env.schema opts this project in, but the varlock binary is not runnable`**
 
-The project asked for varlock and it is not there, so **every ref is quietly
-falling through to the next store** — the silence this finding exists to break.
+The project asked for varlock and it is not there, so every ref is quietly
+falling through to the next store. This finding reports that fall-through.
 Install varlock ([varlock.dev](https://varlock.dev)), or delete
 `.agentstack/.env.schema` to drop the layer on purpose.
 
@@ -197,9 +197,9 @@ the first line of its error; run `varlock load` in the project to see all of it.
 
 **`varlock  not in use — the recommended vault keeps values out of this project entirely`**
 
-Not a defect and never doctor's next action — an invitation. `agentstack init`
-offers to write the `.env.schema` that opts in, or drop one in next to the
-manifest yourself. It declares names, never values.
+Not a defect, and never doctor's next action. It offers an opt-in.
+`agentstack init` offers to write the `.env.schema` that opts in, or drop one in
+next to the manifest yourself. It declares names, never values.
 
 More: [reference — secret resolution](reference.md#secret-resolution) and
 [unresolved secrets block writes](reference.md#unresolved-secrets-block-writes).
@@ -207,7 +207,7 @@ More: [reference — secret resolution](reference.md#secret-resolution) and
 ## It says my files drifted
 
 Drift means the native config on disk no longer matches what the manifest would
-render. agentstack never silently reconciles it — you choose which side wins.
+render. agentstack never silently reconciles it; you choose which side wins.
 
 ```bash
 agentstack more diff              # show exactly what differs, change nothing
@@ -220,7 +220,7 @@ agentstack apply --write     # the manifest is right: re-render over the disk
 **`Claude Code    no longer matches what agentstack last wrote ↳ review: agentstack more diff · adopt the on-disk version: agentstack adopt`**
 
 The region agentstack manages changed since its last write. `doctor` states the
-fact without guessing the cause — a hand-edit is the common one, but a session
+fact without guessing the cause. A hand-edit is the common one, but a session
 that ended onto a stale baseline reaches the same state, so it does not accuse
 you of editing. `agentstack more diff` shows what moved and labels each entry
 `managed`, `foreign (kept)`, or `hand-edited`. Then pick a side: `adopt` pulls
@@ -230,19 +230,19 @@ the on-disk version back into the manifest so it survives the next apply;
 **`Claude Code    kept <names> — applied by another manifest ↳ keep them: agentstack adopt · prune them: agentstack apply --prune-foreign`**
 
 **Foreign** entries: written by a *different* project's manifest into the same
-global file. `apply` keeps them by default — this is context, not a defect.
+global file. `apply` keeps them by default; this is context, not a defect.
 Removing them takes the explicit flag, because they are somebody else's
 servers.
 
 **`Claude Code    would REMOVE <names> ↳ keep them: agentstack adopt · prune them: agentstack apply --write`**
 
 A pending prune. Those entries exist in the config but no longer in the
-manifest, so the next write deletes them. The message names the victims
-deliberately; decide before you run it.
+manifest, so the next write deletes them. The message names each entry it would
+delete; decide before you run it.
 
 **`{name}    changed in {app} (owner) ↳ refresh manifest + re-fan out: agentstack apply --write`**
 
-An **owned** server — one whose defining app rewrites its own config by design.
+An owned server is one whose defining app rewrites its own config by design.
 The app's copy is authoritative; `apply --write` refreshes the manifest from it
 and re-fans it out to the other CLIs.
 
@@ -250,7 +250,8 @@ and re-fans it out to the other CLIs.
 
 Same situation, benign variant: the file changed but agentstack's managed
 region still matches. Live-state churn in configs a running session rewrites
-constantly (`~/.claude.json`) is ignored on purpose, so `doctor` does not flap.
+constantly (`~/.claude.json`) is ignored on purpose, so `doctor` does not report
+drift on every run.
 
 **`{name}    content drifted from lock ↳ agentstack lock --write`**
 
@@ -268,7 +269,7 @@ agentstack lock --write
           `agentstack trust .` ↳ agentstack lock --write
 ```
 
-The same drift on a project you have already **trusted**, and the wording says
+The same drift on a project you have already trusted, and the wording says
 what that costs you: re-pinning is not the whole fix. `lock --write` accepts the
 new bytes and, because the lockfile is part of the consent surface, immediately
 marks your grant stale. Two steps, in this order:
@@ -319,7 +320,7 @@ Claude Code    1 owned key in {path}/.claude/settings.json drifted from the decl
 
 `not yet in` means the merge has not happened; `drifted from the declared value`
 means it happened and something changed the key afterwards. Only keys agentstack
-declares are named — your own unrelated edits elsewhere in `settings.json` are
+declares are named; your own unrelated edits elsewhere in `settings.json` are
 never reported as drift.
 
 More: [drift — adopt or apply?](reference.md#drift-adopt-or-apply) and
@@ -327,7 +328,7 @@ More: [drift — adopt or apply?](reference.md#drift-adopt-or-apply) and
 
 ## It refuses because the project isn't trusted
 
-Untrusted means **inert**: a cloned repository's declarations cannot spawn
+Untrusted means inert: a cloned repository's declarations cannot spawn
 servers, enter agent context, or resolve secrets until a human has read them.
 A consented `agentstack init` records trust for you — the wizard's own confirm
 at a terminal, or `--consented <plan_digest>` on a scripted run — so in practice
@@ -338,7 +339,7 @@ plan (that one imports and leaves the project untrusted on purpose).
 ### The five kinds the gate holds back
 
 Every refusal below opens with `refusing to …` and closes the same way: nothing
-is written, the run **exits nonzero**, and the fix is always `agentstack trust .`.
+is written, the run exits nonzero, and the fix is always `agentstack trust .`.
 The two halves of each `is not trusted` line change to `changed since it was
 trusted` when the project *was* approved and its bytes moved since.
 
@@ -401,7 +402,7 @@ review and `agentstack trust .` before rendering executable extension code
 Hooks and extensions run code, so they take the full consent ceremony every
 time and accept no relaxation at all.
 
-The command's closing line names the count, and the exit code is nonzero — a
+The command's closing line names the count, and the exit code is nonzero; a
 script must not read a refused write as success:
 
 ```text
@@ -418,7 +419,7 @@ error: 2 targets blocked — each ✗ above names the blocker
 content, the machine manifest at `~/.agentstack/agentstack.toml`, and
 `[settings.*]` values all go through on an untrusted project. Seeing
 `✓ wrote 1 setting` next to a refusal is correct, not a leak: none of them
-authorizes new content — a settings value declares no code to run, and taking a
+authorizes new content. A settings value declares no code to run, and taking a
 server away can only shrink what a CLI can reach.
 
 One caveat on removal: the gate blocks a *target*, not one entry. If the same
@@ -467,7 +468,7 @@ then retry
 ```
 
 Trust is bound to content. A `git pull`, or your own edit to the manifest or
-lockfile, invalidates the old approval — that re-gate is the feature. Review
+lockfile, invalidates the old approval; that re-gate is the feature. Review
 what changed, then re-trust.
 
 ```text
@@ -492,7 +493,7 @@ Next:  agentstack trust .   the content changed since you reviewed it — review
 <a id="lock-first-then-trust"></a>
 ### `lock --write` invalidates the grant — lock first, then trust
 
-The lockfile is part of the consent surface, so **re-pinning is new consent**.
+The lockfile is part of the consent surface, so re-pinning is new consent.
 Running `lock --write` on a project you have already trusted always leaves the
 grant stale, and `lock` says so before it says anything else:
 
@@ -507,8 +508,8 @@ agentstack lock --write   # 1. pin the bytes
 agentstack trust .        # 2. review and approve the pinned bytes
 ```
 
-Trusting first and locking after simply throws the approval away. `trust` will
-not even let you go the other way round — an unpinned surface is not
+Trusting first and locking after throws the approval away. `trust` will
+not even let you go the other way round; an unpinned surface is not
 approvable:
 
 ```text
@@ -538,7 +539,7 @@ error: refusing to compile instructions for {dir}/.agentstack: 1 pinned item cha
   house  instruction content drifted from agentstack.lock (locked 1718cc28481d, current a1aecdd87ab5)
 ```
 
-You then ran `agentstack lock --write`, as instructed — and the next command
+You then ran `agentstack lock --write`, as instructed, and the next command
 refuses again, now with the *drifted* wording:
 
 ```text
@@ -559,7 +560,7 @@ agentstack trust .         # review them — this is what unblocks delivery
 ### "I added a skill and now everything else refuses"
 
 `agentstack add … --write` and the panel's edit verbs write the manifest and the
-lockfile **and** deliver, in one run. They judge trust as it stood when the
+lockfile and deliver, in one run. They judge trust as it stood when the
 command started, so the thing you just asked for is not refused by the bytes you
 just asked it to write:
 
@@ -568,7 +569,7 @@ just asked it to write:
   ✓ claude-code: 1 skill → {dir}/.claude/skills
 ```
 
-But they deliberately do **not** re-pin the grant. The new capability is real
+But they deliberately do not re-pin the grant. The new capability is real
 content and still owes you a review, so the project is left stale and the *next*
 command re-gates:
 
@@ -592,15 +593,15 @@ above names the blocker; if it is consent, review with `agentstack trust .`, the
 ### Writes that keep your grant
 
 Not every manifest write costs you a review. A write that records a
-*preference* — it declares no capability and runs no code — carries valid trust
-across itself, so the documented next step is not refused by the bytes the
+*preference* — it declares no capability and runs no code — leaves an existing
+grant valid, so the documented next step is not refused by the bytes the
 command just wrote:
 
 - `agentstack more delivery render-locally [--harness <id>] --write`
 - the `.gitignore` preference (`[meta] gitignore`, set by `init`)
 
-Both re-pin **only** when trust was valid immediately before the write. An
-untrusted project stays untrusted, and a review already pending stays pending —
+Both re-pin only when trust was valid immediately before the write. An
+untrusted project stays untrusted, and a review already pending stays pending;
 neither command can create or resolve a grant.
 
 ### Other trust messages
@@ -608,7 +609,7 @@ neither command can create or resolve a grant.
 **`not trusted — 1 CLI uses the gateway, but this project's 1 server is not proxied ↳ agentstack trust <path>`**
 
 A harness is wired to the gateway, this project declares servers, and none of
-them reach the agent — every session here silently gets control-plane tools
+them reach the agent; every session here silently gets control-plane tools
 only.
 
 **`not trusted for auto mode — untrusted repos get control-plane tools only ↳ agentstack trust`**
@@ -654,7 +655,7 @@ the `more`/`x` namespace). An agent that could grant consent on your behalf
 would make the review a formality.
 
 **Fix:** run the consent verb in your own terminal. The agent can still prepare
-it for you — `agentstack trust --preview` and `trust --list` are allowed, so the
+it for you; `agentstack trust --preview` and `trust --list` are allowed, so the
 surface can be assembled and read before you answer it.
 
 **`cannot trust {path}: its loadable surface isn't fully pinned — N items need locking or review`**
@@ -682,7 +683,7 @@ More: [trust a cloned repo](howto/trust-a-repo.md) and
 ## I want to undo something
 
 Every write agentstack makes is recorded before it lands. `agentstack undo`
-(v0.18.0+) is the interactive front door — your recent changes newest-first,
+(v0.18.0+) is the interactive command — your recent changes newest-first,
 pick a point and revert; `restore` is the same record as a script-friendly
 command:
 
@@ -725,8 +726,8 @@ Replacing an already-managed skill with the same name is not snapshotted
 byte-exact, so its restore is not promised exact.
 
 To take everything back off at once, see
-[undo anything](howto/undo.md) — `agentstack more uninstall` previews first and is
-itself undoable.
+[undo anything](howto/undo.md). `agentstack more uninstall` previews first and
+is itself undoable.
 
 ## A server won't start
 
@@ -734,7 +735,7 @@ itself undoable.
 
 Everything else on this page reads your configuration. `--probe` actually
 starts each stdio server, speaks the MCP `initialize` handshake, and stops it
-again — so instead of "your manifest is well-formed" you get a per-server
+again, so instead of "your manifest is well-formed" you get a per-server
 answer to the question you actually have.
 
 ```text
@@ -765,14 +766,14 @@ Every probe is bounded: ten seconds per server, then the child is killed with
 its whole process group and reaped. Nothing is left running.
 
 One caveat. The probe inherits the environment you ran it from, so a server can
-pass `--probe` in your terminal and still fail inside a GUI-launched app — which
+pass `--probe` in your terminal and still fail inside a GUI-launched app, which
 is precisely the failure the next advisory is about.
 
 **`N servers use a bare launcher that resolves via PATH: linear (npx). A GUI-launched harness (Claude Code.app, Claude Desktop, VS Code) may inherit a minimal PATH and fail to spawn them. Terminal-launched CLIs are unaffected. To pin them, use an absolute path or a login-shell wrapper: command = "zsh", args = ["-lc", "exec <launcher> …"]`**
 
 This is the single most common "it works in my terminal but not in the app"
 failure. Nearly every published MCP server ships as `npx -y …`, and `npx` is
-found through `PATH` — which a GUI-launched app does not inherit from your
+found through `PATH`, which a GUI-launched app does not inherit from your
 shell. agentstack states this once as an advisory rather than once per server,
 and it does not count against readiness.
 
@@ -831,7 +832,7 @@ cleared or a skill removed outside agentstack.
 
 A skill directory that is not a skill yet. The description line is what
 `agentstack search` matches and what an agent sees in the loadable index — a
-skill without one is effectively invisible.
+skill without one is invisible to both.
 
 **Checking a live server rather than its config**
 
@@ -863,7 +864,7 @@ ones with a readiness flag for each.
 **`⚠ server 'github' is defined differently by 1 other CLI — kept the first definition imported (the other stays in its CLI's own config)`**
 
 From `agentstack init`. Two CLIs disagreed about the same server name, so the
-import kept the first one it read. Nothing is lost — the other definition is
+import kept the first one it read. Nothing is lost; the other definition is
 still in its own CLI's config until you apply. Open the manifest, check the
 entry that won, and fix it if the wrong one did.
 
@@ -878,7 +879,7 @@ agentstack more adapters list
 **`effective machine policy unavailable — drift rendering is BLOCKED`**
 
 The machine-level manifest at `~/.agentstack/agentstack.toml` could not be
-read, and project policy can only narrow the machine ceiling — so with no
+read, and project policy can only narrow the machine ceiling, so with no
 ceiling there is nothing to narrow. Fix that file first.
 
 ## Still stuck

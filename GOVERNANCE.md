@@ -13,8 +13,8 @@ AgentStack is currently a solo-maintained, pre-1.0 project.
   [`TODO.md`](TODO.md). Design documents explain contracts; they do not create a
   second roadmap.
 
-Decisions prefer observable user outcomes, compatibility, reversibility, and
-preservation of the security invariants. The maintainer records shipped changes
+When two options conflict, the maintainer picks the one that is reversible and
+keeps the security invariants intact. The maintainer records shipped changes
 in [`CHANGELOG.md`](CHANGELOG.md) and material enforcement limits in
 [`docs/ENFORCEMENT.md`](docs/ENFORCEMENT.md).
 
@@ -24,8 +24,8 @@ Changes to trust granting, policy intersection, digest computation, secret
 resolution, authority construction, or upstream dispatch require focused
 witnesses and line-by-line review. While there is one maintainer, the second
 review may be an independently prompted reviewer, but the release notes must
-say what was reviewed and by whom; automation is not represented as community
-oversight.
+say what was reviewed and by whom; the maintainer does not describe automated
+review as community oversight.
 
 ## Commit access and succession
 

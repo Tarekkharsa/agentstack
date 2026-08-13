@@ -4,13 +4,12 @@
 
 # AgentStack — Adapter support matrix
 
-Thirteen adapters ship today. They are **not equally verified**, and saying
-"supported" thirteen times would be the configuration equivalent of claiming
-enforcement we do not have. This page answers one question per adapter: what is
-actually tested, how often, and what should you expect when the CLI on the other
-end changes its config schema?
+Thirteen adapters ship today. They are **not equally verified**, and calling all
+thirteen "supported" would overstate what we verify. This page answers one
+question per adapter: what is actually tested, how often, and what should you
+expect when the CLI on the other end changes its config schema?
 
-Every row below is derived from something in this repository — the nightly
+Every row below is derived from something in this repository: the nightly
 workflow's job matrix, the committed render snapshots, and the adapter
 descriptors themselves. Where there is no evidence, the cell says so instead of
 guessing. This is the same claim discipline the
@@ -45,7 +44,7 @@ file.
 **Nightly live check** — the [`conformance`](../.github/workflows/conformance.yml)
 workflow installs the real CLI from its own registry at `latest`, renders a config
 into a fenced `HOME`, and asks that CLI to read the config back
-(`mcp list`, or — for the one CLI with no MCP support — a skills-directory
+(`mcp list`, or, for the one CLI with no MCP support, a skills-directory
 read-back). An unknown nonzero exit is a failure, not a skip: only a recognized
 authentication or onboarding gate downgrades to a spoken skip. It proves the
 upstream tool still accepts our output.
@@ -63,7 +62,7 @@ From those two facts, three tiers:
   `~/.agentstack/adapters/` lands there by definition.
 
 Tier is about *verification frequency*, not about how complete an adapter is.
-A tier-2 adapter can manage more of your setup than a tier-1 one — see
+A tier-2 adapter can manage more of your setup than a tier-1 one; see
 [what each adapter manages](#what-each-adapter-manages).
 
 ## The matrix
@@ -84,7 +83,7 @@ A tier-2 adapter can manage more of your setup than a tier-1 one — see
 | VS Code | `vscode` | 2 | yes | no |
 | Windsurf | `windsurf` | 2 | yes | no |
 
-Notes, all of them load-bearing:
+Five notes that change how you read the table:
 
 - **Pi has no render snapshot and that is correct.** Pi has no MCP support by
   design, so there is no native server config to snapshot. Its nightly leg
@@ -104,7 +103,7 @@ Notes, all of them load-bearing:
 - **One shared negative case.** The nightly manifest carries a server named
   `slash/probe`. Codex validates server names at startup against
   `^[a-zA-Z0-9_-]+$`, so the check asserts that Codex's config is rendered
-  *without* it and that the skip is spoken out loud — and that every other
+  *without* it and that the skip is spoken out loud, and that every other
   adapter receives it verbatim.
 
 `agentstack more adapters list` shows the same ids and marks which of these tools look
@@ -153,8 +152,8 @@ Column meanings:
   `agentstack run <cli> --prompt` (the protected default) and workflow steps
   drive. Only two adapters declare one.
 
-Two things this table deliberately does not tell you. It does not say a `yes`
-cell is nightly-verified — cross-reference [the matrix](#the-matrix) for that.
+This table does not tell you two things. It does not say a `yes`
+cell is nightly-verified; cross-reference [the matrix](#the-matrix) for that.
 And it does not say the tool is *confined*: what AgentStack enforces once a CLI
 is running is a separate question, answered in the
 [enforcement matrix](ENFORCEMENT.md) and, per CLI, in the next section.
@@ -165,9 +164,9 @@ Writing a CLI's config and refereeing what that CLI then does are two different
 jobs, and the second is not available on every adapter. `agentstack guard
 install --write` wires `agentstack guard check` into a **detected** CLI's own
 pre-tool-use hook; per call it can then block destructive commands, any access
-to `[policy.filesystem] deny` globs (machine ∪ project — a repo can only add),
+to `[policy.filesystem] deny` globs (machine ∪ project; a repo can only add),
 and writes outside the workspace plus `[guard] allow_roots` plus temp. It is
-cooperative by construction — the CLI chooses to ask — so it catches an agent's
+cooperative by construction: the CLI chooses to ask, so it catches an agent's
 accidents, not a determined attacker. `agentstack guard status` prints this
 same list for the machine in front of you, marking which of the hooked CLIs it
 actually detected.
@@ -188,11 +187,11 @@ actually detected.
 | `junie` | **no — no hook surface exists** | only a static action allowlist; no per-call hook |
 | `kiro` | **no — not wired yet** | AgentStack has not built one. This is a gap in AgentStack, not in Kiro: this repo's descriptor records Kiro's MCP config only, not a hook file the guard could install into |
 
-**The two "no" reasons are different promises, and the page keeps them apart.**
-"No hook surface exists" is a fact about the CLI — nothing to build, nothing to
-wait for. "Not wired yet" is a fact about AgentStack — the CLI could be
-covered, and is not. A security list that blurred them would read as
-*impossible* where the truth is *unbuilt*. Kiro leaves the second list only
+The two "no" reasons mean different things, so they are listed separately.
+"No hook surface exists" is a fact about the CLI: nothing to build, nothing to
+wait for. "Not wired yet" is a fact about AgentStack: the CLI could be
+covered, and is not. Merging them would imply a guard is impossible on Kiro,
+when it is only unbuilt. Kiro leaves the second list only
 when this repo knows all three things a guard target needs: a detect path, the
 concrete hook file, and the per-entry shape uninstall can find again. The
 adapter descriptors in `crates/adapters/descriptors/` are the authority for
@@ -201,12 +200,12 @@ cannot honestly claim.
 
 Two reach notes, because "guarded" is not uniform inside a guarded CLI:
 
-- Cursor's `beforeMCPExecution` is deliberately **not** registered — an MCP
+- Cursor's `beforeMCPExecution` is deliberately **not** registered: an MCP
   call has no file or shell surface the guard can judge without inventing new
   policy.
 - **Shell** writes reach the guard on every wired CLI, because they arrive as
   commands. **File-tool** writes reach it on two signals: a fixed list of
-  writer tool names, and — beyond that list — the *shape of the payload*, so a
+  writer tool names, and, beyond that list, the *shape of the payload*, so a
   tool this build has never heard of is still confined when the call plainly
   intends a write. The exact reach and the named residual are in the
   [enforcement matrix](ENFORCEMENT.md#filesystem--write).
@@ -214,15 +213,15 @@ Two reach notes, because "guarded" is not uniform inside a guarded CLI:
 ## When an upstream CLI changes its schema
 
 Thirteen adapters means thirteen vendors who can change a config format without
-telling us. Here is the honest sequence.
+telling us. The sequence:
 
 **Tier 1.** The nightly run installs the vendor's new release, renders a config,
-and the CLI rejects it — the job goes red, typically within a day of the release.
+and the CLI rejects it: the job goes red, typically within a day of the release.
 The fix is a descriptor change, not code. Until then, your `agentstack apply` is
 still writing the old shape.
 
 **Tier 2.** Nothing tells us. The render snapshot still passes, because it only
-compares our output to our own committed expectation — that expectation is now
+compares our output to our own committed expectation; that expectation is now
 wrong. You will likely notice first, in one of these forms:
 
 - the CLI reports an unknown field, refuses to start, or silently ignores a
@@ -241,16 +240,15 @@ exact error text. That is enough to fix a descriptor; a screenshot of a
 
 ## Why conformance runs nightly, not on pull requests
 
-This is a deliberate trade, and it has a cost worth stating.
-
 The live check installs each CLI at `latest` from a vendor registry. Running it
 on pull requests would mean a change touching none of this can fail because a
 vendor shipped a release that morning, or because a registry was slow, or because
-a tool started demanding authentication in a way its predecessor did not. That
-turns the adapter-rot alarm into noise, and a noisy alarm gets ignored.
+a tool started demanding authentication in a way its predecessor did not. Those
+failures would be unrelated to the change under review, so the signal would be
+ignored.
 
 Running it nightly keeps the signal: a red `conformance` run means one specific
-vendor changed something, and the run says which. The cost is latency — up to a
+vendor changed something, and the run says which. The cost is latency: up to a
 day between a vendor's release and the alarm, and no pull-request-time proof that
 an adapter edit still satisfies the real CLI. The person who edits a descriptor
 should run the smoke script locally; it fences `HOME` and never touches real
@@ -264,7 +262,7 @@ configs:
 
 Adapters are data, not code: one YAML descriptor each, embedded in the binary,
 with additions and overrides loaded from `~/.agentstack/adapters/`. A descriptor
-you drop in there is tier 3 by definition — no snapshot, no nightly check — and
+you drop in there is tier 3 by definition (no snapshot, no nightly check), and
 it is part of the trusted computing base: it decides where AgentStack writes and
 what shape it writes. Validate one before installing it:
 

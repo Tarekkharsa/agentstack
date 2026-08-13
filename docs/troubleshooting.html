@@ -289,8 +289,8 @@
 <div class="cb"><pre class="block"><code>→ Restart or reopen your agent CLIs so they pick up the new config.
   undo: agentstack more restore --last --write</code></pre></div>
 <p>Restart the CLI first, then work down this list.</p>
-<p>Under the default routing there is often <strong>no file to look at</strong> — an MCP-capable CLI is served live. <code>agentstack more why &lt;name&gt;</code> states where that capability came from, whether it is pinned and approved, which CLIs serve it live, which get a file, and what it reaches. Start there before hunting for a config on disk.</p>
-<p>If a write was <em>refused</em> rather than skipped, the cause is almost always the trust gate — jump to <a href="#it-refuses-because-the-project-isnt-trusted">it refuses because the project isn't trusted</a>.</p>
+<p>Under the default routing there is often no file to look at; an MCP-capable CLI is served live. <code>agentstack more why &lt;name&gt;</code> states where that capability came from, whether it is pinned and approved, which CLIs serve it live, which get a file, and what it reaches. Start there before hunting for a config on disk.</p>
+<p>If a write was <em>refused</em> rather than skipped, the cause is almost always the trust gate. Jump to <a href="#it-refuses-because-the-project-isnt-trusted">it refuses because the project isn't trusted</a>.</p>
 <p><strong><code>Claude Code    1 change pending ↳ agentstack apply --write</code></strong></p>
 <p>The manifest declares something the native config does not have yet. Nothing is written until you ask.</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack apply --write</code></pre></div>
@@ -300,14 +300,14 @@
 <p>Nothing is listed for <code>apply</code> to write to. Either name the CLIs in the manifest or aim one run by hand:</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack apply --target claude-code --write</code></pre></div>
 <p><strong><code>Claude Code    not detected (ok unless you use it)</code></strong></p>
-<p>A note, not a fault. agentstack ships adapters for many CLIs and reports the ones it did not find so a machine with 5 of 13 installed is not greeted by 8 warnings. If you <em>do</em> use that CLI, it is installed somewhere agentstack does not look — check that its config lives at the standard path.</p>
+<p>A note, not a fault. agentstack ships adapters for many CLIs and reports the ones it did not find so a machine with 5 of 13 installed is not greeted by 8 warnings. If you <em>do</em> use that CLI, it is installed somewhere agentstack does not look. Check that its config lives at the standard path.</p>
 <p><strong><code>1 target in sync — wrote 1.</code> but the CLI still shows nothing</strong></p>
 <p>Check the scope. Project scope writes a repo-local file (<code>.mcp.json</code>); global scope writes the CLI's user-level config. A server rendered into the repo is invisible to a session you started somewhere else.</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack apply --scope global --write</code></pre></div>
 <p>More: <a href="reference.html#scopes">reference — scopes</a>.</p>
 <p><strong>Nothing exists on disk at all, and that is deliberate</strong></p>
 <div class="cb"><pre class="block"><code>not rendering configs — clean-at-rest keeps them off disk</code></pre></div>
-<p>In clean-at-rest mode nothing is generated between sessions; capabilities exist only inside <code>agentstack run</code> or between <code>agentstack more session start</code> and <code>agentstack more session end</code>. A missing <code>.mcp.json</code> here is the design. Do not create one. See <a href="reference.html#delivery--routing-and-where-rendered-files-live">delivery in the reference</a>.</p>
+<p>In clean-at-rest mode nothing is generated between sessions; capabilities exist only inside <code>agentstack run</code> or between <code>agentstack more session start</code> and <code>agentstack more session end</code>. Nothing writes a <code>.mcp.json</code> in this mode. Do not create one. See <a href="reference.html#delivery--routing-and-where-rendered-files-live">delivery in the reference</a>.</p>
 <p><strong><code>Codex will IGNORE {dir}/.codex/config.toml — the project is not trusted in ~/.codex/config.toml (projects."{dir}".trust_level) ↳ open Codex in this folder once and accept the trust prompt</code></strong></p>
 <p>This is Codex's own project-trust list, not agentstack's. agentstack rendered the file correctly; Codex refuses to read it until you have opened Codex in that folder once and accepted its prompt.</p>
 <p><strong><code>instruction '{fragment}' targets '{target}', which has no instructions file ↳ remove the target or use a supported CLI</code></strong></p>
@@ -316,7 +316,7 @@
 <p>Instruction fragments changed in the manifest but the compiled block in the CLI's instructions file is old.</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack more instructions --write</code></pre></div>
 <h2 id="a-secret-wont-resolve">A secret won't resolve<a class="hlink" href="#a-secret-wont-resolve" aria-label="Link to this section">#</a></h2>
-<p>agentstack never stores secret values in the manifest — only <code>${REF}</code> placeholders resolved per machine. An unresolved ref <strong>blocks the write</strong>; that is the intended behaviour, not a bug to route around.</p>
+<p>agentstack never stores secret values in the manifest, only <code>${REF}</code> placeholders resolved per machine. An unresolved ref blocks the write; that is the intended behaviour, not a bug to route around.</p>
 <p><strong><code>✗ unresolved secret LINEAR_TOKEN (server 'linear') ↳ agentstack secret set LINEAR_TOKEN</code></strong></p>
 <p>Nothing in the resolution chain (env, varlock, keychain, project <code>.env</code>) holds a value for that name.</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack secret set LINEAR_TOKEN
@@ -324,7 +324,7 @@
 <p><strong><code>✗ not written — unresolved secrets; set them or pass --allow-unresolved</code></strong></p>
 <p>The per-target consequence of the line above: that config file was left untouched. <code>--allow-unresolved</code> writes the literal <code>${REF}</code> through to the native config, which is occasionally what you want (the harness expands it itself) and usually not.</p>
 <p><strong><code>error: 1 blocked write on 1 target — fix: agentstack secret set LINEAR_TOKEN (or pass --allow-unresolved)</code></strong></p>
-<p>The closing line, and a <strong>nonzero exit</strong> — scripts and CI must not read a blocked <code>apply --write</code> as success. It names every missing ref, so the fix is copy-pasteable.</p>
+<p>The closing line, and a nonzero exit; scripts and CI must not read a blocked <code>apply --write</code> as success. It names every missing ref, so the fix is copy-pasteable.</p>
 <div class="cb"><pre class="block"><code>✗ secret read failed LINEAR_TOKEN (server 'linear') — keychain read failed: A
   default keychain could not be found. ↳ run `agentstack secret set LINEAR_TOKEN`,
   then re-run</code></pre></div>
@@ -336,38 +336,38 @@
 <p>A <code>.env</code> is the one store that keeps real values in plain text on disk. Versions before 0.16 wrote it at the ambient umask. Only the owner can fix the mode:</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>chmod 600 .env</code></pre></div>
 <p><strong><code>✗ blocked by policy: &lt;entry&gt;</code></strong></p>
-<p>Not a missing secret — a refusal. <code>[policy.secrets]</code> or <code>[policy.egress]</code> denied that resolution, and <code>--allow-unresolved</code> does <strong>not</strong> override policy. Widen the machine ceiling or narrow what the project asks for.</p>
+<p>Not a missing secret — a refusal. <code>[policy.secrets]</code> or <code>[policy.egress]</code> denied that resolution, and <code>--allow-unresolved</code> does not override policy. Widen the machine ceiling or narrow what the project asks for.</p>
 <p>Three more lines <code>doctor</code> prints in the same <strong>Secrets</strong> section speak about the recommended vault rather than about one ref:</p>
 <p><strong><code>varlock  .env.schema opts this project in, but the varlock binary is not runnable</code></strong></p>
-<p>The project asked for varlock and it is not there, so <strong>every ref is quietly falling through to the next store</strong> — the silence this finding exists to break. Install varlock (<a href="https://varlock.dev">varlock.dev</a>), or delete <code>.agentstack/.env.schema</code> to drop the layer on purpose.</p>
+<p>The project asked for varlock and it is not there, so every ref is quietly falling through to the next store. This finding reports that fall-through. Install varlock (<a href="https://varlock.dev">varlock.dev</a>), or delete <code>.agentstack/.env.schema</code> to drop the layer on purpose.</p>
 <p><strong><code>varlock  varlock load failed — …</code></strong></p>
 <p>varlock is installed but could not resolve this project's schema. Doctor quotes the first line of its error; run <code>varlock load</code> in the project to see all of it.</p>
 <p><strong><code>varlock  not in use — the recommended vault keeps values out of this project entirely</code></strong></p>
-<p>Not a defect and never doctor's next action — an invitation. <code>agentstack init</code> offers to write the <code>.env.schema</code> that opts in, or drop one in next to the manifest yourself. It declares names, never values.</p>
+<p>Not a defect, and never doctor's next action. It offers an opt-in. <code>agentstack init</code> offers to write the <code>.env.schema</code> that opts in, or drop one in next to the manifest yourself. It declares names, never values.</p>
 <p>More: <a href="reference.html#secret-resolution">reference — secret resolution</a> and <a href="reference.html#unresolved-secrets-block-writes">unresolved secrets block writes</a>.</p>
 <h2 id="it-says-my-files-drifted">It says my files drifted<a class="hlink" href="#it-says-my-files-drifted" aria-label="Link to this section">#</a></h2>
-<p>Drift means the native config on disk no longer matches what the manifest would render. agentstack never silently reconciles it — you choose which side wins.</p>
+<p>Drift means the native config on disk no longer matches what the manifest would render. agentstack never silently reconciles it; you choose which side wins.</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack more diff              <span class="cm"># show exactly what differs, change nothing</span>
 <span class="pr">$ </span>agentstack adopt --write     <span class="cm"># the disk is right: pull the edit into the manifest</span>
 <span class="pr">$ </span>agentstack apply --write     <span class="cm"># the manifest is right: re-render over the disk</span></code></pre></div>
 <p><code>diff</code> reports the same comparison <code>doctor</code> does, so the two never disagree.</p>
 <p><strong><code>Claude Code    no longer matches what agentstack last wrote ↳ review: agentstack more diff · adopt the on-disk version: agentstack adopt</code></strong></p>
-<p>The region agentstack manages changed since its last write. <code>doctor</code> states the fact without guessing the cause — a hand-edit is the common one, but a session that ended onto a stale baseline reaches the same state, so it does not accuse you of editing. <code>agentstack more diff</code> shows what moved and labels each entry <code>managed</code>, <code>foreign (kept)</code>, or <code>hand-edited</code>. Then pick a side: <code>adopt</code> pulls the on-disk version back into the manifest so it survives the next apply; <code>apply --write</code> throws it away and re-renders.</p>
+<p>The region agentstack manages changed since its last write. <code>doctor</code> states the fact without guessing the cause. A hand-edit is the common one, but a session that ended onto a stale baseline reaches the same state, so it does not accuse you of editing. <code>agentstack more diff</code> shows what moved and labels each entry <code>managed</code>, <code>foreign (kept)</code>, or <code>hand-edited</code>. Then pick a side: <code>adopt</code> pulls the on-disk version back into the manifest so it survives the next apply; <code>apply --write</code> throws it away and re-renders.</p>
 <p><strong><code>Claude Code    kept &lt;names&gt; — applied by another manifest ↳ keep them: agentstack adopt · prune them: agentstack apply --prune-foreign</code></strong></p>
-<p><strong>Foreign</strong> entries: written by a <em>different</em> project's manifest into the same global file. <code>apply</code> keeps them by default — this is context, not a defect. Removing them takes the explicit flag, because they are somebody else's servers.</p>
+<p><strong>Foreign</strong> entries: written by a <em>different</em> project's manifest into the same global file. <code>apply</code> keeps them by default; this is context, not a defect. Removing them takes the explicit flag, because they are somebody else's servers.</p>
 <p><strong><code>Claude Code    would REMOVE &lt;names&gt; ↳ keep them: agentstack adopt · prune them: agentstack apply --write</code></strong></p>
-<p>A pending prune. Those entries exist in the config but no longer in the manifest, so the next write deletes them. The message names the victims deliberately; decide before you run it.</p>
+<p>A pending prune. Those entries exist in the config but no longer in the manifest, so the next write deletes them. The message names each entry it would delete; decide before you run it.</p>
 <p><strong><code>{name}    changed in {app} (owner) ↳ refresh manifest + re-fan out: agentstack apply --write</code></strong></p>
-<p>An <strong>owned</strong> server — one whose defining app rewrites its own config by design. The app's copy is authoritative; <code>apply --write</code> refreshes the manifest from it and re-fans it out to the other CLIs.</p>
+<p>An owned server is one whose defining app rewrites its own config by design. The app's copy is authoritative; <code>apply --write</code> refreshes the manifest from it and re-fans it out to the other CLIs.</p>
 <p><strong><code>Claude Code    rewritten by the app itself (owned server) — refresh the manifest: agentstack apply --write</code></strong></p>
-<p>Same situation, benign variant: the file changed but agentstack's managed region still matches. Live-state churn in configs a running session rewrites constantly (<code>~/.claude.json</code>) is ignored on purpose, so <code>doctor</code> does not flap.</p>
+<p>Same situation, benign variant: the file changed but agentstack's managed region still matches. Live-state churn in configs a running session rewrites constantly (<code>~/.claude.json</code>) is ignored on purpose, so <code>doctor</code> does not report drift on every run.</p>
 <p><strong><code>{name}    content drifted from lock ↳ agentstack lock --write</code></strong></p>
 <p>A different kind of drift: the <em>pinned bytes</em> of a skill, server, instruction, extension or workflow changed since <code>agentstack.lock</code> was written. Use sites fail closed until you re-pin.</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack lock --write</code></pre></div>
 <div class="cb"><pre class="block"><code>{name}    content changed since you approved it — the pinned bytes and the files
           on disk differ; re-pin it, then review and re-trust with
           `agentstack trust .` ↳ agentstack lock --write</code></pre></div>
-<p>The same drift on a project you have already <strong>trusted</strong>, and the wording says what that costs you: re-pinning is not the whole fix. <code>lock --write</code> accepts the new bytes and, because the lockfile is part of the consent surface, immediately marks your grant stale. Two steps, in this order:</p>
+<p>The same drift on a project you have already trusted, and the wording says what that costs you: re-pinning is not the whole fix. <code>lock --write</code> accepts the new bytes and, because the lockfile is part of the consent surface, immediately marks your grant stale. Two steps, in this order:</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack lock --write    <span class="cm"># accept the new bytes</span>
 <span class="pr">$ </span>agentstack trust .         <span class="cm"># review them and re-grant</span></code></pre></div>
 <p>Full explanation: <a href="#i-re-locked-and-it-still-will-not-deliver">I re-locked and it still will not deliver</a>.</p>
@@ -384,12 +384,12 @@ Claude Code    1 declared key moved since the lock was written (model) ↳ agent
 <p><strong>Leg 2 — the declaration no longer matches the file on disk.</strong> Fix with <code>apply --write</code>.</p>
 <div class="cb"><pre class="block"><code>Claude Code    2 keys not yet in {path}/.claude/settings.json (model, permissions) ↳ agentstack apply --write
 Claude Code    1 owned key in {path}/.claude/settings.json drifted from the declared value (model) ↳ agentstack apply --write</code></pre></div>
-<p><code>not yet in</code> means the merge has not happened; <code>drifted from the declared value</code> means it happened and something changed the key afterwards. Only keys agentstack declares are named — your own unrelated edits elsewhere in <code>settings.json</code> are never reported as drift.</p>
+<p><code>not yet in</code> means the merge has not happened; <code>drifted from the declared value</code> means it happened and something changed the key afterwards. Only keys agentstack declares are named; your own unrelated edits elsewhere in <code>settings.json</code> are never reported as drift.</p>
 <p>More: <a href="reference.html#drift-adopt-or-apply">drift — adopt or apply?</a> and <a href="concepts.html#drift">concepts — drift</a>.</p>
 <h2 id="it-refuses-because-the-project-isnt-trusted">It refuses because the project isn't trusted<a class="hlink" href="#it-refuses-because-the-project-isnt-trusted" aria-label="Link to this section">#</a></h2>
-<p>Untrusted means <strong>inert</strong>: a cloned repository's declarations cannot spawn servers, enter agent context, or resolve secrets until a human has read them. A consented <code>agentstack init</code> records trust for you — the wizard's own confirm at a terminal, or <code>--consented &lt;plan_digest&gt;</code> on a scripted run — so in practice this gate shows up in three places: a repo you cloned, a manifest that changed since you approved it, and a scripted <code>init --yes</code> that carried no reviewed plan (that one imports and leaves the project untrusted on purpose).</p>
+<p>Untrusted means inert: a cloned repository's declarations cannot spawn servers, enter agent context, or resolve secrets until a human has read them. A consented <code>agentstack init</code> records trust for you — the wizard's own confirm at a terminal, or <code>--consented &lt;plan_digest&gt;</code> on a scripted run — so in practice this gate shows up in three places: a repo you cloned, a manifest that changed since you approved it, and a scripted <code>init --yes</code> that carried no reviewed plan (that one imports and leaves the project untrusted on purpose).</p>
 <h3 id="the-five-kinds-the-gate-holds-back">The five kinds the gate holds back<a class="hlink" href="#the-five-kinds-the-gate-holds-back" aria-label="Link to this section">#</a></h3>
-<p>Every refusal below opens with <code>refusing to …</code> and closes the same way: nothing is written, the run <strong>exits nonzero</strong>, and the fix is always <code>agentstack trust .</code>. The two halves of each <code>is not trusted</code> line change to <code>changed since it was trusted</code> when the project <em>was</em> approved and its bytes moved since.</p>
+<p>Every refusal below opens with <code>refusing to …</code> and closes the same way: nothing is written, the run exits nonzero, and the fix is always <code>agentstack trust .</code>. The two halves of each <code>is not trusted</code> line change to <code>changed since it was trusted</code> when the project <em>was</em> approved and its bytes moved since.</p>
 <p><strong>MCP server config</strong> — from <code>apply --write</code> and <code>use --write</code>. No <code>.mcp.json</code>, no <code>[mcp_servers]</code> block. The per-target consequence follows on its own line.</p>
 <div class="cb"><pre class="block"><code>✗ refusing to render MCP servers: project at {dir} is not trusted — review and
   `agentstack trust .` before writing server definitions the harness launches on
@@ -417,12 +417,12 @@ content — review and `agentstack trust .`</code></pre></div>
 <div class="cb"><pre class="block"><code>error: refusing to render native extensions: project at {dir} is not trusted —
 review and `agentstack trust .` before rendering executable extension code</code></pre></div>
 <p>Hooks and extensions run code, so they take the full consent ceremony every time and accept no relaxation at all.</p>
-<p>The command's closing line names the count, and the exit code is nonzero — a script must not read a refused write as success:</p>
+<p>The command's closing line names the count, and the exit code is nonzero; a script must not read a refused write as success:</p>
 <div class="cb"><pre class="block"><code>Wrote 0 of 1 target; 1 blocked — see the ✗ line for each; see ✗ above.
 error: 1 blocked write on 1 target — each ✗ above names the blocker</code></pre></div>
 <div class="cb"><pre class="block"><code>⚠ activated 'default' on 0 targets (wrote 0); 2 targets BLOCKED: Claude Code, Claude Code
 error: 2 targets blocked — each ✗ above names the blocker</code></pre></div>
-<p><strong>What the gate does <em>not</em> hold back.</strong> Pruning and removal, machine-layer content, the machine manifest at <code>~/.agentstack/agentstack.toml</code>, and <code>[settings.*]</code> values all go through on an untrusted project. Seeing <code>✓ wrote 1 setting</code> next to a refusal is correct, not a leak: none of them authorizes new content — a settings value declares no code to run, and taking a server away can only shrink what a CLI can reach.</p>
+<p><strong>What the gate does <em>not</em> hold back.</strong> Pruning and removal, machine-layer content, the machine manifest at <code>~/.agentstack/agentstack.toml</code>, and <code>[settings.*]</code> values all go through on an untrusted project. Seeing <code>✓ wrote 1 setting</code> next to a refusal is correct, not a leak: none of them authorizes new content. A settings value declares no code to run, and taking a server away can only shrink what a CLI can reach.</p>
 <p>One caveat on removal: the gate blocks a <em>target</em>, not one entry. If the same config file still has something the gate refuses, the whole write is skipped and the planned prune waits with it:</p>
 <div class="cb"><pre class="block"><code>− pruning 'notes' (no longer in manifest)
 ✗ refusing to render MCP servers: project at {dir} is not trusted …
@@ -442,7 +442,7 @@ trust it with `agentstack trust` (or the UI trust review), then retry</code></pr
 <div class="cb"><pre class="block"><code>error: refusing to start a session: the manifest or lockfile changed since this
 project was trusted — review with `agentstack trust` (or the UI trust review),
 then retry</code></pre></div>
-<p>Trust is bound to content. A <code>git pull</code>, or your own edit to the manifest or lockfile, invalidates the old approval — that re-gate is the feature. Review what changed, then re-trust.</p>
+<p>Trust is bound to content. A <code>git pull</code>, or your own edit to the manifest or lockfile, invalidates the old approval; that re-gate is the feature. Review what changed, then re-trust.</p>
 <div class="cb"><pre class="block"><code>refusing to probe: this project is not trusted — starting its servers would run
 code nobody has reviewed ↳ agentstack trust
 refusing to probe: the manifest or lockfile changed since this project was
@@ -453,12 +453,12 @@ trusted ↳ agentstack trust</code></pre></div>
 <div class="cb"><pre class="block"><code>Next:  agentstack trust .   the content changed since you reviewed it — review and re-trust</code></pre></div>
 <a id="lock-first-then-trust"></a>
 <h3 id="lock---write-invalidates-the-grant--lock-first-then-trust"><code>lock --write</code> invalidates the grant — lock first, then trust<a class="hlink" href="#lock---write-invalidates-the-grant--lock-first-then-trust" aria-label="Link to this section">#</a></h3>
-<p>The lockfile is part of the consent surface, so <strong>re-pinning is new consent</strong>. Running <code>lock --write</code> on a project you have already trusted always leaves the grant stale, and <code>lock</code> says so before it says anything else:</p>
+<p>The lockfile is part of the consent surface, so re-pinning is new consent. Running <code>lock --write</code> on a project you have already trusted always leaves the grant stale, and <code>lock</code> says so before it says anything else:</p>
 <div class="cb"><pre class="block"><code>⚠ this project is trusted — new pins are new consent, so its trust is now stale; re-review and re-grant with `agentstack trust .`</code></pre></div>
 <p>So the order is fixed, and it is the reverse of what most people try:</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack lock --write   <span class="cm"># 1. pin the bytes</span>
 <span class="pr">$ </span>agentstack trust .        <span class="cm"># 2. review and approve the pinned bytes</span></code></pre></div>
-<p>Trusting first and locking after simply throws the approval away. <code>trust</code> will not even let you go the other way round — an unpinned surface is not approvable:</p>
+<p>Trusting first and locking after throws the approval away. <code>trust</code> will not even let you go the other way round; an unpinned surface is not approvable:</p>
 <div class="cb"><pre class="block"><code>error: cannot trust {path}: its loadable surface isn't fully pinned — 1 item needs locking or review:
   notes  inline skill unpinned — run `agentstack lock --write`
 Pin with `agentstack lock --write`, then review and trust with `agentstack trust .`.</code></pre></div>
@@ -471,17 +471,17 @@ Review the changes with `agentstack lock`, then run `agentstack lock --write` to
 <p><code>apply --write</code> fails the same way for an instruction fragment, under a different opening sentence:</p>
 <div class="cb"><pre class="block"><code>error: refusing to compile instructions for {dir}/.agentstack: 1 pinned item changed since agentstack.lock was written —
   house  instruction content drifted from agentstack.lock (locked 1718cc28481d, current a1aecdd87ab5)</code></pre></div>
-<p>You then ran <code>agentstack lock --write</code>, as instructed — and the next command refuses again, now with the <em>drifted</em> wording:</p>
+<p>You then ran <code>agentstack lock --write</code>, as instructed, and the next command refuses again, now with the <em>drifted</em> wording:</p>
 <div class="cb"><pre class="block"><code>✗ refusing to materialize skills: project at {dir} changed since it was trusted — review and `agentstack trust .` before putting its words into an agent's context ('notes')</code></pre></div>
 <p>Nothing is broken. Re-locking accepts the new bytes; it does not review them. Accepting content is a machine's job, reviewing it is yours, and only the second one delivers. Read the parenthesis in the first message literally — <em>re-locking re-gates the project</em>. The complete fix is three commands:</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack lock            <span class="cm"># see what moved</span>
 <span class="pr">$ </span>agentstack lock --write    <span class="cm"># accept the new bytes</span>
 <span class="pr">$ </span>agentstack trust .         <span class="cm"># review them — this is what unblocks delivery</span></code></pre></div>
 <h3 id="i-added-a-skill-and-now-everything-else-refuses">"I added a skill and now everything else refuses"<a class="hlink" href="#i-added-a-skill-and-now-everything-else-refuses" aria-label="Link to this section">#</a></h3>
-<p><code>agentstack add … --write</code> and the panel's edit verbs write the manifest and the lockfile <strong>and</strong> deliver, in one run. They judge trust as it stood when the command started, so the thing you just asked for is not refused by the bytes you just asked it to write:</p>
+<p><code>agentstack add … --write</code> and the panel's edit verbs write the manifest and the lockfile and deliver, in one run. They judge trust as it stood when the command started, so the thing you just asked for is not refused by the bytes you just asked it to write:</p>
 <div class="cb"><pre class="block"><code>✓ added 'tidy'.
   ✓ claude-code: 1 skill → {dir}/.claude/skills</code></pre></div>
-<p>But they deliberately do <strong>not</strong> re-pin the grant. The new capability is real content and still owes you a review, so the project is left stale and the <em>next</em> command re-gates:</p>
+<p>But they deliberately do not re-pin the grant. The new capability is real content and still owes you a review, so the project is left stale and the <em>next</em> command re-gates:</p>
 <div class="cb"><pre class="block"><code>Status    locked · trust stale (content changed)
 Next:  agentstack trust .   the content changed since you reviewed it — review and re-trust</code></pre></div>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack trust .</code></pre></div>
@@ -490,15 +490,15 @@ Next:  agentstack trust .   the content changed since you reviewed it — review
 above names the blocker; if it is consent, review with `agentstack trust .`, then
 `agentstack use --write`)</code></pre></div>
 <h3 id="writes-that-keep-your-grant">Writes that keep your grant<a class="hlink" href="#writes-that-keep-your-grant" aria-label="Link to this section">#</a></h3>
-<p>Not every manifest write costs you a review. A write that records a <em>preference</em> — it declares no capability and runs no code — carries valid trust across itself, so the documented next step is not refused by the bytes the command just wrote:</p>
+<p>Not every manifest write costs you a review. A write that records a <em>preference</em> — it declares no capability and runs no code — leaves an existing grant valid, so the documented next step is not refused by the bytes the command just wrote:</p>
 <ul>
 <li><code>agentstack more delivery render-locally [--harness &lt;id&gt;] --write</code></li>
 <li>the <code>.gitignore</code> preference (<code>[meta] gitignore</code>, set by <code>init</code>)</li>
 </ul>
-<p>Both re-pin <strong>only</strong> when trust was valid immediately before the write. An untrusted project stays untrusted, and a review already pending stays pending — neither command can create or resolve a grant.</p>
+<p>Both re-pin only when trust was valid immediately before the write. An untrusted project stays untrusted, and a review already pending stays pending; neither command can create or resolve a grant.</p>
 <h3 id="other-trust-messages">Other trust messages<a class="hlink" href="#other-trust-messages" aria-label="Link to this section">#</a></h3>
 <p><strong><code>not trusted — 1 CLI uses the gateway, but this project's 1 server is not proxied ↳ agentstack trust &lt;path&gt;</code></strong></p>
-<p>A harness is wired to the gateway, this project declares servers, and none of them reach the agent — every session here silently gets control-plane tools only.</p>
+<p>A harness is wired to the gateway, this project declares servers, and none of them reach the agent; every session here silently gets control-plane tools only.</p>
 <p><strong><code>not trusted for auto mode — untrusted repos get control-plane tools only ↳ agentstack trust</code></strong></p>
 <p>The same fact when nothing is wired up yet. Stated as <code>ok</code>, because staying untrusted is a legitimate choice.</p>
 <div class="cb"><pre class="block"><code>error: refusing to trust: stdin is not a terminal — review the declarations
@@ -515,7 +515,7 @@ trust --preview`, review the surface, and pass its `surface_digest` back</code><
   nothing was granted · consent is granted at your terminal, not from an agent
   shell · the agent may prepare the review with `agentstack trust --preview`</code></pre></div>
 <p>The host guard refuses the consent verbs — <code>trust</code>, <code>yes</code>, <code>init --yes</code>, <code>apply --yes</code> — when they are run from an agent shell, in every spelling (through a path, a wrapper, a pipeline, a quoted <code>sh -c</code>, or either spelling of the <code>more</code>/<code>x</code> namespace). An agent that could grant consent on your behalf would make the review a formality.</p>
-<p><strong>Fix:</strong> run the consent verb in your own terminal. The agent can still prepare it for you — <code>agentstack trust --preview</code> and <code>trust --list</code> are allowed, so the surface can be assembled and read before you answer it.</p>
+<p><strong>Fix:</strong> run the consent verb in your own terminal. The agent can still prepare it for you; <code>agentstack trust --preview</code> and <code>trust --list</code> are allowed, so the surface can be assembled and read before you answer it.</p>
 <p><strong><code>cannot trust {path}: its loadable surface isn't fully pinned — N items need locking or review</code></strong></p>
 <p>Trust binds to bytes, so everything loadable must be pinned first. Full output and the ordering rule: <a href="#lock-first-then-trust">lock first, then trust</a>.</p>
 <p><strong><code>error: refusing to apply without --consented &lt;digest&gt; — run --preview first, review, then pass the digest it printed</code></strong></p>
@@ -524,7 +524,7 @@ trust --preview`, review the surface, and pass its `surface_digest` back</code><
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack trust --revoke</code></pre></div>
 <p>More: <a href="howto/trust-a-repo.html">trust a cloned repo</a> and <a href="enforcement.html#what-trusted-does-and-does-not-mean">what "trusted" does and does not mean</a>.</p>
 <h2 id="i-want-to-undo-something">I want to undo something<a class="hlink" href="#i-want-to-undo-something" aria-label="Link to this section">#</a></h2>
-<p>Every write agentstack makes is recorded before it lands. <code>agentstack undo</code> (v0.18.0+) is the interactive front door — your recent changes newest-first, pick a point and revert; <code>restore</code> is the same record as a script-friendly command:</p>
+<p>Every write agentstack makes is recorded before it lands. <code>agentstack undo</code> (v0.18.0+) is the interactive command — your recent changes newest-first, pick a point and revert; <code>restore</code> is the same record as a script-friendly command:</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack undo                     <span class="cm"># timeline: pick a point, revert to it</span>
 <span class="pr">$ </span>agentstack more restore                  <span class="cm"># list every undoable recorded write</span>
 <span class="pr">$ </span>agentstack more restore --last --write   <span class="cm"># undo the most recent</span>
@@ -540,10 +540,10 @@ Undo one with: agentstack more restore &lt;id&gt; --write (or --last for the new
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack more restore claude-code</code></pre></div>
 <p>That is the fallback path: one adapter's config from its single-slot backup, rather than a recorded change.</p>
 <p><strong>What <code>restore</code> does not cover.</strong> It reverts agentstack's own recorded config writes — not side effects a tool already had. A file a server deleted does not come back. Five actions are not file writes and have their own verb: <code>gateway disconnect</code>, <code>guard uninstall</code>, <code>trust --revoke</code>, <code>session end</code>, and <code>remove</code>. Replacing an already-managed skill with the same name is not snapshotted byte-exact, so its restore is not promised exact.</p>
-<p>To take everything back off at once, see <a href="howto/undo.html">undo anything</a> — <code>agentstack more uninstall</code> previews first and is itself undoable.</p>
+<p>To take everything back off at once, see <a href="howto/undo.html">undo anything</a>. <code>agentstack more uninstall</code> previews first and is itself undoable.</p>
 <h2 id="a-server-wont-start">A server won't start<a class="hlink" href="#a-server-wont-start" aria-label="Link to this section">#</a></h2>
 <p><strong>Start here: <code>agentstack doctor --probe</code>.</strong></p>
-<p>Everything else on this page reads your configuration. <code>--probe</code> actually starts each stdio server, speaks the MCP <code>initialize</code> handshake, and stops it again — so instead of "your manifest is well-formed" you get a per-server answer to the question you actually have.</p>
+<p>Everything else on this page reads your configuration. <code>--probe</code> actually starts each stdio server, speaks the MCP <code>initialize</code> handshake, and stops it again, so instead of "your manifest is well-formed" you get a per-server answer to the question you actually have.</p>
 <div class="cb cb-term"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">shell</span></div><pre class="block"><code><span class="pr">$ </span>agentstack doctor --probe
 <span class="out">MCP server startup (--probe)</span>
 <span class="out">  ✓ notes          started in 62ms · demo-notes · 3 tools</span>
@@ -559,9 +559,9 @@ Undo one with: agentstack more restore &lt;id&gt; --write (or --last for the new
 <li><strong><code>refusing to probe</code></strong> — the project isn't trusted at its current bytes. Review it with <code>agentstack trust</code> first; starting a repo's servers is exactly what that gate holds back.</li>
 </ul>
 <p>Every probe is bounded: ten seconds per server, then the child is killed with its whole process group and reaped. Nothing is left running.</p>
-<p>One caveat. The probe inherits the environment you ran it from, so a server can pass <code>--probe</code> in your terminal and still fail inside a GUI-launched app — which is precisely the failure the next advisory is about.</p>
+<p>One caveat. The probe inherits the environment you ran it from, so a server can pass <code>--probe</code> in your terminal and still fail inside a GUI-launched app, which is precisely the failure the next advisory is about.</p>
 <p><strong><code>N servers use a bare launcher that resolves via PATH: linear (npx). A GUI-launched harness (Claude Code.app, Claude Desktop, VS Code) may inherit a minimal PATH and fail to spawn them. Terminal-launched CLIs are unaffected. To pin them, use an absolute path or a login-shell wrapper: command = "zsh", args = ["-lc", "exec &lt;launcher&gt; …"]</code></strong></p>
-<p>This is the single most common "it works in my terminal but not in the app" failure. Nearly every published MCP server ships as <code>npx -y …</code>, and <code>npx</code> is found through <code>PATH</code> — which a GUI-launched app does not inherit from your shell. agentstack states this once as an advisory rather than once per server, and it does not count against readiness.</p>
+<p>This is the single most common "it works in my terminal but not in the app" failure. Nearly every published MCP server ships as <code>npx -y …</code>, and <code>npx</code> is found through <code>PATH</code>, which a GUI-launched app does not inherit from your shell. agentstack states this once as an advisory rather than once per server, and it does not count against readiness.</p>
 <p>Two fixes, in the manifest:</p>
 <div class="cb" data-language="toml"><div class="cb-bar"><span class="cb-lang">toml</span></div><pre class="block"><code class="language-toml"># absolute path — no PATH lookup at all
 command = "/Users/you/.nvm/versions/node/v22.14.0/bin/npx"
@@ -586,7 +586,7 @@ args = ["-lc", "cd /path/to/project &amp;&amp; exec my-server"]</code></pre></di
 <div class="cb"><pre class="block"><code>{name}    no SKILL.md in &lt;dir&gt;
 {name}    SKILL.md has no frontmatter description ↳ add `description:` so
           search and agents can find it</code></pre></div>
-<p>A skill directory that is not a skill yet. The description line is what <code>agentstack search</code> matches and what an agent sees in the loadable index — a skill without one is effectively invisible.</p>
+<p>A skill directory that is not a skill yet. The description line is what <code>agentstack search</code> matches and what an agent sees in the loadable index — a skill without one is invisible to both.</p>
 <p><strong>Checking a live server rather than its config</strong></p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack doctor --live</code></pre></div>
 <p>That adds a real MCP <code>initialize</code> handshake to each HTTP server, so a server that parses but does not answer is caught.</p>
@@ -598,12 +598,12 @@ then re-run `agentstack apply --write`</code></pre></div>
 the exact name</code></pre></div>
 <p>The toolset name does not exist. <code>agentstack use --list</code> prints the declared ones with a readiness flag for each.</p>
 <p><strong><code>⚠ server 'github' is defined differently by 1 other CLI — kept the first definition imported (the other stays in its CLI's own config)</code></strong></p>
-<p>From <code>agentstack init</code>. Two CLIs disagreed about the same server name, so the import kept the first one it read. Nothing is lost — the other definition is still in its own CLI's config until you apply. Open the manifest, check the entry that won, and fix it if the wrong one did.</p>
+<p>From <code>agentstack init</code>. Two CLIs disagreed about the same server name, so the import kept the first one it read. Nothing is lost; the other definition is still in its own CLI's config until you apply. Open the manifest, check the entry that won, and fix it if the wrong one did.</p>
 <p><strong><code>{name}: unknown adapter</code></strong></p>
 <p><code>[targets].default</code> names a CLI agentstack has no adapter for.</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack more adapters list</code></pre></div>
 <p><strong><code>effective machine policy unavailable — drift rendering is BLOCKED</code></strong></p>
-<p>The machine-level manifest at <code>~/.agentstack/agentstack.toml</code> could not be read, and project policy can only narrow the machine ceiling — so with no ceiling there is nothing to narrow. Fix that file first.</p>
+<p>The machine-level manifest at <code>~/.agentstack/agentstack.toml</code> could not be read, and project policy can only narrow the machine ceiling, so with no ceiling there is nothing to narrow. Fix that file first.</p>
 <h2 id="still-stuck">Still stuck<a class="hlink" href="#still-stuck" aria-label="Link to this section">#</a></h2>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack doctor --all      <span class="cm"># every section, including the ones this project doesn't use</span>
 <span class="pr">$ </span>agentstack doctor --deep     <span class="cm"># also scan every skill body for hidden-unicode / injection findings</span>

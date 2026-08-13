@@ -142,8 +142,8 @@ at a terminal; a scripted rollout uses the digest-bound pair instead
 (`agentstack trust --preview`, then `agentstack trust --yes --consented
 <digest>`), which refuses a stale or missing digest.
 
-Nothing about this is a migration: it is the same first-run review a project
-gets anywhere, arriving once per machine and per checkout.
+Nothing about this is specific to migration. It is the same first-run review
+a project gets anywhere, arriving once per machine and per checkout.
 
 ## What changed on disk
 

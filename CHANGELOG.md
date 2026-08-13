@@ -151,10 +151,11 @@ Full detail is in the rc.1-rc.5 entries below, which this release supersedes.
 
 ## v0.18.0-rc.5 — 2026-08-12
 
-**The candidate that answers what the walk asked.** rc.4 was what came back
-from walking the build end to end; this one settles the five design questions
-that walk raised, and pays down the performance debt sitting underneath them. A
-library skill gets a name that says where it comes from, `guard` sees what the
+**The candidate that answers the five design questions raised by walking rc.4
+end to end.** rc.4 was what came back from walking the build end to end; this
+one settles the five design questions that walk raised, and pays down the
+performance debt sitting underneath them. A library skill gets a name that
+says where it comes from, `guard` sees what the
 rest of the product sees and asks before it writes, and one word means consent
 everywhere. Nothing in the trust, policy or enforcement core moves. Like rc.1
 through rc.4 this is a pre-release: `install.sh` and `brew install` keep serving
@@ -244,10 +245,11 @@ v0.17.1 until v0.18.0 is final, and a participant pins this build with
 
 ## v0.18.0-rc.4 — 2026-08-12
 
-**The candidate that was walked, not only built.** rc.3 shipped the zero-files
-default and the rmcp wire; this one is what came back from walking that build
-end to end, as a newcomer would. Nothing in the consent, policy or enforcement
-core moves. What moves is how much screen you read to get through a first run,
+**The candidate rebuilt from an end-to-end walkthrough of rc.3.** rc.3 shipped
+the zero-files default and the rmcp wire; this one is what came back from
+walking that build end to end, as a newcomer would. Nothing in the consent,
+policy or enforcement core moves. What moves is how much screen you read to
+get through a first run,
 whether the manifest that run writes actually describes your project, and
 whether the commands you reach for next finish what they start. Like rc.1,
 rc.2 and rc.3 this is a pre-release: `install.sh` and `brew install` keep
@@ -879,9 +881,9 @@ true:
   now records one revertable entry covering the declaration and the pin,
   through the same history seam `apply` and `init` use, and the message names
   only what that entry puts back: the files already delivered into each CLI
-  are reconciled by `agentstack use --write`, which the message now says. A
-  narrow true promise beats a wide false one. Found by replaying the journey
-  against this release candidate, not by review.
+  are reconciled by `agentstack use --write`, which the message now says.
+  Found by replaying the journey against this release candidate, not by
+  review.
 
 - **`doctor` reported `state: "ready"` for a project nothing had activated.**
   Zero errors and zero warnings was true; "ready" was not, because an
@@ -1119,9 +1121,9 @@ release and a validated launch.
 **The release an end-to-end review asked for.** Two independent product
 reviews walked the whole journey — install, import, apply, check, switch,
 undo, remove — and reported thirty-two findings, most of them coherence
-rather than correctness: a tool that was well built but read as unfinished
-ninety seconds after the happy path ended. This release closes every one of
-them that was a defect. The plaintext `.env` is written `0600`; success
+rather than correctness — the product worked but read as unfinished once the
+happy path ended. This release closes every one of them that was a defect.
+The plaintext `.env` is written `0600`; success
 summaries count what they covered instead of what changed; `--help` fits a
 screen; `create-profile` no longer activates what it names; undo entries say
 which change they are; the product says **toolset** in every sentence a
@@ -1753,8 +1755,8 @@ surface shipped:
 ## v0.14.0 — 2026-07-19
 
 **The onboarding loop closes in both directions.** The docs now mirror the
-product, and the product now hands you to the docs at the two moments
-curiosity peaks.
+product, and the product links to the docs at two points: the end of the
+wizard, and the first guard denial.
 
 ### Added
 

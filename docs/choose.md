@@ -26,20 +26,23 @@ project.
 | Hooks · extensions | written into native files, reviewed in full every time | they run code |
 | Anything, on a CLI that reads files only | written into native files | that CLI has no live channel |
 
-A project is normally in **both** lanes at once, and that is the ordinary case,
-not a compromise.
+Most projects use **both** lanes at once.
 
 **The delivery override: render locally.** `agentstack more delivery render-locally
 --write` (add `--harness <id>` for a single CLI) writes files even where the
 live channel would have worked. It is the only setting that changes the
 *routing*; materializing one toolset's files right now, without changing the
-routing, is `agentstack use <toolset> --write` instead. Pick it for offline work, deterministic native
-files, inspection with ordinary filesystem tools, a rule against a persistent
-background process, debugging without another runtime dependency, or testing a
-CLI's own behaviour. Switching it changes only *where the bytes go* — never what
-you trust or what your policy allows, and it costs you no review: a preference
-declares no capability, so a grant that was valid before the write is carried
-across it.
+routing, is `agentstack use <toolset> --write` instead. Pick it for:
+
+- offline work, or deterministic native files you can inspect with ordinary
+  filesystem tools;
+- a rule against a persistent background process;
+- debugging, or testing a CLI's own behaviour, without another runtime
+  dependency.
+
+Switching it changes only *where the bytes go* — never what you trust or what
+your policy allows. It costs you no review. A preference declares no
+capability, so your existing grant still holds after the write.
 
 Either lane still passes the trust gate. On an untrusted or drifted project
 neither the live channel nor the file lane delivers servers, skills,
@@ -57,8 +60,7 @@ for the routing itself and how delivery sits beside selection and isolation.
 ## Then, your decision: how much protection?
 
 Find the row that sounds like you. The last column says how strongly each
-option is *actually* enforced, in the [enforcement matrix's](ENFORCEMENT.md)
-own words.
+option is enforced, in the [enforcement matrix's](ENFORCEMENT.md) own words.
 
 | You are… | You need | Command | What it actually does |
 |---|---|---|---|

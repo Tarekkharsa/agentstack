@@ -23,7 +23,7 @@ export PATH="$HOME/.local/bin:$PATH"       # only if the installer printed "Add 
 The installer puts the binary in `/usr/local/bin` when it can write there and in
 `$HOME/.local/bin` otherwise. It names the directory it chose, and when that
 directory is not already on your `PATH` it prints
-`Add to PATH:  export PATH="<dir>:$PATH"` — the `export` above is the
+`Add to PATH:  export PATH="<dir>:$PATH"`. The `export` above is the
 `~/.local/bin` case. Copy whichever line it prints into your shell startup file,
 so a new shell still finds the binary.
 
@@ -39,8 +39,8 @@ Set up this machine:
 agentstack init --connect
 ```
 
-A real run on a machine with Claude Code and Codex already configured — shown
-here in its non-interactive form — prints this. Lines marked `…` are trimmed:
+This is a real run on a machine with Claude Code and Codex configured. Lines
+marked `…` are trimmed. The non-interactive form prints:
 
 ```console
 $ agentstack init --connect --yes --secrets env
@@ -82,7 +82,7 @@ Two details that vary with your machine rather than with the command:
   managed `/.agentstack/.env` line into `.gitignore` only when the project is one.
   Outside a Git repository the same run prints `Stored 1 token in .env` with no
   `(gitignored)` suffix and writes no `.gitignore`, leaving a plaintext token
-  unprotected — run `git init` first, or add `/.agentstack/.env` to whatever
+  unprotected. Run `git init` first, or add `/.agentstack/.env` to whatever
   ignore list you use, before that directory goes anywhere.
 
 Then check the result:
@@ -109,15 +109,15 @@ agentstack 0.19.0 — one portable manifest, every agent CLI
   All commands: agentstack --help   ·   per-CLI detail: agentstack status --verbose
 ```
 A scripted `init --yes` acknowledges the **import** and never the servers it
-found, so the project is locked and *untrusted* — nothing it declares is active
+found, so the project is locked and *untrusted*. Nothing it declares is active
 yet. `status` says so and names the one step that changes it:
 
 ```bash
 agentstack trust .          # at a terminal: read the review, answer it
 ```
 
-Headless, that review is two commands — preview the surface, hand its digest
-back:
+Headless, that review is two commands. Preview the surface, then hand its
+digest back:
 
 ```bash
 agentstack trust --preview                      # JSON; read `surface_digest`
@@ -129,10 +129,9 @@ there is no separate step.
 
 
 The last lines change with the state. When something still needs doing, the
-`Next:` line names that instead — and `status` adds a
+`Next:` line names that instead. `status` then adds a
 `Deep check (drift, quirks, supply chain): agentstack doctor` pointer, which the
-ready output above does not print. Either way `agentstack doctor` is the deeper
-check whenever you want it.
+ready output above does not print.
 
 `init` detects your CLIs, offers to import the MCP server entries and supported
 settings it can represent, and registers the zero-files gateway. It previews
@@ -155,7 +154,9 @@ agentstack adopt --to-library
 agentstack adopt --to-library --write
 ```
 
-**Two things, two names, and the difference matters on day two.** The
+### Machine library vs library repo
+
+Two things, two names, and the difference matters on day two. The
 **machine library** is `~/.agentstack/lib` — a store on this machine, created
 for you, not version-controlled. A **library repo** is a Git checkout you own
 and link, which is what travels to another machine. `init` writes into the
@@ -187,7 +188,7 @@ first one wins.
 ### Publish what `init` imported
 
 Linking a repo does not move anything into it. `init` put the servers it found
-in the **machine library**, which stays on this machine — so a second machine
+in the **machine library**, which stays on this machine. A second machine
 that clones the repo receives nothing until you publish them:
 
 ```bash
@@ -197,9 +198,8 @@ agentstack lib add-server github \
 
 That copies the definition into the linked repo, checksums it, and prints where
 it landed. Repeat per server (`agentstack lib list` names what the machine
-library holds), then commit and push the repo. **This is the step that makes
-day two work** — without it the next machine clones an empty library and every
-name resolves to nothing.
+library holds), then commit and push the repo. Without it the next machine
+clones an empty library and every name resolves to nothing.
 
 See [Several libraries work together](library.md#several-libraries-work-together)
 for the folder layout, collisions, and qualified names such as
@@ -234,7 +234,7 @@ you would any Git repo.
 `lib list` prints what the combined library holds, and closes with a
 **What is dead in here** section: every skill, server, extension, and hook with
 no recorded usage, plus the reversible `agentstack lib remove <name> --write`
-that retires one. It says `no data` rather than "unused" on purpose — counts
+that retires one. It says `no data` rather than "unused" on purpose. Counts
 come from recorded history only, and the call log rotates.
 
 ## 3. Keep each project small
@@ -282,12 +282,12 @@ agentstack status
 
 `lock --write` accepts the exact pinned bytes and `trust .` is the human review
 for this machine. Run the loop after you add or remove a selected capability,
-accept an updated library item, or change the default toolset — not for
+accept an updated library item, or change the default toolset, not for
 unrelated edits.
 
 `trust .` needs a terminal: with stdin not a TTY it prints the review surface and
 then refuses with `refusing to trust: stdin is not a terminal`. **In CI**, take
-the two-step form instead — `trust --preview` already emits JSON (there is no
+the two-step form instead. `trust --preview` already emits JSON (there is no
 `--json` flag), and the field to read out of it is `surface_digest`, whose value
 already carries its `sha256:` prefix:
 
@@ -304,7 +304,7 @@ What the agent *may* do is prepare the review: `agentstack trust --preview` and
 protection. You grant in your own terminal.
 
 `--yes` requires `--consented`, and the grant refuses unless the digest still
-matches the bytes on disk — so it is a consent bound to exactly what was
+matches the bytes on disk. It is a consent bound to exactly what was
 reviewed, not a way to skip the review.
 
 ```console
@@ -317,8 +317,7 @@ Next: `agentstack doctor` to verify the gateway wiring.
 
 See [Trust a project](howto/trust-a-repo.md) for why the lock comes first.
 
-`agentstack doctor` is the deeper verification. On a healthy project it ends
-like this:
+On a healthy project `agentstack doctor` ends like this:
 
 ```console
 $ agentstack doctor
@@ -361,7 +360,7 @@ Install the binary there with the same one-liner as
 [step 1](#1-install-and-set-up-this-machine), then run those two commands: the
 first previews the complete bootstrap, and the second clones or links the
 library, detects this machine's CLIs, and installs the required global
-integration. Two things do not travel with the repo — secret **values** and the
+integration. Two things do not travel with the repo. Secret **values** and the
 trust review are per machine, so this machine asks for its own missing secrets
 and its own `agentstack trust .`.
 
@@ -375,7 +374,7 @@ agentstack up --write
 AgentStack works the same whether the CLI starts directly, from stock T3 Code,
 or from another supervisor. T3 Code is not required.
 
-## The commands you will actually use
+## Commands you will use most
 
 | Command | Use it for |
 | --- | --- |
@@ -408,7 +407,7 @@ spelling, and plain `--help` there does not list `self` (only
 too, and is the one to use if `self update` reports that Homebrew owns the
 binary.
 
-## Why use it — and when not to
+## Why use it, and when not to
 
 Use AgentStack when you have more than one agent CLI, project, machine, or
 person and want one reviewed source of truth. It is especially useful when you

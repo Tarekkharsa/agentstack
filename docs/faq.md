@@ -124,8 +124,8 @@ skills in the central library so projects can select them by name.
 
 AgentStack leaves them with the application that installed and updates them.
 During `init`, MCP servers whose executable lives inside another app bundle are
-named but excluded by default. This avoids copying one application's private
-plumbing into unrelated CLIs or re-locking every time that app updates.
+named but excluded by default. This avoids copying one application's internal
+files into unrelated CLIs or re-locking every time that app updates.
 
 Use `agentstack init --include-tool-managed` only when you deliberately want to
 override that boundary. Built-in CLI features, plugins, and connector systems

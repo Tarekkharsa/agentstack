@@ -53,9 +53,8 @@ on the machine where the agent runs.
 
 No T3 Code fork or AgentStack panel is required. The earlier experimental
 custom panel is not the supported setup path; its lasting lesson is that a UI
-should present AgentStack's JSON status and preview/consent contracts while the
-standalone CLI remains the authority. AgentStack can expose those stable JSON
-read and preview/apply contracts without moving authority out of the CLI.
+should present AgentStack's JSON status and preview/consent contracts, and the
+CLI stays the authority.
 
 For integrations, `agentstack init --plan` advertises the `init-plan` contract:
 it emits JSON with the detected setup and a `plan_digest` without changing the
@@ -101,7 +100,7 @@ agentstack trust .
 ```
 
 The next agent connection receives the default toolset automatically. A file-
-only provider may additionally need the rendered command printed by status.
+only provider may also need the rendered command printed by status.
 
 ### Per-run evidence
 

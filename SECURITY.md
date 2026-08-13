@@ -1,8 +1,8 @@
 # Security Policy
 
 AgentStack is a security tool: it trust-gates, firewalls, and audits what AI
-agent CLIs are allowed to do on a machine. Vulnerability reports are welcome
-and taken seriously.
+agent CLIs are allowed to do on a machine. Vulnerability reports get an
+acknowledgment within **7 days**.
 
 ## Supported versions
 
@@ -20,9 +20,8 @@ report, the fix, and the advisory in one place.
 Include what you can: affected version, reproduction steps, and impact
 (e.g. which trust, policy, secret, or sandbox guarantee is bypassed).
 
-You should get an acknowledgment within **7 days**. This is a single-maintainer
-project, so fix timelines depend on severity and complexity; you'll be kept
-informed of progress.
+This is a single-maintainer project, so fix timelines depend on severity and
+complexity; you'll be kept informed of progress.
 
 ## Threat model
 

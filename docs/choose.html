@@ -290,12 +290,18 @@
 <tr><td>Hooks · extensions</td><td>written into native files, reviewed in full every time</td><td>they run code</td></tr>
 <tr><td>Anything, on a CLI that reads files only</td><td>written into native files</td><td>that CLI has no live channel</td></tr>
 </tbody></table></div>
-<p>A project is normally in <strong>both</strong> lanes at once, and that is the ordinary case, not a compromise.</p>
-<p><strong>The delivery override: render locally.</strong> <code>agentstack more delivery render-locally --write</code> (add <code>--harness &lt;id&gt;</code> for a single CLI) writes files even where the live channel would have worked. It is the only setting that changes the <em>routing</em>; materializing one toolset's files right now, without changing the routing, is <code>agentstack use &lt;toolset&gt; --write</code> instead. Pick it for offline work, deterministic native files, inspection with ordinary filesystem tools, a rule against a persistent background process, debugging without another runtime dependency, or testing a CLI's own behaviour. Switching it changes only <em>where the bytes go</em> — never what you trust or what your policy allows, and it costs you no review: a preference declares no capability, so a grant that was valid before the write is carried across it.</p>
+<p>Most projects use <strong>both</strong> lanes at once.</p>
+<p><strong>The delivery override: render locally.</strong> <code>agentstack more delivery render-locally --write</code> (add <code>--harness &lt;id&gt;</code> for a single CLI) writes files even where the live channel would have worked. It is the only setting that changes the <em>routing</em>; materializing one toolset's files right now, without changing the routing, is <code>agentstack use &lt;toolset&gt; --write</code> instead. Pick it for:</p>
+<ul>
+<li>offline work, or deterministic native files you can inspect with ordinary filesystem tools;</li>
+<li>a rule against a persistent background process;</li>
+<li>debugging, or testing a CLI's own behaviour, without another runtime dependency.</li>
+</ul>
+<p>Switching it changes only <em>where the bytes go</em> — never what you trust or what your policy allows. It costs you no review. A preference declares no capability, so your existing grant still holds after the write.</p>
 <p>Either lane still passes the trust gate. On an untrusted or drifted project neither the live channel nor the file lane delivers servers, skills, instructions, hooks or extensions — see <a href="concepts.html#trust-and-the-consent-digest">concepts — trust</a>.</p>
 <p>The older per-project delivery modes (<code>static</code>, <code>clean-at-rest</code>, <code>zero-files</code>) are readings of a project's current shape, not choices: <code>agentstack set-mode</code> is retired and delivery is routed for you. See <a href="reference.html#delivery--routing-and-where-rendered-files-live">delivery in the reference</a> for what each still means, and <a href="architecture.html#delivery-is-routed-not-chosen">ARCHITECTURE — delivery is routed, not chosen</a> for the routing itself and how delivery sits beside selection and isolation.</p>
 <h2 id="then-your-decision-how-much-protection">Then, your decision: how much protection?<a class="hlink" href="#then-your-decision-how-much-protection" aria-label="Link to this section">#</a></h2>
-<p>Find the row that sounds like you. The last column says how strongly each option is <em>actually</em> enforced, in the <a href="enforcement.html">enforcement matrix's</a> own words.</p>
+<p>Find the row that sounds like you. The last column says how strongly each option is enforced, in the <a href="enforcement.html">enforcement matrix's</a> own words.</p>
 <div class="tblwrap"><table>
 <thead><tr><th>You are…</th><th>You need</th><th>Command</th><th>What it actually does</th></tr></thead><tbody>
 <tr><td>just syncing config across your CLIs</td><td>config sync</td><td><code>init</code> then <code>apply --write</code></td><td>Copies your reviewed config into each CLI. No runtime check — nothing is blocked once an agent is running.</td></tr>

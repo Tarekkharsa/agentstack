@@ -96,7 +96,7 @@ its default toolset live.
 | Settings, hooks, extensions | Managed files required by the CLI |
 | File-only CLI | Rendered compatibility files |
 
-“Zero files” means no generated project MCP configs or copied skill folders for
+"Zero files" means no generated project MCP configs or copied skill folders for
 the live lane. The manifest, lock, and any required managed instruction files
 still exist.
 
@@ -153,8 +153,8 @@ receives only that skill's full body.
 The user may ask for a skill by name, but does not have to. A clear frontmatter
 description tells the agent when the skill is relevant. The embedded
 `using-agentstack` manual is always available, even before a project is trusted.
-An untrusted project lists names only: descriptions are bundle content, and
-untrusted content stays inert wherever it would be read.
+An untrusted project lists names only, because descriptions are bundle content,
+and untrusted content stays inert wherever it would be read.
 
 ## Dynamic MCP tool discovery
 
@@ -199,7 +199,7 @@ Trust is the local human approval for one project's current manifest and lock.
 A new clone is inert until reviewed. Editing either file, pulling a changed
 version, or re-locking makes trust stale.
 
-Trust means “I reviewed these declared capabilities.” It does not prove that
+Trust means "I reviewed these declared capabilities." It does not prove that
 third-party code is safe and it does not copy approval to another machine.
 
 The **consent digest** is the hash AgentStack records for that reviewed
