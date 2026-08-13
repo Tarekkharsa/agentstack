@@ -226,6 +226,9 @@ cargo build --release                  # add --features sandbox for `run --sandb
 Release binaries ship with sandbox support compiled in; a bare `cargo build` does not. Pass
 `--features sandbox` to get `run --sandbox` / `--lockdown`.
 
+On 0.18.x the verb is `agentstack x self update` — `more` arrives in 0.19, and
+`x` keeps working after it as a permanent alias.
+
 Once installed, `agentstack more self update` moves you to the latest *stable*
 release; it verifies the download against the release's published checksum
 before replacing anything. It never moves you onto a pre-release, and never

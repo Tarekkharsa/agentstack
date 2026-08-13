@@ -17,6 +17,17 @@ agent CLI without copying configuration into every repo.
 your library repo  →  each project's manifest + lock  →  every agent CLI
 ```
 
+Install it in about four seconds — the download is verified against the
+checksums published with the release:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh
+```
+
+Then [Get started](start.md). Other ways in, including building from source
+and what that costs you, are in
+[Install](https://github.com/Tarekkharsa/agentstack#install).
+
 Everything published here is linked from this page: the guides, the how-tos,
 the reference, and the enforcement record.
 
