@@ -2756,6 +2756,11 @@ pub(crate) fn grant_probed(
     // that assertion checkable. The fully interactive ceremony is untouched —
     // no `--yes`, a real prompt, and the grant binds to the snapshot that was
     // displayed.
+    //
+    // `card.is_none()` is that ceremony, not an exemption from it: the funnel
+    // has no `--preview`, so there is no digest for it to demand — what it has
+    // is a question, and below it now ASKS that question whether or not
+    // `--yes` was passed, at a terminal it refuses to proceed without.
     if yes && consented.is_none() && card.is_none() {
         anyhow::bail!(
             "refusing to trust: --yes requires --consented — run `agentstack trust --preview`, review the surface, and pass its `surface_digest` back"
