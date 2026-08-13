@@ -106,7 +106,14 @@ fn cli(proj: &Path, args: &[&str]) -> (String, bool) {
 /// `agentstack_list_loadable` catalog, and an `agentstack_load` of `name`.
 /// Three surfaces, one connection — the order an agent actually meets them in.
 struct McpProbe {
-    /// The `instructions` string from `initialize` (the ambient skill index).
+    /// The ambient skill index — the thing an agent sees without asking.
+    ///
+    /// It used to be the `instructions` string from `initialize`. It now lives
+    /// in the `agentstack_list_loadable` TOOL DESCRIPTION, because that is what
+    /// every client actually puts in front of the model; `initialize`
+    /// instructions are dropped by several. The property under test is
+    /// unchanged — an entry the loader would refuse must not be offered
+    /// ambiently — so this reads the index wherever it lives.
     index: String,
     /// The parsed `agentstack_list_loadable` payload.
     catalog: Value,
@@ -136,6 +143,7 @@ fn mcp_probe(proj: &Path, name: &str) -> McpProbe {
         } }),
         serde_json::json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": "agentstack_list_loadable", "arguments": {} } }),
         serde_json::json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": { "name": "agentstack_load", "arguments": { "name": name, "reason": "witness" } } }),
+        serde_json::json!({ "jsonrpc": "2.0", "id": 4, "method": "tools/list", "params": {} }),
     ] {
         writeln!(stdin, "{request}").unwrap();
     }
@@ -159,14 +167,24 @@ fn mcp_probe(proj: &Path, name: &str) -> McpProbe {
             .unwrap_or("")
             .to_string()
     };
-    let init = by_id(1);
     let list = by_id(2);
     let load = by_id(3);
+    let tools = by_id(4);
+    // The index as a client sees it: the description of the tool that serves
+    // the catalog. Falls back to nothing rather than to `initialize`, so a
+    // regression that empties the description fails loudly instead of quietly
+    // passing on a stale source.
+    let ambient_index = tools["result"]["tools"]
+        .as_array()
+        .and_then(|ts| {
+            ts.iter()
+                .find(|t| t["name"] == "agentstack_list_loadable")
+                .and_then(|t| t["description"].as_str())
+        })
+        .unwrap_or("")
+        .to_string();
     McpProbe {
-        index: init["result"]["instructions"]
-            .as_str()
-            .unwrap_or("")
-            .to_string(),
+        index: ambient_index,
         catalog: serde_json::from_str(&tool_text(&list)).unwrap_or(Value::Null),
         load: tool_text(&load),
         load_is_error: load["result"]["isError"] == Value::Bool(true),
