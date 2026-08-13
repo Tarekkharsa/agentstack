@@ -9,6 +9,10 @@ on:
     - cron: "17 5 * * *"
   workflow_dispatch:
 
+# Least privilege by default; only `notify` widens, and only to issues.
+permissions:
+  contents: read
+
 env:
   CARGO_TERM_COLOR: always
   CARGO_NET_RETRY: "10"
@@ -70,7 +74,58 @@ jobs:
         run: cargo build --release
       - name: Install ${{ matrix.npm }} (latest)
         run: npm install -g ${{ matrix.npm }}
+      # This job installs whatever the registry serves TODAY, so the vendor
+      # version is the one variable nobody controls — and it was the one thing
+      # no log recorded. Without it, "the nightly went red" cannot be told
+      # apart from "the vendor shipped a new CLI last night" without
+      # re-running by hand. Never fails the job: this is evidence, not a gate.
+      - name: Record installed ${{ matrix.adapter }} version
+        run: |
+          npm ls -g --depth=0 "${{ matrix.npm }}" || true
+          timeout 60 "${{ matrix.bin }}" --version \
+            || echo "(${{ matrix.bin }} --version reported nothing)"
       - name: Smoke ${{ matrix.adapter }}
         env:
           AGENTSTACK_BIN: ${{ github.workspace }}/target/release/agentstack
         run: ./examples/sandbox/conformance-smoke.sh ${{ matrix.adapter }} ${{ matrix.bin }} ${{ matrix.config }}
+
+  # Eight consecutive red nights produced nothing but the default failure
+  # email, which is easy to stop seeing. This keeps ONE issue as the running
+  # record: opened on the first failure, appended to on every later one, so
+  # the streak is visible in one place rather than reconstructed from run
+  # history. Deliberately not auto-closing on recovery — a human closing it is
+  # the acknowledgement that someone looked.
+  notify:
+    needs: [render, smoke]
+    if: failure()
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Open or update the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          TITLE="Nightly conformance failing"
+          # Match the title exactly: `--search` is fuzzy, so filter its result
+          # rather than trusting it to have found the right issue.
+          num="$(gh issue list --repo "$REPO" --state open --limit 50 \
+                   --json number,title \
+                   --jq "map(select(.title == \"$TITLE\")) | .[0].number // empty")"
+          if [ -n "$num" ]; then
+            gh issue comment "$num" --repo "$REPO" \
+              --body "Still failing: $RUN_URL"
+            echo "commented on #$num"
+          else
+            gh issue create --repo "$REPO" --title "$TITLE" \
+              --body "The nightly conformance workflow failed.
+
+          This issue is the running record: it stays open and each further
+          failure is appended as a comment. Close it once the cause is fixed.
+
+          First failing run: $RUN_URL"
+            echo "opened a new tracking issue"
+          fi
