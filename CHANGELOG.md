@@ -41,6 +41,15 @@ name.** Two changes here are breaking for scripts; both are listed first.
   screen rather than one hop behind the namespace, and `start.md` has a section
   for the second machine.
 
+- **Your editor now autocompletes the manifest.** A JSON Schema is generated
+  from the same serde model that parses `agentstack.toml`, so the two cannot
+  drift: every field, its type and its doc comment reach the editor, and a
+  typo'd key is underlined rather than silently ignored. `init` writes a
+  `#:schema` line at the top of a generated manifest, and the schema is
+  published with the docs, so taplo / Even Better TOML, Zed and IntelliJ pick
+  it up with no configuration. A CI gate regenerates the schema and fails on
+  any drift from the published file.
+
 - **Materializing a skill is roughly 20x faster on macOS.** Copying a skill tree
   is one `clonefile(2)` call on APFS — the kernel shares extents copy-on-write
   instead of reading and writing every byte. Taken only when the tree is

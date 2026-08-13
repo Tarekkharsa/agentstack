@@ -85,6 +85,16 @@ fn toml_files_under(dir: &Path, out: &mut Vec<PathBuf>) {
     paths.sort();
     for path in paths {
         if path.is_dir() {
+            // `examples/sandbox/runtime/` is gitignored scratch space the demo
+            // scripts write into. It is absent from a clean checkout, so CI
+            // never sees it — but it exists on the machine of anyone who has
+            // run the examples, which CONTRIBUTING's push checklist now asks
+            // contributors to do. Walking it made this test fail locally for
+            // exactly the people following the instructions, over files that
+            // are not part of the repository at all.
+            if path.file_name().is_some_and(|n| n == "runtime") {
+                continue;
+            }
             toml_files_under(&path, out);
         } else if path.extension().is_some_and(|e| e == "toml") {
             out.push(path);
