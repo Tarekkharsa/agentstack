@@ -15,26 +15,30 @@
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh
-export PATH="$HOME/.local/bin:$PATH"          # only if the installer printed "Add to PATH"
-agentstack init                               # finds what your CLIs already have, writes it into .agentstack/
-agentstack more gateway connect --all --write # connect your CLIs once, so they receive things live
-agentstack status                             # is it ready — and if not, the one thing that fixes it
-# then restart your coding CLI — it reads its config at startup:
-agentstack more why <server>                  # which of your CLIs is being served this, and from where
+export PATH="$HOME/.local/bin:$PATH" # only if the installer printed "Add to PATH"
+agentstack init --connect            # import what your CLIs already have, and connect them
+# now restart your coding CLI — it reads its config at startup
+agentstack status                    # is it ready — and if not, the one thing that fixes it
+agentstack more why <server>         # which of your CLIs is served this, and from where
 ```
 
 The installer verifies the download against the checksums published with the
-release. `more` is the extended toolbox; every `more` command also runs at its
-bare name. Step 3 printing `already connected` is success — the interactive
-wizard may have done it for you.
+release. Plain `init` is a guided wizard and needs a terminal; `init --yes` is
+the scripted form. `more` is the extended toolbox, and every `more` command
+also runs at its bare name.
+
+Two more worth knowing early: `agentstack doctor` tells you what is wrong and
+what fixes it, and `agentstack more restore` takes any write back.
 
 ![Two CLIs with different half-setups: agentstack imports both into one setup file, connects them so both are served the servers live while the project stays clean, passes doctor with 0 errors, writes each native format on request, and restores the machine byte-for-byte](docs/demos/first-value.svg)
 
 ## Your second machine
 
 Publish your setup into a library repo you own, commit it, and the next machine
-is one command: `agentstack up --library <git-url> --write`. Secret values and
-the trust review stay per machine, by design.
+is one command: `agentstack up --library <git-url> --write`. Two things stay
+per machine by design: secret values, and
+[the trust review](https://tarekkharsa.github.io/agentstack/howto/trust-a-repo.html)
+— you read what the project declares, and say yes once.
 → [Set up another machine](https://tarekkharsa.github.io/agentstack/start.html#6-set-up-another-machine)
 
 ## Where to go next
