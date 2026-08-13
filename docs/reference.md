@@ -1923,13 +1923,13 @@ you have, and — when it was built from a git checkout — which commit:
 
 ```console
 $ agentstack --version
-agentstack 0.18.0 (sandbox: yes)              # a release binary — run --sandbox works
+agentstack 0.19.0 (sandbox: yes)              # a release binary — run --sandbox works
 $ agentstack --version
-agentstack 0.18.0 (sandbox: no)               # a plain source build — it does not
+agentstack 0.19.0 (sandbox: no)               # a plain source build — it does not
 $ agentstack --version
-agentstack 0.18.0 (sandbox: no, a1b2c3d)      # built from commit a1b2c3d
+agentstack 0.19.0 (sandbox: no, a1b2c3d)      # built from commit a1b2c3d
 $ agentstack --version
-agentstack 0.18.0 (sandbox: no, a1b2c3d-dirty) # …with uncommitted changes on top
+agentstack 0.19.0 (sandbox: no, a1b2c3d-dirty) # …with uncommitted changes on top
 ```
 
 The commit is there because the version number alone does not name a build: it

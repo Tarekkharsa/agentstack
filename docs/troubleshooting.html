@@ -510,6 +510,12 @@ above and re-run interactively, or acknowledge non-interactively with --yes
 <div class="cb"><pre class="block"><code>error: refusing to trust: --yes requires --consented — run `agentstack
 trust --preview`, review the surface, and pass its `surface_digest` back</code></pre></div>
 <p><code>--yes</code> alone would make "the user saw the review" the caller's claim rather than a checked fact.</p>
+<p><strong>`<code>blocked: </code>agentstack trust<code> grants consent — it was refused</code>`</strong></p>
+<div class="cb"><pre class="block"><code>blocked: `agentstack trust` grants consent — it was refused
+  nothing was granted · consent is granted at your terminal, not from an agent
+  shell · the agent may prepare the review with `agentstack trust --preview`</code></pre></div>
+<p>The host guard refuses the consent verbs — <code>trust</code>, <code>yes</code>, <code>init --yes</code>, <code>apply --yes</code> — when they are run from an agent shell, in every spelling (through a path, a wrapper, a pipeline, a quoted <code>sh -c</code>, or either spelling of the <code>more</code>/<code>x</code> namespace). An agent that could grant consent on your behalf would make the review a formality.</p>
+<p><strong>Fix:</strong> run the consent verb in your own terminal. The agent can still prepare it for you — <code>agentstack trust --preview</code> and <code>trust --list</code> are allowed, so the surface can be assembled and read before you answer it.</p>
 <p><strong><code>cannot trust {path}: its loadable surface isn't fully pinned — N items need locking or review</code></strong></p>
 <p>Trust binds to bytes, so everything loadable must be pinned first. Full output and the ordering rule: <a href="#lock-first-then-trust">lock first, then trust</a>.</p>
 <p><strong><code>error: refusing to apply without --consented &lt;digest&gt; — run --preview first, review, then pass the digest it printed</code></strong></p>

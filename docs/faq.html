@@ -327,6 +327,12 @@
 <h2 id="why-must-i-trust-my-own-project">Why must I trust my own project?<a class="hlink" href="#why-must-i-trust-my-own-project" aria-label="Link to this section">#</a></h2>
 <p>The same rule protects every path, including a repo you just cloned or changed. Trust is a review of the current manifest and lock on one machine. A changed consent surface becomes inert until reviewed again.</p>
 <p>Trust means reviewed, not proven safe. Use policy and protected runs for enforcement.</p>
+<h2 id="why-cant-my-agent-grant-trust-for-me">Why can't my agent grant trust for me?<a class="hlink" href="#why-cant-my-agent-grant-trust-for-me" aria-label="Link to this section">#</a></h2>
+<p>Because then the review would be a formality. The host guard refuses the consent verbs — <code>trust</code>, <code>yes</code>, <code>init --yes</code>, <code>apply --yes</code> — when they come from an agent shell, in every spelling, and says so:</p>
+<div class="cb"><pre class="block"><code>blocked: `agentstack trust` grants consent — it was refused
+  nothing was granted · consent is granted at your terminal, not from an agent
+  shell · the agent may prepare the review with `agentstack trust --preview`</code></pre></div>
+<p>The agent can still do the reading: <code>trust --preview</code> and <code>trust --list</code> are allowed, so it can assemble the surface and explain it. You answer it in your own terminal.</p>
 <h2 id="can-my-teammate-use-a-different-cli-than-me">Can my teammate use a different CLI than me?<a class="hlink" href="#can-my-teammate-use-a-different-cli-than-me" aria-label="Link to this section">#</a></h2>
 <p>Yes. The project declares intent once. Each adapter delivers it in the form its CLI supports, and <code>agentstack up</code> connects only the CLIs detected on that machine.</p>
 <h2 id="does-agentstack-depend-on-t3-code">Does AgentStack depend on T3 Code?<a class="hlink" href="#does-agentstack-depend-on-t3-code" aria-label="Link to this section">#</a></h2>

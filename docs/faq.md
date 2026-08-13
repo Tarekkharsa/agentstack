@@ -160,6 +160,22 @@ consent surface becomes inert until reviewed again.
 Trust means reviewed, not proven safe. Use policy and protected runs for
 enforcement.
 
+## Why can't my agent grant trust for me?
+
+Because then the review would be a formality. The host guard refuses the
+consent verbs — `trust`, `yes`, `init --yes`, `apply --yes` — when they come
+from an agent shell, in every spelling, and says so:
+
+```text
+blocked: `agentstack trust` grants consent — it was refused
+  nothing was granted · consent is granted at your terminal, not from an agent
+  shell · the agent may prepare the review with `agentstack trust --preview`
+```
+
+The agent can still do the reading: `trust --preview` and `trust --list` are
+allowed, so it can assemble the surface and explain it. You answer it in your
+own terminal.
+
 ## Can my teammate use a different CLI than me?
 
 Yes. The project declares intent once. Each adapter delivers it in the form its

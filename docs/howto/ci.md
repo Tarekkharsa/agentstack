@@ -23,7 +23,7 @@ Or use the one-line GitHub Action, which wraps the same gate:
 ```yaml
 steps:
   - uses: actions/checkout@v4
-  - uses: Tarekkharsa/agentstack@v0.17.1  # pin the release tag you use, never @main
+  - uses: Tarekkharsa/agentstack@v0.19.0  # pin the release tag you use, never @main
 ```
 
 `install --locked` fetches skill sources into the store and **fails if resolving

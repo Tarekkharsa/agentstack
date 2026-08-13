@@ -286,15 +286,22 @@ accept an updated library item, or change the default toolset — not for
 unrelated edits.
 
 `trust .` needs a terminal: with stdin not a TTY it prints the review surface and
-then refuses with `refusing to trust: stdin is not a terminal`. In CI, or in an
-agent shell with no TTY, take the two-step form instead — `trust --preview`
-already emits JSON (there is no `--json` flag), and the field to read out of it is
-`surface_digest`, whose value already carries its `sha256:` prefix:
+then refuses with `refusing to trust: stdin is not a terminal`. **In CI**, take
+the two-step form instead — `trust --preview` already emits JSON (there is no
+`--json` flag), and the field to read out of it is `surface_digest`, whose value
+already carries its `sha256:` prefix:
 
 ```bash
 agentstack trust --preview                  # JSON review surface; read `surface_digest` from it
 agentstack trust . --yes --consented <surface_digest>   # the value already includes sha256:
 ```
+
+**From an agent shell, neither form works, and that is deliberate.** The host
+guard refuses every consent verb an agent could run — `trust`, `yes`,
+`init --yes`, `apply --yes` — so the two-step form above is refused there too.
+What the agent *may* do is prepare the review: `agentstack trust --preview` and
+`trust --list` are allowed, because a review nobody can read is not a
+protection. You grant in your own terminal.
 
 `--yes` requires `--consented`, and the grant refuses unless the digest still
 matches the bytes on disk — so it is a consent bound to exactly what was

@@ -639,6 +639,24 @@ trust --preview`, review the surface, and pass its `surface_digest` back
 `--yes` alone would make "the user saw the review" the caller's claim rather
 than a checked fact.
 
+**``blocked: `agentstack trust` grants consent — it was refused``**
+
+```text
+blocked: `agentstack trust` grants consent — it was refused
+  nothing was granted · consent is granted at your terminal, not from an agent
+  shell · the agent may prepare the review with `agentstack trust --preview`
+```
+
+The host guard refuses the consent verbs — `trust`, `yes`, `init --yes`,
+`apply --yes` — when they are run from an agent shell, in every spelling
+(through a path, a wrapper, a pipeline, a quoted `sh -c`, or either spelling of
+the `more`/`x` namespace). An agent that could grant consent on your behalf
+would make the review a formality.
+
+**Fix:** run the consent verb in your own terminal. The agent can still prepare
+it for you — `agentstack trust --preview` and `trust --list` are allowed, so the
+surface can be assembled and read before you answer it.
+
 **`cannot trust {path}: its loadable surface isn't fully pinned — N items need locking or review`**
 
 Trust binds to bytes, so everything loadable must be pinned first. Full output
