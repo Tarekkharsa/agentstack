@@ -124,7 +124,7 @@ pub(crate) fn prepare(args: &TryArgs) -> Result<Prepared> {
     std::fs::create_dir_all(&dest_root)
         .with_context(|| format!("creating {}", dest_root.display()))?;
     crate::util::restrict(&dest_root, true);
-    crate::util::fsx::copy_dir_all(&src_dir, &dest)?;
+    crate::fsclone::copy_dir_all(&src_dir, &dest)?;
 
     let body = std::fs::read_to_string(src_dir.join("SKILL.md"))
         .with_context(|| format!("reading {}", src_dir.join("SKILL.md").display()))?;

@@ -615,7 +615,7 @@ fn apply_upgrade(
     for (i, dir) in old_skill_dirs.iter().enumerate() {
         if dir.exists() {
             let dst = backup_root.join(format!("skill-{i}"));
-            crate::util::fsx::copy_dir_all(dir, &dst)?;
+            crate::fsclone::copy_dir_all(dir, &dst)?;
             backups.push((dir.clone(), dst, true));
         }
     }
@@ -743,7 +743,7 @@ fn apply_upgrade(
             for (orig, backup, is_dir) in &backups {
                 if *is_dir {
                     let _ = fs::remove_dir_all(orig);
-                    let _ = crate::util::fsx::copy_dir_all(backup, orig);
+                    let _ = crate::fsclone::copy_dir_all(backup, orig);
                 } else {
                     if let Some(parent) = orig.parent() {
                         let _ = fs::create_dir_all(parent);

@@ -97,15 +97,25 @@ macOS/APFS charges per file, and every path below walks or copies a tree.
 None of these changes what is enforced, and the constraint in 20 is that none
 of them may.
 
-19. **[ ] Clone trees instead of copying them file by file.**
-    `crates/core/src/util/fsx.rs` copies one `fs::copy` per entry and has no
-    `clonefile(2)`/reflink path; on APFS that costs 5-10x a clone. Add the fast
-    path and keep the current loop as the fallback. Callers that pay today: the
-    store's `snapshot_content`, `lib add`'s `copy_extension_source`, upgrade
-    backups, the trash-move fallback, and image staging. `clonefile` requires
-    the destination not to exist and clones a symlink as a symlink, so it fits
-    `copy_dir_all` only; `copy_dir_all_following_symlinks` keeps the loop. A
-    prototype is in progress.
+19. **[x] Clone trees instead of copying them file by file.** Landed, but
+    uncommitted: the change sits in the working tree beside this note. The fast
+    path is `crates/cli/src/fsclone.rs`, a wrapper whose `copy_dir_all` drops in
+    for `fsx::copy_dir_all` — a metadata-only eligibility scan, then one
+    `clonefile(2)` into a temporary sibling, then an atomic rename onto the
+    destination; anything it cannot clone falls back to the core loop, so the
+    fast path can only be skipped, never be the reason a copy fails. The scan
+    exists because `clonefile` reproduces the source exactly while the loop does
+    not (it drops `.git` and reads through symlinks), so a tree holding either
+    is declined whole rather than cloned and repaired. Converted callers: the
+    store's `snapshot_content`, skill materialization under the copy strategy
+    (`render/skills.rs`), the skill and asset copies in `commands/add.rs` and
+    `commands/try_skill.rs`, and the two upgrade backup sites. `lib add`'s
+    `copy_extension_source` and the trash-move fallback keep the loop because
+    they call `copy_dir_all_following_symlinks`, and image staging has no
+    `copy_dir_all` call to convert. The unsafe is
+    confined to `cli::sys::clone_tree` under the dated `STRATEGY.md` exception
+    (approved 2026-08-13) and `core` keeps `forbid(unsafe_code)`. Measured about
+    20x on a 2000-file tree: about 500 ms down to about 25 ms.
 20. **[ ] Merge the redundant tree walks.** One resolve can traverse the same
     tree four or five times: `reject_symlinks` (`crates/cli/src/scan.rs:212`),
     `dir_digest` (`crates/core/src/digest.rs:113`), the copy walk, a re-digest,

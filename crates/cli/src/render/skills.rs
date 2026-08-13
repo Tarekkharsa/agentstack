@@ -367,7 +367,7 @@ pub fn materialize(plan: &SkillPlan) -> Result<()> {
             SkillStrategy::Symlink => symlink_dir(source, &dest)
                 .with_context(|| format!("symlinking skill '{name}' → {}", dest.display()))?,
             SkillStrategy::Copy => {
-                crate::util::fsx::copy_dir_all(source, &dest)
+                crate::fsclone::copy_dir_all(source, &dest)
                     .with_context(|| format!("copying skill '{name}' → {}", dest.display()))?;
                 fs::write(dest.join(MARKER), b"agentstack\n").ok();
             }

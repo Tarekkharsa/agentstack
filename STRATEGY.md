@@ -81,7 +81,9 @@ cost, never relaxes guarantees.
 - Untrusted repository content is inert. The funnel stages; it never activates.
 - All repository content is hostile input: parsed defensively, bounded, never
   interpolated into shell commands.
-- No new unsafe code.
+- No new unsafe code. One dated exception, approved 2026-08-13: the
+  `clonefile(2)` call behind `cli::sys::clone_tree`, confined to
+  `cli/src/sys.rs` with the rest of the FFI. Every other crate keeps `forbid`.
 - Consent is content-bound. A byte change re-gates — the presentation of
   re-gating improves; the fact of it does not.
 - Policy only narrows. Machine ceiling always wins.

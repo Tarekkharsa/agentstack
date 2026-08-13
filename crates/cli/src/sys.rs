@@ -11,8 +11,13 @@
 //!
 //! Each wrapper keeps its Unix / non-Unix parity so callers hold no `cfg`
 //! branches of their own. The unsafe here is minimal and boring: signal
-//! delivery, process-group setup, one stdout/stderr fd dance, and a
-//! writability probe.
+//! delivery, process-group setup, one stdout/stderr fd dance, a writability
+//! probe, and one APFS tree clone.
+//!
+//! [`clone_tree`] is the one entry STRATEGY.md's "no new unsafe code" line
+//! carries a dated exception for. It was admitted on the condition that it
+//! lands HERE and nowhere else — in particular not in `core`, which keeps true
+//! `forbid` — so the exception stays one reviewable call.
 
 use std::io;
 use std::path::Path;
@@ -314,6 +319,47 @@ pub fn dir_writable(dir: &Path) -> bool {
     std::fs::metadata(dir)
         .map(|m| m.is_dir() && !m.permissions().readonly())
         .unwrap_or(false)
+}
+
+/// Copy the directory tree `src` to `dst` with one `clonefile(2)` — the APFS
+/// copy-on-write copy. The whole hierarchy is cloned by a single call: no
+/// bytes are read, none are written, and the two trees share their blocks
+/// until one side is modified. `dst` must not exist.
+///
+/// `false` means the kernel declined and the caller must copy the tree the
+/// ordinary way. Every reason collapses to that one answer — not an APFS
+/// volume (`ENOTSUP`), a different volume (`EXDEV`), the name was taken
+/// (`EEXIST`), a platform without the call at all — because there is nothing a
+/// caller could do differently for any of them.
+///
+/// This is the raw kernel operation: it reproduces `.git`, symlinks and every
+/// mode bit exactly as the source has them, which is NOT what
+/// [`crate::fsclone::copy_dir_all`] promises. Deciding whether a given tree
+/// survives that faithfully is `fsclone`'s job; this wrapper only makes the
+/// call. Nothing else may call it.
+#[cfg(target_os = "macos")]
+pub fn clone_tree(src: &Path, dst: &Path) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    let (Ok(from), Ok(to)) = (
+        std::ffi::CString::new(src.as_os_str().as_bytes()),
+        std::ffi::CString::new(dst.as_os_str().as_bytes()),
+    ) else {
+        return false;
+    };
+    // SAFETY: `clonefile` reads the two NUL-terminated paths for the duration
+    // of the call and returns an int — no ownership passes either way, and both
+    // `CString`s outlive the call, so the pointers stay valid. `flags` is 0
+    // because callers pass a real directory, which leaves the symlink-related
+    // flags nothing to act on.
+    unsafe { libc::clonefile(from.as_ptr(), to.as_ptr(), 0) == 0 }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn clone_tree(_src: &Path, _dst: &Path) -> bool {
+    // Linux `FICLONE` and ReFS block cloning are the equivalents, and neither
+    // clones a whole directory in one call the way APFS does. Until one of them
+    // earns its own wrapper, every other platform copies the ordinary way.
+    false
 }
 
 #[cfg(test)]

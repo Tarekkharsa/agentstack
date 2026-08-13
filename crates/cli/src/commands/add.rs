@@ -513,7 +513,7 @@ impl AssetSource {
     pub(crate) fn extract_dir(&self, asset: &str, out: &Path) -> Result<()> {
         match self {
             AssetSource::Embedded => crate::catalog::extract_asset_dir(asset, out),
-            AssetSource::Dir(root) => crate::util::fsx::copy_dir_all(&root.join(asset), out),
+            AssetSource::Dir(root) => crate::fsclone::copy_dir_all(&root.join(asset), out),
         }
     }
 

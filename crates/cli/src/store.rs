@@ -607,7 +607,11 @@ impl Store {
     /// two resolves of the same commit share one immutable dir and a later
     /// resolve of a *different* commit lands in a different dir — the bytes a
     /// materialized symlink points at can never change under it. Callers
-    /// reject symlinks first, so `copy_dir_all` is faithful here.
+    /// reject symlinks first, so [`fsclone::copy_dir_all`] is faithful here —
+    /// and a symlink-free body is exactly the shape it clones instead of
+    /// copying, which is why the snapshot of a large skill costs one syscall.
+    ///
+    /// [`fsclone::copy_dir_all`]: crate::fsclone::copy_dir_all
     pub fn snapshot_content(&self, src: &Path, digest_hex: &str) -> Result<PathBuf> {
         let content_root = self.root.join("content");
         let dest = content_root.join(digest_hex);
@@ -627,7 +631,7 @@ impl Store {
         // Copy to a temp then rename into place, so a crash never leaves a
         // partial dir under a digest name (which would read as complete).
         let tmp = content_root.join(format!(".tmp-{}", crate::runs::gen_id()));
-        crate::util::fsx::copy_dir_all(src, &tmp)
+        crate::fsclone::copy_dir_all(src, &tmp)
             .with_context(|| format!("snapshotting {}", src.display()))?;
         if fs::rename(&tmp, &dest).is_err() {
             let _ = fs::remove_dir_all(&tmp);

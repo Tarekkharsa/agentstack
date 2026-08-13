@@ -26,6 +26,7 @@ pub mod eve;
 pub mod executable;
 pub mod execution;
 pub mod footprint;
+pub mod fsclone;
 pub mod gateway;
 pub mod gateway_http;
 pub mod gitx;
