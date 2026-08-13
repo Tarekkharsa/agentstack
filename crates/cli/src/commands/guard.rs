@@ -1190,6 +1190,21 @@ fn status() -> Result<()> {
             "  allow_roots [machine manifest]: {}",
             cfg.allow_roots.join(", ")
         );
+        // A root covering `/` is not one entry among several — it is the
+        // whole write confinement switched off. Printing it in a list beside
+        // ordinary paths reads as a detail; it is the headline.
+        if cfg.allow_roots.iter().any(|r| {
+            let t = r.trim();
+            // An EMPTY entry trims to "" too; a blank string is a
+            // misconfiguration, not a deliberate "everything".
+            !t.is_empty() && matches!(t.trim_end_matches('/'), "" | "/**" | "/*")
+        }) {
+            println!(
+                "  {} writes allowed anywhere on this machine; deny globs and \
+                 destructive-command rules still apply",
+                "note:".yellow()
+            );
+        }
     } else {
         println!("  allow_roots: unavailable");
     }

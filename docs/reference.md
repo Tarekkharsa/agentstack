@@ -1085,6 +1085,64 @@ write = ["./**"]                      # sandbox: workspace mounts read-write
 deny  = [".env*", "**/*.pem"]         # no tool call may touch these, ever
 ```
 
+### Which array controls what
+
+Five arrays across two tables decide filesystem access, and they do not all
+have an enforcer. Verified against `crates/policy/src/{compile.rs,ruleset.rs}`
+and `crates/cli/src/guard.rs`.
+
+| Array | Owner | Enforcer | When absent | Allow-all spelling |
+|---|---|---|---|---|
+| `[policy.filesystem] read` | machine + project | **none today** — compiled, displayed by `doctor`/`trust`, consulted by nothing | no effect | n/a (it grants nothing) |
+| `[policy.filesystem] write` | machine + project | sandbox workspace mount only | workspace mounts **read-only** (deny-by-default) | `write = ["./**"]` |
+| `[policy.filesystem] deny` | machine ∪ project — a project may only ADD | host guard (cooperative) and sandbox | nothing is blocklisted | `deny = []` |
+| `[guard] allow_roots` | machine only | host guard write confinement | writes confined to the workspace + temp | `allow_roots = ["/"]` |
+| `[guard.project_roots]` | machine only | host guard, for one named workspace | no extra roots for that workspace | per-workspace list |
+
+Read the rows together, because the gaps matter:
+
+- **`read` is informational.** It is compiled into the ruleset and printed by
+  `doctor` and the trust card, and then nothing asks it anything. Declaring a
+  `read` scope does not confine a read.
+- **Host reads are limited by `deny` and by nothing else.** There is no read
+  allowlist at runtime: any path not caught by a deny glob is readable.
+- **`write` is all-or-nothing, and only for the sandbox.** It answers one
+  question — may the workspace root be mounted read-write? A partial scope like
+  `src/**` does not mount part of the tree; it rounds **down** to read-only.
+  It has no bearing on host writes.
+- **`deny` wins over everything.** It is a pure blocklist, unioned across the
+  machine and project layers, matched against the workspace-relative path, the
+  absolute path, and the bare file name. A project can add to it and can never
+  drop the machine's entries.
+- **Inside a project workspace, full write access is already the default.**
+  The host guard confines writes to the workspace, `[guard] allow_roots` and
+  temp directories — so a project editing its own files needs no configuration
+  at all.
+
+**The two allow-all recipes**, and what they still do not disarm:
+
+```toml
+# Machine: let the guard's write confinement allow anything on disk.
+[guard]
+allow_roots = ["/"]
+
+[policy.filesystem]
+deny = []
+```
+
+```toml
+# Sandbox: mount the workspace read-write instead of read-only.
+[policy.filesystem]
+write = ["./**"]
+```
+
+`allow_roots = ["/"]` switches off the *write-scope* check and nothing else.
+The destructive-command rules (`rm -rf` outside the workspace, `git reset
+--hard`, and the rest) still fire, and the guard still refuses shell writes
+into `~/.agentstack` — precisely so this table cannot be edited into
+allowlisting itself. Deny globs still apply; `deny = []` is what removes them.
+
+
 ## Call log
 
 Every tool call the gateway brokers (MCP proxy and code-mode alike) appends to

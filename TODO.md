@@ -91,14 +91,51 @@ docs describe and the code does not emit.
     performance bookends, macOS kernel containment (Docker there is a Linux VM),
     and `agentstack x image --write` beyond its plan screen.
 
+## Disk cost on many small files
+
+macOS/APFS charges per file, and every path below walks or copies a tree.
+None of these changes what is enforced, and the constraint in 20 is that none
+of them may.
+
+19. **[ ] Clone trees instead of copying them file by file.**
+    `crates/core/src/util/fsx.rs` copies one `fs::copy` per entry and has no
+    `clonefile(2)`/reflink path; on APFS that costs 5-10x a clone. Add the fast
+    path and keep the current loop as the fallback. Callers that pay today: the
+    store's `snapshot_content`, `lib add`'s `copy_extension_source`, upgrade
+    backups, the trash-move fallback, and image staging. `clonefile` requires
+    the destination not to exist and clones a symlink as a symlink, so it fits
+    `copy_dir_all` only; `copy_dir_all_following_symlinks` keeps the loop. A
+    prototype is in progress.
+20. **[ ] Merge the redundant tree walks.** One resolve can traverse the same
+    tree four or five times: `reject_symlinks` (`crates/cli/src/scan.rs:212`),
+    `dir_digest` (`crates/core/src/digest.rs:113`), the copy walk, a re-digest,
+    and `dir_size` (`crates/cli/src/store.rs:1277`). Fold reject-symlinks,
+    digest and size into one traversal. Constraint: the merged walk still hashes
+    the current bytes on every call. `docs/ARCHITECTURE.md` forbids a
+    stat-fingerprint digest cache on any verification path — the old one was
+    removed deliberately, because a same-stat content change could serve a stale
+    digest and become a trust bypass. Do not reintroduce one.
+21. **[ ] A disk-I/O benchmark, so 19 and 20 are measurable.** The only benches
+    (`crates/workflow/benches`) time no I/O, so a store snapshot or a tree copy
+    has no baseline and a regression is invisible. Add one repeatable timed run
+    over either. Criterion would be a new dependency and needs maintainer
+    approval; a plain timed harness may be enough. Shape to borrow:
+    `github.com/NullVoxPopuli/disk-perf-git-and-pnpm`, which times `git clean`
+    and `pnpm install` to expose the same APFS many-small-file cost.
+22. **[ ] A `doctor` check for Spotlight indexing.** Indexing measurably slows
+    many-small-file I/O on macOS, and `~/.agentstack` (store, runs) is indexed
+    by default. Report whether it is — `mdutil`, or a `.metadata_never_index`
+    marker — and name the exclusion. Report only: excluding a directory stays
+    the user's to do.
+
 ## Not scheduled, deliberately
 
-19. R2 — the positioning flip. `STRATEGY.md` reopens only at its named
+23. R2 — the positioning flip. `STRATEGY.md` reopens only at its named
     tripwires.
-20. R1 — the private APM disclosure. **Maintainer-only: embargoed to a third
+24. R1 — the private APM disclosure. **Maintainer-only: embargoed to a third
     party's private channel, so no agent drafts, sends, or contacts anyone about
     it.**
-21. The retired Mode axis still has leftovers in `doctor --json`, `overview.rs`
+25. The retired Mode axis still has leftovers in `doctor --json`, `overview.rs`
     and `ui_contract.rs`.
-22. `docs/design/automatic-delivery.md` — the automatic-delivery design lane.
-23. `x diff --profile`.
+26. `docs/design/automatic-delivery.md` — the automatic-delivery design lane.
+27. `x diff --profile`.

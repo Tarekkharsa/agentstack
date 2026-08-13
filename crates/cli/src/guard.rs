@@ -166,8 +166,28 @@ fn deny_glob_check(ctx: &GuardContext, access: Access, path: &str) -> Decision {
             }
         }
     }
-    if let Some(name) = abs.file_name() {
-        spellings.push(name.to_string_lossy().into_owned());
+    // The bare file name, but ONLY for a token that could be a file name.
+    //
+    // This spelling exists so `cat .env` is caught when the deny glob is
+    // written `.env` rather than `**/.env`. It is also the one spelling that
+    // can fire on text that names no file at all: `check_bash` judges every
+    // token, and a quoted argument like a commit message is a single token, so
+    // `git commit -m "update docs/.env.local handling"` normalized to a path
+    // and offered its last component — `.env.local handling` — which a `.env*`
+    // glob happily matched. The command was then refused for containing a
+    // sentence.
+    //
+    // Whitespace is the discriminator, and it costs nothing: a real path
+    // CAN contain a space, but such a path still gets its absolute and
+    // workspace-relative spellings below, which are the ones that actually
+    // identify a file. Only the loosest spelling is withheld, and only from
+    // tokens that cannot be bare file names. Deliberately NOT done by
+    // skipping `-m`/`--message` operands: a real path must never be able to
+    // hide behind a flag.
+    if !path.chars().any(char::is_whitespace) {
+        if let Some(name) = abs.file_name() {
+            spellings.push(name.to_string_lossy().into_owned());
+        }
     }
     let refs: Vec<&str> = spellings.iter().map(String::as_str).collect();
     match ctx.ruleset.fs_deny_decision(&refs) {
@@ -1508,6 +1528,68 @@ mod tests {
     }
 
     // ── file tools ──────────────────────────────────────────────────────
+
+    /// G2: free text that merely MENTIONS a denied name is not a file access.
+    ///
+    /// `check_bash` judges every token, and a quoted argument is ONE token, so
+    /// a commit message was normalized to a path and offered its last
+    /// component to the deny globs. `"update docs/.env.local handling"` ends in
+    /// `.env.local handling`, which a prefix glob like `.env*` matches — and
+    /// the whole commit was refused for containing a sentence.
+    ///
+    /// The fixture uses a prefix glob on purpose: with only exact names in the
+    /// deny list the bug does not reproduce, and a test that cannot reproduce
+    /// it cannot hold the fix.
+    #[test]
+    fn a_denied_name_inside_free_text_is_not_a_file_access() {
+        let machine = Policy {
+            filesystem: FsPolicy {
+                read: vec![],
+                write: vec![],
+                deny: vec![".env*".into(), "id_rsa".into()],
+            },
+            ..Policy::default()
+        };
+        let c = GuardContext {
+            ruleset: agentstack_policy::compile(&machine, &Policy::default(), &[]),
+            ..ctx()
+        };
+
+        // (a) The false positive: a message ABOUT a denied file.
+        for cmd in [
+            r#"git commit -m "update docs/.env.local handling""#,
+            r#"git commit -m "remove .env from the repo""#,
+            r#"echo "see .env.local for the token""#,
+        ] {
+            assert!(
+                !denied(check_event(&c, &bash(cmd))),
+                "free text must not read as a file access: {cmd}"
+            );
+        }
+
+        // (b) The thing it must never stop denying: a real access.
+        for cmd in [
+            "echo secret > .env.local",
+            "cp /tmp/x .env",
+            "cat .env.local",
+            "cat .env",
+            "cat sub/dir/.env.local",
+            "source ./.env",
+        ] {
+            assert!(
+                denied(check_event(&c, &bash(cmd))),
+                "a real access to a denied file must still be refused: {cmd}"
+            );
+        }
+
+        // (c) A flag operand gets no exemption: the fix keys on whitespace,
+        //     never on the preceding flag, so a real path passed to `-m` is
+        //     still judged.
+        assert!(
+            denied(check_event(&c, &bash("git commit -m .env.local"))),
+            "a real path must not hide behind a flag"
+        );
+    }
 
     #[test]
     fn env_files_are_unreadable_and_unwritable_anywhere() {

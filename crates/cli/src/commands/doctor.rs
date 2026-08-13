@@ -3343,7 +3343,14 @@ fn run_checks(
     // Borrows `machine_policy`; the Policy section below still
     // moves it into `check_machine_policy`.
     report.section("Machine policy");
-    let (posture, why) = classify_machine_posture(&machine_policy);
+    // `allow_roots` lives in the machine `[guard]` table, not in `[policy]`,
+    // but it decides whether a filesystem scope narrows anything — so the
+    // posture cannot be honest without it.
+    let machine_allow_roots = match crate::manifest::machine_guard_health() {
+        Some(Ok(cfg)) => cfg.allow_roots,
+        _ => Vec::new(),
+    };
+    let (posture, why) = classify_machine_posture(&machine_policy, &machine_allow_roots);
     report.line(Level::Ok, format!("{posture} — {why}"));
     if posture == "unconfigured" && manifest.policy.is_empty() {
         report.mark_irrelevant();
@@ -4616,14 +4623,20 @@ fn report_machine_dimension(
 /// - **open** — the current machine manifest has an empty `[policy]`.
 /// - **restrictive** — at least one dimension carries a rename-proof `"*"` rule
 ///   (tools/egress/secrets), or a `[policy.filesystem]` scope is set: the
-///   firewall binds every server, whatever a repo renames it to.
+///   firewall binds every server, whatever a repo renames it to. **Except when
+///   the filesystem scope is the open one:** an empty `deny` list next to a
+///   `[guard] allow_roots` covering `/` narrows nothing on disk, and calling
+///   that "restrictive" told the reader the opposite of the truth.
 /// - **mixed** — some machine policy, but only named-server rules, which a repo
 ///   can dodge by renaming its server (see the rename-dodge lint above).
 ///
 /// Never overstates: a `"*"` rule earns "restrictive", not "locked down" — a
 /// `"*"` allowlist can still be broad. Pure (takes a borrow, returns static
 /// strings) so it is unit-testable without a `Report` or a real machine file.
-fn classify_machine_posture(machine: &crate::machine_policy::Inspection) -> (&'static str, String) {
+fn classify_machine_posture(
+    machine: &crate::machine_policy::Inspection,
+    allow_roots: &[String],
+) -> (&'static str, String) {
     match &machine.status {
         crate::machine_policy::Status::Unconfigured => {
             return (
@@ -4658,8 +4671,27 @@ fn classify_machine_posture(machine: &crate::machine_policy::Inspection) -> (&'s
             "machine [policy] is empty — nothing here narrows what a project may do".into(),
         );
     }
+    if dims.iter().all(|m| m.is_empty())
+        && policy.filesystem.deny.is_empty()
+        && allow_roots_cover_everything(allow_roots)
+    {
+        return (
+            "open",
+            "no deny globs and [guard] allow_roots covers \"/\" — writes are allowed anywhere \
+             on this machine (destructive-command rules still apply)"
+                .into(),
+        );
+    }
     let has_wildcard = dims.iter().any(|m| m.contains_key("*"));
-    if has_wildcard || !policy.filesystem.is_empty() {
+    // A filesystem scope earns "restrictive" only if it actually narrows
+    // something. `read` is informational and `write` only sizes the sandbox
+    // workspace mount, so the deny list is what confines a host write — and if
+    // that is empty while `allow_roots` covers `/`, writes are allowed
+    // everywhere the guard looks. Reporting THAT as restrictive is the
+    // opposite of the truth, which is the one thing this summary may not do.
+    let fs_narrows = !policy.filesystem.deny.is_empty()
+        || (!policy.filesystem.is_empty() && !allow_roots_cover_everything(allow_roots));
+    if has_wildcard || fs_narrows {
         (
             "restrictive",
             "a rename-proof \"*\" rule (or a filesystem scope) constrains every server".into(),
@@ -4670,6 +4702,21 @@ fn classify_machine_posture(machine: &crate::machine_policy::Inspection) -> (&'s
             "only named-server rules — a repo can dodge them by renaming its server".into(),
         )
     }
+}
+
+/// Whether `[guard] allow_roots` opens the whole filesystem.
+///
+/// `/` is the spelling that does it, and it is worth naming rather than
+/// inferring: a root that merely sits high (`/Users`) still leaves the rest of
+/// the disk confined, so only a root that covers everything counts.
+fn allow_roots_cover_everything(allow_roots: &[String]) -> bool {
+    allow_roots.iter().any(|r| {
+        let t = r.trim();
+        // `!t.is_empty()` is load-bearing: an EMPTY entry also trims to "",
+        // and reading a blank string as "the whole filesystem" would report a
+        // misconfigured manifest as deliberately open.
+        !t.is_empty() && matches!(t.trim_end_matches('/'), "" | "/**" | "/*")
+    })
 }
 
 /// Diagnose the machine `[policy.tools]`/`[policy.egress]`/`[policy.secrets]`
@@ -5566,7 +5613,10 @@ mod tests {
             policy: Some(Default::default()),
             status: crate::machine_policy::Status::Unconfigured,
         };
-        assert_eq!(classify_machine_posture(&unconfigured).0, "unconfigured");
+        assert_eq!(
+            classify_machine_posture(&unconfigured, &[]).0,
+            "unconfigured"
+        );
         // Unreadable machine file without a snapshot → blocked, never open.
         let blocked = crate::machine_policy::Inspection {
             policy: None,
@@ -5575,30 +5625,118 @@ mod tests {
                 snapshot_error: "missing".into(),
             },
         };
-        assert_eq!(classify_machine_posture(&blocked).0, "blocked");
+        assert_eq!(classify_machine_posture(&blocked, &[]).0, "blocked");
         // Present but empty [policy] → open.
-        assert_eq!(classify_machine_posture(&current(policy(""))).0, "open");
+        assert_eq!(
+            classify_machine_posture(&current(policy("")), &[]).0,
+            "open"
+        );
         // Only a named-server rule → mixed (a repo can rename its server).
         assert_eq!(
-            classify_machine_posture(&current(policy(
-                "[policy.tools]\ngithub = [\"!delete_*\"]\n"
-            )))
+            classify_machine_posture(
+                &current(policy("[policy.tools]\ngithub = [\"!delete_*\"]\n")),
+                &[]
+            )
             .0,
             "mixed"
         );
         // A rename-proof "*" rule → restrictive.
         assert_eq!(
-            classify_machine_posture(&current(policy("[policy.egress]\n\"*\" = [\"!*\"]\n"))).0,
+            classify_machine_posture(&current(policy("[policy.egress]\n\"*\" = [\"!*\"]\n")), &[])
+                .0,
             "restrictive"
         );
         // A filesystem scope alone → restrictive (bundle-global, no server key).
         assert_eq!(
-            classify_machine_posture(&current(policy(
-                "[policy.filesystem]\nwrite = [\"./**\"]\n"
-            )))
+            classify_machine_posture(
+                &current(policy("[policy.filesystem]\nwrite = [\"./**\"]\n")),
+                &[]
+            )
             .0,
             "restrictive"
         );
+    }
+
+    /// G3: an open machine must not be reported as a restrictive one.
+    ///
+    /// `write` only sizes the sandbox workspace mount and `read` is
+    /// informational, so on the host it is the deny list that confines a
+    /// write. With that empty and `[guard] allow_roots` covering `/`, writes
+    /// are allowed everywhere the guard looks — and the summary used to call
+    /// that "restrictive" purely because `[policy.filesystem]` was non-empty.
+    /// Saying the opposite of the truth is the one thing this line may not do.
+    #[test]
+    fn an_open_machine_is_not_reported_as_restrictive() {
+        let policy = |toml_body: &str| -> crate::manifest::Policy {
+            let m: Manifest = toml::from_str(&format!("version = 1\n{toml_body}")).unwrap();
+            m.policy
+        };
+        let current = |policy| crate::machine_policy::Inspection {
+            policy: Some(policy),
+            status: crate::machine_policy::Status::Current {
+                source_digest: "a".repeat(64),
+                snapshot_synced: true,
+                cache_error: None,
+            },
+        };
+        let open_everything = ["/".to_string()];
+
+        // The reported case: a filesystem scope, no deny globs, allow_roots "/".
+        let (posture, why) = classify_machine_posture(
+            &current(policy("[policy.filesystem]\nwrite = [\"./**\"]\n")),
+            &open_everything,
+        );
+        assert_eq!(posture, "open", "{why}");
+        assert!(why.contains("allowed anywhere"), "{why}");
+
+        // A deny glob narrows something even with allow_roots "/", so the
+        // relaxation must not swallow it.
+        assert_eq!(
+            classify_machine_posture(
+                &current(policy("[policy.filesystem]\ndeny = [\".env\"]\n")),
+                &open_everything,
+            )
+            .0,
+            "restrictive"
+        );
+
+        // And without the open root, a filesystem scope is restrictive as before.
+        assert_eq!(
+            classify_machine_posture(
+                &current(policy("[policy.filesystem]\nwrite = [\"./**\"]\n")),
+                &["/Users/me/code".to_string()],
+            )
+            .0,
+            "restrictive"
+        );
+
+        // A rename-proof "*" rule still outranks an open disk: it constrains
+        // servers, which allow_roots has nothing to say about.
+        assert_eq!(
+            classify_machine_posture(
+                &current(policy("[policy.egress]\n\"*\" = [\"!*\"]\n")),
+                &open_everything,
+            )
+            .0,
+            "restrictive"
+        );
+    }
+
+    /// The spellings that mean "everything", and the ones that only look like it.
+    #[test]
+    fn only_a_root_covering_everything_counts_as_open() {
+        for open in ["/", "/**", "/*", " / "] {
+            assert!(
+                allow_roots_cover_everything(&[open.to_string()]),
+                "{open:?} covers everything"
+            );
+        }
+        for narrow in ["/Users", "/Users/me", "/var/**", ""] {
+            assert!(
+                !allow_roots_cover_everything(&[narrow.to_string()]),
+                "{narrow:?} does not cover everything"
+            );
+        }
     }
 
     /// Flatten a `Report`'s lines (across every section) into `(tag, msg)`

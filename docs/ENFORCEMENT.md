@@ -456,6 +456,28 @@ toolset containing it.
 
 ### Filesystem — write
 
+**Which array has an enforcer.** Three of the five filesystem arrays are
+enforced and one is not; the full reference table, with the allow-all recipes,
+is in [`reference.md`](reference.md#which-array-controls-what).
+
+| Array | Owner | Enforcer | When absent |
+|---|---|---|---|
+| `[policy.filesystem] read` | machine + project | **none** — compiled and displayed, consulted by nothing | no effect |
+| `[policy.filesystem] write` | machine + project | sandbox workspace mount only, all-or-nothing | workspace mounts **read-only** |
+| `[policy.filesystem] deny` | machine ∪ project (project may only ADD) | host guard (cooperative) + sandbox | nothing blocklisted |
+| `[guard] allow_roots` | machine only | host guard write confinement | writes confined to workspace + temp |
+| `[guard.project_roots]` | machine only | host guard, one named workspace | no extra roots |
+
+Declaring a `read` scope confines no read: host reads are limited by `deny` and
+by nothing else. A `write` scope answers one question — may the workspace root
+be mounted read-write — and a partial scope like `src/**` rounds **down** to
+read-only rather than mounting part of the tree. Writes *inside* a project
+workspace need no configuration; they are allowed by default. And
+`allow_roots = ["/"]` switches off the write-scope check alone: the
+destructive-command rules and the refusal of shell writes into `~/.agentstack`
+both still stand.
+
+
 - **host / gateway — cooperative (¶), when the guard is installed.** No
   sandbox, no mount, no kernel path-scoping touches either path — `runs.rs`
   spawns the harness against the real filesystem, and stdio MCP children run

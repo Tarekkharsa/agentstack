@@ -630,6 +630,35 @@ github = ["GH_*"]                     # this server may only read GH_* refs
 <div class="cb" data-language="toml"><div class="cb-bar"><span class="cb-lang">toml</span></div><pre class="block"><code class="language-toml">[policy.filesystem]
 write = ["./**"]                      # sandbox: workspace mounts read-write
 deny  = [".env*", "**/*.pem"]         # no tool call may touch these, ever</code></pre></div>
+<h3 id="which-array-controls-what">Which array controls what<a class="hlink" href="#which-array-controls-what" aria-label="Link to this section">#</a></h3>
+<p>Five arrays across two tables decide filesystem access, and they do not all have an enforcer. Verified against <code>crates/policy/src/{compile.rs,ruleset.rs}</code> and <code>crates/cli/src/guard.rs</code>.</p>
+<div class="tblwrap"><table>
+<thead><tr><th>Array</th><th>Owner</th><th>Enforcer</th><th>When absent</th><th>Allow-all spelling</th></tr></thead><tbody>
+<tr><td><code>[policy.filesystem] read</code></td><td>machine + project</td><td><strong>none today</strong> — compiled, displayed by <code>doctor</code>/<code>trust</code>, consulted by nothing</td><td>no effect</td><td>n/a (it grants nothing)</td></tr>
+<tr><td><code>[policy.filesystem] write</code></td><td>machine + project</td><td>sandbox workspace mount only</td><td>workspace mounts <strong>read-only</strong> (deny-by-default)</td><td><code>write = ["./**"]</code></td></tr>
+<tr><td><code>[policy.filesystem] deny</code></td><td>machine ∪ project — a project may only ADD</td><td>host guard (cooperative) and sandbox</td><td>nothing is blocklisted</td><td><code>deny = []</code></td></tr>
+<tr><td><code>[guard] allow_roots</code></td><td>machine only</td><td>host guard write confinement</td><td>writes confined to the workspace + temp</td><td><code>allow_roots = ["/"]</code></td></tr>
+<tr><td><code>[guard.project_roots]</code></td><td>machine only</td><td>host guard, for one named workspace</td><td>no extra roots for that workspace</td><td>per-workspace list</td></tr>
+</tbody></table></div>
+<p>Read the rows together, because the gaps matter:</p>
+<ul>
+<li><strong><code>read</code> is informational.</strong> It is compiled into the ruleset and printed by <code>doctor</code> and the trust card, and then nothing asks it anything. Declaring a <code>read</code> scope does not confine a read.</li>
+<li><strong>Host reads are limited by <code>deny</code> and by nothing else.</strong> There is no read allowlist at runtime: any path not caught by a deny glob is readable.</li>
+<li><strong><code>write</code> is all-or-nothing, and only for the sandbox.</strong> It answers one question — may the workspace root be mounted read-write? A partial scope like <code>src/**</code> does not mount part of the tree; it rounds <strong>down</strong> to read-only. It has no bearing on host writes.</li>
+<li><strong><code>deny</code> wins over everything.</strong> It is a pure blocklist, unioned across the machine and project layers, matched against the workspace-relative path, the absolute path, and the bare file name. A project can add to it and can never drop the machine's entries.</li>
+<li><strong>Inside a project workspace, full write access is already the default.</strong> The host guard confines writes to the workspace, <code>[guard] allow_roots</code> and temp directories — so a project editing its own files needs no configuration at all.</li>
+</ul>
+<p><strong>The two allow-all recipes</strong>, and what they still do not disarm:</p>
+<div class="cb" data-language="toml"><div class="cb-bar"><span class="cb-lang">toml</span></div><pre class="block"><code class="language-toml"># Machine: let the guard's write confinement allow anything on disk.
+[guard]
+allow_roots = ["/"]
+
+[policy.filesystem]
+deny = []</code></pre></div>
+<div class="cb" data-language="toml"><div class="cb-bar"><span class="cb-lang">toml</span></div><pre class="block"><code class="language-toml"># Sandbox: mount the workspace read-write instead of read-only.
+[policy.filesystem]
+write = ["./**"]</code></pre></div>
+<p><code>allow_roots = ["/"]</code> switches off the <em>write-scope</em> check and nothing else. The destructive-command rules (<code>rm -rf</code> outside the workspace, <code>git reset --hard</code>, and the rest) still fire, and the guard still refuses shell writes into <code>~/.agentstack</code> — precisely so this table cannot be edited into allowlisting itself. Deny globs still apply; <code>deny = []</code> is what removes them.</p>
 <h2 id="call-log">Call log<a class="hlink" href="#call-log" aria-label="Link to this section">#</a></h2>
 <p>Every tool call the gateway brokers (MCP proxy and code-mode alike) appends to <code>~/.agentstack/audit/calls.jsonl</code> (<code>0600</code>, dir <code>0700</code>): timestamp, run id (under <code>agentstack run</code>), server, tool, <strong>keyed argument digest</strong> (never values — keyed with a per-machine secret so an exfiltrated log can't confirm guessed arguments), outcome (<code>ok</code>/<code>error</code>/<code>denied</code>), latency, and a detail that is either the policy rule (denials) or a <strong>fixed error class</strong> (failures) — upstream error text is never written, so a malicious server can't inject content into the log. Summarize with <code>agentstack x report calls [--since &lt;days&gt;] [--json]</code>; add <code>--tail &lt;n&gt;</code> to also list the last n individual calls (<code>--project &lt;path&gt;</code> scopes everything to one project root). With <code>--json</code>, <code>--tail</code> adds an <code>events</code> array of raw records — the stable feed external UIs consume; the default JSON shape is unchanged without it. Add <code>--include-loads</code> to interleave on-demand skill loads into that same <code>--json</code> events feed, each row tagged with a <code>kind</code> of <code>"call"</code> or <code>"skill_load"</code>; off by default, so without it the feed is unchanged. A load is never a call — it never enters the call counts. Best-effort local <strong>diagnostics</strong> (logging can never fail a call; size-rotated at ~5 MB × 2), not tamper-evident — input to <code>report calls</code>/<code>optimize</code>, not forensic evidence.</p>
 <h2 id="content-scanning">Content scanning<a class="hlink" href="#content-scanning" aria-label="Link to this section">#</a></h2>
