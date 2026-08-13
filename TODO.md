@@ -243,6 +243,32 @@ sessions are done and their three blockers are known.
     first chance to write down what a bad result would look like BEFORE the
     result arrives.
 
+36. **[ ] A typo'd root key is silently ignored — by the parser AND by the
+    schema.** Reproduced 2026-08-13 against the released binary: a manifest
+    whose only defect is `default_tolset = "dev"` (for `default_toolset`)
+    passes taplo validation, parses, and `status` runs clean — reporting
+    `Toolset dev — default`, which is the value it picked up from
+    `[toolsets.dev]`, not from the misspelled key. The key is dropped without a
+    word. The root `Manifest` and `toolsets` are serde-permissive while the
+    eleven nested tables are strict, which is almost certainly deliberate:
+    forward compatibility, so an older binary can read a manifest written by a
+    newer one.
+
+    So the fix is probably **not** `deny_unknown_fields` at the root — that
+    would trade a silent typo for a hard refusal of every future key. The
+    candidate is a `doctor` / `status` note instead: *unknown key
+    'default_tolset' — did you mean 'default_toolset'?*, an edit-distance
+    suggestion against the known key set, which costs nothing when the key is
+    genuinely from a newer version and catches the typo when it is not.
+
+    Also worth considering: `additionalProperties: false` at the SCHEMA root
+    only, so an editor underlines the typo while the binary stays tolerant.
+    **That divergence is the actual design question, not a detail** — a schema
+    stricter than the parser means the editor and the binary disagree about
+    what a valid manifest is, and this project's own rule is that claims match
+    enforcement. Decide whether "the editor warns, the binary accepts" is an
+    honest split or a second truth; the answer decides the shape of the fix.
+
 ## Not scheduled, deliberately
 
 24. R2 — the positioning flip. `STRATEGY.md` reopens only at its named
