@@ -4,7 +4,7 @@ User-facing changes per release. The [GitHub Releases
 page](https://github.com/Tarekkharsa/agentstack/releases) carries the built
 binaries, checksums, and provenance attestations for each entry.
 
-## Unreleased
+## v0.19.0 — 2026-08-13
 
 **Consent gets harder to give by accident, and the toolbox gets a word for a
 name.** Two changes here are breaking for scripts; both are listed first.
@@ -40,6 +40,12 @@ name.** Two changes here are breaking for scripts; both are listed first.
 - **`up` is a visible verb.** The fresh-machine command is on the default help
   screen rather than one hop behind the namespace, and `start.md` has a section
   for the second machine.
+
+- **Materializing a skill is roughly 20x faster on macOS.** Copying a skill tree
+  is one `clonefile(2)` call on APFS — the kernel shares extents copy-on-write
+  instead of reading and writing every byte. Taken only when the tree is
+  eligible; anything the syscall cannot reproduce faithfully falls back to the
+  ordinary recursive copy, so the tree that lands is the same either way.
 
 ## v0.18.1 — 2026-08-13
 

@@ -27,7 +27,7 @@ directory is not already on your `PATH` it prints
 `~/.local/bin` case. Copy whichever line it prints into your shell startup file,
 so a new shell still finds the binary.
 
-That installs v0.18.1, the release these pages describe, and verifies the
+That installs v0.19.0, the release these pages describe, and verifies the
 download against the checksums published with it. It is the latest stable
 release, so no version pin is needed; `AGENTSTACK_VERSION=vX.Y.Z` still asks
 for a specific build. To build from a checkout instead, see
@@ -94,7 +94,7 @@ agentstack status
 On the project above, that prints:
 
 ```console
-agentstack 0.18.1 — one portable manifest, every agent CLI
+agentstack 0.19.0 — one portable manifest, every agent CLI
 
   CLIs      2 of 13 supported detected here: Claude Code · Codex CLI
   Setup  ~/my-project/.agentstack/agentstack.toml — 2 servers → 2 detected CLIs, no CLIs pinned
@@ -383,7 +383,7 @@ or from another supervisor. T3 Code is not required.
 
 ## If Homebrew gives you an older build
 
-These pages describe v0.18.1. The installer one-liner above serves it. The
+These pages describe v0.19.0. The installer one-liner above serves it. The
 Homebrew formula is published by hand after each stable release, so
 `brew install` can trail the releases page for a while; `agentstack --version`
 says which build you have.

@@ -205,7 +205,7 @@ machines, or teammates.
 
 ## Install
 
-The quickstart installs **v0.18.1**, the release this README describes, and
+The quickstart installs **v0.19.0**, the release this README describes, and
 every command on this page runs on it. It is the latest stable release, so the
 installer needs no version pin; `AGENTSTACK_VERSION=vX.Y.Z` still asks for a
 specific build, and `agentstack --version` says which one you have.
