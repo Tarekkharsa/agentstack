@@ -251,15 +251,60 @@ fn cite_builtin(ctx: &GuardContext, decision: Decision) -> Decision {
     }
 }
 
-/// Every operation that can modify or delete a path must pass both the
-/// machine/project deny globs and the writable-root boundary. Keeping this as
-/// one primitive prevents spelling-specific command handlers from omitting
-/// half of the check.
+/// Every operation that can modify or delete a path must pass the
+/// machine/project deny globs, the `~/.agentstack` absolute deny, and the
+/// writable-root boundary. Keeping this as one primitive prevents
+/// spelling-specific command handlers from omitting part of the check.
 fn write_target_check(ctx: &GuardContext, path: &str) -> Decision {
     if let d @ Decision::Deny { .. } = deny_glob_check(ctx, Access::Write, path) {
         return d;
     }
+    if let d @ Decision::Deny { .. } = agentstack_home_check(ctx, path) {
+        return d;
+    }
     write_scope_check(ctx, path)
+}
+
+/// `~/.agentstack` is never writable, `[guard] allow_roots` notwithstanding.
+///
+/// That directory holds the machine manifest whose `[guard]` table configures
+/// this very check (a write there could widen `allow_roots` or flip
+/// `enabled = false`), the trust store that records what a human consented to,
+/// and the hook wrapper scripts the CLIs execute. An allow_roots that covers
+/// it — or a permissive `["/"]` — would let the guard be edited out of the way
+/// through the guard.
+///
+/// Applies to file-tool writes (Write / Edit / `apply_patch`) as well as
+/// shell writes. It did not, once: the exemption argued that a harness shows
+/// those diffs to the user, so they are consented edits. That holds for
+/// manifests in a workspace, and it is exactly wrong for the trust store —
+/// "the user saw a diff scroll past" is not the consent ceremony, and the file
+/// it forges is the record OF that ceremony. So the exemption survives for
+/// everything outside this directory (that is [`write_scope_check`], which
+/// still allows `allow_roots`), and stops at its edge.
+fn agentstack_home_check(ctx: &GuardContext, path: &str) -> Decision {
+    let abs = normalize(path, &ctx.workspace, &ctx.home);
+    // Both sides in as-given AND symlink-resolved spellings — resolving can
+    // only ADD ways to hit the deny, never ways to escape it.
+    let targets = [Some(abs.clone()), resolve_existing_prefix(&abs)];
+    let homes = [
+        Some(ctx.agentstack_home.clone()),
+        resolve_existing_prefix(&ctx.agentstack_home),
+    ];
+    for t in targets.iter().flatten() {
+        for h in homes.iter().flatten() {
+            if within(t, h) {
+                return Decision::deny(format!(
+                    "{} is inside {} — the guard's own config, the trust store, and the \
+                     hook scripts; [guard] allow_roots cannot allowlist it (edit it \
+                     directly, outside the agent)",
+                    abs.display(),
+                    ctx.agentstack_home.display()
+                ));
+            }
+        }
+    }
+    Decision::Allow
 }
 
 /// Every target of a multi-target write (a patch envelope), through the SAME
@@ -288,39 +333,6 @@ fn check_write_set(ctx: &GuardContext, paths: &[String]) -> Decision {
         }
     }
     Decision::Allow
-}
-
-/// [`write_target_check`] for writes reached through the SHELL (in-place
-/// edits, redirects, rm/mv/cp/tee …), with one addition: targets inside
-/// `~/.agentstack` are always denied, `allow_roots` notwithstanding. That
-/// directory holds the machine manifest whose `[guard]` table configures
-/// this very check (a `sed -i` there could widen `allow_roots` or flip
-/// `enabled = false`), the trust store, and the hook wrapper scripts the
-/// CLIs execute. File-tool writes (Write/Edit) are exempt: those diffs are
-/// shown to the user by the harness, and legitimately edit manifests.
-fn shell_write_check(ctx: &GuardContext, path: &str) -> Decision {
-    let abs = normalize(path, &ctx.workspace, &ctx.home);
-    // Both sides in as-given AND symlink-resolved spellings — resolving can
-    // only ADD ways to hit the deny, never ways to escape it.
-    let targets = [Some(abs.clone()), resolve_existing_prefix(&abs)];
-    let homes = [
-        Some(ctx.agentstack_home.clone()),
-        resolve_existing_prefix(&ctx.agentstack_home),
-    ];
-    for t in targets.iter().flatten() {
-        for h in homes.iter().flatten() {
-            if within(t, h) {
-                return Decision::deny(format!(
-                    "{} is inside {} — the guard's own config and state; \
-                     [guard] allow_roots cannot allowlist it (edit it directly, \
-                     outside the agent)",
-                    abs.display(),
-                    ctx.agentstack_home.display()
-                ));
-            }
-        }
-    }
-    write_target_check(ctx, path)
 }
 
 /// Lexical normalization: make `path` absolute against `base`, expand `~`
@@ -410,7 +422,29 @@ const WRAPPERS: &[&str] = &[
     "sudo", "env", "nohup", "time", "nice", "ionice", "command", "builtin", "exec", "stdbuf",
 ];
 
+/// Interpreters that write any file from one `-c`/`-e` string argument.
+///
+/// The tokenizer sees that string as a single opaque token, so none of the
+/// path analysis below can read the write out of it — `python3 -c
+/// "open(...).write(...)"` reaches the filesystem with no target the guard
+/// ever judged. That is tolerable almost everywhere (the guard is cooperative,
+/// and an interpreter is a general-purpose tool), and NOT tolerable for one
+/// directory: `~/.agentstack` holds the trust store, so a write there forges a
+/// human's consent. See [`check_interpreter_consent_store`].
+const INTERPRETERS: &[&str] = &["node", "nodejs", "ruby", "deno", "bun", "php"];
+
+/// Shells whose `-c` argument is a whole command line of its own.
+const SHELLS: &[&str] = &["sh", "bash", "zsh", "dash", "ksh", "ash"];
+
+/// How deep a `sh -c "sh -c …"` nest is followed before the guard stops
+/// unwrapping. Three is far past any real command and keeps the work bounded.
+const MAX_SHELL_DEPTH: u8 = 3;
+
 fn check_bash(ctx: &GuardContext, command: &str) -> Decision {
+    check_bash_depth(ctx, command, 0)
+}
+
+fn check_bash_depth(ctx: &GuardContext, command: &str, depth: u8) -> Decision {
     for segment in split_segments(command) {
         let tokens = tokenize(&segment);
         if tokens.is_empty() {
@@ -436,13 +470,33 @@ fn check_bash(ctx: &GuardContext, command: &str) -> Decision {
                 }
                 continue;
             }
-            if let d @ Decision::Deny { .. } = shell_write_check(ctx, &target) {
+            if let d @ Decision::Deny { .. } = write_target_check(ctx, &target) {
                 return d;
             }
         }
         let (program, rest, via_xargs) = strip_wrappers(tokens);
         let Some(program) = program else { continue };
+        // The consent-store checks run BEFORE the per-program table, because
+        // they judge programs the table also handles for other reasons
+        // (`perl -i`), and because a refusal here is about consent, not about
+        // destruction.
+        if let d @ Decision::Deny { .. } = check_interpreter_consent_store(ctx, &program, &rest) {
+            return d;
+        }
+        // `sh -c "<command>"`: the inner string is a command line the guard
+        // would judge in full if it arrived on its own, and the tokenizer sees
+        // it as ONE opaque token. Unwrap it and judge it, so a quoted shell is
+        // not a way to say what the guard refuses to hear (bounded by
+        // [`MAX_SHELL_DEPTH`]).
+        if SHELLS.contains(&program.as_str()) && depth < MAX_SHELL_DEPTH {
+            if let Some(script) = shell_script_arg(&rest) {
+                if let d @ Decision::Deny { .. } = check_bash_depth(ctx, script, depth + 1) {
+                    return d;
+                }
+            }
+        }
         let d = match program.as_str() {
+            "agentstack" => check_agentstack(&rest),
             "rm" => check_rm(ctx, &rest, via_xargs),
             "git" => cite_builtin(ctx, check_git(&rest)),
             "find" => check_find(ctx, &rest),
@@ -661,11 +715,144 @@ fn check_rm(ctx: &GuardContext, args: &[String], via_xargs: bool) -> Decision {
             );
         }
         // Deletion is a write: confined to the workspace + allow_roots + tmp.
-        if let d @ Decision::Deny { .. } = shell_write_check(ctx, &t) {
+        if let d @ Decision::Deny { .. } = write_target_check(ctx, &t) {
             return d;
         }
     }
     Decision::Allow
+}
+
+/// The script argument of a shell invocation (`-c`, and combined spellings
+/// like `-lc`/`-ec`), or `None` when the shell runs a file or a pipe instead.
+fn shell_script_arg(args: &[String]) -> Option<&str> {
+    let mut i = 0;
+    while i < args.len() {
+        let a = &args[i];
+        // Only short flag clusters carry `c`; `--posix` must not match on its
+        // letters, and `--` ends the options.
+        if a == "--" {
+            return None;
+        }
+        if a.starts_with('-') && !a.starts_with("--") && a.contains('c') {
+            return args.get(i + 1).map(String::as_str);
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Whether this program runs an inline program text (see [`INTERPRETERS`]).
+///
+/// `perl` counts only with a `-e`-family flag: the guard already judges
+/// `perl -i` as an in-place editor with real path operands, and a `perl`
+/// invocation with no inline program is that, not this.
+fn is_interpreter(program: &str, args: &[String]) -> bool {
+    if program.starts_with("python") {
+        return true;
+    }
+    if program == "perl" {
+        return args
+            .iter()
+            .any(|a| a.starts_with('-') && !a.starts_with("--") && a.contains('e'));
+    }
+    INTERPRETERS.contains(&program)
+}
+
+/// One directory an interpreter may not name from an agent's shell.
+///
+/// Deliberately TEXTUAL and coarse: the argument to `-c`/`-e` is a program in
+/// another language, and the guard neither parses it nor knows whether the
+/// mention is a read or a write. Everywhere else that imprecision would be a
+/// bad trade; here it is the right one, because `~/.agentstack` holds the
+/// trust store — the record of what a human consented to — and a false
+/// negative there forges a human's yes, while a false positive costs one
+/// script that has to be run outside the agent.
+///
+/// It is not a boundary and does not claim to be: an interpreter can build the
+/// same path out of pieces this never sees. It closes the spelling anyone
+/// actually writes, and `docs/ENFORCEMENT.md` names what remains.
+fn check_interpreter_consent_store(ctx: &GuardContext, program: &str, args: &[String]) -> Decision {
+    if !is_interpreter(program, args) {
+        return Decision::Allow;
+    }
+    let text = args.join(" ");
+    let home = ctx.agentstack_home.to_string_lossy();
+    let names_store = text.contains(".agentstack")
+        // Every spelling of the env var at once — `$AGENTSTACK_HOME`,
+        // `${AGENTSTACK_HOME}`, `os.environ["AGENTSTACK_HOME"]`.
+        || text.contains("AGENTSTACK_HOME")
+        || (!home.as_ref().is_empty() && text.contains(home.as_ref()));
+    if !names_store {
+        return Decision::Allow;
+    }
+    Decision::deny(format!(
+        "blocked: a {program} program naming {} was refused — that directory holds the \
+         trust store (what a human consented to) and the guard's own config\n  \
+         nothing ran · an interpreter's inline program is opaque to this check, so it is \
+         refused here rather than judged · edit those files directly, outside the agent",
+        ctx.agentstack_home.display()
+    ))
+}
+
+/// `agentstack` itself, run from an agent's shell.
+///
+/// Consent is the one thing this CLI must never take from the agent it is
+/// governing: `trust`, the `yes` funnel, and the promptless `--yes` forms of
+/// `init`/`apply` all end with a grant recorded as though a human had read the
+/// review. A hooked agent shell is not that human, and the flag that says "I
+/// read it" is one the agent can type as easily as any other. So those
+/// invocations are refused at the hook, and everything else `agentstack`
+/// does — status, preview, lock, render, undo — stays allowed.
+///
+/// `trust --preview` is explicitly allowed: it is the read half of the verb
+/// (it prints the surface and its digest and writes nothing), and it is what
+/// an agent should run to hand a human something to review.
+///
+/// Cooperative, like the rest of this module: the harness chooses to consult
+/// the hook, and a harness that does not gets nothing from this. What it
+/// removes is the everyday path — an agent with an ordinary tool loop typing
+/// the grant itself.
+fn check_agentstack(args: &[String]) -> Decision {
+    let Some(verb) = agentstack_verb(args) else {
+        return Decision::Allow;
+    };
+    let has = |flag: &str| args.iter().any(|a| a == flag);
+    let refuse = |what: &str| {
+        Decision::deny(format!(
+            "blocked: `agentstack {what}` grants consent — it was refused\n  \
+             nothing was granted · consent is granted at your terminal, not from an agent \
+             shell · the agent may prepare the review with `agentstack trust --preview`"
+        ))
+    };
+    match verb {
+        "trust" if !has("--preview") => refuse("trust"),
+        "yes" => refuse("yes"),
+        "init" if has("--yes") => refuse("init --yes"),
+        "apply" if has("--yes") => refuse("apply --yes"),
+        _ => Decision::Allow,
+    }
+}
+
+/// The subcommand of an `agentstack` command line: the first operand, past any
+/// flags (and past the display-only `x` namespace, which `strip_namespace`
+/// removes before clap parses).
+fn agentstack_verb(args: &[String]) -> Option<&str> {
+    let mut i = 0;
+    while i < args.len() {
+        let a = args[i].as_str();
+        // The one global flag that takes a separate value — its operand is not
+        // the verb. (`--manifest-dir=DIR` is one token and skips as a flag.)
+        if a == "--manifest-dir" {
+            i += 2;
+            continue;
+        }
+        if a.starts_with('-') || a == "x" {
+            i += 1;
+            continue;
+        }
+        return Some(a);
+    }
+    None
 }
 
 fn check_git(args: &[String]) -> Decision {
@@ -722,7 +909,7 @@ fn check_find(ctx: &GuardContext, args: &[String]) -> Decision {
         return Decision::Allow; // implicit `.` — inside the workspace
     }
     for r in roots {
-        if let d @ Decision::Deny { .. } = shell_write_check(ctx, r) {
+        if let d @ Decision::Deny { .. } = write_target_check(ctx, r) {
             return d;
         }
         let abs = normalize(r, &ctx.workspace, &ctx.home);
@@ -770,7 +957,7 @@ fn check_chmod_chown(ctx: &GuardContext, program: &str, args: &[String]) -> Deci
                 Decision::deny(format!("{program} -R on {}", abs.display())),
             );
         }
-        if let d @ Decision::Deny { .. } = shell_write_check(ctx, t) {
+        if let d @ Decision::Deny { .. } = write_target_check(ctx, t) {
             return d;
         }
     }
@@ -783,7 +970,7 @@ fn check_write_targets(ctx: &GuardContext, program: &str, args: &[String]) -> De
         if matches!(t.as_str(), "/dev/null" | "/dev/stdout" | "/dev/stderr") {
             continue;
         }
-        if let Decision::Deny { reason } = shell_write_check(ctx, &t) {
+        if let Decision::Deny { reason } = write_target_check(ctx, &t) {
             return Decision::deny(format!("{program}: {reason}"));
         }
     }
@@ -797,7 +984,7 @@ fn check_mv_cp(ctx: &GuardContext, program: &str, args: &[String]) -> Decision {
     }
     // The destination is a write; for `mv`, sources are deletions too.
     let (sources, dest) = targets.split_at(targets.len() - 1);
-    if let Decision::Deny { reason } = shell_write_check(ctx, &dest[0]) {
+    if let Decision::Deny { reason } = write_target_check(ctx, &dest[0]) {
         return Decision::deny(format!("{program} destination: {reason}"));
     }
     for s in sources {
@@ -805,7 +992,7 @@ fn check_mv_cp(ctx: &GuardContext, program: &str, args: &[String]) -> Decision {
             return d;
         }
         if program == "mv" {
-            if let Decision::Deny { reason } = shell_write_check(ctx, s) {
+            if let Decision::Deny { reason } = write_target_check(ctx, s) {
                 return Decision::deny(format!("mv source (a deletion): {reason}"));
             }
         }
@@ -864,7 +1051,7 @@ fn check_in_place_edit(ctx: &GuardContext, program: &str, args: &[String]) -> De
         if !is_explicit_path(f) {
             continue;
         }
-        if let Decision::Deny { reason } = shell_write_check(ctx, f) {
+        if let Decision::Deny { reason } = write_target_check(ctx, f) {
             return Decision::deny(format!("{program} -i rewrites {f} in place: {reason}"));
         }
     }
@@ -2536,11 +2723,12 @@ mod tests {
         }
     }
 
-    /// The guard's own config/state dir is never shell-writable, even when
-    /// `allow_roots` covers it — otherwise a shell write could widen
-    /// allow_roots (or flip `enabled = false`) and then write anywhere.
+    /// The guard's own config/state dir is never writable — by a shell OR by a
+    /// file tool — even when `allow_roots` covers it. Otherwise a write could
+    /// widen allow_roots (or flip `enabled = false`) and then write anywhere,
+    /// or rewrite `trust.json` and forge a consent nobody gave.
     #[test]
-    fn guard_own_config_is_never_shell_writable() {
+    fn guard_own_config_is_never_writable() {
         let mut c = ctx();
         c.allow_roots = vec![PathBuf::from("/Users/me")]; // home allowlisted!
         for cmd in [
@@ -2557,10 +2745,35 @@ mod tests {
                 "{cmd} should be denied"
             );
         }
-        // The special case is shell-only and write-only: reads pass, other
-        // home writes pass (allow_roots covers home here), and file-tool
-        // writes stay governed by the ordinary boundary — harnesses show
-        // those diffs to the user, and agents legitimately edit manifests.
+        // H3: a file tool reaches the identical deny. It did not before — the
+        // exemption argued that a harness shows Write/Edit diffs to the user,
+        // which is true of a manifest in a workspace and worthless for the
+        // file that RECORDS a consent ceremony.
+        for path in [
+            "/Users/me/.agentstack/agentstack.toml",
+            "/Users/me/.agentstack/trust.json",
+            "~/.agentstack/trust.json",
+        ] {
+            assert!(
+                denied(check_event(
+                    &c,
+                    &GuardEvent::FileWrite { path: path.into() }
+                )),
+                "FileWrite {path} should be denied"
+            );
+            assert!(
+                denied(check_event(
+                    &c,
+                    &GuardEvent::FileWrites {
+                        paths: vec![path.into()]
+                    }
+                )),
+                "FileWrites {path} should be denied"
+            );
+        }
+        // The special case is write-only and bounded to that one directory:
+        // reads pass, and other home writes pass (allow_roots covers home
+        // here) exactly as before.
         assert_eq!(
             check_event(&c, &bash("cat /Users/me/.agentstack/agentstack.toml")),
             Decision::Allow
@@ -2573,11 +2786,115 @@ mod tests {
             check_event(
                 &c,
                 &GuardEvent::FileWrite {
-                    path: "/Users/me/.agentstack/agentstack.toml".into()
+                    path: "/Users/me/notes.txt".into()
                 }
             ),
             Decision::Allow
         );
+        assert_eq!(
+            check_event(
+                &c,
+                &GuardEvent::FileRead {
+                    path: "/Users/me/.agentstack/trust.json".into()
+                }
+            ),
+            Decision::Allow
+        );
+    }
+
+    // ── consent (H1–H2) ─────────────────────────────────────────────────
+
+    /// RED TEAM — an agent's own shell cannot type the grant.
+    ///
+    /// `--yes --consented <digest>` is the fully-formed non-interactive grant:
+    /// it satisfies every check inside the CLI, because inside the CLI it is
+    /// indistinguishable from a human who previewed and pasted the digest
+    /// back. The hook is where that difference still exists, so the refusal
+    /// lives here. Reverting the `agentstack` arm allows every line below.
+    #[test]
+    fn an_agent_shell_cannot_grant_consent() {
+        let c = ctx();
+        for cmd in [
+            "agentstack trust .",
+            "agentstack trust . --yes --consented deadbeef",
+            "agentstack trust --yes --consented deadbeef",
+            "agentstack yes",
+            "agentstack yes --yes",
+            "agentstack init --yes",
+            "agentstack apply --write --yes",
+            // Spelled with a path, under a wrapper, behind the display-only
+            // `x` namespace, after a global flag with a value, inside a
+            // pipeline, and inside a quoted `sh -c` — the effective program is
+            // the same one either way.
+            "/usr/local/bin/agentstack trust . --yes --consented d",
+            "sudo agentstack trust .",
+            "agentstack x yes",
+            "agentstack --manifest-dir /work/proj trust .",
+            "echo hi && agentstack trust . --yes --consented d",
+            "sh -c 'agentstack trust . --yes --consented d'",
+            "bash -lc \"agentstack yes --yes\"",
+        ] {
+            assert!(
+                denied(check_event(&c, &bash(cmd))),
+                "{cmd} should be denied"
+            );
+        }
+        // Everything else the CLI does stays allowed — including the read half
+        // of the trust verb, which is exactly what an agent SHOULD run to hand
+        // a human something to review.
+        for cmd in [
+            "agentstack trust --preview",
+            "agentstack trust --preview --json",
+            "agentstack status",
+            "agentstack lock --write",
+            "agentstack apply --write",
+            "agentstack init --plan",
+            "agentstack use dev --write",
+            "sh -c 'agentstack trust --preview'",
+        ] {
+            assert_eq!(check_event(&c, &bash(cmd)), Decision::Allow, "{cmd}");
+        }
+    }
+
+    /// RED TEAM — an interpreter is not a way to reach the trust store.
+    ///
+    /// The inline program is one opaque token to every path check in this
+    /// module, so the mention of the directory is the whole signal. Coarse on
+    /// purpose: this is the one directory where a false negative forges a
+    /// human's consent.
+    #[test]
+    fn interpreters_may_not_name_the_consent_store() {
+        let c = ctx();
+        for cmd in [
+            r#"python3 -c "open('/Users/me/.agentstack/trust.json','w').write('{}')""#,
+            r#"python -c "import os,json; json.dump({}, open(os.environ['AGENTSTACK_HOME']+'/trust.json','w'))""#,
+            r#"python3.12 -c "print(open('~/.agentstack/trust.json').read())""#,
+            r#"node -e "require('fs').writeFileSync(process.env.HOME+'/.agentstack/trust.json','{}')""#,
+            r#"ruby -e "File.write('/Users/me/.agentstack/trust.json','{}')""#,
+            r#"deno eval "Deno.writeTextFileSync('$AGENTSTACK_HOME/trust.json','{}')""#,
+            r#"bun -e "Bun.write('/Users/me/.agentstack/trust.json','{}')""#,
+            r#"php -r "file_put_contents('/Users/me/.agentstack/trust.json','{}');""#,
+            r#"perl -e "open(F,'>','/Users/me/.agentstack/trust.json')""#,
+            // Under a wrapper, and inside a quoted shell.
+            r#"env python3 -c "open('/Users/me/.agentstack/trust.json','w')""#,
+            r#"sh -c "python3 -c \"open('/Users/me/.agentstack/trust.json','w')\"""#,
+        ] {
+            assert!(
+                denied(check_event(&c, &bash(cmd))),
+                "{cmd} should be denied"
+            );
+        }
+        // Ordinary interpreter work is untouched — the check is one directory
+        // wide, and `perl` with no inline program is still just the in-place
+        // editor the table already judged.
+        for cmd in [
+            r#"python3 -c "open('/work/proj/out.txt','w').write('hi')""#,
+            "python3 script.py --out /work/proj/build",
+            r#"node -e "console.log(1+1)""#,
+            "perl -i -pe 's/a/b/' /work/proj/notes.txt",
+        ] {
+            assert_eq!(check_event(&c, &bash(cmd)), Decision::Allow, "{cmd}");
+        }
     }
 
     // ── protocols ───────────────────────────────────────────────────────
