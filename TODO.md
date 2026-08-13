@@ -58,9 +58,11 @@ docs describe and the code does not emit.
     BLOCKED, so --write would refuse and write nothing" and never names
     `--write`; pinned by
     `crates/cli/tests/a_dry_run_predicts_its_write.rs::use_dry_run_does_not_promise_a_write_its_own_gate_would_refuse`.
-11. **[ ] P8-G3 — `apply`'s dry run has the same shape.** "0 targets would
-    change. Re-run with --write to write." above an `apply --write` that exits 1
-    with "nothing was delivered".
+11. **[x] P8-G3 — `apply`'s dry run has the same shape.** Closed: already fixed
+    by #50 (`delivers_nothing` arm in `crates/cli/src/commands/apply.rs`,
+    regression test `apply_dry_run_does_not_promise_a_write_that_would_deliver_nothing`);
+    re-verified 2026-08-13 — the preview now names the refusal and both
+    recovery commands instead of `--write`.
 12. **[x] P8-G4 — `use --write` reports activation for a run that failed.**
     "activated 'backend' on 4 targets (wrote 0)" prints above `error: 3 targets
     blocked` and exit 1. **Closed in `64109b5`, verified 2026-08-13:** a fully
