@@ -1095,7 +1095,7 @@ and `crates/cli/src/guard.rs`.
 |---|---|---|---|---|
 | `[policy.filesystem] read` | machine + project | **none today** — compiled, displayed by `doctor`/`trust`, consulted by nothing | no effect | n/a (it grants nothing) |
 | `[policy.filesystem] write` | machine + project | sandbox workspace mount only | workspace mounts **read-only** (deny-by-default) | `write = ["./**"]` |
-| `[policy.filesystem] deny` | machine ∪ project — a project may only ADD | host guard (cooperative) and sandbox | nothing is blocklisted | `deny = []` |
+| `[policy.filesystem] deny` | machine ∪ project — a project may only ADD | host guard (cooperative) — the only enforcer today; the sandbox has no per-path mask mount | nothing is blocklisted | `deny = []` |
 | `[guard] allow_roots` | machine only | host guard write confinement | writes confined to the workspace + temp | `allow_roots = ["/"]` |
 | `[guard.project_roots]` | machine only | host guard, for one named workspace | no extra roots for that workspace | per-workspace list |
 
@@ -1110,10 +1110,12 @@ Read the rows together, because the gaps matter:
   question — may the workspace root be mounted read-write? A partial scope like
   `src/**` does not mount part of the tree; it rounds **down** to read-only.
   It has no bearing on host writes.
-- **`deny` wins over everything.** It is a pure blocklist, unioned across the
-  machine and project layers, matched against the workspace-relative path, the
-  absolute path, and the bare file name. A project can add to it and can never
-  drop the machine's entries.
+- **`deny` wins over everything the guard sees.** It is a pure blocklist,
+  unioned across the machine and project layers, matched against the
+  workspace-relative path, the absolute path, and the bare file name. A project
+  can add to it and can never drop the machine's entries. Its one enforcer is
+  the cooperative host guard; inside a sandbox the confinement is the mount
+  boundary, not a per-path mask.
 - **Inside a project workspace, full write access is already the default.**
   The host guard confines writes to the workspace, `[guard] allow_roots` and
   temp directories — so a project editing its own files needs no configuration
