@@ -47,9 +47,19 @@ fn lease_lives_for_one_stdio_process_and_writes_no_native_artifacts() {
     ] {
         writeln!(stdin, "{request}").unwrap();
         stdin.flush().unwrap();
-        let mut line = String::new();
-        stdout.read_line(&mut line).unwrap();
-        responses.push(serde_json::from_str::<Value>(&line).unwrap());
+        // Read until an actual RESPONSE arrives. A notification carries no
+        // `id` and the server may emit one between requests
+        // (`notifications/tools/list_changed`); treating the next line as
+        // this request's answer drifts every later index by one.
+        loop {
+            let mut line = String::new();
+            stdout.read_line(&mut line).unwrap();
+            let value = serde_json::from_str::<Value>(&line).unwrap();
+            if !value["id"].is_null() {
+                responses.push(value);
+                break;
+            }
+        }
     }
     drop(stdin); // EOF is the implicit final lease cleanup.
 

@@ -670,10 +670,17 @@ fn mcp_exchange(
     drop(stdin);
     let output = child.wait_with_output().unwrap();
     assert!(output.status.success(), "the mcp server exited cleanly");
+    // A JSON-RPC NOTIFICATION is not a response: it carries no `id`, and the
+    // server may send one at any time (`notifications/tools/list_changed`
+    // fires when the loadable set moves). Positional indexing over the raw
+    // stream therefore drifts the moment the server gains a notification —
+    // which is exactly what happened when the skill index moved into the tool
+    // description. Filter them out here so the callers stay request-indexed.
     let mut responses: Vec<serde_json::Value> = String::from_utf8(output.stdout)
         .unwrap()
         .lines()
-        .map(|line| serde_json::from_str(line).unwrap())
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .filter(|v| !v["id"].is_null())
         .collect();
     // JSON-RPC responses may complete out of order. Keep this fixture's
     // callers request-indexed by sorting on the numeric ids they supplied.
