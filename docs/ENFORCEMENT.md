@@ -117,8 +117,8 @@ that is where the refusals live.
 What the guard refuses, on the everyday path (`agentstack guard check`, wired
 as each CLI's pre-tool-use hook):
 
-- **the grant, typed.** `agentstack trust` (except the read-only
-  `--preview`), `agentstack yes`, and the promptless `init --yes` / `apply
+- **the grant, typed.** `agentstack trust` (except its read-only `--preview`
+  and `--list`), `agentstack yes`, and the promptless `init --yes` / `apply
   --yes` are denied from an agent shell, in the wrapped and quoted spellings
   too (`sudo …`, `sh -c "…"`). Everything else `agentstack` does — status,
   preview, lock, render, undo — stays allowed;
