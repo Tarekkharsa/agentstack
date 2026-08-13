@@ -24,9 +24,22 @@ checksums published with the release:
 curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh
 ```
 
-Then [Get started](start.md). Other ways in, including building from source
-and what that costs you, are in
-[Install](https://github.com/Tarekkharsa/agentstack#install).
+Then [Get started](start.md), which also covers building from source and what
+that costs you.
+
+## Grow into it
+
+Start with configuration portability. Add toolsets, sharing, and stronger
+governance only when you need them.
+
+| Step | You run | You get |
+| --- | --- | --- |
+| [1 — Unify](start.md) | `agentstack init` → `more gateway connect --all --write` | import once, delivered everywhere |
+| [2 — Switch](howto/name-a-toolset.md) | toolsets · `session start/end` | toolsets and temporary sessions |
+| [3 — Diagnose](start.md#commands-you-will-use-most) | `agentstack doctor` · `diff` | doctor and diff explain drift |
+| [4 — Recover](howto/undo.md) | `adopt` · `apply` · `restore` · `uninstall` | keep an edit, or undo the write |
+| [5 — Share](howto/team-setup.md) | the setup file · its lock · the library | locked, secret-free setups |
+| [6 — Govern](howto/trust-a-repo.md) | trust · policy · lockdown | trust, policy, confined runs |
 
 Everything published here is linked from this page: the guides, the how-tos,
 the reference, and the enforcement record.

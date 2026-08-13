@@ -31,7 +31,7 @@ That installs v0.19.0, the release these pages describe, and verifies the
 download against the checksums published with it. It is the latest stable
 release, so no version pin is needed; `AGENTSTACK_VERSION=vX.Y.Z` still asks
 for a specific build. To build from a checkout instead, see
-[Install](../README.md#install).
+[Install and set up this machine](#1-install-and-set-up-this-machine) above.
 
 Set up this machine:
 

@@ -1858,6 +1858,10 @@ evidence alone.
 <a id="staying-current-agentstack-self-update"></a>
 ## Staying current (`agentstack more self update`)
 
+> **On 0.18.x the verb is `agentstack x self update`.** `more` arrives in
+> 0.19.0, and `x` keeps working after it as a permanent alias — both spellings
+> reach the same command, so nothing scripted against `x` ever breaks.
+
 `agentstack more
 self update` replaces the binary you are running with the newest published
 release, and `agentstack doctor` tells you when there is one.
