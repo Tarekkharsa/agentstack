@@ -92,6 +92,23 @@ already-published check compares `[tag, draft, prerelease, assets]` against
 longer recognizes it as published, so a re-dispatch will try to rebuild it.
 Do not re-dispatch a published RC.
 
+**Re-cutting an unpublished tag, and the trap in it.** The don't-move rule
+above binds from the moment of PUBLISH. While a release is still only a draft —
+nothing at `releases/latest`, no release page — a tag MAY be deleted and
+re-cut, and for a docs-only fix that is the right call: the binary is identical
+either way, and the site deploys from the tag, so a stale tag ships stale docs
+for the life of that release.
+
+Delete the DRAFT first, then re-cut. `release.yml` reuses an existing draft
+rather than replacing it: on a re-dispatch it uploads fresh assets but leaves
+the old release notes and `target_commitish` in place. A v0.19.0 re-cut hit
+exactly this — correct binaries from the new commit, sitting under notes from
+the old one that never mentioned the release's headline feature. The assets
+looked right, the page was wrong, and only a notes-versus-CHANGELOG diff caught
+it. So: `gh release delete <tag> --yes`, then re-cut the tag, then let the
+workflow build into a genuinely new draft, and check the notes as part of
+verifying it.
+
 If the tag exists but its draft was lost, rebuild that exact tag through the
 manual recovery input. This still creates a draft and never publishes:
 
