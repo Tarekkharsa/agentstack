@@ -3188,7 +3188,7 @@ fn human_bytes(bytes: u64) -> String {
 // A central library solves distribution but makes CAPABILITY ROT worse: an
 // index that only ever grows becomes the mess the scattered static configs
 // were. `lib list` is where a person looks, so the staleness reading belongs
-// here rather than three hops away in `agentstack x report calls`.
+// here rather than three hops away in `agentstack more report calls`.
 //
 // Two rules shape everything below.
 //

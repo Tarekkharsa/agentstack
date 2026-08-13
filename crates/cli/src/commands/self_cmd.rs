@@ -189,7 +189,7 @@ fn run_link(args: &SelfLinkArgs) -> Result<()> {
         println!("Add to PATH:  export PATH=\"{}:$PATH\"", dir.display());
     }
     println!(
-        "Harness configs registered with `agentstack x gateway connect` use this stable \
+        "Harness configs registered with `agentstack more gateway connect` use this stable \
          path on their next `connect --write`."
     );
     Ok(())
@@ -203,7 +203,7 @@ fn run_which() -> Result<()> {
     let Some(first) = hits.first() else {
         println!("on PATH:  (not found)");
         println!(
-            "  {} a bare `agentstack` won't run from other shells ↳ agentstack x self link",
+            "  {} a bare `agentstack` won't run from other shells ↳ agentstack more self link",
             "⚠".yellow()
         );
         return Ok(());
@@ -217,14 +217,14 @@ fn run_which() -> Result<()> {
             println!("on PATH:  {} → {}", first.display(), target.display());
             println!(
                 "  {} stale: a bare `agentstack` runs a different binary than this one \
-                 ↳ agentstack x self link",
+                 ↳ agentstack more self link",
                 "⚠".yellow()
             );
         }
         Err(_) => {
             println!("on PATH:  {} (broken link)", first.display());
             println!(
-                "  {} broken: the PATH entry no longer resolves ↳ agentstack x self link",
+                "  {} broken: the PATH entry no longer resolves ↳ agentstack more self link",
                 "⚠".yellow()
             );
         }

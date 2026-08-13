@@ -74,7 +74,9 @@ pub fn run(args: &SetupArgs, manifest_dir: Option<&Path>) -> Result<()> {
             // actually deliver anything. `apply` writes the rendered lane only
             // — house rules, settings, hooks — and a project with none of them
             // has nothing for it to do.
-            println!("    agentstack x gateway connect --all --write   # serve what routes live");
+            println!(
+                "    agentstack more gateway connect --all --write   # serve what routes live"
+            );
             println!("    agentstack apply --write           # write the rendered lane, if any");
             println!("    agentstack use <toolset> --write   # if the manifest has skills");
             return Ok(());
@@ -644,7 +646,7 @@ fn run_zero_files(
 
     // cmds[0] = "agentstack trust .", cmds[1] = "agentstack set-mode zero-files"
     let (cmds, what) = mode_switch_plan(Mode::ZeroFiles, None);
-    const CONNECT_LATER: &str = "agentstack x gateway connect --all --write";
+    const CONNECT_LATER: &str = "agentstack more gateway connect --all --write";
 
     if preconsented {
         println!(
@@ -692,10 +694,10 @@ fn print_switch_pointer(ctx: &super::Context, mode: super::overview::Mode) {
         "·".dimmed(),
         mode.label()
     );
-    println!("    {}", "agentstack x uninstall".bold());
+    println!("    {}", "agentstack more uninstall".bold());
     println!(
         "  {} it previews every removal first, and every FILE it removes undoes with \
-         `agentstack x restore --last`.",
+         `agentstack more restore --last`.",
         "·".dimmed()
     );
     print_skills_are_not_in_that_undo(&ctx.dir);
@@ -706,7 +708,7 @@ fn print_switch_pointer(ctx: &super::Context, mode: super::overview::Mode) {
 ///
 /// The pointer sends a reader to `x uninstall`, whose skills leg is
 /// `capture: false` ([`super::unrender::Removal::capture`]) — so "undoes with
-/// `agentstack x restore --last`" offered an undo that brings the configs back
+/// `agentstack more restore --last`" offered an undo that brings the configs back
 /// and silently leaves the skills off. This is the same defect
 /// [`super::uninstall`] repaired in its own closing copy, said by a different
 /// command, so it carries the same shared sentence.
@@ -1117,13 +1119,16 @@ fn mode_switch_plan(
         ),
         Mode::CleanAtRest => (
             vec![
-                format!("agentstack x session start {p}"),
-                "agentstack x session end".into(),
+                format!("agentstack more session start {p}"),
+                "agentstack more session end".into(),
             ],
             "Materialize your toolset for a session, then revert it so the repo stays clean.",
         ),
         Mode::ZeroFiles => (
-            vec!["agentstack trust .".into(), "agentstack x uninstall".into()],
+            vec![
+                "agentstack trust .".into(),
+                "agentstack more uninstall".into(),
+            ],
             "Review this repo once, then switch: the switch registers the gateway in your CLIs \
              and removes anything this project rendered, so its capabilities serve live.",
         ),
@@ -1428,7 +1433,7 @@ fn run_doctor_step(args: &DoctorArgs, manifest_dir: Option<&Path>, verbose: bool
 /// the automatic fork and the legacy zero-files fork, so there is one copy of
 /// this offer and one failure message.
 fn offer_bridge(preconsented: bool) -> Result<()> {
-    const CONNECT_LATER: &str = "agentstack x gateway connect --all --write";
+    const CONNECT_LATER: &str = "agentstack more gateway connect --all --write";
     // `--connect` is an answer already given, in the same breath as the
     // command that got here. Asking again would be theatre, not consent — but
     // the run still SAYS what it is about to write, because a machine-wide
@@ -1586,7 +1591,7 @@ fn render_stop_summary(files: &[(String, String)]) -> String {
     for (path, label) in files {
         out.push_str(&format!("    {path}  ({label})\n"));
     }
-    out.push_str("  Undo recorded files:  agentstack x restore --last --write\n");
+    out.push_str("  Undo recorded files:  agentstack more restore --last --write\n");
     out.push_str(
         "  Keychain values are outside file history; inspect with `agentstack secret list` and remove with `agentstack secret rm <NAME>`.\n",
     );
@@ -1676,7 +1681,7 @@ fn print_change_summary(
         );
         println!(
             "    {}",
-            "agentstack x gateway connect --all --write".bold()
+            "agentstack more gateway connect --all --write".bold()
         );
     } else {
         println!("\n{} Setup complete.", "✓".green());
@@ -1871,7 +1876,9 @@ fn render_change_summary(s: &ChangeSummary<'_>) -> String {
     // ONE next step, and one compact line for everything that stays reachable.
     let (cmd, why) = next;
     out.push_str(&format!("\n  Next: {cmd}   ({why})\n"));
-    out.push_str("  Also: agentstack   ·   undo this setup: agentstack x restore --last --write\n");
+    out.push_str(
+        "  Also: agentstack   ·   undo this setup: agentstack more restore --last --write\n",
+    );
     // P29.1: the closing doorway is the summary's FINAL line — it hands the user
     // to the walkthrough exactly when curiosity peaks, or back to bare
     // `agentstack` for the next step. Every delivery-mode fork ends through this
@@ -2243,12 +2250,12 @@ mod tests {
         assert_eq!(cmds, vec!["agentstack apply --write".to_string()]);
 
         let (cmds, _) = mode_switch_plan(Mode::CleanAtRest, Some("dev"));
-        assert_eq!(cmds[0], "agentstack x session start dev");
-        assert_eq!(cmds[1], "agentstack x session end");
+        assert_eq!(cmds[0], "agentstack more session start dev");
+        assert_eq!(cmds[1], "agentstack more session end");
 
         // No profile declared → a visible placeholder, not a panic.
         let (cmds, _) = mode_switch_plan(Mode::CleanAtRest, None);
-        assert_eq!(cmds[0], "agentstack x session start <toolset>");
+        assert_eq!(cmds[0], "agentstack more session start <toolset>");
 
         // Zero-files: trust FIRST (set-mode refuses an untrusted project so
         // the derived mode can't disagree with the choice), then the switch
@@ -2257,7 +2264,7 @@ mod tests {
         // deriving — and displaying — static.
         let (cmds, _) = mode_switch_plan(Mode::ZeroFiles, None);
         assert_eq!(cmds[0], "agentstack trust .");
-        assert_eq!(cmds[1], "agentstack x uninstall");
+        assert_eq!(cmds[1], "agentstack more uninstall");
     }
 
     // Stage 1.2: the close leads with the concise facts — manifest path, CLIs
@@ -2341,7 +2348,7 @@ mod tests {
         assert!(out.contains("~/.claude.json  (Claude Code · servers)"));
         assert!(out.contains("API_TOKEN  resolved from keychain"));
         assert!(out.contains("house rules"));
-        assert!(out.contains("agentstack x restore --last --write"));
+        assert!(out.contains("agentstack more restore --last --write"));
         assert!(out.contains("agentstack doctor"));
         assert!(out.contains("agentstack secret rm API_TOKEN"));
         // A CLI config changed → the restart advice is present.
@@ -2384,7 +2391,7 @@ mod tests {
             ..Default::default()
         });
         assert!(out.contains("No files were written"));
-        assert!(out.contains("agentstack x restore --last --write"));
+        assert!(out.contains("agentstack more restore --last --write"));
     }
 
     // P30: the restart-CLIs advice appears ONLY when a native CLI config
@@ -2464,7 +2471,7 @@ mod tests {
         assert!(out.contains("The import already wrote 2 files"));
         assert!(out.contains(".agentstack/agentstack.toml  (manifest · import)"));
         assert!(out.contains(".env  (.env · lifted secrets)"));
-        assert!(out.contains("agentstack x restore --last --write"));
+        assert!(out.contains("agentstack more restore --last --write"));
     }
 
     // P29.1: the summary's FINAL line is the start-page doorway, present on

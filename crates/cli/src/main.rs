@@ -37,11 +37,15 @@ fn main() {
         print!("{}", agentstack::cli::full_command_inventory());
         return;
     }
-    // `agentstack x …` — the namespace that holds every command outside the
-    // fifteen on the default help screen. Bare `x` (or `x --help`) lists what
-    // lives there; `x <cmd> …` is rewritten to `<cmd> …` before clap parses, so
-    // the two spellings share one parse tree and one dispatch path below.
-    if argv.first().map(String::as_str) == Some(agentstack::cli::NAMESPACE) {
+    // `agentstack more …` — the namespace that holds every command outside the
+    // sixteen on the default help screen. Bare `more` (or `more --help`) lists
+    // what lives there; `more <cmd> …` is rewritten to `<cmd> …` before clap
+    // parses, so the two spellings share one parse tree and one dispatch path
+    // below. `x`, the pre-v0.19 spelling, is accepted here forever.
+    if argv
+        .first()
+        .is_some_and(|a| agentstack::cli::is_namespace(a))
+    {
         if argv.len() == 1 || argv[1..].iter().all(|a| a == "--help" || a == "-h") {
             print!("{}", agentstack::cli::namespace_listing());
             return;

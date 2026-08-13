@@ -23,7 +23,7 @@
 //! do: a plain rendered project, and the abandoned-render shape — a config an
 //! earlier `apply` wrote that is still on disk after the servers moved to the
 //! live lane. The second is the branch whose two sides are "nothing to report"
-//! and "`agentstack x unrender --write`", i.e. the widest gap two answers about
+//! and "`agentstack more unrender --write`", i.e. the widest gap two answers about
 //! one project can have.
 
 use std::fs;
@@ -155,7 +155,7 @@ fn a_rendered_project_reads_the_same_from_anywhere() {
 /// The abandoned render: `apply` wrote a server config, then the servers moved
 /// to the live lane and nothing new is written there — but the harness still
 /// reads the file. This is the finding whose one next action is
-/// `agentstack x unrender --write`, and the state in which the panel and the
+/// `agentstack more unrender --write`, and the state in which the panel and the
 /// terminal were seen describing one project two ways.
 #[test]
 fn an_abandoned_render_reads_the_same_from_anywhere() {

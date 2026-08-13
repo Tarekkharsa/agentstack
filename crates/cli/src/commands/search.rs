@@ -221,7 +221,7 @@ pub fn run(args: &SearchArgs, manifest_dir: Option<&Path>) -> Result<()> {
             // last week, and a result line with no next step reads as a dead
             // end — which is what sends people back to a browser tab.
             let cmd = if added {
-                format!("agentstack x explain {}", c.name)
+                format!("agentstack more explain {}", c.name)
             } else if c.source == "catalog" {
                 format!("agentstack add from {}", c.name)
             } else {

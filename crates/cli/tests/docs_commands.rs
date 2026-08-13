@@ -413,6 +413,22 @@ fn scan_file(
         let Some((tok1_pos, tok1)) = first else {
             continue;
         };
+        // `agentstack more <cmd>` is `agentstack <cmd>` — `main` strips the
+        // namespace before clap ever sees argv, so the verb to judge is the
+        // one AFTER the prefix. (Both spellings: `x` is the permanent alias.)
+        // While the prefix was one letter this needed no code, because
+        // `looks_like_command_token` rejects single characters; `more` is a
+        // word, so without this the toolbox spelling the docs are REQUIRED to
+        // use would read as an unknown verb.
+        let (first, second) = if agentstack::cli::is_namespace(tok1) {
+            next_two_tokens(&content, tok1_pos + tok1.len())
+        } else {
+            (first, second)
+        };
+        // A bare `agentstack more` names the toolbox screen, not a verb.
+        let Some((tok1_pos, tok1)) = first else {
+            continue;
+        };
         if !looks_like_command_token(tok1) {
             continue;
         }
@@ -430,6 +446,16 @@ fn scan_file(
         let Some((tok2_pos, tok2)) = second else {
             continue;
         };
+        // The tokeniser runs past end-of-line so a command wrapped across two
+        // prose lines is still read whole. That means the next line's own
+        // invocation can be picked up as this one's argument — `agentstack
+        // more unrender` on one line, `agentstack more unrender --write` on
+        // the next, and the second `agentstack` reads as a subcommand of
+        // `unrender`. A token that IS the binary name starts a new command; it
+        // is never an argument to the previous one.
+        if tok2 == "agentstack" {
+            continue;
+        }
         // A `<placeholder>` argument after a leaf command that accepts no
         // positional documents an argument the CLI doesn't take (the shipped
         // `adopt <name>` bug). Markdown carries a raw `<name>` (the token
@@ -602,7 +628,7 @@ fn normalize_dynamic(raw: &str) -> Option<Vec<String>> {
     let tokens: Vec<String> = s.split_whitespace().map(String::from).collect();
     // Strip the `x` namespace exactly as `main` does before clap sees argv
     // (`cli::strip_namespace`). This test parses with clap directly, so without
-    // this a doc showing `agentstack x restore --last` reads as an unrecognized
+    // this a doc showing `agentstack more restore --last` reads as an unrecognized
     // subcommand — even though the binary runs it. Since item 10 requires a
     // surface to name commands through the namespace rather than at a spelling
     // a reader cannot find in `--help`, the gate has to model the real argv

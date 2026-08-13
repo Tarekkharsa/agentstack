@@ -79,7 +79,7 @@ fn run(args: &[&str], home: &Path, proj: &Path) -> Run {
     }
 }
 
-/// The bridge exactly as `agentstack x gateway connect --write` registers it:
+/// The bridge exactly as `agentstack more gateway connect --write` registers it:
 /// an absolute path to the binary, `mcp --auto-project`. The absolute path is
 /// the point — recognizing it cannot depend on the command being the bare word.
 const BRIDGE: &str = r#"{"mcpServers":{"agentstack":{"command":"/usr/local/bin/agentstack","args":["mcp","--auto-project"]}}}"#;

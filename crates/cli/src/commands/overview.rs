@@ -57,7 +57,7 @@ impl Mode {
     pub(crate) fn help(self) -> &'static str {
         match self {
             Mode::Static => "Config files stay on disk, kept out of git. Works with every CLI, zero moving parts. This is what you have now.",
-            Mode::CleanAtRest => "Use a toolset temporarily: `agentstack x session start` activates it and `session end` puts every file back exactly as it was. Nothing stays in your repo between sessions.",
+            Mode::CleanAtRest => "Use a toolset temporarily: `agentstack more session start` activates it and `session end` puts every file back exactly as it was. Nothing stays in your repo between sessions.",
             Mode::ZeroFiles => "No generated files are written; your CLIs fetch servers and skills live from agentstack, and each repo stays inert until you review it once. The repo still keeps its agentstack manifest and lock, and any house-rules region stays in its file. Best when you work across many repos.",
         }
     }
@@ -934,19 +934,19 @@ pub(crate) fn clean_at_rest_next_step(
     }
     if session_active {
         return Some((
-            "agentstack x session end".to_string(),
+            "agentstack more session end".to_string(),
             "finish this session and restore the clean-at-rest state",
         ));
     }
     match toolsets {
         [one] => Some((
-            format!("agentstack x session start {}", crate::text::sanitize_line(one)),
+            format!("agentstack more session start {}", crate::text::sanitize_line(one)),
             "materialize the toolset for this session",
         )),
         [] => Some((
             "declare a toolset before a session can load one — the name is yours to choose"
                 .to_string(),
-            "`agentstack toolset create <name> --server <server>`, then `agentstack x session start <name>`",
+            "`agentstack toolset create <name> --server <server>`, then `agentstack more session start <name>`",
         )),
         many => Some((
             format!(
@@ -956,7 +956,7 @@ pub(crate) fn clean_at_rest_next_step(
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-            "`agentstack x session start <toolset>` materializes it; `agentstack x session end` puts every file back",
+            "`agentstack more session start <toolset>` materializes it; `agentstack more session end` puts every file back",
         )),
     }
 }
@@ -1031,7 +1031,7 @@ pub(crate) fn session_status_line(
     age_secs: u64,
     abandoned: bool,
 ) -> (String, String) {
-    let end = "`agentstack x session end` restores your files".to_string();
+    let end = "`agentstack more session end` restores your files".to_string();
     if abandoned {
         (
             format!("'{profile}' looks abandoned ({})", session_age(age_secs)),
@@ -1269,7 +1269,7 @@ pub(crate) struct ProjectFacts {
 ///   ([`crate::footprint::estimate_tokens`], the ~4-chars-per-token
 ///   heuristic), and this reading calls it rather than growing a second one.
 ///   Server costs are not re-derived at all: they are read from the measured
-///   cache `footprint.json` that `agentstack x report usage --live` writes, so
+///   cache `footprint.json` that `agentstack more report usage --live` writes, so
 ///   `status` and `report usage` cannot disagree about a server's cost.
 /// * **No data is not zero.** A server that has never been measured is counted
 ///   in `servers_unmeasured`, never as `0` tokens, and a project with nothing
@@ -1683,7 +1683,7 @@ fn project_json(f: &ProjectFacts) -> serde_json::Value {
                 "counted": f.context.house_rules.0,
                 "est_tokens": f.context.house_rules.1,
             },
-            "detail": "agentstack x report usage",
+            "detail": "agentstack more report usage",
         });
     }
 
@@ -1925,7 +1925,7 @@ fn print_updates_line(updates: &[crate::commands::updates::PackUpdate]) {
 ///    `Next:` line, it names no fix, and it never touches `next_action`.
 /// 4. **Quiet when boring.** One contributor gets the total only; the breakdown
 ///    appears when there is genuinely something to compare. The full per-server
-///    detail lives in `agentstack x report usage`.
+///    detail lives in `agentstack more report usage`.
 ///
 /// `verbose` is rule 4 taken one step further: the default screen states the
 /// whole reading as one line — headline, the unmeasured caveat that qualifies
@@ -1949,7 +1949,7 @@ fn print_context_line(c: &ContextCost, verbose: bool) {
             "{} not measured — context cost unknown, not zero",
             super::count(c.servers_unmeasured, "declared server")
         );
-        let pointer = "see `agentstack x report usage`";
+        let pointer = "see `agentstack more report usage`";
         if verbose {
             println!("  {}  {headline}", "Context ".bold());
             println!("            {}", pointer.dimmed());
@@ -1974,7 +1974,7 @@ fn print_context_line(c: &ContextCost, verbose: bool) {
             "  {}  {}   {}",
             "Context ".bold(),
             line,
-            "detail: `agentstack x report usage`".dimmed()
+            "detail: `agentstack more report usage`".dimmed()
         );
         return;
     }
@@ -2014,7 +2014,7 @@ fn print_context_line(c: &ContextCost, verbose: bool) {
     }
     println!(
         "            {}",
-        "detail: `agentstack x report usage`".dimmed()
+        "detail: `agentstack more report usage`".dimmed()
     );
 }
 
@@ -2436,7 +2436,7 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
         && next.0 != DROPPED_FILES_FIX
     {
         (
-            "agentstack x gateway connect --all --write".to_string(),
+            "agentstack more gateway connect --all --write".to_string(),
             "nothing routed live is reaching those tools until the bridge is registered",
         )
     } else {
@@ -3017,11 +3017,11 @@ mod tests {
         let start =
             clean_at_rest_next_step(Mode::CleanAtRest, TrustState::Trusted, true, false, &one)
                 .expect("trusted clean-at-rest starts a session");
-        assert_eq!(start.0, "agentstack x session start dev");
+        assert_eq!(start.0, "agentstack more session start dev");
 
         let end = clean_at_rest_next_step(Mode::CleanAtRest, TrustState::Trusted, true, true, &one)
             .expect("active clean-at-rest session points at its close");
-        assert_eq!(end.0, "agentstack x session end");
+        assert_eq!(end.0, "agentstack more session end");
 
         assert!(
             clean_at_rest_next_step(Mode::Static, TrustState::Trusted, true, false, &one).is_none()
@@ -3033,7 +3033,7 @@ mod tests {
     /// state rather than declared once.
     ///
     /// Before this, 0 and 2+ toolsets both printed the literal
-    /// `agentstack x session start <toolset>`, and `machine_command` dropped it
+    /// `agentstack more session start <toolset>`, and `machine_command` dropped it
     /// for the brackets, so a panel got `null` with nothing saying why. The
     /// zero case was the worse of the two: `session start` takes `<TOOLSET>` as
     /// a REQUIRED positional (measured — it exits 2 without one), so the
@@ -3052,7 +3052,7 @@ mod tests {
 
         // Exactly one: nothing to choose, so a driver gets a real command.
         let (sentence, _) = step(&["dev"]);
-        assert_eq!(sentence, "agentstack x session start dev");
+        assert_eq!(sentence, "agentstack more session start dev");
         assert!(
             machine_command(&sentence).is_some(),
             "the one state with a concrete answer must reach the machine field"
@@ -3070,14 +3070,14 @@ mod tests {
             "picking for the user would start the wrong toolset: {sentence}"
         );
         assert!(
-            why.contains("agentstack x session start <toolset>"),
+            why.contains("agentstack more session start <toolset>"),
             "the shape stays where a human reads it: {why}"
         );
 
         // None: `session start` cannot run at all here.
         let (sentence, _) = step(&[]);
         assert!(
-            !sentence.starts_with("agentstack x session start"),
+            !sentence.starts_with("agentstack more session start"),
             "no toolset exists for it to load — naming it is a command that \
              refuses: {sentence}"
         );
@@ -3120,7 +3120,7 @@ mod tests {
             "agentstack lock --write",
             "agentstack apply --write",
             "agentstack yes",
-            "agentstack x gateway connect --all --write",
+            "agentstack more gateway connect --all --write",
             "find a server or skill to add — only you know what this project needs",
         ] {
             assert_eq!(
@@ -4189,14 +4189,14 @@ mod tests {
     fn session_status_line_flags_abandoned_and_offers_recovery() {
         let (head, hint) = session_status_line("dev", 240, false);
         assert_eq!(head, "'dev' active temporarily (started 4m ago)");
-        assert!(hint.contains("agentstack x session end"));
+        assert!(hint.contains("agentstack more session end"));
         assert!(!hint.contains("abandoned"));
 
         let (head, hint) = session_status_line("dev", 14 * 3600, true);
         assert!(head.contains("looks abandoned"), "flags it: {head}");
         assert!(head.contains("started 14h 0m ago"));
         assert!(
-            hint.contains("agentstack x session end"),
+            hint.contains("agentstack more session end"),
             "still offers the safe recovery: {hint}"
         );
     }

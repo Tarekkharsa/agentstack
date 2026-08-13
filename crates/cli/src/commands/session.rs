@@ -1,6 +1,6 @@
 //! `agentstack session` — CLI control for ephemeral sessions, mirroring the
 //! t3code's Start/End. A safety hatch: if t3code dies mid-session,
-//! `agentstack x session end` (or `--all`) still reverts it.
+//! `agentstack more session end` (or `--all`) still reverts it.
 
 use std::path::Path;
 
@@ -41,7 +41,7 @@ fn render_start_report(
         ));
     }
     out.push_str(
-        "  End it with `agentstack x session end` — every file above goes back exactly.\n",
+        "  End it with `agentstack more session end` — every file above goes back exactly.\n",
     );
     // …and say why that is the ONLY command that ends it, but only when this
     // session actually materialized skills. The banner above no longer offers
@@ -55,7 +55,7 @@ fn render_start_report(
     // is the half that must never drift between Undo surfaces.
     if !report.skill_adds.is_empty() {
         out.push_str(&format!(
-            "    · {}. So `agentstack x restore` is not the way back from a session; \
+            "    · {}. So `agentstack more restore` is not the way back from a session; \
              `session end` is.\n",
             crate::history::SKILLS_ARE_NOT_RECORDED
         ));
@@ -159,7 +159,7 @@ fn render_session_list(rows: &[SessionRow]) -> String {
         ));
         if r.abandoned {
             out.push_str(
-                "      recover: run `agentstack x session end` in that project (or `session end --all`) — it restores your files\n",
+                "      recover: run `agentstack more session end` in that project (or `session end --all`) — it restores your files\n",
             );
         }
     }
@@ -183,7 +183,7 @@ pub fn run(args: &SessionArgs, dir: Option<&Path>) -> Result<()> {
             // rule here. The report below still repeats it, because by then it
             // can name the exact files.
             //
-            // `agentstack x restore --last --write` used to be offered here as
+            // `agentstack more restore --last --write` used to be offered here as
             // an equal alternative, and it is not one. `session::start` records
             // ONLY the server-config snapshots in the history ledger; the
             // skills it materializes are tracked in the session store and
@@ -195,7 +195,7 @@ pub fn run(args: &SessionArgs, dir: Option<&Path>) -> Result<()> {
             // with "nothing to undo". `session end` is the whole revert, which
             // is why it is now the only command this banner names.
             println!(
-                "  {} temporary: `agentstack x session end` puts every file back — and takes off any skills this activates.",
+                "  {} temporary: `agentstack more session end` puts every file back — and takes off any skills this activates.",
                 "↩".dimmed()
             );
             let report = crate::session::start(dir, profile, scope)?;
@@ -219,7 +219,7 @@ pub fn run(args: &SessionArgs, dir: Option<&Path>) -> Result<()> {
         SessionCmd::Freeze { name } => {
             let created = crate::session::freeze(dir, name.as_deref())?;
             println!(
-                "{} froze the session into toolset '{}' — replay it deterministically with `agentstack x session start {}`",
+                "{} froze the session into toolset '{}' — replay it deterministically with `agentstack more session start {}`",
                 "✓".green(),
                 created.bold(),
                 created
@@ -282,7 +282,7 @@ mod tests {
         assert!(out.contains("Claude Code · servers → .mcp.json"));
         assert!(out.contains("Codex CLI · servers → .codex/config.toml"));
         assert!(out.contains("skills → .claude/skills: helper"));
-        assert!(out.contains("agentstack x session end"));
+        assert!(out.contains("agentstack more session end"));
 
         // This session materialized skills, so the report says why `session
         // end` is the ONLY command that reverts it — the shared sentence, not a
@@ -301,7 +301,7 @@ mod tests {
             ..report
         };
         let out = render_start_report(&no_skills, Path::new("/repo"));
-        assert!(out.contains("agentstack x session end"));
+        assert!(out.contains("agentstack more session end"));
         assert!(!out.contains(crate::history::SKILLS_ARE_NOT_RECORDED));
     }
 
@@ -341,7 +341,7 @@ mod tests {
         assert!(out.contains("/repo/a"));
         assert!(out.contains("'ops' (project) · started 14h 0m ago · looks abandoned"));
         // Recovery is offered for the abandoned session only.
-        assert!(out.contains("recover: run `agentstack x session end`"));
+        assert!(out.contains("recover: run `agentstack more session end`"));
         let recover_lines = out.matches("recover:").count();
         assert_eq!(recover_lines, 1, "only the abandoned row offers recovery");
     }

@@ -110,7 +110,10 @@ fn restart_hint(outcome: &Outcome) {
         // Name the exact command, not the bare verb: `agentstack restore` alone
         // lists the ledger, so a user following this line got a list to read
         // rather than the undo they were promised.
-        crate::outln!("  {}", "undo: agentstack x restore --last --write".dimmed());
+        crate::outln!(
+            "  {}",
+            "undo: agentstack more restore --last --write".dimmed()
+        );
     }
 }
 
@@ -150,7 +153,7 @@ impl AbandonedRender {
     /// The one command that takes the file back off disk. Named identically by
     /// `apply`, `doctor` and `status` — rule (e) wants one runnable answer, not
     /// three spellings of it.
-    pub const REMOVE_IT: &'static str = "agentstack x unrender --write";
+    pub const REMOVE_IT: &'static str = "agentstack more unrender --write";
 
     /// One line a person can act on, shared by every surface.
     pub fn sentence(&self) -> String {
@@ -1681,7 +1684,7 @@ fn render(
             // `delivery` cannot name four different recovery commands.
             crate::outln!("  {} {}", "→".cyan(), super::delivery::CONNECT_THE_BRIDGE);
             crate::outln!(
-                "  {} or write files anyway: agentstack x delivery render-locally --write",
+                "  {} or write files anyway: agentstack more delivery render-locally --write",
                 "→".cyan()
             );
         }
@@ -1809,7 +1812,7 @@ fn render(
             // here, because this is the line a reader acts on.
             crate::outln!(
                 "{} would change{} — and {} would deliver nothing here, so it refuses: {} · or \
-                 write files anyway: agentstack x delivery render-locally --write",
+                 write files anyway: agentstack more delivery render-locally --write",
                 super::count(changed_count, "target"),
                 removal_note(removed_count),
                 "--write".bold(),
@@ -1888,7 +1891,7 @@ fn render(
     if will_write && delivers_nothing {
         anyhow::bail!(
             "nothing was delivered: every capability here is routed to the live lane and no \
-             bridge is registered — {} · or write files anyway: agentstack x delivery \
+             bridge is registered — {} · or write files anyway: agentstack more delivery \
              render-locally --write",
             super::delivery::CONNECT_THE_BRIDGE
         );
@@ -2090,7 +2093,7 @@ fn plan_owned_manifest_refresh(
     (by_file, elsewhere)
 }
 
-// ── `agentstack x unrender` ───────────────────────────────────────────────
+// ── `agentstack more unrender` ───────────────────────────────────────────────
 //
 // The command every surface names when it finds an abandoned server config.
 // It exists because the honest report needed a runnable answer: `apply` no
@@ -2102,14 +2105,14 @@ fn plan_owned_manifest_refresh(
 // lane. Settings, hooks, instructions and the `.gitignore` block are still
 // rendered for these harnesses, so removing them here would break the very
 // delivery this command exists to clean up after. The machine-wide exit is
-// still `agentstack x uninstall`.
+// still `agentstack more uninstall`.
 //
 // The removal itself is `unrender::plan` — the ordinary render path against an
 // empty manifest — filtered to those files. No second deletion path, and every
 // write is captured into history, so this is undoable with `agentstack
 // restore` like any other.
 
-/// `agentstack x unrender` — take an abandoned server config back off disk.
+/// `agentstack more unrender` — take an abandoned server config back off disk.
 pub fn run_unrender(args: &crate::cli::UnrenderArgs, manifest_dir: Option<&Path>) -> Result<()> {
     let ctx = super::load(manifest_dir)?;
     let state = State::load()?;
@@ -2249,6 +2252,9 @@ pub fn run_unrender(args: &crate::cli::UnrenderArgs, manifest_dir: Option<&Path>
     } else {
         crate::outln!("\n{} removed.", super::count(removed, "file"));
     }
-    crate::outln!("  {}", "undo: agentstack x restore --last --write".dimmed());
+    crate::outln!(
+        "  {}",
+        "undo: agentstack more restore --last --write".dimmed()
+    );
     Ok(())
 }

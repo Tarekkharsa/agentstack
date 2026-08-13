@@ -277,8 +277,8 @@ pub fn start(manifest_dir: Option<&Path>, profile: &str, scope: Scope) -> Result
     let key_dir = dir_key(&ctx.dir);
     if load_all().contains_key(&key_dir) {
         anyhow::bail!(
-            "a session is already active here — end it first: `agentstack x session end` \
-             (`agentstack x session list` shows which one)"
+            "a session is already active here — end it first: `agentstack more session end` \
+             (`agentstack more session list` shows which one)"
         );
     }
     let manifest = &ctx.loaded.manifest;

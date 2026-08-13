@@ -27,7 +27,7 @@ beyond a trivial count — don't hand-roll it in a shell one-liner.
 
 ## Dead-weight detection (the useful one)
 
-1. List what's installed: `agentstack x lib list` (library skills + servers) and
+1. List what's installed: `agentstack more lib list` (library skills + servers) and
    the project's active profile.
 2. Extract which skills/servers were actually invoked, from the transcripts'
    tool-use / skill-load events.
@@ -46,5 +46,5 @@ beyond a trivial count — don't hand-roll it in a shell one-liner.
 ## Note
 
 agentstack records some of this natively (activation counts, per-server context
-cost). If `agentstack x report calls` exists in your version, prefer it — it joins
+cost). If `agentstack more report calls` exists in your version, prefer it — it joins
 usage to the library for you. This skill is the portable, no-code version.

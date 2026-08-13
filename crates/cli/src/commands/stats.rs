@@ -1,4 +1,4 @@
-//! `agentstack x report usage` — local usage analytics (PLAN §9g): per capability, how
+//! `agentstack more report usage` — local usage analytics (PLAN §9g): per capability, how
 //! many times it's been activated, in how many (target, scope) places it's
 //! currently live, and — for servers — what it costs in context-window tokens
 //! per session. Activation counts come from `usage.json`; the footprint from
@@ -182,7 +182,7 @@ fn print_human(report: &Value) {
             }
             let name = c["name"].as_str().unwrap_or("?");
             println!(
-                "{} '{name}' costs ~{} every session ({}) but has never been activated — consider `agentstack x remove {name}`",
+                "{} '{name}' costs ~{} every session ({}) but has never been activated — consider `agentstack more remove {name}`",
                 "dead weight:".yellow().bold(),
                 c["costLabel"].as_str().unwrap_or("?"),
                 fmt_age(c["measuredAt"].as_u64().unwrap_or(0)),
@@ -202,7 +202,7 @@ fn print_human(report: &Value) {
     if !report["anyMeasured"].as_bool().unwrap_or(false) {
         println!(
             "\n{}",
-            "Context cost unmeasured — run `agentstack x report usage --live` to measure each server's tools/list token footprint.".dimmed()
+            "Context cost unmeasured — run `agentstack more report usage --live` to measure each server's tools/list token footprint.".dimmed()
         );
     }
 }

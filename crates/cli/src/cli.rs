@@ -11,9 +11,12 @@
 //! each of the four ideas the help already promises — Setup · Toolset · Status
 //! · Undo.
 //!
-//! That derivation yields fifteen, not ten. It is the honest number: `lock`,
+//! That derivation yields sixteen, not ten. It is the honest number: `lock`,
 //! `secret` and `adopt` are here because guidance names them, and hiding one to
 //! reach a rounder count would trade a real guarantee for a tidier screen.
+//! `up` is the sixteenth, and it is here on the rule's other half: it is the
+//! obvious verb for Setup on a machine that is not the one the library was
+//! built on, which is the state a second machine is always in.
 //!
 //! `lib` and `why` were briefly visible on an argument from importance — the
 //! library is where capabilities are kept, and `why` answers "where did this
@@ -21,17 +24,19 @@
 //! asks whether an EMITTER can name a command, and neither is named by a
 //! first-run rung, by a `↳ fix` line, or by a machine `next_action` / `fix`
 //! field: doctor's one mention of `lib` (a linked folder that vanished) already
-//! prints `agentstack x lib unlink`, and nothing anywhere emits `why` at all.
-//! Both are therefore behind `x`, on exactly the terms `guard` and `gateway`
+//! prints `agentstack more lib unlink`, and nothing anywhere emits `why` at all.
+//! Both are therefore behind `more`, on exactly the terms `guard` and `gateway`
 //! are — commands guidance may still name, listed one hop away.
 //!
-//! Everything else moves behind `agentstack x <command>` — the same commands,
+//! Everything else moves behind `agentstack more <command>` — the same commands,
 //! one hop away, listed and grouped by [`namespace_listing`]. Nothing is
 //! removed: every hidden command still runs at its own name, and `--help --all`
-//! still prints the complete map. `x` is display-only sugar — [`strip_namespace`]
-//! removes the `x` before clap parses, so dispatch has exactly one path.
+//! still prints the complete map. `more` is display-only sugar —
+//! [`strip_namespace`] removes it before clap parses, so dispatch has exactly
+//! one path. The namespace was spelled `x` through v0.18 and that spelling is
+//! still accepted, permanently ([`NAMESPACE_ALIAS`]).
 //!
-//! A guidance string may still name a command that lives behind `x`
+//! A guidance string may still name a command that lives behind `more`
 //! (`agentstack guard install`, `agentstack self link`, …). Those verbs are
 //! listed by name on the `--help` screen itself, under "Also named by
 //! guidance", so the guarantee at the top of this comment holds for them too.
@@ -109,7 +114,7 @@ Four ideas cover the whole product: Setup (what you have) · Toolset (what this
 task needs) · Status (is it ready) · Undo (how to take it back).
 
 Everything else lives one hop away, grouped by task:
-  agentstack x                   the rest of the toolbox
+  agentstack more                the rest of the toolbox
 
 Every command, grouped by task — and what the pieces are called underneath:
   agentstack --help --all"
@@ -185,13 +190,12 @@ pub enum Command {
     /// manifest, naming `apply --write` as the next step.
     Init(InitArgs),
 
-    /// Set this machine up from a setup that already exists: one command.
+    /// Set this machine up from your library repo: one command.
     ///
     /// For a fresh machine holding a checkout. Syncs the personal library,
     /// finds and connects installed CLIs, verifies `agentstack.lock`, keeps
     /// live-capable delivery zero-files, and names this machine's remaining
     /// secrets and trust review. Preview first; add `--write` to apply.
-    #[command(hide = true)]
     Up(UpArgs),
 
     /// Status: where this project stands, on one screen, and the one next step.
@@ -344,7 +348,7 @@ pub enum Command {
 
     /// Run a reviewed multi-agent task using toolsets you already approved.
     ///
-    /// Kept off the default help and listed under `agentstack x`, though the
+    /// Kept off the default help and listed under `agentstack more`, though the
     /// six interpreter-boundary review findings are closed, each with its own
     /// witness (the watchdog's no-I/O exit, interpreter memory bounds,
     /// host-native re-entrancy, a run-total native call budget, cross-host
@@ -440,7 +444,7 @@ pub enum Command {
     ///
     /// Skill directories that `use --write` materialized are NOT recorded: this
     /// ledger holds a file and its pre-write bytes, and a delivered skill is a
-    /// linked directory. Take those off with `agentstack x uninstall --write`,
+    /// linked directory. Take those off with `agentstack more uninstall --write`,
     /// or by activating a toolset that omits them.
     #[command(
         hide = true,
@@ -594,10 +598,10 @@ Examples:
     /// the harness keeps reading it at startup. This takes exactly those
     /// files back off. Nothing else is touched: settings, hooks and
     /// instructions are still rendered for those harnesses, and the whole
-    /// machine exit is still `agentstack x uninstall`.
+    /// machine exit is still `agentstack more uninstall`.
     ///
     /// Dry-run by default; `--write` removes. Every removal is snapshotted
-    /// first, so `agentstack x restore --last --write` puts it back.
+    /// first, so `agentstack more restore --last --write` puts it back.
     #[command(hide = true)]
     Unrender(UnrenderArgs),
 
@@ -2149,7 +2153,7 @@ pub struct InitArgs {
     /// manifest and any lifted token values, and promises the CLIs' own configs
     /// stay untouched. With `--dry-run` the registration is described and
     /// nothing is written. Identical to running
-    /// `agentstack x gateway connect --all --write` afterwards.
+    /// `agentstack more gateway connect --all --write` afterwards.
     #[arg(long)]
     pub connect: bool,
 
@@ -3382,23 +3386,39 @@ pub enum SecretCommand {
 
 /// The name of the namespace that holds everything outside the visible list.
 ///
-/// One letter, because it is punctuation rather than vocabulary: `x` names no
-/// concept the product teaches, so it cannot compete with Setup, Toolset,
-/// Status and Undo for a reader's attention.
-pub const NAMESPACE: &str = "x";
+/// An ordinary word, and a deliberately dull one: `more` says what the screen
+/// is (there is more of this product than the help just showed) without naming
+/// a concept that competes with Setup, Toolset, Status and Undo for a reader's
+/// attention. It replaced `x`, which said the same thing in punctuation and had
+/// to be explained every time it was printed.
+pub const NAMESPACE: &str = "more";
 
-/// What `agentstack x` prints: the rest of the toolbox, grouped by task.
+/// The old spelling, kept forever.
 ///
-/// Grouped by the same headings as `--help --all`, minus the fifteen commands
+/// `x` was the namespace through v0.18; it is printed in shipped READMEs, blog
+/// posts, and the shell history of everyone who used it. A rename that breaks
+/// those is a rename that costs the reader something, so `x` stays an accepted
+/// prefix permanently — undocumented on the help screens, pinned by test so it
+/// cannot be dropped by accident.
+pub const NAMESPACE_ALIAS: &str = "x";
+
+/// Is `arg` one of the two spellings of the namespace prefix?
+pub fn is_namespace(arg: &str) -> bool {
+    arg == NAMESPACE || arg == NAMESPACE_ALIAS
+}
+
+/// What `agentstack more` prints: the rest of the toolbox, grouped by task.
+///
+/// Grouped by the same headings as `--help --all`, minus the sixteen commands
 /// the default help already lists — this screen is the complement of that one,
 /// not a second copy of it.
 pub fn namespace_listing() -> String {
     String::from(
-        "agentstack x — the rest of the toolbox. Every one of these also runs at its\n\
-         own name: `agentstack x guard install` and `agentstack guard install` are the\n\
-         same command. Run `agentstack x <command> --help` for flags and details.\n\
+        "agentstack more — the rest of the toolbox. Every one of these also runs at its\n\
+         own name: `agentstack more guard install` and `agentstack guard install` are the\n\
+         same command. Run `agentstack more <command> --help` for flags and details.\n\
          \n  \
-         Set up      up · adapters · settings · self · completions\n  \
+         Set up      adapters · settings · self · completions\n  \
          Edit        set · remove · install · lib · export · import\n  \
          Share       share · receive · publisher\n  \
          Render      instructions · session · diff · unrender · uninstall · delivery\n  \
@@ -3407,29 +3427,32 @@ pub fn namespace_listing() -> String {
          Run         kill · shim · workflow · image · gateway · mcp · try\n  \
          Inspect     report · lease · optimize · proxy\n\
          \n\
-         The everyday fifteen are on `agentstack --help`. For all of it at once,\n\
+         The everyday sixteen are on `agentstack --help`. For all of it at once,\n\
          including the fixed actions a graphical panel invokes:\n  \
          agentstack --help --all\n",
     )
 }
 
-/// Strip a leading `x` so `agentstack x <cmd> …` parses as `agentstack <cmd> …`.
+/// Strip a leading `more` (or its permanent alias `x`) so
+/// `agentstack more <cmd> …` parses as `agentstack <cmd> …`.
 ///
 /// `argv` is the full command line including the binary name. Returns `None`
 /// when the namespace was not used, so the caller can pass the original
 /// through untouched.
 ///
-/// Deliberately display-only: the `x` is removed BEFORE clap sees it, so there
-/// is exactly one parse tree and exactly one dispatch path in `main.rs`. A
-/// nested clap subcommand would need a second copy of the whole `Command` enum
-/// and a second dispatch arm for every verb — two places to forget.
+/// Deliberately display-only: the prefix is removed BEFORE clap sees it, so
+/// there is exactly one parse tree and exactly one dispatch path in `main.rs`.
+/// A nested clap subcommand would need a second copy of the whole `Command`
+/// enum and a second dispatch arm for every verb — two places to forget. It is
+/// also why the alias costs nothing: two accepted spellings of one prefix, not
+/// two of anything else.
 ///
-/// Only the first argument is considered. `agentstack apply x` is an argument
-/// to `apply`, not a namespace, and stays that way.
+/// Only the first argument is considered. `agentstack apply more` is an
+/// argument to `apply`, not a namespace, and stays that way.
 pub fn strip_namespace(argv: &[String]) -> Option<Vec<String>> {
     let (bin, rest) = argv.split_first()?;
     let (first, tail) = rest.split_first()?;
-    if first != NAMESPACE {
+    if !is_namespace(first) {
         return None;
     }
     let mut out = Vec::with_capacity(argv.len() - 1);

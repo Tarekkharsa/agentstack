@@ -780,7 +780,7 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   **Disk is the trigger, the ledger only conjugates the remedy.** The
 ///   detector reads the file and lists the servers it actually declares. What
 ///   the state ledger decides is which of two commands is offered:
-///   `agentstack x unrender --write` for a file AgentStack recorded writing,
+///   `agentstack more unrender --write` for a file AgentStack recorded writing,
 ///   and `agentstack adopt` for one it did not (a clone, a git checkout, a hand
 ///   edit). That split is not cosmetic — `x unrender` removes only
 ///   ledger-recorded entries, so offering it for a foreign file would name a
@@ -788,9 +788,9 @@ pub const SCHEMA_VERSION: u64 = 1;
 ///   A panel must render the remedy the payload gives it and must never
 ///   synthesise one from the presence of the finding.
 ///
-///   `agentstack x unrender` exists as a command on this binary: it takes an
+///   `agentstack more unrender` exists as a command on this binary: it takes an
 ///   abandoned server config back off disk, previewing by default and writing
-///   under `--write`, and it is reachable in one hop under `agentstack x`. It
+///   under `--write`, and it is reachable in one hop under `agentstack more`. It
 ///   is NOT a panel action — it is absent from [`PANEL_ACTIONS`], so a panel
 ///   may show the command as text for a human to run and may not invoke it.
 ///
@@ -1178,7 +1178,7 @@ mod tests {
     }
 
     /// The abandoned-render reading is advertised, and it is a READ contract
-    /// only: `agentstack x unrender` removes a file, so it may never become a
+    /// only: `agentstack more unrender` removes a file, so it may never become a
     /// panel action without its own deliberate entry in [`PANEL_ACTIONS`].
     #[test]
     fn abandoned_render_is_advertised_and_is_not_a_panel_action() {

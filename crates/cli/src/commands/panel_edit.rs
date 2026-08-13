@@ -636,7 +636,7 @@ fn print_created(name: &str, review_pending: bool, is_default: bool) {
     }
     println!(
         "  {}",
-        format!("(or only for now: agentstack x session start {name})").dimmed()
+        format!("(or only for now: agentstack more session start {name})").dimmed()
     );
     println!(
         "  {}",
@@ -1532,7 +1532,7 @@ fn profile_blockers(manifest: &Manifest, name: &str, dir: Option<&Path>) -> Vec<
         if crate::session::active(&ctx.dir).is_some_and(|s| s.profile == name) {
             out.push((
                 "a session is using it".to_string(),
-                "agentstack x session end".to_string(),
+                "agentstack more session end".to_string(),
             ));
         }
     }

@@ -27,7 +27,7 @@ use crate::secret::{env_file, keychain};
 /// The command that registers the bridge — what `--connect` does for you, and
 /// what every one of init's "not connected yet" disclosures points at. One
 /// constant so those surfaces cannot drift into naming different commands.
-const GATEWAY_CONNECT: &str = "agentstack x gateway connect --all --write";
+const GATEWAY_CONNECT: &str = "agentstack more gateway connect --all --write";
 
 /// Store lifted secret values, collecting the references whose store write
 /// failed instead of aborting init or silently dropping them. The manifest
@@ -1873,7 +1873,7 @@ version = 1
 #   agentstack search <query>          find servers/skills in the catalog
 #   agentstack add from <id> --write   add one to this manifest
 #   agentstack apply                   preview what renders into each CLI
-#   agentstack x gateway connect --all --write   or skip rendered files entirely:
+#   agentstack more gateway connect --all --write   or skip rendered files entirely:
 #   agentstack trust .                 serve this repo through the gateway
 ";
         if args.dry_run {
@@ -2042,7 +2042,7 @@ version = 1
                 format!(
                     "They are personal, machine-wide preferences, so they go to your machine layer \
                      ({}) — not into this repo. Declare a project-specific value with \
-                     `agentstack x settings set <cli> <key> <value>`.",
+                     `agentstack more settings set <cli> <key> <value>`.",
                     display_home(&crate::util::paths::agentstack_home())
                 )
                 .dimmed()
@@ -2364,7 +2364,7 @@ version = 1
             // A preview never writes, and that includes the machine-wide half.
             // Naming the exact files keeps `--dry-run --connect` a real
             // preview of the consent the flag carries; the diff itself is one
-            // command away (`agentstack x gateway connect --all`, dry-run by
+            // command away (`agentstack more gateway connect --all`, dry-run by
             // default), which is where a per-file review belongs.
             println!(
                 "Would also register the agentstack bridge in the CLIs installed here \
@@ -3084,7 +3084,7 @@ impl ImportSummary<'_> {
             )
         } else if !self.unconnected_live.is_empty() {
             (
-                "agentstack x gateway connect --all --write",
+                "agentstack more gateway connect --all --write",
                 "start serving what routes live",
             )
         } else if self.rendered_work {
@@ -3099,7 +3099,7 @@ impl ImportSummary<'_> {
 
         let mut also: Vec<String> = Vec::new();
         if self.needs_trust && !self.unconnected_live.is_empty() {
-            also.push("agentstack x gateway connect --all --write".to_string());
+            also.push("agentstack more gateway connect --all --write".to_string());
         }
         if self.rendered_work && next != "agentstack apply --write" {
             also.push("agentstack apply --write".to_string());
@@ -3107,7 +3107,7 @@ impl ImportSummary<'_> {
         if next != "agentstack doctor" {
             also.push("agentstack doctor".to_string());
         }
-        also.push("undo: agentstack x restore --last --write".to_string());
+        also.push("undo: agentstack more restore --last --write".to_string());
         out.push_str(&format!("  Then:      {}\n", also.join("  ·  ")));
         // The same import in ONE command next time: a script author needs the
         // flag that stops the not-yet-delivering gap from happening at all.
@@ -3900,7 +3900,7 @@ mod tests {
         assert!(out.contains("8 MCP servers · settings from 2 CLIs"));
         assert!(out.contains("1 still needs a value"));
         assert!(out.contains("agentstack secret set GITHUB_TOKEN"));
-        assert!(out.contains("agentstack x restore --last --write"));
+        assert!(out.contains("agentstack more restore --last --write"));
         assert!(out.contains("agentstack apply --write"));
         assert!(out.contains("agentstack doctor"));
 
@@ -4052,7 +4052,7 @@ mod tests {
             "{unwired}"
         );
         assert!(unwired.contains("nothing is served yet"), "{unwired}");
-        assert!(unwired.contains("agentstack x gateway connect --all --write"));
+        assert!(unwired.contains("agentstack more gateway connect --all --write"));
         assert!(!unwired.contains("served live"), "{unwired}");
 
         // Connected → no disclosure to make, at any verbosity, and no claim of
@@ -4099,7 +4099,7 @@ mod tests {
         assert!(!stranded.contains("Import complete."), "{stranded}");
         // Both repairs: the command for this machine, and the flag that stops
         // the gap happening at all.
-        assert!(stranded.contains("agentstack x gateway connect --all --write"));
+        assert!(stranded.contains("agentstack more gateway connect --all --write"));
         assert!(stranded.contains("agentstack init --connect"), "{stranded}");
         // Nothing was registered, so the ordinary untouched-configs note holds.
         assert!(
@@ -4152,7 +4152,7 @@ mod tests {
         }
         .render();
         assert!(
-            live_only.contains("Next:      agentstack x gateway connect --all --write"),
+            live_only.contains("Next:      agentstack more gateway connect --all --write"),
             "{live_only}"
         );
         assert_eq!(live_only.matches("Next:").count(), 1, "{live_only}");
@@ -4174,7 +4174,7 @@ mod tests {
             ..Default::default()
         }
         .render();
-        assert!(both.contains("Next:      agentstack x gateway connect --all --write"));
+        assert!(both.contains("Next:      agentstack more gateway connect --all --write"));
         assert_eq!(both.matches("Next:").count(), 1, "{both}");
         assert!(
             both.contains("Then:      agentstack apply --write"),
@@ -4198,7 +4198,7 @@ mod tests {
         );
         assert_eq!(untrusted.matches("Next:").count(), 1, "{untrusted}");
         assert!(
-            untrusted.contains("Then:      agentstack x gateway connect --all --write"),
+            untrusted.contains("Then:      agentstack more gateway connect --all --write"),
             "{untrusted}"
         );
 

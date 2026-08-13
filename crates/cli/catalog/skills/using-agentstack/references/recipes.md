@@ -101,8 +101,8 @@ Use AgentStack's ownership-aware cleanup; do not delete provider folders by
 hand:
 
 ```bash
-agentstack x unrender --write
-agentstack x uninstall --scope project --keep-home --write
+agentstack more unrender --write
+agentstack more uninstall --scope project --keep-home --write
 agentstack doctor
 ```
 

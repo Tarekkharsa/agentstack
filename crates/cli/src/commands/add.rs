@@ -69,7 +69,7 @@ fn add_from(a: &AddFromArgs, manifest_dir: Option<&Path>) -> Result<()> {
         let (source, name) = crate::sources::split_lib_reference(&a.id).with_context(|| {
             format!(
                 "'{}' is not a library reference — the form is `lib:<source>/<name>`, \
-                 e.g. `lib:central/rust-testing` (see `agentstack x lib sources`)",
+                 e.g. `lib:central/rust-testing` (see `agentstack more lib sources`)",
                 crate::text::sanitize_line(&a.id)
             )
         })?;
@@ -165,7 +165,7 @@ pub(crate) fn resolve_git_pack_gated(
 fn add_from_server(a: &AddFromArgs, ctx: &super::Context, candidate: &Candidate) -> Result<()> {
     if ctx.loaded.manifest.servers.contains_key(&candidate.name) {
         anyhow::bail!(
-            "server '{}' already exists in the manifest — run `agentstack x remove {}` first, or rename it",
+            "server '{}' already exists in the manifest — run `agentstack more remove {}` first, or rename it",
             candidate.name,
             candidate.name
         );
@@ -233,7 +233,7 @@ fn add_from_skill(
 ) -> Result<()> {
     if ctx.loaded.manifest.skills.contains_key(&candidate.name) {
         anyhow::bail!(
-            "skill '{}' already exists in the manifest — run `agentstack x remove {}` first, or rename it",
+            "skill '{}' already exists in the manifest — run `agentstack more remove {}` first, or rename it",
             candidate.name,
             candidate.name
         );
@@ -334,7 +334,7 @@ fn add_from_library_skill(
         let linked = library.linked.source_names();
         anyhow::bail!(
             "no linked library named '{}' — linked: {}. Link one with \
-             `agentstack x lib link <path> --name {} --write`.",
+             `agentstack more lib link <path> --name {} --write`.",
             crate::text::sanitize_line(source),
             if linked.is_empty() {
                 "(none)".to_string()
@@ -347,7 +347,7 @@ fn add_from_library_skill(
     let reference = format!("{}{source}/{name}", crate::sources::LIB_PREFIX);
     if library.get(&reference).is_none() {
         anyhow::bail!(
-            "no skill '{}' in library '{}' — run `agentstack x lib list` to see what is there",
+            "no skill '{}' in library '{}' — run `agentstack more lib list` to see what is there",
             crate::text::sanitize_line(name),
             crate::text::sanitize_line(source),
         );
@@ -356,7 +356,7 @@ fn add_from_library_skill(
     if manifest.skills.contains_key(name) {
         anyhow::bail!(
             "skill '{name}' is already declared inline in this manifest — an inline block \
-             shadows the library copy. Remove it (`agentstack x remove {name}`) first, or \
+             shadows the library copy. Remove it (`agentstack more remove {name}`) first, or \
              keep the inline one."
         );
     }
@@ -574,7 +574,7 @@ fn add_pack(
     }
     if manifest.packs.contains_key(pack) {
         anyhow::bail!(
-            "a pack '{pack}' is already installed in the manifest — run `agentstack x remove {pack}` first to reinstall"
+            "a pack '{pack}' is already installed in the manifest — run `agentstack more remove {pack}` first to reinstall"
         );
     }
 
@@ -983,7 +983,7 @@ fn upsert_server(a: &AddServerArgs, manifest_dir: Option<&Path>, allow_update: b
     let exists = ctx.loaded.manifest.servers.contains_key(&a.name);
     if exists && !allow_update {
         anyhow::bail!(
-            "server '{name}' already exists in the manifest — update it in place: `agentstack x set server {name} …` · or remove it first: `agentstack x remove {name}`",
+            "server '{name}' already exists in the manifest — update it in place: `agentstack more set server {name} …` · or remove it first: `agentstack more remove {name}`",
             name = a.name
         );
     }
@@ -1565,7 +1565,7 @@ fn final_names(
         })?;
         if ctx.loaded.manifest.skills.contains_key(&name) {
             anyhow::bail!(
-                "skill '{name}' already exists in the manifest — run `agentstack x remove {name}` first, or rename it"
+                "skill '{name}' already exists in the manifest — run `agentstack more remove {name}` first, or rename it"
             );
         }
         names.push(name);
@@ -1937,14 +1937,14 @@ fn activation_footer_line(
         ),
         Mode::CleanAtRest if review_pending => format!(
             "{} review with `agentstack trust .` first — until then \
-             `agentstack x session start{}` refuses",
+             `agentstack more session start{}` refuses",
             "·".dimmed(),
             profile
                 .map(|p| format!(" {p}"))
                 .unwrap_or(" <toolset>".into())
         ),
         Mode::CleanAtRest => format!(
-            "{} next session picks this up: `agentstack x session start{}`",
+            "{} next session picks this up: `agentstack more session start{}`",
             "·".dimmed(),
             profile
                 .map(|p| format!(" {p}"))
@@ -2060,7 +2060,7 @@ pub fn write_from_provider(dir: &Path, id: &str, profile: Option<&str>) -> Resul
             let manifest = &ctx.loaded.manifest;
             if manifest.servers.contains_key(&candidate.name) {
                 anyhow::bail!(
-                    "server '{}' already exists — run `agentstack x remove {}` first, or rename it",
+                    "server '{}' already exists — run `agentstack more remove {}` first, or rename it",
                     candidate.name,
                     candidate.name
                 );
@@ -2080,7 +2080,7 @@ pub fn write_from_provider(dir: &Path, id: &str, profile: Option<&str>) -> Resul
             let manifest = &ctx.loaded.manifest;
             if manifest.skills.contains_key(&candidate.name) {
                 anyhow::bail!(
-                    "skill '{}' already exists — run `agentstack x remove {}` first, or rename it",
+                    "skill '{}' already exists — run `agentstack more remove {}` first, or rename it",
                     candidate.name,
                     candidate.name
                 );
@@ -2581,7 +2581,7 @@ mod tests {
 
         let err = add_server(&args, Some(tmp.path())).unwrap_err();
         assert!(
-            err.to_string().contains("agentstack x set server"),
+            err.to_string().contains("agentstack more set server"),
             "{err:#}"
         );
 

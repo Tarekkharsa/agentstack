@@ -5,7 +5,7 @@
 
 //! A preference write must not wall the user off from the next command.
 //!
-//! The defect these tests pin: `agentstack x delivery render-locally --write`
+//! The defect these tests pin: `agentstack more delivery render-locally --write`
 //! records `[delivery] render_locally` and nothing else — a ROUTING choice over
 //! capabilities the human already declared and already reviewed. But the
 //! manifest bytes ARE the consent digest, so the write flipped a trusted
