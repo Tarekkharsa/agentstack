@@ -395,7 +395,39 @@ the bar; it does not move the pass/fail line.
   and expensive in aggregate, so the number of times matters as much as any one
   reaction. If it never happens, write "not observed".
 
+### At least one session runs with nobody in the room (2026-08-13)
+
+A moderated walkthrough is a signal, not proof. A stranger with the maintainer
+present always does better than a stranger alone: questions get answered before
+they become blockers, hesitation gets read as thinking rather than as being
+stuck, and the observer's presence quietly supplies the confidence the product
+is supposed to supply itself. Every finding from a moderated run is real, and
+none of it establishes that someone can do this unaccompanied.
+
+So **at least one session is fully unmoderated**: the participant alone, no
+maintainer present, no one to ask. Screen-recorded with their consent, or
+self-reported afterwards if they decline the recording — the recording is
+better evidence, and refusing it is not a reason to drop the leg.
+
+**Unmoderated results are reported separately**, never averaged into the
+moderated ones. And in §7, **the unmoderated runs are the real number**: where
+the two legs disagree, the unmoderated leg is what the gate reads. The
+moderated sessions stay in the report as the richer record — they are where the
+verbatim confusion quotes come from — but they are the softer measurement, and
+the template says so.
+
 ## 6. Metrics sheet (one per participant)
+
+> **Rule of the instrument: no silent telemetry, ever (2026-08-13).** Every
+> number in this study comes from a session an observer ran, or from local
+> stats a participant knowingly chose to share. There is no phone-home, no
+> silent ping, no background report — not for this study and not shipped in
+> the build it measures. This is absolute and it is not a trade-off to be
+> revisited when a metric is inconvenient: one silent ping would cost more
+> trust than any number it could return is worth, in a product whose entire
+> claim is that nothing happens to your machine without your yes. A metric
+> that can only be obtained silently is a metric this project does not
+> collect.
 
 ```text
 Participant #___   date ______   CLIs: __________________  OS: ______
@@ -405,6 +437,8 @@ Participant #___   date ______   CLIs: __________________  OS: ______
   time to first manifest (init done)  t = ____
   time to first successful apply      t = ____
   time to clean doctor                t = ____   ← gate metric (install → here)
+  served live on 2 CLIs               yes / no    t = ____
+                                      ← product metric: reached within 10 min?
   toolset created + switched          yes / no    t = ____
   undo (restore) succeeded            yes / no    t = ____
   finished without intervention       yes / no
@@ -431,11 +465,20 @@ checkbox in `TODO.md`.
   zero advanced concepts:     _ / 5   (gate: 5/5 — no participant needed them)
   understood every block:     _ / 5   (gate: ≥ 4)
 
+  served live on 2 CLIs
+  within 10 minutes:          ___ %   (product metric — reported, not a gate)
+
   Three most common blockers (by participant count, not severity):
     1. ____________________________________  seen by _ / 5
     2. ____________________________________  seen by _ / 5
     3. ____________________________________  seen by _ / 5
 ```
+
+**Which runs this counts.** Fill the template from the UNMODERATED sessions;
+they are the real number (see §5). Report the moderated runs alongside, in
+their own copy of the same template, and never averaged together. The
+thresholds below are unchanged — the amendment says which runs they read, not
+what they require.
 
 **Pass:** tick the Stage 1 gate boxes in `TODO.md`, fix the three blockers
 above before any new feature work (§1.6's own closing rule), then launch is
