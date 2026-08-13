@@ -269,6 +269,11 @@ mod tests {
         out
     }
 
+    // Gated exactly like its callers: every use is inside `mod fast_path`,
+    // which is macOS-only, so on any other target this helper is dead code and
+    // `-D warnings` makes dead code an error. The Linux CI leg is what found
+    // it — the first cross-platform build this fast path had seen.
+    #[cfg(target_os = "macos")]
     fn eligible_src(tmp: &assert_fs::TempDir) -> PathBuf {
         let src = tmp.child("src");
         src.child("top.md").write_str("top\n").unwrap();
