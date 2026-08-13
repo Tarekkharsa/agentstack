@@ -555,6 +555,53 @@ pub(crate) fn correct_trust_rung(
     (LOCK_RUNG_FIX.to_string(), LOCK_RUNG_WHY)
 }
 
+/// Rewrite a rung that names the review over a project whose LOCKFILE no
+/// longer describes its manifest. The same ruling [`correct_trust_rung`]
+/// makes, one step further on, and applied by BOTH surfaces through this one
+/// function so they cannot disagree about the order of the ceremony.
+///
+/// A project that was pinned, then hand-edited, then re-trusted looks finished
+/// — `locked · trusted`, no content drift — while `agentstack.lock` still pins
+/// the pre-edit picture. The grant is real, but it is a yes to a surface the
+/// next `lock --write` changes, so naming the review here is naming step 2
+/// while step 1 is outstanding: the dead-end class the guidance guard exists
+/// to catch.
+///
+/// Two limits, both of them refusals to overwrite a better answer:
+///
+/// - **A terminal blocker stands.** Where this project reports declared
+///   content that is not on disk, no command repairs it — `unpinned` carries
+///   `fix: None` and [`unpinned_next_action`] answers in prose — and
+///   `lock --write` cannot repair it either. Naming a command over that state
+///   is the loop the terminal rung exists to end, and the guidance guard
+///   forbids it in as many words. Judged from the findings themselves, the
+///   same way `unpinned_next_action` judges them, rather than by inspecting
+///   the sentence it produced.
+/// - **`trust_rungs_only` keeps `doctor`'s errors on top.** `status` corrects
+///   any actionable rung — its Next line is the one place a person is told
+///   what to do, and a stale pin is what to do first. `doctor` arrives having
+///   checked everything, and its own ladder puts an outstanding error above
+///   the consent rungs; there the correction applies to the review rungs only,
+///   which is exactly the set the two surfaces share.
+pub(crate) fn correct_stale_pin_rung(
+    step: (String, &'static str),
+    lock_stale: bool,
+    unpinned: &[crate::commands::trust::ContentDrift],
+    trust_rungs_only: bool,
+) -> (String, &'static str) {
+    let terminal = !unpinned.is_empty() && unpinned.iter().all(|d| d.fix.is_none());
+    if !lock_stale || terminal {
+        return step;
+    }
+    if trust_rungs_only && !step.0.starts_with("agentstack trust") {
+        return step;
+    }
+    (
+        crate::commands::lock::STALE_PIN_FIX.to_string(),
+        crate::commands::lock::STALE_PIN_WHY,
+    )
+}
+
 /// The `why` for a never-pinned surface that NO command repairs.
 pub(crate) const UNPINNED_NO_FIX_WHY: &str =
     "no command can pin a body that is not on disk — restore it, or drop the declaration";
@@ -1066,6 +1113,22 @@ pub(crate) struct ProjectFacts {
     live_toolsets: Vec<String>,
     session: Option<SessionFacts>,
     locked: bool,
+    /// The lockfile records which manifest bytes it was pinned from, and those
+    /// bytes have since changed ([`agentstack_core::lock::Lock::manifest_stale`]).
+    ///
+    /// A third reading, kept apart from `trust` and `content_drift` for the
+    /// same reason those two are kept apart from each other. `trust` compares
+    /// the manifest/lock BYTES to the consent digest, and `content_drift`
+    /// compares pinned BODIES to their pins; both can be clean while the lock
+    /// itself was computed from a manifest nobody has re-pinned since. That is
+    /// the false-healthy state a hand-edited manifest plus a re-`trust` used to
+    /// reach: `locked · trusted`, no drift, and a lockfile still pinning the
+    /// pre-edit picture.
+    ///
+    /// `false` also means "not known to be stale" — an unstamped lock (every
+    /// lock written before the field, and every partial write) reads the same
+    /// as a fresh one here, which is exactly how this surface behaved before.
+    lock_stale: bool,
     trust: crate::trust::TrustState,
     /// `trust-content-drift-v1`: pinned bodies whose bytes on disk no longer
     /// match the lock. Held separately from `trust` above because it is a
@@ -1508,6 +1571,12 @@ fn project_json(f: &ProjectFacts) -> serde_json::Value {
             "abandoned": s.abandoned,
         })),
         "locked": f.locked,
+        // Whether that lock still describes this manifest. Additive, and
+        // additive in the safe direction: a panel that never asks for it reads
+        // exactly what it read before, and `locked` keeps its shipped meaning
+        // ("a lockfile exists"), so no schema-version bump is owed. `false`
+        // means "not known to be stale" — an unstamped lock cannot answer.
+        "lock_stale": f.lock_stale,
         // Same vocabulary `use --list --json` uses, so a UI holding both reads
         // does not need two trust lookup tables.
         "trust": match f.trust {
@@ -2139,6 +2208,11 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
     let project_root = crate::manifest::project_root_of(&ctx.dir);
     let trust = crate::trust::check(&project_root);
     let locked = crate::lock::Lock::path(&ctx.dir).exists();
+    // ...and whether those pins were computed from THIS manifest. Cheap enough
+    // for the bare screen (two file reads and a digest compare), unlike the
+    // drift passes below — which is the whole reason the lock records the
+    // stamp instead of making every reader re-run the resolver.
+    let lock_stale = crate::commands::lock::pins_are_stale(&ctx.dir);
     // The second half of the trust reading: bytes the consent pinned that have
     // since moved. Same shared detector `trust --preview` and `doctor` use — a
     // second drift check here is exactly how the surfaces came to disagree.
@@ -2408,6 +2482,20 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
     // identically by `doctor`, so the two surfaces cannot disagree about the
     // order of the ceremony.
     let next = correct_trust_rung(next, locked, lock_pins_something(m));
+    // ...and after even that, because it is the same ruling one step further
+    // on. `correct_trust_rung` moves the review behind the pins on a project
+    // that was never locked; this moves it behind the pins on one whose lock
+    // no longer describes the manifest. Both states end in the same trap if
+    // the review goes first — the grant binds to the lockfile, so a yes given
+    // now is void the moment `lock --write` re-pins — and here the trap is
+    // worse, because the project LOOKS finished: `locked · trusted`, no drift,
+    // and a lockfile pinning the manifest as it was before the edit.
+    //
+    // The rung names the pin, and its `why` names the review, so the Next line
+    // carries both steps in the order they must happen. The machine field
+    // stays a single runnable command (`machine_command`), which a two-verb
+    // sentence would not be.
+    let next = correct_stale_pin_rung(next, lock_stale, &surface_unpinned, false);
 
     Ok(Orientation {
         catalog_size: ctx.registry.ids().count(),
@@ -2433,6 +2521,7 @@ fn collect(manifest_dir: Option<&Path>, deep_reads: bool) -> Result<Orientation>
             live_toolsets,
             session,
             locked,
+            lock_stale,
             trust,
             content_drift,
             surface_unpinned,
@@ -2643,13 +2732,27 @@ fn print_orientation(o: &Orientation, status: bool, verbose: bool) {
             println!(
                 "  {}  {}{}",
                 "Status  ".bold(),
-                if f.locked { "locked" } else { "not locked" },
+                match (f.locked, f.lock_stale) {
+                    // The label may not say "locked" flat when the pins were
+                    // computed from a manifest that has since been edited:
+                    // `locked · trusted` over a stale lock is the exact
+                    // false-healthy line this qualifier exists to stop.
+                    (true, true) => "locked (pins are stale)",
+                    (true, false) => "locked",
+                    (false, _) => "not locked",
+                },
                 match f.trust {
                     crate::trust::TrustState::Trusted => " · trusted",
                     crate::trust::TrustState::Changed => " · trust stale (content changed)",
                     crate::trust::TrustState::Untrusted => " · untrusted",
                 }
             );
+            if f.lock_stale {
+                println!(
+                    "            {}",
+                    crate::commands::lock::STALE_PIN_LINE.dimmed()
+                );
+            }
             if !f.live_toolsets.is_empty() {
                 println!(
                     "  {}  {} — live on {}",
@@ -3561,6 +3664,7 @@ mod tests {
                     abandoned: false,
                 }),
                 locked: true,
+                lock_stale: false,
                 trust: crate::trust::TrustState::Changed,
                 content_drift: Vec::new(),
                 surface_unpinned: Vec::new(),

@@ -198,6 +198,16 @@ struct Report {
     /// `None` reads as `false` — a report that never set it keeps naming the
     /// review, which is what it did before the rung existed.
     lock_pins: Option<bool>,
+    /// Does `agentstack.lock` still describe the manifest it was pinned from?
+    /// The SAME shared reading `status` uses
+    /// ([`crate::commands::lock::pins_are_stale`]) — never a second detector.
+    ///
+    /// Carried for the same reason `lock_pins` is: so
+    /// [`next_action`](Report::next_action) can put the re-pin ahead of the
+    /// review on a project whose lock predates the manifest, where a grant
+    /// would be void as soon as the pins move. `None` reads as "not stale",
+    /// which is how every report behaved before the stamp existed.
+    lock_stale: Option<bool>,
     /// Have bytes this project already pinned moved since? The SAME shared
     /// reading `status` and `trust --preview` use
     /// ([`crate::commands::trust::content_drift`]) — not a second detector.
@@ -323,6 +333,7 @@ impl Report {
             apply_renders: None,
             no_toolsets: None,
             lock_pins: None,
+            lock_stale: None,
             content_drift: false,
             surface_unpinned: Vec::new(),
             trust_gated: true,
@@ -630,12 +641,23 @@ impl Report {
         // about the order of the ceremony. `trust` pins the manifest layers AND
         // the lockfile, so a grant made before anything is pinned is void the
         // moment `use --write` mints one; see `overview::correct_trust_rung`.
-        super::overview::correct_trust_rung(
+        let step = super::overview::correct_trust_rung(
             self.unlocked_aware_next_action(),
             // `None` reads as locked, which is how every report that never set
             // the field behaved before this rung existed.
             self.locked.unwrap_or(true),
             self.lock_pins.unwrap_or(false),
+        );
+        // …and the same ruling one step further on, through the same shared
+        // function `status` applies: a lock that predates the manifest makes
+        // the review premature exactly as never having locked does. Scoped to
+        // the rungs that name the review, so an outstanding error keeps the
+        // top of doctor's ladder.
+        super::overview::correct_stale_pin_rung(
+            step,
+            self.lock_stale.unwrap_or(false),
+            &self.surface_unpinned,
+            true,
         )
     }
 
@@ -1904,6 +1926,7 @@ fn run_checks(
     report.rendered = Some(super::overview::has_rendered_artifacts(&ctx, &all_ids));
     report.apply_renders = Some(super::overview::apply_renders_something(manifest));
     report.lock_pins = Some(super::overview::lock_pins_something(manifest));
+    report.lock_stale = Some(crate::commands::lock::pins_are_stale(&ctx.dir));
     report.no_toolsets = Some(manifest.profiles.is_empty());
     report.gitignore = Some(manifest.meta.manages_gitignore());
     let (detected, capable, incapable) =
@@ -2091,6 +2114,25 @@ fn run_checks(
     }
 
     report.section("Drift");
+    // Reported BEFORE the suppression branch below, and outside it, because it
+    // is drift of a different kind: not "the rendered files disagree with the
+    // manifest" — which a clean-at-rest or zero-files project deliberately has
+    // nothing to say about — but "the lockfile was computed from a manifest
+    // nobody has re-pinned since". That is true in every delivery mode, and it
+    // is the one finding that must not be silenced here: a stale pin is
+    // precisely what let a hand-edited project read `locked · trusted` with a
+    // green Drift section.
+    let stale_pins = crate::commands::lock::pins_are_stale(&ctx.dir);
+    if stale_pins {
+        report.line(
+            Level::Warn,
+            format!(
+                "{}; re-pin, then re-review with `agentstack trust .` ↳ {}",
+                crate::commands::lock::STALE_PIN_LINE,
+                crate::commands::lock::STALE_PIN_FIX
+            ),
+        );
+    }
     if args.skip_drift || mode == super::overview::Mode::ZeroFiles {
         // Both delivery modes that keep rendered configs off disk ON PURPOSE:
         // the usual "declared servers not on disk → apply --write" comparison
@@ -2111,9 +2153,14 @@ fn run_checks(
                 "not rendering configs — zero-files serves this project live through the gateway"
             },
         );
-        report.mark_irrelevant();
+        // ...but never hide a section that carries the stale-pin finding: the
+        // suppression is about the render comparison this mode does not make,
+        // not about everything the section holds.
+        if !stale_pins {
+            report.mark_irrelevant();
+        }
     } else {
-        let mut any_drift = false;
+        let mut any_drift = stale_pins;
         let identity = state::manifest_identity(&ctx.dir);
         // Context-default scope: project for a repo manifest, global for the
         // machine manifest — the scope `apply` writes here when none is passed
