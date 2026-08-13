@@ -2,7 +2,7 @@
 
 > **Purpose:** the only ordered product-wide work queue.
 >
-> **Status:** rebuilt 2026-08-12 against agentstack 0.18.0. Closed work and
+> **Status:** rebuilt 2026-08-12 against agentstack 0.18.1. Closed work and
 > the reasoning behind it live in git history and in `CHANGELOG.md`; this file
 > holds only what is open. The queue is the maintainer's to reorder; deviations
 > edit this file, never [`STRATEGY.md`](STRATEGY.md).

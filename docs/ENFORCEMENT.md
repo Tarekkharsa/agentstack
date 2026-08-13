@@ -4,7 +4,7 @@
 
 # AgentStack — Enforcement matrix
 
-*Current as of agentstack 0.18.0.*
+*Current as of agentstack 0.18.1.*
 
 > Short codes below — `W2`, `W4`, `D3`, `D4`, `G9`, `Phase 1`–`Phase 4` — name
 > internal development milestones, not public releases or CVE-style

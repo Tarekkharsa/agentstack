@@ -1,6 +1,6 @@
 # AgentStack product strategy
 
-*Current as of agentstack 0.18.0, 2026-08-12. Rebuilt from the repository:
+*Current as of agentstack 0.18.1, 2026-08-13. Rebuilt from the repository:
 every claim below describes what the code does today, not what was planned.*
 
 > **Relationship to the other documents:** [`TODO.md`](TODO.md) is the only
@@ -35,7 +35,7 @@ one thing never automated, inferred, or defaulted is consent to new content.
 
 ## What the product is today
 
-All of the following ships in 0.18.0:
+All of the following ships in 0.18.1:
 
 - **Thirteen adapters.** One manifest renders to every supported CLI's native
   format; a nightly conformance job proves the real tools still accept it.
@@ -146,10 +146,7 @@ plan.
 
 ## What happens next
 
-1. **Cut stable v0.18.0.** The documented install still pins a release
-   candidate because `releases/latest` never points at a pre-release; a stable
-   tag retires that pin and the warning that goes with it.
-2. **Run the activation study.** The kit is
+1. **Run the activation study.** The kit is
    [`docs/design/activation-study.md`](docs/design/activation-study.md); it
    waits on its own §0 re-pin to the current release candidate and refuses to
    be run until that is cleared. Its five thresholds and three-blocker rule are
@@ -158,7 +155,7 @@ plan.
    my CLIs"; 5/5 need no advanced concepts; ≥4/5 understand every block. The
    three blockers are the study's *output*, so they cannot be worked before it
    runs.
-3. **Then the launch push.** Show HN as the primary moment, same-day posts in
+2. **Then the launch push.** Show HN as the primary moment, same-day posts in
    the Claude Code and Codex communities, and a slow-burn presence in the
    skills ecosystems positioned as the governed way to use what those
    registries distribute. The announcement leads with portability, with trust

@@ -4,6 +4,57 @@ User-facing changes per release. The [GitHub Releases
 page](https://github.com/Tarekkharsa/agentstack/releases) carries the built
 binaries, checksums, and provenance attestations for each entry.
 
+## v0.18.1 — 2026-08-13
+
+**What two fresh-eyes walkthroughs of v0.18.0 tripped over.** No behaviour in
+the trust, policy or enforcement core moves; this is the first-run path saying
+true things when it fails.
+
+- **`self update` no longer calls a pre-release "the latest release".** The
+  version type drops the `-rc.N` suffix so ranking works, which made an
+  `0.18.0-rc.5` compare equal to a released `0.18.0` and print a green tick
+  naming a build the user did not have. A pre-release now gets neither branch:
+  it is told the build it is running, what the stable channel holds, and the
+  pinned installer line that moves it — because `self update` deliberately
+  moves nobody onto a pre-release or off one.
+
+- **A failed `add server` names its own verb.** The retry skeleton pointed at
+  `x set server`, a different command, for a server that does not exist yet.
+  `add` creates, `set` updates, and the retry line no longer swaps one for the
+  other.
+
+- **An import collision that reads identically now says what differs.**
+  `init --connect` could print the same sentence on both sides of a "which one
+  do you want" question, because the detector compares whole definitions while
+  the display shows only what a server runs. When the identity matches, the
+  block states it once and names the fields that actually moved.
+
+- **A doubled `sha256:` prefix is diagnosed as itself.** Pasting the documented
+  placeholder produced `sha256:sha256:<hex>`, which the gate refused as
+  "the manifest/lock changed since the preview" — sending users to re-preview
+  an unchanged project forever. The refusal is unchanged; only the sentence is.
+
+- **The keychain refusal says it once and names the way out.** A machine with
+  no keychain — headless CI, a container, a Linux box with no secret service —
+  got a stuttered platform error and no next step. It now names `--env-file`,
+  which works there, as a whole command.
+
+- **`init` flags a plaintext secrets file outside a git repository.** Inside a
+  repository the line ends "(gitignored)"; outside one that word is simply
+  absent, which nobody can notice who has not seen both. It now says so.
+
+- **`undo` and `x restore` each state which writes they cover.** `undo` is
+  scoped to the project on purpose — a timeline offering another repository's
+  applies would offer to break it — so a machine-scope write like
+  `x gateway connect` is undoable but not listed there. Both surfaces now say
+  which set they are showing.
+
+- **Docs.** The quickstart names the PATH line the installer prints; token
+  protection is stated as the conditional it is; the headless forms of `trust`
+  and `secret set` are documented and driven; `--env-file` is a named store
+  rather than an aside; and the two snippets that taught a digest the gate
+  refuses are fixed.
+
 ## v0.18.0 — 2026-08-12
 
 **One setup, delivered live, with consent that is bound to bytes.** The stable
