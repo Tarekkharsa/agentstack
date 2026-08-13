@@ -9,10 +9,13 @@ use serde::{Deserialize, Serialize};
 
 /// Top-level manifest, deserialized from `agentstack.toml`.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Manifest {
     /// Schema version. Currently always `1`.
     pub version: u32,
 
+    /// Project metadata: an optional display name, and whether agentstack
+    /// maintains this project's managed `.gitignore` block.
     #[serde(default, skip_serializing_if = "Meta::is_empty")]
     pub meta: Meta,
 
@@ -143,6 +146,7 @@ pub struct Manifest {
 /// compatibility test against native CLI behaviour), not of one run or one
 /// machine.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct Delivery {
     /// Project-wide: write files even where the live channel would have worked.
@@ -160,8 +164,11 @@ pub struct Delivery {
 
 /// One harness's delivery override.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct HarnessDelivery {
+    /// This harness's answer to **Render locally**, winning over the
+    /// project-wide value in both directions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub render_locally: Option<bool>,
 }
@@ -198,6 +205,7 @@ impl Delivery {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct ExperimentalConfig {
     /// Advertise and permit the isolated `tools_execute` MCP primitive.
@@ -209,12 +217,18 @@ pub struct ExperimentalConfig {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct ExperimentalExecuteLimits {
+    /// Wall-clock ceiling for one `tools_execute` call, in milliseconds.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u64>,
+    /// Ceiling on the tool calls the executed code may make back through the
+    /// relay during one `tools_execute` run.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_calls: Option<u32>,
+    /// Ceiling on the combined stdout + stderr bytes one `tools_execute` run
+    /// may produce.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_output_bytes: Option<usize>,
 }
@@ -236,6 +250,7 @@ impl ExperimentalConfig {
 /// honor its own hook protocol), aimed at accidents, not malice — the
 /// kernel-enforced story is `run --sandbox`/`--lockdown`.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct GuardConfig {
     /// Master switch. `None` (absent) means the guard is not configured;
@@ -271,6 +286,7 @@ impl GuardConfig {
 
 /// Team/org governance (PLAN §9e, D18). Off by default; enforced by `doctor`.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Policy {
     /// Capability names that must be present in the manifest.
     #[serde(default)]
@@ -322,6 +338,7 @@ pub struct Policy {
 /// Machine-layer workflow ceilings. New table, so typos are rejected outright
 /// (`deny_unknown_fields`) — the same argument as [`FsPolicy`].
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct WorkflowPolicy {
     /// Cap on any workflow's total agent spawns. Absent = no machine cap.
@@ -362,10 +379,17 @@ impl WorkflowPolicy {
 /// are rejected outright (`deny_unknown_fields`) — unlike the long-shipped
 /// `Policy` fields, there is no existing config to stay lenient for.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct FsPolicy {
+    /// Allowed read scopes, as path globs. INFORMATIONAL: nothing enforces
+    /// this scope today — see the `[policy.filesystem]` field docs for what
+    /// is enforced and where.
     #[serde(default)]
     pub read: Vec<String>,
+    /// Allowed write scopes, as path globs. Enforced in sandbox mode: the
+    /// workspace mounts read-only unless the effective scope covers it.
+    /// Host mode does not enforce it.
     #[serde(default)]
     pub write: Vec<String>,
     /// Path globs no tool call may touch at all — read or write. Unlike
@@ -798,6 +822,7 @@ pub fn glob_match(pattern: &str, text: &str) -> bool {
 
 /// One instruction fragment: a markdown file applied to some/all harnesses.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Instruction {
     /// The fragment's own file, relative to the manifest dir or absolute.
     ///
@@ -841,6 +866,7 @@ fn is_all_targets(targets: &[String]) -> bool {
 /// One lifecycle hook: run `command` on a harness `event` (optionally filtered
 /// by `matcher`). Compiled into each hook-capable harness's native hooks config.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Hook {
     /// Lifecycle event, e.g. `PreToolUse`, `PostToolUse`, `SessionStart`.
     pub event: String,
@@ -868,8 +894,12 @@ pub struct Hook {
 /// re-fetch. (The former plugin-recipe/marketplace lane that also used this
 /// table was removed; the extensions kind supersedes it.)
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct PackInstall {
+    /// The pack version this install recorded. Bookkeeping written by
+    /// `add from`, not a field to hand-author.
     pub version: String,
+    /// The pack's one-line summary, as recorded at install time.
     pub description: String,
     /// Where this pack was resolved from (`catalog:<id>` or
     /// `git:<url>@<tag>[#subdir]`); parsed by `upgrade` to re-resolve.
@@ -911,6 +941,7 @@ pub struct PackInstall {
 /// override that silently matches nothing is how a project comes to believe it
 /// dropped something it still has.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct PackageOverride {
     /// Package member names this project drops entirely.
@@ -939,6 +970,7 @@ impl PackageOverride {
 /// lenient for, so a typo (`clis`, `models`) is rejected outright instead of
 /// silently widening the selector to "matches everything".
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct InstructionVariant {
     /// Adapter id this body is for (`claude-code`, `codex`, …).
@@ -1033,7 +1065,10 @@ impl Instruction {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Meta {
+    /// Display name for this project, reported in agentstack's own project
+    /// snapshot. Cosmetic: nothing resolves by it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
 
@@ -1067,6 +1102,7 @@ impl Meta {
 
 /// Transport kind for an MCP server.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, clap::ValueEnum)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "lowercase")]
 pub enum ServerType {
     Http,
@@ -1075,17 +1111,24 @@ pub enum ServerType {
 
 /// A single MCP server definition (transport-neutral).
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Server {
+    /// Transport: `stdio` for a locally launched process, `http` for a URL.
     #[serde(rename = "type")]
     pub server_type: ServerType,
 
     // Scalars and arrays first, then map/subtable fields last, so the struct
     // serializes to valid TOML (a key after a `[subtable]` header would be
     // captured by that subtable).
+    /// Endpoint an `http` server is reached at. Supports `${REF}` substitution.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
+    /// Executable a `stdio` server is launched as (`npx`, `uvx`, an absolute
+    /// path). Supports `${REF}` substitution.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command: Option<String>,
+    /// Arguments passed to `command`, in order. Each element supports
+    /// `${REF}` substitution.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub args: Vec<String>,
     /// Working directory a stdio server is launched from. Some servers only
@@ -1128,8 +1171,13 @@ pub struct Server {
     /// follows the owner's disk, including keys the owner adds or removes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub owner: Option<String>,
+    /// Extra HTTP headers sent to an `http` server, e.g.
+    /// `Authorization = "Bearer ${MY_TOKEN}"`. Values carry `${REF}`
+    /// references, never secret literals (invariant 5).
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub headers: IndexMap<String, String>,
+    /// Environment variables set for a `stdio` server's process. Values carry
+    /// `${REF}` references, never secret literals (invariant 5).
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub env: IndexMap<String, String>,
     /// Target-specific keys with no transport-neutral equivalent, keyed by
@@ -1158,6 +1206,7 @@ impl Server {
 
 /// A skill: a portable directory containing a `SKILL.md`.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Skill {
     /// Local path source (relative to the manifest, or absolute).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1211,6 +1260,7 @@ impl Skill {
 /// the policy ceiling — agentstack pins and delivers the bytes, it never runs
 /// or governs them at runtime.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Extension {
     /// Local path source, relative to the manifest dir (same anchoring as
     /// skills and instructions — a `.agentstack/` layout keeps extension
@@ -1224,8 +1274,11 @@ pub struct Extension {
     /// requires `subpath` alongside `git`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git: Option<String>,
+    /// Pinned git revision (branch, tag, or commit). Latest if absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rev: Option<String>,
+    /// For git sources: the extension's directory within the repo.
+    /// Required alongside `git`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subpath: Option<String>,
     /// The ONE adapter id this extension's code is written against (`pi`,
@@ -1233,6 +1286,7 @@ pub struct Extension {
     /// elsewhere: extension code is harness-specific by nature, so there is
     /// no `"*"` and no fan-out.
     pub target: String,
+    /// Optional one-line summary of what this extension does.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
 }
@@ -1249,8 +1303,10 @@ pub struct Extension {
 /// lenient for, so typos (`max_agent`, `role`) are rejected outright — the
 /// same argument as [`FsPolicy`].
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct Workflow {
+    /// Optional one-line summary of what this workflow does.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     /// Local path source, relative to the manifest dir — pinned by the strict
@@ -1264,8 +1320,11 @@ pub struct Workflow {
     /// requires `subpath` alongside `git` — mirroring [`Extension`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub git: Option<String>,
+    /// Pinned git revision (branch, tag, or commit). Latest if absent.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rev: Option<String>,
+    /// For git sources: the workflow's directory within the repo.
+    /// Required alongside `git`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subpath: Option<String>,
     /// The reviewed BLUEPRINT this script was authored from — a project-local
@@ -1314,6 +1373,7 @@ pub struct Workflow {
 /// here would silently mean "default scheduling" on a surface whose whole
 /// purpose is to be explicit about what the framework may do.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(deny_unknown_fields)]
 pub struct RoleScheduling {
     /// Asserts this role's children have no side effects — no filesystem
@@ -1353,7 +1413,10 @@ impl Workflow {
 
 /// A profile selects a subset of servers, skills, and packages.
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Profile {
+    /// Server names this toolset selects, each naming a `[servers.<name>]`
+    /// entry.
     #[serde(default)]
     pub servers: Vec<String>,
     /// May contain the wildcard `"*"` meaning "all skills".
@@ -1410,6 +1473,7 @@ pub struct Profile {
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct Targets {
     /// Adapter ids `apply` writes to when `--target` is not given.
     #[serde(default)]

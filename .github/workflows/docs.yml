@@ -140,10 +140,14 @@ jobs:
           BASE="https://tarekkharsa.github.io/agentstack"
           # Every canonical page, derived from the sitemap so a page added
           # there is automatically covered ("" → index.html, "dir/" →
-          # dir/index.html), plus the sitemap itself.
+          # dir/index.html), plus the sitemap itself and the manifest JSON
+          # Schema. The schema is not a page and so is not in the sitemap, but
+          # every manifest agentstack writes names its URL in a `#:schema`
+          # line — if it stops serving, editor completion silently dies in
+          # every project, and nothing else here would notice.
           FILES="$(grep -o '<loc>[^<]*</loc>' docs/sitemap.xml \
             | sed -e 's|<loc>||' -e 's|</loc>||' -e "s|$BASE/||" \
-            -e 's|^$|index.html|' -e 's|/$|/index.html|') sitemap.xml"
+            -e 's|^$|index.html|' -e 's|/$|/index.html|') sitemap.xml agentstack.schema.json"
           mismatched=""
           for f in $FILES; do
             ok=""

@@ -961,9 +961,11 @@ Set AGENTSTACK_NO_UPDATE_CHECK=1 to stop AgentStack contacting the release
 channel at all (this command and `doctor`'s once-a-day note).")]
     Update(SelfUpdateArgs),
 
-    /// Regenerate the "All commands" inventory in docs/reference.md from the
-    /// live clap tree. No flag prints the block; `--write` splices it into the
-    /// managed region. A maintainer/CI command, not part of the daily surface.
+    /// Regenerate the documentation that is generated from the binary: the
+    /// "All commands" inventory in docs/reference.md (from the live clap tree)
+    /// and docs/agentstack.schema.json (from the manifest model). No flag
+    /// prints the command block; `--write` writes both. A maintainer/CI
+    /// command, not part of the daily surface.
     #[command(hide = true)]
     Docs(SelfDocsArgs),
 }
@@ -977,7 +979,9 @@ pub struct SelfUpdateArgs {
 
 #[derive(Args, Debug)]
 pub struct SelfDocsArgs {
-    /// Splice the generated block into docs/reference.md (else print to stdout).
+    /// Write both generated artifacts — the command inventory spliced into
+    /// docs/reference.md, and docs/agentstack.schema.json (else print the
+    /// command block to stdout).
     #[arg(long)]
     pub write: bool,
 }

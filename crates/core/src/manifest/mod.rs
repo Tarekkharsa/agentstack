@@ -6,6 +6,7 @@
 
 pub mod load;
 pub mod model;
+pub mod schema;
 
 pub use load::{
     discover_project_base, load_from_contents, load_from_dir, machine_experimental_health,
@@ -20,3 +21,4 @@ pub use model::{
     Instruction, InstructionVariant, Manifest, PackInstall, PackageOverride, PatternMatch, Policy,
     Profile, RuleDenial, Server, ServerType, Skill, SkillSource, Workflow, WorkflowPolicy,
 };
+pub use schema::{SCHEMA_DIRECTIVE, SCHEMA_DOC_PATH, SCHEMA_URL};

@@ -8,6 +8,19 @@ license.workspace = true
 repository.workspace = true
 publish = false
 
+[features]
+# Derive `schemars::JsonSchema` alongside serde on the manifest model, so the
+# editor-facing JSON Schema is generated from the one source of truth rather
+# than hand-written beside it.
+#
+# OFF by default, and that is the whole point: `trust` and `policy` are the two
+# small review boundaries, they both depend on this crate, and neither has any
+# business carrying a schema generator. With the feature off their dependency
+# trees are unchanged (`cargo tree -p agentstack-trust` shows no schemars). The
+# `cli` crate — which already links schemars transitively through rmcp, so this
+# costs the shipped binary nothing — turns it on to emit the file.
+schema = ["dep:schemars"]
+
 [dependencies]
 # TODO(phase-1): drop clap from core — Scope/ServerType derive ValueEnum today.
 # The orphan-rule-safe fix: a cli-local arg enum implementing ValueEnum, with
@@ -21,6 +34,11 @@ dirs = "5"
 anyhow = "1"
 indexmap = { version = "2", features = ["serde"] }
 owo-colors = "4"
+# MAINTAINER-APPROVED (see the `schema` feature above). Optional, so it is a
+# dependency of exactly one build configuration. `indexmap2` is what teaches it
+# the `IndexMap` fields that make up most of the manifest; without it every
+# capability table would be unschematized.
+schemars = { version = "1", features = ["indexmap2"], optional = true }
 
 [dev-dependencies]
 assert_fs = "1"
