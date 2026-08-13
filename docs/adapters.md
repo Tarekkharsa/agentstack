@@ -107,8 +107,8 @@ Notes, all of them load-bearing:
   *without* it and that the skip is spoken out loud — and that every other
   adapter receives it verbatim.
 
-`agentstack x adapters list` shows the same ids and marks which of these tools look
-installed on your machine. `agentstack x adapters show <id>` prints one descriptor.
+`agentstack more adapters list` shows the same ids and marks which of these tools look
+installed on your machine. `agentstack more adapters show <id>` prints one descriptor.
 
 ## What each adapter manages
 
@@ -231,7 +231,7 @@ wrong. You will likely notice first, in one of these forms:
 - servers you expect are simply absent from that tool's server list.
 
 In every case, AgentStack's own state is unharmed: the manifest is the source of
-truth, the write is recorded, and `agentstack x restore --last --write` puts the
+truth, the write is recorded, and `agentstack more restore --last --write` puts the
 native file back. What is broken is the translation, and translation lives in
 one YAML descriptor.
 
@@ -269,7 +269,7 @@ it is part of the trusted computing base: it decides where AgentStack writes and
 what shape it writes. Validate one before installing it:
 
 ```sh
-agentstack x adapters validate ./my-cli.yaml
+agentstack more adapters validate ./my-cli.yaml
 ```
 
 More on the format and the rendering rules:

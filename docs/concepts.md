@@ -106,7 +106,7 @@ problem when status says the capability is served live.
 
 Two commands are easy to confuse. `agentstack use <toolset> --write`
 **materializes one toolset's files now** and records nothing about routing;
-`agentstack x delivery render-locally --write` **records a durable preference**
+`agentstack more delivery render-locally --write` **records a durable preference**
 that routes kinds to files from then on, for every toolset. One is an action,
 the other is a setting.
 

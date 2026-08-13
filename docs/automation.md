@@ -85,7 +85,7 @@ withheld in parentheses. Trust is recorded per project directory and never
 copied, so a clone, a second checkout, or a fresh worktree of a project someone
 already approved is untrusted at its new path. An unattended pipeline against
 one does not silently render a partial setup: it stops, and the fix is a human
-review. Budget for it — clone, `agentstack x install --locked`, then the
+review. Budget for it — clone, `agentstack more install --locked`, then the
 digest-bound `trust --preview` → `trust --yes --consented` pair on this
 page, before any `--write`. (`agentstack trust .` is the interactive form: it
 asks one closing question, so it exits nonzero with no terminal to answer it.)
@@ -111,8 +111,8 @@ process start time).
 | --- | --- | --- |
 | `agentstack status --json` | `json-reads-v1` | `version`, `clis_detected`, `manifest`, `project`, `next_action` |
 | `agentstack search <q> --json` | `json-reads-v1` | `query`, `results[]` |
-| `agentstack x adapters list --json` | `json-reads-v1` | `adapters[]` |
-| `agentstack x session list --json` | `json-reads-v1` | `sessions[]` |
+| `agentstack more adapters list --json` | `json-reads-v1` | `adapters[]` |
+| `agentstack more session list --json` | `json-reads-v1` | `sessions[]` |
 | `agentstack doctor --json` | `status-v1` | `state`, `next_action`, `sections`, `errors`, `warnings`, `trust`, `protection` |
 | `agentstack doctor --json` | `doctor-advisories-v1` | top-level `advisories` count; section lines may carry `level: "advisory"` |
 | `agentstack doctor --json` | `doctor-mode-v1` | top-level `mode` (`static` / `clean-at-rest` / `zero-files`) and `activation` (`locked` / `never_activated`) — the same derived readings `status` prints, so no prose-matching. `activation` answers "was this project ever activated", i.e. does a lockfile exist; it is **not** a liveness reading |
@@ -122,18 +122,18 @@ process start time).
 | `agentstack doctor --probe --json` | `doctor-probe-v1` | top-level `probe` object. **This one spawns**: it starts each stdio server, speaks the MCP `initialize` handshake, and stops it again |
 | `agentstack use --list --json` | `profiles-v1` | `path`, `trust`, `profiles[]` with readiness |
 | `agentstack use --list --json` | `sessions-v1` | per-entry `active`, plus the top-level `session` object |
-| `agentstack x diff --json` | `diff-v1` | `targets[]`, `drifted`, `kept`, `owner_refreshes`, `scope`, `warnings` |
-| `agentstack x diff --json` | `diff-ownership-v1` | per-target `managed`, `hand_edited`, `foreign_untracked` |
-| `agentstack x diff --json` | `diff-existence-v1` | per-target `existed_before` — splits "never rendered here / file absent" from "the manifest moved ahead of a rendered file" |
-| `agentstack x restore --json` | `restore-last` | `entries` (newest first) and `adapter_backups` |
+| `agentstack more diff --json` | `diff-v1` | `targets[]`, `drifted`, `kept`, `owner_refreshes`, `scope`, `warnings` |
+| `agentstack more diff --json` | `diff-ownership-v1` | per-target `managed`, `hand_edited`, `foreign_untracked` |
+| `agentstack more diff --json` | `diff-existence-v1` | per-target `existed_before` — splits "never rendered here / file absent" from "the manifest moved ahead of a rendered file" |
+| `agentstack more restore --json` | `restore-last` | `entries` (newest first) and `adapter_backups` |
 | `agentstack undo --json` | `json-reads-v1` | `entries[]` (newest first) — the same recorded writes `restore --json` lists, keyed for timeline display |
 | `agentstack workflow list --json` | `workflow-observe-v1` | `workflows[]` with per-entry trust and lock state |
 | `agentstack workflow list --json` | `workflow-serial-roles-v1` | per-entry `serial_roles` |
 | `agentstack workflow list --json` / `workflow explain --json` | `workflow-role-selection-v1` | per-entry `role_details[]` — each role's `harness`, `model`, `effort`, `serial`, and any declared value that would not reach the child. `explain` carries the envelope too; it is the deeper per-workflow read and **re-gates on trust** |
 | `agentstack workflow runs --json` | `workflow-observe-v1` | `runs[]` from the machine-global runs directory |
-| `agentstack x lease status --json` | `lease-status-v1` | `leases[]` — the machine-level runtime lease registry, each row's `liveness` derived at read time from the PID and that process's start time. `unknown` never means live. Writes nothing; on macOS it does run `/bin/ps` per recorded PID to read a start time, because there is no `/proc` to read instead |
-| `agentstack x delivery --json` | `delivery-routing-v1` | `default` plus one `harnesses[]` row per targeted CLI with its per-kind `routes[]` (where the bytes go) and that harness's own `bridge_registered`. Decide on those two typed fields; the row's `summary` and `why` are display copy and must never be matched on |
-| `agentstack x image --json` | `image-plan-v1` | the packaging plan: every pinned `members[]` entry, `required_secrets` (names only), `blockers`, `buildable` |
+| `agentstack more lease status --json` | `lease-status-v1` | `leases[]` — the machine-level runtime lease registry, each row's `liveness` derived at read time from the PID and that process's start time. `unknown` never means live. Writes nothing; on macOS it does run `/bin/ps` per recorded PID to read a start time, because there is no `/proc` to read instead |
+| `agentstack more delivery --json` | `delivery-routing-v1` | `default` plus one `harnesses[]` row per targeted CLI with its per-kind `routes[]` (where the bytes go) and that harness's own `bridge_registered`. Decide on those two typed fields; the row's `summary` and `why` are display copy and must never be matched on |
+| `agentstack more image --json` | `image-plan-v1` | the packaging plan: every pinned `members[]` entry, `required_secrets` (names only), `blockers`, `buildable` |
 | `agentstack status --json` | `library-sources-v1` | `project.shadowed_names[]` — one sentence per capability name more than one linked library source holds. Always present, `[]` when nothing collides |
 | `agentstack status --json` | `instruction-channels-v1` | `project.instruction_channels[]` — one row per targeted CLI, including the ones with no instruction channel at all |
 | `agentstack status --json` | `package-members-v1` | `project.packages[]` — the effective member set this project pinned, after its overrides. Inserted only when a package is selected |
@@ -164,11 +164,11 @@ the digest back to apply.
 | `agentstack edit-profile` | `profiles-edit-batch-v1` | one preview + one digest over a batch of membership edits |
 | `agentstack toolset rename` | `toolset-rename-v1` | renames the toolset everywhere it appears; memberships kept |
 | `agentstack toolset delete` | `toolset-delete-v1` | deletes the toolset; the servers and skills in it stay declared |
-| `agentstack set-mode` | `set-mode-v1` — **superseded, refuses** | the Mode axis retired; delivery is routed, `agentstack status` reports it, and `agentstack x uninstall` removes rendered files |
+| `agentstack set-mode` | `set-mode-v1` — **superseded, refuses** | the Mode axis retired; delivery is routed, `agentstack status` reports it, and `agentstack more uninstall` removes rendered files |
 | the managed-`.gitignore` prompt on `apply` / `use --write` | `gitignore-opt-out-v1` | records a durable per-project opt-out from the managed block |
 | `agentstack remove-from-library` | `library-remove-v1` | machine-wide, not project; recoverable from `lib/.trash` |
 | `agentstack remove-capability` | `manifest-remove-v1` | removes a project definition and memberships, then re-locks and re-renders; library untouched |
-| `agentstack x restore --last --write` | `restore-last` | undoes the newest recorded write |
+| `agentstack more restore --last --write` | `restore-last` | undoes the newest recorded write |
 
 `profile` in these command and contract names is the older spelling of
 **toolset**; they name the same object.
@@ -328,7 +328,7 @@ Field notes:
 Field notes:
 
 - `abandoned` is the CLI's judgment, not a threshold to re-invent. It is the
-  state a supervising UI died in — offer `agentstack x session end`, which
+  state a supervising UI died in — offer `agentstack more session end`, which
   restores every file the session touched.
 - Both `started_unix` and `age_seconds` ship: a poller wants the stable start
   time, a one-shot caller wants the age.
@@ -427,10 +427,10 @@ Some commands emit JSON that is evidence or analysis rather than control-plane
 state. These carry **no envelope** and **no feature name**, and their shape may
 change without a `schema_version` bump. Treat them as reports, not APIs:
 
-- `agentstack x explain <name> --json`
-- `agentstack x report run --json`, `report runs --json`, `report calls --json`,
+- `agentstack more explain <name> --json`
+- `agentstack more report run --json`, `report runs --json`, `report calls --json`,
   `report wire --json`
-- `agentstack x optimize --json`
+- `agentstack more optimize --json`
 - `agentstack workflow report --json` (`workflow explain --json` left this list
   when it gained the envelope and `workflow-role-selection-v1`)
 
@@ -442,7 +442,7 @@ variants. Three moved recently and are worth knowing if you parse them:
   tag. Toolset-fence refusals arrive as `"event": "fence_refused"` (server,
   tool, the `toolset` that would expose it, and the reason), deliberately
   **not** as a `tool_call` with a denied outcome, so a refusal never inflates
-  the count of calls a run made. `agentstack x report run <id>` prints them in
+  the count of calls a run made. `agentstack more report run <id>` prints them in
   their own **Fence refusals** section.
 - `~/.agentstack/audit/calls.jsonl` — the guard's three fail-closed *system*
   refusals are filed under synthetic `system: <tag>` subjects

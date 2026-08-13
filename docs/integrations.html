@@ -277,7 +277,7 @@
   </details>
 </aside>
   <main id="main-content" tabindex="-1">
-<p class="versionbar">These pages describe <b>v0.18.1</b>, the current release. That is the build <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">the installer</a> gives you. <code>agentstack --version</code> says which build you have.</p>
+<p class="versionbar">These pages describe <b>unreleased <code>main</code></b>, which is ahead of the current release. <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">The installer</a> serves <b>v0.18.1</b>, so commands and flags documented here may not exist in your build. <code>agentstack --version</code> says which build you have.</p>
 <h1 id="integrations">Integrations</h1>
 <p>AgentStack is standalone. Its manifest, lock, trust, policy, dynamic delivery, and machine bootstrap work without a supervisor or custom UI.</p>
 <p>An integration may launch a supported CLI, but it does not become a second configuration system.</p>
@@ -311,7 +311,7 @@
 <p>The next agent connection receives the default toolset automatically. A file- only provider may additionally need the rendered command printed by status.</p>
 <h3 id="per-run-evidence">Per-run evidence<a class="hlink" href="#per-run-evidence" aria-label="Link to this section">#</a></h3>
 <p>T3 Code sessions normally attribute to the machine's global audit. For a separate run identity, create a transparent AgentStack shim and configure that provider instance to launch it:</p>
-<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack x shim make claude</code></pre></div>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack more shim make claude</code></pre></div>
 <p>This is optional and does not change the provider's capabilities.</p>
 <h2 id="other-supervisors">Other supervisors<a class="hlink" href="#other-supervisors" aria-label="Link to this section">#</a></h2>
 <p>The same rule applies to any launcher: if it starts a supported CLI with its normal home and working directory, AgentStack works unchanged. If the launcher overrides either, run <code>agentstack doctor</code> on that machine and follow the reported adapter-specific fix.</p>

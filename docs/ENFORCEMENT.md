@@ -922,7 +922,7 @@ still fail-closed, and still only evidence that the check ran.
     happens to follow.
   Two things are deliberately outside the trust gate, each because it is not
   the project's content: removing skills agentstack already placed (the inert
-  direction — deactivation and `x unrender` keep working untrusted), and the
+  direction — deactivation and `more unrender` keep working untrusted), and the
   machine manifest at `$AGENTSTACK_HOME` — which
   `manifest::discover_project_base` refuses to discover as a project, so no
   `trust` command could ever satisfy a gate on it.
@@ -971,7 +971,7 @@ still fail-closed, and still only evidence that the check ran.
     re-enforced at the write choke point (`render::instructions::InstrPlan::
     write`), so a caller that ignores the field still cannot reach disk; an
     existing region is left exactly as the human last approved it rather than
-    emptied; and `apply --write` and `agentstack x instructions --write` both
+    emptied; and `apply --write` and `agentstack more instructions --write` both
     exit nonzero naming `agentstack trust .`. The gate is on the content's
     provenance, not on the destination, so it is identical at project scope
     (`./CLAUDE.md`) and global scope (`~/.claude/CLAUDE.md`).
@@ -1438,7 +1438,7 @@ review of identical content gets shorter.
   project, committed, or shared. Recognition in particular never crosses
   machines — that is a consequence of where it lives, not a policy promise.
 - **Not a backup.** The snapshot store is not a recovery mechanism and is not
-  what `agentstack x restore` reads; it holds approved bytes for comparison, not
+  what `agentstack more restore` reads; it holds approved bytes for comparison, not
   project history.
 - **Not a widening of consent.** Recognition shortens what the card *says*; it
   never shortens the gate. The per-project yes still happens in full, and a

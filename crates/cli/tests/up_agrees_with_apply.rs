@@ -75,7 +75,7 @@ const LIVE_PLUS_RENDERED: &str = "version = 1\n\
 
 /// The one recovery command `apply` names for this state. Both surfaces must
 /// carry it, or the exit code is all the user gets.
-const CONNECT: &str = "agentstack x gateway connect --all --write";
+const CONNECT: &str = "agentstack more gateway connect --all --write";
 
 struct Run {
     text: String,
@@ -181,7 +181,7 @@ fn up_and_apply_agree_that_delivering_nothing_is_a_failure() {
         );
         assert!(
             r.text
-                .contains("agentstack x delivery render-locally --write"),
+                .contains("agentstack more delivery render-locally --write"),
             "`{who}` must also name the override for a user who wants the files \
              anyway:\n{}",
             r.text

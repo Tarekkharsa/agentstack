@@ -402,7 +402,7 @@ fn print_profile_listing(out: &serde_json::Value) {
             super::count(p["blockers"].as_array().map_or(0, Vec::len), "blocker")
         };
         let in_use = if p["active"].as_bool().unwrap_or(false) {
-            "  · in use (agentstack x session end reverts it)"
+            "  · in use (agentstack more session end reverts it)"
         } else {
             ""
         };
@@ -831,7 +831,7 @@ pub fn activate(
         // the way back at the top of the write phase, not by inventing a gate.
         if args.write {
             println!(
-                "  {} undo: `agentstack x restore --last --write`",
+                "  {} undo: `agentstack more restore --last --write`",
                 "↩".dimmed()
             );
             // G31: that promise covers the FILES this activation writes. The
@@ -1322,7 +1322,7 @@ pub fn activate(
     ignore_entries.extend(ext_ignore);
 
     // Captured BEFORE the block is spliced, exactly as `apply` does: `use`
-    // prints "↩ undo: agentstack x restore --last --write" up front, and a
+    // prints "↩ undo: agentstack more restore --last --write" up front, and a
     // .gitignore edit that never entered the ledger made that hint name
     // somebody else's change — in a live-lane project the managed block is
     // often the ONLY file this activation writes, so without this the entry
@@ -1418,7 +1418,7 @@ pub fn activate(
             );
             println!("  {} {}", "→".cyan(), super::delivery::CONNECT_THE_BRIDGE);
             println!(
-                "  {} or write files anyway: agentstack x delivery render-locally --write",
+                "  {} or write files anyway: agentstack more delivery render-locally --write",
                 "→".cyan()
             );
         }
@@ -1524,7 +1524,10 @@ pub fn activate(
             // Name the exact command — bare `agentstack restore` lists the
             // ledger instead of undoing, so it read as a broken instruction.
             if wrote > 0 {
-                println!("  {}", "undo: agentstack x restore --last --write".dimmed());
+                println!(
+                    "  {}",
+                    "undo: agentstack more restore --last --write".dimmed()
+                );
             }
         } else {
             // A blocked target is a failure, not a footnote: report it in the

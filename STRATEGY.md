@@ -56,7 +56,7 @@ All of the following ships in 0.18.1:
 - **Toolsets and leases.** One selection concept — project selection, lease
   unit, and workflow role are the same noun — with a lease registry behind the
   MCP control plane.
-- **Images.** `agentstack x image` composes one toolset's pinned members into a
+- **Images.** `agentstack more image` composes one toolset's pinned members into a
   self-run Docker image.
 - **Evidence and recovery.** Per-run reports, a call audit log, and byte-exact
   restore of managed writes.

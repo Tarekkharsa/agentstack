@@ -16,7 +16,7 @@ rest.
 
 **You do not have to choose.** Delivery is *routed*, not picked: AgentStack
 decides per capability, from what kind it is and which CLI it is going to, and
-says what it decided. `agentstack x delivery` shows the routing for your
+says what it decided. `agentstack more delivery` shows the routing for your
 project.
 
 | Capability | Where it goes | Why |
@@ -29,7 +29,7 @@ project.
 A project is normally in **both** lanes at once, and that is the ordinary case,
 not a compromise.
 
-**The delivery override: render locally.** `agentstack x delivery render-locally
+**The delivery override: render locally.** `agentstack more delivery render-locally
 --write` (add `--harness <id>` for a single CLI) writes files even where the
 live channel would have worked. It is the only setting that changes the
 *routing*; materializing one toolset's files right now, without changing the

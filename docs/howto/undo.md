@@ -15,7 +15,7 @@ to a point. Nothing changes until you add the shown `--write` form.
 
 ```console
 recent changes (newest first)
-  this project only — machine-wide writes: agentstack x restore --list
+  this project only — machine-wide writes: agentstack more restore --list
   1  1m ago       init                                         7 files · Claude Code, Codex CLI
 
   pick a point: agentstack undo --to <n> --write
@@ -25,9 +25,9 @@ recent changes (newest first)
 machine-global, so `undo` filters it to writes that landed inside the directory
 you are standing in — offering another repository's applies would be offering
 to break a project you are not looking at. A machine-scope write is therefore
-recorded but not listed here: `agentstack x gateway connect --all --write`
+recorded but not listed here: `agentstack more gateway connect --all --write`
 registers the bridge in each harness's own config, and `apply --scope global`
-writes outside the project too. Both are undoable, through `x restore` below,
+writes outside the project too. Both are undoable, through `more restore` below,
 which lists everything this machine recorded.
 
 ## Undo one recorded write
@@ -35,27 +35,27 @@ which lists everything this machine recorded.
 The script-friendly form is:
 
 ```bash
-agentstack x restore
-agentstack x restore --last --write
-agentstack x restore <id> --write
+agentstack more restore
+agentstack more restore --last --write
+agentstack more restore <id> --write
 ```
 
 The bare form lists every recorded point and every adapter backup:
 
 ```console
-$ agentstack x restore
+$ agentstack more restore
 Recorded changes (newest first) — everything on this machine:
 
   18cb1a4c48  1m ago   global   gateway connect            2 files · Claude Code, Codex CLI
   18cb1a4c46  1m ago   project  init                       7 files · Claude Code, Codex CLI
 
-Undo one with: agentstack x restore <id> --write (or --last for the newest)
+Undo one with: agentstack more restore <id> --write (or --last for the newest)
 
 Adapter config backups (content before our last write):
   Claude Code    global ~/.claude.json
   Codex CLI      global ~/.codex/config.toml
 
-Restore one with: agentstack x restore <adapter> [--scope project] --write
+Restore one with: agentstack more restore <adapter> [--scope project] --write
 ```
 
 Restore covers managed config-file writes such as settings, hooks,
@@ -67,8 +67,8 @@ so going one step too far remains recoverable.
 When the gateway now serves MCP servers live but older native entries remain:
 
 ```bash
-agentstack x unrender
-agentstack x unrender --write
+agentstack more unrender
+agentstack more unrender --write
 agentstack doctor
 ```
 
@@ -77,8 +77,8 @@ It removes only entries AgentStack owns. User entries remain.
 ## Remove this project's rendered setup
 
 ```bash
-agentstack x uninstall --scope project --keep-home
-agentstack x uninstall --scope project --keep-home --write
+agentstack more uninstall --scope project --keep-home
+agentstack more uninstall --scope project --keep-home --write
 agentstack doctor
 ```
 
@@ -93,8 +93,8 @@ tree.
 ## Remove everything AgentStack manages on this machine
 
 ```bash
-agentstack x uninstall
-agentstack x uninstall --write
+agentstack more uninstall
+agentstack more uninstall --write
 ```
 
 Without `--keep-home`, this also removes AgentStack's machine state after

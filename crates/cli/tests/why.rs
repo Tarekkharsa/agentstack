@@ -341,7 +341,7 @@ fn an_unknown_name_names_a_runnable_discoverable_command() {
         assert!(
             visible.contains(&verb) || listing.contains(&verb),
             "`{verb}` is named by guidance but is neither visible on \
-             `agentstack --help` nor listed by `agentstack x`"
+             `agentstack --help` nor listed by `agentstack more`"
         );
     }
 }

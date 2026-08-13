@@ -4,6 +4,43 @@ User-facing changes per release. The [GitHub Releases
 page](https://github.com/Tarekkharsa/agentstack/releases) carries the built
 binaries, checksums, and provenance attestations for each entry.
 
+## Unreleased
+
+**Consent gets harder to give by accident, and the toolbox gets a word for a
+name.** Two changes here are breaking for scripts; both are listed first.
+
+- **BREAKING: `trust --yes` now requires `--consented <surface_digest>`,
+  wherever it is typed.** A bare `--yes` acknowledged a review nobody had read.
+  The digest binds the acknowledgement to the exact bytes that were previewed,
+  so a script consents to a surface it has actually seen or it does not consent
+  at all. Get the digest from `agentstack trust --preview`, whose
+  `surface_digest` field already carries its `sha256:` prefix.
+
+- **BREAKING: a scripted `init --yes` no longer trusts the project.** It
+  acknowledges the WRITE — the import — and never the servers the import
+  declares, so a headless import now leaves the project untrusted and consent
+  is its own step. At a terminal nothing changes: plain `agentstack init` still
+  asks the question inside the wizard. Scripts that relied on the old
+  behaviour need an explicit `trust` step; the first-value demo shows the
+  two-command headless form.
+
+- **The guard refuses the one verb that could consent on an agent's behalf.**
+  An agent shell can no longer run `agentstack trust`/`yes` in any spelling —
+  through a path, a wrapper, a pipeline, a quoted `sh -c`, or either spelling of
+  the display-only namespace. The read-only half of those verbs, `--preview`
+  and `--list` included, still runs: refusing a review nobody can act on would
+  only hide the surface. The trust store is also closed to interpreters and
+  file tools, so consent cannot be forged by writing the file directly.
+
+- **`agentstack x` is now `agentstack more`.** The toolbox prefix has a word for
+  a name, and every page that taught `x` teaches `more`. **`x` keeps working —
+  it is a permanent alias, not a deprecation**, so nothing scripted breaks and
+  both spellings parse forever.
+
+- **`up` is a visible verb.** The fresh-machine command is on the default help
+  screen rather than one hop behind the namespace, and `start.md` has a section
+  for the second machine.
+
 ## v0.18.1 — 2026-08-13
 
 **What two fresh-eyes walkthroughs of v0.18.0 tripped over.** No behaviour in

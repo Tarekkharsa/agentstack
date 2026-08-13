@@ -33,8 +33,8 @@ script and args, or it refuses). Every agent step runs as a governed
 independently security-reviewed on 2026-07-23, and all six findings that review
 raised are now closed, each with its own witness. `agentstack workflow` is
 therefore listed one hop away: it is grouped out of the everyday `agentstack
---help` list and named under **Run** on `agentstack x`. It runs at both
-`agentstack x workflow` and `agentstack workflow`.
+--help` list and named under **Run** on `agentstack more`. It runs at both
+`agentstack more workflow` and `agentstack workflow`.
 
 That change is **discoverability, not enforcement**. Not one boundary moved
 when the command became listed: what the review settled is the *posture*, and

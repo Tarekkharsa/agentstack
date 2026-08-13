@@ -642,7 +642,7 @@ pub(crate) fn next_step_line(
     }
     match mode {
         Mode::CleanAtRest => {
-            format!("Next: `agentstack x session start {profile}` to load it for this session.")
+            format!("Next: `agentstack more session start {profile}` to load it for this session.")
         }
         Mode::ZeroFiles => "Next: `agentstack doctor` to verify the gateway wiring.".to_string(),
         Mode::Static => {

@@ -398,8 +398,8 @@ fn collect(args: &DiffArgs, manifest_dir: Option<&Path>, print_text: bool) -> Re
                     live_withheld.join(", ")
                 );
                 println!(
-                    "  {} check that lane instead: agentstack x delivery · write files anyway: \
-                     agentstack x delivery render-locally --write",
+                    "  {} check that lane instead: agentstack more delivery · write files anyway: \
+                     agentstack more delivery render-locally --write",
                     "→".cyan()
                 );
             }

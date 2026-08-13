@@ -276,7 +276,7 @@ pub fn resolve_harness(
     if let Some(id) = named {
         anyhow::ensure!(
             registry.get(&id).is_some(),
-            "unknown tool '{id}' — see `agentstack x adapters list`"
+            "unknown tool '{id}' — see `agentstack more adapters list`"
         );
         return Ok(id);
     }
@@ -317,9 +317,9 @@ pub fn plan(
         )
     })?;
 
-    let desc = registry
-        .get(harness)
-        .with_context(|| format!("unknown tool '{harness}' — see `agentstack x adapters list`"))?;
+    let desc = registry.get(harness).with_context(|| {
+        format!("unknown tool '{harness}' — see `agentstack more adapters list`")
+    })?;
     let bin = desc
         .detect
         .bin

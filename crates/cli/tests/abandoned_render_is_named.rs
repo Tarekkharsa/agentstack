@@ -124,7 +124,7 @@ fn a_config_left_behind_by_the_flip_is_named_by_every_surface_and_removable() {
             "`{label}` must name the file it left behind:\n{out}"
         );
         assert!(
-            out.contains("agentstack x unrender --write"),
+            out.contains("agentstack more unrender --write"),
             "`{label}` must name the command that removes it:\n{out}"
         );
     }
@@ -323,7 +323,7 @@ fn the_global_config_the_import_read_from_is_not_called_a_foreign_file() {
     ] {
         let out = run(args, &proj, &home);
         assert!(
-            out.contains("still on disk") && out.contains("agentstack x unrender --write"),
+            out.contains("still on disk") && out.contains("agentstack more unrender --write"),
             "`{label}` lost the abandoned GLOBAL render:\n{out}"
         );
     }

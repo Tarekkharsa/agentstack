@@ -34,7 +34,7 @@ The strategic frame: the **manifest** is the unit. Everything else in the system
 what the README, the walkthrough, and the how-tos mean by that name. A
 **bundle** is the manifest, its optional local overlay, and the resolved
 lockfile taken together as one consent unit: what gets declared, pinned,
-trusted, and distributed, and what `agentstack x share` signs into a `.astack`
+trusted, and distributed, and what `agentstack more share` signs into a `.astack`
 for `receive` to review (see
 [`ENFORCEMENT.md`](ENFORCEMENT.md#bundle-signatures--share--receive)).
 
@@ -156,12 +156,12 @@ The boundaries an operator does still choose:
 | Materialize the rendered lane | `apply --write` / `use --write` | Explicit, non-executing render; refused on an untrusted or drifted project. |
 | Narrow one live connection to part of a manifest | Toolset lease | Smallest live surface, nothing rendered; policy and audit stay on the path. |
 | Rendered files, clean between sessions | `session start`/`end` | A lifetime contract over the rendered lane, with an explicit restore step. |
-| Files required where the live channel would have served | `x delivery render-locally` | The one delivery override, recorded in the manifest so every clone reads the same. |
+| Files required where the live channel would have served | `more delivery render-locally` | The one delivery override, recorded in the manifest so every clone reads the same. |
 | Unfamiliar repository | Trust gate first | Selection must never grant consent; unreviewed auto-project bundles stay inert. |
 | High-risk code or strict egress | Policy + lockdown | Policy defines authority; lockdown removes direct routes and confines the process. |
 | CI | `install --locked` + `doctor --ci` | Checks reproducibility, policy, drift, and content without interactive trust. |
 
-`agentstack x delivery` states the routing per harness, and `--json` is the same
+`agentstack more delivery` states the routing per harness, and `--json` is the same
 reading for a UI (`delivery-routing-v1`). The reader-facing versions of this
 section are [concepts.md — delivery](concepts.md#delivery-modes) and
 [how capabilities reach your CLIs](choose.md).

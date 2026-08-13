@@ -1,4 +1,4 @@
-//! `agentstack x delivery` — state the routing, and set the one override.
+//! `agentstack more delivery` — state the routing, and set the one override.
 //!
 //! The read half prints what [`crate::delivery::Plan`] decided, per harness, in
 //! plain language. The write half records **Render locally** in the manifest —
@@ -141,7 +141,7 @@ fn show(json: bool, manifest_dir: Option<&Path>) -> Result<()> {
     println!(
         "  {} {}",
         "·".dimmed(),
-        "write files anyway: agentstack x delivery render-locally --write".dimmed()
+        "write files anyway: agentstack more delivery render-locally --write".dimmed()
     );
     Ok(())
 }
@@ -160,7 +160,7 @@ fn render_locally(
     if let Some(id) = harness {
         anyhow::ensure!(
             ctx.registry.get(id).is_some(),
-            "no such tool: {id} — `agentstack x adapters list` names the ones this build knows"
+            "no such tool: {id} — `agentstack more adapters list` names the ones this build knows"
         );
     }
 
@@ -315,7 +315,7 @@ pub fn set_render_locally(text: &str, harness: Option<&str>, on: bool) -> Result
 /// registered. Shared so `status`, `delivery`, and `doctor`'s finding cannot
 /// name three different commands for one state.
 pub const CONNECT_THE_BRIDGE: &str =
-    "register the bridge: agentstack x gateway connect --all --write";
+    "register the bridge: agentstack more gateway connect --all --write";
 
 /// `HarnessPlan::sentence` states the routing as if it were already happening.
 /// That is true only once a CLI has the gateway registered: with no bridge,

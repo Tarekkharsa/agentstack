@@ -261,7 +261,7 @@ pub fn prepare(manifest_dir: Option<&Path>, harness: &str) -> Result<LaunchPlan>
         // and "see `agentstack adapters list`" alone costs a round-trip.
         let ids: Vec<&str> = ctx.registry.ids().collect();
         format!(
-            "unknown CLI '{harness}' — valid ids: {} (details: `agentstack x adapters list`)",
+            "unknown CLI '{harness}' — valid ids: {} (details: `agentstack more adapters list`)",
             ids.join(" · ")
         )
     })?;
@@ -354,7 +354,7 @@ pub fn launch(
                     duration_ms: started.elapsed().as_millis() as u64,
                 });
             }
-            println!("\nSee what happened: `agentstack x report run {id}`");
+            println!("\nSee what happened: `agentstack more report run {id}`");
             return Err(e);
         }
     };
@@ -373,7 +373,7 @@ pub fn launch(
             duration_ms: started.elapsed().as_millis() as u64,
         });
     }
-    println!("\nSee what happened: `agentstack x report run {id}`");
+    println!("\nSee what happened: `agentstack more report run {id}`");
     // As before this was extracted: the harness's own exit code is its
     // business — only a wait/spawn failure is an error here.
     let _ = status;

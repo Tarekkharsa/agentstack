@@ -89,7 +89,7 @@ Useful commands:
 ```bash
 agentstack trust --list
 agentstack trust --revoke
-agentstack x explain <capability>
+agentstack more explain <capability>
 ```
 
 Removing AgentStack-managed content remains possible without trust. A stale

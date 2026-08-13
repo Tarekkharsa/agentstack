@@ -1,10 +1,11 @@
 <img alt="agentstack" src="docs/logo.svg" width="380">
 
 > **One agent setup. Every coding CLI.**
-> You configure the same MCP server once per tool, in a different format each
-> time, with your tokens sitting in plain JSON.
-> AgentStack keeps one `.agentstack/` directory and delivers it to Claude Code,
-> Codex, Cursor, Gemini CLI, OpenCode and
+> Today you configure the same MCP server once per tool, in a different format
+> each time, with your tokens sitting in plain JSON.
+> With AgentStack the whole setup — config, skills, servers, instructions —
+> lives in one repo you own, any machine gets it with one command, and every CLI
+> speaks it: Claude Code, Codex, Cursor, Gemini CLI, OpenCode and
 > [eight more](https://tarekkharsa.github.io/agentstack/adapters.html) — served
 > live where the tool speaks MCP, written as native files where it does not.
 
@@ -19,13 +20,15 @@
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh
-export PATH="$HOME/.local/bin:$PATH"       # only if the installer printed "Add to PATH"
-agentstack init                            # finds what your CLIs already have, writes it into .agentstack/
-agentstack x gateway connect --all --write # register the bridge once (the interactive wizard may have done it)
-agentstack status                          # is it ready — and if not, the one thing that fixes it
+export PATH="$HOME/.local/bin:$PATH"          # only if the installer printed "Add to PATH"
+agentstack init                               # finds what your CLIs already have, writes it into .agentstack/
+agentstack more gateway connect --all --write # register the bridge once (the interactive wizard may have done it)
+agentstack status                             # is it ready — and if not, the one thing that fixes it
 # then restart your coding CLI — a harness reads its config at startup:
-agentstack x why <server>                  # names which CLIs are served it live
+agentstack more why <server>                  # names which CLIs are served it live
 ```
+
+`more` is the extended toolbox — every `more` command also runs at its bare name.
 
 If you ran `agentstack init` interactively and let the wizard register the
 gateway, step 3 has nothing left to do and prints `already connected` or
@@ -74,7 +77,7 @@ It holds `${GITHUB_TOKEN}`-style placeholders, never the token values.
 
 Delivery is **routed, not chosen** — you never pick a delivery mode per server.
 AgentStack decides the lane for each capability on each tool, and
-`agentstack x delivery` prints what it decided. There are two lanes:
+`agentstack more delivery` prints what it decided. There are two lanes:
 
 - **Served live.** Skills and MCP servers go to MCP-capable tools through one
   gateway — brokered, policy-checked, digest-verified, and recorded. Nothing is
@@ -88,8 +91,8 @@ AgentStack decides the lane for each capability on each tool, and
 Live delivery needs the bridge registered once per tool:
 
 ```sh
-agentstack x gateway connect --all           # preview which CLIs would be registered
-agentstack x gateway connect --all --write   # register it
+agentstack more gateway connect --all           # preview which CLIs would be registered
+agentstack more gateway connect --all --write   # register it
 ```
 
 Until that registration exists, nothing is served live: `status` and `delivery`
@@ -135,9 +138,9 @@ current binary. Step by step:
    reviewed. At a terminal the wizard asks this inside `init`; a scripted run
    consents in two commands, previewing the surface and handing back its
    digest.
-4. **Connect** — `agentstack x gateway connect --all --write`: the live lane
+4. **Connect** — `agentstack more gateway connect --all --write`: the live lane
    needs one bridge registered per MCP-capable CLI.
-5. **Route** — `agentstack x delivery`: both CLIs are MCP-capable, so the servers
+5. **Route** — `agentstack more delivery`: both CLIs are MCP-capable, so the servers
    are served live and no file is written for them. The project holds
    `.agentstack/` and the `.gitignore` that hides the lifted secret — no native
    config at all.
@@ -145,11 +148,11 @@ current binary. Step by step:
    expect a note or two — advisories like "these servers launch via bare `npx`"
    are stated once and do not count against readiness; a first Codex project
    also warns until you open Codex there once and accept its trust prompt.
-7. **Render anyway** — `agentstack x delivery render-locally --write`, then
+7. **Render anyway** — `agentstack more delivery render-locally --write`, then
    `agentstack apply --toolset default --scope global --write`: the rendered
    lane is routed, not removed, so asking for files is an explicit opt-in. Both
    CLIs then carry both servers, each in its own format.
-8. **Undo** — `agentstack x restore --last --write`, four times (the render, the
+8. **Undo** — `agentstack more restore --last --write`, four times (the render, the
    render-locally override, the bridge, the import): every file byte-identical
    to where it started.
 
@@ -157,6 +160,21 @@ Reproduce it yourself, fenced (an isolated temp `HOME` — it never touches your
 real configs, and it asserts every step, so it doubles as the witness that this
 output stays accurate):
 [`examples/first-value-demo/run-demo.sh`](examples/first-value-demo/run-demo.sh).
+
+## Your second machine
+
+Once that setup is committed to a repo you own, the next machine is one command:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh
+agentstack up --library <git-url>           # preview what this machine would get
+agentstack up --library <git-url> --write   # apply it
+```
+
+`up` syncs the library, finds the CLIs installed here, registers the bridge, and
+verifies `agentstack.lock` against what you pinned. Two things it does not carry
+for you: secret **values** and the trust review are per machine, so it names the
+secrets still missing and leaves `agentstack trust .` to you.
 
 ## Why
 
@@ -198,13 +216,13 @@ repository and the workflow that built it — check it with
 
 ```sh
 cargo build --release                  # add --features sandbox for `run --sandbox`
-./target/release/agentstack x self link  # symlink onto your PATH
+./target/release/agentstack more self link  # symlink onto your PATH
 ```
 
 Release binaries ship with sandbox support compiled in; a bare `cargo build` does not — pass
 `--features sandbox` to get `run --sandbox` / `--lockdown`.
 
-Once installed, `agentstack x self update` moves you to the latest *stable*
+Once installed, `agentstack more self update` moves you to the latest *stable*
 release; it verifies the download against the release's published checksum
 before replacing anything. It never moves you onto a pre-release, and never
 back off one — to install a specific build, pass `AGENTSTACK_VERSION`.
@@ -221,7 +239,7 @@ The formula is published by hand after each stable release, so it can lag a tag;
 `brew info` shows an older version than the
 [releases page](https://github.com/Tarekkharsa/agentstack/releases), use the
 installer or a checkout. On a Homebrew install, upgrade with
-`brew upgrade agentstack` rather than `agentstack x self update` — replacing the
+`brew upgrade agentstack` rather than `agentstack more self update` — replacing the
 file directly desynchronizes the formula.
 
 **Supported platforms: macOS and Linux.** A Windows binary is published, but it is not
@@ -231,7 +249,7 @@ evidence that would move it.
 
 ### Upgrading
 
-`agentstack x self update` previews; `--write` verifies the sha256 before
+`agentstack more self update` previews; `--write` verifies the sha256 before
 installing.
 [Details](https://tarekkharsa.github.io/agentstack/reference.html).
 
@@ -251,33 +269,36 @@ governance only when you need them:
 
 ## The command surface
 
-`agentstack --help` lists the fifteen everyday verbs — `init`, `status`, `add`,
-`search`, `apply`, `doctor`, `lock`, `toolset`, `use`, `yes`, `run`, `trust`,
-`undo`, `adopt`, `secret`. Four ideas cover them: Setup, Toolset, Status, Undo.
+`agentstack --help` lists the sixteen everyday verbs — `init`, `up`, `status`,
+`add`, `search`, `apply`, `doctor`, `lock`, `toolset`, `use`, `yes`, `run`,
+`trust`, `undo`, `adopt`, `secret`. Four ideas cover them: Setup, Toolset,
+Status, Undo.
 
 A verb is on that screen when the product itself can tell you to run it — a
 first-run step, a `doctor` fix line, or a machine-readable `next_action`.
 
-`agentstack x why <name>` is the one to reach for when nothing is on disk: under
+`agentstack more why <name>` is the one to reach for when nothing is on disk: under
 the default routing a served capability writes no file, so `why` is where its
-origin, pin, approval, live tools and reach are stated. `agentstack x unrender`
+origin, pin, approval, live tools and reach are stated. `agentstack more unrender`
 is the opposite direction — it takes back a server config the rendered lane
 left behind.
 
-Everything else lives one hop away under `agentstack x`:
+Everything else lives one hop away under `agentstack more`:
 
 ```bash
-agentstack x                 # the rest of the toolbox, grouped by task
-agentstack x guard install --write   # same command as `agentstack guard install --write`
+agentstack more                       # the rest of the toolbox, grouped by task
+agentstack more guard install --write # same command as `agentstack guard install --write`
 ```
 
 Nothing was removed. Every command still runs at its own name with its own
 `--help`, and `agentstack --help --all` prints the whole tree.
 
-The `agentstack x` prefix, and the `yes`, `undo`, `x why`, and `x unrender`
-verbs, arrived in v0.18.0. On v0.17.1 they are an `unrecognized subcommand`
-error, and every command that does exist there runs at its own bare name — so
-if `brew info` still shows the older formula, that is what you have.
+The extended toolbox, and the `yes`, `undo`, `why`, and `unrender` verbs,
+arrived in v0.18.0 — where the prefix was spelled `agentstack x`. That spelling
+still works and always will; `more` is what the help screens teach now. On
+v0.17.1 none of it exists: the prefix is an `unrecognized subcommand` error and
+every command that does exist there runs at its own bare name — so if
+`brew info` still shows the older formula, that is what you have.
 `agentstack --version` settles it.
 
 ## Documentation
@@ -302,7 +323,7 @@ Everything is explained on the website — that is the one place docs live:
 
 [CONTRIBUTING.md](CONTRIBUTING.md) has the fast inner loop, every CI gate with
 the command that reproduces it locally, and the security invariants a change
-has to preserve. Install your build with `agentstack x self link`. Release
+has to preserve. Install your build with `agentstack more self link`. Release
 history: [CHANGELOG.md](CHANGELOG.md).
 
 ## Community and support

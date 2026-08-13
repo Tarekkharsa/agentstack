@@ -749,7 +749,7 @@ fn run_value(manifest_dir: Option<&Path>, args: &WorkflowRunArgs) -> Result<serd
                             "workflow '{}' exceeded its effective wall-clock ceiling ({}s) — \
                              refusing the next batch and failing cleanly in-band (the \
                              out-of-thread watchdog at ceiling+{}s remains the stall backstop; \
-                             outcome recorded — see `agentstack x workflow report {}`)",
+                             outcome recorded — see `agentstack more workflow report {}`)",
                             wf.name,
                             effective_wall,
                             watchdog_grace_secs(),
@@ -1199,7 +1199,7 @@ fn resolve_bindings(
         let desc = ctx.registry.get(&harness).with_context(|| {
             format!(
                 "role '{role}' binds harness '{harness}', which is not a known adapter — \
-                 see `agentstack x adapters list`"
+                 see `agentstack more adapters list`"
             )
         })?;
         anyhow::ensure!(
@@ -1341,7 +1341,7 @@ fn spawn_watchdog(
                  plus the {grace}s watchdog grace — force-exiting (out-of-thread \
                  watchdog: a stalled engine slice cannot be interrupted cooperatively). Live \
                  children receive SIGTERM; the outcome is recorded best-effort — see \
-                 `agentstack x workflow report {run_id}`.",
+                 `agentstack more workflow report {run_id}`.",
             );
             // The ONE exception to the fail-closed recording gate: this
             // thread is already dying, so the append is BEST-EFFORT (the
@@ -2068,7 +2068,7 @@ fn collect_workflow_report(run_id: &str) -> Result<WorkflowReportEvidence> {
     else {
         anyhow::bail!(
             "run '{run_id}' is not a workflow run (no workflow_started event) — for a locked \
-             or sandboxed run, use `agentstack x report run {run_id}`"
+             or sandboxed run, use `agentstack more report run {run_id}`"
         );
     };
 

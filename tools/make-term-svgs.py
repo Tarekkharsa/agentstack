@@ -246,7 +246,7 @@ FIRSTRUN = (
 #
 # The journey is the routed one: servers reach both CLIs LIVE over the gateway
 # and the project stays clean, so rendering files is a later, explicit opt-in
-# (`x delivery render-locally`) rather than the second step. Do not collapse
+# (`more delivery render-locally`) rather than the second step. Do not collapse
 # those two acts back together — the old scene claimed `apply` was the way
 # servers arrive, which the delivery router no longer does by default.
 FIRST_VALUE = (
@@ -266,7 +266,7 @@ FIRST_VALUE = (
         out(("c", "  github · tldraw — what each one runs, and the secret refs it reads")),
         out(("ok", "  ✓"), ("c", " trusted for exactly these bytes"), ("c", "   a later edit asks again"), d=0.8),
         gap(),
-        cmd("agentstack x gateway connect --all --write", "   # register the bridge"),
+        cmd("agentstack more gateway connect --all --write", "   # register the bridge"),
         out(("ok", "  ✓"), ("c", " Updated 2 harness configs."), d=0.55),
         cmd("agentstack delivery", "                         # how does each tool get them?"),
         out(("c", "  Claude Code · Codex CLI   "), ("ok", "MCP servers served live"), ("c", " · house rules to files")),
@@ -275,7 +275,7 @@ FIRST_VALUE = (
         cmd("agentstack doctor"),
         out(("ok", "  ✓"), ("c", " 0 errors, 0 warnings."), ("c", "   ready: reviewed, activated, verified"), d=0.8),
         gap(),
-        cmd("agentstack x delivery render-locally --write", "   # want the files anyway?"),
+        cmd("agentstack more delivery render-locally --write", "   # want the files anyway?"),
         cmd("agentstack apply --toolset default --scope global --write"),
         out(("ok", "  ✓"), ("c", " wrote 2 servers — 2 targets in sync, each in its own syntax"), d=0.8),
         gap(),

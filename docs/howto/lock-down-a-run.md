@@ -83,7 +83,7 @@ Point `AGENTSTACK_SANDBOX_IMAGE` at an image that carries your agent CLI. The
 lockdown egress sidecar is pulled from GHCR automatically, pinned per release
 (override with `AGENTSTACK_EGRESS_IMAGE`).
 
-After a run, `agentstack x report run <id>` replays its posture label and every
+After a run, `agentstack more report run <id>` replays its posture label and every
 egress and tool-call decision — see [see what your agents did](see-what-happened.md).
 
 **Limits.** The posture labels name each mode's ceiling honestly: the protected

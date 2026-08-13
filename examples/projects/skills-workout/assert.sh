@@ -121,7 +121,7 @@ say "LANE A (on request) — the rendered lane via 'use <toolset> --write'"
 # It runs before `lock`/`trust` on purpose: it edits the manifest, and the
 # grant below binds to the manifest AND lockfile bytes, so overriding after a
 # grant would invalidate the grant.
-run_locally="$("$AS" x delivery render-locally --write 2>&1)" || {
+run_locally="$("$AS" more delivery render-locally --write 2>&1)" || {
   printf '%s\n' "$run_locally"
   bad "delivery render-locally --write exited nonzero (its output is above)"
   exit 1

@@ -466,7 +466,7 @@ fn apply_dry_run_does_not_promise_a_write_that_would_deliver_nothing() {
     // write would have.
     assert!(
         dry.text
-            .contains("agentstack x gateway connect --all --write"),
+            .contains("agentstack more gateway connect --all --write"),
         "the preview must name the same recovery command the write names:\n{}",
         dry.text
     );

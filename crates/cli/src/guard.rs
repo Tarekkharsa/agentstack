@@ -838,8 +838,15 @@ fn check_agentstack(args: &[String]) -> Decision {
 }
 
 /// The subcommand of an `agentstack` command line: the first operand, past any
-/// flags (and past the display-only `x` namespace, which `strip_namespace`
-/// removes before clap parses).
+/// flags and past the display-only namespace, which `strip_namespace` removes
+/// before clap parses.
+///
+/// **Both spellings of that namespace, and that is load-bearing.** `x` was the
+/// original prefix and `more` is what the product teaches now; `x` is kept as a
+/// permanent alias, so both reach the same verb. A guard that skipped only one
+/// of them would leave `agentstack <other> yes` as a way for an agent shell to
+/// grant consent — the exact thing this check exists to refuse. When a third
+/// spelling is ever added, it belongs here on the same line.
 fn agentstack_verb(args: &[String]) -> Option<&str> {
     let mut i = 0;
     while i < args.len() {
@@ -850,7 +857,7 @@ fn agentstack_verb(args: &[String]) -> Option<&str> {
             i += 2;
             continue;
         }
-        if a.starts_with('-') || a == "x" {
+        if a.starts_with('-') || a == "x" || a == "more" {
             i += 1;
             continue;
         }
@@ -2827,11 +2834,14 @@ mod tests {
             "agentstack init --yes",
             "agentstack apply --write --yes",
             // Spelled with a path, under a wrapper, behind the display-only
-            // `x` namespace, after a global flag with a value, inside a
-            // pipeline, and inside a quoted `sh -c` — the effective program is
-            // the same one either way.
+            // namespace in BOTH its spellings, after a global flag with a
+            // value, inside a pipeline, and inside a quoted `sh -c` — the
+            // effective program is the same one every way. `x` is a permanent
+            // alias of `more`, so a guard that refused only the new spelling
+            // would leave the old one open.
             "/usr/local/bin/agentstack trust . --yes --consented d",
             "sudo agentstack trust .",
+            "agentstack more yes",
             "agentstack x yes",
             "agentstack --manifest-dir /work/proj trust .",
             "echo hi && agentstack trust . --yes --consented d",

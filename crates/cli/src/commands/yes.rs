@@ -161,7 +161,7 @@ pub fn run_answered(
     println!(
         "\n{}",
         "This declares them in the manifest and pins their bytes, then shows you the \
-         full review below. Undo the declaration and pin with `agentstack x restore \
+         full review below. Undo the declaration and pin with `agentstack more restore \
          --last --write`; `agentstack use --write` then reconciles what each CLI holds."
             .dimmed()
     );
@@ -268,7 +268,7 @@ pub fn run_answered(
     println!(
         "\n{} live. {}",
         "✓".green(),
-        "Undo the declaration and pin: `agentstack x restore --last --write`".dimmed()
+        "Undo the declaration and pin: `agentstack more restore --last --write`".dimmed()
     );
     Ok(())
 }

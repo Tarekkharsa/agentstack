@@ -683,7 +683,7 @@ fn the_rung_for_a_project_that_delivers_nothing_names_a_command_that_runs() {
          very project — that is a loop with no exit:\n{json}"
     );
     assert_eq!(
-        next, "agentstack x delivery render-locally --write",
+        next, "agentstack more delivery render-locally --write",
         "the rung must name the one way forward that runs here:\n{json}"
     );
 
@@ -733,7 +733,7 @@ fn a_project_that_delivers_something_gains_no_undeliverable_finding() {
     );
     assert_ne!(
         next_action_of(&json),
-        "agentstack x delivery render-locally --write",
+        "agentstack more delivery render-locally --write",
         "and it must not be pushed into writing files it already writes:\n{json}"
     );
 }

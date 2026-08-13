@@ -31,13 +31,13 @@ deliberately:
 
 ```bash
 # first machine — set it up and push:
-agentstack x lib sync --init --remote <your-remote>
-agentstack x lib sync                     # commit local changes, pull, push
+agentstack more lib sync --init --remote <your-remote>
+agentstack more lib sync                     # commit local changes, pull, push
 
 # a fresh machine — clone the library into place:
-agentstack x lib sync --init --remote <your-remote>
+agentstack more lib sync --init --remote <your-remote>
 
-agentstack x lib sync --status            # working-tree changes + ahead/behind
+agentstack more lib sync --status            # working-tree changes + ahead/behind
 ```
 
 ## What travels vs. what doesn't

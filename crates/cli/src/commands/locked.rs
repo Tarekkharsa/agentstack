@@ -1542,7 +1542,7 @@ fn live(
         .unwrap_or_else(|| crate::scope::Scope::default_for(&ctx.dir));
     let desc = ctx.registry.get(&args.harness).with_context(|| {
         format!(
-            "unknown harness '{}' — see `agentstack x adapters list`",
+            "unknown harness '{}' — see `agentstack more adapters list`",
             args.harness
         )
     })?;
@@ -2009,7 +2009,7 @@ fn live(
             banner!(
                 quiet,
                 headless,
-                "\nSee what happened: `agentstack x report run {run_id}`"
+                "\nSee what happened: `agentstack more report run {run_id}`"
             );
             // Child delivery: the outcome above is RECORDED; the report hands
             // the drive loop the identity + captured stdout, and the drive
@@ -2054,7 +2054,7 @@ fn live(
                     banner!(
                         quiet,
                         headless,
-                        "\nSee what happened: `agentstack x report run {run_id}`"
+                        "\nSee what happened: `agentstack more report run {run_id}`"
                     );
                     Err(e)
                 }

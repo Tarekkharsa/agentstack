@@ -277,52 +277,52 @@
   </details>
 </aside>
   <main id="main-content" tabindex="-1">
-<p class="versionbar">These pages describe <b>v0.18.1</b>, the current release. That is the build <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">the installer</a> gives you. <code>agentstack --version</code> says which build you have.</p>
+<p class="versionbar">These pages describe <b>unreleased <code>main</code></b>, which is ahead of the current release. <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">The installer</a> serves <b>v0.18.1</b>, so commands and flags documented here may not exist in your build. <code>agentstack --version</code> says which build you have.</p>
 <h1 id="undo-agentstack-changes">Undo AgentStack changes</h1>
 <p>Start with the simple timeline:</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack undo</code></pre></div>
 <p>It shows recent AgentStack-managed writes and the exact command for returning to a point. Nothing changes until you add the shown <code>--write</code> form.</p>
 <div class="cb cb-term" data-language="console"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">console</span></div><pre class="block"><code class="language-console"><span class="out">recent changes (newest first)</span>
-<span class="out">  this project only — machine-wide writes: agentstack x restore --list</span>
+<span class="out">  this project only — machine-wide writes: agentstack more restore --list</span>
 <span class="out">  1  1m ago       init                                         7 files · Claude Code, Codex CLI</span>
 
 <span class="out">  pick a point: agentstack undo --to &lt;n&gt; --write</span></code></pre></div>
-<p><strong><code>undo</code> is scoped to this project, and that is deliberate.</strong> The ledger is machine-global, so <code>undo</code> filters it to writes that landed inside the directory you are standing in — offering another repository's applies would be offering to break a project you are not looking at. A machine-scope write is therefore recorded but not listed here: <code>agentstack x gateway connect --all --write</code> registers the bridge in each harness's own config, and <code>apply --scope global</code> writes outside the project too. Both are undoable, through <code>x restore</code> below, which lists everything this machine recorded.</p>
+<p><strong><code>undo</code> is scoped to this project, and that is deliberate.</strong> The ledger is machine-global, so <code>undo</code> filters it to writes that landed inside the directory you are standing in — offering another repository's applies would be offering to break a project you are not looking at. A machine-scope write is therefore recorded but not listed here: <code>agentstack more gateway connect --all --write</code> registers the bridge in each harness's own config, and <code>apply --scope global</code> writes outside the project too. Both are undoable, through <code>more restore</code> below, which lists everything this machine recorded.</p>
 <h2 id="undo-one-recorded-write">Undo one recorded write<a class="hlink" href="#undo-one-recorded-write" aria-label="Link to this section">#</a></h2>
 <p>The script-friendly form is:</p>
-<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack x restore
-<span class="pr">$ </span>agentstack x restore --last --write
-<span class="pr">$ </span>agentstack x restore &lt;id&gt; --write</code></pre></div>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack more restore
+<span class="pr">$ </span>agentstack more restore --last --write
+<span class="pr">$ </span>agentstack more restore &lt;id&gt; --write</code></pre></div>
 <p>The bare form lists every recorded point and every adapter backup:</p>
-<div class="cb cb-term" data-language="console"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">console</span></div><pre class="block"><code class="language-console"><span class="pr">$ </span>agentstack x restore
+<div class="cb cb-term" data-language="console"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">console</span></div><pre class="block"><code class="language-console"><span class="pr">$ </span>agentstack more restore
 <span class="out">Recorded changes (newest first) — everything on this machine:</span>
 
 <span class="out">  18cb1a4c48  1m ago   global   gateway connect            2 files · Claude Code, Codex CLI</span>
 <span class="out">  18cb1a4c46  1m ago   project  init                       7 files · Claude Code, Codex CLI</span>
 
-<span class="out">Undo one with: agentstack x restore &lt;id&gt; --write (or --last for the newest)</span>
+<span class="out">Undo one with: agentstack more restore &lt;id&gt; --write (or --last for the newest)</span>
 
 <span class="out">Adapter config backups (content before our last write):</span>
 <span class="out">  Claude Code    global ~/.claude.json</span>
 <span class="out">  Codex CLI      global ~/.codex/config.toml</span>
 
-<span class="out">Restore one with: agentstack x restore &lt;adapter&gt; [--scope project] --write</span></code></pre></div>
+<span class="out">Restore one with: agentstack more restore &lt;adapter&gt; [--scope project] --write</span></code></pre></div>
 <p>Restore covers managed config-file writes such as settings, hooks, instructions, and rendered server configuration. The revert is itself recorded, so going one step too far remains recoverable.</p>
 <h2 id="remove-legacy-rendered-configuration">Remove legacy rendered configuration<a class="hlink" href="#remove-legacy-rendered-configuration" aria-label="Link to this section">#</a></h2>
 <p>When the gateway now serves MCP servers live but older native entries remain:</p>
-<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack x unrender
-<span class="pr">$ </span>agentstack x unrender --write
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack more unrender
+<span class="pr">$ </span>agentstack more unrender --write
 <span class="pr">$ </span>agentstack doctor</code></pre></div>
 <p>It removes only entries AgentStack owns. User entries remain.</p>
 <h2 id="remove-this-projects-rendered-setup">Remove this project's rendered setup<a class="hlink" href="#remove-this-projects-rendered-setup" aria-label="Link to this section">#</a></h2>
-<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack x uninstall --scope project --keep-home
-<span class="pr">$ </span>agentstack x uninstall --scope project --keep-home --write
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack more uninstall --scope project --keep-home
+<span class="pr">$ </span>agentstack more uninstall --scope project --keep-home --write
 <span class="pr">$ </span>agentstack doctor</code></pre></div>
 <p><code>--keep-home</code> preserves the central library, trust store, audit, and undo history. The project manifest and lock remain, so the setup can be rebuilt.</p>
 <p>AgentStack removes empty parent directories left by its managed skill delivery. It preserves non-empty folders and any user-owned files. This cleanup uses directory-empty semantics; it never recursively deletes an unknown provider tree.</p>
 <h2 id="remove-everything-agentstack-manages-on-this-machine">Remove everything AgentStack manages on this machine<a class="hlink" href="#remove-everything-agentstack-manages-on-this-machine" aria-label="Link to this section">#</a></h2>
-<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack x uninstall
-<span class="pr">$ </span>agentstack x uninstall --write</code></pre></div>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack more uninstall
+<span class="pr">$ </span>agentstack more uninstall --write</code></pre></div>
 <p>Without <code>--keep-home</code>, this also removes AgentStack's machine state after removing managed provider entries. Preview carefully: the deleted trust store, audit history, and local library state are not recoverable from the undo ledger once that ledger is gone. A Git-backed central library remains recoverable from its remote.</p>
 <h2 id="what-undo-cannot-restore">What undo cannot restore<a class="hlink" href="#what-undo-cannot-restore" aria-label="Link to this section">#</a></h2>
 <p>AgentStack can reverse its own recorded configuration writes. It cannot restore a file an MCP server deleted, an arbitrary manual manifest edit, or another program's change. Use Git or that program's recovery mechanism for those.</p>

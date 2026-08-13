@@ -500,7 +500,7 @@ fn undoable_project(tmp: &std::path::Path) -> std::path::PathBuf {
     proj
 }
 
-/// `use --write` opens by naming `agentstack x restore --last --write` as the
+/// `use --write` opens by naming `agentstack more restore --last --write` as the
 /// way back. That hint is a lie unless this activation's own `.gitignore` edit
 /// is IN the ledger: without it the newest entry belongs to some earlier
 /// command, and following the hint takes back somebody else's change.

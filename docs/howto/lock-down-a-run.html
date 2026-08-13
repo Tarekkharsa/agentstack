@@ -277,7 +277,7 @@
   </details>
 </aside>
   <main id="main-content" tabindex="-1">
-<p class="versionbar">These pages describe <b>v0.18.1</b>, the current release. That is the build <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">the installer</a> gives you. <code>agentstack --version</code> says which build you have.</p>
+<p class="versionbar">These pages describe <b>unreleased <code>main</code></b>, which is ahead of the current release. <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">The installer</a> serves <b>v0.18.1</b>, so commands and flags documented here may not exist in your build. <code>agentstack --version</code> says which build you have.</p>
 <h1 id="lock-down-a-run">Lock down a run</h1>
 <p>For anyone launching an agent on work that must not leak. Prerequisite for the sandbox tiers: a running Docker daemon and a build with sandbox support (release binaries have it; a bare <code>cargo build</code> needs <code>--features sandbox</code>).</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="cm"># Preview first — walks every gate, launches nothing, needs no Docker</span>
@@ -309,7 +309,7 @@
 </ul>
 <p>So an <code>--unprotected</code> run always has a person at the terminal reading its <code>HOST / ADVISORY</code> banner. Dropping protection is not something a script can do on your behalf.</p>
 <p>Point <code>AGENTSTACK_SANDBOX_IMAGE</code> at an image that carries your agent CLI. The lockdown egress sidecar is pulled from GHCR automatically, pinned per release (override with <code>AGENTSTACK_EGRESS_IMAGE</code>).</p>
-<p>After a run, <code>agentstack x report run &lt;id&gt;</code> replays its posture label and every egress and tool-call decision — see <a href="../howto/see-what-happened.html">see what your agents did</a>.</p>
+<p>After a run, <code>agentstack more report run &lt;id&gt;</code> replays its posture label and every egress and tool-call decision — see <a href="../howto/see-what-happened.html">see what your agents did</a>.</p>
 <p><strong>Limits.</strong> The posture labels name each mode's ceiling honestly: the protected default is pre-launch gating plus a frozen surface, not a kernel fence — the harness still runs as you, on the host — and only <code>--lockdown</code> is topologically confined. What each mode actually enforces per dimension, with every strength caveat, is the <a href="../enforcement.html#the-matrix">enforcement matrix</a>.</p>
 <ul>
 <li><a href="../concepts.html">Concepts</a> — sandbox vs lockdown vs the protected run, posture</li>

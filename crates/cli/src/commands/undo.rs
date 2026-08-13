@@ -160,7 +160,7 @@ fn print_timeline(rows: &[Row]) {
     // a bounded list and a list that looks complete and is not.
     println!(
         "  {}",
-        "this project only — machine-wide writes: agentstack x restore --list".dimmed()
+        "this project only — machine-wide writes: agentstack more restore --list".dimmed()
     );
     for r in rows {
         println!(
@@ -218,7 +218,7 @@ pub fn run(args: &UndoArgs, manifest_dir: Option<&Path>) -> Result<()> {
         println!("nothing recorded to undo for this project.");
         println!(
             "  {}",
-            "machine-wide writes are listed by: agentstack x restore --list".dimmed()
+            "machine-wide writes are listed by: agentstack more restore --list".dimmed()
         );
         // The line that closed G31. "Nothing recorded" straight after
         // `use --write` reported writing skills to three locations reads as a

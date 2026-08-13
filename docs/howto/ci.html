@@ -277,11 +277,11 @@
   </details>
 </aside>
   <main id="main-content" tabindex="-1">
-<p class="versionbar">These pages describe <b>v0.18.1</b>, the current release. That is the build <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">the installer</a> gives you. <code>agentstack --version</code> says which build you have.</p>
+<p class="versionbar">These pages describe <b>unreleased <code>main</code></b>, which is ahead of the current release. <a href="https://github.com/Tarekkharsa/agentstack/releases/latest">The installer</a> serves <b>v0.18.1</b>, so commands and flags documented here may not exist in your build. <code>agentstack --version</code> says which build you have.</p>
 <h1 id="use-it-in-ci">Use it in CI</h1>
 <p>For anyone gating a repo's agent setup in continuous integration. Prerequisite: a committed <a href="../concepts.html">manifest</a> and <a href="../concepts.html">lockfile</a> under <code>.agentstack/</code> (see <a href="../howto/team-setup.html">share a setup with your team</a>).</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="cm"># Reproducible install, then a gate that fails on any problem</span>
-<span class="pr">$ </span>agentstack x install --locked   <span class="cm"># fetch pinned skills; fail if the lockfile would change</span>
+<span class="pr">$ </span>agentstack more install --locked   <span class="cm"># fetch pinned skills; fail if the lockfile would change</span>
 <span class="pr">$ </span>agentstack doctor --ci        <span class="cm"># exit nonzero on errors, drift, policy, or unsafe content</span>
 
 <span class="cm"># Building the manifest fresh in a job? Write only the manifest, no prompts:</span>
@@ -294,7 +294,7 @@
 <h2 id="the-trust-gate-headlessly">The trust gate, headlessly<a class="hlink" href="#the-trust-gate-headlessly" aria-label="Link to this section">#</a></h2>
 <p>A fresh runner is an untrusted checkout — the grant is keyed to a path on one machine and never travels with the repo — and an untrusted project refuses to <strong>deliver</strong>: no server definitions written into a CLI's config, no skill files materialized, no instruction fragments compiled, no hooks, no extensions (see <a href="../howto/trust-a-repo.html">trust a cloned repo</a>).</p>
 <p><strong>The gate above is unaffected.</strong> <code>install --locked</code> fetches into the store and <code>doctor --ci</code> only reads — neither renders nor activates anything, so neither asks for consent. Both pass on an untrusted checkout, <code>doctor</code> states "not trusted for auto mode" as a fact rather than a failure, and the one-line Action keeps working exactly as written.</p>
-<p><strong>A job that renders needs the two-step grant.</strong> If your pipeline goes further — <code>apply --write</code>, <code>use --write</code>, <code>agentstack x session start</code>, or a protected <code>agentstack run</code> — it hits the gate, and a bare <code>agentstack trust .</code> refuses in CI because stdin is not a terminal. Present the reviewed digest back instead:</p>
+<p><strong>A job that renders needs the two-step grant.</strong> If your pipeline goes further — <code>apply --write</code>, <code>use --write</code>, <code>agentstack more session start</code>, or a protected <code>agentstack run</code> — it hits the gate, and a bare <code>agentstack trust .</code> refuses in CI because stdin is not a terminal. Present the reviewed digest back instead:</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="cm"># 1. Emit the review surface as JSON and grant nothing. Keep it as a build</span>
 <span class="cm">#    artifact — it is the record of what the runner was about to approve.</span>
 <span class="pr">$ </span>agentstack trust --preview . &gt; surface.json

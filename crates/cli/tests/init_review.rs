@@ -674,7 +674,7 @@ fn init_yes_alone_never_touches_a_harness_config() {
         "the close must disclose the unconnected live lane:\n{text}"
     );
     assert!(
-        text.contains("agentstack x gateway connect --all --write"),
+        text.contains("agentstack more gateway connect --all --write"),
         "the close must name the command that fixes this machine:\n{text}"
     );
     assert!(

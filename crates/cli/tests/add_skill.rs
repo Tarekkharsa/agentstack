@@ -1010,7 +1010,7 @@ fn clean_at_rest_footer_names_the_review_after_a_write_but_not_after_a_preview()
     // otherwise owe has not come due and the old sentence is still true.
     let preview = cli(&proj, &["add", "skill", "../extra/gamma"]);
     assert!(
-        preview.contains("next session picks this up: `agentstack x session start default`"),
+        preview.contains("next session picks this up: `agentstack more session start default`"),
         "a preview leaves the project trusted, so its footer is untouched:\n{preview}"
     );
     assert_eq!(
@@ -1029,7 +1029,7 @@ fn clean_at_rest_footer_names_the_review_after_a_write_but_not_after_a_preview()
     assert!(
         written.contains(
             "review with `agentstack trust .` first — until then \
-             `agentstack x session start default` refuses"
+             `agentstack more session start default` refuses"
         ),
         "the footer must name the review that unblocks the session:\n{written}"
     );

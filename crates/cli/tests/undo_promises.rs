@@ -389,7 +389,7 @@ fn the_restore_that_was_offered_leaves_the_skills_on_disk() {
     // must not offer `x restore` beside it as an equal.
     let banner = temporary_banner(&out);
     assert!(
-        banner.contains("agentstack x session end"),
+        banner.contains("agentstack more session end"),
         "the banner still names the way back before the first byte changes: {banner}"
     );
     assert!(
@@ -454,7 +454,7 @@ fn a_session_that_materializes_no_skills_gets_no_notice() {
     let (out, ok) = run(&["x", "session", "start", "dev"], &home, &root);
     assert!(ok, "{out}");
     assert!(
-        temporary_banner(&out).contains("agentstack x session end"),
+        temporary_banner(&out).contains("agentstack more session end"),
         "control: the same banner is reached — so the assertion below is about the notice, \
          not about a different code path: {out}"
     );
@@ -821,7 +821,7 @@ fn undo_and_restore_each_state_which_writes_they_cover() {
     // wider list, because "nothing recorded to undo for this project" is the
     // reading most likely to be mistaken for "nothing was written".
     assert!(
-        out.contains("agentstack x restore --list"),
+        out.contains("agentstack more restore --list"),
         "undo must name where the machine-wide writes are: {out}"
     );
     if out.contains("recent changes") {

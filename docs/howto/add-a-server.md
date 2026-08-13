@@ -97,11 +97,11 @@ The next trusted agent connection opens the default and can discover the
 server's tools through `tools_search`. The server definition is not copied into
 project MCP configs in the live lane.
 
-Because nothing is written for a server served live, `x why` is the place that
+Because nothing is written for a server served live, `more why` is the place that
 answers "where did this come from, and who gets it":
 
 ```console
-$ agentstack x why github
+$ agentstack more why github
 
   github  (MCP server)
 

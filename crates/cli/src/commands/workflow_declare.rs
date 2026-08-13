@@ -321,9 +321,12 @@ pub fn run(manifest_dir: Option<&Path>, args: &WorkflowDeclareArgs) -> Result<()
                 "Next — review it, then run it:".bold(),
                 "agentstack trust .        review the roles, ceilings, and the approved graph"
                     .dimmed(),
-                format!("agentstack x workflow run {name}").dimmed()
+                format!("agentstack more workflow run {name}").dimmed()
             );
-            println!("  {}", "undo: agentstack x restore --last --write".dimmed());
+            println!(
+                "  {}",
+                "undo: agentstack more restore --last --write".dimmed()
+            );
             Ok(())
         }
         Err(e) => {
@@ -349,7 +352,7 @@ pub fn run(manifest_dir: Option<&Path>, args: &WorkflowDeclareArgs) -> Result<()
             bail!(
                 "declaring workflow '{name}' failed, and rolling it back was INCOMPLETE \
                  ({reverted} of {} restored) — the project is NOT as it was.\n\n\
-                 Finish the undo with:  agentstack x restore --last --write\n\nWhat failed: {e:#}",
+                 Finish the undo with:  agentstack more restore --last --write\n\nWhat failed: {e:#}",
                 super::count(undo.len(), "file")
             );
         }

@@ -44,7 +44,7 @@
 //!   and prints a green tick while the blocking condition stands untouched.
 //! * **(e) IS DISCOVERABLE** — every harvested command's verb can be found
 //!   from `agentstack --help`: listed there directly, named there as reachable,
-//!   or listed one step away under `agentstack x`. A surface may never name a
+//!   or listed one step away under `agentstack more`. A surface may never name a
 //!   command a person cannot find. This is the rule the command-visibility
 //!   split could break and that (a) structurally cannot see: hiding a command
 //!   from `--help` does not stop it parsing, so a guard built only on the clap
@@ -237,7 +237,7 @@
 //!    <command>`) and an enumerated value (`--secrets <env|keychain|skip>`) —
 //!    so reading them today would fail rule (a) on correct English. Closing
 //!    this needs a per-argument sentinel derived from the clap tree.
-//! 3. `agentstack x gateway connect --all --write` REFUSING under this file's
+//! 3. `agentstack more gateway connect --all --write` REFUSING under this file's
 //!    spawn when no harness config is present. That is a fact about the
 //!    isolated machine, not about the guidance, so it is not asserted. The
 //!    three harness-detecting states are what put the branch under the rules.
@@ -1407,7 +1407,7 @@ fn tokens_of(command: &str) -> Vec<String> {
 
 /// Normalize a harvested command the way the BINARY does before clap sees it.
 ///
-/// `agentstack x <cmd> …` is not a nested clap subcommand: `main` strips the
+/// `agentstack more <cmd> …` is not a nested clap subcommand: `main` strips the
 /// leading `x` from argv and there is exactly one parse tree and one dispatch
 /// arm. So a guidance string naming the namespaced spelling would fail rule (a)
 /// — "unrecognized subcommand 'x'" — while running perfectly in a terminal,
@@ -1416,7 +1416,7 @@ fn tokens_of(command: &str) -> Vec<String> {
 /// This is not a relaxation, and the distinction is the whole point: the
 /// product's OWN [`agentstack::cli::strip_namespace`] is called here rather
 /// than a copy of its rule, so the guard cannot drift from the binary. What the
-/// stripping does NOT do is excuse anything: `agentstack x nonexistent` still
+/// stripping does NOT do is excuse anything: `agentstack more nonexistent` still
 /// fails to parse (pinned by `the_guard_still_rejects_a_bad_namespaced_command`),
 /// and that the two spellings really reach the same place is asserted
 /// separately, against the real binary, by `the_x_namespace_is_a_pure_alias`.
@@ -1537,7 +1537,7 @@ struct Discoverable {
     visible: BTreeSet<String>,
     /// Named on the plain `--help` screen as reachable both ways.
     named_on_help: BTreeSet<String>,
-    /// Listed in the grouped `agentstack x` toolbox.
+    /// Listed in the grouped `agentstack more` toolbox.
     under_x: BTreeSet<String>,
     /// Every top-level command `--help --all` names.
     in_help_all: BTreeSet<String>,
@@ -1558,7 +1558,7 @@ impl Discoverable {
         } else if self.named_on_help.contains(name) {
             "named on the `agentstack --help` screen"
         } else if self.under_x.contains(name) {
-            "listed under `agentstack x`"
+            "listed under `agentstack more`"
         } else {
             "NOT DISCOVERABLE"
         }
@@ -1573,7 +1573,7 @@ impl Discoverable {
 /// a discoverability rule can stay honest.
 fn discoverable(home: &Path, proj: &Path, tree: &clap::Command) -> Discoverable {
     let help = strip_ansi(&run(&["--help"], home, proj).text);
-    let x = strip_ansi(&run(&["x"], home, proj).text);
+    let x = strip_ansi(&run(&["more"], home, proj).text);
     let all = strip_ansi(&run(&["--help", "--all"], home, proj).text);
 
     let visible = listed_commands(&help);
@@ -1602,7 +1602,7 @@ fn discoverable(home: &Path, proj: &Path, tree: &clap::Command) -> Discoverable 
     }
     assert!(
         !under_x.is_empty(),
-        "read no commands at all out of `agentstack x` — the extraction broke, not the \
+        "read no commands at all out of `agentstack more` — the extraction broke, not the \
          product:\n{x}"
     );
 
@@ -1619,7 +1619,7 @@ fn discoverable(home: &Path, proj: &Path, tree: &clap::Command) -> Discoverable 
 ///
 /// `None` means the command's verb can be found from `agentstack --help`.
 fn discoverability_violation(h: &Harvested, reachable: &BTreeSet<String>) -> Option<String> {
-    // `agentstack x install` is discoverable BY CONSTRUCTION — naming the
+    // `agentstack more install` is discoverable BY CONSTRUCTION — naming the
     // namespace is one of the two ways this rule accepts. Judge what follows.
     let toks = as_argv(&tokens_of(&h.command));
     let verb = toks.get(1)?;
@@ -1636,7 +1636,7 @@ fn discoverability_violation(h: &Harvested, reachable: &BTreeSet<String>) -> Opt
     let path = path.join(" ");
     Some(format!(
         "\n  `agentstack {path}` is named by {} ({}) in state `{}` but is not discoverable from \
-         `agentstack --help` — list it, or name it as `agentstack x {path}`.\n  \
+         `agentstack --help` — list it, or name it as `agentstack more {path}`.\n  \
          why     : a surface may never name a command a reader cannot find. Hiding a command does \
          not stop it PARSING, so rule (a) cannot see this; the reader is simply told to run \
          something that appears on no help screen they were pointed at.",
@@ -1697,7 +1697,7 @@ fn every_suggested_command_parses_and_makes_progress() {
          those verbs is REACHED in this matrix and its non-interactive refusal IS harvested; what \
          is not covered is the wizard text a terminal would show. `docs_commands.rs` covers the \
          same class for documentation prose.",
-        "`agentstack x gateway connect --all --write` is named as a fix by `doctor`, `apply`, \
+        "`agentstack more gateway connect --all --write` is named as a fix by `doctor`, `apply`, \
          `use` and `delivery`, and it refuses under this file's spawn whenever no harness config \
          is present (`no installed harness with MCP support detected`). That refusal is a fact \
          about the ISOLATED MACHINE, not about the guidance, so it is not asserted as a defect. \
@@ -1993,7 +1993,7 @@ fn every_suggested_command_parses_and_makes_progress() {
         undiscoverable.is_empty(),
         "{} named command(s) cannot be found from `agentstack --help`:{}\n\n\
          Discoverable today: {} listed on --help, {} named on the --help screen, {} under \
-         `agentstack x`.\n\
+         `agentstack more`.\n\
          Naming a command a reader cannot find is the defect the command-visibility split exists \
          to REMOVE, not to spread.",
         undiscoverable.len(),
@@ -2193,7 +2193,7 @@ const WRITING_SWEEP_STATES: &[&str] = &[
 ///   the command finished, and the command's own parting advice is to run the
 ///   command. Nothing in (a), (b) or (e) can see it: the string parses, it
 ///   writes, and it is perfectly discoverable — it is just the same step
-///   again. Compared on normalized argv, so `agentstack x lock --write` and
+///   again. Compared on normalized argv, so `agentstack more lock --write` and
 ///   `agentstack lock --write` count as the same command, which they are.
 #[test]
 fn every_closing_next_step_is_executable() {
@@ -2344,7 +2344,7 @@ fn every_closing_next_step_is_executable() {
 /// `the_guard_catches_a_surface_that_names_itself`).
 ///
 /// `None` means the named command is a different step from the one that was
-/// just run. Comparison is on NORMALIZED argv — `agentstack x lock --write`
+/// just run. Comparison is on NORMALIZED argv — `agentstack more lock --write`
 /// and `agentstack lock --write` are one command and must count as one — and
 /// on the whole argv rather than the verb, because `lock` naming `lock
 /// --write` is real progress and flagging it would make the rule useless.
@@ -2377,7 +2377,7 @@ fn self_loop_violation(state: &str, surface_argv: &[&str], command: &str) -> Opt
 /// and (g) has an obvious way to become the first: `lock` naming `lock --write`
 /// is real progress and must pass, while `lock --write` naming `lock --write`
 /// is the dead end. The namespaced spelling of the same command must count as
-/// the same command, or hiding a loop behind `agentstack x` would switch the
+/// the same command, or hiding a loop behind `agentstack more` would switch the
 /// rule off.
 #[test]
 fn the_guard_catches_a_surface_that_names_itself() {
@@ -2395,8 +2395,8 @@ fn the_guard_catches_a_surface_that_names_itself() {
 
     // The namespaced spelling is the SAME command.
     assert!(
-        self_loop_violation("s", &["lock", "--write"], "agentstack x lock --write").is_some(),
-        "`agentstack x lock --write` and `agentstack lock --write` are one command; counting them \
+        self_loop_violation("s", &["lock", "--write"], "agentstack more lock --write").is_some(),
+        "`agentstack more lock --write` and `agentstack lock --write` are one command; counting them \
          as two would let a loop hide behind the namespace"
     );
 
@@ -2953,7 +2953,7 @@ fn the_visible_set_and_the_complete_map_agree() {
         );
     }
     println!(
-        "visible {} ⊆ complete map {} ; `agentstack x` lists {} ; --help also names {}",
+        "visible {} ⊆ complete map {} ; `agentstack more` lists {} ; --help also names {}",
         disco.visible.len(),
         disco.in_help_all.len(),
         disco.under_x.len(),
@@ -2961,7 +2961,7 @@ fn the_visible_set_and_the_complete_map_agree() {
     );
 }
 
-/// `agentstack x <cmd>` is the SAME command as `agentstack <cmd>`.
+/// `agentstack more <cmd>` is the SAME command as `agentstack <cmd>`.
 ///
 /// The namespace is a way to find a command, not a second one. If the two
 /// spellings ever diverged — different flags, different help, a different
@@ -2984,7 +2984,7 @@ fn the_x_namespace_is_a_pure_alias() {
         let namespaced = run(&["x", name, "--help"], &home, &proj);
         if direct.ok != namespaced.ok || strip_ansi(&direct.text) != strip_ansi(&namespaced.text) {
             divergent.push(format!(
-                "\n  `agentstack x {name}` and `agentstack {name}` do not reach the same \
+                "\n  `agentstack more {name}` and `agentstack {name}` do not reach the same \
                  place.\n  direct     (ok={}):\n{}\n  namespaced (ok={}):\n{}",
                 direct.ok,
                 direct.text.trim(),
@@ -2996,13 +2996,13 @@ fn the_x_namespace_is_a_pure_alias() {
     assert!(
         divergent.is_empty(),
         "{} namespaced command(s) diverge from their own name:{}\n\n\
-         `agentstack x <cmd>` is advertised as the same command reached one hop away. If it is \
+         `agentstack more <cmd>` is advertised as the same command reached one hop away. If it is \
          not, the help screen is lying and rule (e)'s one-step claim is void.",
         divergent.len(),
         divergent.join("\n")
     );
     println!(
-        "`agentstack x <cmd>` == `agentstack <cmd>` for all {} namespaced command(s)",
+        "`agentstack more <cmd>` == `agentstack <cmd>` for all {} namespaced command(s)",
         disco.under_x.len()
     );
 }
@@ -3056,12 +3056,12 @@ fn the_guard_catches_an_undiscoverable_command() {
         msg.contains("agentstack secret set")
             && msg.contains("doctor")
             && msg.contains("not discoverable from `agentstack --help`")
-            && msg.contains("agentstack x secret set"),
+            && msg.contains("agentstack more secret set"),
         "the failure must name the command, the surface that emitted it, and what is missing:\n{msg}"
     );
     println!("guard self-check — a named but undiscoverable command:{msg}");
 
-    // …and a command reached one hop away under `agentstack x` passes, or the
+    // …and a command reached one hop away under `agentstack more` passes, or the
     // rule would demand every verb be promoted to the everyday screen.
     let namespaced = disco
         .under_x
@@ -3075,7 +3075,7 @@ fn the_guard_catches_an_undiscoverable_command() {
     };
     assert!(
         discoverability_violation(&one_hop, &live).is_none(),
-        "`{namespaced}` is listed under `agentstack x`, which IS discoverable in one step; \
+        "`{namespaced}` is listed under `agentstack more`, which IS discoverable in one step; \
          flagging it would force every verb onto the everyday screen and undo the split"
     );
 }
@@ -3094,15 +3094,15 @@ fn the_guard_still_rejects_a_bad_namespaced_command() {
         agentstack::cli::Cli::try_parse_from(&argv).is_ok()
     };
     assert!(
-        parses("agentstack x install"),
+        parses("agentstack more install"),
         "the namespaced spelling of a real command must parse, or every guidance string that \
-         names `agentstack x <cmd>` fails rule (a) for a reason that is about this file rather \
+         names `agentstack more <cmd>` fails rule (a) for a reason that is about this file rather \
          than about the product"
     );
     for bad in [
-        "agentstack x nonexistent-verb",
-        "agentstack x lock --no-such-flag",
-        "agentstack x x lock",
+        "agentstack more nonexistent-verb",
+        "agentstack more lock --no-such-flag",
+        "agentstack more x lock",
     ] {
         assert!(
             !parses(bad),
@@ -3132,7 +3132,7 @@ fn the_help_derivation_reads_listings_and_not_prose() {
     for prose in [
         "Four ideas cover the whole product: Setup (what you have) · Toolset (what this",
         "task needs) · Status (is it ready) · Undo (how to take it back).",
-        "  agentstack x                   the rest of the toolbox",
+        "  agentstack more                the rest of the toolbox",
         "  agentstack --help --all",
     ] {
         assert_eq!(
@@ -3154,13 +3154,13 @@ fn the_help_derivation_reads_listings_and_not_prose() {
             "up"
         ],
         "a `·`-separated listing must be read, or rule (e) would flag the very commands such a \
-         line exists to make findable. This shape is what `agentstack x` prints today; the plain \
+         line exists to make findable. This shape is what `agentstack more` prints today; the plain \
          `--help` screen no longer carries a second copy of it."
     );
     assert_eq!(
-        dot_list_idents("  Set up      up · adapters · settings · self · completions"),
-        vec!["up", "adapters", "settings", "self", "completions"],
-        "a grouped `agentstack x` line must be read"
+        dot_list_idents("  Set up      adapters · settings · self · completions"),
+        vec!["adapters", "settings", "self", "completions"],
+        "a grouped `agentstack more` line must be read"
     );
     assert_eq!(
         dot_list_idents("  Undo        restore"),
@@ -3550,7 +3550,7 @@ fn converge_once(
 /// for it. `None` means the suggestion is fine.
 fn noop_violation(clap_tree: &clap::Command, h: &Harvested) -> Option<String> {
     // Namespace-normalized first, or rule (b) would go BLIND on every
-    // `agentstack x <cmd>` string: `x` resolves to no clap node, the path comes
+    // `agentstack more <cmd>` string: `x` resolves to no clap node, the path comes
     // back empty, and a preview-only fix would be waved through.
     let toks = as_argv(&tokens_of(&h.command));
     let path = subcommand_path(clap_tree, &toks[1..]);
@@ -4142,7 +4142,7 @@ fn report(
     // remembers.
     let _ = writeln!(
         s,
-        "discoverability (e): {} listed on --help, {} also named there, {} under `agentstack x`, \
+        "discoverability (e): {} listed on --help, {} also named there, {} under `agentstack more`, \
          {} on the complete map",
         disco.visible.len(),
         disco.named_on_help.len(),
@@ -4262,7 +4262,7 @@ const DECLARED_SERVER: &str = "filesystem";
 /// This is what `overview::bridge_registered` reads: the harness config file
 /// exists (so the harness is *detected* under an isolated HOME) and carries an
 /// `agentstack` entry at the descriptor's MCP location. It is written directly
-/// rather than through `agentstack x gateway connect`, which refuses under this
+/// rather than through `agentstack more gateway connect`, which refuses under this
 /// file's `env_clear` spawn — see the skip record.
 const CLAUDE_BRIDGE_CONFIG: &str =
     r#"{"mcpServers":{"agentstack":{"type":"stdio","command":"agentstack","args":["gateway"]}}}"#;
@@ -4704,7 +4704,7 @@ fn delivery_claims_agree_and_match_the_disk() {
     // that holds on EVERY run belongs in the record on every run, or the report
     // can print a short list while a known blind spot stands.
     skips.note(
-        "rule (f) clause 3 reaches a REGISTERED bridge for `Claude Code` only. `agentstack x \
+        "rule (f) clause 3 reaches a REGISTERED bridge for `Claude Code` only. `agentstack more \
          gateway connect --all --write` refuses under this file's `env_clear` spawn (`no \
          installed harness with MCP support detected`), so the bridge is written directly into \
          the harness config the product reads — and `~/.claude.json` is the one harness config \

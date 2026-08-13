@@ -14,7 +14,7 @@ use clap::{CommandFactory, Parser};
 
 /// The `--help --all` section that lists the fixed argv a graphical panel
 /// invokes. Those names are a machine contract, not human commands, so they are
-/// exempt from the "must be listed by `agentstack x`" rule below.
+/// exempt from the "must be listed by `agentstack more`" rule below.
 fn inventory_contract_section() -> String {
     let inventory = agentstack::cli::full_command_inventory();
     inventory
@@ -47,8 +47,8 @@ fn status_parses_and_help_maps_every_command() {
     assert_eq!(
         visible,
         [
-            "init", "status", "add", "search", "apply", "doctor", "lock", "toolset", "use", "yes",
-            "run", "trust", "undo", "adopt", "secret"
+            "init", "up", "status", "add", "search", "apply", "doctor", "lock", "toolset", "use",
+            "yes", "run", "trust", "undo", "adopt", "secret"
         ],
         "the visible list is DERIVED, not curated by taste: a command is here \
          because the product tells someone to run it — the first-run ladder in \
@@ -62,21 +62,23 @@ fn status_parses_and_help_maps_every_command() {
          find is the exact defect this list exists to prevent. `adopt` stays for \
          the same reason (doctor names it for a server found in a CLI config but \
          not in the manifest, which is a FIRST-RUN state). `toolset`, `status`, \
-         `undo` and `init` cover Toolset · Status · Undo · Setup. The honest \
-         count the rule produces is fifteen, not ten: hiding one of the forced \
+         `undo` and `init` cover Toolset · Status · Undo · Setup, and `up` is \
+         Setup on a machine that is not the one the library was built on — the \
+         state every second machine starts in. The honest \
+         count the rule produces is sixteen, not ten: hiding one of the forced \
          commands to reach a rounder number would trade a real guarantee for a \
          tidier screen. \
          `lib` and `why` were briefly here on an argument from importance, \
          which is not this rule. No first-run rung, no `↳ fix` line and no \
          machine field names either: doctor's single mention of `lib` (a linked \
-         folder that vanished) already prints `agentstack x lib unlink`, and \
-         nothing emits `why` at all — so they sit behind `x` on the same terms \
-         as `guard` and `gateway`. \
-         `up`, `share`, `receive`, `workflow` and `restore` moved behind \
-         `agentstack x` — none is named by any fix or ladder rung, STRATEGY.md \
+         folder that vanished) already prints `agentstack more lib unlink`, and \
+         nothing emits `why` at all — so they sit behind `more` on the same \
+         terms as `guard` and `gateway`. \
+         `share`, `receive`, `workflow` and `restore` moved behind \
+         `agentstack more` — none is named by any fix or ladder rung, STRATEGY.md \
          v3 puts share/receive quiet until team features arrive, and `undo` is \
          the beginner spelling of `restore`. Nothing was removed: each still \
-         runs at its own name and is listed by `agentstack x`."
+         runs at its own name and is listed by `agentstack more`."
     );
 
     // Review finding H5 still holds — the default help must not re-dump the ~45
@@ -84,7 +86,7 @@ fn status_parses_and_help_maps_every_command() {
     // guidance" line naming eight hidden verbs, kept there so guidance could
     // never name a command a reader cannot find. That line is gone, and the
     // guarantee did not move an inch: every one of those eight is listed by
-    // `agentstack x`, which rule (e) of `guidance_is_executable` counts as
+    // `agentstack more`, which rule (e) of `guidance_is_executable` counts as
     // discoverable in one step. The line was a second, hand-maintained copy of a
     // fact the toolbox already carried — the most rot-prone thing on the screen
     // this curation exists to shorten. The guarantee itself is asserted where it
@@ -96,11 +98,11 @@ fn status_parses_and_help_maps_every_command() {
         "the short help must still name the way to the full map"
     );
     assert!(
-        after_help.contains("agentstack x"),
+        after_help.contains("agentstack more"),
         "the short help must name the escape hatch to everything it hides"
     );
     // The eight guidance-named hidden verbs are no longer repeated here; they
-    // are discoverable one step away, under `agentstack x`, which the toolbox
+    // are discoverable one step away, under `agentstack more`, which the toolbox
     // assertion below and rule (e) both check. Nothing that guidance never names
     // may pad this screen (H5).
     for grouped_only in ["proxy", "shim", "sign", "optimize", "kill"] {
@@ -111,17 +113,19 @@ fn status_parses_and_help_maps_every_command() {
         );
     }
 
-    // `agentstack x` is the home of everything not visible, and it must actually
+    // `agentstack more` is the home of everything not visible, and it must actually
     // list them — an escape hatch that names nothing is a dead end.
     let listing = agentstack::cli::namespace_listing();
     // The verbs guidance names by a `↳ fix` line, a ladder rung or ordinary
     // prose and that are hidden. They used to be repeated on the plain help
     // screen; the toolbox is now their only listing, so this is where the
     // "guidance never names an unfindable command" guarantee is anchored on
-    // this side. `lib` and `why` rejoined them when the count went back to
-    // fifteen: guidance still names both (`agentstack x lib unlink` in
+    // this side. `lib` and `why` rejoined them when the count went back up:
+    // guidance still names both (`agentstack more lib unlink` in
     // doctor's fix column, `agentstack lib list` in `explain` and `why`
-    // prose), so both must be findable here in one hop.
+    // prose), so both must be findable here in one hop. `up` left this list
+    // when it was promoted to the visible sixteen — it is now findable on the
+    // plain `--help` screen, which is the stronger half of the same guarantee.
     for named_by_guidance in [
         "gateway",
         "guard",
@@ -130,12 +134,11 @@ fn status_parses_and_help_maps_every_command() {
         "lib",
         "self",
         "session",
-        "up",
         "why",
     ] {
         assert!(
             listing.contains(named_by_guidance),
-            "guidance can print `agentstack {named_by_guidance} …`, so `agentstack x` \
+            "guidance can print `agentstack {named_by_guidance} …`, so `agentstack more` \
              must list it — it is the one screen a reader is pointed at that can \
              still show them where the command lives"
         );
@@ -152,7 +155,7 @@ fn status_parses_and_help_maps_every_command() {
         }
         assert!(
             listing.contains(name),
-            "'{name}' is hidden and is not listed by `agentstack x` — it would be \
+            "'{name}' is hidden and is not listed by `agentstack more` — it would be \
              reachable only by already knowing its name"
         );
     }
@@ -281,12 +284,12 @@ fn visible_namespaced_and_panel_partition_the_whole_surface() {
             &visible,
             "visible",
             &namespaced,
-            "the `agentstack x` toolbox",
+            "the `agentstack more` toolbox",
         ),
         (&visible, "visible", &panel, "the panel contract"),
         (
             &namespaced,
-            "the `agentstack x` toolbox",
+            "the `agentstack more` toolbox",
             &panel,
             "the panel contract",
         ),
@@ -309,7 +312,7 @@ fn visible_namespaced_and_panel_partition_the_whole_surface() {
     let missing: Vec<&String> = all.difference(&covered).collect();
     assert!(
         missing.is_empty(),
-        "{missing:?} are in neither the visible list, the `agentstack x` toolbox, \
+        "{missing:?} are in neither the visible list, the `agentstack more` toolbox, \
          nor the panel contract — they would be reachable only by already \
          knowing the name"
     );
@@ -347,7 +350,7 @@ fn consolidated_verbs_parse() {
         vec!["agentstack", "why", "github"],
         vec!["agentstack", "why", "sql-review", "--json"],
         // `lib` is hidden again; the whole subcommand tree must still parse at
-        // the direct spelling, not just at `agentstack x lib`.
+        // the direct spelling, not just at `agentstack more lib`.
         vec!["agentstack", "lib", "list"],
         // The machine-invoked entrypoint written into harness configs must
         // keep parsing exactly as `connect` renders it.
@@ -483,7 +486,7 @@ fn secret_set_without_tty_names_value_flag() {
     );
 }
 
-// `agentstack x <cmd>` is the SAME command, not a second one. The rewrite
+// `agentstack more <cmd>` is the SAME command, not a second one. The rewrite
 // happens before clap parses (`strip_namespace`), so there is one parse tree
 // and one dispatch arm per verb; this test pins that equivalence, and that the
 // direct spelling of a now-hidden command still parses.
@@ -499,7 +502,7 @@ fn the_namespace_is_a_prefix_not_a_second_command() {
         vec!["up"],
         vec!["share", "team-setup"],
         vec!["workflow", "list"],
-        // The two the fifteen-verb count moved back behind `x`. Nothing was
+        // The two the verb count moved back behind the namespace. Nothing was
         // removed: both still parse at their own names, and a nested
         // subcommand travels with its parent through the rewrite.
         vec!["lib", "list"],
@@ -509,29 +512,36 @@ fn the_namespace_is_a_prefix_not_a_second_command() {
     ] {
         let mut direct = vec!["agentstack".to_string()];
         direct.extend(verb.iter().map(|s| s.to_string()));
-        let mut namespaced = vec!["agentstack".to_string(), "x".to_string()];
-        namespaced.extend(verb.iter().map(|s| s.to_string()));
 
         // Hidden does not mean gone: the direct spelling still parses.
         Cli::try_parse_from(&direct)
             .unwrap_or_else(|e| panic!("`agentstack {}` must still run: {e}", verb.join(" ")));
 
-        let stripped = agentstack::cli::strip_namespace(&namespaced)
-            .expect("a leading `x` is the namespace and is stripped");
-        assert_eq!(
-            stripped,
-            direct,
-            "`agentstack x {0}` must become `agentstack {0}` verbatim",
-            verb.join(" ")
-        );
+        // Both spellings of the prefix, and they must agree: `x` is the
+        // pre-v0.19 name and is kept permanently (see the alias test below).
+        for prefix in [agentstack::cli::NAMESPACE, agentstack::cli::NAMESPACE_ALIAS] {
+            let mut namespaced = vec!["agentstack".to_string(), prefix.to_string()];
+            namespaced.extend(verb.iter().map(|s| s.to_string()));
+
+            let stripped = agentstack::cli::strip_namespace(&namespaced)
+                .unwrap_or_else(|| panic!("a leading `{prefix}` is the namespace and is stripped"));
+            assert_eq!(
+                stripped,
+                direct,
+                "`agentstack {prefix} {0}` must become `agentstack {0}` verbatim",
+                verb.join(" ")
+            );
+        }
     }
 
-    // `x` is only a namespace in first position — an argument that happens to
-    // be `x` belongs to the command that took it.
-    assert!(
-        agentstack::cli::strip_namespace(&argv(&["agentstack", "search", "x"])).is_none(),
-        "`x` after a verb is that verb's argument, not the namespace"
-    );
+    // The prefix is only a namespace in first position — an argument that
+    // happens to spell it belongs to the command that took it.
+    for arg in ["x", "more"] {
+        assert!(
+            agentstack::cli::strip_namespace(&argv(&["agentstack", "search", arg])).is_none(),
+            "`{arg}` after a verb is that verb's argument, not the namespace"
+        );
+    }
     assert!(
         agentstack::cli::strip_namespace(&argv(&["agentstack"])).is_none(),
         "a bare invocation is not namespaced"
@@ -606,16 +616,89 @@ fn demoted_verbs_run_identically_at_both_spellings() {
             );
         }
 
-        let namespaced: Vec<&str> = std::iter::once("x").chain(direct.iter().copied()).collect();
-        let (x_code, x_stdout, x_stderr) = run(&namespaced, home.path(), proj.path());
-        assert_eq!(
-            (x_code, x_stdout, x_stderr),
-            (code, stdout, stderr),
-            "`agentstack x {0}` and `agentstack {0}` must be one command — same \
-             dispatch, same output, same exit code",
-            direct.join(" ")
-        );
+        // Both prefixes: `more` is the name, `x` the permanent alias, and a
+        // reader who learned either must land in exactly the same place.
+        for prefix in [agentstack::cli::NAMESPACE, agentstack::cli::NAMESPACE_ALIAS] {
+            let namespaced: Vec<&str> = std::iter::once(prefix)
+                .chain(direct.iter().copied())
+                .collect();
+            let (x_code, x_stdout, x_stderr) = run(&namespaced, home.path(), proj.path());
+            assert_eq!(
+                (x_code, x_stdout, x_stderr),
+                (code, stdout.clone(), stderr.clone()),
+                "`agentstack {prefix} {0}` and `agentstack {0}` must be one command — same \
+                 dispatch, same output, same exit code",
+                direct.join(" ")
+            );
+        }
     }
+}
+
+/// `x` is the namespace's old name and it never stops working.
+///
+/// The prefix was renamed to `more` in v0.19 because one letter of punctuation
+/// had to be explained every time it was printed. The old spelling is in
+/// shipped READMEs, in blog posts, and in the shell history of everyone who
+/// used the product before the rename — so it stays accepted forever, and this
+/// test is the thing that stops it being dropped in a future tidy-up. It is
+/// hidden, not documented: the help screens teach one name.
+#[test]
+fn the_x_alias_is_permanent() {
+    use std::process::{Command, Stdio};
+
+    let home = tempfile::tempdir().expect("temp home");
+    let proj = tempfile::tempdir().expect("temp project");
+
+    let run = |args: &[&str]| {
+        let out = Command::new(env!("CARGO_BIN_EXE_agentstack"))
+            .args(args)
+            .current_dir(proj.path())
+            .env_clear()
+            .env("HOME", home.path())
+            .env("AGENTSTACK_HOME", home.path().join(".agentstack"))
+            .env("PATH", "/usr/bin:/bin")
+            .env("NO_COLOR", "1")
+            .env("TERM", "dumb")
+            .stdin(Stdio::null())
+            .output()
+            .expect("spawn agentstack");
+        (
+            out.status.code(),
+            String::from_utf8_lossy(&out.stdout).into_owned(),
+        )
+    };
+
+    // A command behind the namespace parses and runs under the old prefix…
+    let (code, stdout) = run(&["x", "adapters", "--help"]);
+    assert_eq!(
+        code,
+        Some(0),
+        "`agentstack x <cmd>` must still parse — the alias is permanent"
+    );
+    assert!(
+        stdout.contains("Usage: agentstack adapters"),
+        "`agentstack x adapters --help` must reach `adapters`; got: {stdout}"
+    );
+
+    // …a bare `x` still prints the toolbox…
+    let (bare_code, bare_stdout) = run(&["x"]);
+    assert_eq!(bare_code, Some(0), "bare `agentstack x` must still list");
+    assert_eq!(
+        bare_stdout,
+        agentstack::cli::namespace_listing(),
+        "bare `agentstack x` prints the same toolbox as bare `agentstack more`"
+    );
+
+    // …and the toolbox it prints teaches the NEW name, never the old one: an
+    // alias that is also advertised is a second name, not an alias.
+    assert!(
+        bare_stdout.starts_with("agentstack more —"),
+        "the toolbox screen must teach `more`; got: {bare_stdout}"
+    );
+    assert!(
+        !bare_stdout.contains("agentstack x "),
+        "the toolbox screen must not teach the alias back to the reader"
+    );
 }
 
 /// One consent flag, one spelling.

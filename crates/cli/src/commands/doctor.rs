@@ -29,13 +29,13 @@ use crate::util::paths;
 /// The one command that registers the bridge. The same command
 /// [`super::delivery::CONNECT_THE_BRIDGE`] names, so `status`, `delivery`, and
 /// this finding cannot name three different fixes for one state.
-const BRIDGE_FIX: &str = "agentstack x gateway connect --all --write";
+const BRIDGE_FIX: &str = "agentstack more gateway connect --all --write";
 
 /// The one command that writes files for a project whose every capability is
 /// routed live. The same override [`super::apply`] names in its own refusal, so
 /// the command a user reads from the failure and the command `doctor` puts on
 /// the terminal line are one string.
-const LOCAL_DELIVERY_FIX: &str = "agentstack x delivery render-locally --write";
+const LOCAL_DELIVERY_FIX: &str = "agentstack more delivery render-locally --write";
 
 /// Is this finding one of the two DELIVERY ones — the unconnected bridge, or
 /// nothing deliverable at all? Recognized by their fixes, so the next-step
@@ -1288,7 +1288,7 @@ pub fn collect_content_units(
             None => skipped_unit(
                 "skill",
                 name,
-                "not materialized ↳ agentstack x install".into(),
+                "not materialized ↳ agentstack more install".into(),
             ),
             Some(src) => match scan::scan_tree(&src) {
                 Ok(findings) => Unit {
@@ -1631,7 +1631,7 @@ fn run_checks(
                 report.line(
                     Level::Warn,
                     format!(
-                        "{:<14} linked folder not found: {} ↳ agentstack x lib unlink {} --write",
+                        "{:<14} linked folder not found: {} ↳ agentstack more lib unlink {} --write",
                         source.name,
                         tidy_path(&source.root),
                         source.name
@@ -1729,7 +1729,7 @@ fn run_checks(
         } else {
             report.line(
                 Level::Ok,
-                "no CLI connected — optional ↳ agentstack x gateway connect --all",
+                "no CLI connected — optional ↳ agentstack more gateway connect --all",
             );
         }
     } else if connected == 0 {
@@ -2754,7 +2754,7 @@ fn run_checks(
                 report.line(
                     Level::Warn,
                     format!(
-                        "{:<14} managed region stale ({} scope) ↳ agentstack x instructions --write",
+                        "{:<14} managed region stale ({} scope) ↳ agentstack more instructions --write",
                         desc.display,
                         stale_scopes.join("/")
                     ),
@@ -2899,7 +2899,7 @@ fn run_checks(
                         // dropping the table), same voice as the sibling
                         // error below.
                         "{id}: unknown CLI — these settings reach nothing; \
-                         `agentstack x adapters list` shows the valid ids \
+                         `agentstack more adapters list` shows the valid ids \
                          ↳ edit [settings.{id}] in the manifest"
                     ),
                 ),
@@ -3104,7 +3104,7 @@ fn run_checks(
         match dir {
             None => report.line(
                 Level::Warn,
-                format!("{name:<20} not installed ↳ agentstack x install"),
+                format!("{name:<20} not installed ↳ agentstack more install"),
             ),
             // ERROR, not a warning: the source resolved, so this is not a
             // missing fetch (`not installed` above covers that, with the
@@ -4126,7 +4126,7 @@ fn check_extension_reproducibility(manifest: &Manifest, dir: &Path, report: &mut
             ),
             ExtensionLockStatus::NotAvailableOffline { .. } => report.line(
                 Level::Warn,
-                format!("{name:<20} git extension not cached — can't verify offline ↳ agentstack x install"),
+                format!("{name:<20} git extension not cached — can't verify offline ↳ agentstack more install"),
             ),
             ExtensionLockStatus::Matches => {
                 report.line(Level::Ok, format!("{name:<20} extension · matches lock"));
@@ -4176,7 +4176,7 @@ fn check_workflow_reproducibility(manifest: &Manifest, dir: &Path, report: &mut 
             ),
             WorkflowLockStatus::NotAvailableOffline { .. } => report.line(
                 Level::Info,
-                format!("{name:<20} git workflow not cached — can't verify offline ↳ agentstack x install"),
+                format!("{name:<20} git workflow not cached — can't verify offline ↳ agentstack more install"),
             ),
             WorkflowLockStatus::Matches => {
                 report.line(Level::Ok, format!("{name:<20} workflow · matches lock"));
@@ -5024,7 +5024,7 @@ fn check_t3code(report: &mut Report) {
             Level::Warn,
             "guard not enabled — t3code's Full-access mode disables the providers' own \
              approval prompts, so those sessions run with no pre-tool-use gate at all \
-             ↳ agentstack x guard install --write",
+             ↳ agentstack more guard install --write",
         );
     } else {
         let coverage = crate::commands::guard::coverage();
@@ -5046,7 +5046,7 @@ fn check_t3code(report: &mut Report) {
                     Level::Warn,
                     format!(
                         "{provider}: guard hook missing — t3code Full-access sessions on \
-                         this provider run ungated ↳ agentstack x guard install --write"
+                         this provider run ungated ↳ agentstack more guard install --write"
                     ),
                 );
             }
@@ -5109,7 +5109,7 @@ fn check_t3code(report: &mut Report) {
                 report.line(
                     Level::Ok,
                     format!(
-                        "instance '{instance}' launches via the agentstack x shim ({path}) — \
+                        "instance '{instance}' launches via the agentstack more shim ({path}) — \
                          its sessions record per-run evidence"
                     ),
                 );
@@ -5125,7 +5125,7 @@ fn check_t3code(report: &mut Report) {
                 report.line(
                     Level::Info,
                     "sessions attribute to the global audit only — for per-run evidence: \
-                     agentstack x shim make <cli>, then point the instance's binary path at it",
+                     agentstack more shim make <cli>, then point the instance's binary path at it",
                 );
             }
         }
@@ -5387,7 +5387,7 @@ mod tests {
         r.section("T3 Code");
         r.line(
             Level::Warn,
-            "the guard is missing\n  ↳ agentstack x guard install --write",
+            "the guard is missing\n  ↳ agentstack more guard install --write",
         );
         r.section("Trust");
         r.line(Level::Warn, "the content changed since you said yes");
@@ -5398,7 +5398,7 @@ mod tests {
         // section-order tie-break below trust is untouched.
         r.trust = Some("trusted");
         let (cmd, _) = r.next_action();
-        assert_eq!(cmd, "agentstack x guard install --write", "{cmd}");
+        assert_eq!(cmd, "agentstack more guard install --write", "{cmd}");
 
         // An error still outranks the review: its command blocks the rest.
         r.trust = Some("drifted");

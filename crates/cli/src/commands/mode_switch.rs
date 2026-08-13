@@ -263,7 +263,7 @@ pub fn set_mode_preview(args: &PanelSetModeArgs, dir: Option<&Path>) -> Result<V
     let skills_outside_the_ledger = plan
         .as_ref()
         .is_some_and(|p| p.removals.iter().any(|r| !r.capture));
-    body.insert("undo".into(), "agentstack x restore --last".into());
+    body.insert("undo".into(), "agentstack more restore --last".into());
     body.insert(
         "undo_covers_files_only".into(),
         skills_outside_the_ledger.into(),
@@ -296,8 +296,8 @@ pub fn set_mode(_args: &PanelSetModeArgs, _dir: Option<&Path>) -> Result<()> {
         "nothing was changed — `set-mode` is retired, and delivery is no longer a mode you pick.\n\
          AgentStack routes each capability to its lane by kind and harness. \
          `agentstack status` says what it decided, per CLI, and where.\n\
-         To stop rendering files for this project: `agentstack x uninstall`.\n\
-         To keep one project or harness on rendered files: `agentstack x delivery render-locally`."
+         To stop rendering files for this project: `agentstack more uninstall`.\n\
+         To keep one project or harness on rendered files: `agentstack more delivery render-locally`."
     )
 }
 

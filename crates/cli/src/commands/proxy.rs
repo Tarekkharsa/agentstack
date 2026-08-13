@@ -9,7 +9,7 @@
 //!
 //! The ranked, per-capability view over that telemetry lives under
 //! `agentstack report wire` (see `commands::report::wire`) — the ground-truth
-//! companion to the static estimate in `agentstack x report usage`.
+//! companion to the static estimate in `agentstack more report usage`.
 
 use std::path::Path;
 

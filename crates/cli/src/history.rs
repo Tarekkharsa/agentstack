@@ -39,7 +39,7 @@ pub const SKILLS_ARE_NOT_RECORDED: &str =
 /// real, verified paths: `x uninstall` plans the skills leg through
 /// `unrender::plan`, and activating a toolset without a skill prunes it.
 pub const SKILLS_COME_OFF_WITH: &str =
-    "take them off with `agentstack x uninstall --write`, or activate a toolset that omits them";
+    "take them off with `agentstack more uninstall --write`, or activate a toolset that omits them";
 
 use std::cell::RefCell;
 use std::fs;

@@ -271,7 +271,7 @@ impl ExecutionPlan {
 
         let desc = ctx.registry.get(&args.harness).with_context(|| {
             format!(
-                "unknown harness '{}' — see `agentstack x adapters list`",
+                "unknown harness '{}' — see `agentstack more adapters list`",
                 args.harness
             )
         })?;
@@ -384,7 +384,7 @@ impl ExecutionPlan {
             let _ = writeln!(
                 s,
                 "  {} lockdown: no host route, no internet — the container's only \
-                 peer is the egress sidecar. Review it with `agentstack x report run {}`.",
+                 peer is the egress sidecar. Review it with `agentstack more report run {}`.",
                 "🔒".cyan(),
                 self.run_id
             );
@@ -392,7 +392,7 @@ impl ExecutionPlan {
             let _ = writeln!(
                 s,
                 "  {} egress is routed through the AgentStack proxy; \
-                 review it after with `agentstack x report run {}`.",
+                 review it after with `agentstack more report run {}`.",
                 "🛡".cyan(),
                 self.run_id
             );
@@ -542,7 +542,7 @@ fn run_container_to_completion(
         Some(c) => Err(anyhow::anyhow!("sandbox exited with code {c}")),
         None => Err(anyhow::anyhow!("sandbox was killed by a signal")),
     };
-    println!("See what happened: `agentstack x report run {run_id}`");
+    println!("See what happened: `agentstack more report run {run_id}`");
     result
 }
 
