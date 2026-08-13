@@ -1678,6 +1678,7 @@ mod tests {
                 executables: Vec::new(),
                 workflows: Vec::new(),
                 settings: Vec::new(),
+                manifest_digest: None,
             };
 
             let manifest: crate::manifest::Manifest =
