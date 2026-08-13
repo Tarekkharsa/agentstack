@@ -329,9 +329,11 @@ More: [drift — adopt or apply?](reference.md#drift-adopt-or-apply) and
 
 Untrusted means **inert**: a cloned repository's declarations cannot spawn
 servers, enter agent context, or resolve secrets until a human has read them.
-A consented `agentstack init` records trust for you, so in practice this gate
-shows up in two places — a repo you cloned, and a manifest that changed since
-you approved it.
+A consented `agentstack init` records trust for you — the wizard's own confirm
+at a terminal, or `--consented <plan_digest>` on a scripted run — so in practice
+this gate shows up in three places: a repo you cloned, a manifest that changed
+since you approved it, and a scripted `init --yes` that carried no reviewed
+plan (that one imports and leaves the project untrusted on purpose).
 
 ### The five kinds the gate holds back
 

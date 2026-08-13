@@ -105,11 +105,17 @@ and `use --write` refuse to render an untrusted project's servers, skills,
 instructions, hooks, and extensions, and name `agentstack trust .` as the fix;
 editing the manifest or the lock afterwards drops the project out of trust —
 `status` then reads `trust stale (content changed)` — until you review it again.
-Running `init` yourself needs no such step: it grants that review for the bytes
-it just wrote, so `status` reads `trusted` straight after it, and building the
-setup *is* the consent. That consent is bound to those exact bytes and nothing
-wider — every later edit still comes back through `agentstack trust .`. And
-nothing a project declares can loosen the limits your own machine sets.
+Running `init` yourself needs no such step: the guided wizard shows you the
+plan, and your confirm grants the review for the bytes it just wrote, so
+`status` reads `trusted` straight after it — building the setup *is* the
+consent. A scripted import is the same deal in two commands, because `--yes`
+acknowledges the write and not the servers: `agentstack init --plan` prints the
+plan and its `plan_digest`, and `agentstack init --yes --consented <digest>`
+imports and grants against the plan you read. Without the digest the import
+still happens and the project simply stays untrusted, one `agentstack trust .`
+away. Either way the consent is bound to those exact bytes and nothing wider —
+every later edit still comes back through `agentstack trust .`. And nothing a
+project declares can loosen the limits your own machine sets.
 
 `init` is a guided wizard. Scripting or CI?
 [Use it in CI](https://tarekkharsa.github.io/agentstack/howto/ci.html).
@@ -125,21 +131,25 @@ current binary. Step by step:
    placeholder reuses the key name the token had in the CLI config it came
    from, so it is `${GITHUB_TOKEN}` in this fixture and
    `${GITHUB_PERSONAL_ACCESS_TOKEN}` if that is what your config calls it.
-3. **Connect** — `agentstack x gateway connect --all --write`: the live lane
+3. **Review** — `agentstack trust .`: nothing here runs until the setup is
+   reviewed. At a terminal the wizard asks this inside `init`; a scripted run
+   consents in two commands, previewing the surface and handing back its
+   digest.
+4. **Connect** — `agentstack x gateway connect --all --write`: the live lane
    needs one bridge registered per MCP-capable CLI.
-4. **Route** — `agentstack x delivery`: both CLIs are MCP-capable, so the servers
+5. **Route** — `agentstack x delivery`: both CLIs are MCP-capable, so the servers
    are served live and no file is written for them. The project holds
    `.agentstack/` and the `.gitignore` that hides the lifted secret — no native
    config at all.
-5. **Verify** — `agentstack doctor`: 0 errors, 0 warnings. On your own machine
+6. **Verify** — `agentstack doctor`: 0 errors, 0 warnings. On your own machine
    expect a note or two — advisories like "these servers launch via bare `npx`"
    are stated once and do not count against readiness; a first Codex project
    also warns until you open Codex there once and accept its trust prompt.
-6. **Render anyway** — `agentstack x delivery render-locally --write`, then
+7. **Render anyway** — `agentstack x delivery render-locally --write`, then
    `agentstack apply --toolset default --scope global --write`: the rendered
    lane is routed, not removed, so asking for files is an explicit opt-in. Both
    CLIs then carry both servers, each in its own format.
-7. **Undo** — `agentstack x restore --last --write`, four times (the render, the
+8. **Undo** — `agentstack x restore --last --write`, four times (the render, the
    render-locally override, the bridge, the import): every file byte-identical
    to where it started.
 

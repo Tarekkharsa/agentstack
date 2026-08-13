@@ -189,7 +189,10 @@ say "Nothing here runs until the setup is reviewed — that review is its own st
 run "agentstack trust ."
 CONSENT="$(as trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')"
 as trust . --yes --consented "$CONSENT" 2>&1 | tail -2 | sed 's/^/  /'
-if as status 2>&1 | grep -qi "trusted"; then
+# Asserted on the trust store's own listing, not on `status`: the ordinary
+# journey deliberately says nothing about trust while everything is fine, so a
+# grep for the word there would fail for a reason that is not this claim.
+if as trust --list 2>&1 | grep -q "$PROJECT"; then
   ok "the project is trusted for exactly the bytes the preview showed"
 else
   bad "the review should have recorded trust for the imported manifest"

@@ -11,6 +11,11 @@ The fenced, reproducible proof of AgentStack's core promise (TODO §1.5):
    value lands in a gitignored `.env`. The token is asserted in all three
    places at once — no secret material in the manifest, the placeholder (never
    the value) in the library entry, the value only in the ignored `.env`.
+2b. **Review** with `agentstack trust .`: nothing a manifest declares is active
+   until a human has read it, and a scripted `--yes` acknowledges the write
+   rather than the servers — so the import leaves the project untrusted and the
+   consent is its own step (headlessly: preview the surface, hand its
+   `surface_digest` back). At a terminal the wizard asks this inside `init`.
 3. **Connect** with `agentstack x gateway connect --all --write`: the live lane
    needs one bridge registered per MCP-capable tool. Before it runs, `delivery`
    and `doctor` say "planned live (not connected)" — the demo resolves that

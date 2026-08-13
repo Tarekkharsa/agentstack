@@ -853,6 +853,16 @@ same grant. `--preview` emits `surface_digest`, the value a later
 `--yes --consented` must present — the CLI-enforced "a human reviewed
 these exact bytes" for external UIs and scripts.
 
+`--yes` requires `--consented` **everywhere**, terminal or not: a terminal on
+stdin proves a device, not a reader, and an agent can allocate one. For the
+same reason `agentstack guard` refuses `trust`, `yes`, `init --yes` and
+`apply --yes` when they are typed from a hooked agent shell — `trust
+--preview` is the read half it may run instead — and a scripted `init --yes`
+imports without granting trust unless it carries `--consented <plan_digest>`
+from `init --plan`. See [the resident
+agent](ENFORCEMENT.md#the-resident-agent) for what that does and does not
+cover.
+
 `trust .` previews the **effective runtime surface** — inline servers and library
 refs alike, each ref labeled pinned/unpinned/drifted. Explicit `--manifest-dir`
 skips the gate (naming a directory is the consent).
