@@ -1763,12 +1763,42 @@ fn run_impl(
         let already = existing_manifest(manifest_dir)?.is_some();
         let store = preresolved_store.expect("resolved right above for Some(consented)");
         let actual = plan_digest(&det, &base, already, store_label(store));
-        anyhow::ensure!(
-            consented == actual,
-            "refusing to apply: the detected setup changed since this plan was reviewed \
-             (consented {consented}, current {actual}) — re-run `agentstack init --plan`, \
-             review the new plan, and apply with its plan_digest"
-        );
+        if consented != actual {
+            // Two very different causes, one message until now. The digest
+            // covers the detected setup AND the flag-derived destination, so a
+            // plan made with different flags mismatches while nothing on the
+            // machine has moved — and being told "the detected setup changed"
+            // sends the user to re-inspect a machine that is fine.
+            //
+            // Tell them apart by asking the only question that separates them:
+            // would THIS detection have produced the consented digest under a
+            // different flag? If yes, the machine is unchanged and the flags
+            // are the difference.
+            let flags_differ = [SecretStore::Env, SecretStore::Keychain, SecretStore::Skip]
+                .into_iter()
+                .filter(|candidate| *candidate != store)
+                .any(|candidate| {
+                    consented == plan_digest(&det, &base, already, store_label(candidate))
+                });
+            anyhow::bail!(
+                "{}",
+                if flags_differ {
+                    format!(
+                        "refusing to apply: this plan was made for different `init` flags — \
+                         nothing on this machine changed (consented {consented}, current \
+                         {actual}) — re-run `agentstack init --plan` with the same flags you \
+                         intend to run, review it, and apply with its plan_digest"
+                    )
+                } else {
+                    format!(
+                        "refusing to apply: the detected setup changed since this plan was \
+                         reviewed (consented {consented}, current {actual}) — re-run \
+                         `agentstack init --plan`, review the new plan, and apply with its \
+                         plan_digest"
+                    )
+                }
+            );
+        }
     }
     let DetectedImport {
         detected,
@@ -3537,6 +3567,62 @@ mod tests {
     /// summary. v1 flattened argv with spaces and omitted env/cwd, so plans
     /// that would write operationally different manifests shared a digest.
     /// NEVER weaken this to a display-derived digest.
+    /// S3: a plan made with different flags is not a changed machine.
+    ///
+    /// The digest binds the flag-derived destination as well as the detection,
+    /// so `init --plan` and `init --plan --secrets env` produce different
+    /// digests on an identical machine. The old refusal said "the detected
+    /// setup changed since this plan was reviewed", sending the user to
+    /// re-inspect a machine that had not moved. The two causes are separated
+    /// by asking whether THIS detection would have produced the consented
+    /// digest under a different flag.
+    #[test]
+    fn a_flag_mismatch_is_told_apart_from_a_changed_machine() {
+        let base = Path::new("/tmp/proj");
+        let det = DetectedImport {
+            detected: Vec::new(),
+            contributing: Vec::new(),
+            servers: IndexMap::new(),
+            project_sourced: false,
+            settings: IndexMap::new(),
+            conflict_counts: IndexMap::new(),
+            lifted: Vec::new(),
+            skipped: Vec::new(),
+            destinations: Vec::new(),
+            tool_managed: Vec::new(),
+            tool_managed_included: false,
+            bridge_entries: Vec::new(),
+        };
+
+        let with_env = plan_digest(&det, base, false, store_label(SecretStore::Env));
+        let with_keychain = plan_digest(&det, base, false, store_label(SecretStore::Keychain));
+        assert_ne!(
+            with_env, with_keychain,
+            "the premise: the destination flag moves the digest"
+        );
+
+        // The same detection under another flag reproduces the consented
+        // digest — so the machine is unchanged and the flags are the cause.
+        let flags_differ = |consented: &str, store: SecretStore| {
+            [SecretStore::Env, SecretStore::Keychain, SecretStore::Skip]
+                .into_iter()
+                .filter(|candidate| *candidate != store)
+                .any(|candidate| {
+                    consented == plan_digest(&det, base, false, store_label(candidate))
+                })
+        };
+        assert!(
+            flags_differ(&with_env, SecretStore::Keychain),
+            "an env-flagged plan applied with keychain flags is a FLAG mismatch"
+        );
+
+        // A digest no flag of this detection can produce is a real change.
+        assert!(
+            !flags_differ("sha256:0000", SecretStore::Env),
+            "a digest from a different machine state must not read as a flag mismatch"
+        );
+    }
+
     #[test]
     fn plan_digest_binds_operational_fields_the_display_summary_hides() {
         let base = Path::new("/tmp/proj");

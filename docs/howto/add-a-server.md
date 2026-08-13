@@ -41,7 +41,7 @@ no recorded usage — a new one starts there, as `no data`.
 > imported one. `agentstack lib sources` prints the order and a `Shadowed names`
 > section naming what is hidden, and `local:github`-style qualified names reach
 > the shadowed copy. See
-> [Link your central library](../start.md#2-link-your-central-library). Adding
+> [Link a library repo](../start.md#2-link-a-library-repo). Adding
 > the same name twice in the *same* source is refused outright: `'github' is
 > already in the central library — pass --replace to overwrite`.
 

@@ -163,7 +163,10 @@ output stays accurate):
 
 ## Your second machine
 
-Once that setup is committed to a repo you own, the next machine is one command:
+Once that setup is **published into a library repo and committed** — `init`
+imports into the machine library at `~/.agentstack/lib`, which does not travel,
+so `agentstack more lib add-server <name> --file ~/.agentstack/lib/servers/<name>.toml --write`
+is what puts a definition in the repo — the next machine is one command:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh

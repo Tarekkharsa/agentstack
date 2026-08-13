@@ -25,7 +25,7 @@ machine-wide state, and it is the one to get right before anything else.
 Point AgentStack at a folder you own and want to reuse across projects. Linking
 is not copying: the library stays yours, and any folder can be one, so nothing
 is moved into a location the tool controls.
-→ [Link your central library](start.md#2-link-your-central-library)
+→ [Link a library repo](start.md#2-link-a-library-repo)
 
 ## Step 3 — Put reusable skills and servers in it
 

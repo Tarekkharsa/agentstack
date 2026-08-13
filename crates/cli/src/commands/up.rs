@@ -227,6 +227,31 @@ fn run_human(args: &UpArgs, manifest_dir: Option<&Path>) -> Result<()> {
     }
 
     // -------------------------------------------------------- environment
+    // The machine bootstrap's happy path is OUTSIDE a project. `up --library
+    // <url>` on a fresh machine has nowhere to look for a manifest yet, and
+    // the library, the detected CLIs and the registered bridge are exactly
+    // what it came to do. Ending that with `error: no agentstack manifest in
+    // <cwd>` reported a failure for work that had just succeeded, and left a
+    // nonzero exit behind a correct setup.
+    //
+    // A project is EXPECTED only when one was named: `--manifest-dir` says
+    // "this project", so its absence there is still an error.
+    if manifest_dir.is_none() && crate::manifest::discover_project_base(&base).is_none() {
+        crate::outln!(
+            "{:<20}{}",
+            "project".dimmed(),
+            "none here — the machine is ready; a project brings its own manifest".dimmed()
+        );
+        crate::outln!(
+            "\n{}  {}   {}",
+            "Next:".bold(),
+            "clone a project and run `agentstack status` in it"
+                .green()
+                .bold(),
+            "the lock is verified there, not here".dimmed()
+        );
+        return Ok(());
+    }
     let ctx = super::load(Some(&dir))?;
     let m = &ctx.loaded.manifest;
     let shape = format!(

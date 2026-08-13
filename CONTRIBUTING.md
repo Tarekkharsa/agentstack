@@ -32,6 +32,24 @@ cargo check -p <crate>            # the loop you run constantly
 cargo test -p <crate>             # or: --test <name> for a single test file
 ```
 
+`-p` takes the *package* name, which is not the directory name — and
+`crates/cli` is the odd one, since its package is the binary's name. The
+mapping:
+
+| Directory          | Package name            |
+| ------------------ | ----------------------- |
+| `crates/cli`       | `agentstack`            |
+| `crates/adapters`  | `agentstack-adapters`   |
+| `crates/core`      | `agentstack-core`       |
+| `crates/egress`    | `agentstack-egress`     |
+| `crates/executor`  | `agentstack-executor`   |
+| `crates/mcp`       | `agentstack-mcp`        |
+| `crates/policy`    | `agentstack-policy`     |
+| `crates/recorder`  | `agentstack-recorder`   |
+| `crates/runtime`   | `agentstack-runtime`    |
+| `crates/trust`     | `agentstack-trust`      |
+| `crates/workflow`  | `agentstack-workflow`   |
+
 Widen to the workspace once, before you push:
 
 ```bash
@@ -53,9 +71,16 @@ sandbox job runs them with `--include-ignored`.
 
 Every gate CI enforces, with the command that reproduces it locally. Run the
 ones your change can plausibly break — you do not need the whole list for a
-typo. All of them are transcribed from
-[`.github/workflows/ci.yml`](.github/workflows/ci.yml); that file wins if the
-two ever disagree.
+typo. They are transcribed from the three workflows that gate a pull request —
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) (build, lint, tests,
+examples, MSRV, sandbox, docs, enforcement pairing, structure lint),
+[`.github/workflows/supply-chain.yml`](.github/workflows/supply-chain.yml)
+(`cargo deny`, on dependency-manifest changes), and
+[`.github/workflows/docs.yml`](.github/workflows/docs.yml) (the docs checks
+plus a headless-browser smoke, on `docs/`, `tools/`, or `CHANGELOG.md`
+changes). Those files win if any of them disagrees with this list.
+[`.github/workflows/conformance.yml`](.github/workflows/conformance.yml) is
+nightly, not a PR gate.
 
 **Always:**
 
@@ -81,6 +106,10 @@ python3 tools/make-docs-pages.py          # regenerate the HTML pages
 git diff --exit-code docs/                # must be clean: never hand-edit generated HTML
 ```
 
+`docs.yml` additionally runs a headless-browser smoke (`tools/site-smoke.mjs`)
+over the key pages; it needs Playwright and Chromium, so most contributors let
+CI run it.
+
 **If you touched a manifest kind or a policy dimension:**
 
 ```bash
@@ -95,6 +124,16 @@ event rather than a silent one:
 cargo tree -p agentstack-workflow --edges normal --color never \
   | sed -E 's/^[^a-zA-Z]*//; s/ \(proc-macro\)//; s/ \(\*\)//; s# \(/.*\)##' \
   | grep -v '^agentstack-workflow ' | sort -u > crates/workflow/deps.snapshot
+```
+
+To check the snapshot without rewriting it — the exact form CI runs, which
+fails on any drift:
+
+```bash
+cargo tree -p agentstack-workflow --edges normal --color never \
+  | sed -E 's/^[^a-zA-Z]*//; s/ \(proc-macro\)//; s/ \(\*\)//; s# \(/.*\)##' \
+  | grep -v '^agentstack-workflow ' | sort -u > /tmp/workflow-deps.txt
+diff -u crates/workflow/deps.snapshot /tmp/workflow-deps.txt
 ```
 
 **If you changed any `Cargo.toml`, `Cargo.lock`, or `deny.toml`:**
@@ -113,14 +152,41 @@ only deliberately. Needs `rustup toolchain install 1.88` once:
 cargo +1.88 check --workspace --all-targets --locked
 ```
 
-**The asserted example suite** (`examples/*/run-demo.sh`, `examples/projects/*/assert.sh`)
-and the conformance self-test run against a release build:
+**The asserted example suite** (`examples/*/run-demo.sh`,
+`examples/projects/*/assert.sh`) and the conformance self-test run against a
+release build. Every one of these demos is CI-grade — isolated `HOME`,
+PASS/FAIL checks, nonzero exit on failure — so CI runs the whole set, not a
+sample. The script list is transcribed from `ci.yml` (the
+`Malicious-repo demo` and `Example suite` steps); re-read it there when this
+list looks stale:
 
 ```bash
 cargo build --release
 bash examples/sandbox/conformance-smoke.sh --self-test
-AGENTSTACK_BIN="$PWD/target/release/agentstack" bash examples/first-value-demo/run-demo.sh
+
+export AGENTSTACK_BIN="$PWD/target/release/agentstack"
+for script in \
+  examples/malicious-repo-demo/run-demo.sh \
+  examples/first-value-demo/run-demo.sh \
+  examples/everyday-loop-demo/run-demo.sh \
+  examples/guard-demo/run-demo.sh \
+  examples/one-manifest-demo/run-demo.sh \
+  examples/mcp-profile-lease/run-demo.sh \
+  examples/projects/multi-cli-webapp/assert.sh \
+  examples/projects/per-cli-instructions/assert.sh \
+  examples/projects/policy-intersection/assert.sh \
+  examples/projects/restricted-folders/assert.sh \
+  examples/projects/skills-workout/assert.sh \
+  examples/projects/locked-run/assert.sh \
+  examples/projects/device-onboarding/assert.sh
+do
+  echo "--- $script"
+  bash "$script" || { echo "FAILED: $script"; break; }
+done
 ```
+
+The Python MCP clients among them (lease demo, gateway probe, skills workout)
+are stdlib-only, so a system `python3` is enough.
 
 **Docker-backed enforcement**, run by CI's dedicated `sandbox` job — reproduce
 locally only when you touched the sandbox, egress, or lockdown paths:
@@ -136,8 +202,19 @@ One gate has no local form: **enforcement pairing** runs on pull requests only,
 because it diffs `base...head` and reads a waiver from the PR body. If you
 change enforcement behaviour in `crates/trust`, `crates/policy` or
 `crates/egress`, change [`docs/ENFORCEMENT.md`](docs/ENFORCEMENT.md) in the same
-PR — or state the waiver in the PR description. You can self-test the checker
-with `python3 tools/check-enforcement-pairing.py --self-test`.
+PR — or waive it explicitly. The waiver is a single line in the **pull-request
+body** (a commit-message trailer on the branch also counts), spelled exactly:
+
+```text
+ENFORCEMENT-WAIVER: <one-line reason>
+```
+
+The reason is required: a bare marker with nothing after it is not a waiver and
+does not satisfy the gate. Keeping it greppable is the point — every waiver
+ever granted is findable with
+`git log --grep 'ENFORCEMENT-WAIVER:'`. Test-only and comment-only changes in
+those crates are already exempt, so a waiver should be rare. You can self-test
+the checker with `python3 tools/check-enforcement-pairing.py --self-test`.
 
 ### T3 Code integration smoke
 
@@ -166,10 +243,21 @@ the exact process group it started and removes its temporary state.
 These are security requirements. PRs that relax them will be declined even
 when the change "works":
 
-- **No `unsafe`.** Every crate carries `#![forbid(unsafe_code)]`; the one
-  exception is `crates/cli/src/sys.rs`, which concentrates the workspace's
-  entire unsafe surface (a handful of libc process-management calls) behind
-  a single `#[allow]`. Don't add unsafe anywhere else.
+- **No `unsafe`.** Ten of the eleven crates carry `#![forbid(unsafe_code)]`
+  at their root: `adapters`, `core`, `egress`, `executor`, `mcp`, `policy`,
+  `recorder`, `runtime`, `trust`, `workflow`. The eleventh, `crates/cli`,
+  carries `#![deny(unsafe_code)]` — at both of its roots, `src/lib.rs` and
+  `src/main.rs`. The difference is deliberate and narrow: `forbid` cannot be
+  downgraded by a local `#[allow]`, and the crate needs exactly one. That
+  single `#[allow(unsafe_code)]` — the only one in the workspace — sits on
+  the `mod sys;` declaration in `src/lib.rs`, so the entire unsafe surface of
+  the workspace is one greppable file, `crates/cli/src/sys.rs`: a handful of
+  libc calls for signal delivery, process-group setup, one stdout fd dance,
+  and a writability probe, each wrapped in a safe function, and the module
+  itself stays crate-private. Don't add unsafe anywhere else. A second
+  `#[allow(unsafe_code)]`, or a `forbid` weakened to `deny`, changes a
+  reviewable property of the whole workspace — raise it in the PR
+  description first.
 - **Policy can only narrow.** The effective policy is the intersection of
   bundle policy and machine policy — never more permissive than the machine.
   The proptest invariants in `crates/policy` witness this per dimension;
@@ -205,6 +293,20 @@ when the change "works":
   claim more than the matrix backs.
 - **No drive-by test suites.** One focused test per new behavior is the
   house style; mechanical plumbing often needs none.
+
+## Submitting
+
+The standard GitHub flow: fork the repository, branch from `main`, push the
+branch to your fork, and open a pull request against `main`. Fill in the
+[pull-request template](.github/PULL_REQUEST_TEMPLATE.md) — the checklist is
+the same set of gates described above, and the body is where an enforcement
+waiver or a new-dependency proposal has to appear.
+
+There is **no DCO and no commit-signing requirement**: no `Signed-off-by`
+trailer, no GPG or sigstore signature, no CLA. Nothing in the workflows checks
+for one. Contributions are accepted under the repository's dual
+MIT / Apache-2.0 licence
+([`LICENSE-MIT`](LICENSE-MIT), [`LICENSE-APACHE`](LICENSE-APACHE)).
 
 ## Easiest first contribution
 

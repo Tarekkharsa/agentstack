@@ -98,7 +98,7 @@ agentstack 0.18.1 — one portable manifest, every agent CLI
 
   CLIs      2 of 13 supported detected here: Claude Code · Codex CLI
   Setup  ~/my-project/.agentstack/agentstack.toml — 2 servers → 2 detected CLIs, no CLIs pinned
-  Status    locked · trusted
+  Status    locked · untrusted
   Toolset   default — default; opens on the next trusted agent connection
   Delivery  skills + MCP servers served live to 2 CLIs
             0 project artifacts for the capabilities served live (the manifest and lock stay, and so does any managed region in a house-rules file)
@@ -108,6 +108,25 @@ agentstack 0.18.1 — one portable manifest, every agent CLI
   Next:  agentstack doctor  ·  verify the wiring — every warning names its fix
   All commands: agentstack --help   ·   per-CLI detail: agentstack status --verbose
 ```
+A scripted `init --yes` acknowledges the **import** and never the servers it
+found, so the project is locked and *untrusted* — nothing it declares is active
+yet. `status` says so and names the one step that changes it:
+
+```bash
+agentstack trust .          # at a terminal: read the review, answer it
+```
+
+Headless, that review is two commands — preview the surface, hand its digest
+back:
+
+```bash
+agentstack trust --preview                      # JSON; read `surface_digest`
+agentstack trust . --yes --consented <surface_digest>
+```
+
+At a terminal, plain `agentstack init` asks this question inside the wizard and
+there is no separate step.
+
 
 The last lines change with the state. When something still needs doing, the
 `Next:` line names that instead — and `status` adds a
@@ -124,25 +143,31 @@ It does not take over everything already installed:
 
 | What already exists | What AgentStack does |
 | --- | --- |
-| MCP entries in a CLI's global or project config | Shows them in the import review and copies accepted definitions into the central library (`~/.agentstack/lib`, or your first linked source) by default. The original entries are not deleted. |
+| MCP entries in a CLI's global or project config | Shows them in the import review and copies accepted definitions into the **machine library** (`~/.agentstack/lib`, or your first linked source) by default. The original entries are not deleted. |
 | Skills already installed for Codex, Claude Code, or another CLI | Leaves them where they are. Adopt a skill explicitly when you want AgentStack to manage and share it. |
 | App-owned tools such as Computer Use or a server installed inside another application's bundle | Leaves them with the owning app and names them as excluded. `--include-tool-managed` is an explicit override. |
 | Unrelated CLI settings, plugins, and built-in capabilities | Leaves them untouched. AgentStack manages only the entries and managed regions it records. |
 
-To preview adopting existing native skills into your central library:
+To preview adopting existing native skills into your machine library:
 
 ```bash
 agentstack adopt --to-library
 agentstack adopt --to-library --write
 ```
 
-Use the central library for your own reusable skills, MCP definitions, and
-instructions. Keep a capability inside one project only when it truly belongs
-to that repository.
+**Two things, two names, and the difference matters on day two.** The
+**machine library** is `~/.agentstack/lib` — a store on this machine, created
+for you, not version-controlled. A **library repo** is a Git checkout you own
+and link, which is what travels to another machine. `init` writes into the
+machine library; only what you publish into a library repo comes with you.
 
-## 2. Link your central library
+Use either for your own reusable skills, MCP definitions, and instructions.
+Keep a capability inside one project only when it truly belongs to that
+repository.
 
-Your library is a normal Git checkout. It can be private, live on any Git host,
+## 2. Link a library repo
+
+Your library repo is a normal Git checkout. It can be private, live on any Git host,
 and use a simple folder structure for reusable skills, MCP servers,
 instructions, hooks, and extensions.
 
@@ -158,6 +183,23 @@ The first command previews. The second links the folder on this machine.
 If you already have `~/.agentstack/lib`, AgentStack keeps it as another source
 and you read the combined library. When two sources hold the same name, the
 first one wins.
+
+### Publish what `init` imported
+
+Linking a repo does not move anything into it. `init` put the servers it found
+in the **machine library**, which stays on this machine — so a second machine
+that clones the repo receives nothing until you publish them:
+
+```bash
+agentstack lib add-server github \
+  --file ~/.agentstack/lib/servers/github.toml --write
+```
+
+That copies the definition into the linked repo, checksums it, and prints where
+it landed. Repeat per server (`agentstack lib list` names what the machine
+library holds), then commit and push the repo. **This is the step that makes
+day two work** — without it the next machine clones an empty library and every
+name resolves to nothing.
 
 See [Several libraries work together](library.md#several-libraries-work-together)
 for the folder layout, collisions, and qualified names such as

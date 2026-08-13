@@ -265,15 +265,24 @@ fn undo_selection(
     write: bool,
     json: bool,
 ) -> Result<()> {
+    // An already-undone entry is refused HERE, before anything is printed.
+    // The batch arm always filtered `undone` out; the single arm did not, so a
+    // re-undo printed a full preview — several green "already matches" ticks,
+    // which read as success — and only then failed from inside the rollback.
+    // Two contradictory outcomes for one command; now there is one.
     let selected: Vec<&history::Entry> = match &entry.batch {
         Some(batch) => entries
             .iter()
             .filter(|candidate| candidate.batch.as_ref() == Some(batch) && !candidate.undone)
             .collect(),
+        None if entry.undone => Vec::new(),
         None => vec![entry],
     };
     if selected.is_empty() {
-        anyhow::bail!("this change batch was already undone");
+        anyhow::bail!(
+            "this change was already undone — nothing to do · what is still undoable: \
+             `agentstack more restore --list`"
+        );
     }
 
     if !json {

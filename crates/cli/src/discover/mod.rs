@@ -253,14 +253,27 @@ pub fn native_configs_with(
             let Ok(Some(value)) = desc.read_config_value_for(*scope, dir) else {
                 continue;
             };
-            let servers: Vec<String> = crate::adapter::extract_servers(desc, &value)
-                .into_iter()
-                .map(|(name, _)| name)
-                .collect();
-            let unimported: Vec<String> = servers
+            let extracted = crate::adapter::extract_servers(desc, &value);
+            let servers: Vec<String> = extracted.iter().map(|(name, _)| name.clone()).collect();
+            // Our OWN bridge registration is never something to import. It is
+            // the control plane `gateway connect` writes into each harness's
+            // global config, and asking the user to adopt it would ask the
+            // project to serve the gateway.
+            //
+            // `abandoned_render_is_named.rs` already holds this for the
+            // foreign-FILE detector; this is the second reading of the same
+            // disk — the per-server count — and it had no such exclusion, so
+            // the machine `up` had just bootstrapped reported the bridge as
+            // "1 server configured here, not in this setup". Same recognizer
+            // as `connect`, so a renamed registration is caught by its argv
+            // shape too.
+            let unimported: Vec<String> = extracted
                 .iter()
-                .filter(|n| !manifest_servers.contains(*n))
-                .cloned()
+                .filter(|(name, server)| {
+                    !manifest_servers.contains(name)
+                        && !crate::commands::connect::is_bridge_entry(name, server)
+                })
+                .map(|(name, _)| name.clone())
                 .collect();
             out.push(NativeConfig {
                 id: desc.id.clone(),

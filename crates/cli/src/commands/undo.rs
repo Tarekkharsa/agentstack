@@ -351,17 +351,42 @@ pub fn run(args: &UndoArgs, manifest_dir: Option<&Path>) -> Result<()> {
         );
         return Ok(());
     }
+    // "nothing else touched" is a claim about the MACHINE, and `undo` only
+    // ever acts on this project — so it was false in the ordinary case. The
+    // second machine is the one that shows it: `up --write` registers the
+    // bridge globally, `undo --to 1 --write` reverts the import, and the
+    // registration is still there while the screen says nothing else was
+    // touched. Same scope split `undo` and `x restore` already state when they
+    // LIST; this is the sentence they owed after acting.
+    let elsewhere = history::list()
+        .into_iter()
+        .filter(|e| !e.undone)
+        .filter(|e| {
+            !e.files
+                .iter()
+                .any(|f| std::path::Path::new(&f.path).starts_with(&dir))
+        })
+        .count();
+    let scope = if elsewhere == 0 {
+        "nothing else touched".to_string()
+    } else {
+        format!(
+            "this project only — {} outside it {} untouched; see them with \
+             `agentstack more restore --list`",
+            super::count(elsewhere, "recorded change"),
+            if elsewhere == 1 { "is" } else { "are" }
+        )
+    };
     match recorded {
         Some(_) => println!(
             "  {}",
-            "nothing else touched · this undo is itself undoable — run agentstack undo again"
-                .dimmed()
+            format!("{scope} · this undo is itself undoable — run agentstack undo again").dimmed()
         ),
         // Only when the reverted entries captured no files at all, which the
         // ledger should not produce; say so rather than imply a redo exists.
         None => println!(
             "  {}",
-            "nothing else touched · this revert captured no files, so it has no redo".dimmed()
+            format!("{scope} · this revert captured no files, so it has no redo").dimmed()
         ),
     }
     Ok(())

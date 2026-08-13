@@ -328,7 +328,7 @@
 
 <span class="out">  CLIs      2 of 13 supported detected here: Claude Code · Codex CLI</span>
 <span class="out">  Setup  ~/my-project/.agentstack/agentstack.toml — 2 servers → 2 detected CLIs, no CLIs pinned</span>
-<span class="out">  Status    locked · trusted</span>
+<span class="out">  Status    locked · untrusted</span>
 <span class="out">  Toolset   default — default; opens on the next trusted agent connection</span>
 <span class="out">  Delivery  skills + MCP servers served live to 2 CLIs</span>
 <span class="out">            0 project artifacts for the capabilities served live (the manifest and lock stay, and so does any managed region in a house-rules file)</span>
@@ -337,27 +337,39 @@
 
 <span class="out">  Next:  agentstack doctor  ·  verify the wiring — every warning names its fix</span>
 <span class="out">  All commands: agentstack --help   ·   per-CLI detail: agentstack status --verbose</span></code></pre></div>
+<p>A scripted <code>init --yes</code> acknowledges the <strong>import</strong> and never the servers it found, so the project is locked and <em>untrusted</em> — nothing it declares is active yet. <code>status</code> says so and names the one step that changes it:</p>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack trust .          <span class="cm"># at a terminal: read the review, answer it</span></code></pre></div>
+<p>Headless, that review is two commands — preview the surface, hand its digest back:</p>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack trust --preview                      <span class="cm"># JSON; read `surface_digest`</span>
+<span class="pr">$ </span>agentstack trust . --yes --consented &lt;surface_digest&gt;</code></pre></div>
+<p>At a terminal, plain <code>agentstack init</code> asks this question inside the wizard and there is no separate step.</p>
 <p>The last lines change with the state. When something still needs doing, the <code>Next:</code> line names that instead — and <code>status</code> adds a <code>Deep check (drift, quirks, supply chain): agentstack doctor</code> pointer, which the ready output above does not print. Either way <code>agentstack doctor</code> is the deeper check whenever you want it.</p>
 <p><code>init</code> detects your CLIs, offers to import the MCP server entries and supported settings it can represent, and registers the zero-files gateway. It previews changes before writing them. <code>status</code> tells you whether the setup is ready and gives one next command when it is not.</p>
 <p>It does not take over everything already installed:</p>
 <div class="tblwrap"><table>
 <thead><tr><th>What already exists</th><th>What AgentStack does</th></tr></thead><tbody>
-<tr><td>MCP entries in a CLI's global or project config</td><td>Shows them in the import review and copies accepted definitions into the central library (<code>~/.agentstack/lib</code>, or your first linked source) by default. The original entries are not deleted.</td></tr>
+<tr><td>MCP entries in a CLI's global or project config</td><td>Shows them in the import review and copies accepted definitions into the <strong>machine library</strong> (<code>~/.agentstack/lib</code>, or your first linked source) by default. The original entries are not deleted.</td></tr>
 <tr><td>Skills already installed for Codex, Claude Code, or another CLI</td><td>Leaves them where they are. Adopt a skill explicitly when you want AgentStack to manage and share it.</td></tr>
 <tr><td>App-owned tools such as Computer Use or a server installed inside another application's bundle</td><td>Leaves them with the owning app and names them as excluded. <code>--include-tool-managed</code> is an explicit override.</td></tr>
 <tr><td>Unrelated CLI settings, plugins, and built-in capabilities</td><td>Leaves them untouched. AgentStack manages only the entries and managed regions it records.</td></tr>
 </tbody></table></div>
-<p>To preview adopting existing native skills into your central library:</p>
+<p>To preview adopting existing native skills into your machine library:</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack adopt --to-library
 <span class="pr">$ </span>agentstack adopt --to-library --write</code></pre></div>
-<p>Use the central library for your own reusable skills, MCP definitions, and instructions. Keep a capability inside one project only when it truly belongs to that repository.</p>
-<h2 id="2-link-your-central-library">2. Link your central library<a class="hlink" href="#2-link-your-central-library" aria-label="Link to this section">#</a></h2>
-<p>Your library is a normal Git checkout. It can be private, live on any Git host, and use a simple folder structure for reusable skills, MCP servers, instructions, hooks, and extensions.</p>
+<p><strong>Two things, two names, and the difference matters on day two.</strong> The <strong>machine library</strong> is <code>~/.agentstack/lib</code> — a store on this machine, created for you, not version-controlled. A <strong>library repo</strong> is a Git checkout you own and link, which is what travels to another machine. <code>init</code> writes into the machine library; only what you publish into a library repo comes with you.</p>
+<p>Use either for your own reusable skills, MCP definitions, and instructions. Keep a capability inside one project only when it truly belongs to that repository.</p>
+<h2 id="2-link-a-library-repo">2. Link a library repo<a class="hlink" href="#2-link-a-library-repo" aria-label="Link to this section">#</a></h2>
+<p>Your library repo is a normal Git checkout. It can be private, live on any Git host, and use a simple folder structure for reusable skills, MCP servers, instructions, hooks, and extensions.</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack lib link ~/GitHub/ai-setup --name central --first
 <span class="pr">$ </span>agentstack lib link ~/GitHub/ai-setup --name central --first --write
 <span class="pr">$ </span>agentstack lib sources</code></pre></div>
 <p>The first command previews. The second links the folder on this machine. <code>--first</code> makes it the default place to read and add reusable capabilities.</p>
 <p>If you already have <code>~/.agentstack/lib</code>, AgentStack keeps it as another source and you read the combined library. When two sources hold the same name, the first one wins.</p>
+<h3 id="publish-what-init-imported">Publish what <code>init</code> imported<a class="hlink" href="#publish-what-init-imported" aria-label="Link to this section">#</a></h3>
+<p>Linking a repo does not move anything into it. <code>init</code> put the servers it found in the <strong>machine library</strong>, which stays on this machine — so a second machine that clones the repo receives nothing until you publish them:</p>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack lib add-server github \
+  --file ~/.agentstack/lib/servers/github.toml --write</code></pre></div>
+<p>That copies the definition into the linked repo, checksums it, and prints where it landed. Repeat per server (<code>agentstack lib list</code> names what the machine library holds), then commit and push the repo. <strong>This is the step that makes day two work</strong> — without it the next machine clones an empty library and every name resolves to nothing.</p>
 <p>See <a href="library.html#several-libraries-work-together">Several libraries work together</a> for the folder layout, collisions, and qualified names such as <code>local:rust-testing</code>.</p>
 <h3 id="put-reusable-capabilities-in-it">Put reusable capabilities in it<a class="hlink" href="#put-reusable-capabilities-in-it" aria-label="Link to this section">#</a></h3>
 <p>Scaffold a new skill in the directory you are standing in, then copy it — or one you already have — into the library:</p>

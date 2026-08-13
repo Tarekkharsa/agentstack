@@ -1752,6 +1752,7 @@ fn sources_cmd() -> Result<()> {
     let library = Library::load_linked(&linked)?;
 
     println!("Library sources (first match wins)");
+    let nothing_linked = linked.iter().all(|source| !source.explicit);
     for (i, source) in linked.iter().enumerate() {
         // A folder that is not there yet is worth saying plainly — it is not
         // an error (a source can be linked before it is populated), but a user
@@ -1761,10 +1762,17 @@ fn sources_cmd() -> Result<()> {
         } else {
             format!("  {}", "(folder not found)".yellow())
         };
+        // "nothing linked yet" is a claim about the WHOLE list, not about
+        // this row, so it may only be made when the list bears it out. After
+        // `up --write` clones and links a library the default source is still
+        // implicit — and saying "nothing linked yet" beside a populated linked
+        // source told the reader the bootstrap had not happened.
         let default = if source.explicit {
             String::new()
-        } else {
+        } else if nothing_linked {
             format!("  {}", "(the default — nothing linked yet)".dimmed())
+        } else {
+            format!("  {}", "(the default)".dimmed())
         };
         println!(
             "  {}. {:<12} {}{}{}",
