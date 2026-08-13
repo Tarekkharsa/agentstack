@@ -23,9 +23,14 @@
 //! `commands/locked.rs`). So the lock now RECORDS the manifest bytes it was
 //! computed from (`Lock::manifest_digest`), and both surfaces answer the
 //! question with a digest comparison instead.
+//!
+//! The second test covers the wrong-order trap the same review found next:
+//! `trust` on an unlocked project grants happily, and the next `lock --write`
+//! voids the grant. Message only — what `trust` accepts is unchanged.
 
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 use std::sync::Mutex;
 
 use agentstack::cli::{LockArgs, TrustArgs};
@@ -195,4 +200,89 @@ fn a_hand_edited_manifest_leaves_the_lock_stale_and_both_surfaces_say_so() {
     assert_eq!(body["project"]["trust"], "trusted");
     let report = doctor::collect(Some(&proj)).unwrap();
     assert_eq!(stale_drift_line(&report), None);
+}
+
+/// L3, the wrong-order trap: a grant on an unlocked project binds to a
+/// lockfile that does not exist yet, and the next `lock --write` voids it.
+/// `trust` now says so — and says nothing of the kind once the project is
+/// pinned. Behaviour is untouched: both invocations still grant.
+///
+/// Driven through the real binary because the warning is a stderr line, and
+/// stderr is where it must be: `trust --preview` writes JSON to stdout, and a
+/// warning printed there would break every parser reading it.
+#[test]
+fn trust_on_an_unlocked_project_says_lock_first() {
+    let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let tmp = assert_fs::TempDir::new().unwrap();
+    let proj = machine(tmp.path());
+    // A server, not an instruction fragment: the trap needs a project the
+    // grant ACCEPTS while unlocked, and a declared body with no pin is refused
+    // outright (`surface_unpinned`). A server definition is pinned from the
+    // manifest itself, so an unlocked project declaring one is `grantable` —
+    // which is precisely the state where the warning has something to say.
+    fs::write(
+        proj.join("agentstack.toml"),
+        "version = 1\n[targets]\ndefault = [\"claude-code\"]\n\
+         [servers.echo]\ntype = \"stdio\"\ncommand = \"/bin/echo\"\n",
+    )
+    .unwrap();
+    let home = tmp.path().join("home");
+
+    let run = |args: &[&str]| {
+        let out = Command::new(env!("CARGO_BIN_EXE_agentstack"))
+            .args(args)
+            .current_dir(&proj)
+            .env("HOME", &home)
+            .env("AGENTSTACK_HOME", home.join(".agentstack"))
+            .env("NO_COLOR", "1")
+            .output()
+            .unwrap();
+        (
+            out.status.success(),
+            String::from_utf8_lossy(&out.stdout).to_string(),
+            String::from_utf8_lossy(&out.stderr).to_string(),
+        )
+    };
+
+    // Unlocked: the preview raises the flag IN its JSON — and prints nothing
+    // beside it, because a caller that merges stdout and stderr must still be
+    // handed a parseable document.
+    let (ok, stdout, stderr) = run(&["trust", "--preview", "."]);
+    assert!(ok, "the preview still runs: {stderr}");
+    let preview: serde_json::Value = serde_json::from_str(&format!("{stdout}{stderr}")).unwrap();
+    assert_eq!(
+        preview["lock_first"], true,
+        "an unlocked preview must raise the flag: {preview}"
+    );
+    assert_eq!(
+        preview["grantable"], true,
+        "message only — the verdict is unchanged: {preview}"
+    );
+
+    // Unlocked: the grant warns too, and still grants.
+    let digest = trust::digest_for(&proj).unwrap();
+    let (ok, _, stderr) = run(&["trust", ".", "--yes", "--consented", &digest]);
+    assert!(ok, "the grant still succeeds: {stderr}");
+    assert!(
+        stderr.contains("lock first"),
+        "an unlocked grant must warn: {stderr}"
+    );
+
+    // Pinned: nothing to warn about, on either path.
+    let (ok, _, stderr) = run(&["lock", "--write"]);
+    assert!(ok, "{stderr}");
+    let (ok, stdout, stderr) = run(&["trust", "--preview", "."]);
+    assert!(ok, "{stderr}");
+    let preview: serde_json::Value = serde_json::from_str(&format!("{stdout}{stderr}")).unwrap();
+    assert_eq!(
+        preview["lock_first"], false,
+        "a locked project has no order to get wrong: {preview}"
+    );
+    let digest = trust::digest_for(&proj).unwrap();
+    let (ok, _, stderr) = run(&["trust", ".", "--yes", "--consented", &digest]);
+    assert!(ok, "{stderr}");
+    assert!(
+        !stderr.contains("lock first"),
+        "a locked grant is silent: {stderr}"
+    );
 }

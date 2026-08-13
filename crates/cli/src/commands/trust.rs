@@ -1018,13 +1018,60 @@ pub fn run(args: &TrustArgs, manifest_dir: Option<&Path>) -> Result<()> {
         return list();
     }
     let base = resolve_base(args.path.as_deref(), manifest_dir)?;
-    if args.preview {
-        return preview(&base);
-    }
     if args.revoke {
         return revoke(&base);
     }
+    if args.preview {
+        // The preview says it in its JSON (`lock_first`), never on stderr:
+        // callers merge the two streams, and a warning line printed beside a
+        // JSON document is a document that no longer parses.
+        return preview(&base);
+    }
+    warn_if_unlocked(&base);
     grant(&base, args.yes, args.consented.as_deref())
+}
+
+/// Is a yes given here bound to a lockfile that does not exist yet?
+///
+/// The grant binds to the content digest over the manifest layers **and the
+/// lockfile**. With no lockfile, the very next `lock --write` (or the `use
+/// --write` that mints one) moves that digest and drops the project back to
+/// `trust stale`, asking for the same review a minute later. `status` already
+/// reroutes its rung for this state
+/// ([`crate::commands::overview::correct_trust_rung`]); the verb itself said
+/// nothing, so a person who typed `trust .` straight out — or a panel reading
+/// `grantable: true` — walked into it anyway.
+///
+/// False when the project declares nothing `lock` would pin — the same
+/// predicate the rung uses, so the two cannot disagree about which projects
+/// have an order to get wrong (a hooks-only manifest never grows a lockfile,
+/// and telling it to lock first would be a dead end).
+fn lock_first(dir: &Path) -> bool {
+    if crate::lock::Lock::path(dir).exists() {
+        return false;
+    }
+    crate::manifest::load_from_dir(dir)
+        .map(|loaded| crate::commands::overview::lock_pins_something(&loaded.manifest))
+        .unwrap_or(false)
+}
+
+/// The human half of [`lock_first`]: say it before the review, not after the
+/// surprise.
+///
+/// **A warning only.** `grantable` and the grant's own refusals are untouched —
+/// consenting to content you have read is legitimate, the yes is real while it
+/// lasts, and this is an ordering hazard rather than an unsafe act.
+fn warn_if_unlocked(base: &Path) {
+    let dir = crate::manifest::resolve_manifest_dir(base);
+    if !lock_first(&dir) {
+        return;
+    }
+    eprintln!(
+        "{} lock first: this project has no agentstack.lock, and a grant binds to the lockfile — \
+         the next `agentstack lock --write` voids the yes you are about to give. Run `agentstack \
+         lock --write`, then `agentstack trust .`",
+        "⚠".yellow()
+    );
 }
 
 /// Read-only: emit the runtime surface a human would consent to, as JSON,
@@ -1424,6 +1471,19 @@ pub fn preview_value(base: &Path) -> Result<serde_json::Value> {
             .chain(unpinned.iter().map(|d| d.to_json()))
             .collect::<Vec<_>>(),
         "grantable": server_blockers.is_empty() && drift.is_empty() && unpinned.is_empty(),
+        // The wrong-order trap, as a FLAG rather than a blocker: this project
+        // has no lockfile, so a grant given now is void the moment one is
+        // written. `grantable` is untouched — consenting to content you have
+        // read is legitimate, and this is an ordering hazard, not an unsafe
+        // act. A panel showing the consent dialog should say "lock first"
+        // beside its yes button; the human path prints exactly that sentence
+        // on stderr (`warn_if_unlocked`).
+        //
+        // A bare bool, and deliberately not the sentence: this envelope's
+        // prose-carrying keys are machine fields a driver executes, and a
+        // command-shaped string under a new key is precisely the shape the
+        // guidance guard refuses. The words belong on the human surface.
+        "lock_first": lock_first(&dir),
         // Drift and never-pinned name the SAME command, so `fix` answers for
         // either; the `why` distinguishes them for the human. A blocker that
         // carries NO fix (a declared body absent from disk) contributes
@@ -2822,7 +2882,12 @@ pub(crate) fn grant_probed(
                 item.pin = Some(checksum);
             }
         }
-        patched.save(&dir)?;
+        // Keeping the manifest stamp, because this write earned the right to:
+        // it re-pinned the bytes of items already in the lock and re-resolved
+        // nothing, so which declarations the lock covers is exactly what it
+        // was. Dropping it would also break the parity witness — the card must
+        // leave the same lockfile as `lock --write` + `trust`, byte for byte.
+        patched.save_keeping_stamp(&dir)?;
         // Recompute, never re-read (§7.2). The manifest and local bytes are the
         // ones this review rendered from; only the lock moved, and these are
         // the exact bytes we just serialized — so a concurrent edit cannot
