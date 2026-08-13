@@ -20,10 +20,10 @@
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh | sh
-export PATH="$HOME/.local/bin:$PATH"       # only if the installer printed "Add to PATH"
-agentstack init                            # finds what your CLIs already have, writes it into .agentstack/
+export PATH="$HOME/.local/bin:$PATH"          # only if the installer printed "Add to PATH"
+agentstack init                               # finds what your CLIs already have, writes it into .agentstack/
 agentstack more gateway connect --all --write # register the bridge once (the interactive wizard may have done it)
-agentstack status                          # is it ready — and if not, the one thing that fixes it
+agentstack status                             # is it ready — and if not, the one thing that fixes it
 # then restart your coding CLI — a harness reads its config at startup:
 agentstack more why <server>                  # names which CLIs are served it live
 ```
@@ -276,8 +276,8 @@ left behind.
 Everything else lives one hop away under `agentstack more`:
 
 ```bash
-agentstack more                 # the rest of the toolbox, grouped by task
-agentstack more guard install --write   # same command as `agentstack guard install --write`
+agentstack more                       # the rest of the toolbox, grouped by task
+agentstack more guard install --write # same command as `agentstack guard install --write`
 ```
 
 Nothing was removed. Every command still runs at its own name with its own
