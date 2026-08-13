@@ -39,11 +39,12 @@
 > and the §7 pass condition are byte-identical — a demand answer informs the
 > bar, it does not move the pass/fail line.
 >
-> **Re-pin pass, 2026-08-08 — DO NOT RUN THIS KIT UNTIL §0 IS CLEARED.** The
-> kit was re-checked against the real binary and several instructions no longer
-> match the product. The corrections are inline and dated; what only the
-> maintainer can decide is in **§0**. The five thresholds, the §6 metrics
-> sheet, the §7 results template and the §7 pass condition are untouched.
+> **Pinned to v0.19.0, 2026-08-13 — §0 IS CLEARED AND THIS KIT IS RUNNABLE.**
+> Both blocking decisions are settled: v0.19.0 is published, and it is the
+> build this kit installs and measures. The 2026-08-08 re-pin corrections are
+> inline and dated. The five thresholds, the §6 metrics sheet, the §7 results
+> template and the §7 pass condition are untouched, as they have been
+> throughout.
 
 ## 0. Re-pin status (2026-08-08) — read before booking anyone
 
@@ -57,28 +58,23 @@ where that matters it is said so. Nothing in `crates/` was changed.
 
 ### §0.1 Two blocking decisions — the maintainer's, not an observer's
 
-**B-A. The pinned RC is 125 commits stale, and the study would measure a
-product that no longer exists.** `v0.18.0-rc.2` is tagged at `4afe274`
-(2026-08-01). `main` is 125 commits ahead of it. Landing in that gap, all of it
-on the participant's path: the consent gate extended to all five delivered kinds
-(servers, skills, instructions, hooks, extensions), routed delivery, `init
---connect`, `NO_COLOR`, the whole G22–G36 family of "the next step names a
-command that then refuses", and the docs-site rebuild. §3 pins the study to
-rc.2. **Re-pinning cannot be done from here: no newer tag exists.** Cut the RC
-the study is to run against, then update §3's install line and the version floor
-in §3 and Appendix B3 to it.
+**B-A. CLEARED 2026-08-13 — the kit is pinned to v0.19.0.** The blocker was
+that `v0.18.0-rc.2` was 125 commits stale and the study would have measured a
+product that no longer existed. **v0.19.0 is published**, cut from `91a3d96`,
+and §3's install line and the version floors in §3 and Appendix B3 now name it.
+Everything that had landed in that gap is in this build, plus what came after:
+the consent hardening (a scripted `init --yes` imports without trusting;
+`trust --yes` requires `--consented`), the `more` rename with `x` kept as a
+permanent alias, `up` as a visible verb, and manifest autocomplete from a
+generated JSON Schema.
 
-**B-B. `agentstack --version` cannot tell the two builds apart, so every
-version check in this kit is inert.** `crates/cli/Cargo.toml` reads
-`version = "0.18.0-rc.2"` at the tag *and* at `main` — the crate version was
-never bumped after the tag was cut. Measured: the binary built from `main` at
-`ecf5c4d` prints `agentstack 0.18.0-rc.2`. So §3's "confirm `agentstack
---version` ≥ 0.18.0-rc.2" and Appendix B3's identical check pass on both
-binaries and distinguish nothing. Whatever RC B-A produces must carry a version
-string no earlier build shares, or the pre-flight check is theatre.
-
-Until both are cleared, the honest state of this kit is **not runnable** — not
-because the protocol is wrong, but because there is no build to pin it to.
+**B-B. CLEARED 2026-08-13 — the version check distinguishes something now.**
+The blocker was that `--version` printed `0.18.0-rc.2` from both the tag and
+`main`, so every version check in this kit was inert. The published binary
+prints `agentstack 0.19.0 (sandbox: yes, 91a3d96)` — a version string no
+earlier build shares, and a commit no earlier build carries. §3's and Appendix
+B3's pre-flight checks now separate the study build from anything a
+participant may already have installed.
 
 ### §0.2 What the re-pin corrected in place
 
@@ -198,21 +194,22 @@ docs — participants must arrive cold; the task script hands them the URL.
 
   ```sh
   curl -fsSL https://raw.githubusercontent.com/Tarekkharsa/agentstack/main/install.sh \
-    | AGENTSTACK_VERSION=v0.18.0-rc.2 sh
+    | AGENTSTACK_VERSION=v0.19.0 sh
   ```
 
-  > **Recorded change (2026-08-02):** the instrument was re-cut and published
-  > as v0.18.0-rc.2 before any participant ran; the pinned install line and the
-  > version floor were updated to match. Protocol and pass condition are
-  > byte-identical.
+  > **Recorded changes.** 2026-08-02: the instrument was re-cut and published
+  > as v0.18.0-rc.2 before any participant ran. 2026-08-13: re-pinned to the
+  > published v0.19.0, which is what the sessions measure. Both times the
+  > pinned install line and the version floor moved together, and both times
+  > the protocol and the pass condition were byte-identical to what they had
+  > been. Nothing about what is measured has ever changed with a re-pin.
 
-  > **Re-pin, 2026-08-08 — this line is stale and must not be sent as it
-  > stands.** `v0.18.0-rc.2` is 125 commits behind `main`; see §0.1 B-A for
-  > what is missing from it. Replace the version in this block with the RC cut
-  > for the run.
+  > **Pinned 2026-08-13.** This line installs v0.19.0, the published build this
+  > study measures. It is the study's instrument: do not substitute a newer
+  > release mid-run, because a result gathered on two builds answers neither.
 
 - Confirm the binary they end up with carries the current journey:
-  `agentstack --version` ≥ 0.18.0-rc.2. Two other routes hand them an older
+  `agentstack --version` ≥ 0.19.0. Two other routes hand them an older
   binary: a bare `| sh` installs the latest *stable* release, and
   `brew install Tarekkharsa/tap/agentstack` does the same — the tap holds one
   formula with no prerelease channel, so it advances only on a final release
@@ -220,11 +217,15 @@ docs — participants must arrive cold; the task script hands them the URL.
   version reads 0.17.x, they used one of those instead of the pinned line, and
   the session should restart from the install.
 
-  > **Re-pin, 2026-08-08 — this check currently proves less than it says.** The
-  > crate version was not bumped after the rc.2 tag was cut, so a binary built
-  > from `main` also prints `agentstack 0.18.0-rc.2` (measured). It still
-  > catches a 0.17.x participant, which is what it was written for; it cannot
-  > tell the pinned RC apart from anything built after it. §0.1 B-B is the fix.
+  > **Pinned 2026-08-13 — this check now proves what it says.** The published
+  > binary prints `agentstack 0.19.0 (sandbox: yes, 91a3d96)`: a version string
+  > and a commit no earlier build carries, so the check separates the study
+  > build from anything already installed, not merely from 0.17.x.
+  >
+  > Since v0.19.0 IS the latest stable release, a bare `| sh` and
+  > `brew install` now land on it too. That is a convenience, not a
+  > substitute — send the pinned line, so the run is reproducible from the
+  > kit alone once a later release exists.
 
 - Start a timer at the moment they run the install command; note wall-clock
   timestamps at each milestone below.
@@ -470,7 +471,7 @@ found deterministically by the §8.1 pilot and fixed in v0.17.1.
 ### 8.1 Isolated pilot run (2026-07-31) — kit rehearsal, not a participant
 
 > **HISTORICAL — captured on v0.17.0, replayed on v0.17.1. Participants run
-> v0.18.0-rc.2.** Everything in this section is evidence that specific
+> v0.19.0.** Everything in this section is evidence that specific
 > blockers were found and fixed. **It is not a description of what a
 > participant will see.** Read it to know what was already caught, so a
 > familiar-looking stall can be recognized as either "the old one, back" (a
@@ -560,7 +561,7 @@ same isolated HOME:
   are stated as two different facts.
 - The toolset task proceeds; the dead-end does not occur.
 
-**Observers: do not expect this stall.** Participants install v0.18.0-rc.2,
+**Observers: do not expect this stall.** Participants install v0.19.0,
 which carries this fix and everything after it. If a project-scope participant stalls anyway, that is a *new* finding
 and belongs on the stall log as one — do not attribute it to this entry. Do not
 screen participants out for having a project-scope setup — see Appendix B2.
@@ -913,7 +914,7 @@ never select for it.
 - Print one Appendix A sheet. Have a pen and a clock with a seconds hand or a
   phone timer.
 - Confirm the version they will get is current: the study needs
-  `agentstack --version` ≥ 0.18.0-rc.2. Run §3's pinned install line on your
+  `agentstack --version` ≥ 0.19.0. Run §3's pinned install line on your
   own machine, not theirs, and check the version it produces. Do not check
   what the bare public installer serves — it serves the latest stable release
   on purpose, and that is not the build this study is about.
