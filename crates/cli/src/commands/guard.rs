@@ -1190,20 +1190,8 @@ fn status() -> Result<()> {
             "  allow_roots [machine manifest]: {}",
             cfg.allow_roots.join(", ")
         );
-        // A root covering `/` is not one entry among several — it is the
-        // whole write confinement switched off. Printing it in a list beside
-        // ordinary paths reads as a detail; it is the headline.
-        if cfg.allow_roots.iter().any(|r| {
-            let t = r.trim();
-            // An EMPTY entry trims to "" too; a blank string is a
-            // misconfiguration, not a deliberate "everything".
-            !t.is_empty() && matches!(t.trim_end_matches('/'), "" | "/**" | "/*")
-        }) {
-            println!(
-                "  {} writes allowed anywhere on this machine; deny globs and \
-                 destructive-command rules still apply",
-                "note:".yellow()
-            );
+        if let Some(note) = open_disk_note(&cfg.allow_roots) {
+            println!("  {} {note}", "note:".yellow());
         }
     } else {
         println!("  allow_roots: unavailable");
@@ -1234,6 +1222,24 @@ fn status() -> Result<()> {
         );
     }
     Ok(())
+}
+
+/// The one extra line `status` prints when `[guard] allow_roots` covers `/`.
+///
+/// A root covering `/` is not one entry among several — it is the whole
+/// write-scope check switched off, so it belongs above the path list rather
+/// than inside it. What still applies is named in the same breath, because
+/// "anywhere" alone would overstate: the deny globs and the built-in
+/// destructive-command rules do not go away with it.
+///
+/// Pure (String in, Option<String> out) so the wording is unit-testable
+/// without a machine manifest or captured stdout.
+fn open_disk_note(allow_roots: &[String]) -> Option<String> {
+    crate::guard::allow_roots_cover_everything(allow_roots).then(|| {
+        "writes allowed anywhere on this machine; deny globs and \
+         destructive-command rules still apply"
+            .to_string()
+    })
 }
 
 // ── file surgery ────────────────────────────────────────────────────────────
@@ -1502,6 +1508,37 @@ fn set_guard_enabled(enabled: bool) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// G3: `guard status` must SAY that an open `allow_roots` opens the disk.
+    ///
+    /// Printed among ordinary paths, `/` reads as one entry in a list; it is
+    /// actually the write-scope check switched off. The note says so, and says
+    /// what survives it, so the line cannot be read as "nothing applies".
+    #[test]
+    fn status_notes_an_allow_root_that_covers_everything() {
+        let note = open_disk_note(&["/".to_string()]).expect("a root covering / earns the note");
+        assert!(note.contains("anywhere on this machine"), "{note}");
+        // Never overstate: the deny globs and built-in rules still fire.
+        assert!(note.contains("deny globs"), "{note}");
+        assert!(
+            note.contains("destructive-command rules still apply"),
+            "{note}"
+        );
+
+        // Same wording for the other spellings of "everything".
+        for open in ["/**", "/*", " / "] {
+            assert!(open_disk_note(&[open.to_string()]).is_some(), "{open:?}");
+        }
+        // A high root is not every root, and a blank entry is a
+        // misconfiguration — neither may be reported as a deliberate open disk.
+        for narrow in ["/Users", "/Users/me/code", "/var/**", ""] {
+            assert!(
+                open_disk_note(&[narrow.to_string()]).is_none(),
+                "{narrow:?}"
+            );
+        }
+        assert!(open_disk_note(&[]).is_none());
+    }
 
     /// A1 witness: seeding is idempotent, carries the canonical defaults
     /// (including the new `id_ecdsa` / `.netrc` entries), ships the

@@ -375,6 +375,26 @@ fn resolve_existing_prefix(path: &Path) -> Option<PathBuf> {
     }
 }
 
+/// Whether `[guard] allow_roots` opens the whole filesystem — i.e. whether
+/// [`write_scope_check`] can still refuse anything at all.
+///
+/// `/` is the spelling that does it, and it is worth naming rather than
+/// inferring: a root that merely sits high (`/Users`) still leaves the rest of
+/// the disk confined, so only a root that covers everything counts. Lives here,
+/// beside the check it describes, because two reporting surfaces
+/// (`doctor`'s machine-policy posture and `guard status`) must answer this
+/// question the same way — a second spelling of it could disagree with the
+/// first.
+pub(crate) fn allow_roots_cover_everything(allow_roots: &[String]) -> bool {
+    allow_roots.iter().any(|r| {
+        let t = r.trim();
+        // `!t.is_empty()` is load-bearing: an EMPTY entry also trims to "",
+        // and reading a blank string as "the whole filesystem" would report a
+        // misconfigured manifest as deliberately open.
+        !t.is_empty() && matches!(t.trim_end_matches('/'), "" | "/**" | "/*")
+    })
+}
+
 /// Component-wise prefix check (string prefixes would let `/tmp2` pass as
 /// inside `/tmp`).
 fn within(path: &Path, root: &Path) -> bool {
