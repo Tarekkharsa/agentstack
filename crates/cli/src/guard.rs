@@ -804,9 +804,13 @@ fn check_interpreter_consent_store(ctx: &GuardContext, program: &str, args: &[St
 /// invocations are refused at the hook, and everything else `agentstack`
 /// does — status, preview, lock, render, undo — stays allowed.
 ///
-/// `trust --preview` is explicitly allowed: it is the read half of the verb
-/// (it prints the surface and its digest and writes nothing), and it is what
-/// an agent should run to hand a human something to review.
+/// The verb's READ-ONLY spellings are explicitly allowed, because refusing
+/// them would cost an agent the ability to describe the situation without
+/// buying anything: `--preview` prints the surface and its digest (and is what
+/// an agent should run to hand a human something to review), and `--list`
+/// prints which projects are trusted. Neither grants anything. `--revoke` is
+/// NOT in that set: it writes the store, and "the agent may take trust away"
+/// is a separate decision from this one.
 ///
 /// Cooperative, like the rest of this module: the harness chooses to consult
 /// the hook, and a harness that does not gets nothing from this. What it
@@ -825,7 +829,7 @@ fn check_agentstack(args: &[String]) -> Decision {
         ))
     };
     match verb {
-        "trust" if !has("--preview") => refuse("trust"),
+        "trust" if !has("--preview") && !has("--list") => refuse("trust"),
         "yes" => refuse("yes"),
         "init" if has("--yes") => refuse("init --yes"),
         "apply" if has("--yes") => refuse("apply --yes"),
@@ -2845,6 +2849,9 @@ mod tests {
         for cmd in [
             "agentstack trust --preview",
             "agentstack trust --preview --json",
+            // Read-only, and it grants nothing: an agent may still say which
+            // projects are trusted.
+            "agentstack trust --list",
             "agentstack status",
             "agentstack lock --write",
             "agentstack apply --write",
