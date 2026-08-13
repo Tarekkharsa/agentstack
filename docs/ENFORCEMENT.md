@@ -92,17 +92,69 @@ Trusted does **not** mean:
 - **Tamper-proof against a compromised host agent.** In host mode the agent CLI
   runs as you, so it can in principle reach the user-writable trust store under
   `~/.agentstack/` and self-trust a bundle. Only the sandbox removes this. The
-  interactive consent probe is part of the same honest limit: `agentstack
-  trust` treats a terminal on stdin as attended consent, and a same-user
-  process that allocates a pseudo-terminal (`script`, `expect`, a `pty`
-  wrapper) reads as interactive — no stronger than the store-file boundary
-  above, and not claimed to be. What the gate does enforce is that headless
-  callers (pipes, RPC servers) cannot grant without `--yes` plus the reviewed
-  `--consented`. Every store mutation now leaves an identity-only
-  event behind (see [Trust-store mutation
+  interactive consent probe is part of the same honest limit: `isatty(stdin)`
+  proves stdin is a terminal *device*, never that a human is reading it, and a
+  same-user process that allocates a pseudo-terminal (`script`, `expect`, a
+  `pty` wrapper) reads as interactive. Because of that, **no grant depends on
+  the probe**: `--yes` requires `--consented <digest>` everywhere, terminal or
+  not, so the probe decides only whether a human is *prompted* — the one
+  question it can answer. Every store mutation leaves an identity-only event
+  behind (see [Trust-store mutation
   logging](#trust-store-mutation-logging)), which makes silent self-trust
   harder to miss — but the log lives in the same user-writable directory, so
   it is evidence, not a defence.
+
+### The resident agent
+
+The threat this section is really about is not a distant attacker: it is the
+agent already running here, in a hooked harness, on your account, holding the
+same shell and the same file tools you hold. Every flag the CLI accepts is a
+flag it can type, and inside the process a `trust . --yes --consented <digest>`
+from that agent is indistinguishable from the same command typed by a human who
+read the preview. The hook is the last place that difference still exists, so
+that is where the refusals live.
+
+What the guard refuses, on the everyday path (`agentstack guard check`, wired
+as each CLI's pre-tool-use hook):
+
+- **the grant, typed.** `agentstack trust` (except its read-only `--preview`
+  and `--list`), `agentstack yes`, and the promptless `init --yes` / `apply
+  --yes` are denied from an agent shell, in the wrapped and quoted spellings
+  too (`sudo …`, `sh -c "…"`). Everything else `agentstack` does — status,
+  preview, lock, render, undo — stays allowed;
+- **the store, from an interpreter.** A `python*`/`node`/`ruby`/`deno`/`bun`/
+  `php`/`perl -e` program whose text names `.agentstack` or `AGENTSTACK_HOME`
+  is denied. The inline program is opaque to every path check the guard has, so
+  this one is textual and coarse — the right trade in exactly one directory,
+  the one where a false negative forges a human's consent;
+- **the store, from a file tool.** `~/.agentstack` is unwritable by Write /
+  Edit / `apply_patch` as well as by the shell, and `[guard] allow_roots`
+  cannot allowlist it even when set to the whole home directory. The older
+  exemption ("a harness shows those diffs to the user") holds for a manifest in
+  a workspace and is worthless for the file that *records* a consent ceremony.
+
+Alongside those, a scripted `agentstack init --yes` no longer records trust by
+itself: `--yes` acknowledges the write, and consent for what the imported
+servers run comes either from the wizard's own confirm or from `--consented
+<plan_digest>` after `init --plan`. The import completes and the project stays
+untrusted, which the close says in as many words.
+
+What remains, stated plainly:
+
+- **interpreter creativity beyond the pattern.** A program can assemble the
+  path from pieces the text check never sees. The check closes the spelling
+  anyone actually writes, not the space of all spellings;
+- **hookless harnesses.** All of the above is cooperative — a harness that
+  never consults its own hook protocol, or an agent invoked outside one, is
+  outside every refusal here. The kernel-enforced story is `run --sandbox` /
+  `--lockdown`;
+- **same-user OS access.** A process running as you can answer a prompt it
+  allocated, or write `trust.json` directly. **The real boundary is the OS user
+  account**; nothing in this section claims otherwise. What these gates remove
+  is the ordinary path — the agent with a tool loop, typing the flag.
+
+`crates/cli/tests/red_team_agent_self_consent.rs` is the witness for the five
+doors above, driven through the hook binary and the real grant path.
 
 Conversely, **untrusted project declarations are inert on automatic and
 experimental execution paths**: the auto-project gateway does not spawn or

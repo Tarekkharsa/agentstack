@@ -1732,24 +1732,32 @@ pub(crate) fn grant_with_card(
 /// gate is testable without a real terminal. `interactive` is whether stdin is
 /// a TTY; production passes `std::io::stdin().is_terminal()`.
 ///
-/// Typing `agentstack trust` at a terminal IS the consent (direnv-allow style),
-/// so an interactive session is unchanged. When stdin is NOT a terminal — a
-/// pipe, a here-string, or an agent driving the shell — the command refuses
-/// unless `--yes` explicitly acknowledges the review AND `--consented`
-/// binds that acknowledgement to the exact previewed bytes (§7.2): `--yes`
-/// alone would let any RPC caller grant without anyone having seen the
-/// surface, which is precisely the UI-enforcement gap this closes.
+/// Typing `agentstack trust` at a terminal and answering its prompts IS the
+/// consent (direnv-allow style), so an interactive session is unchanged. When
+/// stdin is NOT a terminal — a pipe, a here-string, or an agent driving the
+/// shell — the command refuses unless `--yes` explicitly acknowledges the
+/// review AND `--consented` binds that acknowledgement to the exact previewed
+/// bytes (§7.2): `--yes` alone would let any RPC caller grant without anyone
+/// having seen the surface, which is precisely the UI-enforcement gap this
+/// closes.
 ///
 /// Honesty about the probe (independent review, 2026-07-23): `isatty(stdin)`
 /// proves stdin is a terminal DEVICE, not that a human is attending it — a
 /// process that allocates a PTY (`script`, `expect`, Python's `pty`) reads as
-/// interactive. That is accepted, not overlooked: the trust store is a plain
-/// file under the user's own account, so any same-user process able to stage
-/// a PTY could equally write `trust.json` directly. The gate's enforceable
-/// job is narrower and holds — headless callers (RPC servers, plain shell
-/// pipes) cannot grant without presenting the reviewed digest — and the real
-/// boundary against a hostile same-user process is the OS user account, as
-/// `docs/ENFORCEMENT.md` states.
+/// interactive. So the digest requirement is NOT conditioned on the probe
+/// (H4): `--yes` requires `--consented` everywhere, terminal or not, and a
+/// PTY-wrapped `trust . --yes` refuses exactly like a piped one. What the
+/// probe still decides is only whether a human is PROMPTED, which is the
+/// question it can actually answer.
+///
+/// What remains, stated rather than hidden: a PTY-holding process can also
+/// answer a prompt, so the fully interactive ceremony is defeatable by
+/// something that already runs as the user — and such a process could equally
+/// write `trust.json` directly. The real boundary against a hostile same-user
+/// process is the OS user account, as `docs/ENFORCEMENT.md` states. What these
+/// gates hold against is the ordinary case they were built for: a headless
+/// caller, or an agent typing flags, cannot grant without presenting bytes a
+/// human previewed.
 ///
 /// The entire review below renders from ONE [`trust::ConsentSnapshot`], and
 /// the no-digest grant records that snapshot's digest — never a re-read — so
@@ -2734,10 +2742,26 @@ pub(crate) fn grant_probed(
             "refusing to trust: stdin is not a terminal — review the declarations above and re-run interactively, or acknowledge non-interactively with --yes --consented <surface_digest from `agentstack trust --preview`>"
         );
     }
-    // §7.2: a non-interactive `--yes` must also present the digest of the
-    // surface that was reviewed. Without it, "the user saw the review" would
-    // be the caller's claim, not a checked fact.
-    if !interactive && consented.is_none() {
+    // §7.2: `--yes` must also present the digest of the surface that was
+    // reviewed. Without it, "the user saw the review" would be the caller's
+    // claim, not a checked fact.
+    //
+    // H4 — this used to be conditioned on `!interactive`, which made the TTY
+    // probe load-bearing for the ONE case it cannot answer. `isatty(stdin)`
+    // proves stdin is a terminal device, not that a human is attending it, and
+    // a resident agent can allocate a PTY (`script`, `expect`, `pty.spawn`) as
+    // easily as it can type the flag; `trust . --yes` under one then granted
+    // with no digest at all. The rule is now unconditional: whoever passes
+    // `--yes` is asserting they read a review, and the digest is what makes
+    // that assertion checkable. The fully interactive ceremony is untouched —
+    // no `--yes`, a real prompt, and the grant binds to the snapshot that was
+    // displayed.
+    //
+    // `card.is_none()` is that ceremony, not an exemption from it: the funnel
+    // has no `--preview`, so there is no digest for it to demand — what it has
+    // is a question, and below it now ASKS that question whether or not
+    // `--yes` was passed, at a terminal it refuses to proceed without.
+    if yes && consented.is_none() && card.is_none() {
         anyhow::bail!(
             "refusing to trust: --yes requires --consented — run `agentstack trust --preview`, review the surface, and pass its `surface_digest` back"
         );
@@ -2746,15 +2770,26 @@ pub(crate) fn grant_probed(
     // The funnel asks its single question here — after the complete review,
     // before anything is granted or rendered. A refusal leaves the trust store
     // untouched, exactly like every other refusal on this path.
+    //
+    // H4 (the funnel's half): `--yes` no longer skips this question. The
+    // funnel has no `--preview`, so it has no digest to demand instead — what
+    // it has is a question, asked at a terminal, and the flag that used to
+    // answer it in advance was reachable by anything holding a PTY. `yes`
+    // stays what its help says it is: a review you read and answer.
     if let Some(card) = card {
-        if interactive && !yes {
-            let said_yes = match card.answer {
-                Some(answer) => answer,
-                None => super::panel_edit::confirm(&card.question)?,
-            };
-            if !said_yes {
-                anyhow::bail!("cancelled — nothing was granted or activated");
-            }
+        // The card path never grants unasked. `yes` refuses without a terminal
+        // at its own entry point; saying it again here means the grant cannot
+        // be reached that way even if a future caller forgets.
+        anyhow::ensure!(
+            interactive,
+            "refusing to activate: `agentstack yes` is a review you read and answer — it needs a terminal"
+        );
+        let said_yes = match card.answer {
+            Some(answer) => answer,
+            None => super::panel_edit::confirm(&card.question)?,
+        };
+        if !said_yes {
+            anyhow::bail!("cancelled — nothing was granted or activated");
         }
     }
 
@@ -3625,11 +3660,13 @@ mod tests {
     // is not a terminal — doing so would defeat the untrusted-means-inert gate.
     // Since §7.2, `--yes` alone is not enough either: the acknowledgement must
     // carry the previewed surface digest, or a headless caller could grant a
-    // surface nobody reviewed. Tests run without a TTY, so `interactive: false`
-    // is the real refusal path; `grant_gated` takes the probe as a parameter so
-    // both branches are driven directly. NEVER delete or weaken this test.
+    // surface nobody reviewed. Since H4 the digest requirement does not depend
+    // on the TTY probe at all: case (e) drives `interactive: true` — a
+    // PTY-wrapped agent — and `--yes` without a digest refuses there too.
+    // `grant_gated` takes the probe as a parameter so every branch is driven
+    // directly. NEVER delete or weaken this test.
     #[test]
-    fn non_tty_grant_refuses_without_yes_and_consented() {
+    fn a_grant_refuses_without_yes_and_consented_terminal_or_not() {
         let _guard = crate::util::TEST_ENV_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -3657,6 +3694,26 @@ mod tests {
         // covers the store staying clean; here we prove the CLI wiring).
         assert!(grant_gated(proj.path(), true, Some("sha256:beef"), false, None).is_err());
         assert_eq!(trust::check(proj.path()), TrustState::Untrusted);
+
+        // (e) H4 — the PTY case, on a project of its own so (d) below still
+        // starts from Untrusted. `interactive: true` is exactly what a resident
+        // agent gets by wrapping this CLI in a pty (`script`, `expect`,
+        // `pty.spawn`): the probe reads "terminal", nobody is reading it, and
+        // `--yes` used to be sufficient there. It is not, and the requirement
+        // no longer depends on the one thing the probe cannot answer.
+        let pty_proj = assert_fs::TempDir::new().unwrap();
+        pty_proj
+            .child(".agentstack/agentstack.toml")
+            .write_str("version = 1\n[servers.x]\ntype = \"http\"\nurl = \"https://x/mcp\"\n")
+            .unwrap();
+        let err = grant_gated(pty_proj.path(), true, None, true, None).unwrap_err();
+        assert!(format!("{err:#}").contains("--consented"));
+        assert_eq!(trust::check(pty_proj.path()), TrustState::Untrusted);
+        // …and with the previewed digest it grants, terminal or not: the flag
+        // pair means the same thing everywhere.
+        let pty_digest = trust::digest_for(pty_proj.path()).unwrap();
+        grant_gated(pty_proj.path(), true, Some(&pty_digest), true, None).unwrap();
+        assert_eq!(trust::check(pty_proj.path()), TrustState::Trusted);
 
         // (d) --yes with the previewed digest: grants.
         let previewed = trust::digest_for(proj.path()).unwrap();

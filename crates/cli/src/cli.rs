@@ -2307,8 +2307,9 @@ pub struct UseArgs {
 /// one confirmation.
 #[derive(Args, Debug, Default)]
 pub struct YesArgs {
-    /// Acknowledge the review without an interactive prompt. Same meaning it
-    /// has on `trust`: the reviewer asserts they read what was printed.
+    /// Acknowledge the review. It does NOT answer the funnel's question: the
+    /// one yes is typed at the terminal, because a flag is something anything
+    /// driving this shell can pass.
     #[arg(long)]
     pub yes: bool,
 }

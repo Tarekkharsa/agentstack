@@ -13,6 +13,11 @@
 #      DEFINITIONS land in the library; the manifest references them by name.
 #      The inline token is lifted to a `${GITHUB_TOKEN}` reference in the
 #      library definition, and its value lands in a gitignored .env.
+#   2b. `agentstack trust .` — the review. A scripted `--yes` acknowledges the
+#      WRITE, never the servers, so consent is its own step here (headless, it
+#      is the two-command form: preview the surface, hand its digest back). At
+#      a terminal, plain `agentstack init` asks this question inside the wizard
+#      and there is no separate step.
 #   3. `agentstack x gateway connect --all --write` — register the bridge each
 #      MCP-capable tool talks to. This is what makes the live lane real; until
 #      it runs, delivery and doctor both say so plainly.
@@ -172,6 +177,25 @@ if grep -qF "$TOKEN" .agentstack/.env \
   ok "the value exists only in .agentstack/.env, which init gitignored"
 else
   bad "the value must live only in the gitignored .env (also found in: ${LEAKS:-nowhere})"
+fi
+
+# The consent step. A scripted `--yes` says "write without asking me", which is
+# a fine thing to say about a manifest and is not a review of what these servers
+# run — so the import leaves the project untrusted and names this command. The
+# headless form is the two-command one: preview the surface, hand back the
+# digest that names the bytes reviewed. (At a terminal the wizard asks inside
+# `agentstack init`, and there is no separate step.)
+say "Nothing here runs until the setup is reviewed — that review is its own step:"
+run "agentstack trust ."
+CONSENT="$(as trust . --preview | sed -n 's/.*"surface_digest": "\([^"]*\)".*/\1/p')"
+as trust . --yes --consented "$CONSENT" 2>&1 | tail -2 | sed 's/^/  /'
+# Asserted on the trust store's own listing, not on `status`: the ordinary
+# journey deliberately says nothing about trust while everything is fine, so a
+# grep for the word there would fail for a reason that is not this claim.
+if as trust --list 2>&1 | grep -q "$PROJECT"; then
+  ok "the project is trusted for exactly the bytes the preview showed"
+else
+  bad "the review should have recorded trust for the imported manifest"
 fi
 
 # The live lane needs one registration: each MCP-capable tool has to be told

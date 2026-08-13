@@ -157,7 +157,7 @@ fn a_library_first_import_records_every_imported_server_in_its_reviewed_surface(
 
     let proj = tmp.path().join("proj");
     fs::create_dir_all(&proj).unwrap();
-    init::run(&library_first_args(), Some(&proj)).unwrap();
+    init::run(&consented_args(&proj), Some(&proj)).unwrap();
 
     // The manifest really is the library-first shape — otherwise this test
     // would pass for the wrong reason on a future default change.
@@ -207,7 +207,7 @@ fn changing_a_library_servers_command_re_gates_as_changed_not_added() {
 
     let proj = tmp.path().join("proj");
     fs::create_dir_all(&proj).unwrap();
-    init::run(&library_first_args(), Some(&proj)).unwrap();
+    init::run(&consented_args(&proj), Some(&proj)).unwrap();
 
     // Someone edits the library definition's command line — the case the
     // re-gate diff exists to catch.
@@ -240,6 +240,26 @@ fn changing_a_library_servers_command_re_gates_as_changed_not_added() {
     // a real classification rather than everything reading `changed`.
     fs::write(&def, edited.replace("search-mcp-EVIL", "search-mcp")).unwrap();
     assert_eq!(change_for(&proj, "search"), "unchanged");
+}
+
+/// [`library_first_args`] for the witnesses that need the import to RECORD
+/// TRUST.
+///
+/// Since H5 a bare `--yes` no longer grants: it acknowledges the write, not
+/// the review, and it is a flag a resident agent can type. The scripted route
+/// that does grant is the two-step one a script actually runs — emit the plan,
+/// review it, hand its digest back — so these witnesses run it, through the
+/// production `plan_json` rather than a re-derived digest.
+fn consented_args(proj: &std::path::Path) -> InitArgs {
+    let mut args = library_first_args();
+    let plan = init::plan_json(&args, Some(proj)).unwrap();
+    args.consented = Some(
+        plan["plan_digest"]
+            .as_str()
+            .expect("the plan names the digest it describes")
+            .to_string(),
+    );
+    args
 }
 
 /// The args every library-first witness above shares: no `--project-servers`,
@@ -310,7 +330,7 @@ fn init_leaves_a_differing_library_definition_untouched_without_a_yes() {
     .unwrap();
     let proj = tmp.path().join("proj2");
     fs::create_dir_all(&proj).unwrap();
-    init::run(&library_first_args(), Some(&proj)).unwrap();
+    init::run(&consented_args(&proj), Some(&proj)).unwrap();
 
     assert_eq!(
         fs::read_to_string(lib_home.join("servers/search.toml")).unwrap(),
@@ -354,7 +374,7 @@ fn an_identical_library_definition_is_not_a_collision() {
 
     let first = tmp.path().join("proj1");
     fs::create_dir_all(&first).unwrap();
-    init::run(&library_first_args(), Some(&first)).unwrap();
+    init::run(&consented_args(&first), Some(&first)).unwrap();
     let lib_def = home.join(".agentstack/lib/servers/search.toml");
     let after_first = fs::read_to_string(&lib_def).unwrap();
 
@@ -362,7 +382,7 @@ fn an_identical_library_definition_is_not_a_collision() {
     // project still gets the server.
     let second = tmp.path().join("proj2");
     fs::create_dir_all(&second).unwrap();
-    init::run(&library_first_args(), Some(&second)).unwrap();
+    init::run(&consented_args(&second), Some(&second)).unwrap();
 
     assert_eq!(fs::read_to_string(&lib_def).unwrap(), after_first);
     let items = match agentstack::trust::prior_surface(&second) {

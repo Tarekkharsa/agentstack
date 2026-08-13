@@ -2614,7 +2614,25 @@ version = 1
     // the one moment the boundary IS relevant, so it says so once, with the
     // exact next command — progressive disclosure rule 3, not a violation of
     // the vocabulary witness (whose journey has no project-scope config).
-    let trusted = if project_sourced {
+    //
+    // H5 — WHOSE consent this grant rides on. Two answers are acceptable, and
+    // `--yes` alone is neither of them:
+    //
+    // - the wizard (`gate_write`): a human was shown the plan and confirmed it
+    //   at a prompt. That confirmation is the consent, and it is the same
+    //   ceremony `trust` asks for;
+    // - `--consented <plan_digest>`: the plan was emitted by `init --plan`,
+    //   read outside this process, and handed back. Detection is re-checked
+    //   against that digest above, so the grant binds to reviewed bytes —
+    //   exactly what `trust --preview` / `--consented` does for the trust verb.
+    //
+    // A bare `init --yes` is neither: it asserts "write without asking me",
+    // which is a fine thing for an automated import to say about a manifest,
+    // and is not a review of what those servers run. It is also a flag a
+    // resident agent can type. So the import still completes; it simply leaves
+    // the project untrusted, and the close names `agentstack trust .`.
+    let consent_covers_trust = gate_write || args.consented.is_some();
+    let trusted = if project_sourced || !consent_covers_trust {
         false
     } else {
         grant_trust_for_import(&base, &toml_text, &manifest, library_import)
@@ -2628,7 +2646,6 @@ version = 1
             "·".dimmed()
         );
     }
-    let _ = trusted;
 
     if let Some(notice) = secret_notice {
         println!("{notice}");
@@ -2703,7 +2720,12 @@ version = 1
                 servers_rendered: renders_servers(&target_defaults, &manifest),
                 rendered_work: renders_anything(&target_defaults, &manifest, server_count),
                 bridge_registered_now,
-                needs_trust: project_sourced,
+                // Whether this run left the project untrusted — for ANY of the
+                // reasons it can (repo-supplied servers, a `--yes` with no
+                // reviewed plan behind it, or a grant that failed closed).
+                // Reading `project_sourced` here would have let the H5 case
+                // end on "agentstack doctor" while the manifest sat inert.
+                needs_trust: !trusted,
                 verbose: args.verbose,
             }
             .render()
@@ -2912,9 +2934,11 @@ struct ImportSummary<'a> {
     /// are no longer untouched — each gained exactly one entry — and the note
     /// below must say which, or it contradicts the diff printed above it.
     bridge_registered_now: bool,
-    /// Did this import take servers out of the repository's own config, so the
-    /// trust grant was withheld? Then the review is the single most relevant
-    /// next step, and it takes the one `Next:` line.
+    /// Did this run end with the project still untrusted — because servers came
+    /// out of the repository's own config, because a scripted `--yes` carried
+    /// no reviewed plan (H5), or because the grant failed closed? Then the
+    /// review is the single most relevant next step, and it takes the one
+    /// `Next:` line: nothing downstream serves anything until it happens.
     needs_trust: bool,
     /// Spell every fact out (`--verbose`) rather than stating it as a count.
     verbose: bool,
@@ -3078,10 +3102,7 @@ impl ImportSummary<'_> {
         // only in the state that earns them, which is the same carve-out that
         // file already makes for the "NOT YET CONNECTED" disclosure.
         let (next, why) = if self.needs_trust {
-            (
-                "agentstack trust .",
-                "review what this repo's own servers run",
-            )
+            ("agentstack trust .", "review what these servers run")
         } else if !self.unconnected_live.is_empty() {
             (
                 "agentstack x gateway connect --all --write",
