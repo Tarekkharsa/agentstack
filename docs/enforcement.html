@@ -373,7 +373,7 @@
 <thead><tr><th>Array</th><th>Owner</th><th>Enforcer</th><th>When absent</th></tr></thead><tbody>
 <tr><td><code>[policy.filesystem] read</code></td><td>machine + project</td><td><strong>none</strong> — compiled and displayed, consulted by nothing</td><td>no effect</td></tr>
 <tr><td><code>[policy.filesystem] write</code></td><td>machine + project</td><td>sandbox workspace mount only, all-or-nothing</td><td>workspace mounts <strong>read-only</strong></td></tr>
-<tr><td><code>[policy.filesystem] deny</code></td><td>machine ∪ project (project may only ADD)</td><td>host guard (cooperative) + sandbox</td><td>nothing blocklisted</td></tr>
+<tr><td><code>[policy.filesystem] deny</code></td><td>machine ∪ project (project may only ADD)</td><td>host guard (cooperative) — the only enforcer today</td><td>nothing blocklisted</td></tr>
 <tr><td><code>[guard] allow_roots</code></td><td>machine only</td><td>host guard write confinement</td><td>writes confined to workspace + temp</td></tr>
 <tr><td><code>[guard.project_roots]</code></td><td>machine only</td><td>host guard, one named workspace</td><td>no extra roots</td></tr>
 </tbody></table></div>

@@ -636,7 +636,7 @@ deny  = [".env*", "**/*.pem"]         # no tool call may touch these, ever</code
 <thead><tr><th>Array</th><th>Owner</th><th>Enforcer</th><th>When absent</th><th>Allow-all spelling</th></tr></thead><tbody>
 <tr><td><code>[policy.filesystem] read</code></td><td>machine + project</td><td><strong>none today</strong> — compiled, displayed by <code>doctor</code>/<code>trust</code>, consulted by nothing</td><td>no effect</td><td>n/a (it grants nothing)</td></tr>
 <tr><td><code>[policy.filesystem] write</code></td><td>machine + project</td><td>sandbox workspace mount only</td><td>workspace mounts <strong>read-only</strong> (deny-by-default)</td><td><code>write = ["./**"]</code></td></tr>
-<tr><td><code>[policy.filesystem] deny</code></td><td>machine ∪ project — a project may only ADD</td><td>host guard (cooperative) and sandbox</td><td>nothing is blocklisted</td><td><code>deny = []</code></td></tr>
+<tr><td><code>[policy.filesystem] deny</code></td><td>machine ∪ project — a project may only ADD</td><td>host guard (cooperative) — the only enforcer today; the sandbox has no per-path mask mount</td><td>nothing is blocklisted</td><td><code>deny = []</code></td></tr>
 <tr><td><code>[guard] allow_roots</code></td><td>machine only</td><td>host guard write confinement</td><td>writes confined to the workspace + temp</td><td><code>allow_roots = ["/"]</code></td></tr>
 <tr><td><code>[guard.project_roots]</code></td><td>machine only</td><td>host guard, for one named workspace</td><td>no extra roots for that workspace</td><td>per-workspace list</td></tr>
 </tbody></table></div>
@@ -645,7 +645,7 @@ deny  = [".env*", "**/*.pem"]         # no tool call may touch these, ever</code
 <li><strong><code>read</code> is informational.</strong> It is compiled into the ruleset and printed by <code>doctor</code> and the trust card, and then nothing asks it anything. Declaring a <code>read</code> scope does not confine a read.</li>
 <li><strong>Host reads are limited by <code>deny</code> and by nothing else.</strong> There is no read allowlist at runtime: any path not caught by a deny glob is readable.</li>
 <li><strong><code>write</code> is all-or-nothing, and only for the sandbox.</strong> It answers one question — may the workspace root be mounted read-write? A partial scope like <code>src/**</code> does not mount part of the tree; it rounds <strong>down</strong> to read-only. It has no bearing on host writes.</li>
-<li><strong><code>deny</code> wins over everything.</strong> It is a pure blocklist, unioned across the machine and project layers, matched against the workspace-relative path, the absolute path, and the bare file name. A project can add to it and can never drop the machine's entries.</li>
+<li><strong><code>deny</code> wins over everything the guard sees.</strong> It is a pure blocklist, unioned across the machine and project layers, matched against the workspace-relative path, the absolute path, and the bare file name. A project can add to it and can never drop the machine's entries. Its one enforcer is the cooperative host guard; inside a sandbox the confinement is the mount boundary, not a per-path mask.</li>
 <li><strong>Inside a project workspace, full write access is already the default.</strong> The host guard confines writes to the workspace, <code>[guard] allow_roots</code> and temp directories — so a project editing its own files needs no configuration at all.</li>
 </ul>
 <p><strong>The two allow-all recipes</strong>, and what they still do not disarm:</p>
