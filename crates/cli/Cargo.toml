@@ -23,7 +23,12 @@ path = "src/main.rs"
 sandbox = ["agentstack-runtime/docker", "dep:agentstack-egress"]
 
 [dependencies]
-agentstack-core = { path = "../core" }
+# `schema` derives the manifest's JSON Schema from the model so `self docs
+# --write` can emit docs/agentstack.schema.json. It costs the binary nothing:
+# schemars is already linked here through rmcp (via agentstack-mcp). The
+# feature exists so `trust` and `policy` — which also depend on core — do NOT
+# inherit a schema generator into their review-boundary dependency trees.
+agentstack-core = { path = "../core", features = ["schema"] }
 agentstack-trust = { path = "../trust" }
 agentstack-policy = { path = "../policy" }
 agentstack-adapters = { path = "../adapters" }

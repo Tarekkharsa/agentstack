@@ -1317,6 +1317,7 @@ fn plan_digest(
 /// with the user (instruction fragments, eventually more), not a copy of
 /// whatever the CLIs happen to hold today (that's project `init`'s job).
 const GLOBAL_MANIFEST_TEMPLATE: &str = "\
+#:schema https://tarekkharsa.github.io/agentstack/agentstack.schema.json
 # Machine-level agentstack manifest — the personal layer.
 # Cross-project intent that travels with YOU, not with a repo: instruction
 # fragments compiled into each CLI's global CLAUDE.md / AGENTS.md.
@@ -1889,6 +1890,7 @@ fn run_impl(
         // says "run `agentstack init`" — so scaffold a commented starter
         // manifest instead of importing nothing.
         const STARTER: &str = "\
+#:schema https://tarekkharsa.github.io/agentstack/agentstack.schema.json
 version = 1
 
 # Fresh manifest — no agent CLIs were detected to import from.
@@ -2339,7 +2341,8 @@ version = 1
         delivery: Default::default(),
     };
     let toml_text = format!(
-        "{}{}",
+        "{}\n{}{}",
+        agentstack_core::manifest::SCHEMA_DIRECTIVE,
         capability_header(&manifest),
         toml::to_string_pretty(&manifest).context("serializing manifest to TOML")?
     );

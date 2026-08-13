@@ -1,0 +1,987 @@
+{
+  "type": "object",
+  "properties": {
+    "version": {
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0,
+      "description": "Schema version. Currently always `1`."
+    },
+    "meta": {
+      "description": "Project metadata: an optional display name, and whether agentstack\nmaintains this project's managed `.gitignore` block.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Meta"
+        }
+      ]
+    },
+    "servers": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/definitions/Server"
+      },
+      "description": "MCP servers, keyed by the name used everywhere else (profiles, configs)."
+    },
+    "skills": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/definitions/Skill"
+      },
+      "description": "Skills (portable `SKILL.md` directories), keyed by name."
+    },
+    "default_toolset": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Toolset selected automatically for a trusted zero-files connection.\nThe value is portable project intent; the live lease it creates is\nprocess-local and still subject to this machine's trust and policy."
+    },
+    "toolsets": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/definitions/Profile"
+      },
+      "description": "Named bundles for selective loading — the **toolset**, one of the four\nuser-facing ideas.\n\nThe manifest key is `toolsets`. `profiles` is accepted as a silent\nolder spelling so no existing manifest breaks, and it is never written\nback: `rename` decides what serialization emits, `alias` only widens\nwhat deserialization accepts. A manifest carrying *both* keys is a\nserde duplicate-field error, which is the honest answer — we cannot\nknow which one the author meant.\n\nThe Rust field keeps the older name; renaming it touches ~30 files for\nno user-visible gain, and `profiles` is still what most of this crate's\ninternals say. See TODO.md item 9."
+    },
+    "instructions": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/definitions/Instruction"
+      },
+      "description": "Portable instruction fragments compiled into each harness's CLAUDE.md /\nAGENTS.md."
+    },
+    "settings": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Native per-CLI settings (permissions, feature flags). Keyed by adapter\nid (e.g. `claude-code`); each value is an object merged non-destructively\ninto that CLI's settings file."
+    },
+    "hooks": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/definitions/Hook"
+      },
+      "description": "Lifecycle hooks compiled into each hook-capable harness's native config."
+    },
+    "extensions": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/definitions/Extension"
+      },
+      "description": "Native harness extensions (executable add-on code, e.g. pi's `.ts`\nextensions), keyed by name. Each targets exactly ONE adapter and is\npinned strictly in the lock."
+    },
+    "workflows": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/definitions/Workflow"
+      },
+      "description": "Governed workflows (D7 W1): orchestration scripts agentstack itself\nwill execute inside the governed engine (W3), spawning agent runs under\nthe declared role profiles. Declarations here arrive from unreviewed\nrepos and are hostile input (rule 7): nothing in this table runs,\nparses as script, or is even invocable by name until the bundle is\ntrusted and the source is pinned strictly in the lock\n(docs/design/workflows-capability.md §4–5)."
+    },
+    "packs": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/definitions/PackInstall"
+      },
+      "description": "Vendor-pack install ledgers, keyed by pack name. Each records the members\na `add from <source>` install added (server, skills, house rules) so\n`remove`/`lock --upgrade` can undo or re-resolve the pack. Members ride\nthe normal manifest sections; this table is only the bookkeeping."
+    },
+    "package_overrides": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/definitions/PackageOverride"
+      },
+      "description": "Per-member project divergence from a selected package (W5,\n`docs/design/package-layer.md`), keyed by package name. A project that\ntakes a package but replaces or drops one member declares it here, and\nthe lock then records the resulting **effective member set** with each\nmember's origin — so a divergence is always something a reader can see,\nnever something inferred by diffing against the package."
+    },
+    "targets": {
+      "description": "Where `apply` writes by default and which adapters are in play.\n\nAbsent means \"every CLI detected here\", resolved at render time — so an\nempty table is not written back out. A `[targets]` block is a\nNARROWING, and one that merely restates the detection would freeze\ntoday's machine into a file that travels to other machines.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Targets"
+        }
+      ]
+    },
+    "policy": {
+      "description": "Optional governance: required/forbidden capabilities + source allowlist.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Policy"
+        }
+      ]
+    },
+    "guard": {
+      "description": "Host-mode hook guard (`agentstack guard`) configuration. Only the\nMACHINE manifest's `[guard]` is consulted — a repo manifest can never\nenable, disable, or widen the guard (same trust posture as `[policy]`,\nbut guard-specific knobs are host concerns, so they live outside it).",
+      "allOf": [
+        {
+          "$ref": "#/definitions/GuardConfig"
+        }
+      ]
+    },
+    "experimental": {
+      "description": "Machine-owned experimental runtime features. Repository manifests are\nparsed for portability but never consulted as authority for these flags.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/ExperimentalConfig"
+        }
+      ]
+    },
+    "delivery": {
+      "description": "The one advanced delivery override (`docs/design/automatic-delivery.md`\n§\"The decision\"). Absent is the default — **Automatic**, the delivery\nplanner routing each capability by kind and harness.",
+      "allOf": [
+        {
+          "$ref": "#/definitions/Delivery"
+        }
+      ]
+    }
+  },
+  "required": [
+    "version"
+  ],
+  "description": "The portable manifest (`.agentstack/agentstack.toml`): the one file a project authors. It contains no secret literals — only `${REF}` references resolved per-machine at render time.",
+  "title": "AgentStack manifest",
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "Meta": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Display name for this project, reported in agentstack's own project\nsnapshot. Cosmetic: nothing resolves by it."
+        },
+        "gitignore": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Whether agentstack maintains the managed `.gitignore` block for this\nproject's generated artifacts.\n\n`Some(false)` opts out durably: no command creates or updates the block\nhere. A per-run `--no-gitignore` cannot express that — the next\n`use <toolset>` would put the block straight back — so the decision\nlives with the project, in the file that travels with it. That also\nmakes it the same answer on every clone: a machine-local setting would\nguarantee the block ping-pongs through a team's diffs as each member\nactivates a toolset.\n\n`None` / `Some(true)` is the default: the block is maintained."
+        }
+      }
+    },
+    "Server": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "description": "Transport: `stdio` for a locally launched process, `http` for a URL.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ServerType"
+            }
+          ]
+        },
+        "url": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Endpoint an `http` server is reached at. Supports `${REF}` substitution."
+        },
+        "command": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Executable a `stdio` server is launched as (`npx`, `uvx`, an absolute\npath). Supports `${REF}` substitution."
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Arguments passed to `command`, in order. Each element supports\n`${REF}` substitution."
+        },
+        "cwd": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Working directory a stdio server is launched from. Some servers only\nstart correctly when spawned from their own directory (e.g. relative\ndynamic `import()`s that resolve against `process.cwd()`); a harness\notherwise inherits its own project cwd. Rendered to each adapter's\nnative working-directory key where one exists; adapters whose config\nformat has no such key drop it (the server may still need a shell\nwrapper there). Supports `${REF}`/path expansion like other fields."
+        },
+        "integrity_roots": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "D3 integrity roots (locked-run contract §8): repository-relative files\nor directory subtrees whose **content** this stdio server's interpreted\npayload depends on (transitive imports, sourced files, required\nmodules). `agentstack lock` pins each declared root by a symlink-free\ncontent digest, and a one-byte change anywhere inside a root re-gates\ntrust. Roots are declared, not inferred — pinning only the entry script\nwould leave `import`ed/`source`d files unbound. Paths must stay inside\nthe project (traversal, absolute paths, and symlinks are hard errors at\npin/verify time). Empty for http servers and for stdio servers whose\ncommand is an external `$PATH` binary with no local payload."
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Adapter ids `apply` renders this server to; `[\"*\"]` (the default) = all\ntargets. An explicit empty list opts the server out of the direct\n`[servers]` fan-out entirely — for a server some other harness already\nprovides on its own, where a direct render would configure it twice."
+        },
+        "owner": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Adapter id whose live config is the source of truth for this server\n(`owner = \"codex\"`). Some harness apps rewrite their own server entries\n(e.g. the Codex desktop app refreshes env values on every self-update);\nwithout this, the manifest goes stale and a blind `apply --write` would\ndowngrade the app's fresh values. With an owner set, every plan\n(apply/diff/doctor) refreshes the definition from the owner's on-disk\nconfig before rendering, so drift on the owner's config never proposes\na revert — it proposes refreshing the manifest and re-fanning the fresh\nvalues out to the other targets. Keys whose manifest value carries a\n`${REF}` stay manifest-canonical (secret hygiene); everything else\nfollows the owner's disk, including keys the owner adds or removes."
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Extra HTTP headers sent to an `http` server, e.g.\n`Authorization = \"Bearer ${MY_TOKEN}\"`. Values carry `${REF}`\nreferences, never secret literals (invariant 5)."
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Environment variables set for a `stdio` server's process. Values carry\n`${REF}` references, never secret literals (invariant 5)."
+        },
+        "extra": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "description": "Target-specific keys with no transport-neutral equivalent, keyed by\nadapter id then native field name:\n\n```toml\n[servers.miro.extra.codex]\nstartup_timeout_sec = 20\n```\n\nThat adapter's renderer passes them through verbatim (string values\nstill get `${REF}` substitution) and `init`/`adopt` lift unknown config\nkeys back into here, so hand-tuned target keys round-trip instead of\nbeing dropped on the next `apply`."
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "description": "A single MCP server definition (transport-neutral)."
+    },
+    "ServerType": {
+      "type": "string",
+      "enum": [
+        "http",
+        "stdio"
+      ],
+      "description": "Transport kind for an MCP server."
+    },
+    "Skill": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Local path source (relative to the manifest, or absolute)."
+        },
+        "git": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Git source URL."
+        },
+        "rev": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Pinned git revision (branch, tag, or commit). Latest if absent."
+        },
+        "subpath": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "For git sources: the skill's directory within the repo (the common\nmarketplace/monorepo layout, where `SKILL.md` lives in a subdir rather\nthan at the repo root). Ignored for path sources."
+        }
+      },
+      "description": "A skill: a portable directory containing a `SKILL.md`."
+    },
+    "Profile": {
+      "type": "object",
+      "properties": {
+        "servers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Server names this toolset selects, each naming a `[servers.<name>]`\nentry.",
+          "default": []
+        },
+        "skills": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "May contain the wildcard `\"*\"` meaning \"all skills\".",
+          "default": []
+        },
+        "packages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Central-library packages this toolset selects by name (W5,\n`docs/design/package-layer.md`). A package is a versioned composition of\nmembers; selecting one here is a *compact reference*, which the lock\nexpands into the exact member set with a digest and provenance per\nmember. That expansion is what makes the reference as safe as vendoring\nthe members, so nothing may read this field as authority on its own.\n\nDeliberately **no `\"*\"` wildcard**, unlike `skills`: `\"*\"` there means\n\"the inline skills this manifest already declares\", which is bounded by\nthe manifest. A package wildcard would mean \"every composition on this\nmachine\", which is exactly the broad surprise activation the skill\nwildcard's inline-only rule exists to avoid."
+        },
+        "harness": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Which harness a workflow-role child bound to this profile launches\n(design doc §3: the harness is a property of the role's profile, never\nof the script). Consulted ONLY by the workflow drive loop, which\nvalidates it against the adapter registry at admission; interactive\n`run <harness> --profile <p>` keeps its positional harness and never\nreads this field, so it cannot create ambiguity in the existing\nprofile paths. Absent = the engine's default harness (claude-code)."
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Which model this toolset selects, for instruction-variant resolution\n(`docs/design/instruction-variants.md` §\"How the model is determined\")\nand — since workflows became a headline capability — for the child a\nworkflow role bound to this toolset launches.\n\nRead ONLY when this toolset is the one a command explicitly named — a\ndefault toolset nobody selected contributes no model, because a default\nis not a selection. It is a declaration of intent, not a setting\nAgentStack writes into a harness: choosing a toolset never rewrites a\nCLI's native config. The workflow consumer honors that literally — it\ndelivers the value as launch FLAGS on the child's argv and never writes\nit into the harness's persistent settings file — and reports honestly\nwhen the bound harness has no way to carry it per launch."
+        },
+        "effort": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "How much reasoning effort this toolset asks for (`low`/`high`,\n`minimal`…`high` — the vocabulary is the harness's own, checked against\nthat adapter's settings catalog, never a vocabulary AgentStack invents).\n\nSame contract as [`Self::model`] in every respect: a declaration of\nintent, read only for a toolset something explicitly selected,\ndelivered as launch flags to a workflow child, and reported rather than\nsilently dropped when the bound harness cannot select it per launch."
+        }
+      },
+      "description": "A profile selects a subset of servers, skills, and packages."
+    },
+    "Instruction": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The fragment's own file, relative to the manifest dir or absolute.\n\n`None` means **sourceless**: the body resolves from the linked library\nsources by this entry's manifest key, exactly as a sourceless\n`[extensions.<name>]` resolves from the library\n(`docs/design/instruction-variants.md` §\"The same schema in a library\nsource\"). Optional rather than required so the two cases are one kind\nof declaration; `skip_serializing_if` keeps every existing manifest\nround-tripping byte-identically."
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Adapter ids this fragment applies to; `[\"*\"]` (the default) = all.",
+          "default": [
+            "*"
+          ]
+        },
+        "variant": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/InstructionVariant"
+          },
+          "description": "Per-(CLI, model) bodies for this fragment, most specific winning\n([`select_variant`]). `targets` decides WHETHER this fragment reaches a\nCLI; `variant` decides WHICH BYTES it sends once it does."
+        }
+      },
+      "description": "One instruction fragment: a markdown file applied to some/all harnesses."
+    },
+    "InstructionVariant": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "cli": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Adapter id this body is for (`claude-code`, `codex`, …)."
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Model this body is for, as the project spells it (`opus`, `gpt-5.5`).\nCompared literally: AgentStack never normalizes or aliases a model\nname, because guessing that two spellings mean one model is exactly the\nguess this feature refuses to make."
+        },
+        "path": {
+          "type": "string",
+          "description": "This variant's body, anchored exactly like the base `path`."
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "description": "One per-(CLI, model) body of an instruction fragment.\n\nBoth selector keys are optional and at least one must be present — a\nvariant with neither would be a second base body with no rule to choose\nbetween them, which validation refuses.\n\n`deny_unknown_fields`: a brand-new table with no legacy manifests to stay\nlenient for, so a typo (`clis`, `models`) is rejected outright instead of\nsilently widening the selector to \"matches everything\"."
+    },
+    "Hook": {
+      "type": "object",
+      "properties": {
+        "event": {
+          "type": "string",
+          "description": "Lifecycle event, e.g. `PreToolUse`, `PostToolUse`, `SessionStart`."
+        },
+        "matcher": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Tool/agent/notification filter for events that support it (optional)."
+        },
+        "command": {
+          "type": "string",
+          "description": "Command to run."
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Extra command arguments (optional)."
+        },
+        "timeout": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
+          "description": "Timeout in seconds (optional)."
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Adapter ids this hook applies to; `[\"*\"]` (the default) = all hook-capable.",
+          "default": [
+            "*"
+          ]
+        }
+      },
+      "required": [
+        "event",
+        "command"
+      ],
+      "description": "One lifecycle hook: run `command` on a harness `event` (optionally filtered\nby `matcher`). Compiled into each hook-capable harness's native hooks config."
+    },
+    "Extension": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Local path source, relative to the manifest dir (same anchoring as\nskills and instructions — a `.agentstack/` layout keeps extension\nsources under `.agentstack/`). Pinned by the strict integrity-root\ndigest, which rejects traversal and symlinks outright."
+        },
+        "git": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Git source URL, fetched through the shared store. A git extension is\nalways digested at its `subpath` anchored at the checkout root (a\nclone's `.git` can never be part of a reproducible pin), so validation\nrequires `subpath` alongside `git`."
+        },
+        "rev": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Pinned git revision (branch, tag, or commit). Latest if absent."
+        },
+        "subpath": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "For git sources: the extension's directory within the repo.\nRequired alongside `git`."
+        },
+        "target": {
+          "type": "string",
+          "description": "The ONE adapter id this extension's code is written against (`pi`,\n`opencode`, …). Deliberately singular, unlike `targets` lists\nelsewhere: extension code is harness-specific by nature, so there is\nno `\"*\"` and no fan-out."
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Optional one-line summary of what this extension does."
+        }
+      },
+      "required": [
+        "target"
+      ],
+      "description": "A native harness extension: executable add-on code (pi's `.ts` extensions,\nOpenCode's `.js` plugins) rendered into one harness's native extension\ndirectory. The highest-risk capability kind agentstack manages: the code\nexecutes INSIDE the harness process with full user permissions, outside\nthe policy ceiling — agentstack pins and delivers the bytes, it never runs\nor governs them at runtime."
+    },
+    "Workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Optional one-line summary of what this workflow does."
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Local path source, relative to the manifest dir — pinned by the strict\nintegrity-root digest (symlink anywhere = hard error), the same family\nas extensions: workflow source is executable code, never skill content."
+        },
+        "git": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Git source URL, fetched through the shared store. A git workflow is\nalways digested at its `subpath` anchored at the checkout root (a\nclone's `.git` can never be part of a reproducible pin), so validation\nrequires `subpath` alongside `git` — mirroring [`Extension`]."
+        },
+        "rev": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Pinned git revision (branch, tag, or commit). Latest if absent."
+        },
+        "subpath": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "For git sources: the workflow's directory within the repo.\nRequired alongside `git`."
+        },
+        "blueprint": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The reviewed BLUEPRINT this script was authored from — a project-local\npath to the `agentstack-blueprint` JSON a user approved as a graph\n(review finding F13).\n\nIts purpose is to make one consent cover both artifacts. Approving a\npicture of a workflow and then consenting to a script are otherwise two\nindependent gates, and the second one — the one that actually\nauthorizes execution — showed content the first one never displayed.\nDeclared here, the blueprint is pinned beside the script, so the trust\npreview can render the approved shape next to the bytes that will run\nand a change to EITHER re-gates.\n\nWhat this does NOT do, stated plainly because rule 8 requires it:\nAgentStack does not verify that the script implements the blueprint.\nFaithfulness is still the authoring model's, and a reviewer reads both.\nOptional — a hand-written workflow has no blueprint and needs none."
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The profiles the script's `agent()` calls may name — a CLOSED set, the\nworkflow's whole authority-request surface. Every entry must exist in\n`[profiles]`; an empty list is valid (pure computation, spawns nothing).",
+          "default": []
+        },
+        "max_agents": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "description": "Requested ceiling on total agent spawns. Absent = the built-in default;\nthe effective value is always min(request, machine cap)."
+        },
+        "max_wall_seconds": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
+          "description": "Requested wall-clock ceiling in seconds. Same min(request, cap) rule."
+        },
+        "scheduling": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/RoleScheduling"
+          },
+          "description": "`[workflows.<name>.scheduling.<role>]` — per-role scheduling requests.\n\nThe scaling plan's thesis lives here: every freedom a scheduler wants\n(retry a task, race a duplicate, place it anywhere) is paid for by task\nPURITY, so purity must be a checked property of the granted authority\nrather than an author's claim. Validation therefore refuses a claim the\ncurrent authority model cannot substantiate — see\n`docs/design/workflow-scaling.md` §4 Phase 4."
+        }
+      },
+      "description": "A governed workflow declaration (D7 W1): one orchestration script plus the\nauthority it REQUESTS — the closed set of role profiles its `agent()` calls\nmay name, and its spawn/wall-clock ceilings. Requests can only reduce what\nthe machine's `[policy.workflows]` caps grant, never increase it (rule 2).\nUnlike an [`Extension`] (delivered into a harness, run there), agentstack\nitself executes a workflow — inside the governed engine, gated and\nsandboxed — which is exactly why the trust gate stands in front of it.\n\n`deny_unknown_fields`: a brand-new table with no legacy configs to stay\nlenient for, so typos (`max_agent`, `role`) are rejected outright — the\nsame argument as [`FsPolicy`]."
+    },
+    "RoleScheduling": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "effect_free": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Asserts this role's children have no side effects — no filesystem\nwrites, no network reach — and may therefore be retried or duplicated\nfreely.\n\nCurrently **refused by validation**, and the refusal is the honest\nanswer rather than a limitation to route around: `[policy.filesystem]`\nis bundle-global (not per-profile), its `write` scope is enforced only\nin sandbox mode, and workflow children run at the host tier. Nothing in\ntoday's model can prove the claim, and rule 8 says claims match\nenforcement."
+        },
+        "retry": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "description": "How many times a failed child of this role may be retried. Gated on\n`effect_free`: a retry of a mutating child duplicates its effects."
+        },
+        "speculative": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Whether a straggler of this role may have a backup copy raced against\nit. Gated on `effect_free` for the same reason, doubled: a speculative\nduplicate runs *concurrently* with the original."
+        }
+      },
+      "description": "One role's scheduling request. New table, so `deny_unknown_fields`: a typo\nhere would silently mean \"default scheduling\" on a surface whose whole\npurpose is to be explicit about what the framework may do."
+    },
+    "PackInstall": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "string",
+          "description": "The pack version this install recorded. Bookkeeping written by\n`add from`, not a field to hand-author."
+        },
+        "description": {
+          "type": "string",
+          "description": "The pack's one-line summary, as recorded at install time."
+        },
+        "source": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Where this pack was resolved from (`catalog:<id>` or\n`git:<url>@<tag>[#subdir]`); parsed by `upgrade` to re-resolve."
+        },
+        "rev": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The commit a git pack's tag resolved to at install time (provenance;\ncontent digests live in the lock via each extracted skill)."
+        },
+        "targets": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Adapter ids the pack's members target; `[\"*\"]` = every adapter.",
+          "default": [
+            "*"
+          ]
+        },
+        "servers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Server member names this pack added to `[servers]`."
+        },
+        "skills": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Skill member names this pack added to `[skills]`."
+        },
+        "hooks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Hook member names this pack added to `[hooks]`."
+        },
+        "instructions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Instruction-fragment member names this pack added to `[instructions]`."
+        }
+      },
+      "required": [
+        "version",
+        "description"
+      ],
+      "description": "A vendor-pack install ledger: the record `agentstack add from <source>`\nwrites so a pack install can be undone (`remove`) or re-resolved\n(`lock --upgrade`). It is pure bookkeeping — the pack's real members (server,\nskills, house-rule instructions) live in the normal manifest sections; this\nstruct only lists which of them the pack owns plus the provenance needed to\nre-fetch. (The former plugin-recipe/marketplace lane that also used this\ntable was removed; the extensions kind supersedes it.)"
+    },
+    "PackageOverride": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "remove": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Package member names this project drops entirely."
+        },
+        "replace": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Package member name → the project-declared capability that stands in for\nit. Ordered so the lock (and the trust digest over it) does not churn on\nmap iteration order."
+        }
+      },
+      "description": "`[package_overrides.<package>]` — one project's divergence from one package.\n\nThe smallest schema that expresses \"take package P, but not member M\" and\n\"take package P, but use my own M instead\". Both halves name *package member\nnames*; `replace` values name a capability this project already declares\n(`[skills.*]` / `[servers.*]` / `[instructions.*]`) of the same kind, so an\noverriding member pins through the paths that already pin project\ncapabilities rather than introducing a second declaration form.\n\nEvery edge fails closed at lock time — a key naming a member the package\ndoes not carry, a replacement the project does not declare, a replacement of\na different kind, or an override for a package no toolset selects. A stale\noverride that silently matches nothing is how a project comes to believe it\ndropped something it still has."
+    },
+    "Targets": {
+      "type": "object",
+      "properties": {
+        "default": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Adapter ids `apply` writes to when `--target` is not given.",
+          "default": []
+        }
+      }
+    },
+    "Policy": {
+      "type": "object",
+      "properties": {
+        "require": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Capability names that must be present in the manifest.",
+          "default": []
+        },
+        "forbid": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Capability names that must NOT be present.",
+          "default": []
+        },
+        "allowed_sources": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Glob patterns a capability's source must match (e.g.\n`git:github.com/acme/*`, `registry:*`, `path:*`). Empty = allow any.",
+          "default": []
+        },
+        "tools": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "description": "Per-server tool rules, enforced at the runtime gateway (the MCP\nfirewall). `[policy.tools]` maps a server name to glob patterns over its\ntool names: plain patterns allow, `!`-prefixed patterns deny. With at\nleast one allow pattern the list is an allowlist (a tool must match an\nallow and no deny); with only deny patterns everything else is allowed.\nA denied tool is invisible to discovery and refused if called.",
+          "default": {}
+        },
+        "egress": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "description": "Per-server outbound host rules, same grammar as `tools` (globs over\nhostnames, `!` denies, `\"*\"` key is rename-proof), with an optional\n`:port` suffix: `api.example.com:443` scopes to that port, a bare host\nmeans any port. The write/spawn-time check matches the host and defers\nthe port; the Phase-2 proxy enforces the exact CONNECT port.",
+          "default": {}
+        },
+        "secrets": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "description": "Per-server secret access, same grammar (globs over `${REF}` names).\nEnforced fail-closed at both substitution sites: a ref outside a\nserver's effective set never resolves for it — not into a rendered\nconfig, not into a gateway upstream.",
+          "default": {}
+        },
+        "filesystem": {
+          "description": "Bundle-global filesystem scopes (path globs). The `write` scope is\nenforced in sandbox mode — the workspace mounts read-only unless the\neffective scope covers it (deny-by-default; see\n`CompiledRuleset::workspace_write_decision` in the policy crate).\n`read` scopes are informational, and host mode enforces neither.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/FsPolicy"
+            }
+          ]
+        },
+        "workflows": {
+          "description": "`[policy.workflows]` — machine-owned ceilings on every workflow run.\nOnly the MACHINE manifest's table is consulted as authority (same trust\nposture as the rest of `[policy]`): a workflow's own manifest entry is\na request, and the effective ceiling is min(request, this cap) — a repo\ncan only narrow, never widen (rule 2).",
+          "allOf": [
+            {
+              "$ref": "#/definitions/WorkflowPolicy"
+            }
+          ]
+        }
+      },
+      "description": "Team/org governance (PLAN §9e, D18). Off by default; enforced by `doctor`."
+    },
+    "FsPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "read": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Allowed read scopes, as path globs. INFORMATIONAL: nothing enforces\nthis scope today — see the `[policy.filesystem]` field docs for what\nis enforced and where.",
+          "default": []
+        },
+        "write": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Allowed write scopes, as path globs. Enforced in sandbox mode: the\nworkspace mounts read-only unless the effective scope covers it.\nHost mode does not enforce it.",
+          "default": []
+        },
+        "deny": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Path globs no tool call may touch at all — read or write. Unlike\n`read`/`write` (allow scopes), `deny` is a pure blocklist and the\neffective set is the UNION of the machine and bundle layers: a repo\ncan add denies but never remove the machine's. Patterns are matched\nagainst the workspace-relative path, the absolute path, AND the bare\nfile name, so `\".env*\"` catches a `.env` anywhere in the tree.\nEnforced by the host-mode hook guard (`agentstack guard`); the\nsandbox mask-mount enforcement is tracked for a later session.",
+          "default": []
+        }
+      },
+      "description": "`[policy.filesystem]` — read/write path-glob scopes. New table, so typos\nare rejected outright (`deny_unknown_fields`) — unlike the long-shipped\n`Policy` fields, there is no existing config to stay lenient for."
+    },
+    "WorkflowPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_agents": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "description": "Cap on any workflow's total agent spawns. Absent = no machine cap."
+        },
+        "max_wall_seconds": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
+          "description": "Cap on any workflow's wall clock, in seconds. Absent = no machine cap."
+        },
+        "max_concurrent": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "description": "How many governed children the workflow drive loop may run at once.\nMACHINE-owned and engine-owned: never script-negotiated (Stage D adds\nnegotiation of the other ceilings, not this one). Absent = the engine's\nconservative built-in default. A value of 0 is clamped to 1 by the\nconsumer — the cap bounds concurrency, it cannot deadlock the drive."
+        },
+        "max_resident_result_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
+          "description": "Ceiling on the TOTAL bytes of `agent()` results handed to the\ninterpreter across one run. The workflow crate's posture label states\nhonestly that no JS heap cap exists in-process; this is the bound that\nmakes a wide fan-out over large outputs a refusal rather than\nunbounded growth. Absent = the drive loop's built-in default.\n\nMACHINE-owned like the rest of this table, and never script-negotiated:\na script's remedy is to ask for `result: 'handle'`, not for more room."
+        }
+      },
+      "description": "Machine-layer workflow ceilings. New table, so typos are rejected outright\n(`deny_unknown_fields`) — the same argument as [`FsPolicy`]."
+    },
+    "GuardConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Master switch. `None` (absent) means the guard is not configured;\n`Some(false)` is an explicit opt-out that also prunes installed hooks\non the next `guard install`/`apply`."
+        },
+        "allow_roots": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Absolute path prefixes (after `~` expansion) where writes and deletes\nare allowed BEYOND the current workspace — e.g. a projects folder.\nThe workspace itself and the system temp dirs are always writable;\neverything else is deny-by-default for writes/deletes.",
+          "default": []
+        },
+        "project_roots": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "description": "`[guard.project_roots]` — extra allow-roots granted ONLY when the\nguard's anchored workspace sits under the key path. This keeps a\nscoped grant (\"sessions in ~/x may also write ~/y\") in the MACHINE\nmanifest, where the authority lives — a project manifest can never\nwiden the guard's write scope for itself (rule 2), and the guard\nalready denies shell writes to its own config file."
+        }
+      },
+      "description": "`[guard]` — the machine-level destructive-command guard wired into each\nagent CLI as a pre-tool-use hook. Enforcement is cooperative (the CLI must\nhonor its own hook protocol), aimed at accidents, not malice — the\nkernel-enforced story is `run --sandbox`/`--lockdown`."
+    },
+    "ExperimentalConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tools_execute": {
+          "type": "boolean",
+          "description": "Advertise and permit the isolated `tools_execute` MCP primitive.",
+          "default": false
+        },
+        "tools_execute_limits": {
+          "description": "Optional machine-owned ceilings. Requests may only narrow these.",
+          "allOf": [
+            {
+              "$ref": "#/definitions/ExperimentalExecuteLimits"
+            }
+          ]
+        }
+      }
+    },
+    "ExperimentalExecuteLimits": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "timeout_ms": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0,
+          "description": "Wall-clock ceiling for one `tools_execute` call, in milliseconds."
+        },
+        "max_calls": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0,
+          "description": "Ceiling on the tool calls the executed code may make back through the\nrelay during one `tools_execute` run."
+        },
+        "max_output_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 0,
+          "description": "Ceiling on the combined stdout + stderr bytes one `tools_execute` run\nmay produce."
+        }
+      }
+    },
+    "Delivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "render_locally": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "Project-wide: write files even where the live channel would have worked.\n`None` is Automatic."
+        },
+        "harness": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/definitions/HarnessDelivery"
+          },
+          "description": "Per-harness overrides, keyed by adapter id (`claude-code`, `codex`, …).\nA harness entry wins over the project-wide value, in both directions —\nso one CLI can be pinned to files while the rest stay automatic, and one\nCLI can stay automatic inside an otherwise render-locally project."
+        }
+      },
+      "description": "The delivery override table: **Render locally**, and nothing else.\n\nThere is deliberately no \"mode\" here and no second knob. Delivery is\notherwise *routed*, not chosen — the planner decides from the capability's\nkind and the harness it is going to — and adding a second override would\nre-create the mode-switch the contract removed.\n\nThe override travels with the project for the same reason `[meta] gitignore`\ndoes: \"this project must have real files\" is a property of the project (a\ncorporate policy forbidding a persistent daemon, an offline machine, a\ncompatibility test against native CLI behaviour), not of one run or one\nmachine."
+    },
+    "HarnessDelivery": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "render_locally": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "This harness's answer to **Render locally**, winning over the\nproject-wide value in both directions."
+        }
+      },
+      "description": "One harness's delivery override."
+    }
+  },
+  "$id": "https://tarekkharsa.github.io/agentstack/agentstack.schema.json"
+}

@@ -127,6 +127,32 @@ fn run_docs(args: &SelfDocsArgs) -> Result<()> {
             path.display()
         );
     }
+    write_manifest_schema()?;
+    Ok(())
+}
+
+/// Regenerate `docs/agentstack.schema.json` from the manifest model.
+///
+/// It rides `self docs --write` rather than getting a verb of its own for the
+/// same reason the command inventory does: both are documentation generated
+/// from a live Rust definition, both are committed, and both are guarded by a
+/// regenerate-and-diff test. One maintainer command keeps them in step —
+/// splitting them would make "I ran the generator" ambiguous.
+fn write_manifest_schema() -> Result<()> {
+    let path = schema_json_path();
+    let generated = agentstack_core::manifest::schema::manifest_schema_json();
+    // Read-compare-then-write: an unchanged file keeps its mtime, so a
+    // no-op regeneration does not look like a docs edit to anything watching.
+    if std::fs::read_to_string(&path).is_ok_and(|on_disk| on_disk == generated) {
+        println!("{} {} already up to date", "✓".green(), path.display());
+        return Ok(());
+    }
+    std::fs::write(&path, &generated).with_context(|| format!("writing {}", path.display()))?;
+    println!(
+        "{} regenerated the manifest JSON Schema in {}",
+        "✓".green(),
+        path.display()
+    );
     Ok(())
 }
 
@@ -157,6 +183,16 @@ pub fn splice_commands(doc: &str, block: &str) -> Result<String> {
 /// repo root is two levels up). `self docs` is a source-tree maintainer command.
 fn reference_md_path() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/reference.md")
+}
+
+/// `docs/agentstack.schema.json`, anchored at the repo root the same way
+/// [`reference_md_path`] is. It sits directly in `docs/` because GitHub Pages
+/// deploys that directory as the site root, which is what puts the file at the
+/// URL every emitted manifest's `#:schema` line names.
+fn schema_json_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../..")
+        .join(agentstack_core::manifest::schema::SCHEMA_DOC_PATH)
 }
 
 fn run_link(args: &SelfLinkArgs) -> Result<()> {

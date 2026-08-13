@@ -136,6 +136,7 @@ dependencies = [
  "indexmap",
  "owo-colors",
  "proptest",
+ "schemars",
  "serde",
  "serde_json",
  "sha2",
@@ -3624,6 +3625,7 @@ checksum = "687274d293b6cdc6e73e0fee520bf2049650090d7164f87672d212a3c530cf4a"
 dependencies = [
  "chrono",
  "dyn-clone",
+ "indexmap",
  "ref-cast",
  "schemars_derive",
  "serde",

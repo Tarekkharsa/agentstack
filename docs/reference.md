@@ -547,6 +547,19 @@ field is checked on load — a manifest (or lockfile, or library index)
 written by a newer schema than the build supports errors with an "upgrade
 agentstack" message instead of being misread silently.
 
+**Editor completion.** Every manifest agentstack writes opens with
+`#:schema https://tarekkharsa.github.io/agentstack/agentstack.schema.json`.
+That line is an ordinary TOML comment to every parser and a schema association
+to any editor running a TOML language server — Even Better TOML / taplo in VS
+Code, Zed, IntelliJ — which then offers key completion, type checking, and
+hover documentation for the whole file, with no editor configuration. The
+schema is [generated from the same Rust types the parser uses](agentstack.schema.json),
+so what the editor completes is what agentstack accepts, and the tables that
+reject unknown keys on load (`[policy.filesystem]`, `[workflows.*]`,
+`[delivery]`, and the rest) flag a typo in the editor too. A project that
+predates this, or a manifest you wrote by hand, gets the same treatment by
+adding that one line at the top.
+
 ### Data-driven adapters
 
 Claude Code, Claude Desktop, Codex, Cursor, Windsurf, Gemini CLI, VS Code,
