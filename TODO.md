@@ -189,6 +189,60 @@ it.
       documented where it is still its own act (`--update`, `--upgrade`, CI
       verification).
 
+## After the study
+
+Everything here is gated on the v0.19.0 study concluding. The freeze is not a
+pause on thinking — these are the things the walk and the dogfood turned up
+while the build was closed — but nothing here touches `main` until the five
+sessions are done and their three blockers are known.
+
+29. **[ ] Slash visibility for live skills.** The live lane serves skills to the
+    MODEL — gateway index plus on-demand load — and writes no native file, so
+    the CLI's slash menu never lists them and the human loses the `/name` entry
+    a native skill gets. Design candidate: a thin native stub per live skill
+    whose only job is slash-menu presence and triggering the gateway load —
+    human discoverability with zero-drift delivery. Found by the maintainer in
+    his own dogfood project.
+
+30. **[ ] The guard reads quoted prose as an invocation.** `check_bash` judges
+    tokens, so a shell line that merely CONTAINS `agentstack trust` is refused
+    whether it is a command or a quotation: writing the documentation for the
+    consent refusal tripped the refusal, twice, in this repository. Same family
+    as the deny-glob false positive on a commit message, and the same shape of
+    fix — a narrower reading that can tell an argument from a program. A study
+    participant documenting their own setup can hit this.
+
+31. **[ ] Active and dormant layers, with a `doctor` line that says which.** A
+    capability that is declared, pinned and trusted but not selected by the
+    active toolset is invisible in the surfaces that matter, and a reader
+    cannot tell "not installed" from "installed and not selected".
+    **Deliberately NOT a trust-off flag** — that was considered and rejected:
+    the answer is to make the state legible, never to make the gate optional.
+
+32. **[ ] The manifest should teach, not scaffold.** A generated manifest
+    carries the keys the import produced and nothing about the ones a reader
+    would want next. Before documenting any of it, verify the claim it rests
+    on: that an ABSENT `[targets]` really does mean every detected CLI, in the
+    code rather than in the docs.
+
+33. **[ ] The external-adapter PR milestone.** The adapter descriptors are the
+    most contribution-shaped surface in the product, and no outside PR has ever
+    landed one. First external adapter descriptor merged is the milestone worth
+    naming, because it is the first evidence the seam works for someone who
+    did not build it.
+
+34. **[ ] "Fail visible" needs a noun.** The property — a refusal that is
+    printed, exit-coded and recorded rather than swallowed — is the one this
+    product is built on and the one it has no word for. Naming it is a
+    documentation act with teeth: an unnamed property cannot be tested for
+    consistently, and every surface currently invents its own phrasing.
+
+35. **[ ] Say what would falsify the strategy.** `STRATEGY.md` names revisit
+    triggers, which is close, but a trigger is an event and not a prediction.
+    A strategy that cannot be wrong cannot be checked, and the study is the
+    first chance to write down what a bad result would look like BEFORE the
+    result arrives.
+
 ## Not scheduled, deliberately
 
 24. R2 — the positioning flip. `STRATEGY.md` reopens only at its named
