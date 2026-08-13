@@ -61,9 +61,14 @@ docs describe and the code does not emit.
 11. **[ ] P8-G3 — `apply`'s dry run has the same shape.** "0 targets would
     change. Re-run with --write to write." above an `apply --write` that exits 1
     with "nothing was delivered".
-12. **[ ] P8-G4 — `use --write` reports activation for a run that failed.**
+12. **[x] P8-G4 — `use --write` reports activation for a run that failed.**
     "activated 'backend' on 4 targets (wrote 0)" prints above `error: 3 targets
-    blocked` and exit 1.
+    blocked` and exit 1. **Closed in `64109b5`, verified 2026-08-13:** a fully
+    blocked write now prints "'backend' NOT activated — nothing was written"
+    (the same `total_failure` reading that already skips the lockfile pin), the
+    per-target refusals still print, and
+    `crates/cli/tests/a_dry_run_predicts_its_write.rs` holds the witness and its
+    control.
 13. **[ ] P8-G6 — `workflow explain --json` omits the documented
     `role_details[]`.** `list` has it; `explain` emits a top-level `roles[]`.
     Deliberately unfixed: choosing between documenting two key paths and
