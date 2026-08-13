@@ -97,7 +97,7 @@ fn the_compressed_path_records_the_same_events_as_the_explicit_one() {
     let fast = project(tmp.path(), "fast");
     git(&fast, &["init", "-q"]);
     drop_skill(&fast, "review", body);
-    agentstack::commands::yes::run_gated(&yes_args(), Some(&fast), true).unwrap();
+    agentstack::commands::yes::run_answered(&yes_args(), Some(&fast), true, Some(true)).unwrap();
 
     // The explicit path, over identical content.
     let slow = project(tmp.path(), "slow");
@@ -200,7 +200,7 @@ fn one_yes_delivers_skills_and_instructions_alike() {
     )
     .unwrap();
 
-    agentstack::commands::yes::run_gated(&yes_args(), Some(&proj), true).unwrap();
+    agentstack::commands::yes::run_answered(&yes_args(), Some(&proj), true, Some(true)).unwrap();
 
     let compiled = fs::read_to_string(proj.join("CLAUDE.md"))
         .expect("the instruction fragment compiled into CLAUDE.md");
@@ -321,7 +321,7 @@ fn content_that_arrived_with_the_project_cannot_take_the_short_path() {
     git(&proj, &["commit", "-qm", "initial"]);
 
     let before = fs::read_to_string(proj.join(".agentstack/agentstack.toml")).unwrap();
-    agentstack::commands::yes::run_gated(&yes_args(), Some(&proj), true).unwrap();
+    agentstack::commands::yes::run_answered(&yes_args(), Some(&proj), true, Some(true)).unwrap();
 
     assert_eq!(
         fs::read_to_string(proj.join(".agentstack/agentstack.toml")).unwrap(),
@@ -361,7 +361,7 @@ fn a_name_collision_cannot_take_the_short_path() {
     git(&proj, &["init", "-q"]);
     drop_skill(&proj, "review", "# Repo-controlled\n");
 
-    agentstack::commands::yes::run_gated(&yes_args(), Some(&proj), true).unwrap();
+    agentstack::commands::yes::run_answered(&yes_args(), Some(&proj), true, Some(true)).unwrap();
 
     let after = agentstack::manifest::load_from_dir(&proj.join(".agentstack")).unwrap();
     let review = after.manifest.skills.get("review").unwrap();

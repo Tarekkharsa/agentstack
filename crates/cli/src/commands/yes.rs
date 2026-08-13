@@ -82,6 +82,13 @@ pub fn run(args: &YesArgs, manifest_dir: Option<&Path>) -> Result<()> {
 /// would reopen exactly what §7.2 closed on `trust` — a caller asserting
 /// consent nobody gave. Headless callers keep the explicit path, where
 /// `--consented` binds the acknowledgement to previewed bytes.
+///
+/// H4: `--yes` no longer skips the funnel's one question either. It used to,
+/// and a terminal was the only thing standing behind it — which a resident
+/// agent can allocate (`script`, `expect`, `pty.spawn`), turning `yes --yes`
+/// into a promptless grant. The flag now acknowledges the review without
+/// answering it; the question is still asked, and still answered by whoever is
+/// at the terminal.
 pub fn run_gated(args: &YesArgs, manifest_dir: Option<&Path>, interactive: bool) -> Result<()> {
     run_answered(args, manifest_dir, interactive, None)
 }
