@@ -113,7 +113,7 @@ here and in the posture block `agentstack workflow report` prints verbatim:
   progress output is capped per line and per run, and the one allocation a
   script can name directly (`ArrayBuffer` / `SharedArrayBuffer`) has an
   engine-owned ceiling. But a trusted, reviewed, pinned script that allocates
-  on its own account, doubling a string in a loop, is bounded by nothing here.
+  on purpose, doubling a string in a loop, is bounded by nothing here.
   The bound covers hostile ingress, not intent.
 - **The native call budget covers our natives, not Boa's built-ins.** Calls
   into the host functions AgentStack installs (`agent`, `phase`, `log`,
