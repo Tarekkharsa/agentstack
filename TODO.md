@@ -53,9 +53,11 @@ consent decision that stays the maintainer's.
 Each is a surface that promises what a later command refuses, or a contract the
 docs describe and the code does not emit.
 
-10. **[ ] P8-G2 — `use`'s dry run promises what the write refuses.** On an
-    untrusted project it exits 0 and closes "Re-run with --write to apply.";
-    `use --write` then exits 1.
+10. **[x] P8-G2 — `use`'s dry run promises what the write refuses.** Closed by
+    #50: on an untrusted project the preview now closes "1 target would be
+    BLOCKED, so --write would refuse and write nothing" and never names
+    `--write`; pinned by
+    `crates/cli/tests/a_dry_run_predicts_its_write.rs::use_dry_run_does_not_promise_a_write_its_own_gate_would_refuse`.
 11. **[ ] P8-G3 — `apply`'s dry run has the same shape.** "0 targets would
     change. Re-run with --write to write." above an `apply --write` that exits 1
     with "nothing was delivered".
