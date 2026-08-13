@@ -7,7 +7,10 @@
 //! `init → apply --write → doctor` over an existing native config — completes
 //! without prompting and without surfacing a single advanced-mode concept.
 //! No Docker, policy, gateway, confinement/lockdown/sandbox, workflow, or
-//! trust vocabulary appears until the user reaches for those features.
+//! trust vocabulary appears until the user reaches for those features — with
+//! the two carve-outs the assertion itself documents, where a state the run
+//! actually left behind (no bridge registered; no review yet) has to be
+//! named or the close would claim a readiness it does not have.
 //!
 //! Spawns the real binary (not library calls) because the claim is about what
 //! the terminal actually prints.
@@ -135,6 +138,18 @@ fn scripted_init_apply_doctor_needs_no_advanced_vocabulary() {
             l.to_lowercase()
                 .replace("this project is trusted for auto mode", "")
                 .replace("not trusted for auto mode", "")
+                // H5, and the same carve-out for the same reason as the bridge
+                // disclosure above: a scripted `--yes` acknowledges the WRITE,
+                // never the review, so this journey ends with the project
+                // untrusted. Suppressing the one command that fixes that, to
+                // protect the word, would leave the close claiming a readiness
+                // the run does not have — invariant 8 beating the vocabulary
+                // rule, exactly as it does for the un-registered bridge. The
+                // guided journey (a human at `agentstack init`) still consents
+                // inside the wizard and prints none of this.
+                .replace("agentstack trust .", "")
+                .replace("↳ agentstack trust", "")
+                .replace("untrusted repos get control-plane tools only", "")
         })
         .collect::<Vec<_>>()
         .join("\n");

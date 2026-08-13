@@ -280,8 +280,13 @@ fn init_over_repo_supplied_config_imports_but_never_self_trusts() {
 /// first run does not end at the trust gate in their own repo. This is the
 /// counter-witness that keeps the F7 fix from quietly widening into "init
 /// never grants".
+///
+/// Since H5 the scripted route earns that grant with a REVIEWED PLAN
+/// (`init --plan` → `--consented <plan_digest>`) rather than with `--yes`
+/// alone; `tests/red_team_agent_self_consent.rs` holds the other half, that a
+/// bare `--yes` imports and leaves the project untrusted.
 #[test]
-fn init_over_machine_global_config_still_grants() {
+fn init_over_machine_global_config_still_grants_on_a_reviewed_plan() {
     let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let tmp = assert_fs::TempDir::new().unwrap();
     let home = tmp.path().join("home");
@@ -296,7 +301,13 @@ fn init_over_machine_global_config_still_grants() {
     let proj = tmp.path().join("proj");
     fs::create_dir_all(&proj).unwrap();
 
-    init::run(&init_args(), Some(&proj)).unwrap();
+    // The scripted route that grants: emit the plan, review it outside this
+    // process, hand its digest back. Through the production `plan_json`, so a
+    // digest this test computed differently could not paper over a drift.
+    let mut args = init_args();
+    let plan = init::plan_json(&args, Some(&proj)).unwrap();
+    args.consented = Some(plan["plan_digest"].as_str().unwrap().to_string());
+    init::run(&args, Some(&proj)).unwrap();
 
     let loaded = agentstack::manifest::load_from_dir(&proj.join(".agentstack")).unwrap();
     assert!(
