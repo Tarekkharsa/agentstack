@@ -235,7 +235,7 @@ impl<B: Backend> ServerHandler for AgentStackServer<B> {
         // modern request re-derives the project default). Clear and honour the
         // signal here too, or the next legacy client would wait for a
         // notification that was already consumed.
-        self.announce_tool_list_change(&context).await;
+        self.announce_tool_list_change(&context);
         Ok(if era == ProtocolEra::Modern {
             result.with_ttl_ms(0).with_cache_scope(CacheScope::Private)
         } else {
@@ -287,7 +287,7 @@ impl<B: Backend> ServerHandler for AgentStackServer<B> {
         // (lease open/close, a rebuild after a trust flip). Tell the client
         // before its own result reaches it is fine — order does not matter, the
         // notification only invalidates a cache.
-        self.announce_tool_list_change(&context).await;
+        self.announce_tool_list_change(&context);
         Ok(result.into())
     }
 
@@ -346,8 +346,13 @@ impl<B: Backend> ServerHandler for AgentStackServer<B> {
         // about, so this is the moment the proxied surface can appear. The
         // client has already fetched (or is about to fetch) an empty
         // `tools/list`; without this frame it never asks again.
+        // Detached for the same reason as the request path below: nothing
+        // here should wait on a send that the service loop delivers.
         if self.backend.take_tool_list_changed() {
-            let _ = context.peer.notify_tool_list_changed().await;
+            let peer = context.peer.clone();
+            tokio::spawn(async move {
+                let _ = peer.notify_tool_list_changed().await;
+            });
         }
     }
 }
@@ -355,11 +360,31 @@ impl<B: Backend> ServerHandler for AgentStackServer<B> {
 impl<B: Backend> AgentStackServer<B> {
     /// Emit `notifications/tools/list_changed` when the backend reports that
     /// the surface it just served is no longer the surface it would serve now.
-    /// Best-effort: a client that has gone away fails the send, and the
-    /// connection is about to end anyway.
-    async fn announce_tool_list_change(&self, context: &RequestContext<RoleServer>) {
+    ///
+    /// **Sent from a detached task, never awaited here, and that is the whole
+    /// point.** `peer.notify_tool_list_changed()` is a server-to-client send
+    /// that resolves through the same service loop currently waiting on this
+    /// handler to return. Awaiting it inline parks the handler: measured
+    /// through the real stdio server, an `agentstack_lease_open` sat in the
+    /// notify until the connection was tearing down, the send then FAILED, and
+    /// the call's own result — already computed, and correct — was produced too
+    /// late to be written. The client saw no response at all for a call that
+    /// had done its work.
+    ///
+    /// A result must never depend on a cache-invalidation hint reaching
+    /// anyone. Spawning inverts that: the response goes out now, the
+    /// notification goes out when the loop is free to send it.
+    ///
+    /// Still best-effort — a client that has gone away fails the send, and it
+    /// was only ever an invalidation hint. The flag is consumed HERE rather
+    /// than inside the task, so two calls in flight cannot both claim it and
+    /// send twice.
+    fn announce_tool_list_change(&self, context: &RequestContext<RoleServer>) {
         if self.backend.take_tool_list_changed() {
-            let _ = context.peer.notify_tool_list_changed().await;
+            let peer = context.peer.clone();
+            tokio::spawn(async move {
+                let _ = peer.notify_tool_list_changed().await;
+            });
         }
     }
 }
@@ -1355,6 +1380,149 @@ mod tests {
             self.list_changed
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         }
+    }
+
+    /// A backend whose tool call CHANGES the served surface — the shape an
+    /// `agentstack_lease_open` has: the call succeeds AND the tool list it
+    /// just served is now stale.
+    #[derive(Default)]
+    struct ChangingBackend {
+        changed: std::sync::atomic::AtomicBool,
+    }
+
+    impl Backend for ChangingBackend {
+        fn take_tool_list_changed(&self) -> bool {
+            self.changed
+                .swap(false, std::sync::atomic::Ordering::SeqCst)
+        }
+
+        fn list_tools(&self, _era: ProtocolEra) -> Result<Vec<ToolDefinition>, String> {
+            Ok(vec![ToolDefinition {
+                name: "open".into(),
+                description: Some("Opens something and changes the surface".into()),
+                input_schema: serde_json::from_value(serde_json::json!({
+                    "type": "object",
+                    "properties": {}
+                }))
+                .expect("object schema"),
+            }])
+        }
+
+        fn call_tool(
+            &self,
+            _name: &str,
+            arguments: Value,
+            _era: ProtocolEra,
+        ) -> Result<ToolOutcome, String> {
+            self.changed
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            Ok(ToolOutcome::success(arguments))
+        }
+    }
+
+    /// One request yields BOTH its result and the notification.
+    ///
+    /// **Read what this does and does not hold.** It is a property test, not a
+    /// reproduction: it passes against the broken code too, and I could not
+    /// build a faithful reproduction at this level. The defect needs the CLI's
+    /// real transport — an async reader plus the synchronous stdout writer
+    /// `serve_stdio_with_writer` hands us — and an all-async duplex, which is
+    /// what this crate's tests have, completes the notification happily. Two
+    /// other shapes were tried and neither reproduced it either.
+    ///
+    /// The witness that DOES reproduce it is
+    /// `crates/cli/tests/package_layer.rs::activating_a_package_exposes_the_boundary_without_loading_any_body`,
+    /// which drives the real binary over real pipes: it failed before this fix
+    /// and passes after, and that is the check to run when touching this path.
+    ///
+    /// What this one still earns its place for: it pins that a
+    /// surface-changing call answers AND announces, so a future change that
+    /// drops the notification altogether — the obvious over-correction for the
+    /// bug below — fails here.
+    ///
+    /// The defect, for whoever reads this next:
+    /// `announce_tool_list_change` used to AWAIT
+    /// `peer.notify_tool_list_changed()` from inside `call_tool`. That send
+    /// resolves through the same service loop already waiting on the handler to
+    /// return, so the handler parked in it. Traced through the real server, an
+    /// `agentstack_lease_open` sat in the notify until the connection was
+    /// tearing down, the send then failed, and the call's own result — already
+    /// computed and correct — was produced too late to be written. The client
+    /// got nothing back for a call that had done its work.
+    #[tokio::test]
+    async fn a_call_that_changes_the_surface_answers_and_announces() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+
+        let (server_io, client_io) = tokio::io::duplex(64 * 1024);
+        let server =
+            AgentStackServer::new(Arc::new(ChangingBackend::default()), "agentstack-test", "1");
+        let server_task = tokio::spawn(async move { serve_io(server, server_io).await });
+
+        let (client_read, mut client_write) = tokio::io::split(client_io);
+        for request in [
+            serde_json::json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+                "protocolVersion": "2025-11-25", "capabilities": {},
+                "clientInfo": { "name": "agentstack-test", "version": "1" }
+            } }),
+            serde_json::json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call",
+                "params": { "name": "open", "arguments": {} } }),
+            serde_json::json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                "params": { "name": "open", "arguments": {} } }),
+        ] {
+            client_write
+                .write_all(format!("{request}\n").as_bytes())
+                .await
+                .expect("write request");
+        }
+        client_write.flush().await.expect("flush");
+
+        // Read until the frames under test arrive or the deadline passes —
+        // never "until EOF": the server holds its write half open, so waiting
+        // for the stream to end would time out on a healthy run.
+        let mut lines = tokio::io::BufReader::new(client_read).lines();
+        let mut frames: Vec<Value> = Vec::new();
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+        let answered = |frames: &[Value], id: u64| {
+            frames
+                .iter()
+                .any(|f| f["id"] == id && f.get("result").is_some())
+        };
+        let notified = |frames: &[Value]| {
+            frames
+                .iter()
+                .any(|f| f["method"] == "notifications/tools/list_changed")
+        };
+        loop {
+            if answered(&frames, 2) && answered(&frames, 3) && notified(&frames) {
+                break;
+            }
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            if remaining.is_zero() {
+                break;
+            }
+            match tokio::time::timeout(remaining, lines.next_line()).await {
+                Ok(Ok(Some(line))) => {
+                    if let Ok(value) = serde_json::from_str::<Value>(&line) {
+                        frames.push(value);
+                    }
+                }
+                _ => break,
+            }
+        }
+        server_task.abort();
+
+        assert!(
+            answered(&frames, 2),
+            "the surface-changing call got no result: {frames:#?}"
+        );
+        assert!(
+            answered(&frames, 3),
+            "the following call got no result: {frames:#?}"
+        );
+        assert!(
+            notified(&frames),
+            "the client was never told its tool list went stale: {frames:#?}"
+        );
     }
 
     #[tokio::test]
