@@ -13,6 +13,9 @@ use agentstack_core::paint::OwoColorize;
 use anyhow::Result;
 
 use crate::cli::DoctorArgs;
+// The one predicate for "allow_roots opens the whole disk", shared with
+// `guard status` so the two reports cannot disagree.
+use crate::guard::allow_roots_cover_everything;
 use crate::manifest::{validate_with_context, Manifest, Server, ServerType};
 use crate::render::{
     declared_host, plan_hooks, plan_settings, plan_target_with_servers, resolve_targets,
@@ -4702,21 +4705,6 @@ fn classify_machine_posture(
             "only named-server rules — a repo can dodge them by renaming its server".into(),
         )
     }
-}
-
-/// Whether `[guard] allow_roots` opens the whole filesystem.
-///
-/// `/` is the spelling that does it, and it is worth naming rather than
-/// inferring: a root that merely sits high (`/Users`) still leaves the rest of
-/// the disk confined, so only a root that covers everything counts.
-fn allow_roots_cover_everything(allow_roots: &[String]) -> bool {
-    allow_roots.iter().any(|r| {
-        let t = r.trim();
-        // `!t.is_empty()` is load-bearing: an EMPTY entry also trims to "",
-        // and reading a blank string as "the whole filesystem" would report a
-        // misconfigured manifest as deliberately open.
-        !t.is_empty() && matches!(t.trim_end_matches('/'), "" | "/**" | "/*")
-    })
 }
 
 /// Diagnose the machine `[policy.tools]`/`[policy.egress]`/`[policy.secrets]`
