@@ -325,13 +325,12 @@ skills = ["api-review", "sql-review"]</code></pre></div>
 <p>It does not automatically absorb or delete every capability already present on the machine. Existing native skills remain CLI-owned until you explicitly adopt them. Existing MCP entries are copied only through the reviewed <code>init</code> or <code>adopt</code> flow, and their source entries remain in place. App-owned tools such as Computer Use and servers installed inside another application's bundle are excluded from import by default. Unrelated settings, plugins, and built-in CLI features remain native.</p>
 <p>This gives one useful boundary: put capabilities you want to reuse and govern in the central library; leave vendor- or application-owned capabilities with their owner.</p>
 <h2 id="dynamic-skill-loading">Dynamic skill loading<a class="hlink" href="#dynamic-skill-loading" aria-label="Link to this section">#</a></h2>
-<p>The gateway places a compact skill index in the agent's context, carried on the <code>agentstack_list_loadable</code> tool description — the one place every MCP client puts in front of the model:</p>
-<div class="cb"><pre class="block"><code>Loadable now:
-- api-review — Review API changes for compatibility and error handling
-- rust-testing — Plan and write focused Rust tests
-- using-agentstack — Operate an AgentStack-managed setup</code></pre></div>
-<p>It is names plus one-line descriptions, capped per entry and in total to keep context small; when the cap bites, names are kept and descriptions are dropped, because the name is what a load is called with. Because it travels with the tool list, it is re-read whenever that list changes — a project bound from client roots, a lease opened or closed — instead of being frozen at connect time. The agent can also refresh or search it with <code>agentstack_list_loadable(query)</code>. When a task matches a description, it calls <code>agentstack_load(name, reason)</code> and receives only that skill's full body.</p>
-<p>The user may ask for a skill by name, but does not have to. A clear frontmatter description tells the agent when the skill is relevant. The embedded <code>using-agentstack</code> manual is always available, even before a project is trusted. An untrusted project lists names only: descriptions are bundle content, and untrusted content stays inert wherever it would be read.</p>
+<p>The gateway places a compact skill index in the agent's initial context:</p>
+<div class="cb"><pre class="block"><code>api-review — Review API changes for compatibility and error handling
+rust-testing — Plan and write focused Rust tests
+using-agentstack — Operate an AgentStack-managed setup</code></pre></div>
+<p>It is names plus one-line descriptions, capped to keep context small. The agent can refresh or search it with <code>agentstack_list_loadable(query)</code>. When a task matches a description, it calls <code>agentstack_load(name, reason)</code> and receives only that skill's full body.</p>
+<p>The user may ask for a skill by name, but does not have to. A clear frontmatter description tells the agent when the skill is relevant. The embedded <code>using-agentstack</code> manual is always available, even before a project is trusted.</p>
 <h2 id="dynamic-mcp-tool-discovery">Dynamic MCP tool discovery<a class="hlink" href="#dynamic-mcp-tool-discovery" aria-label="Link to this section">#</a></h2>
 <p>The default gateway keeps upstream MCP schemas out of the initial tool list. The agent calls <code>tools_search({ query })</code> to find a tool, then asks for that tool's schema and invokes it by its namespaced name. This keeps the agent's context bounded even when several MCP servers expose hundreds of tools.</p>
 <p>Toolsets decide which MCP servers can be discovered. Machine and project policy still apply to every brokered call.</p>

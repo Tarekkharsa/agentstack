@@ -130,31 +130,22 @@ their owner.
 
 ## Dynamic skill loading
 
-The gateway places a compact skill index in the agent's context, carried on the
-`agentstack_list_loadable` tool description — the one place every MCP client
-puts in front of the model:
+The gateway places a compact skill index in the agent's initial context:
 
 ```text
-Loadable now:
-- api-review — Review API changes for compatibility and error handling
-- rust-testing — Plan and write focused Rust tests
-- using-agentstack — Operate an AgentStack-managed setup
+api-review — Review API changes for compatibility and error handling
+rust-testing — Plan and write focused Rust tests
+using-agentstack — Operate an AgentStack-managed setup
 ```
 
-It is names plus one-line descriptions, capped per entry and in total to keep
-context small; when the cap bites, names are kept and descriptions are dropped,
-because the name is what a load is called with. Because it travels with the tool
-list, it is re-read whenever that list changes — a project bound from client
-roots, a lease opened or closed — instead of being frozen at connect time. The
-agent can also refresh or search it with `agentstack_list_loadable(query)`. When
-a task matches a description, it calls `agentstack_load(name, reason)` and
-receives only that skill's full body.
+It is names plus one-line descriptions, capped to keep context small. The agent
+can refresh or search it with `agentstack_list_loadable(query)`. When a task
+matches a description, it calls `agentstack_load(name, reason)` and receives
+only that skill's full body.
 
 The user may ask for a skill by name, but does not have to. A clear frontmatter
 description tells the agent when the skill is relevant. The embedded
 `using-agentstack` manual is always available, even before a project is trusted.
-An untrusted project lists names only: descriptions are bundle content, and
-untrusted content stays inert wherever it would be read.
 
 ## Dynamic MCP tool discovery
 

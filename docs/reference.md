@@ -876,14 +876,6 @@ manual (the bundled `using-agentstack` skill) is always loadable here, even
 untrusted — see
 [field notes](archive/design/reference-field-notes.md#zero-files-gateway-always-on-manual).
 
-The ambient skill index (concept:
-[concepts.md](concepts.md#dynamic-skill-loading)) travels on the
-`agentstack_list_loadable` tool description, not the `initialize` `instructions`
-field, so it reaches every MCP client and is re-read on every `tools/list` —
-after a legacy client's roots answer names the project, and after a lease opens
-or closes. The trust gate applies to it exactly as it applies to the tool:
-an untrusted project lists names only.
-
 Honest limits: MCP servers, secrets, the tool firewall, the call audit log, and
 skills-over-MCP create no per-project native capability artifacts. Instructions,
 settings, hooks, extensions, and file-only CLIs still use the managed files

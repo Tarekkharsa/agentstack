@@ -157,6 +157,7 @@ struct RequestSnapshot {
     dir: Option<PathBuf>,
     gateway: std::sync::Arc<crate::gateway::Gateway>,
     trust_note: Option<String>,
+    project_known: bool,
 }
 
 impl RmcpBackend {
@@ -228,13 +229,15 @@ impl RmcpBackend {
     /// Record that the tool list a client was last given no longer matches the
     /// one this connection would serve now. Drained by the protocol adapter.
     ///
-    /// This used to be transparent-mode only, on the grounds that compact mode
-    /// advertises a fixed control-plane surface. It no longer does: the
-    /// `agentstack_list_loadable` description carries the ambient skill index,
-    /// so a roots binding or a lease transition changes the compact listing
-    /// too, and a client that is never told keeps showing the pre-binding
-    /// index for the life of the connection.
+    /// Transparent mode only, and that is the whole scope of the problem: only
+    /// there do the proxied upstream tools appear in `tools/list`, so only
+    /// there can the list change after a client has fetched it. Compact mode
+    /// advertises a fixed control-plane surface and would gain nothing but an
+    /// unexplained frame.
     fn note_tool_list_changed(&self) {
+        if !self.transparent {
+            return;
+        }
         self.tools_changed
             .store(true, std::sync::atomic::Ordering::Relaxed);
     }
@@ -254,6 +257,7 @@ impl RmcpBackend {
                 dir: dir.clone(),
                 gateway: std::sync::Arc::clone(gateway),
                 trust_note: trust_anchor.as_ref().and_then(|anchor| anchor.note()),
+                project_known: true,
             },
             RmcpProject::Auto {
                 project,
@@ -279,6 +283,7 @@ impl RmcpBackend {
                     dir: project.dir().map(Path::to_path_buf),
                     gateway: project.gateway_arc(),
                     trust_note: project.trust_note(),
+                    project_known: project.dir().is_some(),
                 }
             }
         }
@@ -339,11 +344,16 @@ impl RmcpBackend {
 
 impl agentstack_mcp::Backend for RmcpBackend {
     fn instructions(&self) -> Option<String> {
-        // A fixed pointer at the skill tools: nothing to snapshot, so
-        // `initialize` no longer binds the project. That binding belonged to
-        // the old initialize-time index, and doing it here raced the legacy
-        // `roots/list` answer that names the project in the first place.
-        initialize_instructions()
+        // Building the instructions can bind the project and open its default
+        // toolset, so it takes the exclusive side like any other swap.
+        let _exclusive = self.dispatch.exclusive();
+        let snapshot = self.snapshot(None);
+        initialize_instructions(
+            snapshot.dir.as_deref(),
+            snapshot.trust_note.as_deref(),
+            &self.lease,
+            snapshot.project_known,
+        )
     }
 
     fn list_tools(
@@ -359,29 +369,6 @@ impl agentstack_mcp::Backend for RmcpBackend {
         }
         let snapshot = self.snapshot(None);
         let mut tools = tool_defs().as_array().cloned().unwrap_or_default();
-        // The ambient skill index rides on this one tool's description: every
-        // MCP client puts tool descriptions in front of the model, and the
-        // list is refetched whenever the surface changes (roots binding, lease
-        // transitions), so the index tracks the loadable set instead of being
-        // frozen at initialize. The static defs stay static; the copy this
-        // listing hands out is the one that carries the index.
-        if let Some(block) = skill_index_block(
-            snapshot.dir.as_deref(),
-            snapshot.trust_note.as_deref(),
-            &self.lease,
-        ) {
-            if let Some(tool) = tools
-                .iter_mut()
-                .find(|tool| tool.get("name").and_then(Value::as_str) == Some(LIST_LOADABLE_TOOL))
-            {
-                let base = tool
-                    .get("description")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .to_string();
-                tool["description"] = Value::String(format!("{base}\n\n{block}"));
-            }
-        }
         if self.transparent {
             tools.extend(snapshot.gateway.namespaced_tools().iter().cloned());
         }
@@ -1229,9 +1216,6 @@ fn dispatch_tool_with_lease(
     };
     json!({ "content": [{ "type": "text", "text": text }], "isError": is_error })
 }
-
-/// The catalog tool whose description carries the ambient skill index.
-const LIST_LOADABLE_TOOL: &str = "agentstack_list_loadable";
 
 fn tool_defs() -> Value {
     let mut tools = json!([
@@ -2213,20 +2197,11 @@ fn list_loadable(dir: Option<&Path>, trust_note: Option<&str>) -> Result<String>
     list_loadable_with_lease(dir, trust_note, &new_lease_store(), None)
 }
 
-/// Entry cap and per-description cap for the ambient skill index. The library
-/// is typically a dozen skills; the caps only matter when a bundle tries to
-/// flood the ambient context (bundle content is hostile input).
+/// Entry cap and per-description cap for the initialize-embedded index. The
+/// library is typically a dozen skills; the caps only matter when a bundle
+/// tries to flood the ambient context (bundle content is hostile input).
 const INDEX_MAX_ENTRIES: usize = 50;
 const INDEX_MAX_DESC_CHARS: usize = 160;
-/// Aggregate cap for the whole index block. The per-entry caps bound one line;
-/// this bounds the sum, so fifty well-behaved entries can't add up to a wall of
-/// text in every `tools/list` answer. Names are never dropped to fit — the name
-/// is what `agentstack_load` is called with, so it is the one part of an entry
-/// that has to survive; descriptions share whatever the names leave over.
-const INDEX_MAX_CHARS: usize = 4_000;
-/// Below this the budget buys nothing readable — a few characters and an
-/// ellipsis is noise, not a hint — so the entry falls back to its bare name.
-const INDEX_MIN_DESC_CHARS: usize = 24;
 
 /// What a keep-pinned skill's catalog entry says when its approved copy cannot
 /// be produced (G11). The `description` slot deliberately holds no pseudo-
@@ -2245,25 +2220,9 @@ fn one_line(s: &str, max: usize) -> String {
     crate::text::one_line(s, max)
 }
 
-/// The `instructions` string for the MCP initialize result: a short pointer at
-/// the two skill tools. The index itself no longer rides here — `instructions`
-/// is answered once, at initialize, before a legacy client has even named its
-/// project, and it is never re-sent when the loadable set changes. It lives on
-/// the `agentstack_list_loadable` tool description instead (see
-/// `skill_index_block`), which every MCP client renders and which is refetched
-/// on `tools/list_changed`.
-fn initialize_instructions() -> Option<String> {
-    Some(String::from(
-        "Skills load on demand: pick a name and call agentstack_load(name, reason). \
-         The agentstack_list_loadable tool description carries the current index of \
-         loadable skills; agentstack_list_loadable(query?) re-reads it live — the set \
-         can change when a lease or session opens.",
-    ))
-}
-
-/// An ambient index of the skills loadable right now (name + one-line
-/// description), rendered for the `agentstack_list_loadable` tool description
-/// so an agent sees the menu without a discovery round-trip and can call
+/// The `instructions` string for the MCP initialize result: an ambient index
+/// of the skills loadable right now (name + one-line description), so an
+/// agent sees the menu without a discovery round-trip and can call
 /// `agentstack_load` directly. Skills that aren't in context don't get used —
 /// this is the same reason host CLIs list native skills in the system prompt.
 ///
@@ -2271,68 +2230,45 @@ fn initialize_instructions() -> Option<String> {
 /// project → names only, descriptions are inert bundle content), profile
 /// fencing, and the built-in manual behave identically — the index is exactly
 /// what a first `agentstack_list_loadable` call would have returned. Best
-/// effort: `tools/list` must answer even when the index can't be built.
-fn skill_index_block(
+/// effort: initialize must succeed even when the index can't be built.
+fn initialize_instructions(
     dir: Option<&Path>,
     trust_note: Option<&str>,
     lease: &LeaseStore,
+    project_known: bool,
 ) -> Option<String> {
+    let mut out = String::from(
+        "Skills load on demand: pick a name and call agentstack_load(name, reason). \
+         agentstack_list_loadable(query?) has the live list — the set can change when \
+         a lease or session opens.\n",
+    );
+    if !project_known {
+        // Auto mode initializes before the project is established (the
+        // roots/list answer arrives later); probing the cwd here could index
+        // the wrong project and would sidestep the trust gate.
+        out.push_str(
+            "No project established yet — call agentstack_list_loadable for the skill index.",
+        );
+        return Some(out);
+    }
     let raw = list_loadable_with_lease(dir, trust_note, lease, None).ok()?;
     let parsed: Value = serde_json::from_str(&raw).ok()?;
     let entries = parsed.get("loadable")?.as_array()?;
-    let shown: Vec<&Value> = entries
-        .iter()
-        .take(INDEX_MAX_ENTRIES)
-        .filter(|entry| {
-            !entry
-                .get("name")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .is_empty()
-        })
-        .collect();
-    // Names first, descriptions with the remainder: an entry whose description
-    // is trimmed away still loads, an entry whose name is trimmed away is not
-    // an entry at all.
-    let names_len: usize = shown
-        .iter()
-        .filter_map(|entry| entry.get("name").and_then(Value::as_str))
-        .map(|name| name.chars().count())
-        .sum();
-    let share = if shown.is_empty() {
-        0
-    } else {
-        (INDEX_MAX_CHARS.saturating_sub(names_len) / shown.len()).min(INDEX_MAX_DESC_CHARS)
-    };
-    let desc_budget = if share < INDEX_MIN_DESC_CHARS {
-        0
-    } else {
-        share
-    };
-    let mut out = String::from("Loadable now:\n");
-    for entry in shown {
+    out.push_str("Loadable now:\n");
+    for entry in entries.iter().take(INDEX_MAX_ENTRIES) {
         let name = entry.get("name").and_then(Value::as_str).unwrap_or("");
-        let raw_desc = entry
+        if name.is_empty() {
+            continue;
+        }
+        let desc = entry
             .get("description")
             .and_then(Value::as_str)
             .unwrap_or("");
-        // Two different emptinesses: no description at all (worth telling the
-        // human about) versus one the aggregate budget just squeezed out (the
-        // name alone is still a complete, loadable entry).
-        let described = !one_line(raw_desc, INDEX_MAX_DESC_CHARS).is_empty();
-        let desc = if desc_budget == 0 {
-            String::new()
-        } else {
-            one_line(raw_desc, desc_budget)
-        };
+        let desc = one_line(desc, INDEX_MAX_DESC_CHARS);
         // G11 — the index is headed "Loadable now", so an entry the loader will
         // refuse has to say so on its own line. Without this it would render as
         // a plain name (or, worse, fall into the "loads fine by name" branch
-        // below) under a heading that promises the opposite. This line keeps
-        // the full per-entry cap and ignores the aggregate budget: a refusal
-        // that doesn't say why is worse than a slightly longer index, and the
-        // text is agentstack's own constant on a path a human deliberately
-        // created (keep-pinned with an unusable snapshot), not bundle content.
+        // below) under a heading that promises the opposite.
         if entry.get("loadable").and_then(Value::as_bool) == Some(false) {
             let why = entry
                 .get("unavailable")
@@ -2344,10 +2280,7 @@ fn skill_index_block(
             ));
         } else if !desc.is_empty() {
             out.push_str(&format!("- {name} — {desc}\n"));
-        } else if described || trust_note.is_some() {
-            // Described but out of budget, or gated by trust: the bare name.
-            out.push_str(&format!("- {name}\n"));
-        } else {
+        } else if trust_note.is_none() {
             // Genuinely undescribed (on the untrusted path descriptions are
             // gated, not missing). Say so — the agent is the only messenger
             // that reliably reaches whoever owns the skill.
@@ -2355,6 +2288,8 @@ fn skill_index_block(
                 "- {name} (its SKILL.md has no description — it loads fine by name; \
                  suggest the user add one)\n"
             ));
+        } else {
+            out.push_str(&format!("- {name}\n"));
         }
     }
     if entries.len() > INDEX_MAX_ENTRIES {
@@ -3367,128 +3302,39 @@ mod tests {
         }
     }
 
-    /// The advertised `agentstack_list_loadable` description, read off the real
-    /// `list_tools` surface — the channel the ambient skill index rides on.
-    fn listed_index(backend: &RmcpBackend) -> String {
-        use agentstack_mcp::Backend;
-        backend
-            .list_tools(agentstack_mcp::ProtocolEra::Legacy)
-            .expect("the control-plane tool definitions must convert")
-            .into_iter()
-            .find(|tool| tool.name == LIST_LOADABLE_TOOL)
-            .and_then(|tool| tool.description)
-            .expect("the catalog tool is advertised with a description")
-    }
-
-    /// The `agentstack_list_loadable` tool description carries an ambient index
-    /// of loadable skills (name + one-line description), mirroring what the
-    /// tool itself would answer: full entries when trusted, names only when the
-    /// trust gate is up.
+    /// The initialize result carries an ambient index of loadable skills
+    /// (name + one-line description), mirroring `agentstack_list_loadable`
+    /// exactly: full entries when trusted, names only when the trust gate is
+    /// up, and no project probe at all in auto mode (project unknown until
+    /// the roots answer).
     #[test]
-    fn listed_tool_description_embeds_trust_gated_skill_index() {
+    fn initialize_embeds_trust_gated_skill_index() {
         let _guard = crate::util::TEST_ENV_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let (_home, proj) = pinned_inline_project();
 
         // Trusted: names + descriptions, plus the built-in manual.
-        let text = listed_index(&fixture_backend(
-            shared(crate::gateway::Gateway::empty()),
-            Some(proj.path()),
-            false,
-        ));
+        let text =
+            initialize_instructions(Some(proj.path()), None, &new_lease_store(), true).unwrap();
         assert!(text.contains("- helper — helps"), "{text}");
         assert!(text.contains(BUILTIN_MANUAL), "{text}");
+        assert!(text.contains("agentstack_load"), "{text}");
 
         // Untrusted: the name is listed, the description (bundle content)
         // is not — identical to the list_loadable trust gate.
-        let text = skill_index_block(
-            Some(proj.path()),
-            Some("This project is not trusted yet."),
-            &new_lease_store(),
-        )
-        .unwrap();
+        let note = "This project is not trusted yet.";
+        let text = initialize_instructions(Some(proj.path()), Some(note), &new_lease_store(), true)
+            .unwrap();
         assert!(text.contains("- helper\n"), "{text}");
         assert!(!text.contains("helps"), "{text}");
 
-        // Initialize keeps only the pointer — the index is not frozen there.
-        let text = initialize_instructions().unwrap();
-        assert!(text.contains("agentstack_list_loadable"), "{text}");
+        // Auto mode (project not yet established): no probe, just the
+        // pointer at the tool.
+        let text =
+            initialize_instructions(Some(proj.path()), None, &new_lease_store(), false).unwrap();
+        assert!(text.contains("No project established yet"), "{text}");
         assert!(!text.contains("helper"), "{text}");
-
-        std::env::remove_var("AGENTSTACK_HOME");
-    }
-
-    /// The index follows the project the client names. A legacy client binds an
-    /// untrusted project through `roots/list` — after `initialize`, which is
-    /// exactly why the index cannot live in the initialize result — and the
-    /// next `tools/list` must carry that project's names, descriptions gated.
-    #[test]
-    fn roots_binding_refreshes_the_index_under_the_trust_gate() {
-        use agentstack_mcp::Backend;
-        let _guard = crate::util::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let (_home, proj) = pinned_inline_project();
-
-        let backend = RmcpBackend {
-            project: std::sync::Mutex::new(RmcpProject::Auto {
-                project: AutoProject::new(None),
-                automatic_lease_decided: false,
-            }),
-            dispatch: DispatchBarrier::default(),
-            tools_changed: std::sync::atomic::AtomicBool::new(false),
-            lease: new_lease_store(),
-            transparent: false,
-            grant_mode: false,
-        };
-        backend.set_legacy_roots(vec![format!("file://{}", proj.path().display())]);
-        // The client is entitled to ignore a stale list unless it is told;
-        // the index is only live because this notification fires here.
-        assert!(
-            backend.take_tool_list_changed(),
-            "roots binding must notify tools/list_changed"
-        );
-
-        let text = listed_index(&backend);
-        assert!(text.contains("- helper\n"), "{text}");
-        assert!(!text.contains("helps"), "{text}");
-
-        std::env::remove_var("AGENTSTACK_HOME");
-    }
-
-    /// The aggregate budget trims descriptions, never names: a name is what
-    /// `agentstack_load` is called with, a description is only a hint.
-    #[test]
-    fn the_index_budget_drops_descriptions_before_names() {
-        use assert_fs::prelude::*;
-        let _guard = crate::util::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let home = assert_fs::TempDir::new().unwrap();
-        std::env::set_var("AGENTSTACK_HOME", home.path());
-
-        // Forty 100-character names spend the whole budget on names alone.
-        let proj = assert_fs::TempDir::new().unwrap();
-        let names: Vec<String> = (0..40)
-            .map(|i| format!("{i:02}-{}", "x".repeat(97)))
-            .collect();
-        let mut manifest = String::from("version = 1\n");
-        for name in &names {
-            manifest.push_str(&format!(
-                "[skills.\"{name}\"]\npath = \"./skills/{name}\"\n"
-            ));
-            proj.child(format!("skills/{name}/SKILL.md"))
-                .write_str("---\ndescription: a distinctive description\n---\n# skill\n")
-                .unwrap();
-        }
-        proj.child("agentstack.toml").write_str(&manifest).unwrap();
-
-        let text = skill_index_block(Some(proj.path()), None, &new_lease_store()).unwrap();
-        for name in &names {
-            assert!(text.contains(&format!("- {name}\n")), "{name} missing");
-        }
-        assert!(!text.contains("a distinctive description"), "{text}");
 
         std::env::remove_var("AGENTSTACK_HOME");
     }
