@@ -319,6 +319,13 @@ fn refuse_invalid_manifest(ctx: &super::Context) -> Result<()> {
 fn pin_all(ctx: &super::Context, args: &LockArgs) -> Result<Pinned> {
     let manifest = &ctx.loaded.manifest;
 
+    // The lock bytes as this pass found them. Read for one question only —
+    // did anything move? — which decides whether the manifest stamp may ride
+    // along at the end (`stamp_manifest`). The same "pins changed" signal
+    // `run` computes for the trust warning, taken here because the pin
+    // helpers each write independently.
+    let lock_at_entry = std::fs::read(Lock::path(&ctx.dir)).ok();
+
     // Instructions are manifest-global, not profile-scoped: pin them
     // regardless of the profile selection (and even with zero profiles). The
     // lock command is strict — an unreadable fragment errors, stale pins for
@@ -393,6 +400,8 @@ fn pin_all(ctx: &super::Context, args: &LockArgs) -> Result<Pinned> {
         None => resolve_implicit_default(manifest, &ctx.dir, &library, &lib_home, &store)?,
     };
     record_lock(&ctx.dir, &skills, &servers, manifest, &library)?;
+    let pins_changed = std::fs::read(Lock::path(&ctx.dir)).ok() != lock_at_entry;
+    stamp_manifest(&ctx.dir, args.profile.is_none(), pins_changed)?;
 
     let from = match &profiles {
         Some(p) => super::count(p.len(), "toolset"),
@@ -424,6 +433,92 @@ fn pin_all(ctx: &super::Context, args: &LockArgs) -> Result<Pinned> {
         summary: pinned_summary,
         from,
     })
+}
+
+/// Does this project's lockfile pin a manifest that has since been edited?
+///
+/// The cheap read the whole stale-pin story rests on: two file reads and a
+/// digest comparison, no resolver, no network — so a refusal path that may not
+/// resolve (`locked.rs` ruling P23) can still ask it.
+///
+/// `false` for a lock with no stamp, which is the honest answer: staleness is
+/// UNKNOWN there, and every surface behaves exactly as it did before the field
+/// existed. It says "not known to be stale", never "known to be fresh".
+pub(crate) fn pins_are_stale(dir: &Path) -> bool {
+    Lock::load(dir)
+        .map(|lock| lock.manifest_stale(dir) == Some(true))
+        .unwrap_or(false)
+}
+
+/// The first of the two steps a stale pin needs, in the form a driver may run
+/// verbatim. Re-pinning alone is not the whole repair — see [`STALE_PIN_WHY`],
+/// which names the second — but it is the one that must come first, because a
+/// grant given before the pins move is void the moment they do.
+pub(crate) const STALE_PIN_FIX: &str = "agentstack lock --write";
+
+/// Why, and the second step. Both steps in order, on the one line the reader
+/// is already looking at.
+pub(crate) const STALE_PIN_WHY: &str =
+    "the lockfile pins your manifest as it was before your edit — re-pin, then re-review with \
+     `agentstack trust .`";
+
+/// The finding itself, as a sentence — what is true, with no verb in it. The
+/// two surfaces attach their own remediation in their own idiom: `status` puts
+/// it on the Next line, `doctor` after its `↳`.
+pub(crate) const STALE_PIN_LINE: &str =
+    "agentstack.lock was computed from an older agentstack.toml — its pins describe this project \
+     as it was before the manifest was edited";
+
+/// Record — on the lockfile this pin pass just wrote — which manifest bytes
+/// the pins were computed from (`Lock::manifest_digest`), so a later `status`
+/// or `doctor` can tell a stale pin set from a fresh one by comparing bytes
+/// instead of running the resolver.
+///
+/// Three conditions, each of them a refusal to make a claim this run cannot
+/// support:
+///
+/// - **`whole_manifest` only.** A `lock --profile <t>` re-resolves that
+///   toolset's skills and servers and nothing else, so it has not seen the
+///   manifest whole. It leaves the stamp exactly as the pin helpers left it
+///   (dropped, if anything was written) rather than certifying a picture it
+///   did not take.
+/// - **Never creates a lockfile.** A manifest with nothing to pin gets no
+///   `agentstack.lock` (`lock_pins_something`), and minting one here for the
+///   sake of a stamp would flip the project's `locked` state — the very signal
+///   the trust rung reads.
+/// - **Never rewrites for an unchanged stamp.** The lock bytes feed the trust
+///   digest, so a re-lock that changed nothing must stay byte-identical and
+///   leave the grant standing.
+/// - **Never mints a stamp on its own.** A lock that carries no stamp and a
+///   pin pass that moved nothing leave the file untouched: adding the field
+///   would change the lock bytes, which re-gates a trusted project for a run
+///   that pinned nothing new. The stamp rides a write that was happening
+///   anyway — the first pin change this project makes carries it, and until
+///   then staleness reads as UNKNOWN, exactly as it did before the field
+///   existed.
+///
+/// The one write it makes on its own is a stamp that is WRONG (`Some(true)`
+/// with nothing else to write), and that one is mandatory: a surface that
+/// reported "stale, run `agentstack lock --write`" over a command that then
+/// left every byte in place would be the poll-and-run dead end this codebase
+/// refuses to ship. Correcting the stamp is what makes the offered command
+/// converge.
+fn stamp_manifest(dir: &Path, whole_manifest: bool, pins_changed: bool) -> Result<()> {
+    if !whole_manifest || !Lock::path(dir).exists() {
+        return Ok(());
+    }
+    let lock = Lock::load(dir)?;
+    match lock.manifest_stale(dir) {
+        // Already accurate.
+        Some(false) => Ok(()),
+        // Recorded, and wrong. Correct it — see above.
+        Some(true) => lock.save_stamped(dir),
+        // Unstamped: record one only while the lock is being rewritten anyway.
+        // (When pins moved, the pin helpers' own saves left it unstamped, so
+        // this is the arm that stamps the ordinary re-lock.)
+        None if pins_changed => lock.save_stamped(dir),
+        None => Ok(()),
+    }
 }
 
 pub fn run(args: &LockArgs, manifest_dir: Option<&Path>) -> Result<()> {

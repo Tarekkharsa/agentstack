@@ -91,6 +91,72 @@ pub struct Lock {
     /// claims and what it does not.
     #[serde(default, rename = "setting", skip_serializing_if = "Vec::is_empty")]
     pub settings: Vec<LockedSetting>,
+    /// The declaration bytes this pin set was computed from — SHA-256 over
+    /// `agentstack.toml` plus the `agentstack.local.toml` overlay, framed by
+    /// [`manifest_stamp`].
+    ///
+    /// **Why the lock records it.** Every pin above answers "did this content
+    /// move?"; none of them answers "was this lock computed from the manifest
+    /// that is on disk now?". A hand-edited manifest that adds a server, a
+    /// settings key, or an instruction leaves every existing pin matching, so
+    /// the only way to notice the lock predates the edit used to be to run the
+    /// resolver again — which the refusal path may not do. This field turns
+    /// that question into a byte comparison ([`Lock::manifest_stale`]).
+    ///
+    /// **Absent means UNKNOWN, never fresh.** Every lock written before this
+    /// field, and every write that was not a whole-manifest re-lock, carries
+    /// no stamp — and a reader must then behave exactly as it did before the
+    /// field existed. That is why [`Lock::save`] DROPS the stamp and only
+    /// [`Lock::save_stamped`] records one: a partial write (an `add`, a
+    /// profile-scoped `lock`, a `use --write` first pin) cannot honestly claim
+    /// the pins cover the whole manifest, and a stale claim would report a
+    /// healthy project as broken.
+    ///
+    /// Additive `#[serde(default)]` optional at version 2, on the precedent
+    /// [`LockedSkill::license`] states: an older binary that rewrites it away
+    /// changes the lock bytes, which flips the trust digest and forces a
+    /// review rather than losing it silently. `skip_serializing_if` keeps an
+    /// unstamped lock byte-identical, and the writer only records a stamp on a
+    /// re-lock that was rewriting the file anyway — so an existing project is
+    /// re-gated by the arrival of this field exactly once, folded into a
+    /// re-review its own pin change had already earned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manifest_digest: Option<Sha256Hex>,
+}
+
+/// Domain separator for the manifest stamp. Distinct from every content digest
+/// so a stamp can never be mistaken for (or collide with) a pin.
+const MANIFEST_STAMP_DOMAIN: &[u8] = b"agentstack-lock-manifest-stamp-v1\0";
+
+/// The stamp a whole-manifest re-lock records for the project at `dir`:
+/// SHA-256 over the declaration layers the pins are computed from — the
+/// manifest, and the local overlay when one exists.
+///
+/// The overlay is included because it declares servers, and a server declared
+/// there is pinned like any other; leaving it out would make an overlay edit
+/// invisible to the staleness check. Each segment is framed presence-byte +
+/// length + bytes, the same framing the trust digest uses, so an absent
+/// overlay can never collide with a present empty one.
+///
+/// `None` when there is no readable manifest — nothing was declared, so there
+/// is nothing to be stale against.
+pub fn manifest_stamp(dir: &Path) -> Option<Sha256Hex> {
+    use sha2::{Digest, Sha256};
+    let manifest = fs::read(dir.join(crate::manifest::load::MANIFEST_FILE)).ok()?;
+    let local = fs::read(dir.join(crate::manifest::load::LOCAL_FILE)).ok();
+    let mut hasher = Sha256::new();
+    hasher.update(MANIFEST_STAMP_DOMAIN);
+    for segment in [Some(manifest.as_slice()), local.as_deref()] {
+        match segment {
+            Some(bytes) => {
+                hasher.update([1u8]);
+                hasher.update((bytes.len() as u64).to_le_bytes());
+                hasher.update(bytes);
+            }
+            None => hasher.update([0u8]),
+        }
+    }
+    Sha256Hex::parse(&format!("{:x}", hasher.finalize())).ok()
 }
 
 impl Default for Lock {
@@ -105,6 +171,7 @@ impl Default for Lock {
             workflows: Vec::new(),
             packages: Vec::new(),
             settings: Vec::new(),
+            manifest_digest: None,
         }
     }
 }
@@ -589,10 +656,76 @@ impl Lock {
         Ok(lock)
     }
 
+    /// Write the lock, DROPPING any manifest stamp.
+    ///
+    /// The ordinary save, and the one every partial write takes. A write that
+    /// re-pinned one capability (`add`), one toolset (`lock --profile`), or one
+    /// activation's subset (`use --write`) knows nothing about the rest of the
+    /// manifest, so it must not leave behind a claim that the pins were
+    /// computed from the manifest on disk. Dropping the stamp returns the file
+    /// to "staleness unknown", which is exactly how every lock behaved before
+    /// the field existed — the fail-safe direction.
+    ///
+    /// A no-op save is still a no-op: callers only write when the pins
+    /// changed, so an untouched lock keeps its stamp.
     pub fn save(&self, dir: &Path) -> Result<()> {
+        if self.manifest_digest.is_none() {
+            return self.write(dir);
+        }
+        let mut unstamped = self.clone();
+        unstamped.manifest_digest = None;
+        unstamped.write(dir)
+    }
+
+    /// Write the lock, recording the manifest stamp for `dir`.
+    ///
+    /// Only a WHOLE-manifest re-lock may call this — the pin pass that walked
+    /// every declared kind and every toolset. See [`Lock::manifest_digest`]
+    /// for why a partial write must take [`Lock::save`] instead.
+    pub fn save_stamped(&self, dir: &Path) -> Result<()> {
+        let mut stamped = self.clone();
+        stamped.manifest_digest = manifest_stamp(dir);
+        stamped.write(dir)
+    }
+
+    /// Write the lock, leaving any stamp exactly as it is.
+    ///
+    /// The narrow middle case between [`save`] and [`save_stamped`]: a write
+    /// that re-pins the BYTES of items already in the lock without touching
+    /// which declarations the lock covers — the re-gate card's accept path,
+    /// which patches checksums for reviewed items and re-resolves nothing.
+    /// The stamp answers "were these pins computed from this manifest?", and
+    /// such a write moves neither side of that question, so dropping the stamp
+    /// would throw away a true answer (and make the card's lockfile differ,
+    /// byte for byte, from the `lock --write` + `trust` sequence it must stay
+    /// at parity with).
+    ///
+    /// Not for a write that could ADD or REMOVE a pin: there the coverage
+    /// claim really is untouched-but-now-wrong, and [`save`] is the honest
+    /// choice.
+    ///
+    /// [`save`]: Lock::save
+    /// [`save_stamped`]: Lock::save_stamped
+    pub fn save_keeping_stamp(&self, dir: &Path) -> Result<()> {
+        self.write(dir)
+    }
+
+    fn write(&self, dir: &Path) -> Result<()> {
         let path = Self::path(dir);
         let text = toml::to_string_pretty(self)?;
         fs::write(&path, text).with_context(|| format!("writing {}", path.display()))
+    }
+
+    /// Does this lock's pin set predate the manifest at `dir`?
+    ///
+    /// `None` = unknown: no stamp was recorded (an older lock, or one whose
+    /// last write was partial), or there is no readable manifest. A reader
+    /// that gets `None` must behave exactly as it did before the stamp
+    /// existed — the absence is not evidence of freshness.
+    pub fn manifest_stale(&self, dir: &Path) -> Option<bool> {
+        let recorded = self.manifest_digest.as_ref()?;
+        let current = manifest_stamp(dir)?;
+        Some(*recorded != current)
     }
 
     pub fn get(&self, name: &str) -> Option<&LockedSkill> {
@@ -930,6 +1063,51 @@ mod tests {
         // A lockfile with no version fails deserialization (required field).
         fs::write(Lock::path(dir.path()), "[[skill]]\n").unwrap();
         assert!(Lock::load(dir.path()).is_err());
+    }
+
+    /// The manifest stamp: absent means UNKNOWN (behaves exactly as a
+    /// pre-stamp lock did), an ordinary `save` drops it, `save_stamped`
+    /// records it, and an edit to either declaration layer moves it.
+    #[test]
+    fn manifest_stamp_is_optional_dropped_by_save_and_moves_with_the_manifest() {
+        let dir = assert_fs::TempDir::new().unwrap();
+        let manifest = dir.path().join(crate::manifest::load::MANIFEST_FILE);
+
+        // No manifest at all: nothing to be stale against.
+        assert_eq!(manifest_stamp(dir.path()), None);
+        fs::write(&manifest, "version = 1\n").unwrap();
+        let first = manifest_stamp(dir.path()).expect("a readable manifest stamps");
+
+        // A lock with no stamp serializes to the same bytes it always did, and
+        // answers "unknown", never "fresh".
+        let lock = Lock::default();
+        let text = toml::to_string_pretty(&lock).unwrap();
+        assert!(!text.contains("manifest_digest"), "{text}");
+        assert_eq!(lock.manifest_stale(dir.path()), None);
+
+        // `save_stamped` records it; `Lock::load` reads it back.
+        lock.save_stamped(dir.path()).unwrap();
+        let loaded = Lock::load(dir.path()).unwrap();
+        assert_eq!(loaded.manifest_digest, Some(first.clone()));
+        assert_eq!(loaded.manifest_stale(dir.path()), Some(false));
+
+        // An edit to the manifest makes the recorded pin set stale — the
+        // whole point: a byte comparison, no resolver run.
+        fs::write(&manifest, "version = 1\n[servers.x]\ncommand = \"x\"\n").unwrap();
+        assert_eq!(loaded.manifest_stale(dir.path()), Some(true));
+
+        // The overlay counts too: it declares servers, so an overlay-only edit
+        // must not slip past the stamp.
+        let stamp_before_overlay = manifest_stamp(dir.path());
+        fs::write(dir.path().join(crate::manifest::load::LOCAL_FILE), "").unwrap();
+        assert_ne!(manifest_stamp(dir.path()), stamp_before_overlay);
+
+        // And an ordinary `save` — the partial-write path — drops the stamp
+        // back to unknown rather than leaving a claim it cannot support.
+        loaded.save(dir.path()).unwrap();
+        let reloaded = Lock::load(dir.path()).unwrap();
+        assert_eq!(reloaded.manifest_digest, None);
+        assert_eq!(reloaded.manifest_stale(dir.path()), None);
     }
 
     #[test]
