@@ -300,11 +300,11 @@
 
 <span class="out">Claude Code (~/.claude.json)</span>
 <span class="out">…   trimmed: the JSON diff that adds the one bridge entry</span>
-<span class="out">  ✓ gateway registered (agentstack x mcp --auto-project)</span>
+<span class="out">  ✓ gateway registered (agentstack more mcp --auto-project)</span>
 
 <span class="out">Codex CLI (~/.codex/config.toml)</span>
 <span class="out">…   trimmed: the TOML diff that adds the one bridge entry</span>
-<span class="out">  ✓ gateway registered (agentstack x mcp --auto-project)</span>
+<span class="out">  ✓ gateway registered (agentstack more mcp --auto-project)</span>
 
 <span class="out">Updated 2 harness configs.</span>
 
@@ -313,8 +313,9 @@
 <span class="out">  Imported:  2 MCP servers → library 'local', referenced by name</span>
 <span class="out">…   trimmed: a Note that no server was copied back into those CLI configs</span>
 <span class="out">  Next:      agentstack doctor   (check the result)</span>
-<span class="out">  Then:      undo: agentstack x restore --last --write</span>
+<span class="out">  Then:      undo: agentstack more restore --last --write</span>
 <span class="out">…   trimmed: the per-CLI --verbose pointers and the zero-files caveat</span></code></pre></div>
+<p><code>more</code> is the extended toolbox — every <code>more</code> command also runs at its bare name.</p>
 <p>Two details that vary with your machine rather than with the command:</p>
 <ul>
 <li><strong>The placeholder name is not fixed.</strong> Each lifted token keeps the key name it had in the CLI config it came from, so you get <code>${GITHUB_PERSONAL_ACCESS_TOKEN}</code> above only because that is what the source config called it; a config using <code>GITHUB_TOKEN</code> yields <code>${GITHUB_TOKEN}</code>.</li>
@@ -332,7 +333,7 @@
 <span class="out">  Delivery  skills + MCP servers served live to 2 CLIs</span>
 <span class="out">            0 project artifacts for the capabilities served live (the manifest and lock stay, and so does any managed region in a house-rules file)</span>
 <span class="out">            rendered lane: house rules + settings + hooks for 2 of 2 CLIs</span>
-<span class="out">  Context   2 declared servers not measured — context cost unknown, not zero   see `agentstack x report usage`</span>
+<span class="out">  Context   2 declared servers not measured — context cost unknown, not zero   see `agentstack more report usage`</span>
 
 <span class="out">  Next:  agentstack doctor  ·  verify the wiring — every warning names its fix</span>
 <span class="out">  All commands: agentstack --help   ·   per-CLI detail: agentstack status --verbose</span></code></pre></div>
@@ -426,7 +427,7 @@ targets = ["*"]</code></pre></div>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack up --library https://github.com/you/ai-setup.git
 <span class="pr">$ </span>agentstack up --library https://github.com/you/ai-setup.git --write
 <span class="pr">$ </span>agentstack status</code></pre></div>
-<p>The first command previews the complete bootstrap. The second clones or links the library, detects this machine's CLIs, and installs the required global integration. The machine then asks only for its own missing secrets and trust reviews.</p>
+<p>Install the binary there with the same one-liner as <a href="#1-install-and-set-up-this-machine">step 1</a>, then run those two commands: the first previews the complete bootstrap, and the second clones or links the library, detects this machine's CLIs, and installs the required global integration. Two things do not travel with the repo — secret <strong>values</strong> and the trust review are per machine, so this machine asks for its own missing secrets and its own <code>agentstack trust .</code>.</p>
 <p>Later, refresh with:</p>
 <div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack up            <span class="cm"># preview</span>
 <span class="pr">$ </span>agentstack up --write</code></pre></div>
@@ -437,7 +438,7 @@ targets = ["*"]</code></pre></div>
 <tr><td><code>agentstack status</code></td><td>See what is ready and the one next action</td></tr>
 <tr><td><code>agentstack doctor</code></td><td>Run the deeper verification when something is wrong</td></tr>
 <tr><td><code>agentstack lib sources</code></td><td>See every linked library and name collision</td></tr>
-<tr><td><code>agentstack x delivery</code></td><td>See where each capability goes, per CLI</td></tr>
+<tr><td><code>agentstack more delivery</code></td><td>See where each capability goes, per CLI</td></tr>
 <tr><td><code>agentstack lock</code></td><td>Preview content changes before accepting them</td></tr>
 <tr><td><code>agentstack trust .</code></td><td>Review changed project content on this machine — needs a terminal; without one use <code>trust --preview</code> then <code>trust . --yes --consented &lt;surface_digest&gt;</code></td></tr>
 <tr><td><code>agentstack up</code></td><td>Preview a machine/library refresh</td></tr>
@@ -445,7 +446,7 @@ targets = ["*"]</code></pre></div>
 </tbody></table></div>
 <h2 id="if-homebrew-gives-you-an-older-build">If Homebrew gives you an older build<a class="hlink" href="#if-homebrew-gives-you-an-older-build" aria-label="Link to this section">#</a></h2>
 <p>These pages describe v0.18.1. The installer one-liner above serves it. The Homebrew formula is published by hand after each stable release, so <code>brew install</code> can trail the releases page for a while; <code>agentstack --version</code> says which build you have.</p>
-<p>On v0.17.1 the <code>agentstack x</code> prefix and the <code>yes</code>, <code>undo</code>, <code>x why</code>, and <code>x unrender</code> verbs do not exist — they fail with <code>unrecognized subcommand</code> — and every command that does exist there runs at its own bare name, for example <code>agentstack gateway connect --all --write</code> rather than <code>agentstack x gateway connect --all --write</code>.</p>
+<p>On v0.17.1 the extended-toolbox prefix and the <code>yes</code>, <code>undo</code>, <code>why</code>, and <code>unrender</code> verbs do not exist — they fail with <code>unrecognized subcommand</code> — and every command that does exist there runs at its own bare name, for example <code>agentstack gateway connect --all --write</code> rather than <code>agentstack more gateway connect --all --write</code>. (In v0.18 the prefix was spelled <code>agentstack x</code>; that spelling is still accepted, permanently.)</p>
 <p>To upgrade, run <code>agentstack self update --write</code> — on v0.17.1 that is the spelling, and plain <code>--help</code> there does not list <code>self</code> (only <code>agentstack --help --all</code> does). The install line at the top of this page works too, and is the one to use if <code>self update</code> reports that Homebrew owns the binary.</p>
 <h2 id="why-use-it--and-when-not-to">Why use it — and when not to<a class="hlink" href="#why-use-it--and-when-not-to" aria-label="Link to this section">#</a></h2>
 <p>Use AgentStack when you have more than one agent CLI, project, machine, or person and want one reviewed source of truth. It is especially useful when you want reusable private skills, consistent MCP servers, per-machine secrets, and no generated capability files in repositories.</p>

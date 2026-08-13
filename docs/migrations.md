@@ -32,16 +32,16 @@ One thing `apply --write` may tell you instead of writing: delivery is routed,
 and for an MCP-capable CLI servers are routed to the **live** lane, which
 `apply` does not render. With no bridge registered yet it therefore writes
 nothing and exits nonzero, naming the two ways forward — register the bridge
-(`agentstack x gateway connect --all --write`) or route those kinds to files
-(`agentstack x delivery render-locally --write`). `agentstack init` prints the
+(`agentstack more gateway connect --all --write`) or route those kinds to files
+(`agentstack more delivery render-locally --write`). `agentstack init` prints the
 same two options at the end of the import. This applies to the recipe below as
 well.
 
 To undo onboarding, list the labelled entries and restore them newest first:
 
 ```sh
-agentstack x restore
-agentstack x restore --last --write
+agentstack more restore
+agentstack more restore --last --write
 ```
 
 Repeat the last command for the preceding `init` entry if you also want to
@@ -62,7 +62,7 @@ agentstack doctor
 Choose `keychain` when you do not want resolved values in a project `.env`.
 AgentStack imports fields it can represent and explicitly lists anything lossy
 or unsupported; it does not delete the original Cursor or Gemini fields. Run
-`agentstack x diff` after the write to see managed, foreign, and hand-edited
+`agentstack more diff` after the write to see managed, foreign, and hand-edited
 entries separately.
 
 ## From dotfiles
@@ -81,7 +81,7 @@ Do **not** copy machine trust, the keychain, resolved `.env` values, history, or
 On each machine:
 
 ```sh
-agentstack x install --locked
+agentstack more install --locked
 agentstack trust .             # review — see "The review step" below
 agentstack apply               # preview
 agentstack apply --write
@@ -92,7 +92,7 @@ If your dotfile manager currently owns native CLI files, choose one owner before
 the write. Keep AgentStack as source of truth and stop templating its managed
 entries, or keep the dotfile template and do not ask AgentStack to own the same
 region. A hand-added native entry you want to preserve can be pulled into the
-manifest with `agentstack adopt --write` after reviewing `agentstack x diff`.
+manifest with `agentstack adopt --write` after reviewing `agentstack more diff`.
 
 ## A team without shared secrets
 
@@ -106,7 +106,7 @@ git commit -m "share agent toolset"
 A teammate then runs:
 
 ```sh
-agentstack x install --locked
+agentstack more install --locked
 agentstack doctor              # list unresolved reference names
 agentstack secret set GITHUB_TOKEN   # repeat for each unresolved reference
 agentstack trust .             # review — see "The review step" below
@@ -126,7 +126,7 @@ Every recipe above that brings a setup to a machine ends at the same gate, so
 it is worth stating once rather than in each block. **Trust is recorded per
 project directory and is never copied**, so a clone, a second checkout, or a
 fresh git worktree of a project you already approved arrives *untrusted* at its
-new path — even with the manifest and lockfile committed and `agentstack x
+new path — even with the manifest and lockfile committed and `agentstack more
 install --locked` already run.
 
 Until it is reviewed, a write refuses in place and names the item it withheld:
@@ -178,8 +178,8 @@ where AgentStack can identify and remove just its managed entries from every
 native file:
 
 ```sh
-agentstack x uninstall           # preview
-agentstack x uninstall --write
+agentstack more uninstall           # preview
+agentstack more uninstall --write
 ```
 
 The summary names what it removed and what it deliberately retained. The
@@ -194,11 +194,11 @@ only; it does not guess which project files to edit.
 Finally remove the executable through the channel that installed it:
 
 - Homebrew: `brew uninstall agentstack`.
-- A source build linked with `agentstack x self link`: run `agentstack x self which`
+- A source build linked with `agentstack more self link`: run `agentstack more self which`
   to identify the link, then remove that link.
-- The curl installer: run `agentstack x self which`, inspect the reported install
+- The curl installer: run `agentstack more self which`, inspect the reported install
   path, then remove that binary with the permissions used to install it.
 
-`agentstack x uninstall` is itself recorded before machine history is removed
+`agentstack more uninstall` is itself recorded before machine history is removed
 when a manifest is available. If you may need its undo, pass `--keep-home` and
 verify the native files before deleting the retained home.

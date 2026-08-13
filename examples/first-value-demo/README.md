@@ -11,7 +11,7 @@ The fenced, reproducible proof of AgentStack's core promise (TODO §1.5):
    value lands in a gitignored `.env`. The token is asserted in all three
    places at once — no secret material in the manifest, the placeholder (never
    the value) in the library entry, the value only in the ignored `.env`.
-3. **Connect** with `agentstack x gateway connect --all --write`: the live lane
+3. **Connect** with `agentstack more gateway connect --all --write`: the live lane
    needs one bridge registered per MCP-capable tool. Before it runs, `delivery`
    and `doctor` say "planned live (not connected)" — the demo resolves that
    complaint rather than asserting less.
@@ -20,7 +20,7 @@ The fenced, reproducible proof of AgentStack's core promise (TODO §1.5):
    asserted clean on the tree itself — it holds `.agentstack/` and the
    `.gitignore` that hides the lifted secret, and no native config at all.
 5. **Verify** with `agentstack doctor`: 0 errors, 0 warnings.
-6. **Render anyway** with `agentstack x delivery render-locally --write`, then
+6. **Render anyway** with `agentstack more delivery render-locally --write`, then
    `agentstack apply --toolset default --scope global --write` — the lane for
    when you want the files. Under the default routing, asking for files is an
    explicit opt-in; the rendered lane is routed, not removed. Both native

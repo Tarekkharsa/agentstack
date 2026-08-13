@@ -180,7 +180,7 @@ fi
 # needs a file. Delivery routes MCP servers to the live lane by default — zero
 # files, nothing on disk — so without this override `apply --write` correctly
 # refuses with "nothing was delivered" and the smoke has nothing to hand the
-# CLI. This is the manifest form of `agentstack x delivery render-locally
+# CLI. This is the manifest form of `agentstack more delivery render-locally
 # --write`, whose stated reasons include, verbatim, compatibility testing
 # against a CLI's own behaviour. Drop it and this alarm stops testing anything.
 cat > "$proj/.agentstack/agentstack.toml" <<TOML

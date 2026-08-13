@@ -311,7 +311,7 @@
 <p>The next agent connection receives the default toolset automatically. A file- only provider may additionally need the rendered command printed by status.</p>
 <h3 id="per-run-evidence">Per-run evidence<a class="hlink" href="#per-run-evidence" aria-label="Link to this section">#</a></h3>
 <p>T3 Code sessions normally attribute to the machine's global audit. For a separate run identity, create a transparent AgentStack shim and configure that provider instance to launch it:</p>
-<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack x shim make claude</code></pre></div>
+<div class="cb cb-term" data-language="bash"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">bash</span></div><pre class="block"><code class="language-bash"><span class="pr">$ </span>agentstack more shim make claude</code></pre></div>
 <p>This is optional and does not change the provider's capabilities.</p>
 <h2 id="other-supervisors">Other supervisors<a class="hlink" href="#other-supervisors" aria-label="Link to this section">#</a></h2>
 <p>The same rule applies to any launcher: if it starts a supported CLI with its normal home and working directory, AgentStack works unchanged. If the launcher overrides either, run <code>agentstack doctor</code> on that machine and follow the reported adapter-specific fix.</p>

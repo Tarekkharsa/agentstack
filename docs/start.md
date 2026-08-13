@@ -53,11 +53,11 @@ $ agentstack init --connect --yes --secrets env
 
 Claude Code (~/.claude.json)
 …   trimmed: the JSON diff that adds the one bridge entry
-  ✓ gateway registered (agentstack x mcp --auto-project)
+  ✓ gateway registered (agentstack more mcp --auto-project)
 
 Codex CLI (~/.codex/config.toml)
 …   trimmed: the TOML diff that adds the one bridge entry
-  ✓ gateway registered (agentstack x mcp --auto-project)
+  ✓ gateway registered (agentstack more mcp --auto-project)
 
 Updated 2 harness configs.
 
@@ -66,9 +66,11 @@ Import complete.
   Imported:  2 MCP servers → library 'local', referenced by name
 …   trimmed: a Note that no server was copied back into those CLI configs
   Next:      agentstack doctor   (check the result)
-  Then:      undo: agentstack x restore --last --write
+  Then:      undo: agentstack more restore --last --write
 …   trimmed: the per-CLI --verbose pointers and the zero-files caveat
 ```
+
+`more` is the extended toolbox — every `more` command also runs at its bare name.
 
 Two details that vary with your machine rather than with the command:
 
@@ -101,7 +103,7 @@ agentstack 0.18.1 — one portable manifest, every agent CLI
   Delivery  skills + MCP servers served live to 2 CLIs
             0 project artifacts for the capabilities served live (the manifest and lock stay, and so does any managed region in a house-rules file)
             rendered lane: house rules + settings + hooks for 2 of 2 CLIs
-  Context   2 declared servers not measured — context cost unknown, not zero   see `agentstack x report usage`
+  Context   2 declared servers not measured — context cost unknown, not zero   see `agentstack more report usage`
 
   Next:  agentstack doctor  ·  verify the wiring — every warning names its fix
   All commands: agentstack --help   ·   per-CLI detail: agentstack status --verbose
@@ -306,10 +308,13 @@ agentstack up --library https://github.com/you/ai-setup.git --write
 agentstack status
 ```
 
-The first command previews the complete bootstrap. The second clones or links
-the library, detects this machine's CLIs, and installs the required global
-integration. The machine then asks only for its own missing secrets and trust
-reviews.
+Install the binary there with the same one-liner as
+[step 1](#1-install-and-set-up-this-machine), then run those two commands: the
+first previews the complete bootstrap, and the second clones or links the
+library, detects this machine's CLIs, and installs the required global
+integration. Two things do not travel with the repo — secret **values** and the
+trust review are per machine, so this machine asks for its own missing secrets
+and its own `agentstack trust .`.
 
 Later, refresh with:
 
@@ -328,7 +333,7 @@ or from another supervisor. T3 Code is not required.
 | `agentstack status` | See what is ready and the one next action |
 | `agentstack doctor` | Run the deeper verification when something is wrong |
 | `agentstack lib sources` | See every linked library and name collision |
-| `agentstack x delivery` | See where each capability goes, per CLI |
+| `agentstack more delivery` | See where each capability goes, per CLI |
 | `agentstack lock` | Preview content changes before accepting them |
 | `agentstack trust .` | Review changed project content on this machine — needs a terminal; without one use `trust --preview` then `trust . --yes --consented <surface_digest>` |
 | `agentstack up` | Preview a machine/library refresh |
@@ -341,11 +346,12 @@ Homebrew formula is published by hand after each stable release, so
 `brew install` can trail the releases page for a while; `agentstack --version`
 says which build you have.
 
-On v0.17.1 the `agentstack x` prefix and the `yes`, `undo`, `x why`, and
-`x unrender` verbs do not exist — they fail with `unrecognized subcommand` —
+On v0.17.1 the extended-toolbox prefix and the `yes`, `undo`, `why`, and
+`unrender` verbs do not exist — they fail with `unrecognized subcommand` —
 and every command that does exist there runs at its own bare name, for example
 `agentstack gateway connect --all --write` rather than
-`agentstack x gateway connect --all --write`.
+`agentstack more gateway connect --all --write`. (In v0.18 the prefix was
+spelled `agentstack x`; that spelling is still accepted, permanently.)
 
 To upgrade, run `agentstack self update --write` — on v0.17.1 that is the
 spelling, and plain `--help` there does not list `self` (only

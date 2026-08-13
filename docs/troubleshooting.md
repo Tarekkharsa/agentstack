@@ -27,13 +27,13 @@ startup**. After any write, `apply` says so itself.
 
 ```text
 → Restart or reopen your agent CLIs so they pick up the new config.
-  undo: agentstack x restore --last --write
+  undo: agentstack more restore --last --write
 ```
 
 Restart the CLI first, then work down this list.
 
 Under the default routing there is often **no file to look at** — an MCP-capable
-CLI is served live. `agentstack x why <name>` states where that capability came
+CLI is served live. `agentstack more why <name>` states where that capability came
 from, whether it is pinned and approved, which CLIs serve it live, which get a
 file, and what it reaches. Start there before hunting for a config on disk.
 
@@ -91,8 +91,8 @@ not rendering configs — clean-at-rest keeps them off disk
 ```
 
 In clean-at-rest mode nothing is generated between sessions; capabilities exist
-only inside `agentstack run` or between `agentstack x session start` and
-`agentstack x session end`. A missing `.mcp.json` here is the design. Do not
+only inside `agentstack run` or between `agentstack more session start` and
+`agentstack more session end`. A missing `.mcp.json` here is the design. Do not
 create one. See
 [delivery in the reference](reference.md#delivery--routing-and-where-rendered-files-live).
 
@@ -107,13 +107,13 @@ that folder once and accepted its prompt.
 An `[instructions.*]` fragment names a CLI that has no `CLAUDE.md`/`AGENTS.md`
 equivalent to compile into.
 
-**`{cli}    managed region stale (project scope) ↳ agentstack x instructions --write`**
+**`{cli}    managed region stale (project scope) ↳ agentstack more instructions --write`**
 
 Instruction fragments changed in the manifest but the compiled block in the
 CLI's instructions file is old.
 
 ```bash
-agentstack x instructions --write
+agentstack more instructions --write
 ```
 
 ## A secret won't resolve
@@ -210,19 +210,19 @@ Drift means the native config on disk no longer matches what the manifest would
 render. agentstack never silently reconciles it — you choose which side wins.
 
 ```bash
-agentstack x diff              # show exactly what differs, change nothing
+agentstack more diff              # show exactly what differs, change nothing
 agentstack adopt --write     # the disk is right: pull the edit into the manifest
 agentstack apply --write     # the manifest is right: re-render over the disk
 ```
 
 `diff` reports the same comparison `doctor` does, so the two never disagree.
 
-**`Claude Code    no longer matches what agentstack last wrote ↳ review: agentstack x diff · adopt the on-disk version: agentstack adopt`**
+**`Claude Code    no longer matches what agentstack last wrote ↳ review: agentstack more diff · adopt the on-disk version: agentstack adopt`**
 
 The region agentstack manages changed since its last write. `doctor` states the
 fact without guessing the cause — a hand-edit is the common one, but a session
 that ended onto a stale baseline reaches the same state, so it does not accuse
-you of editing. `agentstack x diff` shows what moved and labels each entry
+you of editing. `agentstack more diff` shows what moved and labels each entry
 `managed`, `foreign (kept)`, or `hand-edited`. Then pick a side: `adopt` pulls
 the on-disk version back into the manifest so it survives the next apply;
 `apply --write` throws it away and re-renders.
@@ -289,7 +289,7 @@ Something the manifest references has no lock entry at all. Same fix.
 
 agentstack refuses to write into a file it cannot parse, because merging into
 broken JSON would destroy it. Open the named file, fix the syntax, re-run. If
-the file is unsalvageable, `agentstack x restore <adapter>` puts back its
+the file is unsalvageable, `agentstack more restore <adapter>` puts back its
 single-slot backup.
 
 ### Settings drift is reported as two legs, with two different fixes
@@ -371,7 +371,7 @@ only after a yes.
 ✗ instructions not written — the project has not been trusted for this content
 ```
 
-`agentstack x instructions --write` refuses the same content with a shorter
+`agentstack more instructions --write` refuses the same content with a shorter
 pair of lines, and the same nonzero exit:
 
 ```text
@@ -594,7 +594,7 @@ Not every manifest write costs you a review. A write that records a
 across itself, so the documented next step is not refused by the bytes the
 command just wrote:
 
-- `agentstack x delivery render-locally [--harness <id>] --write`
+- `agentstack more delivery render-locally [--harness <id>] --write`
 - the `.gitignore` preference (`[meta] gitignore`, set by `init`)
 
 Both re-pin **only** when trust was valid immediately before the write. An
@@ -668,9 +668,9 @@ command:
 
 ```bash
 agentstack undo                     # timeline: pick a point, revert to it
-agentstack x restore                  # list every undoable recorded write
-agentstack x restore --last --write   # undo the most recent
-agentstack x restore 18c634a4 --write # undo one by its id prefix
+agentstack more restore                  # list every undoable recorded write
+agentstack more restore --last --write   # undo the most recent
+agentstack more restore 18c634a4 --write # undo one by its id prefix
 ```
 
 The ledger looks like this:
@@ -680,7 +680,7 @@ Recorded changes (newest first):
 
   18c6358f  20s ago  project  apply   1 file · Claude Code
 
-Undo one with: agentstack x restore <id> --write (or --last for the newest)
+Undo one with: agentstack more restore <id> --write (or --last for the newest)
 ```
 
 Each row names the operation that wrote it — `init`, `apply`, `session start
@@ -691,7 +691,7 @@ type.
 **Restoring a config that a tool broke, not agentstack**
 
 ```bash
-agentstack x restore claude-code
+agentstack more restore claude-code
 ```
 
 That is the fallback path: one adapter's config from its single-slot backup,
@@ -705,7 +705,7 @@ Replacing an already-managed skill with the same name is not snapshotted
 byte-exact, so its restore is not promised exact.
 
 To take everything back off at once, see
-[undo anything](howto/undo.md) — `agentstack x uninstall` previews first and is
+[undo anything](howto/undo.md) — `agentstack more uninstall` previews first and is
 itself undoable.
 
 ## A server won't start
@@ -789,13 +789,13 @@ command = "zsh"
 args = ["-lc", "cd /path/to/project && exec my-server"]
 ```
 
-**`{name}    not installed ↳ agentstack x install`** / **`not materialized ↳ agentstack x install`**
+**`{name}    not installed ↳ agentstack more install`** / **`not materialized ↳ agentstack more install`**
 
 A skill or git-hosted capability is referenced but its source was never
 fetched into the store.
 
 ```bash
-agentstack x install
+agentstack more install
 ```
 
 **`{cli}    broken skill link '<name>' → <target> (target missing) ↳ remove it: rm <path> · or reinstall the skill it points at`**
@@ -852,7 +852,7 @@ entry that won, and fix it if the wrong one did.
 `[targets].default` names a CLI agentstack has no adapter for.
 
 ```bash
-agentstack x adapters list
+agentstack more adapters list
 ```
 
 **`effective machine policy unavailable — drift rendering is BLOCKED`**
@@ -868,7 +868,7 @@ agentstack doctor --all      # every section, including the ones this project do
 agentstack doctor --deep     # also scan every skill body for hidden-unicode / injection findings
 agentstack doctor --ci       # everything, plus a nonzero exit on any error
 agentstack doctor --json     # machine-readable, for a UI or a bug report
-agentstack x explain <name>    # what one server, skill, or instruction actually is
+agentstack more explain <name>    # what one server, skill, or instruction actually is
 ```
 
 By default `doctor` hides sections for features this project does not use, and

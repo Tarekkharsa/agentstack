@@ -13,14 +13,14 @@
 #      DEFINITIONS land in the library; the manifest references them by name.
 #      The inline token is lifted to a `${GITHUB_TOKEN}` reference in the
 #      library definition, and its value lands in a gitignored .env.
-#   3. `agentstack x gateway connect --all --write` — register the bridge each
+#   3. `agentstack more gateway connect --all --write` — register the bridge each
 #      MCP-capable tool talks to. This is what makes the live lane real; until
 #      it runs, delivery and doctor both say so plainly.
 #   4. `agentstack delivery` — how each tool actually gets them: on an
 #      MCP-capable tool, servers are served live, so the project stays clean —
 #      it holds `.agentstack/` and nothing else.
 #   5. `agentstack doctor` — a clean bill of health.
-#   6. `agentstack x delivery render-locally --write`, then
+#   6. `agentstack more delivery render-locally --write`, then
 #      `agentstack apply --toolset default --scope global --write` — the
 #      rendered lane, for when you want the files anyway. Asking for files is
 #      now an explicit opt-in; the rendered lane is routed, not removed, and
@@ -179,8 +179,8 @@ fi
 # report "planned live (not connected)" — honest, and the reason doctor is not
 # clean yet. The demo resolves the complaint rather than lowering the bar.
 say "The live lane needs one bridge registered — one command, both tools:"
-run "agentstack x gateway connect --all --write"
-as x gateway connect --all --write 2>&1 | tail -3 | sed 's/^/  /'
+run "agentstack more gateway connect --all --write"
+as more gateway connect --all --write 2>&1 | tail -3 | sed 's/^/  /'
 
 say "How does each tool actually get them? Delivery is routed — ask it:"
 run "agentstack delivery"
@@ -227,8 +227,8 @@ fi
 # same one import fanning out, so the toolset has to be named: the definitions
 # are in the library now, not in the manifest's own [servers].
 say "Want the files anyway? Say so once — the rendered lane is routed, not gone:"
-run "agentstack x delivery render-locally --write"
-as x delivery render-locally --write 2>&1 | sed 's/^/  /'
+run "agentstack more delivery render-locally --write"
+as more delivery render-locally --write 2>&1 | sed 's/^/  /'
 
 say "Now ask for them — one import, both native formats:"
 run "agentstack apply --toolset default --scope global --write"

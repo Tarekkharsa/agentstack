@@ -11,7 +11,7 @@ Prerequisite: a committed [manifest](../concepts.md) and
 
 ```bash
 # Reproducible install, then a gate that fails on any problem
-agentstack x install --locked   # fetch pinned skills; fail if the lockfile would change
+agentstack more install --locked   # fetch pinned skills; fail if the lockfile would change
 agentstack doctor --ci        # exit nonzero on errors, drift, policy, or unsafe content
 
 # Building the manifest fresh in a job? Write only the manifest, no prompts:
@@ -52,7 +52,7 @@ asks for consent. Both pass on an untrusted checkout, `doctor` states
 Action keeps working exactly as written.
 
 **A job that renders needs the two-step grant.** If your pipeline goes further
-— `apply --write`, `use --write`, `agentstack x session start`, or a protected
+— `apply --write`, `use --write`, `agentstack more session start`, or a protected
 `agentstack run` — it hits the gate, and a bare `agentstack trust .` refuses in
 CI because stdin is not a terminal. Present the reviewed digest back instead:
 

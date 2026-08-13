@@ -110,7 +110,7 @@ separate run identity, create a transparent AgentStack shim and configure that
 provider instance to launch it:
 
 ```bash
-agentstack x shim make claude
+agentstack more shim make claude
 ```
 
 This is optional and does not change the provider's capabilities.

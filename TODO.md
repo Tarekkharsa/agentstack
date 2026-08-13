@@ -89,7 +89,7 @@ docs describe and the code does not emit.
     the `--unprotected` HOST/ADVISORY banner (never captured — both
     non-interactive doors refuse it), real-model workflow semantics and the
     performance bookends, macOS kernel containment (Docker there is a Linux VM),
-    and `agentstack x image --write` beyond its plan screen.
+    and `agentstack more image --write` beyond its plan screen.
 
 ## Disk cost on many small files
 

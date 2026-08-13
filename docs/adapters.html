@@ -329,7 +329,7 @@
 <li><strong>The nightly job also re-runs the whole test suite</strong> on the latest stable toolchain, so every adapter's render snapshot is re-checked nightly even though only five adapters get a live check.</li>
 <li><strong>One shared negative case.</strong> The nightly manifest carries a server named <code>slash/probe</code>. Codex validates server names at startup against <code>^[a-zA-Z0-9_-]+$</code>, so the check asserts that Codex's config is rendered <em>without</em> it and that the skip is spoken out loud — and that every other adapter receives it verbatim.</li>
 </ul>
-<p><code>agentstack x adapters list</code> shows the same ids and marks which of these tools look installed on your machine. <code>agentstack x adapters show &lt;id&gt;</code> prints one descriptor.</p>
+<p><code>agentstack more adapters list</code> shows the same ids and marks which of these tools look installed on your machine. <code>agentstack more adapters show &lt;id&gt;</code> prints one descriptor.</p>
 <h2 id="what-each-adapter-manages">What each adapter manages<a class="hlink" href="#what-each-adapter-manages" aria-label="Link to this section">#</a></h2>
 <p>This is descriptor data, not a claim: each row is read out of that adapter's YAML descriptor in <a href="https://github.com/Tarekkharsa/agentstack/tree/main/crates/adapters/descriptors"><code>crates/adapters/descriptors/</code></a>. "yes" means the adapter has a declared location for that kind of configuration; "—" means the tool has no such concept, or none we map.</p>
 <div class="tblwrap"><table>
@@ -393,7 +393,7 @@
 <li><code>agentstack doctor</code> reports drift, because the CLI rewrote the file itself;</li>
 <li>servers you expect are simply absent from that tool's server list.</li>
 </ul>
-<p>In every case, AgentStack's own state is unharmed: the manifest is the source of truth, the write is recorded, and <code>agentstack x restore --last --write</code> puts the native file back. What is broken is the translation, and translation lives in one YAML descriptor.</p>
+<p>In every case, AgentStack's own state is unharmed: the manifest is the source of truth, the write is recorded, and <code>agentstack more restore --last --write</code> puts the native file back. What is broken is the translation, and translation lives in one YAML descriptor.</p>
 <p><strong>What we ask of a report.</strong> The CLI's version, the config file it read, and its exact error text. That is enough to fix a descriptor; a screenshot of a "doesn't work" is not.</p>
 <h2 id="why-conformance-runs-nightly-not-on-pull-requests">Why conformance runs nightly, not on pull requests<a class="hlink" href="#why-conformance-runs-nightly-not-on-pull-requests" aria-label="Link to this section">#</a></h2>
 <p>This is a deliberate trade, and it has a cost worth stating.</p>
@@ -402,7 +402,7 @@
 <div class="cb cb-term" data-language="sh"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">sh</span></div><pre class="block"><code class="language-sh"><span class="pr">$ </span>./examples/sandbox/conformance-smoke.sh codex codex .codex/config.toml</code></pre></div>
 <h2 id="adding-or-overriding-an-adapter">Adding or overriding an adapter<a class="hlink" href="#adding-or-overriding-an-adapter" aria-label="Link to this section">#</a></h2>
 <p>Adapters are data, not code: one YAML descriptor each, embedded in the binary, with additions and overrides loaded from <code>~/.agentstack/adapters/</code>. A descriptor you drop in there is tier 3 by definition — no snapshot, no nightly check — and it is part of the trusted computing base: it decides where AgentStack writes and what shape it writes. Validate one before installing it:</p>
-<div class="cb cb-term" data-language="sh"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">sh</span></div><pre class="block"><code class="language-sh"><span class="pr">$ </span>agentstack x adapters validate ./my-cli.yaml</code></pre></div>
+<div class="cb cb-term" data-language="sh"><div class="cb-bar"><span class="cb-dots" aria-hidden="true"><span></span><span></span><span></span></span><span class="cb-lang">sh</span></div><pre class="block"><code class="language-sh"><span class="pr">$ </span>agentstack more adapters validate ./my-cli.yaml</code></pre></div>
 <p>More on the format and the rendering rules: <a href="reference.html#data-driven-adapters">reference — data-driven adapters</a>.</p>
 <h2 id="see-also">See also<a class="hlink" href="#see-also" aria-label="Link to this section">#</a></h2>
 <ul>
