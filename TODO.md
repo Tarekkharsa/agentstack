@@ -128,14 +128,51 @@ of them may.
     marker — and name the exclusion. Report only: excluding a directory stays
     the user's to do.
 
+## The ceremony's second verb
+
+The lock now records the manifest it was pinned from, so `status` and `doctor`
+stop calling a stale pin healthy and `trust` says "lock first" before a grant
+that the next `lock --write` would void. Both are signposts around a hazard the
+product could remove instead: the ceremony has two verbs and the order matters,
+which is a rule the user has to learn and a rule every surface has to teach.
+
+23. **[ ] Fold the pin step into trust — one verb, one yes.** `trust` re-pins
+    before it reviews, so the lock and the grant are one act and the order can
+    no longer be gotten wrong. The constraints are what make it a decision and
+    not a refactor:
+    - **Re-pin at the currently-resolved revision only.** `trust` never fetches
+      a newer upstream — a git skill stays at the rev already resolved, and
+      moving to a later one stays `lock --update`. A review that silently
+      advanced the world would be the opposite of consent.
+    - **The pin diff goes on the review card**, covering every kind the lock
+      carries: skills, servers, instructions *and their per-(CLI, model)
+      variants*, settings keys, executables, extensions, workflows and their
+      blueprints, package member sets. A kind missing from the card is a change
+      the user consented to without seeing.
+    - **A fetch or digest failure refuses the grant.** No partial pin, no "yes"
+      recorded over a surface that could not be read.
+    - **The ~40 lock-remediation strings collapse to "review and re-trust".**
+      They already run through two shared formatters — `crates/cli/src/verify.rs`
+      (`bail_blocked`/`bail_locked`, which end every refusal with "then run
+      `agentstack lock --write`") and
+      `crates/cli/src/commands/trust.rs` (`UNPINNED_FIX`/`DRIFT_FIX`) — so the
+      collapse is one edit per formatter plus the rungs that read them
+      (`overview::correct_trust_rung` and the stale-pin rung both retire).
+    - **Signed-lockfile flows sign AFTER the relock**, or the signature covers
+      bytes the grant replaced.
+    - **The docs drop the verb from the beginner path** — `docs/start.md`,
+      `add-a-server`, `add-a-skill`, `concepts`, `ci` — keeping `lock --write`
+      documented where it is still its own act (`--update`, `--upgrade`, CI
+      verification).
+
 ## Not scheduled, deliberately
 
-23. R2 — the positioning flip. `STRATEGY.md` reopens only at its named
+24. R2 — the positioning flip. `STRATEGY.md` reopens only at its named
     tripwires.
-24. R1 — the private APM disclosure. **Maintainer-only: embargoed to a third
+25. R1 — the private APM disclosure. **Maintainer-only: embargoed to a third
     party's private channel, so no agent drafts, sends, or contacts anyone about
     it.**
-25. The retired Mode axis still has leftovers in `doctor --json`, `overview.rs`
+26. The retired Mode axis still has leftovers in `doctor --json`, `overview.rs`
     and `ui_contract.rs`.
-26. `docs/design/automatic-delivery.md` — the automatic-delivery design lane.
-27. `x diff --profile`.
+27. `docs/design/automatic-delivery.md` — the automatic-delivery design lane.
+28. `x diff --profile`.
