@@ -212,12 +212,37 @@ sessions are done and their three blockers are known.
     fix — a narrower reading that can tell an argument from a program. A study
     participant documenting their own setup can hit this.
 
-31. **[ ] Active and dormant layers, with a `doctor` line that says which.** A
-    capability that is declared, pinned and trusted but not selected by the
-    active toolset is invisible in the surfaces that matter, and a reader
-    cannot tell "not installed" from "installed and not selected".
-    **Deliberately NOT a trust-off flag** — that was considered and rejected:
-    the answer is to make the state legible, never to make the gate optional.
+31. **[ ] Port the two tutorial artifacts into the docs; the layers table
+    lives on the second one.** Two artifact pages are approved as accepted
+    drafts of future docs pages (2026-08-13). They are drafts of *pages*, not
+    of prose to paste: the port re-authors them as Markdown in the docs
+    pipeline. Sources: `/tmp/agentstack-pages/{seven-steps,dormant-layers}.html`.
+
+    - **"AgentStack in seven steps"** — a continuous five-minute beginner
+      journey: install → `init --connect` → trust → restart and `status` → add
+      → second machine → undo. Unslop voice, every command sandbox-verified
+      against v0.19.0. It becomes the docs tutorial page and **supersedes the
+      current step-map**, which points into `start.md` rather than teaching.
+
+    - **"The dormant layers"** — the advanced tour, organised by what is
+      off until asked: schema autocomplete (with a live taplo transcript
+      catching a missing `type` through the `#:schema` line), policy grammar
+      via `examples/policies/developer.toml`, the three run tiers, the lockdown
+      proxy, workflows' child-run gating, images, leases. This is the layers
+      page, and **the doctor-line and layers-table requirements of the former
+      item 31 fold into it**: a capability that is declared, pinned and trusted
+      but not selected by the active toolset is invisible in the surfaces that
+      matter, and a reader cannot tell "not installed" from "installed and not
+      selected". **Deliberately NOT a trust-off flag** — considered and
+      rejected: make the state legible, never make the gate optional.
+
+    **Non-negotiable on the way in:** their sample commands join
+    `docs_commands` and the site checks, so CI executes them forever. An
+    artifact snapshot can rot in silence; a docs page in this repository
+    cannot, and that difference is the whole reason to port rather than link.
+    First-person test claims convert to the docs' dated verified-output
+    convention — "I ran this and saw X" becomes output captured and dated, or
+    it does not ship.
 
 32. **[ ] The manifest should teach, not scaffold.** A generated manifest
     carries the keys the import produced and nothing about the ones a reader
